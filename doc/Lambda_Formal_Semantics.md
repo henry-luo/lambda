@@ -2505,6 +2505,28 @@ governs how an under-determined case here is resolved.
   replaces them. `find` reports the same matches, so every match `replace`
   replaces is one `find` returns. [S17.1.1, S17.4.1; SP21]
 
+### S17.7 Letter case
+
+- **S17.7.1** **Case-insensitive matching folds by Unicode simple case
+  folding**: each code point folds to one code point, the same in every
+  locale, as ECMAScript regular expressions fold under the `u` flag. So `ẞ`
+  matches `ß` and the Kelvin sign matches `k`, while `ß` does not match `ss`
+  and `İ` does not match `i`. One rule serves every path: under `ignore_case`
+  a literal needle, a literal-only pattern and any other pattern fold alike.
+  A match keeps its length in code points, and `find` reports it in its
+  source's text and index (S17.4.1). Folding does not normalize: a
+  precomposed `é` and `e` with a combining accent stay different. *Why: it is
+  the folding regex engines implement; full folding (`ß` ↔ `ss`) changes
+  lengths, which no regex engine supports and which would leave a match's
+  span undefined.* [S17.4.1, S11.1.2v3; SP22]
+- **S17.7.2** **`lower` and `upper` map by Unicode full case mapping**, the
+  same in every locale, as ECMAScript's `toLowerCase` and `toUpperCase` do. A
+  mapping may change the length (`upper("straße")` is `"STRASSE"`,
+  `lower("İ")` is `"i̇"`), and a capital sigma lowercases to a final `ς` at the
+  end of a word (`lower("ΣΑΣ")` is `"σας"`). The result keeps its source's
+  kind: a symbol maps to a symbol. Mapping is not folding: case-insensitive
+  matching follows S17.7.1, not `lower(a) == lower(b)`. [S17.7.1; SP23]
+
 ---
 
 ## Appendix A — Implementation Footnotes
@@ -2714,7 +2736,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S14 data processing | PD9–PD16; FC1–FC11 | `Lambda_Design_Data_Processing.md`, `Lambda_Expr_For_Clauses2.md` |
 | S15 metaprogramming | C9, C9a | `Lambda_Semantics_Formal2.md` |
 | S16 surface syntax | Design_Syntax §3–§7 (39 decided points) | `Lambda_Design_Syntax.md` |
-| S17 system library | C18, C15b.1; IL2-I11, IL2-I12, IL2-I25; SP21 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Int_Sized.md`, `Lambda_IO_Sysinfo.md`, `Lambda_Expr_String_Pattern.md` |
+| S17 system library | C18, C15b.1; IL2-I11, IL2-I12, IL2-I25; SP21–SP23 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Int_Sized.md`, `Lambda_IO_Sysinfo.md`, `Lambda_Expr_String_Pattern.md` |
 
 The decision records preserve the full deliberations — every alternative that
 lost and the arguments that did not persuade. This specification is their

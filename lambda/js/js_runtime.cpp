@@ -22673,227 +22673,14 @@ static int64_t js_string_clamp_integer(double value, int64_t length) {
     return (int64_t)value;
 }
 
-static void js_string_append_codepoint(StrBuf* sb, utf8proc_int32_t cp) {
-    char buf[4];
-    size_t out_len = utf8_encode((uint32_t)cp, buf);
-    if (out_len > 0) strbuf_append_str_n(sb, buf, (int)out_len);
-}
-
-static void js_string_append_codepoints(StrBuf* sb, const utf8proc_int32_t* cps, int count) {
-    for (int i = 0; i < count; i++) js_string_append_codepoint(sb, cps[i]);
-}
-
-static bool js_unicode_is_cased(utf8proc_int32_t cp) {
-    utf8proc_category_t category = utf8proc_category(cp);
-    if (category == UTF8PROC_CATEGORY_LU ||
-        category == UTF8PROC_CATEGORY_LL ||
-        category == UTF8PROC_CATEGORY_LT) {
-        return true;
-    }
-    return utf8proc_tolower(cp) != utf8proc_toupper(cp);
-}
-
-static bool js_unicode_is_case_ignorable(utf8proc_int32_t cp) {
-    utf8proc_category_t category = utf8proc_category(cp);
-    if (category == UTF8PROC_CATEGORY_MN ||
-        category == UTF8PROC_CATEGORY_ME ||
-        category == UTF8PROC_CATEGORY_CF ||
-        category == UTF8PROC_CATEGORY_LM ||
-        category == UTF8PROC_CATEGORY_SK) {
-        return true;
-    }
-    switch (cp) {
-        case 0x0027: case 0x002e: case 0x003a: case 0x00b7:
-        case 0x0387: case 0x05f4: case 0x2019: case 0x2027:
-        case 0xfe13: case 0xfe55: case 0xff07: case 0xff0e:
-        case 0xff1a:
-            return true;
-    }
-    return false;
-}
-
-static bool js_string_has_following_cased(const char* chars, int len, utf8proc_ssize_t pos) {
-    while (pos < (utf8proc_ssize_t)len) {
-        utf8proc_int32_t cp = 0;
-        utf8proc_ssize_t width = utf8proc_iterate(
-            (const utf8proc_uint8_t*)chars + pos,
-            (utf8proc_ssize_t)len - pos,
-            &cp);
-        if (width <= 0) return false;
-        if (!js_unicode_is_case_ignorable(cp)) return js_unicode_is_cased(cp);
-        pos += width;
-    }
-    return false;
-}
-
-static bool js_unicode_full_case_needs_composition(utf8proc_int32_t cp) {
-    if (cp >= 0x1f80 && cp <= 0x1faf) return true;
-    switch (cp) {
-        case 0x1fb2: case 0x1fb3: case 0x1fb4: case 0x1fb7: case 0x1fbc:
-        case 0x1fc2: case 0x1fc3: case 0x1fc4: case 0x1fc7: case 0x1fcc:
-        case 0x1ff2: case 0x1ff3: case 0x1ff4: case 0x1ff7: case 0x1ffc:
-            return true;
-    }
-    return false;
-}
-
-static bool js_string_append_full_case_map(StrBuf* sb, utf8proc_int32_t cp, bool to_upper) {
-    if (to_upper && cp == 0x00df) {
-        strbuf_append_str_n(sb, "SS", 2);
-        return true;
-    }
-    if (to_upper && cp >= 0x1f80 && cp <= 0x1faf) {
-        utf8proc_int32_t base = 0;
-        if (cp <= 0x1f8f) base = 0x1f08 + ((cp - 0x1f80) & 0x07);
-        else if (cp <= 0x1f9f) base = 0x1f28 + ((cp - 0x1f90) & 0x07);
-        else base = 0x1f68 + ((cp - 0x1fa0) & 0x07);
-        js_string_append_codepoint(sb, base);
-        js_string_append_codepoint(sb, 0x0399);
-        return true;
-    }
-    if (to_upper) {
-        switch (cp) {
-            case 0x1fb3: case 0x1fbc: {
-                const utf8proc_int32_t cps[] = {0x0391, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1fc3: case 0x1fcc: {
-                const utf8proc_int32_t cps[] = {0x0397, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1ff3: case 0x1ffc: {
-                const utf8proc_int32_t cps[] = {0x03a9, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1fb2: {
-                const utf8proc_int32_t cps[] = {0x1fba, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1fb4: {
-                const utf8proc_int32_t cps[] = {0x0386, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1fc2: {
-                const utf8proc_int32_t cps[] = {0x1fca, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1fc4: {
-                const utf8proc_int32_t cps[] = {0x0389, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1ff2: {
-                const utf8proc_int32_t cps[] = {0x1ffa, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1ff4: {
-                const utf8proc_int32_t cps[] = {0x038f, 0x0399};
-                js_string_append_codepoints(sb, cps, 2);
-                return true;
-            }
-            case 0x1fb7: {
-                const utf8proc_int32_t cps[] = {0x0391, 0x0342, 0x0399};
-                js_string_append_codepoints(sb, cps, 3);
-                return true;
-            }
-            case 0x1fc7: {
-                const utf8proc_int32_t cps[] = {0x0397, 0x0342, 0x0399};
-                js_string_append_codepoints(sb, cps, 3);
-                return true;
-            }
-            case 0x1ff7: {
-                const utf8proc_int32_t cps[] = {0x03a9, 0x0342, 0x0399};
-                js_string_append_codepoints(sb, cps, 3);
-                return true;
-            }
-        }
-    }
-
-    const utf8proc_property_t* prop = utf8proc_get_property(cp);
-    uint16_t seq = to_upper ? prop->uppercase_seqindex : prop->lowercase_seqindex;
-    if (seq == 0xffff || prop->decomp_seqindex == 0xffff) return false;
-
-    utf8proc_int32_t decomp[32];
-    int last_boundclass = 0;
-    utf8proc_option_t options = (utf8proc_option_t)(UTF8PROC_DECOMPOSE | UTF8PROC_COMPAT);
-    utf8proc_ssize_t count = utf8proc_decompose_char(cp, decomp, 32, options, &last_boundclass);
-    if (count <= 1 || count > 32) return false;
-
-    bool compose = js_unicode_full_case_needs_composition(cp);
-    bool append_upper_iota = false;
-    StrBuf* mapped_buf = strbuf_new();
-    for (utf8proc_ssize_t i = 0; i < count; i++) {
-        utf8proc_int32_t mapped = to_upper ? utf8proc_toupper(decomp[i]) : utf8proc_tolower(decomp[i]);
-        if (to_upper && compose && (decomp[i] == 0x0345 || mapped == 0x0345)) {
-            append_upper_iota = true;
-            continue;
-        }
-        js_string_append_codepoint(mapped_buf, mapped);
-    }
-
-    if (compose) {
-        int norm_len = 0;
-        char* normalized = normalize_utf8proc_nfc(mapped_buf->str, mapped_buf->length, &norm_len);
-        if (normalized) {
-            strbuf_append_str_n(sb, normalized, norm_len);
-            free_utf8proc_result(normalized);
-        } else {
-            strbuf_append_str_n(sb, mapped_buf->str, mapped_buf->length);
-        }
-    } else {
-        strbuf_append_str_n(sb, mapped_buf->str, mapped_buf->length);
-    }
-    if (append_upper_iota) js_string_append_codepoint(sb, 0x0399);
-    strbuf_free(mapped_buf);
-    return true;
-}
-
-static Item js_string_simple_case_map(Item str, bool to_upper) {
+// String.prototype.toLowerCase/toUpperCase: Unicode full case mapping,
+// locale-independent (S17.7.2), shared with Lambda's lower/upper. The mapping
+// once derived multi-code-point cases by decomposing, which split `ǅ` into two.
+static Item js_string_case_map(Item str, bool to_upper) {
     String* s = it2s(str);
     if (!s || s->len == 0) return str;
-
     StrBuf* sb = strbuf_new();
-    bool changed = false;
-    bool last_non_ignorable_cased = false;
-    utf8proc_ssize_t pos = 0;
-    while (pos < (utf8proc_ssize_t)s->len) {
-        utf8proc_int32_t cp = 0;
-        utf8proc_ssize_t width = utf8proc_iterate(
-            (const utf8proc_uint8_t*)s->chars + pos,
-            (utf8proc_ssize_t)s->len - pos,
-            &cp);
-        if (width <= 0) {
-            strbuf_append_char(sb, s->chars[pos]);
-            pos++;
-            continue;
-        }
-
-        if (js_string_append_full_case_map(sb, cp, to_upper)) {
-            changed = true;
-        } else {
-            utf8proc_int32_t mapped = to_upper ? utf8proc_toupper(cp) : utf8proc_tolower(cp);
-            if (!to_upper && cp == 0x03a3 &&
-                last_non_ignorable_cased &&
-                !js_string_has_following_cased(s->chars, s->len, pos + width)) {
-                mapped = 0x03c2;
-            }
-            if (mapped != cp) changed = true;
-            size_t prev_len = sb->length;
-            js_string_append_codepoint(sb, mapped);
-            if (sb->length == prev_len) strbuf_append_str_n(sb, s->chars + pos, (int)width);
-        }
-
-        if (!js_unicode_is_case_ignorable(cp)) last_non_ignorable_cased = js_unicode_is_cased(cp);
-        pos += width;
-    }
-    if (!changed && sb->length == (size_t)s->len) {
+    if (!utf8_case_map(s->chars, s->len, to_upper, sb)) {
         strbuf_free(sb);
         return str;
     }
@@ -23322,10 +23109,10 @@ static Item js_string_intrinsic_algorithm(Item str,
         return js_name_item(s->chars, end);
     }
     if (operation == JS_STRING_INTRINSIC_TO_LOWER_CASE) {
-        return js_string_simple_case_map(str, false);
+        return js_string_case_map(str, false);
     }
     if (operation == JS_STRING_INTRINSIC_TO_UPPER_CASE) {
-        return js_string_simple_case_map(str, true);
+        return js_string_case_map(str, true);
     }
     // String.prototype.normalize(form?) — Unicode normalization (NFC/NFD/NFKC/NFKD)
     if (operation == JS_STRING_INTRINSIC_NORMALIZE) {

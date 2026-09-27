@@ -103,6 +103,14 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
                                     const char* repl, size_t repl_len,
                                     int64_t limit, bool ignore_case);
 
+// S17.7.1: case-insensitive search for literal text, with the pattern path's
+// folding (RE2, Unicode simple case folding). `limit` as for the pattern calls.
+List* literal_find_all_ignore_case(const char* str, size_t len,
+                                   const char* needle, size_t needle_len, int64_t limit);
+String* literal_replace_all_ignore_case(const char* str, size_t str_len,
+                                        const char* needle, size_t needle_len,
+                                        const char* repl, size_t repl_len, int64_t limit);
+
 /**
  * Split string by pattern matches.
  * If keep_delim is true, matched delimiters are included as separate elements.

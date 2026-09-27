@@ -1,6 +1,6 @@
 # Lambda String Patterns and Regular Expressions — Compatibility Analysis
 
-> **Status:** analysis, 2026-09-27, with five rulings, all made by the user on
+> **Status:** analysis, 2026-09-27, with seven rulings, all made by the user on
 > 2026-09-27 and implemented the same day. **SP17** (§10) limits island `!` to
 > single-character sets; it resolves SPO9 and is formal as S11.1.2v3.
 > **SP18** (§11) keeps `!` prefix-only inside an island; exclusion between
@@ -11,14 +11,16 @@
 > leaving `|` as its only binary operator; it resolves SPO13. Both are formal
 > in S11.1.2v3 and S10.1.1v3. The conformance defects in §7 need no new
 > ruling, because each contradicts a ruling or a user doc already in force.
-> The other open questions (SPO7's value-expression tiers, SPO10, SPO12,
-> SPO14, §8)
+> The other open questions (SPO7's value-expression tiers, SPO10, SPO12's
+> spelling, SPO14, §8)
 > each carry a recommendation and await the user's ruling. **SP21** (§13),
 > ruled the same day, resolves SPO11: `replace` steps through matches as
 > ECMAScript `replaceAll` does and inserts its replacement literally (formal
-> as S17.6.1). The §7 defects that needed no ruling, and #6 once SP21 settled
-> it, were fixed on 2026-09-27; #8 waits on SPO12. SP17–SP21 and the
-> SPO entries extend the series of
+> as S17.6.1). **SP22** and **SP23** (§15) settle case: case-insensitive
+> matching folds by Unicode simple case folding on every path (SPO12's folding
+> half), and `lower`/`upper` use Unicode full case mapping, as JS does (formal
+> as S17.7.1 and S17.7.2). All ten §7 defects were fixed on 2026-09-27.
+> SP17–SP23 and the SPO entries extend the series of
 > [Lambda_Design_String_Pattern.md](Lambda_Design_String_Pattern.md) §4.3 and
 > §6. The documentation drift listed in §9 was corrected on 2026-09-27.
 >
@@ -84,7 +86,7 @@
 - **Defects: ten.** One is a crash, four are silent miscompiles or silent
   failures (§7). Two of them, #2 and #4, were fixed with SP17. #9 turned up
   later, while checking the user docs' examples, and #10 while weighing range
-  spellings. All but #8 are fixed as of 2026-09-27; #8 waits on SPO12.
+  spellings. All ten are fixed as of 2026-09-27.
 
 ---
 
@@ -242,7 +244,8 @@ The folding also depends on the path:
   `find("É", \("é"), {ignore_case: true})` are both `[]`, while JS `/é/i`
   matches.
 
-See §7 #8 and SPO12.
+See §7 #8 and SPO12. **Fixed 2026-09-27 (SP22, §15):** a literal needle now
+folds through RE2 as a pattern does, so both calls above match.
 
 ### 4.6 Replacement text
 
@@ -439,7 +442,7 @@ they are **not yet filed** as of 2026-09-27. Code anchors are in Appendix A.
 | 5 | **Fixed 2026-09-27.** Island counts are not validated. | `\(d{2,})` is accepted, where type position gives E103. `"1{,5}" is \(d{,5})` and `"1{a}" is \(d{a})` are both true. | S11.1.6v3 and S16.8.6v3. Its Appendix A row lists the islands among the conforming front ends. |
 | 6 | **Fixed 2026-09-27 (SP21, §13).** `replace` has two semantics, chosen by whether a `limit`, `last` or `ignore_case` option is set. | The plain call uses RE2 `GlobalReplace`: `"aab"` with `"a"*` gives `"-b-"`, `\0` is substituted and `\x` is dropped (§4.6). With an option it gives `"--b-"` and treats the replacement literally. | One call, one meaning. Plain `replace` also skips the empty match at 2 that `find` reports. SPO11 decides the target semantics. |
 | 7 | **Fixed 2026-09-27.** `...` stops at `\n`. | `"a\nb" is \(...)` is false | S16.8.6v3 (`...` ≡ `any*`) and the user doc's "any string". SPO10 decides `.`. |
-| 8 | `ignore_case` folds only ASCII on the literal path but full Unicode on the regex path. | `find("É", \("é"), {ignore_case: true})` is `[]`, while `find("É1", \("é" d), …)` matches | S11.1.2v3: a literal-only island is the literal union, so its meaning must not depend on the path. SPO12 decides the folding rule. |
+| 8 | **Fixed 2026-09-27 (SP22, §15).** `ignore_case` folds only ASCII on the literal path but full Unicode on the regex path. | `find("É", \("é"), {ignore_case: true})` is `[]`, while `find("É1", \("é" d), …)` matches | S11.1.2v3: a literal-only island is the literal union, so its meaning must not depend on the path. SPO12 decides the folding rule. |
 | 9 | **Found and fixed 2026-09-27, while checking doc examples.** A pattern cannot annotate a `let` binding or a parameter: the static boundary reads it as a type value. | `let code: \(a{3}) = "abc"`, and `let x: A = "abc"` with `type A = \(a+)`, give E201 ("cannot initialize … of type type with string"). `fn f(x: \(d+))` called with `"12"` gives E207 ("argument 1 expected type, got string"). The parameter form worked on a 2026-09-12 build (451b17f4c) and fails on 2026-09-22 (fc3153b3b); the `let` form fails on both. | S11.1.2v3: a pattern is a type value, usable wherever a type is. `doc/Lambda_Type.md` §Inline Patterns and §Using Patterns as Types show both forms. |
 | 10 | **Found and fixed 2026-09-27.** An island cannot name a character range type. | With `type Lower = "a" to "z"`, `\(Lower+)` logs "unresolved pattern reference" and matches only the empty string, and `\(!Lower)` is E200; `"q" is Lower` is true. Named literal unions worked (§10.2). | SP5 and S11.1.3: `X to Y` denotes one set in type position and in an island. S11.1.2v3 lets an island reuse named patterns. |
 
@@ -499,7 +502,9 @@ collides with Lambda's own string escapes (`"\\0"`). In the implementation
 that means routing the plain call through the literal loop the options path
 already uses (§7 #6).
 
-**SPO12 — Case-insensitive matching.** There should be one folding rule for
+**SPO12 — Case-insensitive matching.** *Folding rule RESOLVED 2026-09-27 →
+SP22 (§15); the spelling for a case-insensitive `is`/`match` stays open.*
+There should be one folding rule for
 every path, and a spelling for case-insensitive `is` and `match`.
 **Recommendation:** Unicode simple case folding everywhere, which is what RE2
 and JS with `u` do; this closes §7 #8. SP16 reserves the `\tag( … )` family
@@ -889,10 +894,72 @@ lies outside patterns.
 
 ---
 
+## 15. SP22 and SP23: case folding and case mapping (ruled 2026-09-27)
+
+**Rulings (USER, 2026-09-27; formal text S17.7.1 and S17.7.2).**
+
+- **SP22.** Case-insensitive matching folds by Unicode simple case folding:
+  one code point to one, the same in every locale, on every path. This is
+  SPO12's recommendation, part 1; the spelling for a case-insensitive
+  `is`/`match` stays open.
+- **SP23.** `lower` and `upper` use Unicode full case mapping, the same in
+  every locale, as ECMAScript's `toLowerCase`/`toUpperCase` do.
+
+### 15.1 Why simple folding
+
+| Case | JS `/…/iu` | RE2 (the pattern path) |
+|---|---|---|
+| `ẞ` matches `ß` | yes | yes |
+| Kelvin sign matches `k` | yes | yes |
+| `ς` matches `σ` | yes | yes |
+| `ß` matches `ss` | no | no |
+| `İ` matches `i` | no | no |
+
+1. It is what the regex engines implement: RE2 already folded the pattern path
+   this way, and so does JS with the `u` flag.
+2. A match keeps its length in code points, so `find`'s `index` and `value`
+   stay the source's (S17.4.1). Full folding (`ß` ↔ `ss`) changes lengths;
+   no regex engine does it.
+3. It is the same in every locale: no Turkish `İ`/`i` special case, as in JS.
+
+### 15.2 Why full mapping for `lower` and `upper`
+
+Mapping is a different operation from folding: it produces text for people to
+read, so `upper("straße")` must be `"STRASSE"`, not `"STRAßE"`. The user doc
+already promised Unicode behaviour (`upper("café")` is `"CAFÉ"`), while the
+implementation mapped ASCII letters only. Full mapping is also what JS gives,
+so Lambda and LambdaJS agree.
+
+### 15.3 Implementation
+
+- **One case mapping for both languages.** LambdaJS already implemented full
+  mapping (`js_string_simple_case_map`, despite its name): utf8proc's simple
+  mappings, hand-coded multi-character cases, a decomposition trick for the
+  rest, and the Final_Sigma context. The trick split characters that have a
+  one-to-one mapping: `ǅ` upper-cased to `D` + `Ž` instead of `Ǆ`. The code
+  moved to `utf8_case_map` in `lambda/core/utf_string.cpp`. The trick is
+  replaced by the 103 unconditional entries of `SpecialCasing.txt` (16.0.0),
+  generated by `utils/generate_special_casing.py`. LambdaJS's
+  `toLowerCase`/`toUpperCase` and Lambda's `lower`/`upper` both call it.
+  Lambda keeps its ASCII byte loop, since no special case reaches ASCII.
+- **One folding for both paths.** A case-insensitive literal search compiles
+  the escaped needle as a transient pattern and uses the pattern search loops
+  (`literal_find_all_ignore_case`, `literal_replace_all_ignore_case`), so it
+  folds exactly as RE2 does. The literal scanner lost its ASCII-folding
+  branch.
+- **Verification.** Lambda's `lower`/`upper` and LambdaJS match Node on 20
+  special cases (`ß`, `ﬁ`, `ŉ`, `ǰ`, `ΐ`, `ᾳ`, `ǅ`, `İ`, final sigma, the
+  Kelvin sign, among others). All 110 Test262 tests for
+  `String.prototype.to[Locale]{Upper,Lower}Case` pass. Fixtures:
+  `test/lambda/string_case.ls` and `test/lambda/string_ignore_case.ls`, with
+  the same output on all three tiers.
+
+---
+
 ## Appendix A — Implementation map
 
 Anchors are `file:line` plus the symbol, verified against the working tree
-of 2026-09-27 with SP17–SP21 and the §14 fixes applied.
+of 2026-09-27 with SP17–SP23 and the §14 fixes applied.
 
 **Island parser.** In `lambda/runtime/parse_type_pattern.cpp`:
 
@@ -961,6 +1028,16 @@ way.
 `lambda_member_test_type_domain` (`lambda/lambda-data.hpp:1292`, 1299) give a
 pattern's or range's carrier domain; `static_boundary_relation`
 (`lambda/runtime/build_ast.cpp:1683`, 1687) uses it for targets and sources.
+
+**Case (§15).** `utf8_case_map` (`lambda/core/utf_string.cpp:293`) with the
+`SpecialCasing.txt` table and `utf8_special_case` (237), generated by
+`utils/generate_special_casing.py`. Lambda's `text_case_map`
+(`lambda/runtime/lambda-eval.cpp:7203`) serves `lower`/`upper`, and LambdaJS's
+`js_string_case_map` (`lambda/js/js_runtime.cpp:22679`) serves
+`toLowerCase`/`toUpperCase`. A case-insensitive literal search leaves
+`fn_replace_impl` (8103) and `fn_find` (8259) for
+`literal_replace_all_ignore_case` and `literal_find_all_ignore_case`
+(`lambda/runtime/re2_wrapper.cpp:1268`, 1258).
 
 **Expression precedence.** `lambda/runtime/parser/lambda_parser.c:1804`,
 `infix_bp`: `|`, `&`, `!` and `to` all map to `LAMBDA_BP_SET` (§6.4).

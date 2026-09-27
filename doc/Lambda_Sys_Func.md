@@ -563,6 +563,24 @@ find("no-match", digits)
 find("a1b22", digits) |> ~.value     // ["1", "22"]
 ```
 
+`find` and `replace` take an optional options map as their last argument:
+
+| Option | Meaning |
+|---|---|
+| `limit: n` | only the first `n` matches |
+| `last: n` | only the last `n` matches |
+| `ignore_case: true` | match without regard to case |
+
+`ignore_case` folds by Unicode simple case folding, the same way for a string
+and for a pattern (S17.7.1): `É` matches `é` and `ẞ` matches `ß`, but `ß` does
+not match `ss`, because each character folds to exactly one character.
+
+```lambda
+find("École", "é", {ignore_case: true}) |> ~.value   // ["É"]
+replace("a1b2c3", \(d), "#", {limit: 2})              // "a#b#c3"
+replace("aAa", "a", "-", {ignore_case: true})         // "---"
+```
+
 ### contains(str, substring)
 
 Check if a string contains a substring. Returns `true` or `false`. Also works on collections (see [Collection Functions](#collection-functions)).
@@ -664,7 +682,10 @@ trim("\t\n hello \n")         // "hello"
 
 ### upper(str) / lower(str)
 
-Convert string case. Unicode-aware.
+Convert string case by Unicode full case mapping, the same in every locale, as
+JavaScript's `toUpperCase` and `toLowerCase` do (S17.7.2). A mapping may change
+the length, and a symbol maps to a symbol. To compare text without regard to
+case, use `ignore_case` (S17.7.1) rather than comparing `lower` results.
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
@@ -676,6 +697,8 @@ upper("hello")         // "HELLO"
 lower("HELLO")         // "hello"
 upper("café")          // "CAFÉ"
 lower("Straße")        // "straße"
+upper("straße")        // "STRASSE": ß has no one-letter capital
+lower("ΣΑΣ")           // "σας": a final capital sigma becomes ς
 ```
 
 ### normalize(str)

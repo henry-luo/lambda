@@ -56,11 +56,9 @@ static bool convert_occurrence_to_regex(StrBuf* regex, StrView* op_str) {
 }
 
 // Escape regex metacharacters in a literal string
-void escape_regex_literal(StrBuf* regex, String* str) {
-    if (!str) return;
-
-    for (size_t i = 0; i < str->len; i++) {
-        char c = str->chars[i];
+static void escape_regex_chars(StrBuf* regex, const char* chars, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        char c = chars[i];
         // RE2 metacharacters that need escaping
         switch (c) {
         case '\\': case '.': case '+': case '*': case '?':
@@ -73,6 +71,10 @@ void escape_regex_literal(StrBuf* regex, String* str) {
         }
         strbuf_append_char(regex, c);
     }
+}
+
+void escape_regex_literal(StrBuf* regex, String* str) {
+    if (str) escape_regex_chars(regex, str->chars, str->len);
 }
 
 // A named literal type reaches a pattern as a type value. The regex and
@@ -1230,6 +1232,51 @@ String* pattern_replace_all_options(TypePattern* pattern, const char* str, size_
     if (must_release) lam::re2_glue_release(re);
     return result;
 }
+
+// S17.7.1: literal text searched case-insensitively folds as a pattern does,
+// through RE2's Unicode simple case folding. The literal scan folded ASCII
+// only, so `find("É", "é", {ignore_case: true})` missed what `\("é" d)` found,
+// and so did the literal-only island `\("é")`, which is that literal (SP7).
+// The needle becomes a transient pattern backed only by its anchored source.
+static String* literal_regex_source(const char* needle, size_t needle_len) {
+    StrBuf* regex = strbuf_new_cap(needle_len + 8);
+    strbuf_append_char(regex, '^');
+    escape_regex_chars(regex, needle, needle_len);
+    strbuf_append_char(regex, '$');
+    String* source = (String*)mem_alloc(sizeof(String) + regex->length + 1, MEM_CAT_PARSER);
+    if (source) {
+        memcpy(source->chars, regex->str, regex->length);
+        source->chars[regex->length] = '\0';
+        source->len = (uint32_t)regex->length;
+        source->flags = 0;
+        source->is_ascii = str_is_ascii(source->chars, source->len) ? 1 : 0;
+    }
+    strbuf_free(regex);
+    return source;
+}
+
+List* literal_find_all_ignore_case(const char* str, size_t len,
+                                   const char* needle, size_t needle_len, int64_t limit) {
+    TypePattern pattern = {};
+    pattern.regex_source = literal_regex_source(needle, needle_len);
+    if (!pattern.regex_source) return nullptr;
+    List* result = pattern_find_all_options(&pattern, str, len, limit, true);
+    mem_free(pattern.regex_source);
+    return result;
+}
+
+String* literal_replace_all_ignore_case(const char* str, size_t str_len,
+                                        const char* needle, size_t needle_len,
+                                        const char* repl, size_t repl_len, int64_t limit) {
+    TypePattern pattern = {};
+    pattern.regex_source = literal_regex_source(needle, needle_len);
+    if (!pattern.regex_source) return nullptr;
+    String* result = pattern_replace_all_options(&pattern, str, str_len, repl, repl_len,
+        limit, true);
+    mem_free(pattern.regex_source);
+    return result;
+}
+
 
 static String* make_heap_rooted_slice(Rooted<Item>& rooted_source, size_t offset, size_t len) {
     String* value = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
