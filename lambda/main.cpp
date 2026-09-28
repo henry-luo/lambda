@@ -61,8 +61,8 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
-#ifndef NDEBUG
-// the experimental MVP CLI is a debug-build feature and is absent from release hosts.
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
+// the profile host also links MVP so both backends can be measured with release optimization.
 #include "js/mvp/mvp.h"
 #endif
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
@@ -122,7 +122,7 @@ static char* lambda_load_hosted_source_from_cache(const char* path,
     return source;
 }
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
 static char* mvp_load_script_source_from_cache(const char* path, size_t* out_length) {
     if (out_length) *out_length = 0;
     if (!path || !path[0]) return NULL;
@@ -2531,8 +2531,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     input_type_module = true;
                 } else if (strcmp(argv[i], "--runtime=mvp") == 0 ||
                            strcmp(argv[i], "--js-runtime=mvp") == 0) {
-#ifdef NDEBUG
-                    fputs("MVP runtime is available only in debug builds\n", stderr);
+#if defined(NDEBUG) && !defined(LAMBDA_JS_MVP)
+                    fputs("MVP runtime is available only in debug and release-profile builds\n", stderr);
                     runtime_cleanup(&runtime);
                     return lambda_main_finish(9);
 #else
@@ -2631,7 +2631,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             } else {
                 if (!js_file) js_file = argv[2];  // fallback
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
                 js_source = mvp_runtime
                     ? mvp_load_script_source_from_cache(js_file, &js_source_len)
                     : js_load_script_source_from_cache(
@@ -2648,7 +2648,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     return lambda_main_finish(1);
                 }
             }
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
             if (mvp_runtime) {
                 if (input_type_module || html_file) {
                     fputs("MVP runtime supports benchmark scripts only; modules and DOM are unavailable\n",

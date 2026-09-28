@@ -1,12 +1,12 @@
 # JS MVP Runtime
 
-**Version:** 1.1.1
+**Version:** 1.1.2
 
-**Date:** 2026-09-16
+**Date:** 2026-09-28
 
 **Status:** IMPLEMENTED — the selected runtime executes the frozen 63-workload
 standard JavaScript benchmark population through a new MIR execution core. Two
-fresh release sessions meet the requested MVP / QuickJS geometric-mean target:
+historical 2026-09-15 release sessions met the requested MVP / QuickJS geometric-mean target:
 **0.695110x** and **0.691519x**. Every engine/row/session sample is recorded in
 [JS_MVP_Release_Acceptance_20260915.md](../../test/benchmark/js_mvp/JS_MVP_Release_Acceptance_20260915.md).
 
@@ -23,8 +23,19 @@ and ECMAScript semantics (**S1.11**, **D1.3v3**, **D8.4.1v2**).
 The MVP is a new JavaScript execution runtime selected by:
 
 ```sh
-./lambda.exe js --runtime=mvp script.js
+make build-release-profile
+./lambda-profile.exe js --runtime=mvp script.js
 ```
+
+As of 2026-09-28, debug and `release_profile` hosts link the experimental MVP;
+the ordinary release host excludes it. `release_profile` uses `NDEBUG`, O3 and
+LTO, with optional execution counters. Set `JS_OPT_TRACE=0` for timing and
+`JS_EXECUTION_BACKEND=mir` for a comparison with full LambdaJS's compiled lane.
+The current paired comparison uses identical source/wrapper bytes and Node
+output checks; it is separate from the historical QuickJS acceptance above.
+It validates 62/63 current workloads; MVP fails the stronger Navier frame-15
+oracle on non-strict plain-call `this`. See the
+[2026-09-28 report and tuning proposal](../impl/JS_MVP_Release_Profile_Comparison_20260928.md).
 
 It reuses the existing JavaScript parser and AST builder. It does not reuse the
 existing JavaScript execution representation, coercion, property, call, heap,
@@ -206,10 +217,11 @@ baseline.
 
 ## 6. Performance acceptance
 
-Each run uses the normal release binary and the standard benchmark runner:
+The historical sessions used the normal release binary. To repeat this
+protocol with the current build, select the optimized profile host:
 
 ```sh
-python3 test/benchmark/run_benchmarks.py \
+LAMBDA_EXE=./lambda-profile.exe JS_OPT_TRACE=0 python3 test/benchmark/run_benchmarks.py \
   -e mvpjs,quickjs -n 3 -t 120 --cooldown 0 --fresh --legacy \
   --results-output test/benchmark/js_mvp/js_mvp_release_session<N>.json
 ```
