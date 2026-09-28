@@ -920,6 +920,13 @@ void jm_resolve_module_path(const char* base_file, const char* specifier, int sp
         return;
     }
     const char* last_slash = strrchr(base_file, '/');
+#ifdef _WIN32
+    // canonical Windows module paths use backslashes after file_realpath().
+    const char* last_backslash = strrchr(base_file, '\\');
+    if (last_backslash && (!last_slash || last_backslash > last_slash)) {
+        last_slash = last_backslash;
+    }
+#endif
     int dir_len = last_slash ? (int)(last_slash - base_file + 1) : 0;
 
     if (spec_len >= 2 && specifier[0] == '.' && specifier[1] == '/') {
@@ -2798,8 +2805,10 @@ static int js_mir_analyze_and_plan(JsMirTranspiler* mt,
             memset(native, 0, sizeof(*native));
             native->entry = {FN_ENTRY_NATIVE_BODY, true, false, false, false};
             native->effects = body->effects;
-            native->result.normal = {JM_JS_FACT(fc, native_return_kind) ==
-                    NATIVE_RETURN_ITEM ? LMD_TYPE_ANY : JM_JS_FACT(fc, return_type),
+            // the enum branch promotes the conditional to int before list initialization.
+            TypeId native_type = JM_JS_FACT(fc, native_return_kind) ==
+                NATIVE_RETURN_ITEM ? (TypeId)LMD_TYPE_ANY : JM_JS_FACT(fc, return_type);
+            native->result.normal = {native_type,
                 JM_JS_FACT(fc, native_return_kind) == NATIVE_RETURN_ITEM
                     ? VALUE_REP_ITEM : JM_JS_FACT(fc, native_return_kind) ==
                         NATIVE_RETURN_FLOAT ? VALUE_REP_F64 : VALUE_REP_I64,

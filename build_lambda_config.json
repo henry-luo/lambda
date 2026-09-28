@@ -662,6 +662,7 @@
       ],
       "source_files": [
         "lambda/module/node_core/node_events.cpp",
+        "lambda/module/node_core/node_trace_events.cpp",
         "lambda/module/node_core/node_url.cpp",
         "lambda/runtime/parser/source_parser.c",
         "lambda/js/parser/js_lexer.c",
@@ -1618,6 +1619,10 @@
         "Wl,-Bdynamic",
         "lopengl32",
         "lmoldname"
+      ],
+      "host_linker_flags": [
+        "Wl,--export-all-symbols",
+        "Wl,--out-implib=../../modules/lambda-host.lib"
       ],
       "build_dir": "build_windows",
       "cross_compile": false,

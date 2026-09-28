@@ -3716,7 +3716,8 @@ static Type* build_lit_string_from_span(Transpiler* tp, SourceSpan span,
             sym->len = content_len;
             str = (String*)sym;  // store as String* in TypeString (const pool uses raw pointer)
         } else {
-            str = string_from_strview(strview_init(content_start, content_len), tp->pool);
+            // the quote check above makes content_len nonnegative for StrView.
+            str = string_from_strview(strview_init(content_start, (size_t)content_len), tp->pool);
         }
         str_type->string = str;
     }

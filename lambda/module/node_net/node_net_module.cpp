@@ -677,5 +677,5 @@ extern "C" void node_net_jube_register_static(void) {
 extern "C" const JubeModuleDef* node_net_jube_module(void) { return &node_net_module; }
 
 #if defined(LAMBDA_NODE_NET_DYNAMIC_MODULE)
-extern "C" const JubeModuleDef* jube_module(void) { return node_net_jube_module(); }
+extern "C" JUBE_MODULE_EXPORT const JubeModuleDef* jube_module(void) { return node_net_jube_module(); }
 #endif

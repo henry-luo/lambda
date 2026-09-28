@@ -5,10 +5,15 @@
 #include "../../../lib/escape.h"
 #include "../../../lib/str.h"
 #include "../../../lib/strbuf.h"
-#include "../../../lib/uv_loop.h"
+#include "../../../lib/time_util.h"
 
 #include <cstring>
 #include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 static const JubeHostAPI* node_trace_host = NULL;
 
@@ -522,7 +527,7 @@ static Item node_trace_manual_trace(Item phase, Item category, Item name, Item i
     } else {
         event->ph = 'i';
     }
-    event->ts = uv_hrtime() / 1000;
+    event->ts = time_now_us();
     int64_t id_number = 0;
     event->has_id = node_trace_host->value->number_to_int64_exact &&
         node_trace_host->value->number_to_int64_exact(id, &id_number);
@@ -578,7 +583,7 @@ void node_trace_events_emit_async_hooks_init(const char* type_chars, int type_le
         return;
     }
     event->ph = 'b';
-    event->ts = uv_hrtime() / 1000;
+    event->ts = time_now_us();
     event->id = async_id;
     event->has_id = true;
     state->file_written = false;
@@ -601,7 +606,11 @@ void node_trace_events_flush(void) {
         return;
     }
     strbuf_append_str_n(sb, "{\"traceEvents\":[", 16);
-    long pid = (long)uv_os_getpid();
+#ifdef _WIN32
+    long pid = (long)GetCurrentProcessId();
+#else
+    long pid = (long)getpid();
+#endif
     bool first_event = true;
     for (int i = 0; i < event_count; i++) {
         NodeTraceEvent* event = node_trace_event_at(state, i);

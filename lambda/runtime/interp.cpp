@@ -5057,7 +5057,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // RC3.3: at fold time there is no slab to read. A const binding's value
         // comes from its declarator -- which may sit at a *higher* node id than
         // the expression using it, so this cannot wait for a published fact.
-        if (f->st->mode == EvalMode::CONST && f->st->const_owner) {
+        if (f->st->mode == EvalMode::CONST_FOLD && f->st->const_owner) {
             AstDeclaratorNode* declarator = interp_const_binding_decl(node);
             Item bound = ItemNull;
             if (declarator && declarator->init &&
@@ -6753,7 +6753,7 @@ static bool interp_const_node_supported_depth(AstNode* node, int depth) {
         AstNode* callee = ast_unwrap_primary(call->function);
         if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
         if (ast_call_has_named_args(call)) return false;
-        if (!interp_eval_mode_allows_sys_func(EvalMode::CONST,
+        if (!interp_eval_mode_allows_sys_func(EvalMode::CONST_FOLD,
                 ((AstSysFuncNode*)callee)->fn_info)) {
             return false;
         }
@@ -6818,7 +6818,7 @@ bool interp_const_fold_script(Transpiler* tp) {
     InterpState st = {};
     st.ctx = context;
     st.runtime = tp->runtime;
-    st.mode = EvalMode::CONST;
+    st.mode = EvalMode::CONST_FOLD;
     st.const_owner = tp;
     st.depth_limit = 1;
     st.depth = 1;

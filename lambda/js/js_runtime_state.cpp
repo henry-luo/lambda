@@ -855,6 +855,17 @@ Item* js_realm_intrinsic_slot(JsRealmSlotId base, int index) {
         (JsRealmSlotId)(base + index));
 }
 
+Item* js_realm_intrinsic_slot_existing(JsRealmSlotId base, int index) {
+    if (!js_active_runtime_state || base < 0 || index < 0 ||
+            base + index >= JS_REALM_SLOT_COUNT) return NULL;
+    return js_realm_slot_existing(&js_runtime_state.realm_slots,
+        (JsRealmSlotId)(base + index));
+}
+
+bool js_realm_runtime_is_active(void) {
+    return js_active_runtime_state != NULL;
+}
+
 bool js_realm_slots_lookup(JsRealmSlots* slots, const JsRealmSlotId* slot_ids,
         Item** values, int count, bool reserve) {
     if (!slots || !slot_ids || !values || count < 0) return false;

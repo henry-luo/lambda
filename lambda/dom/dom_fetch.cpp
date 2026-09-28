@@ -22,6 +22,7 @@
 #include "../../lib/log.h"
 #include "../../lib/atomic.h"
 #include "../../lib/str.h"
+#include "../../lib/url.h"
 #include "../../lib/uv_loop.h"
 #include "../../lib/byte_builder.h"
 
@@ -696,10 +697,13 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
         // Build absolute path
         char path_buf[2048];
         const char* path = NULL;
+        char* local_path = NULL;
         if (is_file) {
-            path = url + 7;
-            // file:///abs/path -> "/abs/path"
-            if (path[0] == '/' && path[1] == '/' && path[2] == '/') path += 2;
+            // file URLs need platform drive and percent-decoding rules.
+            Url* file_url = url_parse(url);
+            local_path = file_url ? url_to_local_path(file_url) : NULL;
+            if (file_url) url_destroy(file_url);
+            path = local_path;
         } else if (url[0] == '/') {
             // Document-root-relative: WPT uses paths like
             // `/resources/testharness.js` and `/clipboard-apis/...`. Walk up
@@ -730,13 +734,16 @@ extern "C" Item js_fetch(Item url_item, Item options_item) {
             }
         }
 
-        FILE* f = fopen(path, "rb");
+        FILE* f = path ? fopen(path, "rb") : NULL;
         if (!f) {
             char msg[2200];
-            snprintf(msg, sizeof(msg), "fetch failed: cannot open '%s'", path);
+            snprintf(msg, sizeof(msg), "fetch failed: cannot open '%s'",
+                path ? path : url);
+            if (local_path) mem_free(local_path);
             return dom_realm_promise_reject(
                 dom_realm_new_error_named(make_string_item("TypeError"), make_string_item(msg)));
         }
+        if (local_path) mem_free(local_path);
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
         fseek(f, 0, SEEK_SET);

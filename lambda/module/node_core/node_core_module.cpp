@@ -715,7 +715,7 @@ extern "C" const JubeModuleDef* node_core_jube_module(void) {
 // Dynamic module images use the generic loader entry; the static executable
 // calls node_core_jube_register_static instead and never resolves this name.
 #if defined(LAMBDA_NODE_CORE_DYNAMIC_MODULE)
-extern "C" const JubeModuleDef* jube_module(void) {
+extern "C" JUBE_MODULE_EXPORT const JubeModuleDef* jube_module(void) {
     return node_core_jube_module();
 }
 #endif

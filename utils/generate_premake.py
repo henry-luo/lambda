@@ -676,6 +676,27 @@ class PremakeGenerator:
             '',
         ])
 
+    def generate_windows_archive_rebuild(self) -> None:
+        """Replace Windows gmake archives only when their link recipe runs."""
+        if not self.use_windows_config:
+            return
+        self.premake_content.extend([
+            '-- Premake beta2 runs prelink beside the target, and {DELETE} becomes',
+            '-- cmd.exe del even when MSYS2 gmake executes recipes with /bin/sh.',
+            'do',
+            '    local gmake = require("gmake")',
+            '    local scope = gmake.cpp and gmake.cpp.linkCmd and gmake.cpp or gmake',
+            '    if not scope.linkCmd then error("gmake linkCmd hook unavailable") end',
+            '    premake.override(scope, "linkCmd", function(base, cfg, toolset)',
+            '        base(cfg, toolset)',
+            '        if cfg.kind == premake.STATICLIB then',
+            '            premake.outln(\'  LINKCMD = rm -f "$@" && $(AR) -rcs "$@" $(OBJECTS)\')',
+            '        end',
+            '    end)',
+            'end',
+            '',
+        ])
+
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
         vlog("DEBUG: Generating workspace configuration...")
@@ -993,6 +1014,9 @@ class PremakeGenerator:
         was deleted or renamed survives in an archive and can duplicate a moved
         symbol at link time. Rebuild every static archive from scratch."""
         if kind != "StaticLib":
+            return []
+        if self.use_windows_config:
+            # The gmake linker recipe removes the old archive just before ar runs.
             return []
         return [
             '    prelinkcommands {',
@@ -3790,6 +3814,17 @@ class PremakeGenerator:
                     '    ',
                 ])
 
+        if self.use_windows_config:
+            # PE modules need an import library generated from the host's real exports.
+            windows_config = self.config.get('platforms', {}).get('windows', {})
+            host_flags = windows_config.get('host_linker_flags', [])
+            if host_flags:
+                self.premake_content.append('    linkoptions {')
+                for flag in host_flags:
+                    opt = f'-{flag}' if not flag.startswith('-') else flag
+                    self.premake_content.append(f'        "{opt}",')
+                self.premake_content.extend(['    }', '    '])
+
         if self.use_linux_config:
             # Linux Jube DSOs resolve their host ABI from the executable; export
             # those definitions in every host configuration, including debug.
@@ -3904,6 +3939,7 @@ class PremakeGenerator:
 
         # Generate all sections
         self.generate_archive_link_deps()
+        self.generate_windows_archive_rebuild()
         vlog("DEBUG: Generating workspace...")
         self.generate_workspace()
         vlog("DEBUG: Generating library projects...")

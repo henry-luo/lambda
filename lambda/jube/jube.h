@@ -14,6 +14,13 @@ extern "C" {
 #define JUBE_HOST_API_VERSION 4
 #define JUBE_HOST_LANG_API_VERSION 1
 
+// The Windows loader resolves this entry by name from each Jube DLL.
+#ifdef _WIN32
+#define JUBE_MODULE_EXPORT __declspec(dllexport)
+#else
+#define JUBE_MODULE_EXPORT
+#endif
+
 // Hosted compiler services are intentionally build-coupled while their opaque
 // handle contracts evolve. A module validates this at registration, never in
 // an evaluation or generated-code path.
