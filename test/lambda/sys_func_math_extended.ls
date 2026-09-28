@@ -30,9 +30,9 @@
     math.asinh(0),         // 0
     math.asinh(1),         // 0.8813735870
     math.acosh(1),         // 0
-    math.acosh(2),         // 1.3169578969
+    abs(math.acosh(2) - 1.3169578969248166) < 1e-15, // libm may differ by an ulp
     math.atanh(0),         // 0
-    math.atanh(0.5)        // 0.5493061443
+    abs(math.atanh(0.5) - 0.5493061443340548) < 1e-15
 ]
 
 // Section 4: Exponential/logarithmic variants

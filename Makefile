@@ -440,7 +440,7 @@ clean-mir:
 # EOL style is not a real content difference.
 verify-mir-patches:
 	@set -e; \
-	work=build_temp/mir-verify; \
+	work=temp/mir-verify; \
 	rm -rf $$work; mkdir -p $$work; \
 	echo "Fetching pristine MIR $(MIR_UPSTREAM_COMMIT)..."; \
 	git -c advice.detachedHead=false clone -q https://github.com/vnmakarov/mir.git $$work/upstream; \

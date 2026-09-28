@@ -4597,6 +4597,12 @@ static int fn_datetime_append_suffix(DateTime* dt, char* buf, size_t buf_size,
     return len + snprintf(buf + len, buf_size - (size_t)len, "'");
 }
 
+// string() keeps its concise finite spelling, but NaN's sign is not semantic (S4.8.2).
+static void format_string_float(char* buf, size_t capacity, double value) {
+    if (isnan(value)) snprintf(buf, capacity, "nan");
+    else snprintf(buf, capacity, "%g", value);
+}
+
 String* fn_string(Item itm) {
     TypeId type_id = get_type_id(itm);
     switch (type_id) {
@@ -4708,8 +4714,7 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_FLOAT: {
         char buf[32];
-        double dval = itm.get_double();
-        snprintf(buf, sizeof(buf), "%g", dval);
+        format_string_float(buf, sizeof(buf), itm.get_double());
         int len = strlen(buf);
         return heap_strcpy(buf, len);
     }
@@ -4717,7 +4722,7 @@ String* fn_string(Item itm) {
         char buf[32];
         NumSizedType st = itm.get_num_type();
         if (st == NUM_FLOAT16 || st == NUM_FLOAT32) {
-            snprintf(buf, sizeof(buf), "%g", itm.get_num_sized_as_double());
+            format_string_float(buf, sizeof(buf), itm.get_num_sized_as_double());
         } else {
             snprintf(buf, sizeof(buf), "%" PRId64, itm.get_num_sized_as_int64());
         }
