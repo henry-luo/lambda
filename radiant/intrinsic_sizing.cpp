@@ -3948,16 +3948,24 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     replaced_width = native_width;
                 } else {
                     // text, password, number, email, url, search, tel, etc.
-                    // FormDefaults::TEXT_WIDTH is Chrome's UA border-box width.
                     // If author CSS provides padding/border, measure the UA
                     // content box and let the common box addition below apply
                     // the author box. Otherwise keep the UA border-box value.
                     bool has_author_box = css_has_horizontal_box_decl(element->specified_style);
+                    FormControlProp* form = view_block_replaced->form;
+                    FontProp* font = view_block_replaced->font
+                        ? view_block_replaced->font : lycon->font.style;
+                    // Early flex measurements can precede form layout; use
+                    // the selected face instead of the macOS UA width.
+                    float text_content_width = form && form->control_type == FORM_CONTROL_TEXT
+                        ? layout_text_input_content_width(
+                            lycon, view_block_replaced, form, font)
+                        : FormDefaults::TEXT_CONTENT_WIDTH;
                     if (has_author_box || view_block_replaced->bound) {
-                        replaced_width = FormDefaults::TEXT_WIDTH -
-                            2.0f * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
+                        replaced_width = text_content_width;
                     } else {
-                        replaced_width = FormDefaults::TEXT_WIDTH;
+                        replaced_width = text_content_width +
+                            2.0f * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
                         sizes.replaced_includes_pad_border = true;
                     }
                 }

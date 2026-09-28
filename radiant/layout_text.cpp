@@ -4354,9 +4354,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     ? font_load_glyph_emoji(font_box_handle(&lycon->font), &_sd, codepoint, false)
                     : font_load_glyph(font_box_handle(&lycon->font), &_sd, codepoint, false);
                 float raster_scale = ui_context_raster_scale(lycon->ui_context);
-                wd = document_font_missing_figure_space(lycon, codepoint)
-                    ? layout_font_em_size(lycon)
-                    : (glyph ? glyph->advance_x / raster_scale : layout_font_em_size(lycon));
+                if (document_font_missing_figure_space(lycon, codepoint)) {
+                    wd = layout_font_em_size(lycon);
+                } else if (glyph) {
+                    wd = glyph->advance_x / raster_scale;
+                } else {
+                    wd = layout_document_missing_glyph_advance(
+                        font_box_handle(&lycon->font), codepoint, raster_scale);
+                    if (wd <= 0.0f) wd = layout_font_em_size(lycon);
+                }
                 if (glyph && trim_cjk_spacing) {
                     float base_wd = wd;
                     wd += text_spacing_trim_halt_advance(

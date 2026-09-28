@@ -787,6 +787,9 @@ static void timer_start(uv_loop_t* loop, JsTimerHandle* timer,
     // JS can schedule timers after a long document compile before libuv's first
     // turn; refresh its cached clock or the elapsed compile time makes them due.
     uv_update_time(loop);
+    // A zero-delay timer created by a timer callback needs a new event-loop
+    // turn. libuv can otherwise consume an endless chain inside one uv_run().
+    if (timeout_ms == 0) timeout_ms = 1;
     uv_timer_start(&timer->timer, timer_fire_cb, timeout_ms, repeat_ms);
 }
 
@@ -1706,14 +1709,10 @@ extern "C" int js_event_loop_drain(void) {
     if (!loop) return 0;
 
     if (auto_close_mode && !auto_close_after_load) {
-        // Parsing may re-enter the script runner; only service ready work until
-        // the final load boundary decides which pending timers to retain.
-        for (int turn = 0; turn < 4; turn++) {
-            int active = uv_run(loop, UV_RUN_NOWAIT);
-            js_event_loop_render_checkpoint();
-            js_microtask_flush();
-            if (!active) break;
-        }
+        // Nested module drains run while the parser is still dispatching the
+        // document's scripts. Keep timers queued until the load boundary so a
+        // self-rescheduling callback cannot consume the script watchdog here.
+        js_microtask_flush();
         return 0;
     }
 

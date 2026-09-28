@@ -201,6 +201,17 @@ uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint) {
     return 0;
 }
 
+float font_get_missing_glyph_advance(FontHandle* handle) {
+    if (!handle || !handle->tables) return 0.0f;
+    HmtxTable* hmtx = font_tables_get_hmtx(handle->tables);
+    HeadTable* head = font_tables_get_head(handle->tables);
+    if (!hmtx || !head || head->units_per_em == 0) return 0.0f;
+    // Glyph zero is .notdef; its recorded advance keeps missing text aligned
+    // with the browser when no authored or system fallback covers the codepoint.
+    return hmtx_get_advance(hmtx, 0) * handle->size_px /
+        (float)head->units_per_em * handle->bitmap_scale;
+}
+
 // ============================================================================
 // Core: get glyph info for a codepoint
 // ============================================================================

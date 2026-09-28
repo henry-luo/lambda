@@ -1907,6 +1907,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         if (reader.has("y")) ev->y = sim_number_as_float(reader.get("y"));
         ev->pixel_min_r = ev->pixel_min_g = ev->pixel_min_b = ev->pixel_min_a = -1;
         ev->pixel_max_r = ev->pixel_max_g = ev->pixel_max_b = ev->pixel_max_a = -1;
+        ev->pixel_search_radius = reader.has("search_radius")
+            ? sim_number_as_float(reader.get("search_radius")) : 0.0f;
         ev->pixel_force_render = reader.has("force_render") ? reader.get("force_render").asBool() : true;
         if (reader.has("min_r")) ev->pixel_min_r = reader.get("min_r").asInt32();
         if (reader.has("min_g")) ev->pixel_min_g = reader.get("min_g").asInt32();
@@ -3065,16 +3067,26 @@ static void render_pending_surface(UiContext* uicon) {
     doc_state_clear_render_flags(state);
 }
 
-static bool pixel_component_in_range(const char* name, int value, int min_value, int max_value) {
+static bool pixel_component_in_range(const char* name, int value, int min_value,
+                                     int max_value, bool report_error) {
     if (min_value >= 0 && value < min_value) {
-        log_error("event_sim: assert_pixel FAIL - %s=%d below min %d", name, value, min_value);
+        if (report_error) log_error("event_sim: assert_pixel FAIL - %s=%d below min %d", name, value, min_value);
         return false;
     }
     if (max_value >= 0 && value > max_value) {
-        log_error("event_sim: assert_pixel FAIL - %s=%d above max %d", name, value, max_value);
+        if (report_error) log_error("event_sim: assert_pixel FAIL - %s=%d above max %d", name, value, max_value);
         return false;
     }
     return true;
+}
+
+static bool pixel_matches_bounds(uint32_t px, const SimEvent* ev, bool report_error) {
+    bool ok = true;
+    ok = pixel_component_in_range("r", px & 0xFF, ev->pixel_min_r, ev->pixel_max_r, report_error) && ok;
+    ok = pixel_component_in_range("g", (px >> 8) & 0xFF, ev->pixel_min_g, ev->pixel_max_g, report_error) && ok;
+    ok = pixel_component_in_range("b", (px >> 16) & 0xFF, ev->pixel_min_b, ev->pixel_max_b, report_error) && ok;
+    ok = pixel_component_in_range("a", (px >> 24) & 0xFF, ev->pixel_min_a, ev->pixel_max_a, report_error) && ok;
+    return ok;
 }
 
 static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) {
@@ -3097,37 +3109,52 @@ static void assert_pixel_impl(EventSimContext* ctx, UiContext* uicon, SimEvent* 
     RdtDevicePoint device = ui_context_logical_to_device_point(
         uicon, {logical_x, logical_y});
     RdtDevicePixelPoint sample = rdt_device_point_round(device);
-    int device_x = sample.x;
-    int device_y = sample.y;
-    if (device_x < 0 || device_y < 0 ||
-        device_x >= actual->width || device_y >= actual->height) {
+    if (sample.x < 0 || sample.y < 0 ||
+        sample.x >= actual->width || sample.y >= actual->height) {
         log_error("event_sim: assert_pixel FAIL - logical (%.2f,%.2f) maps outside surface at (%d,%d) in %dx%d",
-                  logical_x, logical_y, device_x, device_y, actual->width, actual->height);
+                  logical_x, logical_y, sample.x, sample.y, actual->width, actual->height);
         ctx->fail_count++;
         return;
     }
 
     int stride = actual->pitch / 4; // INT_CAST_OK: pitch is bytes, pixel rows are uint32_t
     uint32_t* pixels = (uint32_t*)actual->pixels;
-    uint32_t px = pixels[device_y * stride + device_x];
+    uint32_t px = pixels[sample.y * stride + sample.x];
+    bool ok = pixel_matches_bounds(px, ev, false);
+    if (!ok && ev->pixel_search_radius > 0.0f) {
+        // Rasterized glyph edges move across font backends; sample the nearby
+        // title ink while keeping the exact channel bounds of the assertion.
+        for (float dy = -ev->pixel_search_radius;
+                dy <= ev->pixel_search_radius && !ok; dy += 1.0f) {
+            for (float dx = -ev->pixel_search_radius;
+                    dx <= ev->pixel_search_radius && !ok; dx += 1.0f) {
+                RdtDevicePoint nearby_device = ui_context_logical_to_device_point(
+                    uicon, {logical_x + dx, logical_y + dy});
+                RdtDevicePixelPoint nearby = rdt_device_point_round(nearby_device);
+                if (nearby.x < 0 || nearby.y < 0 ||
+                    nearby.x >= actual->width || nearby.y >= actual->height) continue;
+                uint32_t nearby_px = pixels[nearby.y * stride + nearby.x];
+                if (pixel_matches_bounds(nearby_px, ev, false)) {
+                    sample = nearby;
+                    px = nearby_px;
+                    ok = true;
+                }
+            }
+        }
+    }
     int r = px & 0xFF;
     int g = (px >> 8) & 0xFF;
     int b = (px >> 16) & 0xFF;
     int a = (px >> 24) & 0xFF;
 
-    bool ok = true;
-    ok = pixel_component_in_range("r", r, ev->pixel_min_r, ev->pixel_max_r) && ok;
-    ok = pixel_component_in_range("g", g, ev->pixel_min_g, ev->pixel_max_g) && ok;
-    ok = pixel_component_in_range("b", b, ev->pixel_min_b, ev->pixel_max_b) && ok;
-    ok = pixel_component_in_range("a", a, ev->pixel_min_a, ev->pixel_max_a) && ok;
-
     if (ok) {
         log_info("event_sim: assert_pixel PASS at logical (%.2f,%.2f), device (%d,%d) rgba=(%d,%d,%d,%d)",
-                 logical_x, logical_y, device_x, device_y, r, g, b, a);
+                 logical_x, logical_y, sample.x, sample.y, r, g, b, a);
         ctx->pass_count++;
     } else {
+        pixel_matches_bounds(px, ev, true);
         log_error("event_sim: assert_pixel FAIL at logical (%.2f,%.2f), device (%d,%d) rgba=(%d,%d,%d,%d)",
-                  logical_x, logical_y, device_x, device_y, r, g, b, a);
+                  logical_x, logical_y, sample.x, sample.y, r, g, b, a);
         ctx->fail_count++;
     }
 }

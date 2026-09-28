@@ -499,6 +499,8 @@ bool layout_replaced_flex_intrinsic_dimensions(ViewBlock* block,
                                                const ReplacedIntrinsicFacts* facts,
                                                float* width, float* height);
 void layout_form_control(LayoutContext* lycon, ViewBlock* block);
+float layout_text_input_content_width(LayoutContext* lycon, ViewBlock* block,
+                                      FormControlProp* form, FontProp* font);
 float form_control_em_size(LayoutContext* lycon, ViewBlock* block, float em);
 bool form_input_uses_fixed_intrinsic_size(const FormControlProp* form);
 float form_button_flow_content_intrinsic_width(LayoutContext* lycon, ViewBlock* block);
@@ -4506,6 +4508,8 @@ float layout_measure_glyph_advance(LayoutContext* lycon, struct FontHandle* hand
                                    FontProp* style, uint32_t codepoint);
 float layout_measure_font_glyph_advance(struct FontHandle* handle, FontProp* style,
                                         uint32_t codepoint, float raster_scale);
+float layout_document_missing_glyph_advance(struct FontHandle* handle,
+                                            uint32_t codepoint, float raster_scale);
 float layout_measure_utf8_text_width(struct FontHandle* handle, FontProp* style,
                                      const char* text, size_t byte_length,
                                      float raster_scale);
