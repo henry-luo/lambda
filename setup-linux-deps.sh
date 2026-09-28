@@ -25,6 +25,7 @@ ALL_LIBS=(
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: ThorVG is built from source (see build_thorvg_v1_0_pre34_for_linux function)
 RADIANT_DEPS=(
+    "libwebkit2gtk-4.1-dev"  # WebKitGTK headers and GTK/JavaScriptCore development dependencies
     "libglfw3-dev"           # OpenGL window and context management
     "libpng-dev"             # PNG image format support
     "libbz2-dev"             # Alternative compression library
@@ -84,7 +85,8 @@ verify_installation() {
 # Function to check if a package is installed
 is_package_installed() {
     local package="$1"
-    dpkg -l | grep -q "^ii.*$package" 2>/dev/null
+    # match the requested package exactly; libcurl does not provide the curl command.
+    [ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null)" = "install ok installed" ]
 }
 
 # Function to install package if not already installed
@@ -148,11 +150,21 @@ if ! command -v apt >/dev/null 2>&1; then
     echo "You may need to adapt the package installation commands for your distribution."
 fi
 
+# refresh stale package indexes before the first install; old versions can return 404.
+echo "Refreshing APT package lists..."
+if ! sudo apt update; then
+    echo "❌ Failed to refresh APT package lists"
+    exit 1
+fi
+
 # Check for essential build tools
 echo "Setting up essential build tools..."
 check_and_install_tool "make" "build-essential" || exit 1
 check_and_install_tool "gcc" "build-essential" || exit 1
 check_and_install_tool "g++" "build-essential" || exit 1
+# linux builds select Clang, so both compiler drivers must be available.
+check_and_install_tool "clang" "clang" || exit 1
+check_and_install_tool "clang++" "clang" || exit 1
 check_and_install_tool "git" "git" || exit 1
 check_and_install_tool "curl" "curl" || exit 1
 
@@ -291,7 +303,6 @@ fi
 
 # Install additional development tools if not present
 echo "Installing additional development dependencies..."
-sudo apt update
 
 
 
@@ -358,12 +369,17 @@ build_gtest_for_linux() {
     return 1
 }
 
+# check the same include search path that the build compiler uses.
+has_mpdecimal_header() {
+    g++ -x c++ -fsyntax-only - >/dev/null 2>&1 <<<'#include <mpdecimal.h>'
+}
+
 # Function to build mpdecimal for Linux
 build_mpdecimal_for_linux() {
     echo "Building mpdecimal for Linux..."
     # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
-        echo "mpdecimal already installed in system location"
+    if has_mpdecimal_header; then
+        echo "mpdecimal header already available to g++"
         return 0
     fi
     # Create build_temp directory if it doesn't exist
@@ -388,7 +404,7 @@ build_mpdecimal_for_linux() {
             # Update library cache
             sudo ldconfig
             # Verify the build
-            if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
+            if has_mpdecimal_header; then
                 echo "✅ mpdecimal built and installed successfully"
                 cd - > /dev/null
                 return 0
@@ -494,23 +510,17 @@ for dep in "${RADIANT_DEPS[@]}"; do
     install_if_missing "$dep" "$dep"
 done
 
-# Verify mpdecimal header installation
+# verify mpdecimal using the compiler's include path, including Debian multiarch directories.
 echo "Verifying mpdecimal header installation..."
-if [ -f "/usr/include/mpdecimal.h" ]; then
-    echo "✅ mpdecimal.h found at /usr/include/mpdecimal.h"
-elif [ -f "/usr/include/mpdec/mpdecimal.h" ]; then
-    echo "✅ mpdecimal.h found at /usr/include/mpdec/mpdecimal.h"
-    echo "Creating symlink for standard location..."
-    sudo ln -sf /usr/include/mpdec/mpdecimal.h /usr/include/mpdecimal.h
-elif [ -f "/usr/local/include/mpdecimal.h" ]; then
-    echo "✅ mpdecimal.h found at /usr/local/include/mpdecimal.h"
+if has_mpdecimal_header; then
+    echo "✅ mpdecimal.h is available to g++"
 else
-    echo "❌ mpdecimal.h not found after installation"
-    echo "Searching for mpdecimal headers..."
-    find /usr -name "*mpdec*" -type f 2>/dev/null || echo "No mpdecimal files found"
-    # Directly build from source if header is missing
-    echo "Building mpdecimal from source..."
+    echo "Building mpdecimal from source because g++ cannot find mpdecimal.h..."
     build_mpdecimal_for_linux
+    if ! has_mpdecimal_header; then
+        echo "❌ mpdecimal.h is still unavailable to g++"
+        exit 1
+    fi
 fi
 
 # Create temporary build directory
@@ -697,56 +707,6 @@ build_thorvg_v1_0_pre34_for_linux() {
         echo "❌ ThorVG text API missing from built library"
     fi
 
-    return 1
-}
-
-# Function to build mpdecimal for Linux
-build_mpdecimal_for_linux() {
-    echo "Building mpdecimal for Linux..."
-
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
-        echo "mpdecimal already installed in system location"
-        return 0
-    fi
-
-    # Create build_temp directory if it doesn't exist
-    mkdir -p "build_temp"
-
-    # Build from source
-    if [ ! -d "build_temp/mpdecimal" ]; then
-        cd build_temp
-        echo "Downloading mpdecimal..."
-        curl -L "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-2.5.1.tar.gz" -o "mpdecimal-2.5.1.tar.gz"
-        tar -xzf "mpdecimal-2.5.1.tar.gz"
-        mv "mpdecimal-2.5.1" "mpdecimal"
-        rm "mpdecimal-2.5.1.tar.gz"
-        cd - > /dev/null
-    fi
-
-    cd "build_temp/mpdecimal"
-
-    echo "Configuring mpdecimal..."
-    if ./configure --prefix="$SYSTEM_PREFIX"; then
-        echo "Building mpdecimal..."
-        if make -j$(nproc); then
-            echo "Installing mpdecimal to system location (requires sudo)..."
-            sudo make install
-
-            # Update library cache
-            sudo ldconfig
-
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
-                echo "✅ mpdecimal built and installed successfully"
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-
-    echo "❌ mpdecimal build failed"
-    cd - > /dev/null
     return 1
 }
 

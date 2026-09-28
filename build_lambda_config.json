@@ -1632,6 +1632,7 @@
     "linux": {
       "output": "lambda.exe",
       "compiler": "clang",
+      "pkg_config_includes": ["webkit2gtk-4.1"],
       "exclude_source_files": [
         "lib/clock_compat.c",
         "lib/font/font_backend_dwrite.cpp"
@@ -1639,11 +1640,9 @@
       "includes": [
         "/usr/include",
         "/usr/include/libpng16",
-        "/usr/lib/aarch64-linux-gnu/glib-2.0/include",
         "/usr/include/at-spi2-atk/2.0",
         "/usr/include/at-spi-2.0",
         "/usr/include/dbus-1.0",
-        "/usr/lib/aarch64-linux-gnu/dbus-1.0/include",
         "/usr/include/gio-unix-2.0",
         "/usr/include/cairo",
         "/usr/include/pango-1.0",
@@ -1654,7 +1653,6 @@
         "/usr/include/uuid",
         "/usr/include/freetype2",
         "/usr/include/gdk-pixbuf-2.0",
-        "/usr/include/aarch64-linux-gnu",
         "/usr/include/webkit2gtk-4.1",
         "/usr/include/webkitgtk-4.1",
         "/usr/include/gtk-3.0",
@@ -1694,7 +1692,7 @@
         {
           "name": "utf8proc",
           "include": "/usr/include",
-          "lib": "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+          "lib": "/usr/lib/${multiarch}/libutf8proc.a",
           "link": "static"
         },
         {
@@ -1732,7 +1730,7 @@
         {
           "name": "nghttp2",
           "include": "/usr/include",
-          "lib": "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+          "lib": "/usr/lib/${multiarch}/libnghttp2.a",
           "link": "static"
         },
         {
@@ -1761,17 +1759,17 @@
         },
         {
           "name": "png",
-          "lib": "/usr/lib/aarch64-linux-gnu/libpng.a",
+          "lib": "/usr/lib/${multiarch}/libpng.a",
           "link": "static"
         },
         {
           "name": "turbojpeg",
-          "lib": "/usr/lib/aarch64-linux-gnu/libturbojpeg.a",
+          "lib": "/usr/lib/${multiarch}/libturbojpeg.a",
           "link": "static"
         },
         {
           "name": "gif",
-          "lib": "/usr/lib/aarch64-linux-gnu/libgif.a",
+          "lib": "/usr/lib/${multiarch}/libgif.a",
           "link": "static"
         },
         {
@@ -1784,13 +1782,13 @@
         {
           "name": "brotlidec",
           "description": "Brotli decompression (WOFF2 dependency)",
-          "lib": "/usr/lib/aarch64-linux-gnu/libbrotlidec.a",
+          "lib": "/usr/lib/${multiarch}/libbrotlidec.a",
           "link": "static"
         },
         {
           "name": "brotlicommon",
           "description": "Brotli common (WOFF2 dependency)",
-          "lib": "/usr/lib/aarch64-linux-gnu/libbrotlicommon.a",
+          "lib": "/usr/lib/${multiarch}/libbrotlicommon.a",
           "link": "static"
         },
         {

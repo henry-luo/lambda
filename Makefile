@@ -467,15 +467,18 @@ build-mir: $(MIR_LIB)
 # Toolchain Validation Functions
 define toolchain_verify
 	@echo "🔍 Verifying toolchain..."
-	@if command -v $(CC) >/dev/null 2>&1; then \
-		echo "✅ Compiler: $(CC) ($(shell $(CC) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
+	@# running through ccache checks that the wrapped compiler exists too.
+	@if $(CC) --version >/dev/null 2>&1; then \
+		echo "✅ Compiler: $(CC) ($(shell $(CC) --version 2>/dev/null | head -1))"; \
 	else \
-		echo "❌ Compiler $(CC) not found"; \
+		echo "❌ Compiler $(CC) is unavailable; run ./setup-linux-deps.sh"; \
+		exit 1; \
 	fi
-	@if command -v $(CXX) >/dev/null 2>&1; then \
-		echo "✅ C++ Compiler: $(CXX) ($(shell $(CXX) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
+	@if $(CXX) --version >/dev/null 2>&1; then \
+		echo "✅ C++ Compiler: $(CXX) ($(shell $(CXX) --version 2>/dev/null | head -1))"; \
 	else \
-		echo "❌ C++ Compiler $(CXX) not found"; \
+		echo "❌ C++ Compiler $(CXX) is unavailable; run ./setup-linux-deps.sh"; \
+		exit 1; \
 	fi
 endef
 

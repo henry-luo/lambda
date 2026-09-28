@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import glob
+import shlex
 import platform
 import copy
 import shutil
@@ -45,6 +46,7 @@ class PremakeGenerator:
                 value = os.environ.get(name, str(default_value))
                 resolved_defines.append(f"{name}={value}")
         self.premake_content = []
+        self._linux_pkg_config_includes: Optional[List[str]] = None
         self.variant = variant
         self.coverage_bin_dir = os.environ.get('LAMBDA_COVERAGE_BIN_DIR', 'test/coverage/bin')
 
@@ -94,7 +96,27 @@ class PremakeGenerator:
         self._expand_node_module_targets()
         self._expand_validation_source_targets()
 
+        self.linux_multiarch_triplet = None
+        self.linux_multiarch_libdir = None
+        if self.use_linux_config:
+            self._resolve_linux_multiarch_paths()
         self.external_libraries = self._parse_external_libraries()
+
+    def _resolve_linux_multiarch_paths(self) -> None:
+        """Resolve Debian archive paths for the native compiler target."""
+        result = subprocess.run(
+            ['gcc', '-print-multiarch'], capture_output=True, text=True,
+        )
+        triplet = result.stdout.strip()
+        if result.returncode != 0 or not triplet:
+            raise RuntimeError('could not determine Linux multiarch triplet from gcc')
+        self.linux_multiarch_triplet = triplet
+        self.linux_multiarch_libdir = f'/usr/lib/{triplet}'
+        for key in ('libraries', 'dev_libraries'):
+            for library in self.config.get('platforms', {}).get('linux', {}).get(key, []):
+                lib_path = library.get('lib', '')
+                if '${multiarch}' in lib_path:
+                    library['lib'] = lib_path.replace('${multiarch}', triplet)
 
     def _prepare_macos_archive_without_members(self) -> None:
         """Materialize macOS static archives without private bundled providers."""
@@ -554,8 +576,21 @@ class PremakeGenerator:
 
         if self.use_linux_config:
             linux_config = platforms_config.get('linux', {})
-            linux_includes = linux_config.get('includes', [])
-            includes.extend(linux_includes)
+            includes.extend(linux_config.get('includes', []))
+            packages = linux_config.get('pkg_config_includes', [])
+            if packages and self._linux_pkg_config_includes is None:
+                # pkg-config supplies multiarch paths such as glibconfig.h's directory.
+                result = subprocess.run(
+                    ['pkg-config', '--cflags-only-I', *packages],
+                    capture_output=True, text=True,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(f"pkg-config include lookup failed for {packages}: {result.stderr.strip()}")
+                self._linux_pkg_config_includes = [
+                    flag[2:] for flag in shlex.split(result.stdout)
+                    if flag.startswith('-I') and len(flag) > 2
+                ]
+            includes.extend(self._linux_pkg_config_includes or [])
         elif self.use_macos_config:
             macos_config = platforms_config.get('macos', {})
             macos_includes = macos_config.get('includes', [])
@@ -2631,8 +2666,8 @@ class PremakeGenerator:
             # Native Linux paths
             self.premake_content.extend([
                 '        "/usr/local/lib",',
-                '        "/usr/local/lib/aarch64-linux-gnu",',
-                '        "/usr/lib/aarch64-linux-gnu",',
+                f'        "/usr/local/lib/{self.linux_multiarch_triplet}",',
+                f'        "{self.linux_multiarch_libdir}",',
                 '        "build/lib",',
             ])
         elif self.use_windows_config:
@@ -2871,7 +2906,7 @@ class PremakeGenerator:
 
                 for lib_name, lib_path in late_static_libs:
                     if lib_name == 'utf8proc':
-                        # Use :libutf8proc.a syntax (path in libdir /usr/lib/aarch64-linux-gnu)
+                        # use :libutf8proc.a syntax so the host multiarch libdir is searched.
                         self.premake_content.append('        ":libutf8proc.a",')
                     else:
                         self.premake_content.append(f'        "{lib_path}",')
