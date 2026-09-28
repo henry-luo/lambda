@@ -441,9 +441,7 @@ static bool parse_font_metadata(const char* file_path, FontEntry* entry, Arena* 
 
     // fallback: use filename as family name
     if (!entry->family_name && file_path) {
-        const char* base = strrchr(file_path, '/');
-        if (!base) base = strrchr(file_path, '\\');
-        if (base) base++; else base = file_path;
+        const char* base = file_path_basename(file_path);
 
         char buf[MAX_FONT_FAMILY_NAME];
         strncpy(buf, base, sizeof(buf) - 1);
@@ -633,9 +631,8 @@ static FontEntry* create_font_placeholder(const char* file_path, Pool* pool, Are
     entry->format = font_detect_format_ext(file_path);
 
     // guess family name from filename (heuristic — refined on parse)
-    const char* base = strrchr(file_path, '/');
-    if (!base) base = strrchr(file_path, '\\');
-    if (base) base++; else base = file_path;
+    // Windows scan roots may use '/', while enumeration appends '\\'.
+    const char* base = file_path_basename(file_path);
 
     char buf[MAX_FONT_FAMILY_NAME];
     strncpy(buf, base, sizeof(buf) - 1);

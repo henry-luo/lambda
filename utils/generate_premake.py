@@ -33,6 +33,10 @@ def elog(*args, **kwargs):
     kwargs.setdefault('file', sys.stderr)
     print(*args, **kwargs)
 
+def glob_premake_paths(pattern: str) -> List[str]:
+    """Return glob matches with Lua-safe, platform-neutral separators."""
+    return [Path(match).as_posix() for match in glob.glob(pattern, recursive=False)]
+
 class PremakeGenerator:
     def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None):
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -3453,22 +3457,21 @@ class PremakeGenerator:
             additional_files.extend(macos_config.get('additional_source_files', []))
 
         for source_dir in source_dirs:
-            import glob
             c_pattern = f"{source_dir}/*.c"
             cpp_pattern = f"{source_dir}/*.cpp"
 
             # Find all C files (one level only, non-recursive)
-            c_files = glob.glob(c_pattern, recursive=False)
+            c_files = glob_premake_paths(c_pattern)
             all_source_files.extend(c_files)
 
             # Find all C++ files (one level only, non-recursive)
-            cpp_files = glob.glob(cpp_pattern, recursive=False)
+            cpp_files = glob_premake_paths(cpp_pattern)
             all_source_files.extend(cpp_files)
 
             # Find Objective-C++ files on macOS (one level only, non-recursive)
             if self.use_macos_config:
                 mm_pattern = f"{source_dir}/*.mm"
-                mm_files = glob.glob(mm_pattern, recursive=False)
+                mm_files = glob_premake_paths(mm_pattern)
                 all_source_files.extend(mm_files)
 
         # On macOS, remove _stub.cpp files when a platform-specific .mm exists
