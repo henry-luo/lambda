@@ -23,6 +23,8 @@ extern Item parse_html_block(MarkupParser* parser, const char* line);
 extern Item parse_rst_line_block(MarkupParser* parser, const char* line);
 extern Item parse_rst_image_directive(MarkupParser* parser, const char* line);
 extern Item parse_rst_contents_directive(MarkupParser* parser, const char* line);
+extern Item parse_rst_directive(MarkupParser* parser, const char* line);
+extern Item parse_man_tagged_paragraph(MarkupParser* parser, const char* line);
 extern Item parse_rst_definition_list(MarkupParser* parser, const char* line);
 
 // AsciiDoc-specific block parsers
@@ -101,6 +103,9 @@ Item parse_block_element(MarkupParser* parser) {
             return parse_html_block(parser, line);
 
         case BlockType::DIRECTIVE:
+            if (parser->config.format == Format::MAN) {
+                return parse_man_tagged_paragraph(parser, line);
+            }
             // AsciiDoc admonitions and other directives
             if (parser->config.format == Format::ASCIIDOC) {
                 return parse_asciidoc_admonition(parser, line);
@@ -109,13 +114,7 @@ Item parse_block_element(MarkupParser* parser) {
             if (parser->config.format == Format::RST) {
                 const char* p = line;
                 while (*p == ' ') p++;
-                // RST image directive
-                if (strncmp(p, ".. image::", 10) == 0 || strncmp(p, ".. figure::", 11) == 0) {
-                    return parse_rst_image_directive(parser, line);
-                }
-                if (strncmp(p, ".. contents::", 13) == 0) {
-                    return parse_rst_contents_directive(parser, line);
-                }
+                if (p[0] == '.' && p[1] == '.') return parse_rst_directive(parser, line);
                 // RST line blocks (| prefix)
                 return parse_rst_line_block(parser, line);
             }

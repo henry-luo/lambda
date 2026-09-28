@@ -64,6 +64,7 @@ public:
         while (text_len > 0 && (text_start[text_len-1] == ' ' || text_start[text_len-1] == '\t')) {
             text_len--;
         }
+        if (text_len == 0) return info;
 
         size_t ul_len = ul_start - next_line;
         while (next_line[ul_len] == ul_char) ul_len++;

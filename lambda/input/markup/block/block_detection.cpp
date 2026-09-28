@@ -200,6 +200,18 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             return BlockType::HEADER;
         }
 
+        // RST explicit markup starts with ".. "; dispatch it before the
+        // code-fence and indentation rules so its body stays with the directive.
+        if (parser->config.format == Format::RST && pos[0] == '.' &&
+            pos[1] == '.' && (pos[2] == ' ' || pos[2] == '\t' || !pos[2])) {
+            if (pos[2] == ' ' && pos[3] == '_') return BlockType::BLANK;
+            return BlockType::DIRECTIVE;
+        }
+        if (parser->config.format == Format::MAN &&
+            (strncmp(pos, ".TP", 3) == 0 || strncmp(pos, ".IP", 3) == 0)) {
+            return BlockType::DIRECTIVE;
+        }
+
         // List item detection
         ListItemInfo list_info = adapter->detectListItem(line);
         if (list_info.valid) {
@@ -238,25 +250,6 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
                     return BlockType::DIRECTIVE; // Use DIRECTIVE for line blocks
                 }
             }
-            // RST image directive: .. image::
-            if (strncmp(p, ".. image::", 10) == 0 || strncmp(p, ".. figure::", 11) == 0) {
-                return BlockType::DIRECTIVE; // Use DIRECTIVE for image
-            }
-            if (strncmp(p, ".. contents::", 13) == 0) {
-                return BlockType::DIRECTIVE;
-            }
-
-            // RST link definition: .. _label: URL - skip these (already pre-scanned)
-            if (strncmp(p, ".. _", 4) == 0) {
-                // Find colon after the label
-                const char* cp = p + 4;
-                while (*cp && *cp != ':' && *cp != '\n' && *cp != '\r') cp++;
-                if (*cp == ':') {
-                    // This is a link definition - return BLANK to skip
-                    return BlockType::BLANK;
-                }
-            }
-
             // A directive with indented options is not a definition-list term.
             if (*line != '=' && *line != '-' && *line != '+' &&
                 !str_is_digit(*line) &&
@@ -373,7 +366,7 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
     // Markdown tables require the adapter's separator-row check above. This
     // generic fallback mistakes pipes inside Markdown link and image URLs for
     // cell delimiters.
-    if (parser->config.format != Format::MARKDOWN &&
+    if (parser->config.format != Format::MARKDOWN && parser->config.format != Format::RST &&
         parser->config.flavor != Flavor::COMMONMARK && is_table_line(line)) {
         return BlockType::TABLE;
     }

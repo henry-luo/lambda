@@ -9810,7 +9810,8 @@ static void dom_schedule_scroll_frame(Item callback) {
 }
 
 static void dom_queue_scroll_event(DomElement* elem, float old_x, float old_y) {
-    if (!elem || elem->scroll_event_pending()) return;
+    // Lambda-only documents have no JS realm to own the queued callback.
+    if (!elem || !dom_realm_active() || elem->scroll_event_pending()) return;
     float x = 0.0f;
     float y = 0.0f;
     dom_scroll_observed_position(elem, &x, &y);

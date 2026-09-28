@@ -31,6 +31,14 @@ public:
 
         const char* p = line;
 
+        if (starts_with_icase(p, "#+TITLE:")) {
+            info.level = 1;
+            info.text_start = str_skip_line_space(p + 8);
+            info.text_end = info.text_start + strlen(info.text_start);
+            info.valid = info.text_end > info.text_start;
+            return info;
+        }
+
         // Org headlines: * at column 0, followed by more * for deeper levels
         if (*p != '*') return info;
 

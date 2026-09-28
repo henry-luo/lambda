@@ -36,7 +36,14 @@ public:
         // Subsection: .SS "Subsection"
         if (line[0] != '.') return info;
 
-        if (strncmp(line, ".SH", 3) == 0) {
+        if (strncmp(line, ".TH ", 4) == 0) {
+            info.level = 1;
+            info.text_start = line + 4;
+            info.text_end = info.text_start;
+            while (*info.text_end && !str_is_space(*info.text_end)) info.text_end++;
+            info.valid = true;
+            return info;
+        } else if (strncmp(line, ".SH", 3) == 0) {
             info.level = 1;
             info.text_start = line + 3;
         } else if (strncmp(line, ".SS", 3) == 0) {

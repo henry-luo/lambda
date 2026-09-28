@@ -1,0 +1,33 @@
+% Project-authored fixture: a simple engineering vector construction.
+\documentclass{article}
+\usepackage{tikz}
+
+\title{Resolving a Planar Displacement}
+\author{Mechanics Workshop}
+\date{September 2026}
+
+\begin{document}
+\maketitle
+
+\section{Orthogonal components}
+A movement of four centimetres horizontally and three centimetres vertically
+has a five-centimetre resultant. The diagram shows the two components and
+the straight-line displacement between the start and end points.
+
+\begin{figure}
+\centering
+\begin{tikzpicture}
+  \draw[blue] (0,0) -- (4cm,0) -- (4cm,30mm);
+  \draw[red] (0,0) -- (4cm,30mm);
+  \draw[gray] (4cm,0) -- (4cm,30mm);
+  \node at (2cm,-0.3cm) {$x=4$};
+  \node at (4.4cm,1.5cm) {$y=3$};
+  \node at (1.7cm,2cm) {$r=5$};
+\end{tikzpicture}
+\caption{Displacement resolved into horizontal and vertical components.}
+\label{fig:displacement}
+\end{figure}
+
+The unit-bearing coordinates also check that millimetres and centimetres
+share the same drawing basis.
+\end{document}

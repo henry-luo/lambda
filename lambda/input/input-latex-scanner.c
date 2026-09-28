@@ -29,6 +29,11 @@ size_t latex_scan_group_end(const char* source, size_t length, size_t start,
             cursor++;
             continue;
         }
+        // TeX comments can contain unmatched braces or brackets.
+        if (c == '%') {
+            while (cursor < length && source[cursor] != '\n' && source[cursor] != '\r') cursor++;
+            continue;
+        }
         if (c == open) depth++;
         else if (c == close && --depth == 0) {
             if (content_start) *content_start = begin;

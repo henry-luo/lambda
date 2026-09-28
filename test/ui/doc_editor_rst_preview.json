@@ -16,6 +16,8 @@
     {"type": "assert_count", "target": {"selector": "#rendered-preview h3#rst-heading-19"}, "count": 1},
     {"type": "assert_count", "target": {"selector": ".rst-contents a[href='#rst-heading-11']"}, "count": 1},
     {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Primary Heading"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .rst-note"}, "count": 3},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Responsible for team coordination"},
     {"type": "click", "target": {"selector": ".tab-source"}},
     {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": ".. contents:: Table of Contents"}
   ]

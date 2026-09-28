@@ -1,0 +1,27 @@
+{
+  "name": "Doc editor previews Org AsciiDoc and man files",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 2800},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "test.org"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_org .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview h1"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview h1"}, "contains": "Org Math Test"},
+    {"type": "click", "target": {"selector": ".tree-filter-clear"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "simple.adoc"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_simple_adoc .tree-label"}},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview h1"}, "contains": "Simple AsciiDoc Test"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Hello World"},
+    {"type": "click", "target": {"selector": ".tree-filter-clear"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "test.man"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_man .tree-label"}},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview h1"}, "contains": "EXAMPLE"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Specify input file to process."},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview dl"}, "count": 5},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": ".TH EXAMPLE 1"}
+  ]
+}

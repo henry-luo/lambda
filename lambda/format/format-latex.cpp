@@ -128,6 +128,12 @@ static void format_latex_element(LaTeXContext& ctx, const ElementReader& elem, i
 
     if (is_command(tag)) {
         format_command_with_args(ctx, elem, tag);
+    } else if (strcmp(tag, "tikzpicture") == 0) {
+        // The input adapter retains the graphics island verbatim; generic
+        // command formatting would lose both environment and plot syntax.
+        String* source = elem.get_string_attr("raw_source");
+        if (source) stringbuf_append_str_n(ctx.output(), source->chars, source->len);
+        else format_environment(ctx, elem, tag, depth);
     } else if (is_environment(tag)) {
         format_environment(ctx, elem, tag, depth);
     } else if (strcmp(tag, "maketitle") == 0) {

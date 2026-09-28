@@ -88,6 +88,7 @@ Item parse_divider(MarkupParser* parser);
  * Collects text lines until a different block type is encountered
  */
 Item parse_paragraph(MarkupParser* parser, const char* line);
+Item parse_block_element(MarkupParser* parser);
 
 /**
  * Parse inline content within a block

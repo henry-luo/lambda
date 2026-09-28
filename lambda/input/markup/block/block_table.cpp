@@ -341,6 +341,77 @@ static bool is_rst_simple_table_border(const char* line) {
     return count >= 2;
 }
 
+static bool is_rst_grid_table_border(const char* line) {
+    const char* p = str_skip_line_space(line);
+    if (*p != '+') return false;
+    int corners = 0;
+    bool has_rule = false;
+    for (; *p; p++) {
+        if (*p == '+') corners++;
+        else if (*p == '-' || *p == '=') has_rule = true;
+        else if (*p != ' ' && *p != '\t') return false;
+    }
+    return corners >= 2 && has_rule;
+}
+
+// Grid rows are delimited by +---+ or +===+ rules; a rule with = marks
+// the cells above it as column headers.
+static Item parse_rst_grid_table(MarkupParser* parser, const char* line) {
+    ArrayList* corners = arraylist_new(8);
+    for (int i = 0; line[i]; i++) {
+        if (line[i] == '+') arraylist_append(corners, (ArrayListValue)(intptr_t)i);
+    }
+    Element* table = create_element(parser, "table");
+    if (!table || corners->length < 2) {
+        arraylist_free(corners);
+        return Item{.item = ITEM_ERROR};
+    }
+    parser->current_line++;
+    while (parser->current_line < parser->line_count) {
+        int first = parser->current_line;
+        while (parser->current_line < parser->line_count &&
+               parser->lines[parser->current_line][0] == '|') parser->current_line++;
+        if (parser->current_line == first) break;
+        if (parser->current_line >= parser->line_count ||
+            !is_rst_grid_table_border(parser->lines[parser->current_line])) break;
+        const char* border = parser->lines[parser->current_line];
+        const char* cell_tag = strchr(border, '=') ? "th" : "td";
+        Element* row = create_element(parser, "tr");
+        if (!row) break;
+        for (int col = 0; col + 1 < corners->length; col++) {
+            int begin = (int)(intptr_t)corners->data[col] + 1;
+            int finish = (int)(intptr_t)corners->data[col + 1];
+            StrBuf* content = strbuf_new();
+            for (int source_line = first; source_line < parser->current_line; source_line++) {
+                const char* source = parser->lines[source_line];
+                int length = (int)strlen(source);
+                if (begin >= length) continue;
+                int end = finish < length ? finish : length;
+                while (begin < end && (source[begin] == ' ' || source[begin] == '\t')) begin++;
+                while (end > begin && (source[end - 1] == ' ' || source[end - 1] == '\t')) end--;
+                if (end > begin) {
+                    if (content->length) strbuf_append_char(content, '\n');
+                    strbuf_append_str_n(content, source + begin, (size_t)(end - begin));
+                }
+                begin = (int)(intptr_t)corners->data[col] + 1;
+            }
+            Element* cell = create_element(parser, cell_tag);
+            if (cell && content->length) {
+                String* text = parser->builder.createString(content->str, content->length);
+                Item inline_content = parse_table_cell_content(parser, text->chars);
+                if (inline_content.item != ITEM_ERROR && inline_content.item != ITEM_UNDEFINED)
+                    list_push((List*)cell, inline_content);
+            }
+            if (cell) list_push((List*)row, Item{.item = (uint64_t)cell});
+            strbuf_free(content);
+        }
+        list_push((List*)table, Item{.item = (uint64_t)row});
+        parser->current_line++;
+    }
+    arraylist_free(corners);
+    return Item{.item = (uint64_t)table};
+}
+
 /**
  * parse_rst_simple_table_row - Parse a row of RST simple table
  *
@@ -466,6 +537,10 @@ static bool is_asciidoc_table_delimiter(const char* line) {
 Item parse_table(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
         return Item{.item = ITEM_ERROR};
+    }
+
+    if (parser->config.format == Format::RST && is_rst_grid_table_border(line)) {
+        return parse_rst_grid_table(parser, line);
     }
 
     // Check for RST simple table (starts with ===)

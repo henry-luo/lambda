@@ -10,6 +10,7 @@
 //   ./lambda.exe view test/ui/doc_editor.ls --headless --no-log
 
 import pdf: lambda.pdf.pdf
+import dom
 import pdf_html: lambda.pdf.html
 import latex: lambda.latex.latex
 import latex_css: lambda.latex.css
@@ -38,6 +39,15 @@ fn path_is_open(open_paths, path) => contains(open_paths, path) or false
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
 // a non-text parent class errors (S7.9.3): no hit
 fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ") or false
+
+pn reset_document_scroll(target) {
+  let root = dom.root_node(target)
+  let preview = dom.query_selector(root, ".rendered-preview")
+  let source = dom.query_selector(root, ".source-tab-panel")
+  // The preview element is reused by the reactive render, including its scroll state.
+  if (preview != null) { dom.set_scroll_state(preview, 0.0, 0.0) }
+  if (source != null) { dom.set_scroll_state(source, 0.0, 0.0) }
+}
 
 fn bounded_text_offset(value, offset) {
   if (offset < 0) { 0 }
@@ -98,6 +108,9 @@ fn document_format(extension) {
   if (contains(["md", "markdown", "mdown", "mkdn"], ext)) { "markdown" }
   else if (contains(["wiki", "mediawiki"], ext)) { "wiki" }
   else if (contains(["rst", "rest"], ext)) { "rst" }
+  else if (ext == "org") { "org" }
+  else if (contains(["adoc", "asciidoc", "asc"], ext)) { "asciidoc" }
+  else if (ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { "man" }
   else if (ext == "textile") { "textile" }
   else if (contains(["htm", "html"], ext)) { "html" }
   else { null }
@@ -152,7 +165,7 @@ fn selected_preview(file) {
 // --------------------------------------------------------------------------
 // Mark document preview templates
 //
-// Markdown, wiki, RST, and HTML readers produce the same HTML-shaped Mark
+// Markup readers produce the same HTML-shaped Mark
 // vocabulary. LaTeX returns its normal HTML elements after rendering.
 // Applying it deliberately keeps parser output separate from this prototype's
 // UI chrome.
@@ -178,6 +191,11 @@ view <h4> { <h4 id:~.id, *[rendered_children(~)]> }
 view <h5> { <h5 id:~.id, *[rendered_children(~)]> }
 view <h6> { <h6 id:~.id, *[rendered_children(~)]> }
 view <p> { <p *[rendered_children(~)]> }
+view <div> { <div class:~.class, *[rendered_children(~)]> }
+view <nav> { <nav class:~.class, *[rendered_children(~)]> }
+view <dl> { <dl *[rendered_children(~)]> }
+view <dt> { <dt *[rendered_children(~)]> }
+view <dd> { <dd *[rendered_children(~)]> }
 view <span> { <span *[rendered_children(~)]> }
 view <strong> { <strong *[rendered_children(~)]> }
 view <em> { <em *[rendered_children(~)]> }
@@ -197,6 +215,7 @@ view <img> { <img src:~.src, alt:~.alt> }
 view <br> { <br> }
 view <hr> { <hr> }
 view <table> { <table *[rendered_children(~)]> }
+view <caption> { <caption *[rendered_children(~)]> }
 view <thead> { <thead *[rendered_children(~)]> }
 view <tbody> { <tbody *[rendered_children(~)]> }
 view <tfoot> { <tfoot *[rendered_children(~)]> }
@@ -273,6 +292,7 @@ on click(evt) {
       emit("directory_toggle", {path:entry_path, is_open:true})
     }
   } else if (not ~.is_dir) {
+    if (~.selected_path != entry_path) { reset_document_scroll(evt.target) }
     emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
   }
 }
@@ -284,7 +304,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, Textile, HTML, LaTeX, PDF, and image files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PDF, and image files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -542,6 +562,12 @@ on preview_tab(tab) {
                       border-left: 3px solid #adc2de; }
       .rst-contents-title { margin: 0 0 .5em; font-weight: 650; }
       .rst-contents ul { margin: 0; padding-left: 1.5em; }
+      .rst-directive { margin: 1em 0; padding: .5em 1em; border-left: 3px solid #b6c5db; background: #f8fafd; }
+      .rst-directive-title { font-weight: 650; }
+      .rst-warning, .rst-danger, .rst-error, .rst-caution { border-left-color: #d89566; background: #fff9f4; }
+      .document-body dl { margin: 1em 0; }
+      .document-body dt { margin-top: .6em; font-weight: 650; }
+      .document-body dd { margin-left: 1.4em; }
       .document-body code, .latex-output code { padding: 2px 5px; border-radius: 4px; background: #eef1f5;
                      font: .9em 'SF Mono', Menlo, monospace; }
       .document-body pre, .latex-output pre { overflow: auto; padding: 13px 15px; border-radius: 6px;
@@ -549,6 +575,7 @@ on preview_tab(tab) {
       .document-body pre code, .latex-output pre code { padding: 0; background: transparent; color: inherit; }
       .document-body a, .latex-output a { color: #1769c2; }
       .document-body table, .latex-output table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+      .document-body caption { text-align: left; font-weight: 650; margin-bottom: .35em; }
       .document-body th, .document-body td, .latex-output th, .latex-output td { border: 1px solid #dbe1ea; padding: 7px 9px; text-align: left; }
       .document-body th, .latex-output th { background: #f3f6fa; }
       .document-body img, .latex-output img { max-width: 100%; }
