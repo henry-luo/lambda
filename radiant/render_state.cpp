@@ -13,9 +13,12 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
         rdcon->perspective_origin_y,
         false
     };
+    float scale = rdcon->raster_scale > 0.0f ? rdcon->raster_scale : 1.0f;
+    // Paint positions are in device pixels; CSS transforms are defined in
+    // layout pixels, then conjugated into the paint coordinate space below.
+    float elem_x = parent_block->x / scale + block->x;
+    float elem_y = parent_block->y / scale + block->y;
     if (block->transform && block->transformp()->perspective > 0.0f) {
-        float elem_x = parent_block->x + block->x;
-        float elem_y = parent_block->y + block->y;
         float origin_x = radiant::transform_perspective_origin_offset(
             block->transformp(), block->width, true);
         float origin_y = radiant::transform_perspective_origin_offset(
@@ -32,14 +35,16 @@ RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock
         return scope;
     }
 
-    float elem_x = parent_block->x + block->x;
-    float elem_y = parent_block->y + block->y;
     RdtLogicalPoint origin = radiant::transform_origin(
         block->transformp(), elem_x, elem_y, block->width, block->height);
 
     RdtMatrix next_transform = radiant::compute_transform_matrix(
         block->transformp()->functions, block->width, block->height, origin.x, origin.y,
         rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
+    next_transform.e13 *= scale;
+    next_transform.e23 *= scale;
+    next_transform.e31 /= scale;
+    next_transform.e32 /= scale;
 
     if (scope.previous_has_transform) {
         rdcon->transform = rdt_matrix_multiply(&scope.previous_transform, &next_transform);

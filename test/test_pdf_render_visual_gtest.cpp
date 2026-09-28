@@ -855,6 +855,168 @@ TEST(RenderOutputParity, SvgPictureReplayMatchesThreadedTiledReplay) {
     expect_pngs_exactly_equal(single_png, tiled_png);
 }
 
+TEST(RenderOutputParity, TikzCalibrationPaintsNumericSvgShapes) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    const char* source = "test/input/tikz_calibration_report.tex";
+    const char* png_path = "temp/render_output_parity/tikz_calibration.png";
+    char qsource[PATH_MAX + 8];
+    char qpng[PATH_MAX + 8];
+    char cmd[PATH_MAX * 4 + 256];
+    shell_quote(source, qsource, sizeof(qsource));
+    shell_quote(png_path, qpng, sizeof(qpng));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 1250 --pixel-ratio 1 > temp/render_output_parity/tikz_calibration.out 2> temp/render_output_parity/tikz_calibration.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qsource, qpng);
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    int min_x = image.width;
+    int min_y = image.height;
+    int max_x = -1;
+    int max_y = -1;
+    // five samples span the plot; a legend swatch alone cannot satisfy both extents.
+    for (int y = 0; y < image.height; y++) {
+        for (int x = 0; x < image.width; x++) {
+            const unsigned char* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+            if (pixel[0] < 160 || pixel[1] > 100 || pixel[2] > 100 || pixel[3] < 200) continue;
+            if (x < min_x) min_x = x;
+            if (x > max_x) max_x = x;
+            if (y < min_y) min_y = y;
+            if (y > max_y) max_y = y;
+        }
+    }
+    int grid_pixels = 0;
+    if (max_x > min_x + 30 && max_y > min_y + 30) {
+        // count the light major grid inside the sample bounds, away from text and axes.
+        for (int y = min_y + 20; y < max_y - 10; y++) {
+            for (int x = min_x + 15; x < max_x - 15; x++) {
+                const unsigned char* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+                if (pixel[0] < 205 || pixel[0] > 245 || pixel[3] < 200) continue;
+                if (abs((int)pixel[0] - (int)pixel[1]) < 4 &&
+                    abs((int)pixel[0] - (int)pixel[2]) < 4) grid_pixels++;
+            }
+        }
+    }
+    image_free(image.pixels);
+    EXPECT_GT(max_x - min_x, 180);
+    EXPECT_GT(max_y - min_y, 80);
+    EXPECT_GT(grid_pixels, 200);
+}
+
+TEST(RenderOutputParity, TikzNamedWorkflowPaintsShapesAndBranchArrow) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    char qsource[PATH_MAX + 8];
+    char qpng[PATH_MAX + 8];
+    char cmd[PATH_MAX * 4 + 256];
+    const char* png_path = "temp/render_output_parity/tikz_named_workflow.png";
+    shell_quote("test/input/tikz_request_workflow.tex", qsource, sizeof(qsource));
+    shell_quote(png_path, qpng, sizeof(qpng));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 1250 --pixel-ratio 1 > temp/render_output_parity/tikz_named_workflow.out 2> temp/render_output_parity/tikz_named_workflow.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qsource, qpng);
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    int widest_shape_stroke = 0;
+    int longest_branch_stroke = 0;
+    // Shape borders make long horizontal runs; the central downward branch
+    // makes a vertical run between the diamond and the Reject node.
+    for (int y = image.height * 45 / 100; y < image.height * 75 / 100; y++) {
+        int run = 0;
+        for (int x = image.width * 30 / 100; x < image.width * 70 / 100; x++) {
+            const unsigned char* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+            bool dark = pixel[0] < 150 && pixel[1] < 150 && pixel[2] < 150 && pixel[3] > 200;
+            run = dark ? run + 1 : 0;
+            if (run > widest_shape_stroke) widest_shape_stroke = run;
+        }
+    }
+    for (int x = image.width / 2 - 45; x < image.width / 2 - 5; x++) {
+        int run = 0;
+        for (int y = image.height * 55 / 100; y < image.height * 70 / 100; y++) {
+            const unsigned char* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+            bool dark = pixel[0] < 150 && pixel[1] < 150 && pixel[2] < 150 && pixel[3] > 200;
+            run = dark ? run + 1 : 0;
+            if (run > longest_branch_stroke) longest_branch_stroke = run;
+        }
+    }
+    image_free(image.pixels);
+    EXPECT_GT(widest_shape_stroke, 35);
+    EXPECT_GT(longest_branch_stroke, 15);
+}
+
+TEST(RenderOutputParity, TikzLatencyYLabelTracksAxisAtTwoX) {
+    if (!file_exists(LAMBDA_EXE)) {
+        GTEST_SKIP() << "lambda.exe not found; run make build first";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+
+    char qsource[PATH_MAX + 8];
+    char qpng[PATH_MAX + 8];
+    char cmd[PATH_MAX * 4 + 256];
+    const char* png_path = "temp/render_output_parity/tikz_latency_2x.png";
+    shell_quote("test/input/tikz_service_latency.tex", qsource, sizeof(qsource));
+    shell_quote(png_path, qpng, sizeof(qpng));
+    snprintf(cmd, sizeof(cmd),
+             "%s render %s%s -o %s -vw 1250 --pixel-ratio 2 > temp/render_output_parity/tikz_latency_2x.out 2> temp/render_output_parity/tikz_latency_2x.err",
+             LAMBDA_EXE, lambda_no_log_arg(), qsource, qpng);
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+
+    ImageData image = {};
+    ASSERT_TRUE(load_png_rgba(png_path, &image));
+    int axis_x = -1;
+    int axis_top = 0;
+    int axis_bottom = 0;
+    int longest_axis_run = 0;
+    // Find the long y-axis stroke, then check for the rotated label to its left.
+    for (int x = image.width * 30 / 100; x < image.width * 48 / 100; x++) {
+        int run = 0;
+        int run_top = 0;
+        for (int y = image.height * 45 / 100; y < image.height * 78 / 100; y++) {
+            const unsigned char* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+            bool dark = pixel[0] < 190 && pixel[1] < 190 && pixel[2] < 190 && pixel[3] > 200;
+            if (dark) {
+                if (run == 0) run_top = y;
+                run++;
+                if (run > longest_axis_run) {
+                    longest_axis_run = run;
+                    axis_x = x;
+                    axis_top = run_top;
+                    axis_bottom = y;
+                }
+            } else run = 0;
+        }
+    }
+    int label_ink = 0;
+    if (axis_x >= 110) {
+        for (int y = axis_top + 35; y < axis_bottom - 35; y++) {
+            for (int x = axis_x - 110; x < axis_x - 70; x++) {
+                const unsigned char* pixel = image.pixels + ((size_t)y * image.width + x) * 4;
+                if (pixel[0] < 150 && pixel[1] < 150 && pixel[2] < 150 && pixel[3] > 200)
+                    label_ink++;
+            }
+        }
+    }
+    image_free(image.pixels);
+    EXPECT_GT(longest_axis_run, 200);
+    EXPECT_GT(label_ink, 40);
+}
+
 TEST(RenderOutputParity, PdfInlineSvgUsesRasterFallbackImage) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";

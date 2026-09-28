@@ -61,8 +61,8 @@
 #include "js/js_interp.hpp"          // retained AST harness execution
 #include "js/js_exec_profile.h"      // profile flush on the batch _exit path
 #include "js/js_runtime_state.hpp"
-#ifndef NDEBUG
-// the experimental MVP CLI is a debug-build feature and is absent from release hosts.
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
+// the profile host also links MVP so both backends can be measured with release optimization.
 #include "js/mvp/mvp.h"
 #endif
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
@@ -122,7 +122,7 @@ static char* lambda_load_hosted_source_from_cache(const char* path,
     return source;
 }
 
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
 static char* mvp_load_script_source_from_cache(const char* path, size_t* out_length) {
     if (out_length) *out_length = 0;
     if (!path || !path[0]) return NULL;
@@ -2531,8 +2531,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     input_type_module = true;
                 } else if (strcmp(argv[i], "--runtime=mvp") == 0 ||
                            strcmp(argv[i], "--js-runtime=mvp") == 0) {
-#ifdef NDEBUG
-                    fputs("MVP runtime is available only in debug builds\n", stderr);
+#if defined(NDEBUG) && !defined(LAMBDA_JS_MVP)
+                    fputs("MVP runtime is available only in debug and release-profile builds\n", stderr);
                     runtime_cleanup(&runtime);
                     return lambda_main_finish(9);
 #else
@@ -2631,7 +2631,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                 }
             } else {
                 if (!js_file) js_file = argv[2];  // fallback
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
                 js_source = mvp_runtime
                     ? mvp_load_script_source_from_cache(js_file, &js_source_len)
                     : js_load_script_source_from_cache(
@@ -2648,7 +2648,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     return lambda_main_finish(1);
                 }
             }
-#ifndef NDEBUG
+#if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
             if (mvp_runtime) {
                 if (input_type_module || html_file) {
                     fputs("MVP runtime supports benchmark scripts only; modules and DOM are unavailable\n",
@@ -3391,16 +3391,18 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML/CSS Layout Engine v2.0 (Lambda CSS)\n\n");
-            printf("Usage: %s layout <file.html|file.tex|file.ls> [more files...] [options]\n", argv[0]);
+            printf("Usage: %s layout <file.html|file.tex|file.pgf|file.ls> [more files...] [options]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'layout' command performs HTML/CSS layout analysis using Lambda's\n");
             printf("  CSS system (separate from Lexbor-based layout). It parses HTML with\n");
             printf("  Lambda parser, applies CSS using Lambda CSS engine, and outputs layout.\n");
             printf("  For LaTeX files (.tex/.latex), it parses LaTeX, converts to HTML, then layouts.\n");
+            printf("  For TikZ fragments (.pgf), it renders the pictures directly.\n");
             printf("  For Lambda scripts (.ls), it evaluates the script, wraps the result in HTML, then layouts.\n");
             printf("\nSupported Formats:\n");
             printf("  .html, .htm    HTML documents\n");
             printf("  .tex, .latex   LaTeX documents (converted to HTML)\n");
+            printf("  .pgf           TikZ/PGF picture fragments\n");
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
             printf("\nOptions:\n");
             printf("  -o, --output FILE                  Output file for layout results (default: stdout)\n");
@@ -3465,7 +3467,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.pgf|input.ls> -o <output.svg|output.pdf|output.png|output.jpg> [options]\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'render' command layouts an HTML, PDF, LaTeX, or Lambda script file and renders the result as SVG, PDF, PNG, JPEG, or DVI.\n");
             printf("  It parses the input (converting LaTeX to HTML or evaluating Lambda script if needed), applies CSS styles,\n");
@@ -3474,6 +3476,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .html, .htm    HTML documents\n");
             printf("  .pdf           PDF documents (converted through Lambda PDF package)\n");
             printf("  .tex, .latex   LaTeX documents (converted to HTML for rendering)\n");
+            printf("  .pgf           TikZ/PGF picture fragments\n");
             printf("  .ls            Lambda scripts (evaluated and rendered)\n");
             printf("  .mmd           Mermaid diagrams (rendered via graph layout)\n");
             printf("  .d2            D2 diagrams (rendered via graph layout)\n");
@@ -3611,14 +3614,14 @@ static int lambda_main_impl(int argc, char *argv[]) {
         // Validate required arguments
         if (!html_file) {
             printf("Error: render command requires an input file\n");
-            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.pgf|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             return lambda_main_finish(1);
         }
 
         if (!output_file) {
             printf("Error: render command requires an output file (-o option)\n");
-            printf("Usage: %s render <input.html|input.pdf|input.tex|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
+            printf("Usage: %s render <input.html|input.pdf|input.tex|input.pgf|input.ls> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             return lambda_main_finish(1);
         }
@@ -3654,6 +3657,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, graph_view_key, false};
             }
             log_info("GRAPH_RENDER_TRANSFORM: rendering '%s' through Lambda graph transform", html_file);
+        } else if (input_ext && strcmp(input_ext, ".pgf") == 0) {
+            render_transform = lambda_document_transform_for_input_type("tikz");
+            if (!render_transform) {
+                log_error("PGF_RENDER_TRANSFORM: TikZ document transform is not configured");
+                return lambda_main_finish(1);
+            }
         }
 
         const char* output_ext = file_path_ext(output_file);
@@ -3854,6 +3863,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  .markdown  Markdown (with GitHub-like styling)\n");
             printf("  .tex       LaTeX (converted to HTML)\n");
             printf("  .latex     LaTeX (converted to HTML)\n");
+            printf("  .pgf       TikZ/PGF picture fragments\n");
             printf("  .ls        Lambda script (evaluated and rendered)\n");
             printf("  .xml       Extensible Markup Language (CSS styled or source view)\n");
             printf("  .rst       reStructuredText (planned support)\n");
@@ -3881,6 +3891,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
             printf("  %s view script.ls                # View Lambda script result\n", argv[0]);
             printf("  %s view paper.tex                # View LaTeX document\n", argv[0]);
+            printf("  %s view diagram.pgf              # View TikZ/PGF fragment\n", argv[0]);
             printf("  %s view config.xml               # View XML document\n", argv[0]);
             printf("  %s view data.json                # View JSON source\n", argv[0]);
             printf("  %s view flowchart.mmd            # View Mermaid diagram\n", argv[0]);
@@ -4018,6 +4029,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     strcmp(ext, ".html") == 0 || strcmp(ext, ".htm") == 0 ||
                     strcmp(ext, ".md") == 0 || strcmp(ext, ".markdown") == 0 ||
                     strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0 ||
+                    strcmp(ext, ".pgf") == 0 ||
                     strcmp(ext, ".ls") == 0 ||
                     strcmp(ext, ".xml") == 0 || strcmp(ext, ".rst") == 0 ||
                     strcmp(ext, ".wiki") == 0 || strcmp(ext, ".svg") == 0 ||
@@ -4035,7 +4047,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                                                        state_dump);
         } else {
             printf("Error: Unsupported file format '%s'\n", ext ? ext : "(no extension)");
-            printf("Supported formats: .pdf, .html, .md, .tex, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
+            printf("Supported formats: .pdf, .html, .md, .tex, .pgf, .ls, .xml, .svg, .png, .jpg, .gif, .json, .yaml, .toml, .txt, .csv\n");
             if (temp_file_path) {
                 if (temp_file_path_is_local) file_delete(temp_file_path);
                 mem_free(temp_file_path);

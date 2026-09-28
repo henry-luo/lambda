@@ -211,6 +211,7 @@ char* convert_charset_to_utf8(const char* content, size_t content_len, const cha
 void apply_inline_styles_to_tree(DomElement* dom_elem, Pool* pool, int depth = 0);
 void log_root_item(Item item, const char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
@@ -1401,8 +1402,11 @@ static CssStylesheet* parse_inline_style_chunks(CssEngine* engine,
     }
     css[offset] = '\0';
     int before = *count;
+    // Inline CSS resources resolve against the owning document, so retain its
+    // URL as the stylesheet origin instead of the diagnostic-only label.
+    const char* inline_origin = base_path ? base_path : "<inline-style>";
     CssStylesheet* stylesheet = parse_and_collect_stylesheet(
-        engine, css, "<inline-style>", base_path, pool, stylesheets, count, capacity, 0);
+        engine, css, inline_origin, base_path, pool, stylesheets, count, capacity, 0);
     for (int i = before; i < *count; i++) {
         (*stylesheets)[i]->owner_element = owner;
     }
@@ -2598,6 +2602,7 @@ struct LayoutFormatRoute {
 static const LayoutFormatRoute layout_format_routes[] = {
     {".ls", load_lambda_script_doc},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},
+    {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
     {".wiki", load_wiki_doc}, {".xml", load_xml_doc},
     {".svg", load_svg_layout_file}, {".png", load_image_layout_file},
@@ -3460,6 +3465,22 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
     return load_lambda_document_transform_doc(latex_url, transform, nullptr, 0,
+                                              viewport_width, viewport_height, pool);
+}
+
+DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("tikz");
+    if (!transform) {
+        log_error("document-transform: TikZ runtime configuration is missing");
+        return nullptr;
+    }
+    char text_width_px[32];
+    snprintf(text_width_px, sizeof(text_width_px), "%d", viewport_width);
+    LambdaDocumentTransformOption option = {
+        "text_width_px", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, text_width_px, false
+    };
+    return load_lambda_document_transform_doc(tikz_url, transform, &option, 1,
                                               viewport_width, viewport_height, pool);
 }
 
@@ -4397,10 +4418,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
 
-        // Reactive templates rebuild result nodes, while form/interaction
-        // state belongs to the retained view identity (S9.1.4). Preserve that
-        // identity for structurally corresponding descendants before retiring
-        // the old subtree.
+        // Reactive templates rebuild result nodes; preserve view state for
+        // structurally corresponding descendants before retiring the old tree.
         view_state_preserve_subtree_identity(state, static_cast<DomNode*>(old_dom),
                                              static_cast<DomNode*>(new_dom));
 
@@ -4424,10 +4443,15 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             } else {
                 parent_dom->last_child = static_cast<DomNode*>(new_dom);
             }
-        } else if (!dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom),
-                                                static_cast<DomNode*>(new_dom))) {
-            log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
-            continue;
+        } else {
+            // Rebase live Range endpoints before the old subtree is detached;
+            // the splice helper does not publish a DOM removal mutation.
+            if (state) dom_mutation_pre_remove(state, static_cast<DomNode*>(old_dom));
+            if (!dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom),
+                                            static_cast<DomNode*>(new_dom))) {
+                log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
+                continue;
+            }
         }
         if (i < 16) new_doms[i] = new_dom;
 
@@ -4984,7 +5008,13 @@ static bool layout_single_file(
         disable_animations
     };
 
-    Url* input_url = url_parse_with_base(input_file, cwd);
+    Url* input_url = url_parse_path_or_url(input_file, cwd);
+    if (!input_url) {
+        js_mir_end_document_phase_timing(&document_js_timing);
+        log_error("Failed to parse layout input: %s", input_file);
+        pool_destroy(pool);
+        return false;
+    }
     EventStateLog* event_log = nullptr;
     if (enable_event_log && input_url) {
         event_log = event_state_log_open(input_file, url_get_href(input_url));
@@ -5017,6 +5047,7 @@ static bool layout_single_file(
                       response ? response->status_code : 0);
             if (response) free_fetch_response(response);
             layout_close_failed_load_logs(&event_log, &state_dump);
+            url_destroy(input_url);
             pool_destroy(pool);
             return false;
         }
@@ -5090,6 +5121,7 @@ static bool layout_single_file(
         write_layout_phase_timing(timing_file, input_file, false, &timing);
         log_error("Failed to load document: %s", input_file);
         layout_close_failed_load_logs(&event_log, &state_dump);
+        url_destroy(input_url);
         pool_destroy(pool);
         return false;
     }

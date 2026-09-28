@@ -82,9 +82,11 @@ def median(values):
 
 
 def run_once(binary, script, timeout_s, language="lambda", tier="jit",
-             expected_stdout_text=None):
+             expected_stdout_text=None, js_runtime="legacy"):
     """Run one script and return a serializable timing/observable record."""
     command = [binary, "js" if language == "js" else "run", script]
+    if language == "js" and js_runtime != "legacy":
+        command.insert(2, "--runtime=" + js_runtime)
     environment = os.environ.copy()
     if language == "lambda":
         environment["LAMBDA_TIER"] = tier
@@ -203,7 +205,8 @@ def paired_ratio_bootstrap(valid_pairs, resamples, seed):
 def compare_row(control, candidate, control_script, candidate_script, pairs, timeout_s,
                 language="lambda", tier="jit", expected_stdout_text=None,
                 bootstrap_resamples=DEFAULT_BOOTSTRAP_RESAMPLES,
-                bootstrap_seed=DEFAULT_BOOTSTRAP_SEED):
+                bootstrap_seed=DEFAULT_BOOTSTRAP_SEED,
+                control_js_runtime="legacy", candidate_js_runtime="legacy"):
     control_samples = []
     candidate_samples = []
     pair_records = []
@@ -216,10 +219,11 @@ def compare_row(control, candidate, control_script, candidate_script, pairs, tim
         second_label = "candidate" if control_first else "control"
         first_script = control_script if first_label == "control" else candidate_script
         second_script = candidate_script if second_label == "candidate" else control_script
+        runtimes = {"control": control_js_runtime, "candidate": candidate_js_runtime}
         first = run_once(first_binary, first_script, timeout_s, language, tier,
-                         expected_stdout_text)
+                         expected_stdout_text, runtimes[first_label])
         second = run_once(second_binary, second_script, timeout_s, language, tier,
-                          expected_stdout_text)
+                          expected_stdout_text, runtimes[second_label])
         samples = {first_label: first, second_label: second}
         control_samples.append(samples["control"])
         candidate_samples.append(samples["candidate"])
@@ -354,6 +358,10 @@ def main():
     parser.add_argument("--candidate", required=True, help="candidate release binary")
     parser.add_argument("--language", choices=["lambda", "js"], default="lambda",
                         help="source language (default: lambda)")
+    parser.add_argument("--control-js-runtime", choices=["legacy", "mvp"], default="legacy",
+                        help="control JavaScript backend (default: full LambdaJS)")
+    parser.add_argument("--candidate-js-runtime", choices=["legacy", "mvp"], default="legacy",
+                        help="candidate JavaScript backend (default: full LambdaJS)")
     parser.add_argument("-s", "--suite", default=None, help="comma-separated suite filter")
     parser.add_argument("-b", "--bench", default=None, help="comma-separated benchmark filter")
     parser.add_argument(
@@ -386,6 +394,9 @@ def main():
         parser.error("--pairs must be positive")
     if args.bootstrap_resamples < 1:
         parser.error("--bootstrap-resamples must be positive")
+    if args.language != "js" and (args.control_js_runtime != "legacy" or
+                                  args.candidate_js_runtime != "legacy"):
+        parser.error("JavaScript runtime selection requires --language js")
 
     control = os.path.abspath(args.control)
     candidate = os.path.abspath(args.candidate)
@@ -458,6 +469,8 @@ def main():
         "bench_filters": bench_filters or [],
         "variants": variants,
         "language": args.language,
+        "control_js_runtime": args.control_js_runtime if args.language == "js" else None,
+        "candidate_js_runtime": args.candidate_js_runtime if args.language == "js" else None,
         "tier": args.tier,
         "pairs": args.pairs,
         "paired_uncertainty": {
@@ -520,7 +533,8 @@ def main():
             row.update(compare_row(control, candidate, control_script, candidate_script,
                                    args.pairs, args.timeout, args.language, args.tier,
                                    spec["expected_stdout_text"],
-                                   args.bootstrap_resamples, args.bootstrap_seed))
+                                   args.bootstrap_resamples, args.bootstrap_seed,
+                                   args.control_js_runtime, args.candidate_js_runtime))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
             if row["expected_stdout_matches_all"] is False:
                 row["status"] = "wrong_output"
@@ -570,7 +584,8 @@ def main():
             row["candidate_source"] = source_provenance(script)
             row.update(compare_row(control, candidate, script, script, args.pairs,
                                    args.timeout, args.language, args.tier, expected_stdout_text,
-                                   args.bootstrap_resamples, args.bootstrap_seed))
+                                   args.bootstrap_resamples, args.bootstrap_seed,
+                                   args.control_js_runtime, args.candidate_js_runtime))
             row["status"] = "ok" if row["pairs_valid"] == args.pairs else "partial_ok"
             if row["expected_stdout_matches_all"] is False:
                 row["status"] = "wrong_output"

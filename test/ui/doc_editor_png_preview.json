@@ -1,0 +1,18 @@
+{
+  "name": "Doc editor previews PNG images",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "none.png"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_latex .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_latex_fixtures .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_latex_fixtures_graphics .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_latex_fixtures_graphics_none_png .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "none.png"},
+    {"type": "assert_count", "target": {"selector": "#image-preview img"}, "count": 1},
+    {"type": "assert_rect", "target": {"selector": "#image-preview img"}, "width": 100, "height": 100, "tolerance": 2},
+    {"type": "assert_count", "target": {"selector": ".tab-source"}, "count": 0}
+  ]
+}

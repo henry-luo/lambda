@@ -278,7 +278,7 @@ static const JubeModuleDef python_jube_module = {
 // standalone target exports the conventional entry point; a legacy monolithic
 // build receives a private name so it cannot accidentally self-register.
 #if defined(LAMBDA_PYTHON_DYNAMIC_MODULE)
-extern "C" const JubeModuleDef* jube_module(void) {
+extern "C" JUBE_MODULE_EXPORT const JubeModuleDef* jube_module(void) {
 #else
 extern "C" const JubeModuleDef* lang_python_jube_module(void) {
 #endif

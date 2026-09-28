@@ -370,14 +370,26 @@ static const char* get_svg_attr(Element* elem, const char* name) {
     return has_uppercase ? extract_element_attribute(elem, lowercase_name, nullptr) : nullptr;
 }
 
-static float get_svg_number_attr(Element* elem, const char* name, float fallback) {
-    if (!elem || !name) return fallback;
+// numeric Items from Lambda-built SVGs are invisible to the string accessor.
+static bool read_svg_number_attr(Element* elem, const char* name, float* result) {
+    if (!elem || !name || !result) return false;
     ConstItem value = elem->get_attr(name);
     Item item = {.item = value.item};
     double number = 0.0;
-    if (item_try_to_double(item, &number)) return (float)number;
+    if (item_try_to_double(item, &number)) {
+        *result = (float)number;
+        return true;
+    }
     const char* text = get_svg_attr(elem, name);
-    return text ? parse_svg_length(text, fallback) : fallback;
+    if (!text || !*text) return false;
+    *result = parse_svg_length(text, 0.0f);
+    return true;
+}
+
+static float get_svg_number_attr(Element* elem, const char* name, float fallback) {
+    float result = fallback;
+    read_svg_number_attr(elem, name, &result);
+    return result;
 }
 
 static uint8_t svg_element_opacity_u8(Element* elem) {
@@ -1642,7 +1654,8 @@ static void draw_svg_fill_stroke(SvgInlineRenderContext* ctx, RdtPath* path, Ele
 
     if (has_stroke) {
         const char* stroke_width_str = get_svg_attr_or_style(ctx, elem, "stroke-width", stroke_width_buf, sizeof(stroke_width_buf));
-        float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f) : ctx->stroke_width;
+        float stroke_width = stroke_width_str ? parse_svg_length(stroke_width_str, 1.0f)
+            : get_svg_number_attr(elem, "stroke-width", ctx->stroke_width);
 
         const char* stroke_opacity = get_svg_attr_or_style(ctx, elem, "stroke-opacity", stroke_opacity_buf, sizeof(stroke_opacity_buf));
         if (stroke_opacity) {
@@ -1755,31 +1768,31 @@ static bool svg_append_basic_shape_path(Element* elem, RdtPath* path,
     SvgBasicShapeGeometry result = {};
 
     if (strcmp(tag, "rect") == 0) {
-        float rx = parse_svg_length(get_svg_attr(elem, "rx"), 0.0f);
-        float ry = parse_svg_length(get_svg_attr(elem, "ry"), rx);
-        result.x = parse_svg_length(get_svg_attr(elem, "x"), 0.0f);
-        result.y = parse_svg_length(get_svg_attr(elem, "y"), 0.0f);
-        result.width = parse_svg_length(get_svg_attr(elem, "width"), 0.0f);
-        result.height = parse_svg_length(get_svg_attr(elem, "height"), 0.0f);
+        float rx = get_svg_number_attr(elem, "rx", 0.0f);
+        float ry = get_svg_number_attr(elem, "ry", rx);
+        result.x = get_svg_number_attr(elem, "x", 0.0f);
+        result.y = get_svg_number_attr(elem, "y", 0.0f);
+        result.width = get_svg_number_attr(elem, "width", 0.0f);
+        result.height = get_svg_number_attr(elem, "height", 0.0f);
         if (result.width <= 0.0f || result.height <= 0.0f) return false;
         rdt_path_add_rect(path, result.x, result.y, result.width, result.height, rx, ry);
     } else if (strcmp(tag, "circle") == 0 || strcmp(tag, "ellipse") == 0) {
-        float rx = parse_svg_length(get_svg_attr(elem, strcmp(tag, "circle") == 0 ? "r" : "rx"), 0.0f);
+        float rx = get_svg_number_attr(elem, strcmp(tag, "circle") == 0 ? "r" : "rx", 0.0f);
         float ry = strcmp(tag, "circle") == 0 ? rx
-            : parse_svg_length(get_svg_attr(elem, "ry"), 0.0f);
+            : get_svg_number_attr(elem, "ry", 0.0f);
         if (rx <= 0.0f || ry <= 0.0f) return false;
-        float cx = parse_svg_length(get_svg_attr(elem, "cx"), 0.0f);
-        float cy = parse_svg_length(get_svg_attr(elem, "cy"), 0.0f);
+        float cx = get_svg_number_attr(elem, "cx", 0.0f);
+        float cy = get_svg_number_attr(elem, "cy", 0.0f);
         result.x = cx - rx;
         result.y = cy - ry;
         result.width = 2.0f * rx;
         result.height = 2.0f * ry;
         rdt_path_add_circle(path, cx, cy, rx, ry);
     } else if (strcmp(tag, "line") == 0) {
-        float x1 = parse_svg_length(get_svg_attr(elem, "x1"), 0.0f);
-        float y1 = parse_svg_length(get_svg_attr(elem, "y1"), 0.0f);
-        float x2 = parse_svg_length(get_svg_attr(elem, "x2"), 0.0f);
-        float y2 = parse_svg_length(get_svg_attr(elem, "y2"), 0.0f);
+        float x1 = get_svg_number_attr(elem, "x1", 0.0f);
+        float y1 = get_svg_number_attr(elem, "y1", 0.0f);
+        float x2 = get_svg_number_attr(elem, "x2", 0.0f);
+        float y2 = get_svg_number_attr(elem, "y2", 0.0f);
         rdt_path_move_to(path, x1, y1);
         rdt_path_line_to(path, x2, y2);
         result.is_line = true;
@@ -3401,6 +3414,7 @@ static void svg_text_style_apply(SvgInlineRenderContext* ctx, Element* elem, Svg
     if (value) str_copy(style->font_family, sizeof(style->font_family), value, strlen(value));
     value = get_svg_attr_or_style(ctx, elem, "font-size", buf, sizeof(buf));
     if (value) style->font_size = svg_font_size_value(value, style->font_size);
+    else style->font_size = get_svg_number_attr(elem, "font-size", style->font_size);
     value = get_svg_attr_or_style(ctx, elem, "font-weight", buf, sizeof(buf));
     if (value) style->font_weight = svg_font_weight_value(value, style->font_weight);
     value = get_svg_attr_or_style(ctx, elem, "font-style", buf, sizeof(buf));
@@ -3419,15 +3433,11 @@ static void svg_text_style_apply(SvgInlineRenderContext* ctx, Element* elem, Svg
 }
 
 static bool svg_text_read_adjust(Element* elem, SvgTextAdjust* adjust) {
-    const char* x = get_svg_attr(elem, "x");
-    const char* y = get_svg_attr(elem, "y");
-    const char* dx = get_svg_attr(elem, "dx");
-    const char* dy = get_svg_attr(elem, "dy");
     bool any = false;
-    if (x && *x) { adjust->has_x = true; adjust->x = parse_svg_length(x, 0.0f); any = true; }
-    if (y && *y) { adjust->has_y = true; adjust->y = parse_svg_length(y, 0.0f); any = true; }
-    if (dx && *dx) { adjust->dx = parse_svg_length(dx, 0.0f); any = true; }
-    if (dy && *dy) { adjust->dy = parse_svg_length(dy, 0.0f); any = true; }
+    if (read_svg_number_attr(elem, "x", &adjust->x)) { adjust->has_x = true; any = true; }
+    if (read_svg_number_attr(elem, "y", &adjust->y)) { adjust->has_y = true; any = true; }
+    if (read_svg_number_attr(elem, "dx", &adjust->dx)) any = true;
+    if (read_svg_number_attr(elem, "dy", &adjust->dy)) any = true;
     if (any) adjust->pending = true;
     return any;
 }

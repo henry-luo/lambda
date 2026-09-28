@@ -20,7 +20,7 @@ static Item parse_pdf_indirect_object(InputContext& ctx, const char **pdf);
 static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, size_t bytes_remaining = 1000000);
 static Item parse_pdf_xref_table(InputContext& ctx, const char **pdf);
 static Item parse_pdf_trailer(InputContext& ctx, const char **pdf);
-static Item analyze_pdf_content_stream(Input *input, const char *stream_data, int length);
+static Item analyze_pdf_content_stream(Input *input, const char *stream_data, size_t length);
 static bool is_valid_pdf_header(const char *pdf_content);
 static void advance_safely(const char **pdf, int max_advance);
 
@@ -919,8 +919,8 @@ static Item parse_pdf_stream(InputContext& ctx, const char **pdf, Map* dict, siz
     
     if (!end_stream) return {.item = ITEM_ERROR};
 
-    // calculate data length
-    int data_length = end_stream - *pdf;
+    // keep the bounded search offset in the size_t lane used by StrView.
+    size_t data_length = stream_at;
     // Trim trailing whitespace from data
     while (data_length > 0 && ((*pdf)[data_length-1] == '\r' || (*pdf)[data_length-1] == '\n')) {
         data_length--;
@@ -1156,8 +1156,8 @@ static Item parse_pdf_trailer(InputContext& ctx, const char **pdf) {
 }
 
 // Analyze PDF content streams for basic information
-static Item analyze_pdf_content_stream(Input *input, const char *stream_data, int length) {
-    if (!stream_data || length <= 0) return {.item = ITEM_NULL};
+static Item analyze_pdf_content_stream(Input *input, const char *stream_data, size_t length) {
+    if (!stream_data || length == 0) return {.item = ITEM_NULL};
 
     Map* analysis_map = map_pooled(input->pool);
     if (!analysis_map) return {.item = ITEM_NULL};

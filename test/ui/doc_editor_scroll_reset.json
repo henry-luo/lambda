@@ -1,0 +1,17 @@
+{
+  "name": "Doc editor resets preview scroll when selecting another document",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "comprehensive_test"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_comprehensive_test_rst .tree-label"}},
+    {"type": "scroll", "x": 700, "y": 450, "dx": 0, "dy": -5},
+    {"type": "assert_state_store", "target": {"selector": "#rendered-preview"}, "view_scroll_y": 250, "tolerance": 20},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_comprehensive_test_adoc .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "comprehensive_test.adoc"},
+    {"type": "assert_state_store", "target": {"selector": "#rendered-preview"}, "view_scroll_y": 0, "tolerance": 1}
+  ]
+}

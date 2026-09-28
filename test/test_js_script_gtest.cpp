@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "../lib/file.h"
+#include "../lib/windows_compat.h"
 #include "../lib/strbuf.h"
 #include "../lambda/runtime/transpiler.hpp"
 #include "../lambda/runtime/module_registry.h"
@@ -54,6 +55,16 @@ TEST(JsModuleResolution, ResolvesHttpModuleSpecifiersAsUrls) {
     jm_resolve_module_path(base, "/vite/assets/root.js", 20, resolved, sizeof(resolved));
     EXPECT_STREQ(resolved, "https://docs.example.test/vite/assets/root.js");
 }
+
+#ifdef _WIN32
+TEST(JsModuleResolution, ResolvesImportsFromCanonicalWindowsPaths) {
+    char resolved[256];
+    const char* base = "C:\\Projects\\lambda\\test\\js\\main.mjs";
+
+    jm_resolve_module_path(base, "./dependency.mjs", 16, resolved, sizeof(resolved));
+    EXPECT_STREQ(resolved, "C:\\Projects\\lambda\\test\\js\\dependency.mjs");
+}
+#endif
 
 TEST(JsModuleResolution, ClassifiesHttpModuleSourcesForUrlCacheEntries) {
     EXPECT_TRUE(js_path_is_http_url("https://docs.example.test/vite/main.js"));

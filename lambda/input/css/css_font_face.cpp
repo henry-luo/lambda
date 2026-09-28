@@ -8,6 +8,7 @@
 #include "css_parser.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/memtrack.h"
+#include "../../../lib/path_str.h"
 #include "../../../lib/str.h"
 #include "../../../lib/url.h"
 #include <string.h>
@@ -389,8 +390,13 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         }
     }
 
-    // Find directory of base_path
+    // The document loader supplies native local paths, so Windows bases may
+    // contain only backslashes even though CSS relative URLs use '/'.
     const char* last_slash = strrchr(base_path, '/');
+    const char* last_backslash = strrchr(base_path, '\\');
+    if (last_backslash && (!last_slash || last_backslash > last_slash)) {
+        last_slash = last_backslash;
+    }
     size_t base_dir_len = last_slash ? (last_slash - base_path + 1) : 0;
 
     // Build result buffer
@@ -418,7 +424,8 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
         // Go up one directory in result
         if (write_pos > result) {
             write_pos--; // back over trailing slash
-            while (write_pos > result && write_pos[-1] != '/') {
+            while (write_pos > result &&
+                   !path_str_is_win32_separator(write_pos[-1])) {
                 write_pos--;
             }
         }
@@ -431,6 +438,11 @@ char* css_resolve_font_url(const char* url, const char* base_path, Pool* pool) {
 
     // Append remaining path
     str_copy(write_pos, result + result_size - write_pos, rel, strlen(rel));
+    if (last_backslash && last_slash == last_backslash) {
+        for (char* cursor = write_pos; *cursor; cursor++) {
+            if (*cursor == '/') *cursor = '\\';
+        }
+    }
 
     return result;
 }

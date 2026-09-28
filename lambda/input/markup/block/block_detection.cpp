@@ -14,6 +14,16 @@ namespace markup {
 // Forward declaration for HTML block detection (from block_html.cpp)
 extern bool is_html_block_start(const char* line);
 
+bool is_rst_definition_term(MarkupParser* parser, int line_index) {
+    if (!parser || line_index < 0 || line_index + 1 >= parser->line_count) return false;
+    const char* term = parser->lines[line_index];
+    const char* definition = parser->lines[line_index + 1];
+    if (!term || is_empty_line(term) || *term == ' ' || *term == '\t' ||
+        (term[0] == '.' && term[1] == '.') ||
+        !definition || (*definition != ' ' && *definition != '\t')) return false;
+    return !is_empty_line(definition);
+}
+
 /**
  * is_asciidoc_admonition - Check if line is an AsciiDoc admonition
  *
@@ -190,6 +200,18 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
             return BlockType::HEADER;
         }
 
+        // RST explicit markup starts with ".. "; dispatch it before the
+        // code-fence and indentation rules so its body stays with the directive.
+        if (parser->config.format == Format::RST && pos[0] == '.' &&
+            pos[1] == '.' && (pos[2] == ' ' || pos[2] == '\t' || !pos[2])) {
+            if (pos[2] == ' ' && pos[3] == '_') return BlockType::BLANK;
+            return BlockType::DIRECTIVE;
+        }
+        if (parser->config.format == Format::MAN &&
+            (strncmp(pos, ".TP", 3) == 0 || strncmp(pos, ".IP", 3) == 0)) {
+            return BlockType::DIRECTIVE;
+        }
+
         // List item detection
         ListItemInfo list_info = adapter->detectListItem(line);
         if (list_info.valid) {
@@ -228,48 +250,11 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
                     return BlockType::DIRECTIVE; // Use DIRECTIVE for line blocks
                 }
             }
-            // RST image directive: .. image::
-            if (strncmp(p, ".. image::", 10) == 0 || strncmp(p, ".. figure::", 11) == 0) {
-                return BlockType::DIRECTIVE; // Use DIRECTIVE for image
-            }
-
-            // RST link definition: .. _label: URL - skip these (already pre-scanned)
-            if (strncmp(p, ".. _", 4) == 0) {
-                // Find colon after the label
-                const char* cp = p + 4;
-                while (*cp && *cp != ':' && *cp != '\n' && *cp != '\r') cp++;
-                if (*cp == ':') {
-                    // This is a link definition - return BLANK to skip
-                    return BlockType::BLANK;
-                }
-            }
-
-            // RST definition list detection
-            // A term line followed by an indented definition line
-            // Term must be at start of line (no leading whitespace)
-            // Next line must be indented
-            if (*line != ' ' && *line != '\t' && *line != '\n' && *line != '\r' && *line != '\0') {
-                // Not indented - could be a term
-                // But exclude table separator lines (=== or ---)
-                if (*line != '=' && *line != '-' && *line != '+') {
-                    // Check if next line is indented (definition)
-                    if (parser->current_line + 1 < parser->line_count) {
-                        const char* next = parser->lines[parser->current_line + 1];
-                        if (next && (*next == ' ' || *next == '\t')) {
-                            // Check that next line isn't empty (just whitespace)
-                            const char* np = next;
-                            np = str_skip_line_space(np);
-                            if (*np && *np != '\n' && *np != '\r') {
-                                // Also ensure current line doesn't look like other block types
-                                // Not a list item (-, *, +, digit)
-                                if (*line != '-' && *line != '*' && *line != '+' &&
-                                    !(*line >= '0' && *line <= '9')) {
-                                    return BlockType::DEFINITION_LIST;
-                                }
-                            }
-                        }
-                    }
-                }
+            // A directive with indented options is not a definition-list term.
+            if (*line != '=' && *line != '-' && *line != '+' &&
+                !str_is_digit(*line) &&
+                is_rst_definition_term(parser, parser->current_line)) {
+                return BlockType::DEFINITION_LIST;
             }
         }
 
@@ -381,7 +366,7 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
     // Markdown tables require the adapter's separator-row check above. This
     // generic fallback mistakes pipes inside Markdown link and image URLs for
     // cell delimiters.
-    if (parser->config.format != Format::MARKDOWN &&
+    if (parser->config.format != Format::MARKDOWN && parser->config.format != Format::RST &&
         parser->config.flavor != Flavor::COMMONMARK && is_table_line(line)) {
         return BlockType::TABLE;
     }

@@ -1025,6 +1025,11 @@ private:
         size_t name_len = strlen(name);
         size_t nested_depth = 0;
         for (size_t i = from; i < length_;) {
+            // commented delimiters are source text, not environment boundaries.
+            if (source_[i] == '%') {
+                while (i < length_ && source_[i] != '\n' && source_[i] != '\r') i++;
+                continue;
+            }
             if (source_[i] != '\\') {
                 i++;
                 continue;
@@ -1033,10 +1038,14 @@ private:
             char full[104];
             size_t after_command = latex_scan_command(source_, length_, i, command,
                                                        sizeof(command), full, sizeof(full));
-            if (after_command == 0 ||
-                (strcmp(command, "begin") != 0 && strcmp(command, "end") != 0) ||
-                after_command >= length_ || source_[after_command] != '{') {
+            if (after_command == 0) {
                 i++;
+                continue;
+            }
+            if ((strcmp(command, "begin") != 0 && strcmp(command, "end") != 0) ||
+                after_command >= length_ || source_[after_command] != '{') {
+                // Skipping the whole command keeps an escaped percent from starting a comment.
+                i = after_command;
                 continue;
             }
             size_t env_begin = 0;
@@ -1064,10 +1073,20 @@ private:
         return length_;
     }
 
-    Item parse_environment(const char* name) {
+    Item parse_environment(const char* name, size_t command_start) {
         ElementBuilder elem = builder_.element(name);
         size_t body_end = length_;
         bool found_end = false;
+        bool tikz_picture = strcmp(name, "tikzpicture") == 0;
+        if (tikz_picture) {
+            while (position_ < length_ && isspace((unsigned char)source_[position_])) position_++;
+            size_t options_begin = 0;
+            size_t options_end = 0;
+            if (consume_brack_group_span(&options_begin, &options_end)) {
+                elem.attr("options", builder_.createStringItem(source_ + options_begin,
+                    options_end - options_begin));
+            }
+        }
         if ((strcmp(name, "tabular") == 0 || strcmp(name, "array") == 0) && position_ < length_ && source_[position_] == '{') {
             size_t columns_begin = 0, columns_end = 0;
             if (consume_group_span(&columns_begin, &columns_end)) {
@@ -1079,11 +1098,19 @@ private:
             Item placement = parse_brack_group();
             if (item_present(placement)) elem.attr("placement", placement);
         }
+        size_t body_begin = position_;
         size_t after_end = find_environment_end(name, position_, &body_end, &found_end);
         if (!found_end) error("missing \\end environment");
         const char* body_source = source_ + position_;
         size_t body_len = body_end >= position_ ? body_end - position_ : 0;
-        if (is_raw_text_environment(name)) {
+        if (tikz_picture) {
+            // TikZ's command grammar is independent of the document parser;
+            // keep the exact island before generic parsing can split paths.
+            elem.attr("source", builder_.createStringItem(body_source, body_len));
+            elem.attr("raw_source", builder_.createStringItem(source_ + command_start,
+                after_end - command_start));
+            elem.attr("body_offset", (int64_t)source_offset(source_ + body_begin));
+        } else if (is_raw_text_environment(name)) {
             elem.text(body_source, body_len);
         } else if (is_math_environment(name)) {
             while (body_len > 0 && isspace((unsigned char)*body_source)) {
@@ -1128,6 +1155,7 @@ private:
     }
 
     Item parse_command() {
+        size_t command_start = position_;
         char name[96];
         char full[104];
         if (!read_command(name, sizeof(name), full, sizeof(full))) return ItemNull;
@@ -1142,7 +1170,7 @@ private:
             size_t env_len = end - begin;
             if (env_len >= sizeof(env)) env_len = sizeof(env) - 1;
             str_copy(env, sizeof(env), source_ + begin, env_len);
-            return parse_environment(env);
+            return parse_environment(env, command_start);
         }
         if (strcmp(name, "end") == 0) return ItemNull;
         if (strcmp(name, "item") == 0) return builder_.element("item").final();

@@ -1,0 +1,47 @@
+{
+  "cli": [
+    {
+      "binary": "./lambda-profile.exe",
+      "arguments": [
+        "js",
+        "--runtime=mvp",
+        "-p",
+        "1 + 2"
+      ],
+      "returncode": 0,
+      "stdout": "3\n",
+      "stderr": "22:14:05 [NOTE] script-cache: summary entries=0 source_lookups=0 source_hits=0 source_misses=0 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=0 retained_ast=0 retained_mir=0 peak=0\n22:14:05 [NOTE] script-cache: shutdown entries=0 source_lookups=0 source_hits=0 source_misses=0 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=0 peak=0\n"
+    },
+    {
+      "binary": "./lambda.exe",
+      "arguments": [
+        "js",
+        "--runtime=mvp",
+        "-p",
+        "1 + 2"
+      ],
+      "returncode": 9,
+      "stdout": "",
+      "stderr": "MVP runtime is available only in debug and release-profile builds\n22:14:05 [NOTE] script-cache: summary entries=0 source_lookups=0 source_hits=0 source_misses=0 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=0 retained_ast=0 retained_mir=0 peak=0\n22:14:05 [NOTE] script-cache: shutdown entries=0 source_lookups=0 source_hits=0 source_misses=0 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=0 peak=0\n"
+    },
+    {
+      "binary": "./lambda-profile.exe",
+      "arguments": [
+        "js",
+        "--js-runtime=mvp",
+        "-p",
+        "1 + 2"
+      ],
+      "returncode": 0,
+      "stdout": "3\n",
+      "stderr": "22:14:05 [NOTE] script-cache: summary entries=0 source_lookups=0 source_hits=0 source_misses=0 ast_hits=0 ast_misses=0 mir_hits=0 mir_misses=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained_source=0 retained_ast=0 retained_mir=0 peak=0\n22:14:05 [NOTE] script-cache: shutdown entries=0 source_lookups=0 source_hits=0 source_misses=0 ast_hits=0 mir_hits=0 invalidations=0 waits=0 poisoned=0 evictions=0 retention_limit=0 retention_pressure=0 retained=0 peak=0\n"
+    }
+  ],
+  "generator_selftest": "failed before assertions: could not determine Linux multiarch triplet from gcc; reproduced with unmodified HEAD generator",
+  "generator_log": "temp/js-mvp-profile-20260928/generator-tests.log",
+  "original_generator_reproduction": "temp/js-mvp-profile-20260928/generator-original-repro.txt",
+  "runner_failure_continuation": "passed: failed timed sample withheld and subsequent row completed",
+  "paired_samples": 620,
+  "diagnostic_rows": 12,
+  "artifact_hash_audit": "passed; measured runner sources archived under temp/js-mvp-profile-20260928"
+}

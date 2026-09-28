@@ -440,7 +440,7 @@ clean-mir:
 # EOL style is not a real content difference.
 verify-mir-patches:
 	@set -e; \
-	work=build_temp/mir-verify; \
+	work=temp/mir-verify; \
 	rm -rf $$work; mkdir -p $$work; \
 	echo "Fetching pristine MIR $(MIR_UPSTREAM_COMMIT)..."; \
 	git -c advice.detachedHead=false clone -q https://github.com/vnmakarov/mir.git $$work/upstream; \
@@ -467,15 +467,18 @@ build-mir: $(MIR_LIB)
 # Toolchain Validation Functions
 define toolchain_verify
 	@echo "🔍 Verifying toolchain..."
-	@if command -v $(CC) >/dev/null 2>&1; then \
-		echo "✅ Compiler: $(CC) ($(shell $(CC) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
+	@# running through ccache checks that the wrapped compiler exists too.
+	@if $(CC) --version >/dev/null 2>&1; then \
+		echo "✅ Compiler: $(CC) ($(shell $(CC) --version 2>/dev/null | head -1))"; \
 	else \
-		echo "❌ Compiler $(CC) not found"; \
+		echo "❌ Compiler $(CC) is unavailable; run ./setup-linux-deps.sh"; \
+		exit 1; \
 	fi
-	@if command -v $(CXX) >/dev/null 2>&1; then \
-		echo "✅ C++ Compiler: $(CXX) ($(shell $(CXX) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
+	@if $(CXX) --version >/dev/null 2>&1; then \
+		echo "✅ C++ Compiler: $(CXX) ($(shell $(CXX) --version 2>/dev/null | head -1))"; \
 	else \
-		echo "❌ C++ Compiler $(CXX) not found"; \
+		echo "❌ C++ Compiler $(CXX) is unavailable; run ./setup-linux-deps.sh"; \
+		exit 1; \
 	fi
 endef
 
@@ -927,7 +930,11 @@ build-lang-python: build build-windows-host-import $(TREE_SITTER_LIB) $(TREE_SIT
 
 build-windows-host-import: build
 	@if [ "$(findstring NT,$(OS))" != "" ]; then \
-		dlltool -D lambda.exe -d lambda_host_exports.def -l modules/lambda-host.lib; \
+		if [ ! -s modules/lambda-host.lib ] || [ build_lambda_config.json -nt lambda.exe ]; then \
+			rm -f lambda.exe; \
+			$(MAKE) build JOBS=$(JOBS) || exit $$?; \
+		fi; \
+		test -s modules/lambda-host.lib; \
 	fi
 
 ifneq (,$(findstring NT,$(OS)))

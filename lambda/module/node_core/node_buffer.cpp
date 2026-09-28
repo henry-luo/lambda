@@ -1954,11 +1954,9 @@ JS_FORWARD_ITEM(js_buffer_swap64, (Item buf), js_buffer_swap_words, (buf, 8))
 // ─── Helpers & statics ──────────────────────────────────────────────────────
 
 static bool buffer_ensure_realm_slots(void) {
-    if (!js_active_runtime_state) return false;
-    return js_realm_slot(&js_runtime_state.realm_slots,
-               JS_REALM_SLOT_BUFFER_NAMESPACE) &&
-        js_realm_slot(&js_runtime_state.realm_slots,
-            JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    // resolve slots in the host so a Windows module never imports its TLS state.
+    return js_realm_intrinsic_slot(JS_REALM_SLOT_BUFFER_NAMESPACE, 0) &&
+        js_realm_intrinsic_slot(JS_REALM_SLOT_BUFFER_PROTOTYPE, 0);
 }
 
 template <typename Target>
@@ -2274,8 +2272,7 @@ JS_BUF_INST_VOID0(swap64)
 
 extern "C" Item js_get_buffer_prototype(void) {
     if (!buffer_ensure_realm_slots()) return ItemError;
-    Item* prototype_slot = js_realm_slot(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_BUFFER_PROTOTYPE);
+    Item* prototype_slot = js_realm_intrinsic_slot(JS_REALM_SLOT_BUFFER_PROTOTYPE, 0);
     if (!prototype_slot) return ItemError;
     Item& buffer_prototype = *prototype_slot;
     if (buffer_prototype.item != 0) return buffer_prototype;
@@ -2344,8 +2341,7 @@ extern "C" Item js_get_buffer_prototype(void) {
 
 Item node_buffer_namespace(void) {
     if (!buffer_ensure_realm_slots()) return ItemError;
-    Item* namespace_slot = js_realm_slot(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_BUFFER_NAMESPACE);
+    Item* namespace_slot = js_realm_intrinsic_slot(JS_REALM_SLOT_BUFFER_NAMESPACE, 0);
     if (!namespace_slot) return ItemError;
     Item& buffer_namespace = *namespace_slot;
     if (buffer_namespace.item != 0) return buffer_namespace;
@@ -2457,4 +2453,3 @@ Item node_buffer_namespace(void) {
 
     return namespace_root.get();
 }
-

@@ -528,9 +528,8 @@ Item parse_emphasis(MarkupParser* parser, const char** text, const char* text_st
     const char* tag;
     Format format = parser->config.format;
     
-    if (format == Format::TYPST) {
-        // Typst: single * = bold (strong), single _ = italic (em)
-        // Typst doesn't use ** or __ for emphasis
+    if (format == Format::TYPST || format == Format::TEXTILE || format == Format::ASCIIDOC) {
+        // These formats use a single * for strong and _ for emphasis.
         tag = (marker == '*') ? "strong" : "em";
     } else if (format == Format::ORG) {
         // Org-mode: single * = bold (strong), single / = italic (em)

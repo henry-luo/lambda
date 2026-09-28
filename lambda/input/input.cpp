@@ -1167,6 +1167,10 @@ static void parse_latex_input(Input* input, const char* source) {
     parse_latex_direct(input, source);
 }
 
+static void parse_tikz_input(Input* input, const char* source) {
+    parse_tikz_direct(input, source);
+}
+
 static void parse_mdx_input(Input* input, const char* source) {
     input->root = input_mdx(input, source);
 }
@@ -1183,6 +1187,7 @@ static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"application/pdf", "pdf"},
     {"application/x-tex", "latex"},
     {"application/x-latex", "latex"},
+    {"text/x-pgf", "tikz"},
     {"application/toml", "toml"},
     {"application/x-yaml", "yaml"},
     {"text/x-java-properties", "properties"},
@@ -1231,6 +1236,7 @@ static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"html5", parse_html_input},
     {"latex", parse_latex_input},
     {"latex-ts", parse_latex_input},
+    {"tikz", parse_tikz_input},
     {"rtf", parse_rtf},
     {"wiki", parse_wiki_input},
     {"asciidoc", parse_asciidoc_input},

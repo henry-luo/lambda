@@ -3424,5 +3424,5 @@ extern "C" void node_fs_jube_register_static(void) {
 extern "C" const JubeModuleDef* node_fs_jube_module(void) { return &node_fs_module; }
 
 #if defined(LAMBDA_NODE_FS_DYNAMIC_MODULE)
-extern "C" const JubeModuleDef* jube_module(void) { return node_fs_jube_module(); }
+extern "C" JUBE_MODULE_EXPORT const JubeModuleDef* jube_module(void) { return node_fs_jube_module(); }
 #endif

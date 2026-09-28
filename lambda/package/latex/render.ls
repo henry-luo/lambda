@@ -11,6 +11,7 @@ import boxes: .elements.boxes
 import font_decl: .elements.font_decl
 import color: .elements.color
 import picture: .elements.picture
+import tikz_bridge: .tikz_bridge
 
 // ============================================================
 // Main dispatcher — called recursively on every AST node
@@ -167,6 +168,7 @@ fn render_element(el, info) {
         case 'abstract': render_abstract(el, info)
         case 'figure': render_figure(el, info)
         case 'picture': picture.render_picture(el, info.unitlength)
+        case 'tikzpicture': tikz_bridge.render_picture(el)
         case 'minipage': render_env_div(el, info, "latex-minipage", null)
         case 'multicols': render_multicols(el, info)
 

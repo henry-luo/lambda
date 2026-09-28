@@ -1,0 +1,25 @@
+{
+  "name": "Doc editor switches from baseline text through drylab to essay PDF",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_pdf"}, "count": 1},
+    {"type": "scroll", "target": {"selector": "#project-tree"}, "dx": 0, "dy": -25},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_pdf_baseline_txt"}, "count": 1},
+    {"type": "scroll", "target": {"selector": "#project-tree"}, "dx": 0, "dy": -2},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf_baseline_txt"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "baseline.txt"},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "drylab_page_01"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf_drylab_pdf"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "drylab.pdf"},
+    {"type": "assert_count", "target": {"selector": "#pdf-preview .pdf-page"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": "#pdf-preview svg"}, "count": 3},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf_essay_pdf"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "essay.pdf"},
+    {"type": "assert_count", "target": {"selector": "#pdf-preview .pdf-page"}, "count": 48},
+    {"type": "scroll", "target": {"selector": "#pdf-preview"}, "dx": 0, "dy": -5},
+    {"type": "assert_state_store", "target": {"selector": "#pdf-preview"}, "view_scroll_y": 250, "tolerance": 20}
+  ]
+}

@@ -15,8 +15,18 @@ import util: .util
 // render a math AST (from tree-sitter-latex-math) into an HTML element tree
 // options: {display: bool, standalone: bool, color: string}
 pub fn render_math(ast, options) {
-    let is_display = if (options != null and options.display != null) options.display else false
     let is_standalone = if (options != null and options.standalone != null) options.standalone else false
+    let result_box = render_box(ast, options)
+    let latex_el = emit_ml_latex(result_box)
+
+    if (is_standalone) css.wrap_standalone(latex_el, options)
+    else latex_el
+}
+
+// Return the same measured box used for HTML emission so graphics labels
+// can place math without estimating its dimensions from source characters.
+pub fn render_box(ast, options) {
+    let is_display = if (options != null and options.display != null) options.display else false
 
     // create root rendering context
     let root_ctx = if (is_display) ctx.display_context() else ctx.text_context()
@@ -29,14 +39,11 @@ pub fn render_math(ast, options) {
 
     // coalesce adjacent spans with identical classes
     let result_box = opt.coalesce(raw_box)
-
-    // wrap with struts and lm_latex class
-    let latex_el = emit_ml_latex(result_box)
-
-    // optionally wrap with stylesheet for standalone HTML
-    if (is_standalone) css.wrap_standalone(latex_el, options)
-    else latex_el
+    result_box
 }
+
+// Emit a previously measured box without recomputing its metrics.
+pub fn render_box_element(measured_box) { emit_ml_latex(measured_box) }
 
 // MathLive-model root emission: public height/depth are already full precision,
 // so this path has exactly one CEIL@2 stringification site for root struts.

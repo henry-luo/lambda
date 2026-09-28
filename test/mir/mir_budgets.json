@@ -276,6 +276,33 @@
               "safepoints": 12
             }
           ]
+        },
+        "windows-debug-v3": {
+          "module_insns": 344,
+          "functions": {
+            "js_main": {
+              "insns": 87
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 2,
+              "root_stores": 7,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 10
+            },
+            {
+              "name": "_js_anon1_#",
+              "occurrence": 0,
+              "roots": 4,
+              "root_stores": 8,
+              "scalar_homes": 1,
+              "number_scratch": 0,
+              "safepoints": 12
+            }
+          ]
         }
       }
     },
@@ -287,6 +314,9 @@
       "budgets": {
         "default": {
           "module_insns": 2342
+        },
+        "windows-debug-v3": {
+          "module_insns": 2357
         }
       }
     },
@@ -348,6 +378,9 @@
         },
         "linux-debug-v3": {
           "module_insns": 175
+        },
+        "windows-debug-v3": {
+          "module_insns": 175
         }
       }
     },
@@ -385,6 +418,35 @@
               "safepoints": 4
             }
           ]
+        },
+        "windows-debug-v3": {
+          "module_insns": 1223,
+          "functions": {
+            "_guarded_load_#": {
+              "insns": 58
+            },
+            "_guarded_store_#": {
+              "insns": 113
+            }
+          },
+          "frames": [
+            {
+              "name": "_guarded_load_#",
+              "roots": 3,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "name": "_guarded_store_#",
+              "roots": 6,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 1,
+              "safepoints": 4
+            }
+          ]
         }
       }
     },
@@ -402,6 +464,35 @@
             },
             "_open_gap_#": {
               "insns": 64
+            }
+          },
+          "frames": [
+            {
+              "name": "_closed_gap_#",
+              "roots": 3,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 2
+            },
+            {
+              "name": "_open_gap_#",
+              "roots": 3,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 2
+            }
+          ]
+        },
+        "windows-debug-v3": {
+          "module_insns": 609,
+          "functions": {
+            "_closed_gap_#": {
+              "insns": 65
+            },
+            "_open_gap_#": {
+              "insns": 65
             }
           },
           "frames": [
@@ -529,6 +620,27 @@
               "safepoints": 2176
             }
           ]
+        },
+        "windows-debug-v3": {
+          "module_insns": 17142,
+          "functions": {
+            "js_main": {
+              "insns": 12627
+            },
+            "Tune6ExactCollection_m128_128": {
+              "insns": 5
+            }
+          },
+          "frames": [
+            {
+              "name": "js_main",
+              "roots": 11,
+              "root_stores": 655,
+              "scalar_homes": 15,
+              "number_scratch": 0,
+              "safepoints": 1823
+            }
+          ]
         }
       }
     },
@@ -543,6 +655,14 @@
           "functions": {
             "_tune30_norms_#": {
               "insns": 200
+            }
+          }
+        },
+        "windows-debug-v3": {
+          "module_insns": 459,
+          "functions": {
+            "_tune30_norms_#": {
+              "insns": 202
             }
           }
         }
@@ -561,6 +681,14 @@
               "insns": 9827
             }
           }
+        },
+        "windows-debug-v3": {
+          "module_insns": 16128,
+          "functions": {
+            "_run_cube_#": {
+              "insns": 9876
+            }
+          }
         }
       }
     },
@@ -575,6 +703,14 @@
           "functions": {
             "_constraint_choose_method_#": {
               "insns": 1829
+            }
+          }
+        },
+        "windows-debug-v3": {
+          "module_insns": 9841,
+          "functions": {
+            "_constraint_choose_method_#": {
+              "insns": 1831
             }
           }
         }

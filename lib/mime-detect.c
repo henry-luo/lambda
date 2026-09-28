@@ -353,6 +353,7 @@ static const char* mime_extension_lookup(const char* content_type, int serve_pro
         {"image/webp",               ".webp"},
         {"application/x-latex",      ".tex", 1},
         {"text/x-tex",               ".tex", 1},
+        {"text/x-pgf",               ".pgf"},
         {"application/x-yaml",       ".yaml", 1},
         {"text/yaml",                ".yaml"},
         {"application/toml",         ".toml", 1},

@@ -71,6 +71,8 @@ Url* url_create(void);
 void url_destroy(Url* url);
 Url* url_parse(const char* input);
 Url* url_parse_with_base(const char* input, const Url* base);
+// Parse URLs and native absolute paths through one cross-platform entry point.
+Url* url_parse_path_or_url(const char* input, const Url* base);
 UrlError url_parse_into(const char* input, Url* url);
 
 // URL manipulation

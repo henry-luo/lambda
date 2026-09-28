@@ -471,6 +471,86 @@ TEST_F(FormatAdapterTest, RstDetection) {
                 json_contains(json->chars, "\"$\": \"h2\""));
 }
 
+TEST_F(FormatAdapterTest, RstContentsKeepsFollowingHeadings) {
+    const char* content =
+        "==========\n"
+        "RST Sample\n"
+        "==========\n"
+        "\n"
+        "Introduction.\n"
+        "\n"
+        ".. contents:: Sections\n"
+        "   :depth: 2\n"
+        "\n"
+        "Next Heading\n"
+        "============\n"
+        "\n"
+        "Body text.\n";
+
+    String* json = parse_to_json(content, "test.rst");
+    ASSERT_NE(json, nullptr);
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"nav\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "Next Heading"));
+    EXPECT_TRUE(json_contains(json->chars, "#rst-heading-10"));
+    EXPECT_FALSE(json_contains(json->chars, "\"$\": \"hr\""));
+    EXPECT_FALSE(json_contains(json->chars, ".. contents::"));
+}
+
+TEST_F(FormatAdapterTest, RstDirectivesAndGridTable) {
+    const char* content =
+        ".. This comment must disappear\n"
+        "   So must this line.\n"
+        "\n"
+        ".. code-block:: python\n"
+        "   :linenos:\n"
+        "\n"
+        "   print('hello')\n"
+        "\n"
+        ".. note::\n"
+        "\n"
+        "   A *useful* note.\n"
+        "\n"
+        "+------+-------+\n"
+        "| Name | Value |\n"
+        "+======+=======+\n"
+        "| One  | Two   |\n"
+        "+------+-------+\n"
+        "\n"
+        ".. csv-table:: Values\n"
+        "   :header: \"Label\", \"Amount\"\n"
+        "\n"
+        "   \"Alpha\", \"1,000\"\n"
+        "\n"
+        ".. list-table:: People\n"
+        "   :header-rows: 1\n"
+        "\n"
+        "   * - Name\n"
+        "     - Role\n"
+        "   * - Ada\n"
+        "     - Engineer\n";
+    String* json = parse_to_json(content, "test.rst");
+    ASSERT_NE(json, nullptr);
+    EXPECT_FALSE(json_contains(json->chars, "This comment"));
+    EXPECT_FALSE(json_contains(json->chars, ":linenos:"));
+    EXPECT_TRUE(json_contains(json->chars, "print('hello')"));
+    EXPECT_TRUE(json_contains(json->chars, "rst-note"));
+    EXPECT_TRUE(json_contains(json->chars, "useful"));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"th\""));
+    EXPECT_TRUE(json_contains(json->chars, "1,000"));
+    EXPECT_TRUE(json_contains(json->chars, "Values"));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"caption\""));
+    EXPECT_TRUE(json_contains(json->chars, "Engineer"));
+}
+
+TEST_F(FormatAdapterTest, RstSubstitutionReferenceIsNotATable) {
+    String* json = parse_to_json("Replace |version| in this sentence.\n", "test.rst");
+    ASSERT_NE(json, nullptr);
+    EXPECT_TRUE(json_contains(json->chars, "version"));
+    EXPECT_FALSE(json_contains(json->chars, "\"$\": \"table\""));
+}
+
 // Test Wiki format detection
 TEST_F(FormatAdapterTest, WikiDetection) {
     const char* content =
@@ -498,6 +578,14 @@ TEST_F(FormatAdapterTest, OrgModeDetection) {
     EXPECT_GT(json->len, 0);
 }
 
+TEST_F(FormatAdapterTest, OrgTitleRendersAsHeading) {
+    String* json = parse_to_json("#+TITLE: Project Notes\n\n* Section\nBody.\n", "notes.org");
+    ASSERT_NE(json, nullptr);
+    EXPECT_TRUE(json_contains(json->chars, "Project Notes"));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_FALSE(json_contains(json->chars, "#+TITLE:"));
+}
+
 // Test AsciiDoc format
 TEST_F(FormatAdapterTest, AsciiDocDetection) {
     const char* content =
@@ -513,17 +601,41 @@ TEST_F(FormatAdapterTest, AsciiDocDetection) {
     EXPECT_GT(json->len, 0);
 }
 
+TEST_F(FormatAdapterTest, AsciiDocSingleAsteriskIsStrong) {
+    String* json = parse_to_json("= Title\n\nA *bold* and _italic_ line.\n", "test.adoc");
+    ASSERT_NE(json, nullptr);
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"em\""));
+}
+
+TEST_F(FormatAdapterTest, ManMacrosKeepSectionsAndTaggedTerms) {
+    const char* content = ".TH SAMPLE 1\n.SH NAME\nsample \\- utility\n"
+                          ".SH OPTIONS\n.TP\n.B \\-h\nShow help.\n"
+                          ".IP \"\\-v\" 4\nVerbose mode.\n";
+    String* json = parse_to_json(content, "sample.man");
+    ASSERT_NE(json, nullptr);
+    EXPECT_TRUE(json_contains(json->chars, "SAMPLE"));
+    EXPECT_TRUE(json_contains(json->chars, "OPTIONS"));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"dl\""));
+    EXPECT_TRUE(json_contains(json->chars, "Show help."));
+    EXPECT_TRUE(json_contains(json->chars, "Verbose mode."));
+    EXPECT_FALSE(json_contains(json->chars, ".TP"));
+}
+
 // Test Textile format
 TEST_F(FormatAdapterTest, TextileDetection) {
     const char* content =
         "h1. Heading\n"
         "\n"
-        "*Bold* and _italic_ text.\n";
+        "*Bold* and _italic_ text with @inline code@.\n";
 
     String* json = parse_to_json(content, "test.textile");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_GT(json->len, 0);
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"em\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "inline code"));
 }
 
 // =============================================================================
