@@ -2502,7 +2502,8 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
     if (is_for_await) {
         MIR_reg_t done_item = jm_callr_1(mt, "js_iterator_result_done", MIR_T_I64, step_iter_result);
         jm_emit_for_of_step_error_lane_check(mt, pushed_try);
-        is_done = jm_callr_1(mt, "js_is_truthy", MIR_T_I64, done_item);
+        // normalize the C++ bool result before MIR branches on Windows.
+        is_done = jm_emit_is_truthy(mt, jm_item_value(done_item));
     } else {
         is_done = jm_emit_iterator_done_test(mt, step_result, "forofdone");
     }

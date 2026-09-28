@@ -2,7 +2,8 @@
 // Tests that work without external network dependencies
 
 // Test 1: fetch with invalid URL should reject, and returns a promise
-var p = fetch("http://localhost:1/nonexistent");
+// A malformed authority fails deterministically without waiting for a socket timeout.
+var p = fetch("http://[");
 p.then(function(response) {
     console.log("should_not_reach");
 }).catch(function(err) {

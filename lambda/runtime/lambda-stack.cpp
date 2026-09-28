@@ -96,7 +96,9 @@ static void init_stack_bounds(void) {
     ULONG_PTR low, high;
     GetCurrentThreadStackLimits(&low, &high);
     _lambda_stack_base = (uintptr_t)high;
-    uintptr_t jit_budget = 8 * 1024 * 1024;
+    // use the configured recursion budget; the old 8 MiB cap rejected
+    // recoverable AST calls even when the process reserved more stack.
+    uintptr_t jit_budget = _lambda_stack_budget;
     uintptr_t jit_limit = high > jit_budget ? (uintptr_t)high - jit_budget : (uintptr_t)low;
     uintptr_t os_limit = (uintptr_t)low + LAMBDA_STACK_SAFETY_MARGIN;
     // JIT frames have no unwind metadata, so reserve a recoverable runtime

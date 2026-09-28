@@ -708,8 +708,13 @@ void jm_finish_function_frame(JsMirTranspiler* mt, const char* function_name) {
             MIR_new_reg_op(mt->ctx, pair_item),
             MIR_new_reg_op(mt->ctx, pair_companion)));
     } else {
+        // Windows transports the scalar payload through Context, so return the
+        // pending Item rather than its reclaimed number-stack pointer.
+        MIR_reg_t return_item = em_returns_companion_slot(
+                mt->func_em->em.frame.plan.companion) && pair_item
+            ? pair_item : mt->func_em->em.frame.return_reg;
         em_emit_insn(&mt->func_em->em, MIR_new_ret_insn(mt->ctx, 1,
-            MIR_new_reg_op(mt->ctx, mt->func_em->em.frame.return_reg)));
+            MIR_new_reg_op(mt->ctx, return_item)));
     }
     jm_finalize_write_back_roots(mt);
     em_finalize_scalar_homes(&mt->func_em->em);

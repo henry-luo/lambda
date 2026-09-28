@@ -43,8 +43,6 @@ extern "C" Item bigint_from_string(const char* str, int len);
 #define JS_CRYPTO_THROW_CODE(name, code, message) \
     static Item name(void) { return js_throw_error_with_code(code, message); }
 
-extern __thread EvalContext* context;
-
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -64,22 +62,19 @@ extern __thread EvalContext* context;
 static const uint8_t crypto_empty_bytes[1] = {0};
 
 static Item* crypto_namespace_slot_existing(void) {
-    if (!js_active_runtime_state) return NULL;
-    return js_realm_slot_existing(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_CRYPTO_NAMESPACE);
+    // the host owns realm TLS; DLL code resolves its slots through host calls.
+    return js_realm_intrinsic_slot_existing(JS_REALM_SLOT_CRYPTO_NAMESPACE, 0);
 }
 
 static Item* crypto_namespace_slot_ensure(void) {
-    if (!js_active_runtime_state) return NULL;
-    return js_realm_slot(&js_runtime_state.realm_slots,
-        JS_REALM_SLOT_CRYPTO_NAMESPACE);
+    return js_realm_intrinsic_slot(JS_REALM_SLOT_CRYPTO_NAMESPACE, 0);
 }
 
 template <typename Target>
 JS_FORWARD_STATIC_VOID( crypto_set_native, (Item object, Item key, Target target), js_set_native_key, (object, key, target))
 
 static JsCryptoNativeState* crypto_native_state_ensure(void) {
-    if (!js_active_runtime_state) return NULL;
+    if (!js_realm_runtime_is_active()) return NULL;
     jube_modules_runtime_attach();
     void* session = jube_node_runtime_current_session();
     return session ? jube_node_crypto_native_state(session) : NULL;
@@ -7766,7 +7761,7 @@ static void crypto_destroy_live_contexts(JsCryptoNativeState* state) {
 }
 
 extern "C" void js_crypto_reset(void) {
-    if (!js_active_runtime_state) return;
+    if (!js_realm_runtime_is_active()) return;
     Item* namespace_slot = crypto_namespace_slot_existing();
     if (!crypto_native_state_current()) {
         if (namespace_slot) *namespace_slot = (Item){0};
@@ -7853,7 +7848,7 @@ extern "C" const JubeModuleDef* node_crypto_jube_module(void) {
 }
 
 #if defined(LAMBDA_NODE_CRYPTO_DYNAMIC_MODULE)
-extern "C" const JubeModuleDef* jube_module(void) {
+extern "C" JUBE_MODULE_EXPORT const JubeModuleDef* jube_module(void) {
     return node_crypto_jube_module();
 }
 #endif

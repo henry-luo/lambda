@@ -927,7 +927,11 @@ build-lang-python: build build-windows-host-import $(TREE_SITTER_LIB) $(TREE_SIT
 
 build-windows-host-import: build
 	@if [ "$(findstring NT,$(OS))" != "" ]; then \
-		dlltool -D lambda.exe -d lambda_host_exports.def -l modules/lambda-host.lib; \
+		if [ ! -s modules/lambda-host.lib ] || [ build_lambda_config.json -nt lambda.exe ]; then \
+			rm -f lambda.exe; \
+			$(MAKE) build JOBS=$(JOBS) || exit $$?; \
+		fi; \
+		test -s modules/lambda-host.lib; \
 	fi
 
 ifneq (,$(findstring NT,$(OS)))

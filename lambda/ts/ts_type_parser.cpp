@@ -20,7 +20,8 @@ struct TsDirectTypeParser {
     int pos;
 
     String* make_string(const char* source, int source_len) {
-        return string_from_strview(strview_init(source, source_len), tp->pool);
+        // identifier spans and the literal call site provide nonnegative lengths.
+        return string_from_strview(strview_init(source, (size_t)source_len), tp->pool);
     }
 
     Type* make_base(TypeId type_id) {

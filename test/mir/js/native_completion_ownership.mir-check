@@ -1,15 +1,17 @@
 {
   "schema_version": 1,
-  "description": "D8.4.3v2/D5.2.1v3: native calls carry an explicit error result, direct recursion retains the native stack guard through an audited leaf against Context::stack_limit (no i32 depth counter), and shared pending resolution removes the second scalar adoption.",
+  "description": "D8.4.3v2/D5.2.1v3: native calls carry an explicit error result (a second return on POSIX, Context::mir_companion_slot on Windows), direct recursion retains the native stack guard through an audited leaf against Context::stack_limit (no i32 depth counter), and shared pending resolution removes the second scalar adoption.",
   "checks": [
     {
       "in_func": "_js_nativeLeaf_#_n",
-      "expect": ["call\tjs_throw_value", "ret\t{{r}}, {{r}}"],
+      "expect": ["call\tjs_throw_value"],
+      "expect_any": ["ret\t{{r}}, {{r}}", "mov\ti64:152(ctx), {{r}}"],
       "forbid": ["js_native_throw", "lambda_item_adopt_scalar_home"]
     },
     {
       "in_func": "_js_nativeRec_#_n",
-      "expect": ["call\t_js_nativeRec_", "call\tjs_throw_range_error", "call\tlambda_stack_is_exhausted", "ret\t{{r}}, {{r}}"],
+      "expect": ["call\t_js_nativeRec_", "call\tjs_throw_range_error", "call\tlambda_stack_is_exhausted"],
+      "expect_any": ["ret\t{{r}}, {{r}}", "mov\ti64:152(ctx), {{r}}"],
       "forbid": ["bstart\t", "ublt\t", "js_native_throw", "js_call_function", "call\tjs_call_p", "i32:"]
     },
     {

@@ -272,8 +272,7 @@ static Item js_util_service_promisify(Item function) {
 }
 
 Item node_util_namespace(void) {
-    Item* namespace_slot = js_active_runtime_state ? js_realm_slot(
-        &js_runtime_state.realm_slots, JS_REALM_SLOT_UTIL_NAMESPACE) : NULL;
+    Item* namespace_slot = js_realm_intrinsic_slot(JS_REALM_SLOT_UTIL_NAMESPACE, 0);
     if (!namespace_slot) return ItemError;
     js_host_hooks_set_console_format_hook(js_util_service_format);
     if (namespace_slot->item != 0) return *namespace_slot;

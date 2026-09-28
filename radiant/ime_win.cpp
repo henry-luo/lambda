@@ -87,11 +87,13 @@ void ime_update_candidate_window(HWND hwnd, HIMC himc) {
     memset(&form, 0, sizeof(form));
     form.dwIndex = 0;
     form.dwStyle = CFS_CANDIDATEPOS;
-    UINT dpi = GetDpiForWindow(hwnd);
-    if (dpi == 0) dpi = USER_DEFAULT_SCREEN_DPI;
-    float host_scale = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
+    // glfw supplies window DPI scale on the Windows 8 target, where GetDpiForWindow is absent.
+    float scale_x = 1.0f;
+    float scale_y = 1.0f;
+    GLFWwindow* window = radiant_ui_get_glfw_window(g_ime_uicon);
+    if (window) glfwGetWindowContentScale(window, &scale_x, &scale_y);
     RdtHostRect host = rdt_logical_to_host_rect(
-        {x, y, w, h}, {host_scale, host_scale, 0.0f, RDT_HOST_Y_DOWN});
+        {x, y, w, h}, {scale_x, scale_y, 0.0f, RDT_HOST_Y_DOWN});
     form.ptCurrentPos.x = (LONG)lroundf(host.x);  // discrete Win32 client coordinate
     form.ptCurrentPos.y = (LONG)lroundf(host.y + host.height);  // candidate baseline
     ImmSetCandidateWindow(himc, &form);

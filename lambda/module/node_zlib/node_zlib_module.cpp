@@ -1202,4 +1202,4 @@ static const JubeModuleDef node_zlib_module = {
     1,
 };
 
-extern "C" const JubeModuleDef* jube_module(void) { return &node_zlib_module; }
+extern "C" JUBE_MODULE_EXPORT const JubeModuleDef* jube_module(void) { return &node_zlib_module; }

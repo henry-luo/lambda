@@ -39,7 +39,7 @@ bool lambda_tier_parse(const char* text, LambdaTier* out);
 // statically, and runs in full like any expression (AI17v2).
 enum class EvalMode : uint8_t {
     RUNTIME,    // full language; effects are admitted by the ordinary walker
-    CONST,      // pass-manager const folder: pure, fuel-bounded, no effects (AI16)
+    CONST_FOLD, // avoid Windows' CONST macro; pure, fuel-bounded folding (AI16)
 };
 
 // The only non-local mechanism for language control flow (AI14); longjmp stays
