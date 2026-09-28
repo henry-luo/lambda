@@ -518,12 +518,15 @@ TEST_F(FormatAdapterTest, TextileDetection) {
     const char* content =
         "h1. Heading\n"
         "\n"
-        "*Bold* and _italic_ text.\n";
+        "*Bold* and _italic_ text with @inline code@.\n";
 
     String* json = parse_to_json(content, "test.textile");
     ASSERT_NE(json, nullptr);
 
-    EXPECT_GT(json->len, 0);
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"strong\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"em\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"code\""));
+    EXPECT_TRUE(json_contains(json->chars, "inline code"));
 }
 
 // =============================================================================

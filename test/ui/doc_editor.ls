@@ -11,6 +11,9 @@
 
 import pdf: lambda.pdf.pdf
 import pdf_html: lambda.pdf.html
+import latex: lambda.latex.latex
+import latex_css: lambda.latex.css
+import math_css: lambda.doc.math.css
 
 let PROJECT_ROOT = "."
 
@@ -95,6 +98,7 @@ fn document_format(extension) {
   if (contains(["md", "markdown", "mdown", "mkdn"], ext)) { "markdown" }
   else if (contains(["wiki", "mediawiki"], ext)) { "wiki" }
   else if (contains(["rst", "rest"], ext)) { "rst" }
+  else if (ext == "textile") { "textile" }
   else if (contains(["htm", "html"], ext)) { "html" }
   else { null }
 }
@@ -108,11 +112,6 @@ fn is_pdf_document(extension) => lower(extension) == "pdf"
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or is_pdf_document(extension)
-
-fn preview_frame_id(extension) {
-  if (document_format(extension) == "html") { "html-preview" }
-  else { "latex-preview" }
-}
 
 fn selected_source(file) {
   if (file == null) { "" }
@@ -132,6 +131,12 @@ fn selected_preview(file) {
       let parsed = input(selected_path, 'pdf') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected PDF"> }
       else { pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> } }
+    }
+    else if (is_latex_document(file["extension"])) {
+      // The editor already owns the runtime, so render LaTeX inline instead of loading an iframe.
+      let parsed = input(selected_path, 'latex') ^ { null }
+      if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
+      else { latex.render(parsed, null) ^ { <p class:"preview-error", "Unable to render selected LaTeX"> } }
     }
     else if (format == null) { null }
     else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
@@ -273,7 +278,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, HTML, LaTeX, and PDF files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, Textile, HTML, LaTeX, and PDF files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -290,10 +295,9 @@ view <document_pane> {
           let preview = selected_preview(~.file);
           <section id:"pdf-preview", class:"rendered-preview pdf-preview",
             apply(preview)>
-        } else if (document_format(~.file["extension"]) == "html" or
-                   is_latex_document(~.file["extension"])) {
+        } else if (document_format(~.file["extension"]) == "html") {
           // defer optional document transforms until their file is selected.
-          <iframe id:preview_frame_id(~.file["extension"]), class:"document-preview",
+          <iframe id:"html-preview", class:"document-preview",
             src:absolute_file_path(~.file["file_path"])>
         } else {
           let preview = selected_preview(~.file);
@@ -438,6 +442,8 @@ on preview_tab(tab) {
     <meta charset:"UTF-8">
     <title "Lambda Document Editor — Prototype">
     <style pdf_html.DEFAULT_CSS>
+    <style latex_css.STYLESHEET>
+    <style math_css.get_stylesheet(null)>
     <style "
       * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
@@ -478,6 +484,8 @@ on preview_tab(tab) {
       .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
       .file-icon { color: #9bbdfc; }
+      /* Hit-tested text spans need their own cursor value in the file tree. */
+      .tree-label, .tree-icon, .tree-spacer { cursor: pointer; }
       .tree-label { white-space: nowrap; font-size: 13px; }
       .file-panel-footer { padding: 10px 14px; border-top: 1px solid #343c4d; color: #99a5b7;
                            font-size: 11px; }
