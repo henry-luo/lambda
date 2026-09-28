@@ -45,14 +45,15 @@ fn bounded_text_offset(value, offset) {
 fn text_before_input(value, evt) {
   let selection_start = evt["selection_start"]
   let caret_pos = evt["caret_pos"]
-  if (selection_start != null) { bounded_text_offset(value, selection_start) }
-  else if (caret_pos != null) { bounded_text_offset(value, caret_pos) }
+  // Optional event offsets can be undefined; only integers are valid slice indices.
+  if (type(selection_start) == int) { bounded_text_offset(value, selection_start) }
+  else if (type(caret_pos) == int) { bounded_text_offset(value, caret_pos) }
   else { len(value) }
 }
 
 fn text_after_input(value, evt) {
   let selection_end = evt["selection_end"]
-  if (selection_end != null) { bounded_text_offset(value, selection_end) }
+  if (type(selection_end) == int) { bounded_text_offset(value, selection_end) }
   else { text_before_input(value, evt) }
 }
 
@@ -233,10 +234,9 @@ view <tree_entry> state is_open: ~.initial_open, children: null {
             extension:child.extension,
             is_dir:child.is_dir,
             depth:(~.depth + 1),
-            ancestor_paths:[*~.ancestor_paths, entry_path],
-            initial_open:path_is_open(~.restored_open_paths,
+            initial_open:path_is_open(~.open_paths,
                                       child_path(entry_path, child.name)),
-            restored_open_paths:~.restored_open_paths,
+            open_paths:~.open_paths,
             selected_path:~.selected_path,
             filter_text:~.filter_text
           >)
@@ -253,15 +253,16 @@ on click(evt) {
       (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
     if (is_open) {
       is_open = false
+      emit("directory_toggle", {path:entry_path, is_open:false})
     } else {
       // Directory input performs a stat for every child, so retain the result
       // for this row and never repeat that work while it remains mounted.
       if (children == null) { children = directory_entries(entry_path) }
       is_open = true
+      emit("directory_toggle", {path:entry_path, is_open:true})
     }
   } else if (not ~.is_dir) {
-    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
-                          ancestor_paths:~.ancestor_paths})
+    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
   }
 }
 
@@ -336,7 +337,7 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
@@ -346,8 +347,13 @@ edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_tex
         , <span class:"project-icon", "⌘">
           <span "lambda">
         >
-        <input id:"file-filter", type:"search", class:"tree-filter", value:filter_text,
-          placeholder:"Filter file names">
+        <div class:"tree-filter-wrap"
+        , <input id:"file-filter", type:"search", class:"tree-filter", value:filter_text,
+            placeholder:"Filter file names">
+          if (filter_text != "") {
+            <button class:"tree-filter-clear", title:"Clear file name filter", "×">
+          }
+        >
       >
       <div id:"project-tree", class:"project-tree"
       , <div class:"tree-row project-root"
@@ -365,10 +371,9 @@ edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_tex
                 extension:entry.extension,
                 is_dir:entry.is_dir,
                 depth:1,
-                ancestor_paths:[],
-                initial_open:path_is_open(restored_open_paths,
+                initial_open:path_is_open(open_paths,
                                           child_path(PROJECT_ROOT, entry.name)),
-                restored_open_paths:restored_open_paths,
+                open_paths:open_paths,
                 selected_path:(if (selected_file == null) "" else selected_file["file_path"]),
                 filter_text:filter_text
               >)
@@ -382,6 +387,19 @@ edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_tex
 }
 on click(evt) {
   if (evt["target_class"] == "root-toggle") { root_open = not root_open }
+  else if (evt["target_class"] == "tree-filter-clear") { filter_text = "" }
+}
+on directory_toggle(entry) {
+  let path = entry["path"]
+  if (entry["is_open"]) {
+    if (not path_is_open(open_paths, path)) {
+      open_paths = [*open_paths, path]
+    }
+  } else {
+    // Closing a directory also forgets its descendants before any remount.
+    open_paths = [for (open_path in open_paths
+      where open_path != path and not starts_with(open_path, path ++ "/")) open_path]
+  }
 }
 on input(evt) {
   let target_class = evt.target_class
@@ -398,11 +416,13 @@ on keydown(evt) {
     if (key == "Backspace") { filter_text = erase_backwards(filter_text, evt) }
     else if (key == "Delete") { filter_text = erase_forwards(filter_text, evt) }
     else if (key == "Escape") { filter_text = "" }
+    else { return }
+    // The model owns this edit; a second native edit would desynchronize it.
+    return 'prevent-default'
   }
 }
 on file_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"], extension: entry["extension"]}
-  restored_open_paths = entry["ancestor_paths"]
   preview_mode = "view"
 }
 on preview_tab(tab) {
@@ -431,10 +451,15 @@ on preview_tab(tab) {
       .project-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 14px;
                        font-size: 14px; font-weight: 700; letter-spacing: 0.02em; color: #f4f6fa; }
       .project-icon { color: #8eb5ff; font-size: 17px; }
+      .tree-filter-wrap { position: relative; }
       .tree-filter { width: 100%; height: 34px; border: 1px solid #465166; border-radius: 6px;
-                     background: #292f3d; color: #f5f7fb; padding: 0 10px; outline: none; }
+                     background: #292f3d; color: #f5f7fb; padding: 0 36px 0 10px; outline: none; }
       .tree-filter:focus { border-color: #79a6ff; box-shadow: 0 0 0 2px rgba(121,166,255,.2); }
       .tree-filter::placeholder { color: #9aa5b7; }
+      .tree-filter-clear { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px;
+                           padding: 0; border: 0; border-radius: 4px; background: transparent;
+                           color: #aeb9ca; cursor: pointer; font-size: 19px; line-height: 26px; }
+      .tree-filter-clear:hover { background: #3b4557; color: #fff; }
       .project-tree { min-height: 0; flex: 1; overflow: auto; padding: 8px 6px 16px; }
       /* Keep long row labels scrollable without recursively measuring every
          expanded descendant for each ancestor's max-content width. */

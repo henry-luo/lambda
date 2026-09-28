@@ -1,0 +1,12 @@
+{
+  "name": "Doc editor opens essay after focusing folder toggles",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-toggle"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf .tree-toggle"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf_essay_pdf .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "essay.pdf"},
+    {"type": "assert_count", "target": {"selector": "#pdf-preview .pdf-page"}, "count": 48}
+  ]
+}
