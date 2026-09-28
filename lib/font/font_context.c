@@ -79,6 +79,8 @@ static const char* default_fallback_fonts[] = {
     "Noto Sans KR",
     "Liberation Sans",
     "DejaVu Sans",
+    // Linux fontconfig uses this face for mathematical symbols absent from web fonts.
+    "DejaVu Sans Mono",
     "Helvetica",
     "Arial",
     "SF Pro Display",

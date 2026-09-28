@@ -430,7 +430,8 @@ inline void test_lambda_script_against_file(const char* script_path, const char*
     const char* script_name = strrchr(script_path, '/');
     script_name = script_name ? script_name + 1 : script_path;
 
-    char* expected_output = read_expected_output(expected_file_path);
+    // direct and tier-parity fixtures use the same platform golden as discovery.
+    char* expected_output = read_expected_output(platform_expected_path(expected_file_path).c_str());
     ASSERT_NE(expected_output, nullptr) << "Could not read expected output file: " << expected_file_path;
 
     char* actual_output = execute_lambda_script(script_path, is_procedural, tier);

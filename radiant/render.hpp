@@ -205,6 +205,9 @@ void rdt_vector_begin_batch(RdtVector* vec);
 void rdt_vector_flush_batch(RdtVector* vec);
 void rdt_vector_end_batch(RdtVector* vec);
 
+// Number of clip masks composed for this vector context; useful for render diagnostics.
+uint64_t rdt_vector_clip_mask_count(const RdtVector* vec);
+
 // ---------------------------------------------------------------------------
 // Path construction
 // ---------------------------------------------------------------------------

@@ -7,6 +7,8 @@
 #include <string.h>
 #include <math.h>
 
+static constexpr float UA_TEXT_INPUT_FONT_SIZE = 13.3333f;
+
 /**
  * Layout support for HTML form controls.
  * Form controls are replaced elements with intrinsic dimensions.
@@ -272,34 +274,25 @@ static float datetime_local_intrinsic_content_width(ViewBlock* block,
                        : FormDefaults::DATETIME_LOCAL_CONTENT_WIDTH;
 }
 
-static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
-                                 FormControlProp* form, FontProp* font) {
-    // Special fixed widths for date/time control types (Chrome UA intrinsic widths)
-    // These are content-area widths (border-box minus 6px border+padding).
-    // Chrome renders these at specific widths based on their picker format.
-    if (form->input_type) {
-        if (form_input_kind_is(form->input_type,
-                FORM_INPUT_KIND_DATETIME_LOCAL)) {
-            form->intrinsic_width = datetime_local_intrinsic_content_width(block, form);
-            form->intrinsic_height = 17.0f;
-            return;
-        }
-        if (apply_fixed_input_intrinsic_size(form)) return;
-    }
-
+float layout_text_input_content_width(LayoutContext* lycon, ViewBlock* block,
+                                      FormControlProp* form, FontProp* font) {
     int size = form->size > 0 ? form->size : FormDefaults::TEXT_SIZE_CHARS;
     // HTML Rendering §15.5.6 converts the size attribute as
     // (size - 1) × average character width + maximum character width.
     float default_content_w = FormDefaults::TEXT_CONTENT_WIDTH;
-    float ua_font_size = 13.3333f;
 
     float content_w = 0;
-    bool uses_ua_default_width = size == FormDefaults::TEXT_SIZE_CHARS &&
-        !form_control_has_specified_font(block);
-    if (uses_ua_default_width) {
-        // The browser's native 20-column control retains this calibrated width.
+#ifdef __APPLE__
+    // macOS native controls retain the existing calibrated default width;
+    // Linux derives it from the selected face's text-control metrics.
+    if (size == FormDefaults::TEXT_SIZE_CHARS &&
+        !form_control_has_specified_font(block)) {
         content_w = default_content_w;
-    } else if (font && font->font_size > 0 && lycon->ui_context) {
+    }
+#else
+    (void)block;
+#endif
+    if (content_w <= 0.0f && font && font->font_size > 0 && lycon->ui_context) {
         FontBox temp_font;
         setup_font(lycon->ui_context, &temp_font, font);
         if (font_box_handle(&temp_font)) {
@@ -315,7 +308,8 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
                     GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
                     average_char_w = zero_glyph.advance_x;
                 }
-                float max_char_w = font_get_max_char_width(font->font_handle);
+                // use the same resolved face for both control metrics.
+                float max_char_w = font_get_max_char_width(font_box_handle(&temp_font));
                 if (max_char_w > 0.0f && average_char_w > 0.0f) {
                     content_w = ceilf(average_char_w * size) +
                         max_char_w - average_char_w;
@@ -326,11 +320,27 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
     if (content_w <= 0) {
         // Fallback: use calibrated formula (Chrome UA default at 13.3333px)
         content_w = default_content_w * size / FormDefaults::TEXT_SIZE_CHARS;
-        if (font && font->font_size > 0 && font->font_size != ua_font_size) {
-            content_w = content_w * font->font_size / ua_font_size;
+        if (font && font->font_size > 0 && font->font_size != UA_TEXT_INPUT_FONT_SIZE) {
+            content_w = content_w * font->font_size / UA_TEXT_INPUT_FONT_SIZE;
         }
     }
-    form->intrinsic_width = content_w;
+    return content_w;
+}
+
+static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
+                                 FormControlProp* form, FontProp* font) {
+    // Date/time controls use picker-specific content widths.
+    if (form->input_type) {
+        if (form_input_kind_is(form->input_type,
+                FORM_INPUT_KIND_DATETIME_LOCAL)) {
+            form->intrinsic_width = datetime_local_intrinsic_content_width(block, form);
+            form->intrinsic_height = 17.0f;
+            return;
+        }
+        if (apply_fixed_input_intrinsic_size(form)) return;
+    }
+
+    form->intrinsic_width = layout_text_input_content_width(lycon, block, form, font);
     // With the native UA font, Chrome preserves its 21px border-box minimum.
     // An author font or line-height instead determines the content height;
     // applying the UA minimum there would double-count replaced decorations.
@@ -338,7 +348,7 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         float def_bp_v = 2 * (FormDefaults::TEXT_PADDING_V + FormDefaults::TEXT_BORDER);
         float default_content_h = FormDefaults::TEXT_HEIGHT - def_bp_v;
         bool has_css_font = form_control_has_specified_font(block) ||
-            (font && font->font_size > 0 && font->font_size != ua_font_size);
+            (font && font->font_size > 0 && font->font_size != UA_TEXT_INPUT_FONT_SIZE);
         float line_h = form_control_normal_line_height(
             lycon, font, has_css_font && font ? font->font_size * 1.15f : default_content_h);
         float used_line_height = form_control_author_non_normal_line_height(

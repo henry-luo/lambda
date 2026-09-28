@@ -106,7 +106,8 @@ static const char* priority_font_families[] = {
     "Trebuchet MS", "Comic Sans MS", "Impact",
     "Helvetica Neue", "Monaco", "Menlo",
     "SFNS", "System Font", "San Francisco", "SF Pro Display", "SF Pro Text",
-    "DejaVu Sans", "DejaVu Serif", "Liberation Sans", "Liberation Serif",
+    "DejaVu Sans", "DejaVu Serif", "DejaVu Sans Mono",
+    "Liberation Sans", "Liberation Serif",
     NULL
 };
 

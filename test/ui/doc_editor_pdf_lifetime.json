@@ -1,0 +1,103 @@
+{
+  "name": "Doc editor PDF string and folder path lifetime",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {
+    "width": 1280,
+    "height": 4000
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-hit-__test .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-hit-__test_pdf .tree-label"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-hit-__test_pdf_Get_Started_With_Smallpdf_pdf"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "Get_Started_With_Smallpdf.pdf"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#pdf-preview .pdf-page"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-hit-__test_pdf_Ghent_PDF-Output-Suite-5-Conformance-Certification_pdf"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "Ghent_PDF-Output-Suite-5-Conformance-Certification.pdf"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#pdf-preview .pdf-page"
+      },
+      "min": 1
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": ".tree-hit-__test_pdf_Ghent_PDF-Output-Test-V50_ALL_REFERENCE_pdf"
+      }
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": ".document-name"
+      },
+      "equals": "Ghent_PDF-Output-Test-V50_ALL_REFERENCE.pdf"
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": "#pdf-preview .pdf-page"
+      },
+      "min": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-hit-__test"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-hit-__test_pdf"
+      },
+      "count": 1
+    },
+    {
+      "type": "assert_count",
+      "target": {
+        "selector": ".tree-hit-__test_pdf_Ghent_PDF-Output-Test-V50_ALL_X4_pdf"
+      },
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Doc editor lists directories before files at each level",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__doc"},
+     "element_b": {"selector": ".tree-hit-__AGENTS_md"}, "relation": "above"},
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__doc"},
+     "element_b": {"selector": ".tree-hit-__lambda"}, "relation": "above"},
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__AGENTS_md"},
+     "element_b": {"selector": ".tree-hit-__Makefile"}, "relation": "above"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_test_css_animation_gtest_cpp"}, "count": 1},
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__test_ui"},
+     "element_b": {"selector": ".tree-hit-__test_test_css_animation_gtest_cpp"}, "relation": "above"},
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__test_pdf"},
+     "element_b": {"selector": ".tree-hit-__test_ui"}, "relation": "above"},
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__test_test_css_animation_gtest_cpp"},
+     "element_b": {"selector": ".tree-hit-__test_test_css_cascade_memory_gtest_cpp"}, "relation": "above"}
+  ]
+}

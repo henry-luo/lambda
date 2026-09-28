@@ -572,11 +572,21 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
             }
             return array_concat_inherit_cert({.array_num = result}, left, right);
         }
-        // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)
+        // a view or N-D array stores a descriptor in extra, not a scalar tail
+        // count. Reserve one tail word per item so copied wide scalars fit.
         Array *la = left.array, *ra = right.array;
         int64_t total_len = la->length + ra->length;
-        int64_t total_extra = la->extra + ra->extra;
+        int64_t total_extra = (la->is_view || la->is_ndim ? la->length : la->extra) +
+                              (ra->is_view || ra->is_ndim ? ra->length : ra->extra);
+        // destination allocation may collect, so retain both sources and result.
+        RootFrame roots(3);
+        Rooted<Item> rooted_left(roots, left);
+        Rooted<Item> rooted_right(roots, right);
         Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len + total_extra), left_type);
+        if (!result) return ItemError;
+        Rooted<Array*> rooted_result(roots, result);
+        la = rooted_left.get().array;
+        ra = rooted_right.get().array;
         result->type_id = left_type;
         result->length = total_len;
         result->capacity = total_len + total_extra;
@@ -585,7 +595,8 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
         // Source tail pointers cannot survive after either operand dies.
         array_copy_owned_items(result, 0, la->items, la->length);
         array_copy_owned_items(result, la->length, ra->items, ra->length);
-        return array_concat_inherit_cert({.array = result}, left, right);
+        return array_concat_inherit_cert({.array = rooted_result.get()},
+                                         rooted_left.get(), rooted_right.get());
     }
     // different types: produce generic Array, convert typed elements to Items
     int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);

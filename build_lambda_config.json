@@ -455,10 +455,10 @@
         "zlib",
         "brotlidec",
         "brotlicommon",
+        "ThorVG",
         "png",
         "turbojpeg",
         "gif",
-        "ThorVG",
         "pthread"
       ],
       "linux": {
@@ -846,9 +846,9 @@
         "zlib",
         "libuv",
         "pthread",
+        "ThorVG",
         "png",
         "turbojpeg",
-        "ThorVG",
         "glfw"
       ],
       "target_name": "lambda-static",
@@ -2941,6 +2941,41 @@
             ],
             "binary": "test_display_list_gtest.exe",
             "icon": "\ud83e\uddfe"
+          },
+          {
+            "source": "test/test_rdt_vector_gtest.cpp",
+            "name": "Vector Backend Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "binary": "test_rdt_vector_gtest.exe",
+            "icon": "\ud83c\udfa8"
           },
           {
             "source": "test/test_layout_custom_gtest.cpp",

@@ -4,8 +4,11 @@
 #include "../core/lambda-decimal.hpp"
 #include "lambda-error.h"
 #include "heap_api.h"
+#include "context_capsule.h"
+#include "root_vector.h"
 #include "../../lib/log.h"
 #include "../../lib/str.h"
+#include "../../lib/string.h"
 #include "../../lib/arraylist.hpp"
 #include "../../lib/math_checked.hpp"
 #include "../../lib/hashmap_helpers.h"
@@ -3190,6 +3193,58 @@ void object_type_set_constraint(int64_t type_index, fn_ptr constraint_func) {
         (int)obj_type->type_name.length, obj_type->type_name.str);
 }
 
+typedef struct UiAttributeRoots {
+    RootVector values;
+} UiAttributeRoots;
+
+static void ui_attribute_roots_destroy(void* capsule) {
+    UiAttributeRoots* state = (UiAttributeRoots*)capsule;
+    root_vector_destroy(&state->values);
+    mem_free(state);
+}
+
+static const ContextCapsuleOps ui_attribute_roots_ops = {
+    "ui-attribute-roots", CONTEXT_CAPSULE_LIFETIME_CONTEXT,
+    sizeof(UiAttributeRoots), NULL, NULL, ui_attribute_roots_destroy
+};
+
+static RootVector* ui_attribute_roots(void) {
+    UiAttributeRoots* state = (UiAttributeRoots*)context_capsule_ensure(
+        context, CONTEXT_CAPSULE_UI_ATTRIBUTE_ROOTS, &ui_attribute_roots_ops);
+    if (!state) return nullptr;
+    if (!state->values.name) {
+        root_vector_init(&state->values, (Context*)context, "ui-element-attributes");
+    }
+    return &state->values;
+}
+
+static bool ui_set_element_fields(Element* elmt, Item* values, int count) {
+    if (count == 0) return true;
+    RootVector* retained = ui_attribute_roots();
+    if (!retained) return false;
+    for (int i = 0; i < count; i++) {
+        Item value = values[i];
+        TypeId type = get_type_id(value);
+        if (type == LMD_TYPE_STRING) {
+            // UI elements live in an arena that GC does not scan. Keep text
+            // attributes with that arena, including PDF SVG path data.
+            String* source = value.get_safe_string();
+            if (source) {
+                String* held = string_from_strview_arena(
+                    strview_init(source->chars, source->len), context->arena);
+                if (!held) return false;
+                values[i] = {.item = s2it(held)};
+            }
+        } else if (type > LMD_TYPE_INT && !root_vector_push(retained, value)) {
+            // Non-text attributes such as component path lists can point
+            // into the GC heap and must remain live with the arena tree.
+            return false;
+        }
+    }
+    set_fields_items((TypeMap*)elmt->type, elmt->data, values, count);
+    return true;
+}
+
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
     // skip data allocation if already set (combined allocation via elmt_with_data)
@@ -3203,7 +3258,17 @@ Element* elmt_fill(Element* elmt, ...) {
     // set attributes
     va_list args;
     va_start(args, elmt);
-    set_fields((TypeMap*)elmt_type, elmt->data, args);
+    if (context->ui_mode && context->arena) {
+        int count = (int)elmt_type->length;
+        RootSpan values((size_t)(count > 0 ? count : 1));
+        for (int i = 0; i < count; i++) values.words()[i] = va_arg(args, uint64_t);
+        if (!ui_set_element_fields(elmt, values.items(), count)) {
+            va_end(args);
+            return nullptr;
+        }
+    } else {
+        set_fields((TypeMap*)elmt_type, elmt->data, args);
+    }
     va_end(args);
     return elmt;
 }
@@ -3221,7 +3286,17 @@ Element* elmt_fill_items(Element* elmt, const Item* values, int value_count) {
             elmt->data = heap_data_calloc(elmt_type->byte_size);
         }
     }
-    set_fields_items((TypeMap*)elmt_type, elmt->data, values, value_count);
+    if (context->ui_mode && context->arena) {
+        int count = (int)elmt_type->length;
+        RootSpan rooted_values((size_t)(count > 0 ? count : 1));
+        for (int i = 0; i < count; i++) {
+            rooted_values.words()[i] = (i < value_count && values)
+                ? values[i].item : ItemNull.item;
+        }
+        if (!ui_set_element_fields(elmt, rooted_values.items(), count)) return nullptr;
+    } else {
+        set_fields_items((TypeMap*)elmt_type, elmt->data, values, value_count);
+    }
     return elmt;
 }
 

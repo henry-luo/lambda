@@ -61,7 +61,7 @@ DOM_UI_JOBS ?= $(shell n=$(NPROCS); if [ "$$n" -gt 1 ]; then echo $$((n - 1)); e
 LAYOUT_TEST_ENV ?= LAMBDA_AUTO_CLOSE=1 LAMBDA_POST_LOAD_SETTLE_MS=200
 # Ranges and reflection remain extended `make test` coverage; their large
 # known-failure inventories are not part of the fast Radiant baseline gate.
-RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
+RADIANT_BASELINE_TEST_PROJECTS := test_ui_automation_gtest test_page_load_gtest test_css_cascade_memory_gtest test_radiant_view_gtest test_rdt_vector_gtest test_layout_fuzzy_gtest test_wpt_css_syntax_gtest test_wpt_input_events_gtest
 RADIANT_DOM2_WPT_RUNNERS := input_events
 # These are the native projects selected by test-lambda-baseline. Keep this
 # list aligned with the runner's non-extended config projects; otherwise a
@@ -2146,6 +2146,8 @@ run-radiant-baseline:
 	dom_ui_elapsed=0; \
 	radiant_view_passed=0; radiant_view_failed=0; radiant_view_status="⏭️  SKIP"; \
 	radiant_view_elapsed=0; \
+	vector_passed=0; vector_failed=0; vector_status="⏭️  SKIP"; \
+	vector_elapsed=0; \
 	page_passed=0; page_failed=0; page_status="⏭️  SKIP"; \
 	page_elapsed=0; \
 	css_memory_passed=0; css_memory_failed=0; css_memory_status="⏭️  SKIP"; \
@@ -2225,6 +2227,22 @@ run-radiant-baseline:
 		if [ "$$radiant_view_failed" = "0" ] || [ -z "$$radiant_view_failed" ]; then radiant_view_status="✅ PASS"; radiant_view_failed=0; else radiant_view_status="❌ FAIL"; any_failed=1; fi; \
 	else \
 		echo "   ⚠️  test/test_radiant_view_gtest.exe not found"; \
+	fi; \
+	\
+	echo "📦 Vector Backend Tests:"; \
+	if [ -f "test/test_rdt_vector_gtest.exe" ]; then \
+		vector_exit=0; \
+		run_logged "temp/_radiant_vector.log" ./test/test_rdt_vector_gtest.exe || vector_exit=$$?; \
+		vector_elapsed=$$run_logged_elapsed; \
+		output=$$(cat "temp/_radiant_vector.log"); \
+		echo "$$output" | grep -E "^\[" | tail -5; \
+		vector_passed=$$(echo "$$output" | grep -E "^\[  PASSED  \]" | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		vector_failed=$$(echo "$$output" | grep -E "^\[  FAILED  \][[:space:]]+[0-9]+ test" | head -1 | grep -oE "[0-9]+" | head -1 || echo "0"); \
+		vector_passed=$${vector_passed:-0}; vector_failed=$${vector_failed:-0}; \
+		if [ $$vector_exit -ne 0 ] && [ $$vector_failed -eq 0 ]; then vector_failed=1; fi; \
+		if [ $$vector_failed -eq 0 ]; then vector_status="✅ PASS"; else vector_status="❌ FAIL"; any_failed=1; fi; \
+	else \
+		echo "   ⚠️  test/test_rdt_vector_gtest.exe not found"; \
 	fi; \
 	\
 	echo "📦 Radiant View UI Fixtures:"; \
@@ -2375,8 +2393,8 @@ run-radiant-baseline:
 		if [ $$failed -eq 0 ]; then echo "   ✅ $$runner ($$passed passing files)"; else echo "   ❌ $$runner ($$failed regressions)"; wpt_dom2_status="❌ FAIL"; any_failed=1; fi; \
 	done; \
 	\
-	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + view_ui_passed + page_passed + css_memory_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
-	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + view_ui_failed + page_failed + css_memory_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
+	total_passed=$$((layout_total_passed + snapshot_passed + ui_passed + dom_ui_passed + radiant_view_passed + vector_passed + view_ui_passed + page_passed + css_memory_passed + fuzzy_passed + render_passed + wpt_syntax_passed + wpt_dom2_passed)); \
+	total_failed=$$((layout_total_failed + snapshot_failed + ui_failed + dom_ui_failed + radiant_view_failed + vector_failed + view_ui_failed + page_failed + css_memory_failed + fuzzy_failed + render_failed + wpt_syntax_failed + wpt_dom2_failed)); \
 	total_skipped=$$layout_total_skipped; \
 	total_tests=$$((total_passed + layout_total_partial + total_failed)); \
 	\
@@ -2392,6 +2410,7 @@ run-radiant-baseline:
 	echo "   ├── UI Automation       $$ui_status  ($$(format_duration "$$ui_elapsed"), $$ui_passed passed, $$ui_failed failed) (test_ui_automation_gtest.exe)"; \
 	echo "   ├── DOM UI Integration  $$dom_ui_status  ($$(format_duration "$$dom_ui_elapsed"), $$dom_ui_passed passed, $$dom_ui_failed failed) (dom-ui-run)"; \
 	echo "   ├── Radiant View Cmd    $$radiant_view_status  ($$(format_duration "$$radiant_view_elapsed"), $$radiant_view_passed passed, $$radiant_view_failed failed) (test_radiant_view_gtest.exe)"; \
+	echo "   ├── Vector Backend      $$vector_status  ($$(format_duration "$$vector_elapsed"), $$vector_passed passed, $$vector_failed failed) (test_rdt_vector_gtest.exe)"; \
 	echo "   ├── View UI Fixtures    $$view_ui_status  ($$(format_duration "$$view_ui_elapsed"), $$view_ui_passed passed, $$view_ui_failed failed) (test_ui_automation_gtest.exe --suite view)"; \
 	echo "   ├── View Page & Markdown $$page_status  ($$(format_duration "$$page_elapsed"), $$page_passed passed, $$page_failed failed) (test_page_load_gtest.exe)"; \
 	echo "   ├── CSS Cascade Memory $$css_memory_status  ($$(format_duration "$$css_memory_elapsed"), $$css_memory_passed passed, $$css_memory_failed failed) (test_css_cascade_memory_gtest.exe)"; \

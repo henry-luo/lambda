@@ -1464,8 +1464,21 @@ float layout_measure_font_glyph_advance(FontHandle* handle, FontProp* style,
     if (!style || style->font_size <= 0.0f || !handle) return 0.0f;
     FontStyleDesc desc = font_style_desc_from_prop(style);
     LoadedGlyph* glyph = font_load_glyph(handle, &desc, codepoint, false);
-    if (!glyph || glyph->advance_x <= 0.0f) return 0.0f;
+    if (!glyph || glyph->advance_x <= 0.0f) {
+        return layout_document_missing_glyph_advance(handle, codepoint, raster_scale);
+    }
     return glyph->advance_x / (raster_scale > 0.0f ? raster_scale : 1.0f);
+}
+
+float layout_document_missing_glyph_advance(FontHandle* handle, uint32_t codepoint,
+                                            float raster_scale) {
+    // A document font's .notdef width is used only after authored and system
+    // fallback failed; missing glyphs in other faces keep their existing path.
+    if (!font_handle_is_document_font(handle) || font_has_codepoint(handle, codepoint)) {
+        return 0.0f;
+    }
+    return font_get_missing_glyph_advance(handle) /
+        (raster_scale > 0.0f ? raster_scale : 1.0f);
 }
 
 bool layout_utf8_next_codepoint(const char** cursor, const char* end,

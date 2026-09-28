@@ -416,6 +416,11 @@ void rdt_vector_end_batch(RdtVector* vec) {
     }
 }
 
+uint64_t rdt_vector_clip_mask_count(const RdtVector* vec) {
+    (void)vec;
+    return 0;
+}
+
 // ============================================================================
 // Path construction
 // ============================================================================
