@@ -44999,6 +44999,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
 static const LambdaDocumentTransformConfig lambda_document_transforms[] = {
     {"pdf", "lambda.pdf.pdf", "pdf_to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
     {"latex", "lambda.latex.latex", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
+    {"tikz", "lambda.doc.tikz.tikz", "render_document", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
     {"graph", "lambda.graph.document", "to_html", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
     {"math", "lambda.doc.math.math", "render_math", LAMBDA_DOCUMENT_TRANSFORM_SOURCE_PARSED},
     // edit mode selects the application; lambda.edit's registry selects the

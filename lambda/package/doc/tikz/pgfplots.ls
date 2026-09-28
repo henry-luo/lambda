@@ -73,12 +73,31 @@ fn axis_domain(points, coordinate, low, high) {
 fn series_color(plot, index) string^ {
     let cycle = ["blue", "red", "green", "purple", "orange"]
     let checked = opts.check(plot, ["blue", "red", "green", "orange", "purple", "gray",
-        "black", "color", "only marks", "domain", "samples"])^
+        "black", "color", "only marks", "domain", "samples", "mark"])^
     let fallback = cycle[index % len(cycle)]
     opts.color(plot, fallback)^
 }
 
-fn render_series(series_list, index, xs, ys, acc) any^ {
+fn point_marker(point, color, mark) {
+    if (mark == "x") <path d: svg.M(point[0] - 3.0, point[1] - 3.0) ++ " " ++
+            svg.L(point[0] + 3.0, point[1] + 3.0) ++ " " ++
+            svg.M(point[0] - 3.0, point[1] + 3.0) ++ " " ++
+            svg.L(point[0] + 3.0, point[1] - 3.0),
+            fill: "none", stroke: color, 'stroke-width': 1.2>
+    else if (mark == "o") <circle cx: point[0], cy: point[1], r: 2.8,
+        fill: "white", stroke: color, 'stroke-width': 1.2>
+    else svg.circle(point[0], point[1], 2.8, color)
+}
+
+fn checked_mark(plot, axis_node) string^ {
+    let marks_only = opts.has(plot, "only marks")
+    let mark = opts.value(plot, "mark", opts.value(axis_node, "mark",
+        if (marks_only) "*" else "none"))
+    if (mark == "none" or mark == "x" or mark == "*" or mark == "o") mark
+    else raise error("unsupported PGFPlots mark: " ++ mark)
+}
+
+fn render_series(series_list, axis_node, index, xs, ys, acc) any^ {
     if (index >= len(series_list)) acc
     else {
         let plot = series_list[index].source
@@ -88,13 +107,14 @@ fn render_series(series_list, index, xs, ys, acc) any^ {
             [float(scale.scale_apply(xs, point.x)),
              float(scale.scale_apply(ys, point.y))]]
         let marks_only = opts.has(plot, "only marks")
+        let mark = checked_mark(plot, axis_node)^
         let path = if (marks_only) null
             else <path d: svg.line_path(transformed), fill: "none",
                 stroke: color, 'stroke-width': 1.5>
-        let marks = if (marks_only) [for (point in transformed)
-            svg.circle(point[0], point[1], 2.8, color)] else []
+        let marks = if (mark == "none") [] else [for (point in transformed)
+            point_marker(point, color, mark)]
         let next = if (path == null) [*acc, *marks] else [*acc, path, *marks]
-        render_series(series_list, index + 1, xs, ys, next)^
+        render_series(series_list, axis_node, index + 1, xs, ys, next)^
     }
 }
 
@@ -108,8 +128,8 @@ fn label_at(raw, x, y, extra = "") any^ {
     else labels.positioned(labels.prepare(raw)^, x, y, extra)
 }
 
-fn legend_labels(axis_node) => [for (child in axis_node
-    where child is element and string(name(child)) == "legend_entry") child.source]
+fn legend_nodes(axis_node) => [for (child in axis_node
+    where child is element and string(name(child)) == "legend_entry") child]
 
 fn render_legend(entries, plots, index, left, acc) any^ {
     if (index >= len(entries)) acc
@@ -132,9 +152,78 @@ fn render_legend(entries, plots, index, left, acc) any^ {
     }
 }
 
-pub fn render_axis(axis_node) any^ {
+fn polar_point(point, center_x, center_y, radius_px, max_radius) {
+    let angle = float(point.x) * 3.141592653589793 / 180.0
+    let radius = float(point.y) * radius_px / max_radius;
+    [center_x + radius * math.cos(angle), center_y - radius * math.sin(angle)]
+}
+
+fn render_polar_series(series_list, index, center_x, center_y,
+                       radius_px, max_radius, acc) any^ {
+    if (index >= len(series_list)) acc
+    else {
+        let plot = series_list[index].source
+        let color = series_color(plot, index)^
+        let points = [for (point in series_list[index].points)
+            polar_point(point, center_x, center_y, radius_px, max_radius)]
+        let next = [*acc, <path d: svg.line_path(points), fill: "none",
+            stroke: color, 'stroke-width': 1.5>]
+        render_polar_series(series_list, index + 1, center_x, center_y,
+            radius_px, max_radius, next)^
+    }
+}
+
+fn render_polar_axis(axis_node) any^ {
+    let checked = opts.check(axis_node, ["width", "height", "title", "domain", "samples"])^
+    let plots = children_named(axis_node, "plot")
+    if (len(plots) == 0) raise error("PGFPlots polar axis has no plots")
+    let series_list = resolve_plots(plots, axis_node, 0, [])^
+    let all_points = [for (series in series_list, point in series.points) point]
+    let max_radius = max([for (point in all_points) abs(float(point.y))])
+    if (max_radius <= 0.0) raise error("PGFPlots polar radius must be nonzero")
+    let width = opts.dimension_px(opts.value(axis_node, "width", "8cm"))^
+    let height = opts.dimension_px(opts.value(axis_node, "height", "8cm"))^
+    let title_source = opts.value(axis_node, "title", null)
+    let title = if (title_source == null) null else labels.plain_title(title_source)^
+    let title_band = if (title == null) 0.0 else 32.0
+    let center_x = width / 2.0
+    let center_y = title_band + height / 2.0
+    let radius_px = (min([width, height]) - 48.0) / 2.0
+    if (radius_px <= 0.0) raise error("PGFPlots polar axis dimensions are too small")
+    let angles = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]
+    let radial_grid = [for (angle in angles) {
+        x: center_x + radius_px * math.cos(angle * 3.141592653589793 / 180.0),
+        y: center_y - radius_px * math.sin(angle * 3.141592653589793 / 180.0)
+    }]
+    let curves = render_polar_series(series_list, 0, center_x, center_y,
+        radius_px, max_radius, [])^
+    let total_height = height + title_band;
+    <div class: "tikz-axis tikz-polar-axis",
+        style: "position:relative;display:inline-block;width:" ++ string(width) ++
+            "px;height:" ++ string(total_height) ++ "px;vertical-align:bottom;",
+        <svg xmlns: "http://www.w3.org/2000/svg", width: width,
+            height: total_height,
+            viewBox: "0 0 " ++ string(width) ++ " " ++ string(total_height),
+            <circle cx: center_x, cy: center_y, r: radius_px / 2.0,
+                fill: "none", stroke: "#ddd", 'stroke-width': 1.0>
+            <circle cx: center_x, cy: center_y, r: radius_px,
+                fill: "none", stroke: "#aaa", 'stroke-width': 1.0>
+            for (point in radial_grid)
+                <path d: svg.M(center_x, center_y) ++ " " ++
+                    svg.L(point.x, point.y), fill: "none",
+                    stroke: "#ddd", 'stroke-width': 1.0>
+            for (curve in curves) curve
+        >
+        if (title != null) <span class: "tikz-polar-title",
+            style: "position:absolute;left:50%;top:2px;" ++
+                "transform:translateX(-50%);white-space:nowrap;font-weight:bold;" ++
+                "font-size:18px;", title>
+    >
+}
+
+fn render_cartesian_axis(axis_node) any^ {
     let checked = opts.check(axis_node, ["xmin", "xmax", "ymin", "ymax", "width", "height",
-        "xlabel", "ylabel", "grid", "domain", "samples"])^
+        "xlabel", "ylabel", "grid", "domain", "samples", "mark"])^
     let plots = children_named(axis_node, "plot")
     if (len(plots) == 0) raise error("PGFPlots axis has no coordinate plots")
     let series_list = resolve_plots(plots, axis_node, 0, [])^
@@ -160,13 +249,18 @@ pub fn render_axis(axis_node) any^ {
         else raise error("PGFPlots clipping outside axis limits is not supported yet")
     let width = opts.dimension_px(opts.value(axis_node, "width", "8cm"))^
     let height = opts.dimension_px(opts.value(axis_node, "height", "5cm"))^
-    let entries = legend_labels(axis_node)
-    if (len(entries) > len(plots))
+    let legend_entries = legend_nodes(axis_node)
+    let surplus_explicit = [for (index, entry in legend_entries
+        where index >= len(plots) and entry.from_list != true) entry]
+    if (len(surplus_explicit) > 0)
         raise error("PGFPlots has more legend entries than plots")
+    let entries = [for (index, entry in legend_entries
+        where index < len(plots)) entry.source]
     // keep legends in a separate band so rising curves and scatter points stay visible.
     let legend_band = if (len(entries) > 0) 6.0 + float(len(entries)) * 22.0 else 0.0
     let total_height = height + legend_band
-    let left = 48.0
+    // logarithmic ticks need room for values such as 1e-05 beside the y title.
+    let left = if (ylog) 80.0 else 64.0
     let top = 20.0 + legend_band
     let pw = width - left - 18.0
     let ph = height - 20.0 - 43.0
@@ -181,7 +275,7 @@ pub fn render_axis(axis_node) any^ {
     let config = {tick_count: 5}
     let grid_x = if (grid == "major") chart_axis.x_axis_grid(xs, pw, ph, config) else null
     let grid_y = if (grid == "major") chart_axis.y_axis_grid(ys, pw, ph, config) else null
-    let plot_elements = render_series(series_list, 0, xs, ys, [])^
+    let plot_elements = render_series(series_list, axis_node, 0, xs, ys, [])^
     // Keep plots in the axis coordinate space; nested SVG viewports shift in Radiant.
     let plot_view = <g
         for (part in plot_elements) part>
@@ -210,3 +304,7 @@ pub fn render_axis(axis_node) any^ {
         for (entry in legend) entry
     >
 }
+
+pub fn render_axis(axis_node) any^ =>
+    if (string(name(axis_node)) == "polaraxis") render_polar_axis(axis_node)^
+    else render_cartesian_axis(axis_node)^

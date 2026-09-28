@@ -23,7 +23,18 @@ pub fn evaluate(node, x) float^ {
             else lhs / rhs
         }
         else if (op == "^") lhs ** rhs
+        else if (op == ">") if (lhs > rhs) 1.0 else 0.0
+        else if (op == "<") if (lhs < rhs) 1.0 else 0.0
+        else if (op == ">=") if (lhs >= rhs) 1.0 else 0.0
+        else if (op == "<=") if (lhs <= rhs) 1.0 else 0.0
+        else if (op == "==") if (lhs == rhs) 1.0 else 0.0
+        else if (op == "!=") if (lhs != rhs) 1.0 else 0.0
         else raise error("unknown PGFPlots arithmetic operator")
+    }
+    else if (kind == "conditional") {
+        // PGF conditionals evaluate only the selected branch.
+        if (evaluate(node[0], x)^ != 0.0) evaluate(node[1], x)^
+        else evaluate(node[2], x)^
     }
     else if (kind == "function_call") {
         let argument = evaluate(node[0], x)^

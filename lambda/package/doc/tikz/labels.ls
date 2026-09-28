@@ -21,3 +21,10 @@ pub fn positioned(prepared, x, y, extra_style = "") {
         "px;white-space:nowrap;transform:translate(-50%,-50%);" ++ extra_style;
     <span class: "tikz-label", style: style, prepared.element>
 }
+
+pub fn plain_title(source) string^ {
+    // PGFPlots title font declarations affect style, not the displayed words.
+    let text = replace(replace(trim(source), "\\large", ""), "\\bfseries", "")
+    if (contains(text, "\\")) raise error("unsupported PGFPlots title command")
+    else replace(replace(text, "{", ""), "}", "")
+}

@@ -1187,6 +1187,7 @@ static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"application/pdf", "pdf"},
     {"application/x-tex", "latex"},
     {"application/x-latex", "latex"},
+    {"text/x-pgf", "tikz"},
     {"application/toml", "toml"},
     {"application/x-yaml", "yaml"},
     {"text/x-java-properties", "properties"},

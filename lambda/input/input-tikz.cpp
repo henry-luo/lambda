@@ -50,9 +50,10 @@ private:
     }
 
     static int precedence(char op) {
-        if (op == '+' || op == '-') return 1;
-        if (op == '*' || op == '/') return 2;
-        if (op == '^') return 3;
+        if (op == '>' || op == '<' || op == '=' || op == '!') return 1;
+        if (op == '+' || op == '-') return 2;
+        if (op == '*' || op == '/') return 3;
+        if (op == '^') return 4;
         return 0;
     }
 
@@ -65,14 +66,34 @@ private:
         while (true) {
             skip_space();
             if (position_ >= length_) return lhs;
+            if (source_[position_] == '?' && minimum == 0) {
+                position_++;
+                Item when_true = expression(0, depth + 1);
+                skip_space();
+                if (when_true.item == ITEM_NULL) return when_true;
+                if (position_ >= length_ || source_[position_++] != ':') {
+                    error("conditional plot expression requires ':'"); return ItemNull;
+                }
+                Item when_false = expression(0, depth + 1);
+                if (when_false.item == ITEM_NULL) return when_false;
+                lhs = builder_.element("conditional").child(lhs)
+                    .child(when_true).child(when_false).final();
+                continue;
+            }
             char op = source_[position_];
             int power = precedence(op);
             if (power == 0 || power < minimum) return lhs;
-            position_++;
+            size_t op_length = 1;
+            if (power == 1 && position_ + 1 < length_ && source_[position_ + 1] == '=')
+                op_length = 2;
+            else if (op == '=' || op == '!') {
+                error("unsupported plot comparison operator"); return ItemNull;
+            }
+            position_ += op_length;
             // Exponentiation is right-associative; the other operators are left-associative.
             Item rhs = expression(power + (op == '^' ? 0 : 1), depth + 1);
             if (rhs.item == ITEM_NULL) return rhs;
-            char spelling[2] = {op, '\0'};
+            char spelling[3] = {op, op_length == 2 ? '=' : '\0', '\0'};
             lhs = builder_.element("binary").attr("op", spelling)
                 .child(lhs).child(rhs).final();
         }
@@ -84,7 +105,7 @@ private:
         char c = source_[position_];
         if (c == '+' || c == '-') {
             position_++;
-            Item operand = expression(3, depth + 1);
+            Item operand = expression(4, depth + 1);
             if (operand.item == ITEM_NULL) return operand;
             char spelling[2] = {c, '\0'};
             return builder_.element("unary").attr("op", spelling).child(operand).final();
@@ -107,6 +128,11 @@ private:
             }
             position_ = next;
             return builder_.element("number_literal").attr("value", value).final();
+        }
+        if (c == '\\' && position_ + 2 <= length_ && source_[position_ + 1] == 'x' &&
+                (position_ + 2 == length_ || !isalpha((unsigned char)source_[position_ + 2]))) {
+            position_ += 2;
+            return builder_.element("variable").attr("name", "x").final();
         }
         if (isalpha((unsigned char)c)) {
             size_t begin = position_;
@@ -444,11 +470,29 @@ private:
         return true;
     }
 
-    bool legend(ElementBuilder& parent) {
+    bool legend(ElementBuilder& parent, bool multiple) {
         size_t begin = 0, end = 0;
         if (!group('{', '}', &begin, &end)) return false;
-        parent.child(builder_.element("legend_entry")
-            .attr("source", source_item(begin, end)).final());
+        if (!multiple) {
+            parent.child(builder_.element("legend_entry")
+                .attr("source", source_item(begin, end)).attr("from_list", false).final());
+            return true;
+        }
+        size_t start = begin, depth = 0;
+        for (size_t cursor = begin; cursor <= end; cursor++) {
+            char c = cursor < end ? source_[cursor] : ',';
+            if (c == '\\' && cursor + 1 < end) { cursor++; continue; }
+            if (c == '{') depth++;
+            else if (c == '}' && depth > 0) depth--;
+            if (c != ',' || depth != 0) continue;
+            size_t label_begin = start, label_end = cursor;
+            trim_span(source_, &label_begin, &label_end);
+            if (label_begin == label_end) { error("empty plot legend entry"); return false; }
+            parent.child(builder_.element("legend_entry")
+                .attr("source", source_item(label_begin, label_end))
+                .attr("from_list", true).final());
+            start = cursor + 1;
+        }
         return true;
     }
 
@@ -486,7 +530,8 @@ private:
     bool environment(ElementBuilder& parent, const char* name, size_t depth) {
         if (strcmp(name, "tikzpicture") != 0 && strcmp(name, "scope") != 0 &&
                 strcmp(name, "axis") != 0 && strcmp(name, "semilogxaxis") != 0 &&
-                strcmp(name, "semilogyaxis") != 0 && strcmp(name, "loglogaxis") != 0) {
+                strcmp(name, "semilogyaxis") != 0 && strcmp(name, "loglogaxis") != 0 &&
+                strcmp(name, "polaraxis") != 0) {
             error("unsupported environment"); return false;
         }
         ElementBuilder el = builder_.element(name);
@@ -522,11 +567,18 @@ private:
             } else if (strcmp(name, "addplot") == 0) {
                 if (!plot(parent)) return false;
             } else if (strcmp(name, "addlegendentry") == 0) {
-                if (!legend(parent)) return false;
+                if (!legend(parent, false)) return false;
+            } else if (strcmp(name, "legend") == 0) {
+                if (!legend(parent, true)) return false;
             } else if (strcmp(name, "draw") == 0 || strcmp(name, "path") == 0) {
                 if (!path(parent, name)) return false;
             } else if (strcmp(name, "node") == 0) {
                 if (!node(parent)) return false;
+            } else if (!closing && strcmp(name, "usepgfplotslibrary") == 0) {
+                size_t begin = 0, end = 0;
+                if (!group('{', '}', &begin, &end)) return false;
+                parent.child(builder_.element("pgfplots_library")
+                    .attr("source", source_item(begin, end)).final());
             } else {
                 error("unsupported TikZ command"); return false;
             }

@@ -211,6 +211,7 @@ char* convert_charset_to_utf8(const char* content, size_t content_len, const cha
 void apply_inline_styles_to_tree(DomElement* dom_elem, Pool* pool, int depth = 0);
 void log_root_item(Item item, const char* indent="  ");
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool);
+DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool);
 
 DomDocument* load_lambda_script_doc(Url* script_url, int viewport_width, int viewport_height, Pool* pool);
 DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height, Pool* pool);
@@ -2598,6 +2599,7 @@ struct LayoutFormatRoute {
 static const LayoutFormatRoute layout_format_routes[] = {
     {".ls", load_lambda_script_doc},
     {".tex", load_latex_doc}, {".latex", load_latex_doc},
+    {".pgf", load_tikz_doc},
     {".md", load_markdown_doc}, {".markdown", load_markdown_doc},
     {".wiki", load_wiki_doc}, {".xml", load_xml_doc},
     {".svg", load_svg_layout_file}, {".png", load_image_layout_file},
@@ -3460,6 +3462,17 @@ DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_hei
         return nullptr;
     }
     return load_lambda_document_transform_doc(latex_url, transform, nullptr, 0,
+                                              viewport_width, viewport_height, pool);
+}
+
+DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_height, Pool* pool) {
+    const LambdaDocumentTransformConfig* transform =
+        lambda_document_transform_for_input_type("tikz");
+    if (!transform) {
+        log_error("document-transform: TikZ runtime configuration is missing");
+        return nullptr;
+    }
+    return load_lambda_document_transform_doc(tikz_url, transform, nullptr, 0,
                                               viewport_width, viewport_height, pool);
 }
 

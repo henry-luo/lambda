@@ -227,6 +227,7 @@ typedef enum {
     DOC_FORMAT_HTML,
     DOC_FORMAT_MARKDOWN,
     DOC_FORMAT_LATEX,
+    DOC_FORMAT_TIKZ,
     DOC_FORMAT_XML,
     DOC_FORMAT_RST,
     DOC_FORMAT_WIKI,
@@ -253,6 +254,8 @@ static DocFormat detect_doc_format(const char* filename) {
         return DOC_FORMAT_MARKDOWN;
     } else if (str_ieq_const(ext, ext_len, "tex") || str_ieq_const(ext, ext_len, "latex")) {
         return DOC_FORMAT_LATEX;
+    } else if (str_ieq_const(ext, ext_len, "pgf")) {
+        return DOC_FORMAT_TIKZ;
     } else if (str_ieq_const(ext, ext_len, "xml")) {
         return DOC_FORMAT_XML;
     } else if (str_ieq_const(ext, ext_len, "rst")) {
@@ -326,6 +329,11 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
                                  top_level_cookie_jar);
         }
 
+        case DOC_FORMAT_TIKZ:
+            log_debug("Loading as TikZ/PGF document");
+            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
+                                 top_level_cookie_jar);
+
         case DOC_FORMAT_XML:
             log_debug("Loading as XML document with CSS stylesheet");
             return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
@@ -378,7 +386,7 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
 
         default:
             log_error("Unsupported document format for file: %s", filename);
-            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .ls, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
+            log_error("Supported formats: .html, .htm, .md, .markdown, .tex, .latex, .pgf, .ls, .xml, .pdf, .svg, .png, .jpg, .jpeg, .gif, .json, .yaml, .yml, .toml, .txt, .csv, .ini, .conf, .cfg, .log");
             return NULL;
     }
 }
@@ -390,6 +398,7 @@ static const char* get_format_name(const char* filename) {
         case DOC_FORMAT_HTML: return "HTML";
         case DOC_FORMAT_MARKDOWN: return "Markdown";
         case DOC_FORMAT_LATEX: return "LaTeX";
+        case DOC_FORMAT_TIKZ: return "TikZ/PGF";
         case DOC_FORMAT_XML: return "XML";
         case DOC_FORMAT_RST: return "RST";
         case DOC_FORMAT_WIKI: return "Wiki";

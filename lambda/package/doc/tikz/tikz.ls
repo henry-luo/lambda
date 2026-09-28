@@ -4,6 +4,7 @@ import labels: .labels
 import plots: .pgfplots
 import named: .named
 import svg: lambda.chart.svg
+import math_css: lambda.doc.math.css
 
 fn children_named(node, tag) => [for (child in node
     where child is element and string(name(child)) == tag) child]
@@ -101,7 +102,8 @@ fn render_picture(picture) any^ {
             (string(name(child)) == "axis" or
              string(name(child)) == "semilogxaxis" or
              string(name(child)) == "semilogyaxis" or
-             string(name(child)) == "loglogaxis")) child]
+             string(name(child)) == "loglogaxis" or
+             string(name(child)) == "polaraxis")) child]
     let paths = drawing_nodes(picture)
     let named_nodes = [for (child in paths where string(name(child)) == "node" and
         (child.id != null or opts.has(child, "draw") or opts.has(child, "diamond"))) child]
@@ -117,11 +119,35 @@ fn render_picture(picture) any^ {
     else raise error("mixed or scoped TikZ pictures are not supported yet")
 }
 
-pub fn render(source) any^ {
-    let parsed = parse(source, {type: "tikz"})^
+fn render_parsed(parsed) any^ {
     let wrapper = children_named(parsed, "tikzpicture")
-    if (len(wrapper) == 1 and len(parsed) == 1) render_picture(wrapper[0])^
-    else render_picture(parsed)^
+    if (len(wrapper) == 0) render_picture(parsed)^
+    else if (len(wrapper) == 1) render_picture(wrapper[0])^
+    else <div class: "tikz-fragment-gallery",
+        for (picture in wrapper)
+            <div style: "margin-bottom:20px;", render_picture(picture)^>
+    >
+}
+
+pub fn render(source) any^ {
+    render_parsed(parse(source, {type: "tikz"})^)^
+}
+
+// Direct .pgf documents use the parsed TikZ tree, including multiple pictures.
+pub fn render_document(ast, options) any^ {
+    let graphic = render_parsed(ast)^
+    let math_stylesheet = math_css.get_stylesheet(options);
+    <html lang: "en",
+        <head
+            <meta charset: "utf-8">
+            <meta name: "viewport", content: "width=device-width, initial-scale=1">
+            <title "TikZ/PGF Picture">
+            <style math_stylesheet>
+        >
+        <body style: "margin:0;padding:24px;background:white;color:#222;" ++
+            "font-family:Georgia,serif;",
+            graphic>
+    >
 }
 
 pub fn render_ast(graphics_island) any^ {
