@@ -563,12 +563,18 @@ pn fold(arr, init, f) {
     result
 }
 
-// Usage
+// Usage — `fold` is a pn, so its call site must be a pn too
 filter([1, 2, 3, 4, 5], (x) => x > 2)        // [3, 4, 5]
 filter_shift([1, 2, 3, 4, 5], (x) => x > 2)  // [5, 6, 7]
 map_array([1, 2, 3], (x) => x * 2)           // [2, 4, 6]
-fold([1, 2, 3, 4], 0, (a, b) => a + b)       // 10
+
+pn main() {
+    print(fold([1, 2, 3, 4], 0, (a, b) => a + b))   // 10
+}
 ```
+
+For a pure fold, use the built-in `reduce` instead of a `pn`:
+`reduce([1, 2, 3, 4], (a, b) => a + b)` is `10` (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md#reduction)).
 
 ---
 

@@ -1,16 +1,22 @@
 ## CLI Commands
 ```bash
-lambda                    # Start REPL
-// REPL Commands: quit, help, clear
-lambda script.ls          # Eval functional script
-lambda run script.ls      # Run procedual script
+lambda                    # Start REPL (commands: quit, help, clear)
+lambda script.ls          # Eval a functional script
+lambda run script.ls      # Run a procedural script (calls main())
 lambda --help             # Show help
 ```
+The dev build is `./lambda.exe`; release bundles ship it as `lambda`.
 
-**Validation:**
+**Documents:**
 ```bash
-lambda validate file.json -s schema.ls  # With schema
-lambda validate file.json            # Default schema
+lambda validate file.json -s schema.ls          # Validate against a schema
+lambda validate page.html                       # Built-in schema (html, md, eml, ics, vcf)
+lambda convert doc.md -t html -o doc.html       # Convert between formats
+lambda layout page.html                         # Print the CSS layout tree
+lambda render page.html -o page.pdf             # Render to svg | pdf | png | jpg
+lambda view page.html                           # Open the interactive viewer
+lambda edit notes.md                            # Edit Markdown, HTML or SVG
+lambda fetch https://example.com -o page.html   # Download a URL
 ```
 
 ## Type System
@@ -19,7 +25,7 @@ Scalar Types:
 
 | Form | Meaning |
 |---|---|
-| `null bool int float decimal` | Primitives |
+| `null bool int integer float decimal` | Primitives (`integer` is arbitrary precision: `42n`) |
 | `string symbol binary datetime path` | Primitives |
 | `i8 i16 i32 i64` | Sized signed integers |
 | `u8 u16 u32 u64` | Sized unsigned integers |
@@ -75,7 +81,7 @@ type Counter {
     fn add(n: int) => value + n
     pn inc() { value = value + 1 }    // Procedural
 }
-type Circle : Shape { radius: float }   // Inheritance
+type Circle : Point { radius: float }   // Inheritance
 ```
 
 Literals & Access:
@@ -97,13 +103,14 @@ Type Checking (nominal only):
 | `p is map` | true (objects are map-compatible) |
 | `{x: 1} is Point` | false (plain maps don't match) |
 
-**Constraints:**
+**Constraints** (parsed, but not yet enforced inside object types — alpha):
 ```lambda
 type User {
   name: string that (len(~) > 1),  // Field constraint
   age: int that (0 <= ~ <= 150),
   that (~.name != "admin")         // Object constraint
 }
+type Age = int that (0 <= ~ <= 150)   // a named constrained type IS enforced by `is`
 ```
 
 **Self reference `~`:**
@@ -188,8 +195,8 @@ Constructors:
 | Form | Meaning |
 |---|---|
 | `datetime()` `today()` `justnow()` | Current date/time |
-| `datetime(2025, 4, 26, 10, 30)` | From parts |
-| `date(2025, 4, 26)` `time(10, 30, 45)` | Date / time only |
+| `datetime("2025-04-26T10:30")` `datetime(1745643645123)` | From an ISO string / Unix milliseconds |
+| `date(2025, 4, 26)` `time(10, 30, 45)` | Date / time from parts |
 
 Collections:
 
@@ -236,8 +243,8 @@ Let Expressions (immutable):
 
 | Form | Meaning |
 |---|---|
-| `(let x = 5, x + 1, x * 2)` | Single binding |
-| `(let a = 1, b = 2, a + b)` | Multiple bindings |
+| `(let x = 5, x * 2)` | Single binding |
+| `(let a = 1, let b = 2, a + b)` | Multiple bindings — repeat `let` |
 
 Let Statements (immutable):
 
@@ -335,6 +342,8 @@ Vector Arithmetic:
 | `1 + [2, 3]` | `[3, 4]` | scalar broadcast |
 | `[1, 2] * 2` | `[2, 4]` | scalar broadcast |
 | `[1, 2] + [3, 4]` | `[4, 6]` | element-wise |
+| `[1, 2, 3] eq 2` | `[false, true, false]` | element-wise comparison: `eq ne lt le gt ge` (S10.2.2) |
+| `[10, 20, 30][[1, 2, 3] gt 1]` | `[20, 30]` | mask indexing; `sum(mask)` counts |
 Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
 ## Pipe Expressions
@@ -566,21 +575,22 @@ Function Declaration:
 
 ```lambda
 pn worker() { return receive()^ }
+pn job(n) { sleep(n)^; return n }
 
 pn main() {
-    let h = start(worker)        // scoped child, opaque identity handle
-    send(h, "job")^             // bounded FIFO mailbox (default 1024)
-    print(wait(h)^)              // wait for T^E result
+    let h = start(worker)                    // scoped child, opaque identity handle
+    send(h, "job")^                          // bounded FIFO mailbox (default 1024)
+    print(wait(h)^)                          // wait for the T^E result
+
+    let j = start(job, [5], {mode: 'task'})  // args array + launch options (S13.1.1v2)
+    let k = start(job, [1])
+    wait(j, timeout: 10)^                    // a timeout does not cancel j
+    select(j, k, timeout: 100)^              // first completed handle
+    sleep(5)^                                // shared libuv timer
+    self()                                   // current handle
+    cancel(k)                                // idempotent cancellation request
+    io.read("file.txt")^                     // async local file read
 }
-
-start(worker, [job], {mode: 'task'})  // args array + launch options (S13.1.1v2)
-
-wait(h, timeout: 10)             // timeout does not cancel h
-select(h1, h2, timeout: 100)^    // first completed handle
-sleep(5)^                        // shared libuv timer
-self()                           // current handle
-cancel(h)                        // idempotent cancellation request
-io.read("file.txt")^             // async local file read
 ```
 
 No `async`/`await` keywords are used. Normal block exit joins children; error
@@ -649,7 +659,7 @@ Given `type SymIdent = \symbol(a w*)`:
 
 **Type:**
 
-`int(v)` `i8(v)` `i16(v)` `i32(v)` `i64(v)` `u8(v)` `u16(v)` `u32(v)` `u64(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `number(v)` `type(v)` `len(v)`
+`int(v)` `i8(v)` `i16(v)` `i32(v)` `i64(v)` `u8(v)` `u16(v)` `u32(v)` `u64(v)` `f32(v)` `float(v)` `decimal(v)` `string(v)` `symbol(v)` `binary(v)` `type(v)` `name(v)` `len(v)` `count(v)`
 
 `type()` returns the canonical numeric name: `type(42i8)` → `"i8"`, `type(3.14f32)` → `"f32"`, `type(1.0f64)` → `"float"`
 
@@ -713,11 +723,11 @@ Follows ECMAScript `String.prototype.split` (S17.1.1).
 
 **Collection:**
 
-`slice(v,i)` `slice(v,i,j)` `set(v)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(s,e,step)` `map(f,v)` `filter(f,v)` `reduce(f,v,init)`
+`slice(v,i)` `slice(v,i,j)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `intersect(a,b)` `except(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(s,e,step)` `reduce(v,f)` `contains(v,x)` `index_of(v,x)`; map and filter are the pipes `|>` and `|:`
 
 **Vector:**
 
-`math.dot(a,b)` `math.norm(v)` `math.cumsum(v)` `math.cumprod(v)` `argmin(v)` `argmax(v)` `diff(v)`
+`math.dot(a,b)` `math.norm(v)` `math.cumsum(v)` `math.cumprod(v)` `argmin(v)` `argmax(v)` `clip(v,lo,hi)` `shape(m)` `reshape(m,s)` `transpose(m)` `flatten(m)` `matmul(a,b)`
 
 **I/O:**
 
@@ -725,7 +735,7 @@ Follows ECMAScript `String.prototype.split` (S17.1.1).
 
 ## Input/Output Formats
 
-**Supported Input Types:** `json`, `xml`, `yaml`, `markdown`, `csv`, `html`, `latex`, `toml`, `rtf`, `css`, `ini`, `math`, `pdf`
+**Supported Input Types:** `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text` (see [Markup_Formats_Support.md](Markup_Formats_Support.md))
 ```lambda
 input("path/file.md", 'markdown')^   // Input Markdown
 ```
@@ -735,7 +745,7 @@ input("path/file.md", 'markdown')^   // Input Markdown
 input("math.txt", {'type':'math', 'flavor':'ascii'})^
 ```
 
-**Output Formatting:** `json`, `yaml`, `xml`, `html`, `markdown`
+**Output Formatting:** `mark`, `json`, `yaml`, `toml`, `ini`, `properties`, `xml`, `html`, `markdown`, `rst`, `org`, `wiki`, `textile`, `latex`, `jsx`, `mdx`, `css`, `text`, `math` (`latex`/`ascii` flavors), `graph` (`dot`/`mermaid`/`d2`)
 ```lambda
 format(data, 'yaml')                // Format as YAML
 ```
@@ -828,7 +838,7 @@ pn main() {                     // print is a pn: only a pn may call it
 4. `*` `/` `div` `%` - Multiplicative
 5. `+` `-` `++` - Additive, concatenation
 6. `<` `<=` `>` `>=` - Relational
-7. `==` `!=` `===` - Equality (`===`: reference equality)
+7. `==` `!=` `===` `eq ne lt le gt ge` - Equality (`===`: reference equality; the word forms are element-wise)
 8. `to` - Range
 9. `&` - Type intersection
 10. `!` - Type exclusion

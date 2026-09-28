@@ -305,19 +305,24 @@ extern "C" int js_animation_frame_flush(double timestamp_ms) {
     return called;
 }
 
+static thread_local bool animation_frame_drain_active = false;
+
 extern "C" int js_animation_frame_drain(int max_frames) {
-    // Auto-close cancels timers in js_event_loop_drain(); rAF draining is
-    // bounded and needed to settle headless layout/reftest-wait snapshots.
+    // Frame callbacks may queue microtasks and ready timers. Pump those without
+    // blocking for a later timeout before the next rendering opportunity.
     if (max_frames <= 0) max_frames = 1;
     int frames = 0;
     int called = 0;
     double timestamp_ms = js_performance_monotonic_now_ms();
+    animation_frame_drain_active = true;
     while (runtime_job_queue_size(&animation_frame_queue) > 0 && frames < max_frames) {
         timestamp_ms += 16.6667;
         called += js_animation_frame_flush(timestamp_ms);
-        js_event_loop_drain();
+        uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
+        js_event_loop_render_checkpoint();
         frames++;
     }
+    animation_frame_drain_active = false;
     if (runtime_job_queue_size(&animation_frame_queue) > 0) {
         log_error("event_loop: animation frame drain stopped with %d callback(s) pending",
             (int)runtime_job_queue_size(&animation_frame_queue));
@@ -1774,6 +1779,13 @@ extern "C" int js_event_loop_drain(void) {
         // them before blocking so recurring timers cannot stall static rendering.
         stop_all_interval_timers();
         uv_run(loop, UV_RUN_NOWAIT);
+        if (dom_get_ui_context() && !animation_frame_drain_active &&
+            js_animation_frame_has_pending()) {
+            // Headless pages need rendering opportunities while timers are
+            // live: a scroll event queued for the next frame must precede a
+            // test's later timeout, as it does in a browser event loop.
+            js_animation_frame_drain(64);
+        }
 
         // run libuv event loop until all one-shot timers/handles are done (or watchdog fires)
         result = lambda_uv_run();

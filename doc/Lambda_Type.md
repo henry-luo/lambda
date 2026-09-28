@@ -71,22 +71,25 @@ Types in Lambda are first-class values that can be manipulated like any other va
 ```lambda
 // Assign types to variables
 let T = int
-let StringList = string[]
-let UserType = {name: string, age: int}
-
-// Pass types as arguments
-fn validate(value, expected_type: type) => value is expected_type
-
-validate(42, int)           // true
-validate("hello", int)      // false
+let IntOrString = int | string
+type StringList = string[]              // suffix and shape forms are declared with `type`
+type UserType = {name: string, age: int}
+[42 is T, "x" is IntOrString, ["a"] is StringList, {name: "a", age: 1} is UserType]
 
 // Return types from functions
-fn element_type(arr_type: type) => arr_type.element
-element_type(int[])         // int
+fn wider(t: type) => t | null
+let W = wider(int);
+[null is W, 5 is W, "a" is W]           // [true, true, false]
 
-// Type in collections
+// Types in collections
 let types = [int, string, bool]
 ```
+
+> **Not yet implemented.** Testing a value against a type held in a
+> *parameter* (`fn check(v, t: type) => v is t`) does not work yet: the
+> right-hand side of `is` must be a type literal, a `type` declaration, or a
+> `let` alias of one. Type parameters do work as contracts
+> (`fn pick(T: type, value: T) T`, below).
 
 ### Type Parameters and Binders
 
@@ -108,12 +111,14 @@ parameter type expression, so it may bind a map field or an array element:
 ```lambda
 fn same(a: number as T, b: T) T => b
 fn field_value(row: {id: int as I}, value: I) I => value
-fn element_value(xs: (int as E)[], value: E) E => value
 
 same(1, 2)                 // 2
 field_value({id: 1}, 2)    // 2
-element_value([1], 2)      // 2
 ```
+
+> **Not yet implemented.** A binder inside an array element type, as in
+> `xs: (int as E)[]`, is ruled by S11.4.8v2 (a nested site binds the
+> encountered subvalue), but the current build rejects such a call.
 
 Repeated `as T` sites in one signature join compatible selections; a later
 reference never infers a type. The name is unavailable before its first site.
@@ -196,14 +201,17 @@ admitted by `A` is also admitted by `B`; it does not convert values or test a
 runtime value as `is` does.
 
 ```lambda
-int <: number                     // true
-number <: int                     // false
-int <: (int | string)             // true
-{a: int, b: int} <: {a: int}      // true
-int[] <: number[]                 // true
+type Pair = {a: int, b: int};
+type HasA = {a: int};
+type Ints = int[];
+type Numbers = number[];
+[int <: number, number <: int, int <: (int | string), Pair <: HasA, Ints <: Numbers]
+// [true, false, true, true, true]
 ```
 
-Non-type operands are errors. Function type operands are also rejected until
+Non-type operands are errors — in an expression a map literal such as
+`{a: int}` is a map *value* holding types, so name such types with `type`
+before comparing them. Function type operands are also rejected until
 their parameter and result variance is specified. [S11.1.4v2, D3.2.5v2]
 
 The schema validator historically spells its catch-all *valid data* pattern as
@@ -217,17 +225,17 @@ The schema validator historically spells its catch-all *valid data* pattern as
 A type operation whose literal operands leave nothing admitted *is* `none`, in an expression and in a declaration alike, and `none` drops out of `|` and `!`. A container literal counts as the pattern it spells:
 
 ```lambda
-1 & 2                 // none: no value is both 1 and 2
-(1 | 2) ! (1 | 2)     // none
-int & "a"             // none: "a" is not an int
-[1] & [2]             // none: no array is both [1] and [2]
-{a: 1} & {a: 2}       // none
-[int] & [int, int]    // none: one item, or two
-int | none            // int
-int ! none            // int
-int & none            // none
-(1 & 2) == none       // true
-null is none          // false
+1 & 2;                // none: no value is both 1 and 2
+(1 | 2) ! (1 | 2);    // none
+int & "a";            // none: "a" is not an int
+[1] & [2];            // none: no array is both [1] and [2]
+{a: 1} & {a: 2};      // none
+[int] & [int, int];   // none: one item, or two
+int | none;           // int
+int ! none;           // int
+int & none;           // none
+(1 & 2) == none;      // true
+null is none;         // false
 none <: string        // true
 ```
 
@@ -249,7 +257,7 @@ let name: string = "Alice"
 let pi: float = 3.14159
 let active: bool = true
 let created: datetime = t'2025-01-01'
-let config_path: path = \.config.json
+let config_path: path = \.'config.json'
 
 // Sized numeric type annotations
 let a: i8 = 42i8
@@ -293,7 +301,7 @@ Ranges represent a contiguous sequence of consecutive values with inclusive star
 | `range` | Any range value |
 | `1 to 10` | Range from 1 to 10 inclusive |
 | `0 to 255` | Byte range |
-| `-100 to 100` | Negative to positive |
+| `(-100) to 100` | Negative to positive — a negative bound is parenthesized |
 | `"a" to "z"` | Lowercase letters |
 | `"0" to "9"` | Digit characters |
 | `"α" to "ω"` | Any Unicode codepoint interval |
@@ -394,8 +402,10 @@ let names: string[] = ["Alice", "Bob"]
 |------|---------|
 | `{name: string, age: int}` | Required fields |
 | `{name: string, age?: int}` | Optional `age` field |
-| `{name: string, ...}` | Open map (allows extra fields) |
 | `{user: {name: string, email: string}}` | Nested maps |
+
+Map types are **open**: a value with fields the type does not name still
+matches (S11.4.6), so `{name: "A", age: 3} is {name: string}` is `true`.
 
 Example:
 
@@ -439,7 +449,7 @@ type Article = <article title: string, author: string;
 | `fn ()` | No params, any return (the return type is optional) |
 | `fn (a: int, b: int) int` | Named parameters (documentation only) |
 | `fn (name: string) string` | Named parameter (documentation only) |
-| `fn (fn (int) int) int` | Takes a function, returns int |
+| `fn (f: fn (int) int) int` | Takes a function, returns int (name the parameter: an unnamed nested function type is not yet parsed) |
 | `fn (int) fn (int) int` | Returns a function |
 | `pn (int) int` | A procedure taking int, returning int |
 | `function` | Any function value, `fn` or `pn` |
@@ -501,7 +511,6 @@ type Point = (float, float)
 
 // Collection aliases
 type IntList = int[]
-type StringMap = {string: string}
 
 // Usage
 let id: UserId = 12345
@@ -534,7 +543,7 @@ type Counter {
     pn increment() { value = value + 1 }   // Mutation method
 }
 
-// Field and object constraints
+// Field and object constraints (parsed; see the status note below)
 type User {
     name: string that (len(~) > 0),
     age: int that (0 <= ~ and ~ <= 150),
@@ -562,6 +571,12 @@ p is map       // true (objects are map-compatible)
 // Object update (copy with overrides)
 let p2 = <Point *:p, x: 10.0>   // copy p, override x
 ```
+
+> **Not yet implemented.** Field-level and object-level `that` constraints
+> inside an object type are parsed and kept in the type, but neither
+> construction nor `is` enforces them yet (S11.4.6 is marked partial: a
+> constrained type enforces its base only). A named constrained type such as
+> `type Age = int that (0 <= ~ <= 150)` *is* enforced by `is` and `match`.
 
 ---
 
@@ -951,7 +966,10 @@ fn grade(score) => match score {
 
 #### Field-Level Constraints in Object Types
 
-Object type fields can each carry their own `that` constraint:
+Object type fields can each carry their own `that` constraint. *Not yet
+implemented:* the constraints below are parsed but not enforced by
+construction or `is` in the current build (see [Object Types](#object-types)),
+so the results shown are the ruled ones.
 
 ```lambda
 type User {
@@ -1339,14 +1357,16 @@ fn safe_process(value: any) => {
 }
 ```
 
-### Type Assertions
+### No Casts
+
+There is no cast or assertion operator: `as` introduces a type binder in a
+signature (see [Type Parameters and Binders](#type-parameters-and-binders)),
+and a checked-cast surface is an open design question (SO9). Narrow a value
+with `is` and a branch, or convert it explicitly:
 
 ```lambda
-// Assert type (unsafe - runtime error if wrong)
-let asserted = value as int    // Asserts value is int
-
-// Safe assertion with check
-let checked = if (value is int) value else error("Expected int")
+fn as_int(value) => if (value is int) value else error("Expected int");
+[as_int(42), int("42"), as_int("42") is error]   // [42, 42, true]
 ```
 
 ---

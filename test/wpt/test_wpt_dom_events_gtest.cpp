@@ -779,7 +779,8 @@ static void report_wpt_dom_events_result(const WptDomEventsResult& result) {
     }
 
     EXPECT_EQ(result.pass_count, result.total_count)
-        << "Not all tests passed in " << p.source_path;
+        << "Not all tests passed in " << p.source_path
+        << "\nOutput (first 4KB):\n" << result.output.substr(0, 4096);
 }
 
 static const std::vector<WptDomEventsParam> g_wpt_dom_events_params =

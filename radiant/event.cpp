@@ -1482,8 +1482,30 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
     }
 }
 
-// The package selects `wheel`; this helper retains only the live pane walk,
-// clamped mutation, non-bubbling scroll notification, and repaint mechanism.
+static void radiant_notify_scrolled_view(EventContext* evcon, ViewBlock* block,
+                                         float old_x, float old_y) {
+    DomDocument* doc = event_context_target_document(evcon);
+    if (dom_realm_active() && doc && doc->view_tree) {
+        if (doc->view_tree->root == static_cast<View*>(block)) {
+            // Publish the root pane before queuing its document event; the
+            // CSSOM getter and scrollend callback must see the same offset.
+            float x = 0.0f;
+            float y = 0.0f;
+            scroll_state_get_position_for_view(event_context_target_state(evcon),
+                static_cast<View*>(block), block->scroll()->pane,
+                &x, &y, nullptr, nullptr);
+            doc_state_sync_viewport_scroll(event_context_target_state(evcon),
+                                           doc, x, y);
+        }
+        dom_notify_scroll_position_change(block, old_x, old_y);
+    } else {
+        radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
+                                      "scroll", false, false);
+    }
+}
+
+// The package selects `wheel`; this helper retains the live pane walk,
+// clamped mutation, scroll notification, and repaint mechanism.
 static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
     if (!evcon || !stack) return false;
     bool changed = false;
@@ -1492,9 +1514,12 @@ static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
         if (!view || !view->is_block()) continue;
         ViewBlock* block = lam::view_require_block(view);
         if (!block->scroller || !block->scroll()->pane) continue;
+        float old_x = 0.0f;
+        float old_y = 0.0f;
+        scroll_state_get_position_for_view(event_context_target_state(evcon), view,
+            block->scroll()->pane, &old_x, &old_y, nullptr, nullptr);
         if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
-            radiant_dispatch_simple_event(evcon, static_cast<View*>(block),
-                                          "scroll", false, false);
+            radiant_notify_scrolled_view(evcon, block, old_x, old_y);
             changed = true;
         }
     }
@@ -4347,8 +4372,7 @@ static bool apply_keyboard_scroll_operation(EventContext* evcon, View* origin,
     if (next_x == x && next_y == y) return false;
 
     bool viewport = doc->view_tree->root == static_cast<View*>(block);
-    radiant_dispatch_simple_event(evcon, static_cast<View*>(block), "scroll",
-                                  false, false);
+    radiant_notify_scrolled_view(evcon, block, x, y);
     if (!viewport) dom_observers_post_layout();
     evcon->need_repaint = true;
     return true;
@@ -7971,6 +7995,7 @@ extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* targe
 }
 
 typedef struct {
+    View* target;
     const char* type;
     double client_x;
     double client_y;
@@ -7984,8 +8009,14 @@ typedef struct {
 
 static Item build_touch_event_item(void* userdata) {
     TouchEventBuildArgs* args = (TouchEventBuildArgs*)userdata;
+    View* listener_target = args->target;
+    while (listener_target && !listener_target->is_element()) {
+        listener_target = listener_target->parent_view();
+    }
+    bool cancelable = dom_input_event_cancelable(listener_target
+        ? listener_target->as_element() : nullptr, args->type);
     Item event = js_create_native_touch_event(args->type, args->client_x, args->client_y,
-        args->ctrl, args->shift, args->alt, args->meta, args->is_active);
+        args->ctrl, args->shift, args->alt, args->meta, args->is_active, cancelable);
     if (args->timestamp_ms >= 0.0) {
         js_event_set_timestamp(event, args->timestamp_ms);
     }
@@ -8001,7 +8032,7 @@ extern "C" bool radiant_dispatch_event_sim_touch(UiContext* uicon, View* target,
     evcon.ui_context = uicon;
     evcon.target_document = uicon->document;
     TouchEventBuildArgs args = {
-        type, client_x, client_y,
+        target, type, client_x, client_y,
         (mods & RDT_MOD_CTRL) != 0, (mods & RDT_MOD_SHIFT) != 0,
         (mods & RDT_MOD_ALT) != 0, (mods & RDT_MOD_SUPER) != 0,
         is_active, timestamp_ms
@@ -8399,6 +8430,8 @@ static bool radiant_dispatch_drag_event(EventContext* evcon, View* target,
  * suppressed (event.preventDefault()).
  */
 typedef struct {
+    View* target;
+    const char* type;
     double client_x;
     double client_y;
     double delta_x;
@@ -8408,12 +8441,18 @@ typedef struct {
 
 static Item build_wheel_event_item(void* userdata) {
     WheelEventBuildArgs* args = (WheelEventBuildArgs*)userdata;
-    return js_create_native_wheel_event("wheel", args->client_x, args->client_y,
+    View* listener_target = args->target;
+    while (listener_target && !listener_target->is_element()) {
+        listener_target = listener_target->parent_view();
+    }
+    bool cancelable = dom_input_event_cancelable(listener_target
+        ? listener_target->as_element() : nullptr, args->type);
+    return js_create_native_wheel_event(args->type, args->client_x, args->client_y,
         args->delta_x, args->delta_y, 0,
         (args->mods & RDT_MOD_CTRL) != 0,
         (args->mods & RDT_MOD_SHIFT) != 0,
         (args->mods & RDT_MOD_ALT) != 0,
-        (args->mods & RDT_MOD_SUPER) != 0);
+        (args->mods & RDT_MOD_SUPER) != 0, cancelable);
 }
 
 static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
@@ -8421,9 +8460,14 @@ static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
                                          double delta_x, double delta_y,
                                          int mods)
 {
-    WheelEventBuildArgs args = {client_x, client_y, delta_x, delta_y, mods};
-    return radiant_dispatch_built_event(evcon, target, build_wheel_event_item,
+    WheelEventBuildArgs args = {target, "wheel", client_x, client_y, delta_x, delta_y, mods};
+    bool prevented = radiant_dispatch_built_event(evcon, target, build_wheel_event_item,
         &args, true, nullptr, true, "wheel");
+    // Legacy mousewheel is dispatched for the same physical input and can
+    // independently cancel its default scrolling action.
+    args.type = "mousewheel";
+    return radiant_dispatch_built_event(evcon, target, build_wheel_event_item,
+        &args, true, nullptr, true, "mousewheel") || prevented;
 }
 
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
@@ -11736,12 +11780,17 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
             if (!evcon.default_prevented && scrollbar_press_block) {
                 uint64_t scroll_epoch = s_scroll_op_epoch;
                 radiant_dispatch_behavior_scrollbar_press(&evcon, evcon.target);
+                float old_x = 0.0f;
+                float old_y = 0.0f;
+                scroll_state_get_position_for_view(event_context_target_state(&evcon),
+                    static_cast<View*>(scrollbar_press_block),
+                    scrollbar_press_block->scroll()->pane,
+                    &old_x, &old_y, nullptr, nullptr);
                 if (s_scroll_op_epoch != scroll_epoch &&
                     scrollpane_apply_press_operation(&evcon, scrollbar_press_block,
                                                       s_scroll_op_name)) {
-                    radiant_dispatch_simple_event(&evcon,
-                        static_cast<View*>(scrollbar_press_block),
-                        "scroll", false, false);
+                    radiant_notify_scrolled_view(&evcon, scrollbar_press_block,
+                                                 old_x, old_y);
                 }
             }
 

@@ -278,7 +278,7 @@ bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
     scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, &h_max, &v_max);
     float previous_h = h;
     float previous_v = v;
-    float scroll_amount = 50;  // pixels to scroll per offset
+    float scroll_amount = RDT_WHEEL_PIXEL_STEP;
 
     if (event->yoffset != 0 && v_max > 0) {
         v += -event->yoffset * scroll_amount;

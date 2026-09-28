@@ -79,6 +79,10 @@ extern "C" Item dom_collect_frame_windows_array(void);
 
 /** Automation hooks: `__lambda_testdriver_key`, `__lambda_set_editing_behavior`. */
 extern "C" Item dom_testdriver_key(Item key_item, Item shift_item, Item ctrl_item, Item alt_item, Item meta_item);
+extern "C" Item dom_testdriver_scroll(Item x_item, Item y_item,
+                                        Item delta_x_item, Item delta_y_item);
+extern "C" Item dom_testdriver_touch(Item target_item, Item type_item,
+                                       Item x_item, Item y_item);
 extern "C" Item dom_set_editing_behavior(Item behavior_item);
 
 extern "C" void dom_install_window_frames_global(void);

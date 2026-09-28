@@ -8,19 +8,21 @@ Lambda supports mathematical typesetting via a dedicated LaTeX math parser and a
 
 ### 1.1 Standalone Math
 
-Pass a raw math expression string directly to `input()` with type `'math'` or `'math-latex'`:
+Parse a math expression from a string with `parse()`, or from a file with `input()`, using type `'math'` (LaTeX, the default), `'math-latex'` or `'math-ascii'`:
 
 ```lambda
-let ast = input("\\frac{a+b}{c}", 'math')^
+let ast = parse("\\frac{a+b}{c}", 'math')^
+let from_file = input("formula.tex", 'math')^
+let ascii = parse("(a + b) / c", {type: 'math', flavor: 'ascii'})^
 ```
 
 | Type string      | Meaning                                  |
 |-----------------|------------------------------------------|
 | `'math'`        | LaTeX math (default)                     |
 | `'math-latex'`  | Explicit LaTeX math                      |
-| `'math-ascii'`  | ASCII Math flavor (see §7)               |
+| `'math-ascii'`  | ASCII Math flavor (see §10)              |
 
-The result is a Lambda element tree rooted at a `math` element, which can be rendered to HTML via the `lambda.doc.math` package.
+Typst math input is not implemented; any other `math-<flavor>` string is parsed as LaTeX. The result is a Lambda element tree rooted at a `math` element, which can be rendered to HTML via the `lambda.doc.math` package.
 
 ### 1.2 Math in Markdown
 
@@ -37,18 +39,32 @@ $$
 
 - **Inline** — delimited by single `$...$`. Backslash-escaped `\$` is not treated as a math delimiter.
 - **Display block** — delimited by `$$...$$`, either on a single line or spanning multiple lines (opening `$$`, body lines, closing `$$` on its own line).
+- **Fenced ASCII math** — a fenced code block tagged `asciimath` becomes a display math block in the ASCII flavor.
 
 ```lambda
 let doc = input('./report.md', 'markdown')^
 ```
 
+`lambda view`, `lambda layout` and `lambda render` typeset the `<math>` elements of a Markdown document through the math package automatically.
+
 ### 1.3 Math in LaTeX Documents
 
-When parsing a full LaTeX document (`type: 'latex'`), math mode content inside `$...$`, `$$...$$`, or math environments is detected automatically and parsed by the same tree-sitter-latex-math grammar.
+When parsing a full LaTeX document (`type: 'latex'`), math mode content inside `$...$`, `$$...$$`, or math environments is detected automatically and parsed by the same direct LaTeX math parser.
 
 ```lambda
 let doc = input('./paper.tex', 'latex')^
 ```
+
+### 1.4 Writing Math Back Out
+
+A parsed `<math>` tree can be serialised again with `format(ast, 'math')`, or converted on the command line:
+
+```bash
+lambda convert formula.tex -f math -t math-latex -o out.tex     # LaTeX
+lambda convert formula.tex -f math -t math-ascii -o out.txt     # ASCII math
+```
+
+The `math-typst` and `math-mathml` targets are accepted by the command line but are stubs that produce no output today.
 
 ---
 
@@ -62,7 +78,7 @@ Math is rendered to HTML using the `lambda.doc.math` package. The package conver
 import math: lambda.doc.math.math
 
 // Parse and render in one step
-let ast     = input("\\sum_{k=1}^{n} k^2", 'math')^
+let ast     = parse("\\sum_{k=1}^{n} k^2", 'math')^
 let inline  = math.render_inline(ast)        // inline (text) style
 let display = math.render_display(ast)       // display (block) style
 let alone   = math.render_standalone(ast)    // display + embedded CSS
@@ -95,7 +111,7 @@ let css = math.stylesheet()
 
 ### 2.3 Output Format
 
-The output HTML uses **MathLive CSS class names** (`ML__latex`, `ML__mfrac`, etc.) and **KaTeX-compatible sizing fonts** (`KaTeX_Size1`–`KaTeX_Size4`) for large delimiters. The package CSS (identical to MathLive's) must be loaded on the page for correct rendering; `render_standalone` embeds it automatically.
+The output HTML is a tree of `<span>` elements carrying Lambda's own `lm_*` class names (`lm_frac`, `lm_sqrt`, …), styled by the package's own stylesheet. The default fonts are Computer Modern / Latin Modern with the KaTeX fonts as fallbacks; `math.stylesheet({font: "katex"})` — or `--font-option katex` on the `lambda convert` command line — selects KaTeX-only fonts. The stylesheet must be loaded on the page for correct rendering; `render_standalone` embeds it automatically.
 
 ---
 
@@ -218,18 +234,11 @@ Use `\begin{env}...\end{env}` syntax. Separate columns with `&` and rows with `\
 | `dcases`      | `\{` left, display size |                          |
 | `rcases`      | right `\}` only  |                               |
 | `aligned`     | none             | Multi-line aligned equations  |
-| `gathered`    | none             | Centered multi-line           |
 | `align`       | none             | Full align environment        |
-| `align*`      | none             | Unnumbered align              |
-| `split`       | none             | Split across lines            |
 | `array`       | none             | General array with col spec   |
-| `subarray`    | none             | Small array for scripts       |
 | `equation`    | none             | Single equation (no numbering)|
-| `equation*`   | none             | Unnumbered equation           |
-| `gather`      | none             | Centered equations            |
-| `gather*`     | none             | Unnumbered gather             |
-| `multline`    | none             | Multi-line single equation    |
-| `multline*`   | none             | Unnumbered multline           |
+
+Other environments (`gathered`, `align*`, `split`, `subarray`, `equation*`, `gather`, `multline`, …) are not parsed: their content is kept, but the environment itself is ignored.
 
 Plain TeX alternatives: `\matrix{...}`, `\pmatrix{...}`, `\bordermatrix{...}`.
 
@@ -375,7 +384,6 @@ x \in \mathbb{R} \quad \text{where } x > 0
 \hspace*{0.5em}   % non-breakable variant
 \hskip 2pt        % plain TeX skip
 \kern 3pt         % kern (raw)
-\mskip 4mu        % math-unit kern (18mu = 1em)
 \mkern 2mu        % math kern
 ```
 
@@ -415,7 +423,7 @@ Supported named colors: CSS color keywords (e.g., `red`, `blue`, `green`, `black
 | `\rlap{x}`      | Left-overlap (zero-width, left-aligned)     |
 | `\clap{x}`      | Centre-overlap (zero-width, centred)        |
 
-> **Note:** `\cancel`, `\bcancel`, `\xcancel` are defined in the grammar but not yet rendered — they are planned for a future update.
+> **Note:** `\cancel`, `\bcancel` and `\xcancel` are not supported; they are passed through as unknown commands.
 
 ---
 
@@ -439,28 +447,13 @@ Supported named colors: CSS color keywords (e.g., `red`, `blue`, `green`, `black
 
 ## 10. ASCII Math Mode
 
-Lambda supports ASCII Math, a more concise notation parsed by the same grammar with flavor `'ascii'`. ASCII Math uses plain-text tokens for common symbols:
+The `'ascii'` flavor is a lighter spelling handled by the same parser:
 
 ```lambda
-let ast = input('(a + b) / sqrt(c^2 + d^2)', 'math-ascii')^
+let ast = parse("(a + b) / sqrt(c^2 + d^2)", 'math-ascii')^
 ```
 
-Key ASCII tokens:
-
-| ASCII token | Equivalent        | ASCII token | Equivalent      |
-|-------------|-------------------|-------------|-----------------|
-| `alpha`     | `\alpha`          | `beta`      | `\beta`         |
-| `sqrt(x)`   | `\sqrt{x}`        | `x/y`       | `\frac{x}{y}`   |
-| `->`        | `\rightarrow`     | `<->`       | `\leftrightarrow` |
-| `<=>`       | `\Leftrightarrow` | `=>`        | `\Rightarrow`   |
-| `<=`        | `\leq`            | `>=`        | `\geq`          |
-| `!=`        | `\neq`            | `~~`        | `\approx`       |
-| `~=`        | `\simeq`          | `xx`        | `\times`        |
-| `+-`        | `\pm`             | `-+`        | `\mp`           |
-| `**`        | `\star`           | `-:`        | `\div`          |
-| `\|->` (pipe-arrow) | `\mapsto` | `..`       | `\ldots`        |
-
-Quoted text is supported in ASCII math: `"hello"` embeds text directly.
+What the flavor changes today: a run of letters is one identifier (`alpha` is the Greek letter, `sqrt` a function), a parenthesised group after `^` or `_` is a script group, and infix `/` is a fraction. The multi-character symbol tokens of AsciiMath proper (`->`, `<=`, `xx`, `+-`, `~~`, `..`, quoted text, …) are **not yet recognized**: `x->0` parses as `x - 0`. Use the LaTeX flavor for anything beyond identifiers, scripts and fractions.
 
 ---
 
@@ -472,13 +465,9 @@ The following constructs are not currently supported. Unknown commands are passe
 
 | Missing              | Notes                                                       |
 |----------------------|-------------------------------------------------------------|
-| `\not\in`, `\not=`   | Negation overlay (`\not` command) — not in grammar          |
-| `\nleq`, `\ngeq`, `\nsim`, `\notin` (extended set) | Many negated relations not in symbol table |
-| `\boldsymbol{x}`     | Bold symbol — use `\mathbf` for roman bold                  |
-| `\pmb{x}`            | Poor man's bold — not supported                             |
+| `\nsim` and other rarely used negated relations | Not in the symbol table (`\not`, `\nleq`, `\ngeq`, `\notin` are supported) |
+| `\pmb{x}`            | Poor man's bold — not supported (`\boldsymbol` is)          |
 | `\widecheck{x}`      | Wide check accent — not in accent table                     |
-| `\iiiint`            | 4-fold integral (only `\int`, `\iint`, `\iiint` supported)  |
-| `\oiiint`            | Triple contour integral                                     |
 | `\LaTeX`, `\TeX`     | Logo commands — not in symbol table                         |
 | `\S`, `\P`           | Section/paragraph symbols                                   |
 | `\dag`, `\ddag`      | Already covered by `\dagger`/`\ddagger`                     |
@@ -487,13 +476,10 @@ The following constructs are not currently supported. Unknown commands are passe
 
 | Missing                    | Notes                                                       |
 |----------------------------|-------------------------------------------------------------|
-| `\xrightarrow[sub]{sup}`   | Extensible arrow with super/subscript — not in grammar      |
-| `\xleftarrow[sub]{sup}`    | Extensible left arrow — not in grammar                      |
-| `\stackrel{a}{b}`          | Treated as unknown command (use `\overset`)                 |
 | `\substack{...}`           | Sub/superscript multi-line — not in grammar                 |
 | `\sideset{l}{r}{\op}`      | Side limits on operators — not supported                    |
 | `\underbrace{x}_{text}`    | Subscript on underbrace (the brace itself works, its label as literal subscript does not auto-render) |
-| `\cancel`, `\bcancel`, `\xcancel` | Strike-through (grammar parses them, rendering not yet implemented) |
+| `\cancel`, `\bcancel`, `\xcancel` | Strike-through — unknown commands                     |
 | `\tag{n}`                  | Equation tags/numbering — not supported                     |
 | `\label{key}` / `\ref{key}`| Cross-referencing — not supported                          |
 | `\intertext{...}`          | Text between aligned rows — not supported                   |
@@ -515,9 +501,8 @@ The following constructs are not currently supported. Unknown commands are passe
 
 | Missing               | Notes                                               |
 |-----------------------|-----------------------------------------------------|
-| MathML output         | Only HTML output is supported                       |
-| DVI / PDF math output | HTML rendering pipeline only (C++ TeX pipeline can produce DVI) |
-| `\text{...}` with nested math | Text re-entering math mode inside `\text` is not supported |
+| MathML and Typst output | `format(ast, 'math')` and `lambda convert` accept the `mathml` and `typst` targets but they are stubs; LaTeX and ASCII output work |
+| DVI / PDF math output | Math reaches PDF only through the HTML/CSS rendering pipeline |
 | Interactive editing   | Cursor, selection, virtual keyboard — out of scope  |
 
 ---

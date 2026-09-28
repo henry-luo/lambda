@@ -1,9 +1,11 @@
 # Bash Support in Lambda
 
-Lambda can compile and execute Bash scripts via JIT compilation. Bash source code is parsed with Tree-sitter, transformed into a typed AST, transpiled to MIR (Medium Intermediate Representation), and JIT-compiled to native machine code — no interpreter loop is involved.
+> **Status (alpha): not shipped.** The Bash front end described here exists in the source tree (`lambda/module/bash/`, about 24K lines, with 37 integration scripts under `test/bash/` and a GNU bash test-suite runner), but it is **not compiled into any current build**: its CLI handler sits behind the `LAMBDA_BASH` build flag, which no build configuration defines, and `lambda/module/bash` is absent from the source directories. In the shipped binary `lambda script.sh` reports that the hosted-language module is unavailable, and none of the tests run. This document records the design and the feature set of the source as it stands, for when the front end is packaged as a Jube module like Python's (see [Lambda_Jube_Runtime.md](Lambda_Jube_Runtime.md)).
+
+The Bash front end compiles Bash scripts through the Lambda runtime. Bash source code is parsed with Tree-sitter, transformed into a typed AST, transpiled to MIR (Medium Intermediate Representation), and JIT-compiled to native machine code — no interpreter loop is involved.
 
 ```bash
-./lambda.exe bash script.sh          # Run a Bash script
+./lambda.exe bash script.sh          # Run a Bash script (once the front end is built in)
 ./lambda.exe bash --posix script.sh  # Run in POSIX-compatible mode
 ```
 
@@ -597,7 +599,7 @@ The `--posix` flag enables POSIX sh compatibility. In POSIX mode, `local` is tre
 
 ## Test Coverage
 
-All 31 integration tests pass:
+The integration suite has 37 scripts under `test/bash/` (plus a runner for the GNU bash test suite); none of them run in current builds because the front end is compiled out. The scripts and the features they cover:
 
 | Test Script | Features Covered |
 |-------------|-----------------|
@@ -643,27 +645,20 @@ All 31 integration tests pass:
 |---------|-------------|
 | **`select` statement** | `select item in list; do ...; done` menu construct |
 | **Coprocesses** | `coproc` command |
-| **Process substitution** | `<(cmd)` and `>(cmd)` |
-| **Job control** | `bg`, `fg`, `jobs`, `wait`, `&` background execution |
-| **`exec`** | Replace the shell process |
-| **`getopts`** | Option parsing builtin |
-| **`let`** | Arithmetic evaluation builtin (alternative to `$(( ))`) |
+| **Job control** | `bg`, `fg`, `jobs` (the `wait` builtin and `&` background execution exist in the source) |
 | **`(( ))` as statement** | Arithmetic without `$` used as a statement (not inside `$(( ))`) |
-| **`$'...'` strings** | ANSI-C quoting (`$'\n'`, `$'\t'`) |
 | **Backtick substitution** | `` `command` `` syntax (only `$(command)` is supported) |
-| **Here-doc indentation** | `<<-EOF` (strip leading tabs) |
-| **Word splitting on `$IFS`** | Implicit `$IFS` splitting of unquoted expansions |
-| **`mapfile` / `readarray`** | Read lines from stdin into an array |
-| **`printf -v`** | Print formatted output into a variable |
 | **Prefix assignments** | `KEY=val command` (env prefix without a builtin/external command) |
+
+Present in the source but untested in any current build: process substitution `<(cmd)`/`>(cmd)`, `exec`, `wait`, `let`, `getopts`, `mapfile`/`readarray`, `printf -v`, `<<-` here-documents, `$'…'` ANSI-C quoting, `$IFS` word splitting, `&` background execution, and `printf` with the `d i o u x X f e g c b q` conversions.
 
 ### Partial / Limited
 
 | Feature | Limitation |
 |---------|-----------|
 | **`echo -e`** | Most escape sequences supported; edge cases may vary |
-| **`printf`** | Only `%s` and `%d` format specifiers |
-| **`read`** | Basic single-variable read; no `-p`, `-a`, `-t`, `-r` flags |
+| **`printf`** | The common conversions are implemented in the source; exotic flags are not |
+| **`read`** | `-p`, `-a`, `-t` and `-r` exist in the source; behaviour unverified |
 | **`$$`, `$!`, `$-`** | Return simulated/static values, not real process data |
 | **Duplicate redirect `>&`** | Parsed in AST but not yet executed |
 

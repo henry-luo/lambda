@@ -45,6 +45,7 @@ Item dom_core_clone_node(Item n, Item deep);
 Item dom_core_normalize(Item n);
 Item dom_core_has_child_nodes(Item n);
 Item dom_core_scroll_into_view_op(Item n);
+Item dom_core_scroll_into_view_options_op(Item n, Item options);
 Item dom_core_scroll_into_view_if_needed_op(Item n, Item center_if_needed);
 Item dom_core_contains_op(Item a, Item b);
 Item dom_core_equal_node(Item a, Item b);

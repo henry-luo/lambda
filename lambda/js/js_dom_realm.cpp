@@ -613,6 +613,10 @@ extern "C" void dom_install_testdriver_globals(void) {
     if (get_type_id(global) != LMD_TYPE_MAP) return;
     js_set_native_key(global, js_name_item("__lambda_testdriver_key"),
         dom_testdriver_key);
+    js_set_native_key(global, js_name_item("__lambda_testdriver_scroll"),
+        dom_testdriver_scroll);
+    js_set_native_key(global, js_name_item("__lambda_testdriver_touch"),
+        dom_testdriver_touch);
     js_set_native_key(global, js_name_item("__lambda_set_editing_behavior"),
         dom_set_editing_behavior);
 }

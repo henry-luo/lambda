@@ -1,20 +1,21 @@
 # Lambda CLI Reference
 
-Lambda Script Interpreter v1.0
+The command-line interface of the Lambda runtime. In a development tree the binary is `./lambda.exe`; release bundles ship it as `lambda`, which is the spelling used below.
 
 ## Synopsis
 
 ```
 lambda                                      # Start interactive REPL
-lambda <script.ls> [options]                # Run a functional script (JIT compiled)
+lambda <script.ls> [options]                # Run a functional script
 lambda <command> [options] [arguments]      # Run a subcommand
+lambda <source.js|.ts|.py>                  # Run a JavaScript, TypeScript or Python source
 ```
 
 ## Default Behavior
 
 When invoked with no arguments, Lambda starts the **REPL** (Read-Eval-Print Loop).
 
-When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script using MIR Direct JIT compilation.
+When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script: it starts on the AST interpreter and compiles hot functions with the MIR JIT (`--tier` selects a tier explicitly). A `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` file runs on LambdaJS; a `.py` file runs on the hosted Python module when it is installed (see [Hosted Languages](#hosted-languages)).
 
 ---
 
@@ -24,15 +25,16 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 
 | Flag | Long Form | Description | Default |
 |------|-----------|-------------|---------|
-| `-h` | `--help` | Show help message | |
 | | `--max-errors N` | Max type errors before stopping (0 = unlimited) | `10` |
 | | `--optimize=N` / `--opt-level=N` | MIR optimization level; large modules may automatically use the interpreter | `2` |
-| | `--mir-interp` | Use the MIR interpreter instead of native code generation | |
-| `-O0` | | Optimization level 0 (debug, stack traces) | |
-| `-O1` | | Optimization level 1 (basic) | |
-| `-O2` | | Optimization level 2 (full) | |
-| `-O3` | | Optimization level 3 | |
+| `-O0` … `-O3` | | Optimization level shorthand: 0 = debug with stack traces, 1 = basic, 2 = full, 3 = aggressive | |
+| | `--tier=auto\|jit\|interp` | Execution tier: `auto` interprets and compiles hot functions, `jit` compiles everything, `interp` never compiles. `LAMBDA_TIER` is the environment equivalent | `auto` |
+| | `--mir-interp` | Run the JIT's output on the MIR interpreter instead of native code | |
 | | `--dry-run` | Skip real I/O; return fabricated results for network/filesystem operations | `false` |
+| | `--static-warning` | Relaxed mode: report static type errors as warnings and keep running (syntax errors still fail; the result may contain error values) | |
+| | `--no-drain` | Return without draining spawned tasks | |
+
+`--help` (`-h`) is recognized only as the first argument: `lambda --help`.
 
 ### Optimization Levels
 
@@ -98,13 +100,10 @@ returns a non-null value, that value is printed to stdout.
 
 ```
 lambda run [options] <script.ls>
+lambda run --lang <language> <source> [args...]   # a hosted-language source (see Hosted Languages)
 ```
 
-**Options:**
-
-| Flag | Long Form | Description |
-|------|-----------|-------------|
-| `-h` | `--help` | Show help |
+**Options:** `--dry-run`, `--no-drain`, `--static-warning`, `--mir-interp` and `--tier=` as in script mode. `--max-errors`, `--optimize` and `-O*` are **not** accepted by `run`.
 
 **Example:**
 
@@ -116,10 +115,10 @@ lambda run script.ls
 
 ### `validate` — Validate Data Against a Schema
 
-Validates one or more data files against a Lambda schema.
+Validates a data file against a Lambda schema — one file per invocation.
 
 ```
-lambda validate [-s <schema>] [-f <format>] [options] <file> [files...]
+lambda validate [-s <schema>] [-f <format>] [options] <file>
 ```
 
 **Options:**
@@ -134,9 +133,7 @@ lambda validate [-s <schema>] [-f <format>] [options] <file> [files...]
 | | `--allow-unknown` | Allow fields not defined in schema | `false` |
 | `-h` | `--help` | Show help | |
 
-**Supported input formats** (auto-detected from extension):
-
-`json`, `csv`, `ini`, `toml`, `yaml`/`yml`, `xml`, `markdown`/`md`, `rst`, `html`/`htm`, `latex`, `rtf`, `pdf`, `wiki`, `asciidoc`/`adoc`, `man`, `eml`, `ics`, `vcf`, `textile`/`txtl`, `mark`/`mk`/`m`, `text`
+**Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`/`.mk`/`.m`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
 
 **Built-in schemas** (no `-s` needed):
 
@@ -149,7 +146,7 @@ lambda validate [-s <schema>] [-f <format>] [options] <file> [files...]
 | `asciidoc`, `man`, `markdown`, `rst`, `textile`, `wiki` | `doc_schema.ls` |
 | `.ls` files | Built-in AST validation |
 
-Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pdf`, and `text` require an explicit schema via `-s`.
+Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pdf`, and `text` require an explicit schema via `-s`. With a custom schema the **root type** is the type named `Document` if the schema defines one, otherwise the last type defined in the file. See [Lambda_Validator_Guide.md](Lambda_Validator_Guide.md).
 
 **Examples:**
 
@@ -157,7 +154,6 @@ Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pd
 lambda validate data.json -s schema.ls
 lambda validate page.html
 lambda validate --strict config.yaml -s config_schema.ls --max-errors 50
-lambda validate file1.json file2.json -s schema.ls
 ```
 
 ---
@@ -178,7 +174,9 @@ lambda convert <input> [-f <from>] -t <to> -o <output> [options]
 | `-t <to>` | `--to` | Output format (**required**) | |
 | `-o <output>` | `--output` | Output file path (**required**) | |
 | | `--full-document` | For LaTeX→HTML: generate complete HTML document with CSS | `false` |
-| | `--pipeline legacy\|unified` | Pipeline selection | |
+| | `--view-key <key>` | Select a named view when the source defines several | |
+| | `--font-option default\|katex` | Math font set for LaTeX→HTML output | `default` |
+| | `--pipeline legacy\|unified` | Accepted for compatibility; currently has no effect | |
 | `-h` | `--help` | Show help | |
 
 **Supported output formats:**
@@ -216,11 +214,20 @@ lambda layout <file> [more files...] [options]
 | `-c` | `--css FILE` | External CSS file to apply (HTML only) | |
 | `-vw` | `--viewport-width WIDTH` | Viewport width in pixels | `1200` |
 | `-vh` | `--viewport-height HEIGHT` | Viewport height in pixels | `800` |
-| | `--flavor FLAVOR` | LaTeX rendering flavor: `latex-js` or `tex-proper` | `latex-js` |
+| | `--stream-layout-results` | Batch mode: stream each result to stdout instead of writing `--output-dir` | |
+| | `--css-at-head-end` | Apply `--css` at the end of `<head>` instead of before the document's own styles | |
+| | `--font-dir DIR` | Additional font directory (repeatable, up to 16) | |
+| | `--timing-output FILE` | Write phase timings as JSON (single file mode) | |
+| | `--view-memory-profile FILE` | Write a view-tree memory profile (single file mode) | |
+| | `--event-log FILE` / `--state-dump FILE` | Replay simulated events and dump the resulting state (testing) | |
+| | `--post-load-settle-ms N` | Wait N ms for scripts and animations after load | |
+| | `--disable-animations` / `--auto-close` | Testing switches | |
 | | `--continue-on-error` | Continue processing on errors in batch mode | `false` |
 | | `--summary` | Print summary statistics | `false` |
 | | `--debug` | Enable debug output | `false` |
-| | `--help` | Show help | |
+| `-h` | `--help` | Show help | |
+
+Batch mode (several inputs) needs `--output-dir` or `--stream-layout-results`. Unknown options are silently ignored.
 
 **Supported input formats:** `.html`/`.htm`, `.tex`/`.latex`, `.ls`
 
@@ -230,7 +237,6 @@ lambda layout <file> [more files...] [options]
 lambda layout page.html
 lambda layout page.html -o layout.txt
 lambda layout page.html -vw 800 -vh 600
-lambda layout doc.tex --flavor tex-proper
 lambda layout *.html --output-dir results/ --summary
 ```
 
@@ -254,6 +260,7 @@ lambda render <input> -o <output> [options]
 | `-s` | `--scale` | Raster export density; does not change logical layout (RSC7) | `1.0` |
 | | `--pixel-ratio` | Device scale for HiDPI/Retina displays; legacy option spelling (RSC7) | `1.0` |
 | `-t` | `--theme <name>` | Color theme for graph diagrams | `zinc-dark` |
+| | `--view-key <key>` | Select a named view when the source defines several | |
 | `-h` | `--help` | Show help | |
 
 **Supported input formats:**
@@ -263,9 +270,11 @@ lambda render <input> -o <output> [options]
 | `.html`, `.htm` | HTML |
 | `.tex`, `.latex` | LaTeX |
 | `.ls` | Lambda Script |
+| `.pdf` | PDF (PDF to PDF is a copy; other targets go through the Lambda PDF package) |
 | `.mmd` | Mermaid diagram |
 | `.d2` | D2 diagram |
 | `.dot`, `.gv` | GraphViz diagram |
+| `.structurizr`, `.dsl` | Structurizr C4 diagram |
 
 **Supported output formats:** `.svg`, `.pdf`, `.png`, `.jpg`/`.jpeg`
 
@@ -276,9 +285,7 @@ lambda render <input> -o <output> [options]
 | SVG, PNG, JPEG | 1200 | 800 |
 | PDF | 800 | 1200 |
 
-**Available themes:**
-
-`tokyo-night`, `nord`, `dracula`, `catppuccin-mocha`, `one-dark`, `github-dark`, `github-light`, `solarized-light`, `catppuccin-latte`, `zinc-dark`, `zinc-light`, `dark`, `light`
+**Themes** (graph diagrams): the dark palettes `zinc-dark`, `dark`, `tokyo-night`, `nord`, `dracula`, `catppuccin-mocha`, `one-dark` and `github-dark`; any other name, including `light`, `zinc-light`, `github-light`, `solarized-light` and `catppuccin-latte`, selects the light palette. Theme names are not validated.
 
 **Examples:**
 
@@ -305,15 +312,22 @@ lambda view [document_file] [options]
 | Flag | Long Form | Description | Default |
 |------|-----------|-------------|---------|
 | | `--event-file <file.json>` | Load simulated events from JSON for testing | |
+| | `--event-result <file.json>` | Write a machine-readable event result | |
+| | `--event-log <file>` / `--state-dump <file>` | Record events / dump interaction state (testing) | |
+| | `--headless` | Run without creating a window | |
+| | `--view-key <key>` | Select a named view when the source defines several | |
+| | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
 | `-h` | `--help` | Show help | |
+
+Unknown options are silently ignored.
 
 **Default file:** `test/html/index.html` (when no file is specified)
 
 **Supported formats:**
 
-`.pdf`, `.html`/`.htm`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
+`.pdf`, `.html`/`.htm`, `.md`/`.markdown`, `.tex`/`.latex`, `.ls`, `.xml`, `.rst`, `.wiki`, `.svg`, `.mmd`, `.d2`, `.dot`/`.gv`, `.structurizr`/`.dsl`, `.png`, `.jpg`/`.jpeg`, `.gif`, `.json`, `.yaml`/`.yml`, `.toml`, `.txt`, `.csv`, `.ini`, `.conf`, `.cfg`, `.log`
 
-Also accepts **HTTP/HTTPS URLs** — fetches content, detects type from `Content-Type` header, and injects `<base>` tag for HTML.
+Also accepts **HTTP/HTTPS URLs**: an HTML page is loaded directly by the browsing shell (with its scripts and stylesheets); any other content is fetched to a temporary file, its type detected from the `Content-Type` header, and opened from there.
 
 **Keyboard controls:**
 
@@ -348,8 +362,12 @@ lambda edit <document_file> [options]
 |------|-----------|-------------|---------|
 | | `--event-file <file.json>` | Load simulated events from JSON for testing | |
 | | `--event-result <file.json>` | Write a machine-readable event result | |
+| | `--event-log <file>` / `--state-dump <file>` | Record events / dump editor state (testing) | |
 | | `--headless` | Run without creating a window | |
+| | `--font-dir <dir>` | Additional font directory (repeatable, up to 16) | |
 | `-h` | `--help` | Show help | |
+
+Remote URLs are rejected: `edit` opens local files only.
 
 **Supported formats:** the `lambda.edit` package chooses the editor from the
 file's suffix.
@@ -431,39 +449,72 @@ lambda fetch https://api.example.com/endpoint -t 5000 -v
 
 ---
 
-### `js` — JavaScript Transpiler
+### `js` — JavaScript
 
-Run JavaScript code through the Lambda JavaScript transpiler.
+Run a JavaScript program on LambdaJS (see [JS_DOM_Support.md](JS_DOM_Support.md)). A `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` file given as the first argument runs the same way without the subcommand.
 
 ```
-lambda js [file.js] [--document page.html]
+lambda js [file.js] [options]
 ```
 
 **Options:**
 
 | Flag | Description |
 |------|-------------|
+| `-e`, `--eval <source>` | Evaluate a snippet |
+| `-p`, `--print <source>` | Evaluate a snippet and print its result |
+| `-i`, `--interactive` | Interactive session |
+| `--input-type=module` | Read an ES module from stdin when no file is given |
 | `--document <file.html>` | Load an HTML document for DOM API access |
+| `--unhandled-rejections=strict\|none` | Unhandled Promise rejection policy |
+| `--stack-size=KB` (also `--stack_size=`) | JavaScript stack size |
+| `--opt-level=N` | JIT optimization level for JavaScript |
+| `--diagnose` | Print diagnostics about the run |
+| `--tls-min-v1.3`, `--tls-max-v1.2` | TLS version bounds (Node compatibility) |
 | `-h`, `--help` | Show help |
 
-If no file is provided, runs built-in test cases.
+`lambda js` with no file and no `-e`/`-p` does nothing and exits 0. `--mir-interp` is rejected (exit 9). A module whose top-level `await` is still pending at exit ends with status 13. Unknown `--` options are passed through silently.
 
 **Examples:**
 
 ```bash
 lambda js app.js
+lambda js -e "console.log([1, 2, 3].map(x => x * 2))"
 lambda js app.js --document index.html
 ```
 
 ---
 
-### `math` — Math Rendering (Deprecated)
+### `ts` — TypeScript
 
 ```
-lambda math
+lambda ts <file.ts>
 ```
 
-This command is **deprecated**. Use `lambda run <script.ls>` to render math formulas instead.
+Runs a TypeScript file on LambdaJS. Type annotations are stripped; there is no type checking.
+
+---
+
+### Hosted Languages
+
+Guest languages run on the Lambda runtime through Jube modules (see [Lambda_Jube_Runtime.md](Lambda_Jube_Runtime.md)). Python is the one that ships:
+
+```
+lambda py app.py                        # the language alias
+lambda app.py                           # dispatch on the extension
+lambda run --lang python app.py [args]  # the explicit form
+```
+
+All three need the `lang-python` module beside the executable (a `modules/lang-python/` directory, or a directory named by `JUBE_MODULE_PATH`); a dev build gets it with `make build-lang-python`. Without it the command prints a hosted-language-unavailable diagnostic. `lambda --help` does not list these forms. The `bash` and `rb` handlers exist in the source but are compiled out of current builds. See [Python_Support.md](Python_Support.md).
+
+---
+
+### Other commands
+
+- `math` — retired. It prints a message pointing at Lambda script math rendering and exits with status 1.
+- `serve` — parses its options but is not implemented; exits with status 1.
+- `replay --event-log <file.jsonl> [document] [--assert-state|--record|--headless|--window|--font-dir DIR]` — replays a recorded interaction against a document (testing).
+- `render-batch`, `test-batch`, `js-test-batch`, `--test*`, `--emit-ast-dump <path>`, `--emit-js-ast-dump <path>` — internal harness and development commands.
 
 ---
 
@@ -488,7 +539,18 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 
 | Variable | Values | Description |
 |----------|--------|-------------|
-| `MEMTRACK_MODE` | `OFF`, `STATS`, `DEBUG` | Memory tracker mode (default: `STATS`) |
+| `LAMBDA_HOME` | path | Runtime asset directory (default: `./lambda` in a dev tree, `./lmd` beside a release binary) |
+| `LAMBDA_TIER` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL keeps a persistent interpreter session unless `jit` |
+| `JUBE_MODULE_PATH` | path | Where hosted-language and Node modules are discovered (default: `./modules` beside the executable) |
+| `LAMBDA_LOG_LEVEL` | level name | Minimum log level written to `log.txt` |
+| `LAMBDA_LOG_FILE` | path | Log file location (default: `./log.txt`) |
+| `LAMBDA_SCRIPT_CACHE` | `0`/`1` | Enable or disable the parsed-script cache |
+| `LAMBDA_DISABLE_MIR_CACHE` | set | Disable the compiled-module cache |
+| `LAMBDA_PROFILE` | set | Print profiling information at exit |
+| `LAMBDA_JS_LARGE_INTERP` | set | Force the interpreter for large JavaScript modules |
+| `MEMTRACK_MODE` | `OFF`, `STATS`, `DEBUG` | Memory tracker mode (default: `OFF` in release builds, `STATS` in debug builds) |
+
+Diagnostic variables for engine development: `LAMBDA_MEMORY_STATS`, `LAMBDA_RSS_REPORT`, `VIEW_MEM_STATS`, `VIEW_MEM_STAGES`, `VIEW_PAUSE_BEFORE_EXIT`, `LAMBDA_COMPILER_TIMING`, `JS_TRANSPILE_TIMING`, `LAMBDA_MIR_DUMP_PATH`, `LAMBDA_GC_FORCE_EVERY`, `LAMBDA_GC_POISON_FREED`, `LAMBDA_JS_EXEC_TIMEOUT_SECONDS`.
 
 ---
 
@@ -529,8 +591,10 @@ lambda edit notes.md
 # Fetch a URL
 lambda fetch https://example.com -o page.html
 
-# Run JavaScript
+# Run JavaScript, TypeScript or hosted Python
 lambda js app.js
+lambda ts app.ts
+lambda py app.py
 
 # Dump the memory context as JSON at exit (+ leak report in log.txt)
 lambda --mem-dump script.ls

@@ -2195,6 +2195,7 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
 void scroll_apply_pending_element_scroll(ViewBlock* block);
 
 bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
+inline constexpr float RDT_WHEEL_PIXEL_STEP = 50.0f;
 bool scrollpane_target(EventContext* evcon, ViewBlock* block);
 
 // Scrollbar hit classification is geometry, not input policy. The DOM package

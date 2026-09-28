@@ -1,14 +1,16 @@
 # Python Support in Lambda
 
-Lambda can run Python scripts via the `py` command:
+Lambda runs Python scripts through the hosted-language module `lang-python`:
 
 ```bash
-./lambda.exe py script.py
+./lambda.exe py script.py                     # the language alias
+./lambda.exe script.py                        # dispatch on the .py extension
+./lambda.exe run --lang python script.py      # the explicit form
 ```
 
-Python source is compiled to native machine code through Tree-sitter parsing, AST construction, and MIR JIT compilation. All Python values are represented as Lambda `Item` values — there is no conversion boundary between the two runtimes.
+> **Status (alpha).** Python is an external Jube module, not part of the host binary: a dev build gets it with `make build-lang-python` (see [Lambda_Jube_Runtime.md](Lambda_Jube_Runtime.md)), and the full release bundle ships it beside the executable. Without the module every form above prints a hosted-language-unavailable diagnostic. The module passes 39 of its 43 test scripts; module import and package resolution are currently unstable (their tests crash), so treat multi-file Python programs as experimental until that regression is fixed.
 
-This document lists every Python language feature and its support status.
+Python source is parsed with tree-sitter-python, built into the shared unified AST, and run by the Lambda runtime — interpreted, or compiled to native code through the MIR JIT. All Python values are Lambda `Item` values, so there is no conversion boundary between the two runtimes. Python is a **dialect hosted on Lambda's substrate**: what the tables below do not list is not supported.
 
 ---
 
@@ -18,7 +20,7 @@ This document lists every Python language feature and its support status.
 
 | Type | Status | Notes |
 |------|--------|-------|
-| `int` | **Full** | 56-bit inline; overflows to 64-bit heap |
+| `int` | **Full** | Small ints inline; arbitrary precision on overflow |
 | `float` | **Full** | 64-bit IEEE 754 double |
 | `bool` | **Full** | `True`/`False` |
 | `None` | **Full** | |
@@ -26,7 +28,7 @@ This document lists every Python language feature and its support status.
 | `list` | **Full** | Lambda `Array`, dynamic growth |
 | `tuple` | **Full** | Stored as `Array` (immutable semantics not enforced) |
 | `dict` | **Full** | Lambda `Map` with `ShapeEntry` chain |
-| `set` | **Partial** | Stored as list — no deduplication or set operations |
+| `set` | **Partial** | Deduplicating set with membership; the set algebra operators (`\|`, `&`, `-`) are not verified |
 | `bytes` / `bytearray` | **Not supported** | |
 | `complex` | **Not supported** | |
 | `frozenset` | **Not supported** | |
@@ -60,8 +62,8 @@ This document lists every Python language feature and its support status.
 | Ternary | `x if cond else y` | **Full** |
 | Augmented assignment | `+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `**=`, `&=`, `\|=`, `^=`, `<<=`, `>>=` | **Full** — variables and subscripts |
 | Matmul | `@`, `@=` | **Not supported** — operator parsed but no-op |
-| Walrus | `:=` | **Not supported** |
-| String `%` formatting | `"hello %s" % name` | **Stub** — returns left operand unchanged |
+| Walrus | `:=` | **Parsed only** — not evaluated |
+| String `%` formatting | `"hello %s" % name` | **Full** |
 
 ### Numeric Semantics
 
@@ -71,7 +73,7 @@ This document lists every Python language feature and its support status.
 | Floor division `//` rounds toward −∞ | **Full** |
 | Modulo `%` result has sign of divisor | **Full** |
 | Negative exponents return float | **Full** |
-| Integer overflow → float promotion | **Full** |
+| Integer overflow → arbitrary-precision int | **Full** |
 | String repetition `"ab" * 3` | **Full** |
 | List repetition `[1] * 3` | **Full** |
 | List concatenation `[1] + [2]` | **Full** |
@@ -88,7 +90,7 @@ This document lists every Python language feature and its support status.
 | Attribute assignment `obj.x = 5` | **Full** | |
 | Augmented subscript `a[0] += 1` | **Full** | |
 | Starred unpacking `a, *rest = [1,2,3]` | **Not supported** | Parsed but not transpiled |
-| Slice assignment `a[1:3] = [4,5]` | **Not supported** | |
+| Slice assignment `a[1:3] = [4,5]` | **Full** | |
 
 ### Control Flow
 
@@ -102,7 +104,7 @@ This document lists every Python language feature and its support status.
 | `pass` | **Full** | |
 | `for...else` | **Not supported** | |
 | `while...else` | **Not supported** | |
-| `match` / `case` (3.10+) | **Not supported** | |
+| `match` / `case` (3.10+) | **Full** | Literal, capture, sequence, mapping and class patterns |
 
 ### Functions
 
@@ -119,14 +121,16 @@ This document lists every Python language feature and its support status.
 | `*args` unpacking in calls | **Full** | `f(*lst)` spreads list as positional args |
 | `**kwargs` unpacking in calls | **Full** | `f(**dct)` spreads dict as keyword args |
 | Closures (variable capture) | **Full** | Multi-level capture across nested scopes |
-| `lambda` expressions | **Not supported** | |
+| `lambda` expressions | **Full** | |
+| Generators (`yield`, `yield from`) | **Full** | Generator functions and generator expressions |
+| `async def` / `await` | **Full** | Coroutines run on the shared event loop |
 | Recursion | **Full** | |
 
 ### Built-in Functions (40+ implemented)
 
 | Function | Status | Notes |
 |----------|--------|-------|
-| `print(...)` | **Partial** | `*args` and f-strings supported; `sep=`/`end=` not supported |
+| `print(...)` | **Full** | `*args`, `sep=` and `end=` |
 | `len(x)` | **Full** | Strings, lists, dicts, class instances (`__len__`) |
 | `type(x)` | **Full** | Returns `<class 'int'>` etc. |
 | `isinstance(x, t)` | **Full** | Full MRO-based check; handles built-in and user-defined classes |
@@ -161,17 +165,19 @@ This document lists every Python language feature and its support status.
 | `list(iterable)` | **Full** | |
 | `tuple(iterable)` | **Full** | |
 | `dict(...)` | **Partial** | `dict()` and `dict(**kwargs)` forms; `dict(pairs)` constructor partial |
-| `set(iterable)` | **Partial** | No deduplication; set operations not supported |
+| `set(iterable)` | **Partial** | Deduplicates; set operators not verified |
 | `getattr(obj, name)` | **Full** | |
 | `setattr(obj, name, val)` | **Full** | |
 | `hasattr(obj, name)` | **Full** | |
-| `property(fget)` | **Full** | Getter-only; `@prop.setter` not supported |
+| `property(fget)` | **Full** | With `@prop.setter` |
 | `staticmethod(f)` | **Full** | Via `@staticmethod` decorator |
 | `super()` | **Full** | Zero-argument form inside methods |
 
-**Not implemented:** `bin`, `oct`, `hex`, `divmod`, `pow` (3-arg), `callable`, `compile`, `eval`, `exec`, `dir`, `vars`, `delattr`, `globals`, `locals`, `ascii`, `bytes`, `bytearray`, `complex`, `frozenset`, `format`, `classmethod`, `slice`.
+Also implemented: `bin`, `oct`, `hex`, `divmod`, `pow` (3-arg), `callable`.
 
-### String Methods (17 implemented)
+**Not implemented:** `compile`, `eval`, `exec`, `dir`, `vars`, `delattr`, `globals`, `locals`, `ascii`, `bytes`, `bytearray`, `complex`, `frozenset`, `format`, `classmethod`, `slice`.
+
+### String Methods
 
 | Method | Status |
 |--------|--------|
@@ -191,9 +197,13 @@ This document lists every Python language feature and its support status.
 | `isalpha()` | **Full** |
 | `title()` | **Full** |
 | `capitalize()` | **Full** |
-| `format(...)` | **Stub** — returns string unchanged |
+| `format(...)` | **Full** — positional and named fields, format specs |
+| `center`, `ljust`, `rjust`, `zfill` | **Full** |
+| `index`, `rfind` | **Full** |
+| `isalnum`, `islower`, `isupper`, `isspace` | **Full** |
+| `splitlines`, `swapcase` | **Full** |
 
-**Not implemented:** `casefold`, `center`, `encode`, `expandtabs`, `index`, `isalnum`, `isdecimal`, `islower`, `isnumeric`, `isprintable`, `isspace`, `istitle`, `isupper`, `ljust`, `maketrans`, `partition`, `rfind`, `rindex`, `rjust`, `rpartition`, `rsplit`, `splitlines`, `swapcase`, `translate`, `zfill`.
+**Not implemented:** `casefold`, `encode`, `expandtabs`, `isdecimal`, `isnumeric`, `isprintable`, `istitle`, `maketrans`, `partition`, `rindex`, `rpartition`, `rsplit`, `translate`.
 
 ### List Methods (11 implemented)
 
@@ -211,7 +221,7 @@ This document lists every Python language feature and its support status.
 | `copy()` | **Full** |
 | `clear()` | **Full** |
 
-### Dict Methods (7 implemented)
+### Dict Methods
 
 | Method | Status | Notes |
 |--------|--------|-------|
@@ -222,8 +232,9 @@ This document lists every Python language feature and its support status.
 | `update(other)` | **Full** | |
 | `pop(key)` | **Partial** | Returns value but may not remove from shape |
 | `clear()` | **Full** | |
+| `copy()`, `popitem()`, `setdefault(key, default)` | **Full** | |
 
-**Not implemented:** `copy`, `fromkeys`, `popitem`, `setdefault`.
+**Not implemented:** `fromkeys`.
 
 ### Truthiness
 
@@ -246,8 +257,8 @@ Follows Python's truthiness rules exactly:
 | Local scope | **Full** | Assignment creates in current scope |
 | Module (global) scope | **Full** | Top-level variables |
 | Variable lookup (inner → outer) | **Full** | LEGB chain walk |
-| `global` declaration | **Parsed** | Scope analysis only — no runtime effect |
-| `nonlocal` declaration | **Parsed** | Scope analysis only — no runtime effect |
+| `global` declaration | **Full** | Rebinds the module-level name |
+| `nonlocal` declaration | **Full** | Rebinds the enclosing function's name |
 
 ### Assertions
 
@@ -268,7 +279,7 @@ Follows Python's truthiness rules exactly:
 | Dict key assignment `d["k"] = v` | **Full** |
 | Slicing `a[1:3]` | **Full** |
 | Slice with step `a[::2]` | **Full** |
-| Slice assignment `a[1:3] = [4,5]` | **Not supported** |
+| Slice assignment `a[1:3] = [4,5]` | **Full** |
 
 ### Comprehensions
 
@@ -277,7 +288,7 @@ Follows Python's truthiness rules exactly:
 | List comprehension `[x*2 for x in lst]` | **Full** | Including `if` filter clause |
 | Dict comprehension `{k: v for k, v in items}` | **Full** | |
 | Set comprehension `{x*2 for x in lst}` | **Full** | |
-| Generator expressions `(x*2 for x in lst)` | **Not supported** | |
+| Generator expressions `(x*2 for x in lst)` | **Full** | Lazy; consumed by `for`, `list()`, `sum()`, … |
 
 ### Classes
 
@@ -292,7 +303,8 @@ Follows Python's truthiness rules exactly:
 | Class attributes | **Full** | Accessible via `ClassName.attr` and instance lookup |
 | `@staticmethod` | **Full** | No `self` / `cls` parameter |
 | `@classmethod` | **Not supported** | |
-| `@property` (getter) | **Full** | Read-only; `@prop.setter` not supported |
+| `@property` | **Full** | Getter and `@prop.setter` |
+| Descriptors (`__get__`, `__set__`) | **Full** | |
 | `isinstance(x, cls)` | **Full** | Full MRO-based check |
 | `issubclass(a, b)` | **Full** | Full MRO-based check |
 | `__init__`, `__str__`, `__repr__` | **Full** | |
@@ -316,7 +328,7 @@ Follows Python's truthiness rules exactly:
 | `except ExceptionType as e` | **Full** | Binds caught exception to name |
 | `except (TypeA, TypeB)` | **Full** | Tuple of exception types |
 | `finally` | **Full** | Always executes |
-| `try...else` clause | **Not supported** | |
+| `try...else` clause | **Full** | |
 | Exception chaining (`raise X from Y`) | **Not supported** | |
 | Custom exception classes | **Full** | `class MyError(Exception): ...` |
 | Built-in exception types | **Full** | `ValueError`, `TypeError`, `KeyError`, `IndexError`, `RuntimeError`, `StopIteration`, `AssertionError`, `AttributeError`, `NotImplementedError`, `Exception` |
@@ -330,10 +342,10 @@ Follows Python's truthiness rules exactly:
 | Method decorators | **Full** | |
 | Decorator factories `@dec(args)` | **Full** | |
 | Stacked decorators | **Full** | Applied bottom-to-top |
-| `@property` (getter) | **Full** | |
+| `@property` and `@prop.setter` | **Full** | |
 | `@staticmethod` | **Full** | |
 | `@classmethod` | **Not supported** | |
-| `@prop.setter` / `@prop.deleter` | **Not supported** | |
+| `@prop.deleter` | **Not supported** | |
 
 ### `with` Statement
 
@@ -353,33 +365,14 @@ Follows Python's truthiness rules exactly:
 | `from module import name` | **Full** | |
 | `from module import name as alias` | **Full** | |
 | `from module import *` | **Full** | All non-dunder top-level names |
-| `import json` / stdlib modules | **Not supported** | No stdlib shims in v3 |
-| `import pkg.submodule` | **Not supported** | No package/`__init__.py` resolution |
+| Standard library | **Partial** | Native shims for `json`, `time`, `random`, `functools`, `collections`, `math`, `os`, `sys`, `re`, `copy`, `enum`, `abc`, `array`, `io` |
+| `import pkg.submodule` | **Full** | Package and `__init__.py` resolution — currently unstable (see the status note) |
 | `from . import x` (relative imports) | **Not supported** | |
 | Circular imports | **Not supported** | |
 
 ---
 
 ## Not Supported
-
-### Lambda Expressions
-
-`lambda x: x*2` — parsed but not transpiled.
-
-### Generators and `yield`
-
-- Generator expressions `(x*2 for x in lst)` — not supported
-- `yield` / `yield from` — not supported
-- Generator functions — not supported
-
-### Async / Concurrency
-
-- `async def` / `await`
-- `async with` / `async for`
-
-### Pattern Matching
-
-`match` / `case` (Python 3.10+) — not supported.
 
 ### Delete
 
@@ -399,41 +392,36 @@ Follows Python's truthiness rules exactly:
 | Feature | Status |
 |---------|--------|
 | F-string `=` debug format `f"{x=}"` | **Not supported** |
-| `str.format()` with substitution | **Stub** — returns string unchanged |
-| `%` formatting `"hello %s" % name` | **Stub** — returns left string unchanged |
 
 ### Remaining Class / Decorator Gaps
 
 | Feature | Status |
 |---------|--------|
 | `@classmethod` | **Not supported** |
-| `@prop.setter` / `@prop.deleter` | **Not supported** |
+| `@prop.deleter` | **Not supported** |
 | Metaclasses | **Not supported** |
 | `__init_subclass__`, `__class_getitem__` | **Not supported** |
 | `__slots__` | **Not supported** |
-| Descriptors beyond `@property` | **Not supported** |
 
 ### Import Limitations
 
 | Pattern | Status |
 |---------|--------|
-| `import json` / stdlib modules | **Not supported** — no stdlib shims in v3 |
-| `import pkg.submodule` | **Not supported** — no package/`__init__.py` resolution |
+| Standard library beyond the shimmed modules | **Not supported** |
 | `from . import x` (relative imports) | **Not supported** |
 | Circular imports | **Not supported** |
+| Module import / packages | **Unstable** — implemented, but the import and package tests currently crash |
 
 ### Other Limitations
 
 | Feature | Status |
 |---------|--------|
 | `for...else` / `while...else` | **Not supported** |
-| `try...else` clause | **Not supported** |
 | Exception chaining `raise X from Y` | **Not supported** |
-| `global` / `nonlocal` runtime enforcement | **Parsed only** — no runtime effect |
 | `contextlib.contextmanager` | **Not supported** |
 | Positional-only params `/` | **Not supported** |
 | Keyword-only params `*` separator | **Not supported** |
-| `:=` walrus operator | **Not supported** |
+| `:=` walrus operator | **Parsed only** |
 | `@` matmul operator | **Not supported** |
 | Type annotations | **Parsed and ignored** |
 | `__name__` / `__doc__` introspection | **Not supported** |
@@ -444,19 +432,19 @@ Follows Python's truthiness rules exactly:
 
 | Category | Supported | Partial | Not Supported |
 |----------|-----------|---------|---------------|
-| **Literals & types** | int, float, str, bool, None, list, tuple, dict | set (as list), f-strings (no `=` debug) | bytes, complex, frozenset |
-| **Operators** | All arithmetic, bitwise, comparison, boolean, chained | `%` formatting (stub) | `@` matmul, `:=` walrus |
-| **Control flow** | if/elif/else, for, while, break/continue, pass | | for-else, while-else, match/case |
-| **Functions** | def, return, nested, recursion, forward refs, defaults, *args, **kwargs, closures | print (no sep/end) | lambda |
-| **Builtins** | 40+ functions | print (no sep/end), open (text only), set (no dedup) | bin/oct/hex, eval/exec, classmethod, slice |
-| **String methods** | 17 working | format (stub) | ~24 more methods |
+| **Literals & types** | int (arbitrary precision), float, str, bool, None, list, tuple, dict, set | f-strings (no `=` debug) | bytes, complex, frozenset |
+| **Operators** | All arithmetic, bitwise, comparison, boolean, chained, `%` formatting | | `@` matmul, `:=` walrus (parsed only) |
+| **Control flow** | if/elif/else, for, while, break/continue, pass, match/case | | for-else, while-else |
+| **Functions** | def, return, nested, recursion, forward refs, defaults, *args, **kwargs, closures, lambda, generators, async | | — |
+| **Builtins** | 45+ functions incl. print(sep=, end=), bin/oct/hex, divmod, callable | open (text only) | eval/exec, classmethod, slice |
+| **String methods** | 30 working incl. format | | casefold, partition, rsplit, translate, … |
 | **List methods** | 11 working (sort supports key=/reverse=) | | — |
-| **Dict methods** | 7 working | pop (partial) | copy, fromkeys, popitem, setdefault |
-| **Indexing & slicing** | list/dict/string, negative, slices, step | | slice assignment |
-| **Comprehensions** | list, dict, set | | generator expressions |
-| **Classes** | single/multiple inheritance, MRO, dunders, super, @property, @staticmethod | | @classmethod, metaclasses, __slots__ |
-| **Exceptions** | try/except/finally, raise, custom exceptions, 10 built-in types | | try-else, exception chaining |
-| **Decorators** | function/class/method, factories, stacked, @property, @staticmethod | | @classmethod, @prop.setter |
+| **Dict methods** | 10 working | pop (partial) | fromkeys |
+| **Indexing & slicing** | list/dict/string, negative, slices, step, slice assignment | | — |
+| **Comprehensions** | list, dict, set, generator expressions | | — |
+| **Classes** | single/multiple inheritance, MRO, dunders, super, @property with setter, @staticmethod, descriptors | | @classmethod, metaclasses, __slots__ |
+| **Exceptions** | try/except/else/finally, raise, custom exceptions, 10 built-in types | | exception chaining |
+| **Decorators** | function/class/method, factories, stacked, @property, @prop.setter, @staticmethod | | @classmethod, @prop.deleter |
 | **`with` statement** | __enter__/__exit__, as-target, exception suppression, nested | | contextlib.contextmanager |
-| **Imports** | import mod, from mod import name/alias/*, .py files | | stdlib, packages, relative, circular |
-| **Async** | — | — | All |
+| **Imports** | import mod, from mod import name/alias/*, .py files, 14 stdlib shims, packages | packages (unstable) | other stdlib, relative, circular |
+| **Async** | async def / await | | async with, async for (unverified) |

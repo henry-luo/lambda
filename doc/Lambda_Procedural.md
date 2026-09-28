@@ -132,7 +132,7 @@ The practical consequence is that a module exposes no mutable cell, so importing
 
 Two kinds of state exist in a running program but are not Lambda values, so the rule above does not describe them.
 
-**External resources** — file handles from `open()`, sockets, and similar OS objects. These hold state in the operating system, not in the Lambda heap. They are scoped rather than immutable: a handle is bound in a block and closed automatically when that block exits, so its lifetime is bounded by an activation just as a `var` is.
+**External resources** — file handles, sockets, and similar OS objects. These hold state in the operating system, not in the Lambda heap. The resource model (S12.4) makes them scoped rather than immutable: a handle is bound in a block and closed automatically when that block exits, so its lifetime is bounded by an activation just as a `var` is. *Not yet implemented:* the current build has no `open()` for resources; file I/O goes through `input`, `output` and the `io` module, and task handles are the one scoped resource that exists today.
 
 **Guest runtime state — an explicit exemption.** When a Lambda program imports a module written in another language, that language keeps its own rules. LambdaJS has a genuinely mutable `globalThis` and mutable module-level bindings; the Python, Bash, and Ruby guests carry their own module state. Importing such a module gives Lambda a handle on state Lambda itself could not have declared:
 
@@ -237,14 +237,14 @@ data, but that behavior never weakens a declared `T[]` binding
 
 ```lambda
 pn example() {
-    let obj = {name: "Alice", age: 30}
+    var obj = {name: "Alice", age: 30}   // a `let` map is immutable (E211)
     obj.age = 31           // OK: same type
     obj.age = "thirty"     // OK: field type changes, shape rebuilt
     obj.name = null        // OK: any type transition
 }
 ```
 
-Map field assignment automatically rebuilds the map's shape metadata when the value type changes, ensuring structural consistency.
+Map field assignment automatically rebuilds the map's shape metadata when the value type changes, ensuring structural consistency. The map must be held by a `var` binding: writing through a `let` binding is error E211.
 
 ### Element Mutation
 
@@ -518,8 +518,8 @@ Available anywhere (in both `fn` and `pn`):
 let data = input("config.json", 'json')^
 let html = input(https.example.com.page, 'html')^
 
-// Check existence
-if exists(\.config.json) { ... }
+// Check existence — a file name with an extension is one quoted step
+if exists(\.'config.json') { ... }
 ```
 
 ### Procedural I/O Functions

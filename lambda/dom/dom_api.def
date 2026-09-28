@@ -158,7 +158,8 @@ DOM_OP(CORE, client_rects,     geometry, 1, "fn(n: any) -> array",              
 DOM_OP(CORE, scroll_state,     geometry, 1, "fn(n: any) -> map",                            dom_core_scroll_state,     DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, set_scroll_state, geometry, 3, "pn(n: any, x: float, y: float) -> null",       dom_core_set_scroll_state, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, element_from_point, geometry, 3, "fn(doc: any, x: float, y: float) -> any",    dom_core_element_from_point, DOM_F_NEUTRAL, "", none, "", "")
-DOM_OP(CORE, scroll_into_view, geometry, 1, "pn(n: any) -> bool",                           dom_core_scroll_into_view_op, DOM_F_NEUTRAL | DOM_F_MUTATES, "", html_element, "", "scrollIntoView")
+DOM_OP(CORE, scroll_into_view, geometry, 1, "pn(n: any) -> bool",                           dom_core_scroll_into_view_op, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, scroll_into_view_options, geometry, 2, "pn(n: any, options: any) -> bool",       dom_core_scroll_into_view_options_op, DOM_F_NEUTRAL | DOM_F_MUTATES, "", html_element, "scroll_into_view", "scrollIntoView")
 
 // ---------------------------------------------------------------------------
 // CORE — focus, navigation, actions — engine-provided

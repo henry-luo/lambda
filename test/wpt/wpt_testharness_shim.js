@@ -30,6 +30,23 @@ var _wpt_fail = 0;
 var _wpt_total = 0;
 var _wpt_pending_promises = 0;
 
+function _wpt_step_wait(predicate, description, timeout) {
+    var deadline = Date.now() + (timeout === undefined ? 2000 : timeout);
+    return new Promise(function(resolve, reject) {
+        function tick() {
+            try {
+                if (predicate()) { resolve(); return; }
+            } catch (error) { reject(error); return; }
+            if (Date.now() >= deadline) {
+                reject(new Error(description || "step_wait timed out"));
+                return;
+            }
+            setTimeout(tick, 16);
+        }
+        tick();
+    });
+}
+
 function test(func, name) {
     _wpt_total++;
     var t = {
@@ -37,6 +54,9 @@ function test(func, name) {
         _cleanups: [],
         add_cleanup: function(fn) { this._cleanups.push(fn); },
         step: function(fn) { fn.apply(this, Array.prototype.slice.call(arguments, 1)); },
+        step_wait: function(fn, desc, timeout) {
+            return _wpt_step_wait(fn, desc, timeout);
+        },
         step_func: function(fn) { var self=this; return function(){ fn.apply(self, arguments); }; },
         unreached_func: function(desc) {
             return function() {
@@ -66,6 +86,16 @@ function assert_equals(actual, expected, desc) {
     if (actual !== expected) {
         var msg = "assert_equals: got " + JSON.stringify(actual) + ", expected " + JSON.stringify(expected);
         if (desc) msg = msg + " - " + desc;
+        throw new Error(msg);
+    }
+}
+
+function assert_approx_equals(actual, expected, epsilon, desc) {
+    if (typeof actual !== "number" || typeof expected !== "number" ||
+        Math.abs(actual - expected) > epsilon) {
+        var msg = "assert_approx_equals: got " + JSON.stringify(actual) +
+            ", expected " + JSON.stringify(expected) + " +/- " + epsilon;
+        if (desc) msg += " - " + desc;
         throw new Error(msg);
     }
 }
@@ -500,6 +530,9 @@ function promise_test(func, name) {
             if (typeof fn === "function") this._cleanups.push(fn);
         },
         step: function(fn) { fn.apply(this, Array.prototype.slice.call(arguments, 1)); },
+        step_wait: function(fn, desc, timeout) {
+            return _wpt_step_wait(fn, desc, timeout);
+        },
         step_func: function(fn) { var self=this; return function(){ fn.apply(self, arguments); }; },
         step_func_done: function(fn) { var self=this; return function(){ if (fn) fn.apply(self, arguments); }; },
         unreached_func: function(desc) {
@@ -3266,6 +3299,7 @@ function _WptActions() {
     this._steps = [];
     this._origin = null;
     this._context = null;
+    this._pointer_type = "mouse";
     this.ButtonType = _WptActions.prototype.ButtonType;
 }
 _WptActions.prototype.ButtonType = {
@@ -3312,6 +3346,16 @@ _WptActions.prototype.keyUp = function(key) {
     this._steps.push({ type: "keyUp", key: key });
     return this;
 };
+_WptActions.prototype.addPointer = function(_id, type) {
+    this._pointer_type = type || "mouse";
+    return this;
+};
+_WptActions.prototype.addWheel = function(_id) { return this; };
+_WptActions.prototype.scroll = function(x, y, deltaX, deltaY, opts) {
+    this._steps.push({ type: "scroll", x: x, y: y,
+        deltaX: deltaX, deltaY: deltaY, origin: opts && opts.origin });
+    return this;
+};
 _WptActions.prototype.pause = function(_dur) { return this; };
 // A tick separates input-source actions. This synchronous adapter already
 // preserves source order, but WPT action chains still require the method.
@@ -3320,6 +3364,30 @@ _WptActions.prototype.setContext = function(ctx) {
     this._context = ctx || null;
     return this;
 };
+
+function _wpt_actions_dispatch_touch(target, type, x, y) {
+    if (target && typeof __lambda_testdriver_touch === "function") {
+        __lambda_testdriver_touch(_wpt_actions_event_target(target), type, x, y);
+    }
+}
+
+function _wpt_actions_origin_center(origin) {
+    var rect = origin.getBoundingClientRect();
+    var right = rect.right !== undefined ? rect.right : rect.left + rect.width;
+    var bottom = rect.bottom !== undefined ? rect.bottom : rect.top + rect.height;
+    var width = (typeof window !== "undefined" && window.innerWidth) ||
+        document.documentElement.clientWidth;
+    var height = (typeof window !== "undefined" && window.innerHeight) ||
+        document.documentElement.clientHeight;
+    // WebDriver measures an element origin at the center of its visible rect.
+    // A tall scroller's geometric center may lie outside the viewport.
+    return {
+        x: (Math.max(0, Math.min(rect.left, width)) +
+            Math.max(0, Math.min(right, width))) / 2,
+        y: (Math.max(0, Math.min(rect.top, height)) +
+            Math.max(0, Math.min(bottom, height))) / 2
+    };
+}
 
 function _wpt_actions_context_document(ctx) {
     if (ctx) {
@@ -3562,7 +3630,22 @@ _WptActions.prototype.send = function() {
     var mods_ptr = { shift: false, ctrl: false, alt: false, meta: false };
     for (var i = 0; i < this._steps.length; i++) {
         var st = this._steps[i];
-        if (st.type === "keyDown") {
+        if (st.type === "scroll") {
+            var scroll_x = st.x || 0;
+            var scroll_y = st.y || 0;
+            if (st.origin && st.origin !== "viewport" &&
+                typeof st.origin.getBoundingClientRect === "function") {
+                var scroll_center = _wpt_actions_origin_center(st.origin);
+                scroll_x += scroll_center.x;
+                scroll_y += scroll_center.y;
+            }
+            // Send wheel input through Radiant's public platform path so hit
+            // testing, event dispatch, cancellation and scrolling agree.
+            if (typeof __lambda_testdriver_scroll === "function") {
+                __lambda_testdriver_scroll(scroll_x, scroll_y,
+                    st.deltaX || 0, st.deltaY || 0);
+            }
+        } else if (st.type === "keyDown") {
             if (st.key === "\uE008") shift_ptr = true;
             else if (st.key === "\uE009") ctrl_ptr = true;
             else if (st.key === "\uE00A" || st.key === "\uE00a") alt_ptr = true;
@@ -3578,6 +3661,18 @@ _WptActions.prototype.send = function() {
             current_x = st.x || 0;
             current_y = st.y || 0;
             if (st.node) current_origin = st.node;
+            if (this._pointer_type === "touch") {
+                if (st.node && typeof st.node.getBoundingClientRect === "function") {
+                    var touch_center = _wpt_actions_origin_center(st.node);
+                    current_x += touch_center.x;
+                    current_y += touch_center.y;
+                }
+                if (down_open) {
+                    _wpt_actions_dispatch_touch(current_origin, "touchmove",
+                        current_x, current_y);
+                }
+                continue;
+            }
             if (down_open && down_text_control && st.node === down_text_control &&
                 down_default_allowed && down_button === this.ButtonType.LEFT) {
                 saw_drag_move = true;
@@ -3599,6 +3694,13 @@ _WptActions.prototype.send = function() {
                 }
             }
         } else if (st.type === "down") {
+            if (this._pointer_type === "touch") {
+                down_open = true;
+                down_anchor = current_origin || this._origin;
+                _wpt_actions_dispatch_touch(down_anchor, "touchstart",
+                    current_x, current_y);
+                continue;
+            }
             down_open = true;
             down_button = st.button;
             down_anchor = current_origin || this._origin;
@@ -3641,6 +3743,13 @@ _WptActions.prototype.send = function() {
                 }
             }
         } else if (st.type === "up") {
+            if (this._pointer_type === "touch") {
+                _wpt_actions_dispatch_touch(down_anchor || current_origin,
+                    "touchend", current_x, current_y);
+                down_open = false;
+                down_anchor = null;
+                continue;
+            }
             var up_anchor = current_origin || down_anchor || this._origin;
             var up_target = down_spin_target || _wpt_actions_event_target(up_anchor);
             if (down_open && down_default_allowed && down_button === this.ButtonType.LEFT &&
@@ -3716,6 +3825,11 @@ _WptActions.prototype.send = function() {
                     // printable private-use characters.
                     _wpt_send_one_key(null, ks.key.charCodeAt(0), true, true,
                         ctrl_held, alt_held, meta_held);
+                } else if (ks.key === "\uE00E" || ks.key === "\uE00F" ||
+                           ks.key === "\uE013" || ks.key === "\uE015") {
+                    // These navigation keys run a scroll default in Radiant.
+                    _wpt_dispatch_native_edit_key(ks.key.charCodeAt(0),
+                        shift_held, ctrl_held, alt_held, meta_held);
                 } else if (ks.key === "\uE006" && !(ctrl_held || alt_held || meta_held)) {
                     _wpt_send_return(null, shift_held);
                 } else if (!(ctrl_held || alt_held || meta_held)) {
@@ -3997,11 +4111,16 @@ var test_driver = {
             if (code === 0xE006) {
                 _wpt_send_return(elem, false);
             } else if (code >= 0xE000) {
-                // send_keys is a WebDriver text operation; use one coherent
-                // synthetic transaction so cloned InputEvents retain their
-                // constructor data instead of mixing native beforeinput with
-                // a fallback input mutation.
-                _wpt_send_one_key(elem, code, false, true);
+                var tag = elem && elem.tagName ? String(elem.tagName).toUpperCase() : "";
+                var editable = elem && elem.isContentEditable;
+                if (code >= 0xE012 && code <= 0xE015 &&
+                    tag !== "INPUT" && tag !== "TEXTAREA" && !editable) {
+                    _wpt_dispatch_native_edit_key(code, false, false, false, false);
+                } else {
+                    // Text editing stays in one transaction so cloned
+                    // InputEvents retain their constructor data.
+                    _wpt_send_one_key(elem, code, false, true);
+                }
             } else {
                 _wpt_type_printable_key(keys.charAt(i), elem);
             }
@@ -5116,8 +5235,25 @@ if (typeof subsetTest !== "function") {
     if (typeof window !== "undefined" && window) window.subsetTest = subsetTest;
 }
 if (typeof shouldRunSubTest !== "function") {
-    var shouldRunSubTest = function() { return true; };
+    var shouldRunSubTest = function(key) {
+        var search = (typeof location !== "undefined" && location)
+            ? String(location.search || "") : "";
+        var match = /(?:^\?|&)(include|exclude)=([^&]+)/.exec(search);
+        if (!key || !match) return true;
+        var found = new RegExp("^" + match[2] + "$").test(key);
+        return match[1] === "exclude" ? !found : found;
+    };
     if (typeof globalThis !== "undefined") globalThis.shouldRunSubTest = shouldRunSubTest;
+}
+// The keyed subset helper is served from /common/ by WPT; the headless
+// extractor supplies its URL variant but does not load that absolute script.
+if (typeof subsetTestByKey !== "function") {
+    var subsetTestByKey = function(key, testFunc) {
+        if (!shouldRunSubTest(key)) return null;
+        return testFunc.apply(null, Array.prototype.slice.call(arguments, 2));
+    };
+    if (typeof globalThis !== "undefined") globalThis.subsetTestByKey = subsetTestByKey;
+    if (typeof window !== "undefined") window.subsetTestByKey = subsetTestByKey;
 }
 
 // test_driver extensions used by the clipboard suite -----------------------
@@ -5161,6 +5297,12 @@ if (typeof waitForUserActivation !== "function") {
 }
 
 function _wpt_fire_onload() {
+    // Load follows the script task's microtask checkpoint. Promise tests
+    // declared by top-level scripts must be able to attach load listeners.
+    Promise.resolve().then(_wpt_dispatch_load_events);
+}
+
+function _wpt_dispatch_load_events() {
     var fn = null;
     if (typeof window !== "undefined" && window && typeof window.onload === "function") {
         fn = window.onload;
@@ -5207,6 +5349,16 @@ function _wpt_fire_onload() {
             window.dispatchEvent(new Event("load"));
         }
     } catch (e) { /* swallow */ }
+    // The headless document loader does not run Radiant's page lifecycle.
+    // Parsed <body onload> handlers and body.onload assignments are attached
+    // to the body EventTarget, so deliver its load event once as well.
+    try {
+        if (typeof document !== "undefined" && document && document.body &&
+            typeof document.body.dispatchEvent === "function" &&
+            typeof Event === "function") {
+            document.body.dispatchEvent(new Event("load"));
+        }
+    } catch (e) { /* swallow */ }
     // After onload, run any add_completion_callback callbacks.
     for (var i = 0; i < _wpt_completion_callbacks.length; i++) {
         try { _wpt_completion_callbacks[i](_wpt_results_summary()); }
@@ -5246,10 +5398,14 @@ function _wpt_print_summary() {
                 " - async_test did not complete; unsupported event/API did not fire");
         }
     }
-    function tick(remaining) {
+    function tick(remaining, empty_frames) {
         if (remaining < 256) _fast_fail_pending_async_without_timers();
         var still_pending = (_wpt_pending_promises > 0) || _async_tests_pending();
-        if (!still_pending || remaining <= 0) {
+        // Load handlers can await rendering before registering their first
+        // promise_test; allow a short frame quiescence before declaring 0/0.
+        var awaiting_registration = !still_pending && _wpt_total === 0 &&
+            empty_frames < 4;
+        if ((!still_pending && !awaiting_registration) || remaining <= 0) {
             console.log("WPT_RESULT: " + _wpt_pass + "/" + _wpt_total + " passed");
             return;
         }
@@ -5259,13 +5415,17 @@ function _wpt_print_summary() {
         // until the watchdog fires. The rAF drain calls back into the timer
         // loop after every frame, so timer-based tests still make progress.
         if (typeof requestAnimationFrame === "function") {
-            requestAnimationFrame(function() { tick(remaining - 1); });
+            requestAnimationFrame(function() {
+                tick(remaining - 1, awaiting_registration ? empty_frames + 1 : 0);
+            });
         } else {
-            setTimeout(function() { tick(remaining - 1); }, 10);
+            setTimeout(function() {
+                tick(remaining - 1, awaiting_registration ? empty_frames + 1 : 0);
+            }, 10);
         }
     }
     // Tests can register their assertions from an already-settled Promise
     // (for example, document.fonts.ready). Let those callbacks run before
     // deciding that the file contains no tests.
-    Promise.resolve().then(function() { tick(256); });
+    Promise.resolve().then(function() { tick(256, 0); });
 }

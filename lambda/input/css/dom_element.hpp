@@ -231,6 +231,13 @@ static inline const char* dom_page_kind_name(DomPageKind kind) {
  * Unified document structure (replaces radiant/dom.hpp Document)
  */
 // tier-1: doc-pool, survives relayout
+enum DomScrollAlign : uint8_t {
+    DOM_SCROLL_ALIGN_START,
+    DOM_SCROLL_ALIGN_CENTER,
+    DOM_SCROLL_ALIGN_END,
+    DOM_SCROLL_ALIGN_NEAREST,
+};
+
 struct DomDocument {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
@@ -368,6 +375,8 @@ struct DomDocument {
     // assigned a fresh Input may release that Input's document context.
     bool owns_input_resources;
     bool pending_scroll_into_view_if_needed;
+    DomScrollAlign pending_scroll_into_view_block;
+    DomScrollAlign pending_scroll_into_view_inline;
 
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
@@ -396,7 +405,9 @@ struct DomDocument {
                     owns_script_runtime(false), behavior_init_pending(false),
                     design_mode(false), document_domain(nullptr), owned_loader_pool(nullptr),
                     behavior_init_controls(nullptr), owns_input_resources(false),
-                    pending_scroll_into_view_if_needed(false) {}
+                    pending_scroll_into_view_if_needed(false),
+                    pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
+                    pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST) {}
 
     bool init(Input* input);
     void destroy();
@@ -553,6 +564,7 @@ enum DomElementFlag : uint32_t {
     // HTML's "in table" form insertion creates a DOM node only for form-owner
     // resolution; it is not a rendered form box unless CSS authoring overrides it.
     ELMT_FLAG_PARSER_INSERTED_TABLE_FORM = 1u << 27,
+    ELMT_FLAG_SCROLL_EVENT_PENDING = 1u << 28,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -824,6 +836,8 @@ struct DomElement : DomNode {
     void set_has_pending_element_scroll_x(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_X, value); }
     bool has_pending_element_scroll_y() const { return flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y); }
     void set_has_pending_element_scroll_y(bool value) { set_flag(ELMT_FLAG_HAS_PENDING_SCROLL_Y, value); }
+    bool scroll_event_pending() const { return flag(ELMT_FLAG_SCROLL_EVENT_PENDING); }
+    void set_scroll_event_pending(bool value) { set_flag(ELMT_FLAG_SCROLL_EVENT_PENDING, value); }
     bool checked_dirty() const { return flag(ELMT_FLAG_CHECKED_DIRTY); }
     void set_checked_dirty(bool v) { set_flag(ELMT_FLAG_CHECKED_DIRTY, v); }
     bool value_dirty() const { return flag(ELMT_FLAG_VALUE_DIRTY); }

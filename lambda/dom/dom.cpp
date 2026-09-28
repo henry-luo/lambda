@@ -776,14 +776,19 @@ extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     UiContext* uicon = _js_current_ui_context;
     DomDocument* doc = uicon && uicon->document
         ? uicon->document : _js_current_document;
+    bool scroll_into_view_pending = doc && doc->pending_scroll_into_view_target;
     if (!uicon || !uicon->headless || dom_is_host_driven_loop() ||
         !doc || !doc->view_tree || !doc->view_tree->root ||
-        doc->js.mutation_count == 0) {
+        (doc->js.mutation_count == 0 && !scroll_into_view_pending)) {
         return false;
     }
     // A one-shot DOM session has no native render loop, so task boundaries must
-    // commit pending mutations; geometry getters remain snapshots.
-    dom_engine_reconcile_dom_mutations(uicon, doc);
+    // commit pending mutations and layout-only scroll requests.
+    if (doc->js.mutation_count > 0) {
+        dom_engine_reconcile_dom_mutations(uicon, doc);
+    } else {
+        layout_html_doc(uicon, doc, true);
+    }
     return true;
 }
 
@@ -809,6 +814,8 @@ static DocState* dom_testdriver_state() {
     return _js_current_document->state;
 }
 
+static float dom_item_to_float(Item value);
+
 extern "C" Item dom_set_editing_behavior(Item behavior_item) {
     DocState* state = dom_testdriver_state();
     if (!state) return make_js_undefined();
@@ -826,6 +833,25 @@ static uint32_t dom_to_u32(Item value) {
     if (t == LMD_TYPE_FLOAT) return (uint32_t)it2d(num);
     if (t == LMD_TYPE_BOOL) return it2b(num) ? 1u : 0u;
     return 0;
+}
+
+static int dom_testdriver_platform_key(uint32_t key) {
+    // WebDriver private-use key values are not Radiant's platform key codes.
+    switch (key) {
+    case 0xE003: return RDT_KEY_BACKSPACE;
+    case 0xE006:
+    case 0xE007: return RDT_KEY_ENTER;
+    case 0xE00E: return RDT_KEY_PAGE_UP;
+    case 0xE00F: return RDT_KEY_PAGE_DOWN;
+    case 0xE010: return RDT_KEY_END;
+    case 0xE011: return RDT_KEY_HOME;
+    case 0xE012: return RDT_KEY_LEFT;
+    case 0xE013: return RDT_KEY_UP;
+    case 0xE014: return RDT_KEY_RIGHT;
+    case 0xE015: return RDT_KEY_DOWN;
+    case 0xE017: return RDT_KEY_DELETE;
+    default: return (int)key; // INT_CAST_OK: platform key enum stores code points.
+    }
 }
 
 extern "C" Item dom_testdriver_key(Item key_item,
@@ -851,12 +877,53 @@ extern "C" Item dom_testdriver_key(Item key_item,
     RdtEvent event;
     memset(&event, 0, sizeof(event));
     event.key.type = RDT_EVENT_KEY_DOWN;
-    event.key.key = wpt_key == 0xE003 ? RDT_KEY_BACKSPACE :
-        (wpt_key == 0xE017 ? RDT_KEY_DELETE : (int)wpt_key); // INT_CAST_OK: platform key enum stores code points.
+    event.key.key = dom_testdriver_platform_key(wpt_key);
     event.key.mods = mods;
     // Testdriver input must traverse the public platform event path so the
     // same route snapshot, notifications, and DOM fallback serve tests/users.
     handle_event(_js_current_ui_context, _js_current_document, &event);
+    return (Item){.item = ITEM_TRUE};
+}
+
+extern "C" Item dom_testdriver_scroll(Item x_item, Item y_item,
+                                        Item delta_x_item, Item delta_y_item) {
+    if (!_js_current_document || !_js_current_ui_context || !dom_testdriver_state()) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    RdtEvent event = {};
+    event.scroll.type = RDT_EVENT_SCROLL;
+    event.scroll.x = dom_item_to_float(x_item);
+    event.scroll.y = dom_item_to_float(y_item);
+    // WebDriver uses CSS-pixel deltas; the platform event uses scroll steps.
+    event.scroll.xoffset = -dom_item_to_float(delta_x_item) / RDT_WHEEL_PIXEL_STEP;
+    event.scroll.yoffset = -dom_item_to_float(delta_y_item) / RDT_WHEEL_PIXEL_STEP;
+    handle_event(_js_current_ui_context, _js_current_document, &event);
+    return (Item){.item = ITEM_TRUE};
+}
+
+extern "C" Item dom_testdriver_touch(Item target_item, Item type_item,
+                                       Item x_item, Item y_item) {
+    if (!_js_current_document || !_js_current_ui_context || !dom_testdriver_state()) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    RootFrame roots(4);
+    Rooted<Item> target_root(roots, target_item);
+    Rooted<Item> type_root(roots, type_item);
+    Rooted<Item> x_root(roots, x_item);
+    Rooted<Item> y_root(roots, y_item);
+    DomElement* target = (DomElement*)dom_unwrap_element(target_root.get());
+    const char* type = fn_to_cstr(type_root.get());
+    if (!target || !type ||
+        (strcmp(type, "touchstart") != 0 && strcmp(type, "touchmove") != 0 &&
+         strcmp(type, "touchend") != 0 && strcmp(type, "touchcancel") != 0)) {
+        return (Item){.item = ITEM_FALSE};
+    }
+    bool is_active = strcmp(type, "touchend") != 0 &&
+                     strcmp(type, "touchcancel") != 0;
+    float x = dom_item_to_float(x_root.get());
+    float y = dom_item_to_float(y_root.get());
+    radiant_dispatch_event_sim_touch(_js_current_ui_context,
+        static_cast<View*>(target), type, x, y, 0, is_active, -1.0);
     return (Item){.item = ITEM_TRUE};
 }
 
@@ -3051,6 +3118,19 @@ static void reset_foreign_document_cache() {
 }
 JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (void* data), free_document, ((DomDocument*)data))
 
+static bool dom_retains_adopted_document(DomDocument* owner,
+                                           DomDocument* target) {
+    if (owner == target) return true;
+    for (DomDocumentResource* resource = owner->resources; resource;
+         resource = resource->next) {
+        if (resource->destroy == dom_destroy_adopted_document &&
+            dom_retains_adopted_document((DomDocument*)resource->data, target)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool dom_transfer_document_storage(DomDocument* source,
                                              DomDocument* destination) {
     if (!dom_foreign_document_state_get()) return true;
@@ -3075,6 +3155,10 @@ static bool dom_transfer_document_storage(DomDocument* source,
         }
     }
     if (!foreign_owner && !iframe_owner) return true;
+
+    // If the source already retains the destination's storage, the source's
+    // existing owner keeps both arenas alive; a reverse edge would leak them.
+    if (dom_retains_adopted_document(source, destination)) return true;
 
     if (!dom_document_add_resource(destination, source,
                                    dom_destroy_adopted_document)) {
@@ -7323,7 +7407,9 @@ static Item js_text_control_set_range_text(Item replacement_arg, Item start_arg,
 JS_FORWARD_ITEM(dom_text_control_set_range_text_bridge, (void* dom_elem,                                                           Item replacement_arg,                                                           Item start_arg,                                                           Item end_arg,                                                           Item mode_arg), js_text_control_set_range_text_for_elem, ((DomElement*)dom_elem, replacement_arg, start_arg, end_arg, mode_arg))
 
 static void dom_queue_scroll_into_view(DomElement* elem, bool center,
-                                       bool if_needed = false) {
+                                       bool if_needed = false,
+                                       DomScrollAlign block_align = DOM_SCROLL_ALIGN_START,
+                                       DomScrollAlign inline_align = DOM_SCROLL_ALIGN_NEAREST) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
     if (!doc) return;
     if (doc->pending_scroll_into_view_target) {
@@ -7336,6 +7422,8 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
     doc->pending_scroll_into_view_target_id = 0;
     doc->pending_scroll_into_view_center = false;
     doc->pending_scroll_into_view_if_needed = false;
+    doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
+    doc->pending_scroll_into_view_inline = DOM_SCROLL_ALIGN_NEAREST;
     DomNodeRef ref = dom_node_ref((DomNode*)elem);
     if (!dom_node_ref_validate(doc, ref) ||
         !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
@@ -7345,6 +7433,8 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
     doc->pending_scroll_into_view_target_id = ref.expected_id;
     doc->pending_scroll_into_view_center = center;
     doc->pending_scroll_into_view_if_needed = if_needed;
+    doc->pending_scroll_into_view_block = block_align;
+    doc->pending_scroll_into_view_inline = inline_align;
     if (doc->state) doc_state_request_reflow(doc->state);
 }
 
@@ -9672,6 +9762,75 @@ static bool dom_is_root_scroll_target(const DomElement* elem) {
          str_icmp_cstr(elem->tag_name, "body") == 0);
 }
 
+static void dom_scroll_observed_position(DomElement* elem, float* x, float* y) {
+    *x = 0.0f;
+    *y = 0.0f;
+    if (!elem) return;
+    if (dom_is_root_scroll_target(elem) && elem->doc) {
+        *x = elem->doc->pending_viewport_scroll_x;
+        *y = elem->doc->pending_viewport_scroll_y;
+        return;
+    }
+    if (elem->scroller && elem->scroll()->pane) {
+        *x = elem->scroll()->pane->h_scroll_position;
+        *y = elem->scroll()->pane->v_scroll_position;
+        return;
+    }
+    if (elem->has_pending_element_scroll_x()) *x = elem->pending_scroll_x();
+    if (elem->has_pending_element_scroll_y()) *y = elem->pending_scroll_y();
+}
+
+static Item dom_dispatch_queued_scroll(Item env_item) {
+    JS_ENV_UNPACK(env, env_item);
+    RootFrame roots(2);
+    Rooted<Item> element_root(roots, env[0]);
+    DomElement* elem = (DomElement*)dom_unwrap_element(element_root.get());
+    if (!elem || !elem->scroll_event_pending()) {
+        return make_js_undefined();
+    }
+    elem->set_scroll_event_pending(false);
+    // CSSOM View queues one scroll event per target for a rendering update.
+    // Two real changes can return to the original offset before that update.
+    bool viewport_scroll = dom_is_root_scroll_target(elem);
+    Rooted<Item> target_root(roots, viewport_scroll
+        ? js_get_document_object_value() : element_root.get());
+    Rooted<Item> event_root(roots, js_create_native_event("scroll", viewport_scroll, false));
+    dom_dispatch_event(target_root.get(), event_root.get());
+    // CSSOM View fires scrollend after an instant scroll settles; a scroll
+    // handler that starts another scroll keeps this target pending instead.
+    if (!elem->scroll_event_pending()) {
+        event_root.set(js_create_native_event("scrollend", viewport_scroll, false));
+        dom_dispatch_event(target_root.get(), event_root.get());
+    }
+    return make_js_undefined();
+}
+
+static void dom_schedule_scroll_frame(Item callback) {
+    (void)js_requestAnimationFrame(callback);
+}
+
+static void dom_queue_scroll_event(DomElement* elem, float old_x, float old_y) {
+    if (!elem || elem->scroll_event_pending()) return;
+    float x = 0.0f;
+    float y = 0.0f;
+    dom_scroll_observed_position(elem, &x, &y);
+    if (x == old_x && y == old_y) return;
+    elem->set_scroll_event_pending(true);
+    RootFrame roots(1);
+    Rooted<Item> target_root(roots, dom_wrap_element(elem));
+    Item values[1] = {target_root.get()};
+    js_schedule_native_env(dom_schedule_scroll_frame,
+        dom_dispatch_queued_scroll, 0, values, 1);
+}
+
+extern "C" void dom_notify_scroll_position_change(void* element,
+                                                    float old_x, float old_y) {
+    // Layout can apply scrollIntoView after the DOM setter returns; queue its
+    // event from the same position-change path as scrollTop/scrollLeft.
+    if (!dom_realm_active()) return;
+    dom_queue_scroll_event((DomElement*)element, old_x, old_y);
+}
+
 extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // Range / Selection wrappers also live under the DOM resource carrier and route here.
 
@@ -10015,6 +10174,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // subtracting the zoomed border widths.
     if (prop_id == JS_DOM_PROP_CLIENT_WIDTH) {
         dom_ensure_geometry_snapshot(elem->doc);
+        if (dom_is_root_scroll_target(elem) && _js_current_ui_context &&
+            dom_has_committed_geometry_snapshot(elem->doc)) {
+            // CSSOM View exposes the viewport, not the full html content box.
+            return (Item){.item = i2it((int64_t)llroundf(
+                _js_current_ui_context->viewport_width))};
+        }
         float bw = 0;
         if (elem->bound && elem->boundary()->border) {
             bw = elem->boundary()->border->width.left + elem->boundary()->border->width.right;
@@ -10025,6 +10190,11 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     }
     if (prop_id == JS_DOM_PROP_CLIENT_HEIGHT) {
         dom_ensure_geometry_snapshot(elem->doc);
+        if (dom_is_root_scroll_target(elem) && _js_current_ui_context &&
+            dom_has_committed_geometry_snapshot(elem->doc)) {
+            return (Item){.item = i2it((int64_t)llroundf(
+                _js_current_ui_context->viewport_height))};
+        }
         float bh = 0;
         if (elem->bound && elem->boundary()->border) {
             bh = elem->boundary()->border->width.top + elem->boundary()->border->width.bottom;
@@ -10914,18 +11084,42 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
         bool is_vertical = prop_id == JS_DOM_PROP_SCROLL_TOP;
         bool is_root_scroll_target = dom_is_root_scroll_target(elem);
+        float old_scroll_x = 0.0f;
+        float old_scroll_y = 0.0f;
+        dom_scroll_observed_position(elem, &old_scroll_x, &old_scroll_y);
 
         if (is_root_scroll_target && elem->doc) {
-            // A pending viewport request has no signed element range yet;
-            // preserve the DOM non-negative origin until layout commits it.
+            // Before first layout there is no viewport range; afterwards the
+            // CSSOM getter must expose the clamped position immediately.
             if (scroll_value < 0.0f) scroll_value = 0.0f;
-            if (is_vertical) {
-                elem->doc->pending_viewport_scroll_y = scroll_value;
-            } else {
-                elem->doc->pending_viewport_scroll_x = scroll_value;
+            float next_x = is_vertical ? old_scroll_x : scroll_value;
+            float next_y = is_vertical ? scroll_value : old_scroll_y;
+            DocState* state = elem->doc->state;
+            if (state && dom_has_committed_geometry_snapshot(elem->doc) &&
+                elem->scroller && elem->scroll()->pane) {
+                ScrollPane* pane = elem->scroll()->pane;
+                scroll_state_set_position_for_view(state, static_cast<View*>(elem),
+                    pane, next_x, next_y, true);
+                scroll_state_get_position_for_view(state, static_cast<View*>(elem),
+                    pane, &next_x, &next_y, nullptr, nullptr);
+            } else if (_js_current_ui_context &&
+                       dom_has_committed_geometry_snapshot(elem->doc)) {
+                // Some headless documents have no native root pane. Their
+                // committed content and viewport still define the same range.
+                float max_x = dom_scrollable_extent(elem, true) -
+                    _js_current_ui_context->viewport_width;
+                float max_y = dom_scrollable_extent(elem, false) -
+                    _js_current_ui_context->viewport_height;
+                if (max_x < 0.0f) max_x = 0.0f;
+                if (max_y < 0.0f) max_y = 0.0f;
+                if (next_x > max_x) next_x = max_x;
+                if (next_y > max_y) next_y = max_y;
             }
+            elem->doc->pending_viewport_scroll_x = next_x;
+            elem->doc->pending_viewport_scroll_y = next_y;
             log_debug("dom_set_property: pending viewport %s=%.1f on <%s>",
-                      prop, scroll_value, elem->tag_name);
+                      prop, is_vertical ? next_y : next_x, elem->tag_name);
+            dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
             return value;
         }
 
@@ -10975,6 +11169,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             }
             log_debug("dom_set_property: set %s=%.1f on <%s>",
                       prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
+            dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
             return value;
         }
 
@@ -10989,6 +11184,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         }
         log_debug("dom_set_property: pending element %s=%.1f on <%s>",
                   prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
+        dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
         return value;
     }
 
@@ -13866,13 +14062,41 @@ extern "C" Item dom_get_client_rects_bridge(void* dom_elem) {
     return dom_static_rect_list_from_array(array_root.get());
 }
 
-extern "C" Item dom_scroll_into_view_bridge(void* dom_elem) {
-    DomElement* elem = (DomElement*)dom_elem;
+static DomScrollAlign dom_scroll_align_from_item(Item value,
+                                                 DomScrollAlign fallback) {
+    const char* name = fn_to_cstr(value);
+    if (!name) return fallback;
+    if (strcmp(name, "start") == 0) return DOM_SCROLL_ALIGN_START;
+    if (strcmp(name, "center") == 0) return DOM_SCROLL_ALIGN_CENTER;
+    if (strcmp(name, "end") == 0) return DOM_SCROLL_ALIGN_END;
+    if (strcmp(name, "nearest") == 0) return DOM_SCROLL_ALIGN_NEAREST;
+    return fallback;
+}
+
+static Item dom_scroll_into_view_with_options(DomElement* elem,
+                                               Item* args, int argc) {
     if (!elem) return make_js_undefined();
-    dom_queue_scroll_into_view(elem, false);
+    DomScrollAlign block = DOM_SCROLL_ALIGN_START;
+    DomScrollAlign inline_align = DOM_SCROLL_ALIGN_NEAREST;
+    if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
+        RootFrame roots(1);
+        Rooted<Item> options(roots, args[0]);
+        block = dom_scroll_align_from_item(
+            dom_realm_get_cstr(options.get(), "block"), block);
+        inline_align = dom_scroll_align_from_item(
+            dom_realm_get_cstr(options.get(), "inline"), inline_align);
+    } else if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_BOOL &&
+               !it2b(args[0])) {
+        block = DOM_SCROLL_ALIGN_END;
+    }
+    dom_queue_scroll_into_view(elem, false, false, block, inline_align);
     log_debug("dom_scrollIntoView: queued target <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return make_js_undefined();
+}
+
+extern "C" Item dom_scroll_into_view_bridge(void* dom_elem) {
+    return dom_scroll_into_view_with_options((DomElement*)dom_elem, nullptr, 0);
 }
 
 extern "C" Item dom_scroll_operation_bridge(Item elem_item,
@@ -15424,7 +15648,14 @@ extern "C" Item dom_core_has_child_nodes(Item n) {
 
 extern "C" Item dom_core_scroll_into_view_op(Item n) {
     DomElement* elem = dom_op_element(n);
-    return elem ? dom_scroll_into_view_bridge((void*)elem) : ItemNull;
+    // Preserve the Lambda package's one-argument native export while the JS
+    // method uses its separate catalog entry to receive alignment options.
+    return elem ? dom_scroll_into_view_with_options(elem, nullptr, 0) : ItemNull;
+}
+
+extern "C" Item dom_core_scroll_into_view_options_op(Item n, Item options) {
+    DomElement* elem = dom_op_element(n);
+    return elem ? dom_scroll_into_view_with_options(elem, &options, 1) : ItemNull;
 }
 
 extern "C" Item dom_core_scroll_into_view_if_needed_op(Item n,
@@ -16455,7 +16686,7 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     if (operation == JUBE_DOM_GET_BOUNDING_CLIENT_RECT) return dom_core_bounding_box(elem_item);
 
     if (operation == JUBE_DOM_SCROLL_INTO_VIEW) {
-        return dom_core_scroll_into_view_op(elem_item);
+        return dom_scroll_into_view_with_options(dom_op_element(elem_item), args, argc);
     }
 
     if (operation == JUBE_DOM_SCROLL ||

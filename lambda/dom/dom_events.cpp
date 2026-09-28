@@ -852,6 +852,32 @@ static bool signal_is_aborted(Item signal_item) {
     return js_is_truthy(ab);
 }
 
+static bool has_active_nonpassive_input_listener(void* key, const char* type) {
+    NodeListeners* listeners = find_listeners(key);
+    if (!listeners) return false;
+    RootFrame roots(1);
+    Rooted<Item> signal_root(roots, ItemNull);
+    for (int i = 0; i < listeners->count; i++) {
+        EventListener* listener = &listeners->items[i];
+        if (listener->removed || listener->passive || !listener->type ||
+            strcmp(listener->type, type) != 0) continue;
+        signal_root.set(event_listener_root_item(listener->signal_root));
+        if (!signal_is_aborted(signal_root.get())) return true;
+    }
+    return false;
+}
+
+extern "C" bool dom_input_event_cancelable(void* target_node, const char* type) {
+    if (!dom_event_runtime_state_ensure()) return false;
+    // Input dispatch follows the same element → document → window path as
+    // EventTarget; passive-only paths cannot cancel the native scroll.
+    for (DomNode* node = (DomNode*)target_node; node; node = node->parent) {
+        if (has_active_nonpassive_input_listener(node, type)) return true;
+    }
+    return has_active_nonpassive_input_listener((void*)&_document_sentinel, type) ||
+           has_active_nonpassive_input_listener((void*)&_window_sentinel, type);
+}
+
 // ============================================================================
 // addEventListener / removeEventListener
 // ============================================================================
@@ -1734,6 +1760,14 @@ static Item js_create_trusted_native_event(const char* type, Item init,
     return event;
 }
 
+extern "C" Item js_create_native_event(const char* type, bool bubbles,
+                                        bool cancelable) {
+    RootFrame roots(1);
+    Rooted<Item> event_root(roots, js_create_event(type, bubbles, cancelable));
+    event_set_bool(event_root.get(), "isTrusted", true);
+    return event_root.get();
+}
+
 static void stamp_modifier_init(Item init, bool ctrl, bool shift, bool alt, bool meta) {
     event_set_bool(init, "ctrlKey",  ctrl);
     event_set_bool(init, "shiftKey", shift);
@@ -1813,7 +1847,7 @@ static Item js_create_native_touch_point(double client_x, double client_y) {
 extern "C" Item js_create_native_touch_event(const char* type,
     double client_x, double client_y,
     bool ctrl, bool shift, bool alt, bool meta,
-    bool is_active)
+    bool is_active, bool cancelable)
 {
     RootFrame roots(5);
     Rooted<Item> touch_root(roots, js_create_native_touch_point(client_x, client_y));
@@ -1827,7 +1861,7 @@ extern "C" Item js_create_native_touch_event(const char* type,
     js_array_push(changed_touches_root.get(), touch_root.get());
 
     Rooted<Item> event_root(roots, js_create_event_init_with_class(type ? type : "", true,
-        true, true, JS_CLASS_TOUCH_EVENT));
+        cancelable, true, JS_CLASS_TOUCH_EVENT));
     Item event = event_root.get();
     event_set_item(event, "touches", touches_root.get());
     event_set_item(event, "targetTouches", target_touches_root.get());
@@ -1965,9 +1999,9 @@ extern "C" Item js_create_native_wheel_event(const char* type,
     double client_x, double client_y,
     double delta_x, double delta_y,
     int buttons,
-    bool ctrl, bool shift, bool alt, bool meta)
+    bool ctrl, bool shift, bool alt, bool meta, bool cancelable)
 {
-    Item init = js_create_native_event_init(true, true, true);
+    Item init = js_create_native_event_init(true, cancelable, true);
     stamp_client_coordinates(init, client_x, client_y, false);
     event_set_int(init, "buttons", buttons);
     event_set_double(init, "deltaX", delta_x);
