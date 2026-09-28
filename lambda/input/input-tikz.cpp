@@ -190,6 +190,12 @@ private:
     size_t position_;
     size_t commands_;
     size_t points_;
+    struct OptionSpan { size_t begin, end; };
+    OptionSpan axis_defaults_[16];
+    size_t axis_default_count_ = 0;
+    struct StyleSpan { size_t name_begin, name_end, value_begin, value_end; };
+    StyleSpan styles_[32];
+    size_t style_count_ = 0;
 
     void error(const char* message) {
         ctx_.tracker.seek(position_);
@@ -211,6 +217,17 @@ private:
 
     static void trim_span(const char* source, size_t* begin, size_t* end) {
         while (*begin < *end && space(source[*begin])) (*begin)++;
+        while (*end > *begin && space(source[*end - 1])) (*end)--;
+    }
+
+    static void trim_option_span(const char* source, size_t* begin, size_t* end) {
+        // TeX comments between keys are whitespace, including their newline.
+        while (*begin < *end) {
+            while (*begin < *end && space(source[*begin])) (*begin)++;
+            if (*begin >= *end || source[*begin] != '%') break;
+            while (*begin < *end && source[*begin] != '\n' && source[*begin] != '\r')
+                (*begin)++;
+        }
         while (*end > *begin && space(source[*end - 1])) (*end)--;
     }
 
@@ -253,17 +270,33 @@ private:
         return true;
     }
 
-    bool options(ElementBuilder& parent) {
-        skip_space_comments();
-        if (position_ >= length_ || source_[position_] != '[') return true;
-        size_t begin = 0, end = 0;
-        if (!group('[', ']', &begin, &end)) return false;
-        parent.attr("options_source", source_item(begin, end));
+    bool expand_style(ElementBuilder& parent, size_t key_begin, size_t key_end,
+                      size_t depth) {
+        if (depth > 8) { error("TikZ style expansion exceeds 8 levels"); return false; }
+        for (size_t i = style_count_; i > 0; i--) {
+            const StyleSpan& style = styles_[i - 1];
+            size_t name_length = style.name_end - style.name_begin;
+            if (name_length == key_end - key_begin &&
+                    memcmp(source_ + style.name_begin, source_ + key_begin, name_length) == 0)
+                return append_options(parent, style.value_begin, style.value_end,
+                                      false, false, true, depth + 1);
+        }
+        return false;
+    }
+
+    bool append_options(ElementBuilder& parent, size_t begin, size_t end,
+                        bool pgfplots_defaults = false, bool define_styles = false,
+                        bool use_styles = false, size_t style_depth = 0) {
         size_t item_begin = begin;
         size_t depth = 0;
         for (size_t cursor = begin; cursor <= end; cursor++) {
             char c = cursor < end ? source_[cursor] : ',';
             if (c == '\\' && cursor + 1 < end) { cursor++; continue; }
+            if (c == '%') {
+                while (cursor < end && source_[cursor] != '\n' && source_[cursor] != '\r')
+                    cursor++;
+                continue;
+            }
             if (c == '{' || c == '[' || c == '(') depth++;
             else if ((c == '}' || c == ']' || c == ')') && depth > 0) depth--;
             if (c != ',' || depth != 0) continue;
@@ -271,6 +304,10 @@ private:
             size_t value_begin = cursor, value_end = cursor;
             size_t nested = 0;
             for (size_t i = item_begin; i < cursor; i++) {
+                if (source_[i] == '%') {
+                    while (i < cursor && source_[i] != '\n' && source_[i] != '\r') i++;
+                    continue;
+                }
                 if (source_[i] == '{' || source_[i] == '[' || source_[i] == '(') nested++;
                 else if ((source_[i] == '}' || source_[i] == ']' || source_[i] == ')') && nested > 0) nested--;
                 else if (source_[i] == '=' && nested == 0) {
@@ -280,20 +317,84 @@ private:
                     break;
                 }
             }
-            trim_span(source_, &key_begin, &key_end);
-            trim_span(source_, &value_begin, &value_end);
+            trim_option_span(source_, &key_begin, &key_end);
+            trim_option_span(source_, &value_begin, &value_end);
             if (value_end > value_begin && source_[value_begin] == '{' &&
                     source_[value_end - 1] == '}') {
                 value_begin++;
                 value_end--;
             }
             if (key_end > key_begin) {
+                size_t key_length = key_end - key_begin;
+                if (define_styles && key_length > 7 &&
+                        memcmp(source_ + key_end - 7, "/.style", 7) == 0) {
+                    if (style_count_ == 32) { error("too many TikZ styles"); return false; }
+                    styles_[style_count_++] = {key_begin, key_end - 7,
+                                               value_begin, value_end};
+                    item_begin = cursor + 1;
+                    continue;
+                }
+                if (use_styles && value_begin == value_end) {
+                    bool matched = false;
+                    for (size_t i = style_count_; i > 0; i--) {
+                        const StyleSpan& style = styles_[i - 1];
+                        if (style.name_end - style.name_begin == key_length &&
+                                memcmp(source_ + style.name_begin,
+                                       source_ + key_begin, key_length) == 0) {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (matched) {
+                        if (!expand_style(parent, key_begin, key_end, style_depth)) return false;
+                        item_begin = cursor + 1;
+                        continue;
+                    }
+                }
+                if (pgfplots_defaults) {
+                    bool append_axis_style = key_length == strlen("every axis/.append style") &&
+                        memcmp(source_ + key_begin, "every axis/.append style", key_length) == 0;
+                    bool replace_axis_style = key_length == strlen("every axis/.style") &&
+                        memcmp(source_ + key_begin, "every axis/.style", key_length) == 0;
+                    if (!append_axis_style && !replace_axis_style) {
+                        error("unsupported pgfplotsset key"); return false;
+                    }
+                    // /.style replaces prior defaults; /.append style preserves them.
+                    if (replace_axis_style) axis_default_count_ = 0;
+                    if (axis_default_count_ == 16) {
+                        error("too many PGFPlots axis style declarations"); return false;
+                    }
+                    // Inherited options precede local axis options in TikZ key order.
+                    axis_defaults_[axis_default_count_++] = {value_begin, value_end};
+                }
                 ElementBuilder option = builder_.element("option");
                 option.attr("key", source_item(key_begin, key_end));
                 option.attr("value", source_item(value_begin, value_end));
                 parent.child(option.final());
             }
             item_begin = cursor + 1;
+        }
+        return true;
+    }
+
+    bool options(ElementBuilder& parent, bool define_styles = false,
+                 bool use_styles = false) {
+        skip_space_comments();
+        if (position_ >= length_ || source_[position_] != '[') return true;
+        size_t begin = 0, end = 0;
+        if (!group('[', ']', &begin, &end)) return false;
+        parent.attr("options_source", source_item(begin, end));
+        return append_options(parent, begin, end, false, define_styles, use_styles);
+    }
+
+    bool inherited_style(ElementBuilder& parent, const char* name) {
+        for (size_t i = style_count_; i > 0; i--) {
+            const StyleSpan& style = styles_[i - 1];
+            size_t length = style.name_end - style.name_begin;
+            if (length == strlen(name) &&
+                    memcmp(source_ + style.name_begin, name, length) == 0)
+                return append_options(parent, style.value_begin, style.value_end,
+                                      false, false, true);
         }
         return true;
     }
@@ -342,6 +443,39 @@ private:
         if (!number(at, end, physical, y)) return false;
         skip_inner_space(source_, at, end);
         if (*at >= end || source_[(*at)++] != ')') return false;
+        return true;
+    }
+
+    bool positioned_coordinate(size_t* at, size_t end, double* x, double* y,
+                               const char** system) {
+        skip_inner_space(source_, at, end);
+        if (*at >= end || source_[*at] != '(') return false;
+        size_t start = *at + 1;
+        skip_inner_space(source_, &start, end);
+        const char* prefix = nullptr;
+        const char* kind = "cartesian";
+        if (start + strlen("axis description cs:") <= end &&
+                memcmp(source_ + start, "axis description cs:",
+                       strlen("axis description cs:")) == 0) {
+            prefix = "axis description cs:";
+            kind = "axis-description";
+        } else if (start + strlen("axis cs:") <= end &&
+                   memcmp(source_ + start, "axis cs:", strlen("axis cs:")) == 0) {
+            prefix = "axis cs:";
+            kind = "axis";
+        }
+        if (!prefix) {
+            if (!coordinate(at, end, true, x, y)) return false;
+        } else {
+            *at = start + strlen(prefix);
+            if (!number(at, end, false, x)) return false;
+            skip_inner_space(source_, at, end);
+            if (*at >= end || source_[(*at)++] != ',' ||
+                    !number(at, end, false, y)) return false;
+            skip_inner_space(source_, at, end);
+            if (*at >= end || source_[(*at)++] != ')') return false;
+        }
+        *system = kind;
         return true;
     }
 
@@ -434,6 +568,31 @@ private:
         return true;
     }
 
+    bool append_inline_node(ElementBuilder& parent, size_t* at, size_t end) {
+        if (!path_word(at, end, "node")) return false;
+        ElementBuilder el = builder_.element("node");
+        el.attr("inline", true);
+        if (!inherited_style(el, "every node")) return false;
+        skip_inner_space(source_, at, end);
+        if (*at < end && source_[*at] == '[') {
+            size_t begin = 0, finish = 0;
+            size_t after = latex_scan_group_end(source_, end, *at, '[', ']',
+                                                 &begin, &finish);
+            if (!after) { error("unclosed inline node options"); return false; }
+            if (!append_options(el, begin, finish, false, false, true)) return false;
+            *at = after;
+        }
+        skip_inner_space(source_, at, end);
+        size_t begin = 0, finish = 0;
+        size_t after = latex_scan_group_end(source_, end, *at, '{', '}',
+                                             &begin, &finish);
+        if (!after) { error("inline node requires text"); return false; }
+        *at = after;
+        el.attr("source", source_item(begin, finish));
+        parent.child(el.final());
+        return true;
+    }
+
     bool append_path_geometry(ElementBuilder& parent, size_t begin, size_t end) {
         size_t at = begin;
         double x = 0.0, y = 0.0;
@@ -464,8 +623,17 @@ private:
                 skip_inner_space(source_, &at, end);
                 if (at != end) { error("ellipse must end after its radii"); return false; }
                 return true;
-            } else if (at + 2 <= end && memcmp(source_ + at, "--", 2) == 0) {
+            } else if (at + 2 <= end &&
+                       (memcmp(source_ + at, "--", 2) == 0 ||
+                        memcmp(source_ + at, "-|", 2) == 0 ||
+                        memcmp(source_ + at, "|-", 2) == 0)) {
+                if (source_[at] != '-') parent.attr("line_mode", "vertical-horizontal");
+                else if (source_[at + 1] != '-')
+                    parent.attr("line_mode", "horizontal-vertical");
                 at += 2;
+                skip_inner_space(source_, &at, end);
+                if (at + 4 <= end && memcmp(source_ + at, "node", 4) == 0 &&
+                        !append_inline_node(parent, &at, end)) return false;
                 double x2 = 0.0, y2 = 0.0;
                 bool next_cartesian = false;
                 if (!append_path_vertex(parent, &at, end, &x2, &y2, &next_cartesian)) {
@@ -544,12 +712,41 @@ private:
         bool append_cycle = position_ < length_ && source_[position_] == '+';
         if (append_cycle) position_++;
         node.attr("append_cycle", append_cycle);
-        if (!options(node)) return false;
+        if (!inherited_style(node, "every plot") || !options(node, false, true))
+            return false;
+        skip_space_comments();
         size_t begin = 0, end = 0;
         if (word("coordinates")) {
             node.attr("input_kind", "coordinates");
             if (!group('{', '}', &begin, &end)) return false;
             if (!append_points(node, begin, end, false)) return false;
+        } else if (position_ < length_ && source_[position_] == '(') {
+            // A PGFPlots parametric pair has two independently sampled expressions.
+            node.attr("input_kind", "parametric");
+            if (!group('(', ')', &begin, &end)) return false;
+            size_t comma = begin, nested = 0;
+            for (; comma < end; comma++) {
+                char c = source_[comma];
+                if (c == '{' || c == '(') nested++;
+                else if ((c == '}' || c == ')') && nested > 0) nested--;
+                else if (c == ',' && nested == 0) break;
+            }
+            if (comma == end) { error("parametric plot requires x and y expressions"); return false; }
+            size_t starts[2] = {begin, comma + 1};
+            size_t ends[2] = {comma, end};
+            for (int part = 0; part < 2; part++) {
+                trim_span(source_, &starts[part], &ends[part]);
+                if (ends[part] > starts[part] + 1 && source_[starts[part]] == '{' &&
+                        source_[ends[part] - 1] == '}') {
+                    starts[part]++; ends[part]--;
+                }
+                PlotExpressionParser expression(ctx_, source_ + starts[part],
+                                                ends[part] - starts[part], starts[part]);
+                Item tree = expression.parse();
+                if (tree.item == ITEM_NULL) return false;
+                node.child(builder_.element(part == 0 ? "x_expression" : "y_expression")
+                    .child(tree).final());
+            }
         } else {
             node.attr("input_kind", "expression");
             if (!group('{', '}', &begin, &end)) return false;
@@ -559,6 +756,13 @@ private:
             node.child(tree);
         }
         skip_space_comments();
+        if (position_ + 4 <= length_ &&
+                memcmp(source_ + position_, "node", 4) == 0) {
+            size_t at = position_;
+            if (!append_inline_node(node, &at, length_)) return false;
+            position_ = at;
+            skip_space_comments();
+        }
         if (position_ >= length_ || source_[position_++] != ';') {
             error("expected plot semicolon"); return false;
         }
@@ -569,7 +773,8 @@ private:
     bool path(ElementBuilder& parent, const char* action) {
         ElementBuilder node = builder_.element("path");
         node.attr("action", action);
-        if (!options(node)) return false;
+        if (!inherited_style(node, "every path") || !options(node, false, true))
+            return false;
         size_t begin = position_, end = 0;
         if (!semicolon(&end)) return false;
         node.attr("source", source_item(begin, end));
@@ -606,7 +811,8 @@ private:
 
     bool node(ElementBuilder& parent) {
         ElementBuilder el = builder_.element("node");
-        if (!options(el)) return false;
+        if (!inherited_style(el, "every node") || !options(el, false, true))
+            return false;
         skip_space_comments();
         if (position_ < length_ && source_[position_] == '(') {
             size_t begin = 0, end = 0;
@@ -620,18 +826,43 @@ private:
         if (!word("at")) { error("node requires an explicit position"); return false; }
         size_t at = position_;
         double x = 0.0, y = 0.0;
-        if (!coordinate(&at, length_, true, &x, &y)) {
+        const char* system = nullptr;
+        if (!positioned_coordinate(&at, length_, &x, &y, &system)) {
             error("expected node coordinate"); return false;
         }
         position_ = at;
         size_t begin = 0, end = 0;
         if (!group('{', '}', &begin, &end)) return false;
-        el.attr("x", x).attr("y", y).attr("source", source_item(begin, end));
+        el.attr("x", x).attr("y", y).attr("coord_system", system)
+            .attr("source", source_item(begin, end));
         skip_space_comments();
         if (position_ >= length_ || source_[position_++] != ';') {
             error("expected node semicolon"); return false;
         }
         parent.child(el.final());
+        return true;
+    }
+
+    bool named_coordinate(ElementBuilder& parent) {
+        skip_space_comments();
+        size_t begin = 0, end = 0;
+        if (!group('(', ')', &begin, &end)) return false;
+        trim_span(source_, &begin, &end);
+        if (!identifier(begin, end)) { error("invalid coordinate name"); return false; }
+        if (!word("at")) { error("named coordinate requires at"); return false; }
+        size_t at = position_;
+        double x = 0.0, y = 0.0;
+        const char* system = nullptr;
+        if (!positioned_coordinate(&at, length_, &x, &y, &system)) {
+            error("expected named coordinate position"); return false;
+        }
+        position_ = at;
+        skip_space_comments();
+        if (position_ >= length_ || source_[position_++] != ';') {
+            error("expected coordinate semicolon"); return false;
+        }
+        parent.child(builder_.element("coordinate").attr("id", source_item(begin, end))
+            .attr("x", x).attr("y", y).attr("coord_system", system).final());
         return true;
     }
 
@@ -643,8 +874,18 @@ private:
             error("unsupported environment"); return false;
         }
         ElementBuilder el = builder_.element(name);
-        if (!options(el)) return false;
+        size_t saved_styles = style_count_;
+        if (strcmp(name, "axis") == 0 || strcmp(name, "semilogxaxis") == 0 ||
+                strcmp(name, "semilogyaxis") == 0 || strcmp(name, "loglogaxis") == 0 ||
+                strcmp(name, "polaraxis") == 0) {
+            for (size_t i = 0; i < axis_default_count_; i++) {
+                if (!append_options(el, axis_defaults_[i].begin, axis_defaults_[i].end))
+                    return false;
+            }
+        }
+        if (!options(el, strcmp(name, "tikzpicture") == 0, false)) return false;
         if (!parse_children(el, name, depth + 1)) return false;
+        style_count_ = saved_styles;
         parent.child(el.final());
         return true;
     }
@@ -682,11 +923,19 @@ private:
                 if (!path(parent, name)) return false;
             } else if (strcmp(name, "node") == 0) {
                 if (!node(parent)) return false;
+            } else if (strcmp(name, "coordinate") == 0) {
+                if (!named_coordinate(parent)) return false;
             } else if (!closing && strcmp(name, "usepgfplotslibrary") == 0) {
                 size_t begin = 0, end = 0;
                 if (!group('{', '}', &begin, &end)) return false;
                 parent.child(builder_.element("pgfplots_library")
                     .attr("source", source_item(begin, end)).final());
+            } else if (!closing && strcmp(name, "pgfplotsset") == 0) {
+                size_t begin = 0, end = 0;
+                if (!group('{', '}', &begin, &end)) return false;
+                ElementBuilder setting = builder_.element("pgfplots_setting");
+                if (!append_options(setting, begin, end, true)) return false;
+                parent.child(setting.final());
             } else {
                 error("unsupported TikZ command"); return false;
             }
