@@ -1028,9 +1028,13 @@ static bool intrinsic_multicol_child_info(DomNode* child, IntrinsicMulticolChild
     if (!child || !child->is_element() || !info) return false;
     info->element = child->as_element();
     ViewBlock* storage = lam::unsafe_view_block_element_storage(info->element);
-    // Shared element storage is enough for pre-layout style reads, but BFC
-    // checks require a real block view rather than an inline element alias.
+    // intrinsic sizing may precede view typing; block-display storage still
+    // carries the BFC properties needed to find an escaping nested spanner.
     info->block = lam::view_as_block(static_cast<View*>(info->element));
+    if (!info->block && storage &&
+        info->element->display.outer == CSS_VALUE_BLOCK) {
+        info->block = storage;
+    }
     // Intrinsic multicol passes need one pre-layout interpretation of hidden, out-of-flow,
     // and column-spanning children; keeping it here prevents the two tree walks diverging.
     info->skipped = storage && (layout_block_is_display_none(storage) ||

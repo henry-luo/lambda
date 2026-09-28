@@ -18,6 +18,7 @@ typedef struct DomNodeRecord {
     DomNodeLifeState state;
     bool recyclable;
     bool candidate;
+    bool current_owner;
     size_t primary_size;
     Element* backing_source;
     uint32_t pins[DOM_NODE_PIN_REASON_COUNT];
@@ -36,6 +37,7 @@ typedef struct DomNodeRegistry {
 // DOM-only unit targets do not link the Radiant view teardown implementation.
 __attribute__((weak)) void view_tree_release_retired_subtree(ViewTree*, DomNode*) {}
 __attribute__((weak)) void view_tree_release_detached_embedded_documents(ViewTree*, DomNode*) {}
+__attribute__((weak)) void view_tree_prepare_detached_subtree(DomNode*) {}
 __attribute__((weak)) void view_pool_release_detached_form_props(DomNode*) {}
 __attribute__((weak)) void form_control_release_prop(DomElement*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
@@ -147,7 +149,8 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
     DomNodeRecord* record = dom_record_find(registry, node);
     if (record) {
         if (record->state != DOM_NODE_RETIRED) {
-            if (record->id == id && record->primary_size == primary_size) return true;
+            if (record->current_owner && record->id == id &&
+                record->primary_size == primary_size) return true;
             dom_lifecycle_fail("duplicate-live-register", dom_node_ref(node),
                                DOM_NODE_PIN_EXTERNAL);
             return false;
@@ -159,6 +162,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
         record->state = DOM_NODE_LIVE;
         record->recyclable = recyclable;
         record->candidate = false;
+        record->current_owner = true;
         record->primary_size = primary_size;
         record->backing_source = backing_source;
         registry->stats.reused_addresses++;
@@ -177,6 +181,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
     record->type = type;
     record->state = DOM_NODE_LIVE;
     record->recyclable = recyclable;
+    record->current_owner = true;
     record->primary_size = primary_size;
     record->backing_source = backing_source;
     size_t bucket = dom_node_bucket(registry, node);
@@ -198,36 +203,39 @@ bool dom_node_registry_register(DomDocument* doc, DomNode* node,
 }
 
 bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
-                                DomNode* node, uint32_t destination_id) {
-    if (!source || !destination || !node || !destination_id) return false;
+                                DomNode* node, uint32_t* destination_id) {
+    if (!source || !destination || !node || !destination_id || !*destination_id) return false;
     DomNodeRecord* source_record = dom_record_find(dom_registry(source), node);
-    if (!source_record || source_record->state == DOM_NODE_RETIRED ||
+    if (!source_record || !source_record->current_owner ||
+        source_record->state == DOM_NODE_RETIRED ||
         source_record->id != node->id) {
         log_error("DOM_LIFECYCLE_TRANSFER: source record is stale for node %p", (void*)node);
         return false;
     }
     DomNodeRecord* destination_record = dom_record_find(dom_registry(destination), node);
-    if (destination_record && destination_record->state != DOM_NODE_RETIRED &&
-        destination_record->id != node->id) {
-        for (int reason = 0; reason < DOM_NODE_PIN_REASON_COUNT; reason++) {
-            if (destination_record->pins[reason] != 0) {
-                log_error("DOM_LIFECYCLE_TRANSFER: destination retains pin %d for node %p",
-                          reason, (void*)node);
-                return false;
-            }
+    if (destination_record && destination_record->state != DOM_NODE_RETIRED) {
+        if (destination_record->current_owner) {
+            log_error("DOM_LIFECYCLE_TRANSFER: destination already owns node %p", (void*)node);
+            return false;
         }
-        // A node may return to a document after an intermediate foreign-fragment
-        // adoption. Its old destination record is an unpinned ownership epoch.
-        destination_record->id = destination_id;
+        bool retained_ref = false;
+        for (int reason = 0; reason < DOM_NODE_PIN_REASON_COUNT; reason++) {
+            if (destination_record->pins[reason]) retained_ref = true;
+        }
+        // A returning node must keep an earlier generation while wrappers or
+        // ranges still pin it; their saved references use that generation ID.
+        if (retained_ref) *destination_id = destination_record->id;
+        destination_record->id = *destination_id;
         destination_record->primary_arena = source_record->primary_arena;
         destination_record->type = source_record->type;
         destination_record->state = DOM_NODE_LIVE;
         destination_record->recyclable = source_record->recyclable;
         destination_record->candidate = false;
+        destination_record->current_owner = true;
         destination_record->primary_size = source_record->primary_size;
         destination_record->backing_source = source_record->backing_source;
     } else if (!dom_node_registry_register_owned(destination, node,
-                   source_record->primary_arena, destination_id, source_record->type,
+                   source_record->primary_arena, *destination_id, source_record->type,
                    source_record->primary_size, source_record->recyclable,
                    source_record->backing_source)) {
         return false;
@@ -236,6 +244,7 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
     // normally, but its detached candidate must never recycle adopted storage.
     source_record->candidate = false;
     source_record->state = DOM_NODE_LIVE;
+    source_record->current_owner = false;
     return true;
 }
 
@@ -274,6 +283,12 @@ DomNode* dom_node_ref_validate(DomDocument* doc, DomNodeRef ref) {
         return nullptr;
     }
     return ref.address;
+}
+
+bool dom_node_registry_owns(DomDocument* doc, DomNode* node) {
+    DomNodeRecord* record = dom_record_find(dom_registry(doc), node);
+    return record && record->current_owner && record->state != DOM_NODE_RETIRED &&
+        record->id == node->id;
 }
 
 bool dom_node_pin(DomDocument* doc, DomNodeRef ref, DomNodePinReason reason) {
@@ -329,7 +344,8 @@ void dom_node_schedule_detached(DomDocument* doc, DomNode* root) {
     DomNodeRegistry* registry = dom_registry(doc);
     if (!registry || !root || root == (DomNode*)doc->root) return;
     DomNodeRecord* record = dom_record_find(registry, root);
-    if (!record || record->id != root->id || record->state == DOM_NODE_RETIRED) return;
+    if (!record || !record->current_owner || record->id != root->id ||
+        record->state == DOM_NODE_RETIRED) return;
     for (DomNodeRecord* other = registry->all_records; other; other = other->all_next) {
         if (!other->candidate || other == record) continue;
         if (dom_node_is_within(root, other->address)) return;
@@ -343,6 +359,9 @@ void dom_node_schedule_detached(DomDocument* doc, DomNode* root) {
         record->state = DOM_NODE_DETACHED_CANDIDATE;
         registry->stats.scheduled_candidates++;
     }
+    // A detached table can retain anonymous layout boxes beyond the next view
+    // pool reset; restore its authored child chain while those boxes are live.
+    if (doc->view_tree) view_tree_prepare_detached_subtree(root);
     // Detached wrapper-owned state must stop being a native-tree GC root;
     // a live JS wrapper remains the sole owner until possible reattachment.
     dom_expando_attachment_changed(doc, root, false);
@@ -352,7 +371,8 @@ void dom_node_cancel_detached(DomDocument* doc, DomNode* root) {
     DomNodeRegistry* registry = dom_registry(doc);
     if (!registry || !root) return;
     DomNodeRecord* record = dom_record_find(registry, root);
-    if (!record || record->id != root->id || record->state == DOM_NODE_RETIRED) return;
+    if (!record || !record->current_owner || record->id != root->id ||
+        record->state == DOM_NODE_RETIRED) return;
     if (record && record->candidate && record->id == root->id) {
         record->candidate = false;
         record->state = DOM_NODE_LIVE;

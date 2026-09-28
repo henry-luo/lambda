@@ -104,6 +104,7 @@ struct DomJsRuntime {
     // Timers, DOM callbacks, and JIT entries all borrow its one EvalContext.
     Runtime* runtime;
     void* doc_node;
+    bool implicit_doctype;
     int mutation_count;
     uint32_t mutation_sequence;
     uint32_t mutation_kind_mask;
@@ -131,7 +132,7 @@ struct DomJsRuntime {
     DomElement* current_script;
 
     DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
-        doc_node(nullptr), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
+        doc_node(nullptr), implicit_doctype(true), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
         mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
         inline_stylesheet_mutations(nullptr), inline_stylesheet_mutation_count(0),
         inline_stylesheet_mutation_capacity(0),

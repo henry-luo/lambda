@@ -949,6 +949,12 @@ void view_tree_release_detached_embedded_documents(ViewTree*, DomNode* root) {
     release_detached_embedded_documents(root);
 }
 
+void view_tree_prepare_detached_subtree(DomNode* root) {
+    if (root && root->is_element()) {
+        layout_unwrap_all_anonymous_table_fixups_for_dom_mutation(root->as_element());
+    }
+}
+
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root) {
     if (!tree || !root) return;
 

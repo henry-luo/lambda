@@ -132,6 +132,7 @@ Item dom_core_has_child_nodes(Item n);
 Item dom_core_normalize(Item n);
 Item dom_core_insert_adjacent_element(Item n, Item where, Item node);
 Item dom_core_insert_adjacent_html(Item n, Item where, Item html);
+Item dom_core_insert_adjacent_text(Item n, Item where, Item text);
 Item dom_core_remove_node(Item n, Item index);
 Item dom_core_attach_shadow(Item n, Item init);
 Item dom_core_compare_document_position(Item a, Item b);

@@ -2085,12 +2085,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     runtime->script_load_compiles++;
 
     // Register in unified module registry for cross-language imports.
-    // Only when the runtime context (heap, name_pool) is already initialized —
-    // module_build_lambda_namespace creates heap objects (maps, strings).
-    // During pure Lambda→Lambda compilation, context isn't set up yet (it's
-    // initialized later by runner_setup_context). The JS→Lambda path sets up
-    // context before calling load_script, so registration works there.
-    if (!new_script->is_main && context && context->heap) {
+    // A Lambda behavior package can compile inside an initialized evaluator
+    // without a JS realm. Its exports need no JS callable wrappers, whose
+    // allocation requires the active realm's Input owner.
+    if (!new_script->is_main && context && context->heap &&
+            js_runtime_state_thread_matches(context) && js_input) {
         Item ns = module_build_lambda_namespace(new_script);
         module_register_for_runtime(
             runtime, new_script->reference, "lambda", ns, new_script->jit_context);

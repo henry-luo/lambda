@@ -164,6 +164,9 @@ void* dom_create_backed_element_bridge(void* document, const char* tag);
 // Document behind a node wrapper or the document proxy (ESO93). Returns DomDocument*.
 void* dom_document_from_item(Item item);
 
+// Clone a Document into an independently owned DOM tree, with optional descendants.
+Item dom_clone_document_bridge(Item document_item, Item deep_arg);
+
 // The script runner changes this only for the dynamic extent of a classic
 // script evaluation. Returns the previous element for nested evaluations.
 void* dom_document_swap_current_script(void* document, void* script_element);

@@ -48,12 +48,13 @@ void dom_lifecycle_destroy(DomDocument* doc);
 bool dom_node_registry_register(DomDocument* doc, DomNode* node,
                                 size_t primary_size, bool recyclable);
 bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
-                                DomNode* node, uint32_t destination_id);
+                                DomNode* node, uint32_t* destination_id);
 void dom_node_registry_set_backing_source(DomDocument* doc, DomNode* node,
                                           Element* backing_source);
 Element* dom_node_registry_backing_source(DomDocument* doc, DomNode* node);
 DomNodeRef dom_node_ref(DomNode* node);
 DomNode* dom_node_ref_validate(DomDocument* doc, DomNodeRef ref);
+bool dom_node_registry_owns(DomDocument* doc, DomNode* node);
 bool dom_node_pin(DomDocument* doc, DomNodeRef ref, DomNodePinReason reason);
 bool dom_node_unpin(DomDocument* doc, DomNodeRef ref, DomNodePinReason reason);
 uint32_t dom_node_pin_count(DomDocument* doc, DomNodeRef ref,

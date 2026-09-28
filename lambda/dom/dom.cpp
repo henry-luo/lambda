@@ -333,6 +333,8 @@ static inline DomJsMutationKind dom_style_mutation_kind(CssPropertyCode prop_id)
     }
 }
 
+static DomDocument* dom_registry_owner_for_detached_node(DomNode* node);
+
 static DomDocument* dom_node_owner_document(DomNode* node) {
     if (node) {
         if (node->is_element()) {
@@ -346,7 +348,9 @@ static DomDocument* dom_node_owner_document(DomNode* node) {
             if (elem && elem->doc) return elem->doc;
         }
     }
-    return nullptr;
+    // CharacterData and DocumentType have no document field. Their registry
+    // keeps ownership after detach, including across foreign-document adoption.
+    return node ? dom_registry_owner_for_detached_node(node) : nullptr;
 }
 
 static DomDocument* dom_mutation_document(DomNode* target, DomNode* parent) {
@@ -899,25 +903,8 @@ static inline void dom_pre_remove(DomNode* child, bool record_mutation = true,
 
         View* focused = focus_get(st);
         if (focused && dom_node_contains(child, (DomNode*)focused)) {
-            if (focused->is_element()) {
-                DomElement* focused_elem = ((DomNode*)focused)->as_element();
-                const char* tag = focused_elem ? focused_elem->tag_name : nullptr;
-                if (tag &&
-                    (str_icmp_cstr(tag, "textarea") == 0 ||
-                     str_icmp_cstr(tag, "input") == 0) &&
-                    child->parent) {
-                    uint32_t index = dom_node_child_index(child);
-                    if (index != UINT32_MAX) {
-                        DomBoundary boundary = { child->parent, index };
-                        const char* exc = nullptr;
-                        if (!state_store_set_selection(
-                                st, &boundary, &boundary, &exc)) {
-                            log_debug("dom_pre_remove_text_control_selection_handoff_failed: %s",
-                                      exc ? exc : "unknown");
-                        }
-                    }
-                }
-            }
+            // text-control selection is independent; removing its focused host
+            // must not create a document range after removeAllRanges().
             focus_clear_preserve_selection(st);
         } else {
             View* caret_view = caret_get_view(st);
@@ -1856,8 +1843,11 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
     // Synthesize a leading DOCTYPE child so that document.childNodes "length"
     // (per dom_node_boundary_length) is 2 — matching how WPT tests assume HTML
     // documents have <!DOCTYPE> + html as their two top-level children.
-    Item dt_item = builder.element("!DOCTYPE").final();
-    DomComment* dt = dom_comment_create_detached(dt_item.element, doc);
+    DomComment* dt = nullptr;
+    if (doc->js.implicit_doctype) {
+        Item dt_item = builder.element("!DOCTYPE").final();
+        dt = dom_comment_create_detached(dt_item.element, doc);
+    }
     DomNode* head_node = nullptr;
     DomNode* tail_node = nullptr;
     if (dt) {
@@ -2990,6 +2980,21 @@ JS_FORWARD_STATIC_EXPRESSION(bool, dom_foreign_document_state_ensure, (),
 #define s_pending_image_load_count (dom_foreign_document_rt_state->pending_image_load_count)
 #define s_iframe_load_drain_scheduled (dom_foreign_document_rt_state->iframe_load_drain_scheduled)
 
+static DomDocument* dom_registry_owner_for_detached_node(DomNode* node) {
+    if (!node) return nullptr;
+    if (dom_node_registry_owns(_js_current_document, node)) return _js_current_document;
+    if (_js_main_document != _js_current_document &&
+        dom_node_registry_owns(_js_main_document, node)) return _js_main_document;
+    if (!dom_foreign_document_state_get()) return nullptr;
+    for (ForeignDocCacheEntry* entry = s_foreign_doc_cache; entry; entry = entry->next) {
+        if (dom_node_registry_owns(entry->doc, node)) return entry->doc;
+    }
+    for (int i = 0; i < s_iframe_cache_count; i++) {
+        if (dom_node_registry_owns(s_iframe_cache[i].doc, node)) return s_iframe_cache[i].doc;
+    }
+    return nullptr;
+}
+
 extern "C" bool dom_doc_has_browsing_context(void* doc) {
     if (!doc || !dom_foreign_document_state_get()) return false;
     for (int i = 0; i < s_doc_with_window_count; i++) {
@@ -3086,7 +3091,7 @@ static bool dom_rebind_subtree_document(DomNode* node,
                                            DomDocument* destination) {
     if (!node || !source || !destination) return false;
     uint32_t destination_id = destination->next_node_id++;
-    if (!dom_node_registry_transfer(source, destination, node, destination_id)) {
+    if (!dom_node_registry_transfer(source, destination, node, &destination_id)) {
         return false;
     }
     node->id = destination_id;
@@ -3870,6 +3875,8 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
     if (!fd) return ItemNull;
     // This document borrows its creator's Input and must not release it.
     dom_document_borrow_input_resources(fd);
+    // createDocument() starts empty; only HTML documents synthesize a doctype.
+    fd->js.implicit_doctype = false;
     if (qualified_name && *qualified_name) {
         MarkBuilder builder(input);
         Item item = builder.element(qualified_name).final();
@@ -4743,6 +4750,122 @@ DomElement* dom_find_element_by_id(DomElement* root, const char* id) {
         child = child->next_sibling;
     }
     return nullptr;
+}
+
+struct DomAriaElementRef {
+    const char* property;
+    const char* attribute;
+    const char* direct_key;
+    bool multiple;
+};
+
+static const DomAriaElementRef k_aria_element_refs[] = {
+    {"ariaActiveDescendantElement", "aria-activedescendant", "__aria_active_descendant_ref", false},
+    {"ariaControlsElements", "aria-controls", "__aria_controls_refs", true},
+    {"ariaDescribedByElements", "aria-describedby", "__aria_described_by_refs", true},
+    {"ariaDetailsElements", "aria-details", "__aria_details_refs", true},
+    {"ariaErrorMessageElements", "aria-errormessage", "__aria_error_message_refs", true},
+    {"ariaFlowToElements", "aria-flowto", "__aria_flow_to_refs", true},
+    {"ariaLabelledByElements", "aria-labelledby", "__aria_labelled_by_refs", true},
+    {"ariaOwnsElements", "aria-owns", "__aria_owns_refs", true},
+};
+
+static const DomAriaElementRef* dom_aria_ref_for_property(const char* property) {
+    if (!property) return nullptr;
+    for (const DomAriaElementRef& row : k_aria_element_refs) {
+        if (strcmp(property, row.property) == 0) return &row;
+    }
+    return nullptr;
+}
+
+static void dom_aria_clear_direct_ref(DomElement* elem, const char* attribute) {
+    if (!elem || !attribute) return;
+    for (const DomAriaElementRef& row : k_aria_element_refs) {
+        if (str_icmp_cstr(attribute, row.attribute) != 0) continue;
+        RootFrame roots(1);
+        Rooted<Item> key(roots, js_name_item(row.direct_key));
+        Item previous = ItemNull;
+        if (expando_get_property((DomNode*)elem, key.get(), &previous)) {
+            expando_set_property((DomNode*)elem, key.get(), ItemNull);
+        }
+        return;
+    }
+}
+
+static Item dom_aria_element_ref_get(DomElement* elem, const DomAriaElementRef* row) {
+    const char* ids = elem->get_attribute(row->attribute);
+    if (!ids && !elem->has_attribute(row->attribute)) return ItemNull;
+    if (!ids || !*ids) {
+        Item direct = ItemNull;
+        if (expando_get_property((DomNode*)elem, js_name_item(row->direct_key), &direct) &&
+            get_type_id(direct) != LMD_TYPE_NULL) return direct;
+        return row->multiple ? js_array_new(0) : ItemNull;
+    }
+
+    // IDREFs resolve within the element's current tree, including detached subtrees.
+    DomNode* root = (DomNode*)elem;
+    while (root->parent) root = root->parent;
+    DomElement* scope = root->is_element() ? root->as_element() : nullptr;
+    if (!row->multiple) {
+        DomElement* target = dom_find_element_by_id(scope, ids);
+        return target ? dom_wrap_element(target) : ItemNull;
+    }
+
+    RootFrame roots(2);
+    Rooted<Item> found(roots, js_array_new(0));
+    Rooted<Item> target_item(roots, ItemNull);
+    StrBuf* token = strbuf_new_cap(32);
+    for (const char* cursor = ids; *cursor;) {
+        while (*cursor && dom_token_list_is_ascii_whitespace(*cursor)) cursor++;
+        const char* start = cursor;
+        while (*cursor && !dom_token_list_is_ascii_whitespace(*cursor)) cursor++;
+        if (cursor == start) break;
+        strbuf_reset(token);
+        strbuf_append_str_n(token, start, (size_t)(cursor - start));
+        DomElement* target = dom_find_element_by_id(scope, token->str);
+        if (target) {
+            target_item.set(dom_wrap_element(target));
+            js_array_push(found.get(), target_item.get());
+        }
+    }
+    strbuf_free(token);
+    return found.get();
+}
+
+static Item dom_aria_element_ref_set(DomElement* elem,
+                                     const DomAriaElementRef* row, Item value) {
+    RootFrame roots(3);
+    Rooted<Item> value_root(roots, value);
+    Rooted<Item> key(roots, js_name_item(row->direct_key));
+    Rooted<Item> direct(roots, ItemNull);
+    TypeId value_type = get_type_id(value_root.get());
+    if (value_type == LMD_TYPE_NULL || value_type == LMD_TYPE_UNDEFINED) {
+        expando_set_property((DomNode*)elem, key.get(), ItemNull);
+        elem->remove_attribute(row->attribute);
+    } else if (row->multiple) {
+        if (value_type != LMD_TYPE_ARRAY)
+            return dom_raise_type_error("ARIA element references require an array of Elements");
+        direct.set(js_array_new(0));
+        int64_t count = js_array_length(value_root.get());
+        for (int64_t i = 0; i < count; i++) {
+            Item target = js_elements_get_int(value_root.get(), i);
+            DomNode* node = (DomNode*)dom_unwrap_element(target);
+            if (!node || !node->is_element())
+                return dom_raise_type_error("ARIA element references require Elements");
+            js_array_push(direct.get(), target);
+        }
+        expando_set_property((DomNode*)elem, key.get(), direct.get());
+        elem->set_attribute(row->attribute, "");
+    } else {
+        DomNode* target = (DomNode*)dom_unwrap_element(value_root.get());
+        if (!target || !target->is_element())
+            return dom_raise_type_error("ARIA element reference requires an Element");
+        expando_set_property((DomNode*)elem, key.get(), value_root.get());
+        elem->set_attribute(row->attribute, "");
+    }
+    dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
+                        elem->parent, row->attribute);
+    return value_root.get();
 }
 
 extern "C" void* dom_popover_target_for_button(void* button_ptr) {
@@ -8011,6 +8134,7 @@ extern "C" void dom_after_set_attribute(void* elem_ptr,
                                            const char* attr_value) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name || !attr_value) return;
+    dom_aria_clear_direct_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_value);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
@@ -8033,6 +8157,7 @@ extern "C" void dom_after_remove_attribute(void* elem_ptr,
                                               const char* attr_name) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem || !attr_name) return;
+    dom_aria_clear_direct_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (elem->tag() == MARKUP_NAME_CANVAS &&
@@ -9635,6 +9760,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return ItemNull;
     }
 
+    if (const DomAriaElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
+        return dom_aria_element_ref_get(elem, aria_ref);
+    }
+
     if (_is_tag(elem, "a") || _is_tag(elem, "area")) {
         if (prop_id == JS_DOM_PROP_HASH) {
             Item result = ItemNull;
@@ -10705,6 +10834,10 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     // would read as a Document but not accept one's writes.
     if (elem->tag_name && strcmp(elem->tag_name, "#document") == 0) {
         return dom_document_proxy_set_property(prop_name, value);
+    }
+
+    if (const DomAriaElementRef* aria_ref = dom_aria_ref_for_property(prop)) {
+        return dom_aria_element_ref_set(elem, aria_ref, value);
     }
 
     if (_is_tag(elem, "table") && prop_id == JS_DOM_PROP_T_HEAD) {
@@ -14676,16 +14809,16 @@ static void dom_clone_content_attributes(DomElement* source, DomElement* clone) 
     }
 }
 
-extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
-    DomElement* elem = (DomElement*)elem_ptr;
-    if (!elem) return ItemNull;
-    bool deep = has_deep ? js_is_truthy(deep_arg) : false;
+static DomElement* dom_clone_element_into_document(DomElement* elem,
+                                                   DomDocument* destination,
+                                                   bool deep) {
+    if (!elem || !destination) return nullptr;
     // clones need a fresh native element; sharing the source buffer makes later
     // attribute removal on the clone dangle the original's native attribute data.
-    MarkBuilder _clone_builder(elem->doc->input);
+    MarkBuilder _clone_builder(destination->input);
     Item _clean_elem = _clone_builder.element(elem->tag_name).final();
-    DomElement* clone = dom_element_create(elem->doc, elem->tag_name, _clean_elem.element);
-    if (!clone) return ItemNull;
+    DomElement* clone = dom_element_create(destination, elem->tag_name, _clean_elem.element);
+    if (!clone) return nullptr;
     dom_clone_content_attributes(elem, clone);
     // DOM cloning must not copy source-bound wrapper caches; their host_data would
     // make clone.classList/style writes mutate the original element.
@@ -14694,25 +14827,52 @@ extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_de
         DomNode* child = elem->first_child;
         while (child) {
             if (child->is_element()) {
-                Item child_clone = dom_clone_node_bridge(child->as_element(), deep_arg, has_deep);
-                DomNode* cloned_child = (DomNode*)dom_unwrap_element(child_clone);
-                if (cloned_child && !dom_append_backed_element(clone, cloned_child)) {
-                    return ItemNull;
+                DomNode* cloned_child = (DomNode*)dom_clone_element_into_document(
+                    child->as_element(), destination, true);
+                if (!cloned_child || !dom_append_backed_element(clone, cloned_child)) {
+                    return nullptr;
                 }
             } else if (child->is_text()) {
                 DomText* text = child->as_text();
                 DomText* text_clone = DomText::create_detached_copy(
-                    clone->doc, text->text, text->length);
+                    destination, text->text, text->length);
                 // Deep clones need matching DOM and Mark child order so later
                 // insertBefore()/prepend() can locate their reference child.
                 if (!text_clone || !dom_insert_backed_text(clone, text_clone, nullptr)) {
-                    return ItemNull;
+                    return nullptr;
                 }
             }
             child = child->next_sibling;
         }
     }
-    return dom_wrap_element(clone);
+    return clone;
+}
+
+extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_deep) {
+    DomElement* elem = (DomElement*)elem_ptr;
+    DomElement* clone = elem ? dom_clone_element_into_document(elem, elem->doc,
+        has_deep && js_is_truthy(deep_arg)) : nullptr;
+    return clone ? dom_wrap_element(clone) : ItemNull;
+}
+
+extern "C" Item dom_clone_document_bridge(Item document_item, Item deep_arg) {
+    DomDocument* source = (DomDocument*)dom_document_from_item(document_item);
+    if (!source || !source->input) return ItemNull;
+    DomDocument* clone = dom_document_create(source->input);
+    if (!clone) return ItemNull;
+    // The clone owns its DOM nodes but borrows the parser Input that backs them.
+    dom_document_borrow_input_resources(clone);
+    bool deep = js_is_truthy(deep_arg);
+    // A shallow Document clone has no children, including the implicit doctype.
+    clone->js.implicit_doctype = deep && source->js.implicit_doctype;
+    if (deep && source->root) {
+        clone->root = dom_clone_element_into_document(source->root, clone, true);
+        if (!clone->root) {
+            free_document(clone);
+            return ItemNull;
+        }
+    }
+    return wrap_foreign_doc(clone);
 }
 
 extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
@@ -14998,40 +15158,57 @@ extern "C" Item dom_replace_with_bridge(void* node_ptr, Item* args, int argc) {
         node, args, argc, JS_DOM_CHILD_NODE_REPLACE);
 }
 
+enum DomAdjacentSlot {
+    DOM_ADJACENT_INVALID,
+    DOM_ADJACENT_NO_PARENT,
+    DOM_ADJACENT_READY,
+};
+
+static DomAdjacentSlot dom_adjacent_slot(DomElement* elem, const char* position,
+                                         DomElement** parent, DomNode** reference) {
+    if (!elem || !position || !parent || !reference) return DOM_ADJACENT_INVALID;
+    *parent = nullptr;
+    *reference = nullptr;
+    if (str_icmp_cstr(position, "beforebegin") == 0) {
+        *parent = elem->parent ? elem->parent->as_element() : nullptr;
+        *reference = (DomNode*)elem;
+    } else if (str_icmp_cstr(position, "afterbegin") == 0) {
+        *parent = elem;
+        *reference = elem->first_child;
+    } else if (str_icmp_cstr(position, "beforeend") == 0) {
+        *parent = elem;
+    } else if (str_icmp_cstr(position, "afterend") == 0) {
+        *parent = elem->parent ? elem->parent->as_element() : nullptr;
+        *reference = elem->next_sibling;
+    } else {
+        return DOM_ADJACENT_INVALID;
+    }
+    return *parent ? DOM_ADJACENT_READY : DOM_ADJACENT_NO_PARENT;
+}
+
 extern "C" Item dom_insert_adjacent_element_bridge(void* elem_ptr, Item position_arg,
                                                       Item new_node_arg) {
     DomElement* elem = (DomElement*)elem_ptr;
     if (!elem) return ItemNull;
     const char* position = fn_to_cstr(position_arg);
     DomNode* new_node = (DomNode*)dom_unwrap_element(new_node_arg);
-    if (!position || !new_node) return ItemNull;
-    if (new_node->parent) {
-        dom_pre_remove(new_node);
-        new_node->parent->remove_child(new_node);
+    if (!dom_is_document_element_child(new_node)) {
+        return dom_raise_type_error("insertAdjacentElement requires an Element");
     }
-    DomNode* new_parent = nullptr;
-    if (str_icmp_cstr(position, "beforebegin") == 0) {
-        if (elem->parent && elem->parent->is_element()) {
-            elem->parent->insert_before(new_node, (DomNode*)elem);
-            new_parent = elem->parent;
-        }
-    } else if (str_icmp_cstr(position, "afterbegin") == 0) {
-        ((DomNode*)elem)->insert_before(new_node, elem->first_child);
-        new_parent = (DomNode*)elem;
-    } else if (str_icmp_cstr(position, "beforeend") == 0) {
-        ((DomNode*)elem)->append_child(new_node);
-        new_parent = (DomNode*)elem;
-    } else if (str_icmp_cstr(position, "afterend") == 0) {
-        if (elem->parent && elem->parent->is_element()) {
-            elem->parent->insert_before(new_node, elem->next_sibling);
-            new_parent = elem->parent;
-        }
+    DomElement* parent = nullptr;
+    DomNode* reference = nullptr;
+    DomAdjacentSlot slot = dom_adjacent_slot(elem, position, &parent, &reference);
+    if (slot == DOM_ADJACENT_INVALID) {
+        return dom_raise_named("SyntaxError", "Invalid adjacent position");
     }
-    if (new_parent) {
-        dom_post_insert(new_parent, new_node);
-        dom_mutation_notify();
+    if (slot == DOM_ADJACENT_NO_PARENT) return ItemNull;
+    if (!dom_document_can_append(parent, new_node)) {
+        return dom_raise_named("HierarchyRequestError", "Document cannot have this child");
     }
-    return new_node_arg;
+    // The shared insertion path adopts cross-document nodes and keeps the
+    // backing tree, lifecycle pins, and sibling chain in one transaction.
+    return dom_insert_before_bridge(parent, new_node_arg,
+        reference ? dom_wrap_element(reference) : ItemNull);
 }
 
 extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_arg,
@@ -15040,31 +15217,17 @@ extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_ar
     if (!elem) return ItemNull;
     const char* position = fn_to_cstr(position_arg);
     const char* html_str = fn_to_cstr(html_arg);
-    if (!position || !html_str || !elem->doc) return ItemNull;
+    if (!html_str || !elem->doc) return ItemNull;
+    DomElement* target_parent = nullptr;
+    DomNode* ref_node = nullptr;
+    DomAdjacentSlot slot = dom_adjacent_slot(elem, position, &target_parent, &ref_node);
+    if (slot == DOM_ADJACENT_INVALID) {
+        return dom_raise_named("SyntaxError", "Invalid adjacent position");
+    }
+    if (slot == DOM_ADJACENT_NO_PARENT) return ItemNull;
     DomDocument* doc = elem->doc;
     DomElement* fragment = dom_parse_html_fragment(doc, html_str);
     if (!fragment) return ItemNull;
-
-    DomElement* target_parent = nullptr;
-    DomNode* ref_node = nullptr;
-    if (str_icmp_cstr(position, "beforebegin") == 0) {
-        if (!elem->parent || !elem->parent->is_element()) return ItemNull;
-        target_parent = elem->parent->as_element();
-        ref_node = (DomNode*)elem;
-    } else if (str_icmp_cstr(position, "afterbegin") == 0) {
-        target_parent = elem;
-        ref_node = elem->first_child;
-    } else if (str_icmp_cstr(position, "beforeend") == 0) {
-        target_parent = elem;
-        ref_node = nullptr;
-    } else if (str_icmp_cstr(position, "afterend") == 0) {
-        if (!elem->parent || !elem->parent->is_element()) return ItemNull;
-        target_parent = elem->parent->as_element();
-        ref_node = elem->next_sibling;
-    } else {
-        log_error("dom_insert_adjacent_html_bridge: invalid position '%s'", position);
-        return ItemNull;
-    }
 
     while (fragment->first_child) {
         DomNode* child = fragment->first_child;
@@ -15075,6 +15238,28 @@ extern "C" Item dom_insert_adjacent_html_bridge(void* elem_ptr, Item position_ar
             ((DomNode*)target_parent)->append_child(child);
     }
     return ItemNull;
+}
+
+static Item dom_insert_adjacent_text_bridge(DomElement* elem, Item position_arg,
+                                             Item text_arg) {
+    if (!elem) return ItemNull;
+    DomElement* parent = nullptr;
+    DomNode* reference = nullptr;
+    DomAdjacentSlot slot = dom_adjacent_slot(elem, fn_to_cstr(position_arg),
+                                              &parent, &reference);
+    if (slot == DOM_ADJACENT_INVALID) {
+        return dom_raise_named("SyntaxError", "Invalid adjacent position");
+    }
+    if (slot == DOM_ADJACENT_NO_PARENT) return make_js_undefined();
+    if (parent->doc && parent->doc->js.doc_node == parent) {
+        return dom_raise_named("HierarchyRequestError", "Document cannot have text children");
+    }
+    Item text = js_to_string(text_arg);
+    if (item_is_error(text)) return text;
+    RootFrame roots(1);
+    Rooted<Item> rooted_text(roots, text);
+    return dom_insert_text_before_child(parent, rooted_text.get(), reference)
+        ? make_js_undefined() : ItemNull;
 }
 
 extern "C" Item dom_append_variadic_bridge(void* elem_ptr, Item* args, int argc) {
@@ -15286,6 +15471,7 @@ extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     if (dom_is_internal_attr(attr_name)) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
     elem->set_attribute(attr_name, attr_val);
+    dom_aria_clear_direct_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "option") && str_icmp_cstr(attr_name, "selected") == 0) {
@@ -15305,6 +15491,7 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     if (!attr_name) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
     elem->remove_attribute(attr_name);
+    dom_aria_clear_direct_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
     if (_is_tag(elem, "select") && str_icmp_cstr(attr_name, "multiple") == 0) {
@@ -15716,6 +15903,10 @@ extern "C" Item dom_core_insert_adjacent_element(Item n, Item where, Item node) 
 extern "C" Item dom_core_insert_adjacent_html(Item n, Item where, Item html) {
     DomElement* elem = dom_op_element(n);
     return elem ? dom_insert_adjacent_html_bridge((void*)elem, where, html) : ItemNull;
+}
+extern "C" Item dom_core_insert_adjacent_text(Item n, Item where, Item text) {
+    DomElement* elem = dom_op_element(n);
+    return dom_insert_adjacent_text_bridge(elem, where, text);
 }
 
 // ---------------------------------------------------------------------------
