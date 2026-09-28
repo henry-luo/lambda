@@ -63,8 +63,11 @@ pub fn color(node, fallback) string^ {
             "orange", "purple", "gray"]
         where has(node, candidate)) candidate]
     let color_name = if (len(named) > 0) named[0] else value(node, "color", fallback)
+    color_value(color_name)^
+}
+
+pub fn color_value(color_name) string^ {
     if (allowed(color_name, ["black", "blue", "red", "green", "darkgreen",
-            "orange", "purple", "gray"]))
-        color_name
+            "orange", "purple", "gray"])) color_name
     else raise error("unsupported TikZ color: " ++ color_name)
 }

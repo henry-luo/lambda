@@ -499,7 +499,7 @@ which can resolve PATH executables and passes a pipeline through captured
 stdout. This is useful compatibility work, but it should not be conflated with
 Nu's native shell experience: its pipeline is currently sequential with stdout
 capture, and job control, process substitution, coprocesses, and `exec` remain
-unsupported ([Bash support](../../doc/Bash_Support.md)).
+unsupported ([Bash support](../../doc/dev/Bash_Support.md)).
 
 The practical consequence is simple: Lambda should not recommend itself as a
 login shell today. Its Bash guest expands interoperability; it does not erase
@@ -588,6 +588,6 @@ transformation. That composition treats each tool as the thing it is best at.
 - Lambda implementation status: formal-semantics Appendix A, especially
   `S14.2, S14.3`.
 - Lambda product scope: `README.md`; Bash guest scope:
-  `doc/Bash_Support.md`.
+  `doc/dev/Bash_Support.md`.
 - Nushell primary documentation: [Book](https://www.nushell.sh/book/),
   [Repository](https://github.com/nushell/nushell), and links inline above.

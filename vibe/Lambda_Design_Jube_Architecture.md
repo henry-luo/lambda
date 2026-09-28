@@ -24,7 +24,7 @@
 > - `vibe/Lambda_Design_Pipeline.md` — text/data/binary pipelines over the K27 core (JA1 file/stream line)
 > - `vibe/Lambda_Design_Static_Modules.md` — static-library layering of the host itself
 > - `vibe/Lambda_Design_MIR_Cache_L3.md` — compiled-script cache (JA13 adjunct)
-> - `doc/Lambda_Jube_Runtime.md` — user-facing runtime/bundle description
+> - `doc/dev/Lambda_Jube_Runtime.md` — user-facing runtime/bundle description
 
 ## 0. Decision index
 

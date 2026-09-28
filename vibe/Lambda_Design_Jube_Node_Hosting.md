@@ -18,7 +18,7 @@
 >   (Python); this document reuses its principles and delivery machinery but is
 >   **not** a language hosting
 > - `vibe/impl/Lambda_Impl_Hosted_Python.md` — the staged migration template (H0–H10)
-> - `doc/Lambda_Jube_Runtime.md` — user-facing runtime/bundle description
+> - `doc/dev/Lambda_Jube_Runtime.md` — user-facing runtime/bundle description
 
 All file:line references were verified against master on 2026-07-25 and will
 drift; treat them as anchors, not contracts.
@@ -777,7 +777,7 @@ standard host byte-identical across bundle packaging, and lands static-first
 - **N7 — Closure.** `node-core` flips dynamic; packaging: standard bundle =
   host + `node-core` (+ manifest-only leaf descriptors), full bundle = all,
   minimal profile = host only; `make verify-jube-package` extended with
-  node-module hash + absent/full smoke; docs (`doc/Lambda_Jube_Runtime.md`
+  node-module hash + absent/full smoke; docs (`doc/dev/Lambda_Jube_Runtime.md`
   section); final allowlist reduction in the checker. *Gate:* byte-identical
   host across all three bundles; minimal profile runs the non-Node JS suites;
   release perf evidence (require microbench, node-baseline wall time) within

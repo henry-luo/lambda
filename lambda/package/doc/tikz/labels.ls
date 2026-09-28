@@ -1,6 +1,32 @@
 // Text and math labels share one positioned HTML representation.
 import math: lambda.doc.math.math
 
+fn plain_text(source) {
+    // Common TeX accent commands in figure labels have plain Unicode equivalents.
+    let acute_i = replace(source, "\\'{i}", "í")
+    let acute_o = replace(acute_i, "\\'{o}", "ó")
+    let acute_a = replace(acute_o, "\\'{a}", "á")
+    let tilde_a = replace(acute_a, "\\~{a}", "ã")
+    replace(tilde_a, "\\c{c}", "ç")
+}
+
+fn mixed_parts(source, offset, acc) any^ {
+    let opening = index_of(slice(source, offset, len(source)), "$")
+    if (opening == null) [*acc, <span plain_text(slice(source, offset, len(source)))>]
+    else {
+        let start = offset + opening
+        let after = start + 1
+        let closing = index_of(slice(source, after, len(source)), "$")
+        if (closing == null) raise error("unclosed math span in TikZ label")
+        else {
+            let ast = parse(slice(source, after, after + closing), {type: "math"})^
+            let rendered = math.render_box_element(math.render_box(ast, {display: false}))
+            mixed_parts(source, after + closing + 1,
+                [*acc, <span plain_text(slice(source, offset, start))>, rendered])^
+        }
+    }
+}
+
 pub fn prepare(source) map^ {
     let value = trim(source)
     let textcolor_prefix = "\\textcolor{"
@@ -30,10 +56,15 @@ pub fn prepare(source) map^ {
         {element: math.render_box_element(measured),
             width_em: measured.width, height_em: measured.height,
             depth_em: measured.depth}
+    } else if (contains(value, "$")) {
+        let parts = mixed_parts(value, 0, [])^;
+        {element: <span for (part in parts) part>,
+            width_em: null, height_em: null, depth_em: null}
     } else {
         // CSS measures ordinary text at paint time; the geometry caller must
         // reserve space independently before it admits long labels.
-        {element: <span value>, width_em: null, height_em: null, depth_em: null}
+        {element: <span plain_text(value)>,
+            width_em: null, height_em: null, depth_em: null}
     }
 }
 

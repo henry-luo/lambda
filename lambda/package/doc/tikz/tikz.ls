@@ -117,9 +117,12 @@ fn render_drawing(picture) any^ {
 
 fn render_picture(picture, options) any^ {
     let tag = string(name(picture))
-    let valid = if (tag == "tikzpicture") opts.check(picture, [])^
+    let valid = if (tag == "tikzpicture") opts.check(picture, [">"])^
         else if (tag == "tikz_picture") true
         else raise error("expected TikZ picture")
+    let arrow_tip = opts.value(picture, ">", null)
+    if (arrow_tip != null and arrow_tip != "stealth")
+        raise error("unsupported TikZ arrow tip")
     let axes = [for (child in picture
         where child is element and
             (string(name(child)) == "axis" or
@@ -128,15 +131,17 @@ fn render_picture(picture, options) any^ {
              string(name(child)) == "loglogaxis" or
              string(name(child)) == "polaraxis")) child]
     let paths = drawing_nodes(picture)
+    let content = [for (child in picture where child is element and
+        string(name(child)) != "option") child]
     let named_refs = [for (child in paths,
         point in if (string(name(child)) == "path") children_named(child, "point") else []
         where point.ref != null) point]
     let named_nodes = [for (child in paths where string(name(child)) == "node" and
         (opts.has(child, "draw") or opts.has(child, "diamond") or
          len([for (reference in named_refs where reference.ref == child.id) reference]) > 0)) child]
-    if (len(axes) == 1 and len(paths) == 0 and len(picture) == 1)
+    if (len(axes) == 1 and len(paths) == 0 and len(content) == 1)
         plots.render_axis(axes[0], options)^
-    else if (len(axes) == 0 and len(paths) > 0 and len(paths) == len(picture))
+    else if (len(axes) == 0 and len(paths) > 0 and len(paths) == len(content))
         if (len(named_nodes) > 0 or len(named_refs) > 0)
             named.render(picture)^
         else render_drawing(picture)^

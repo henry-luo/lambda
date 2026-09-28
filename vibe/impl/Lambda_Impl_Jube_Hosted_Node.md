@@ -1218,7 +1218,7 @@ module without its slice.
   four; a packaged node-baseline smoke against compatibility; expected
   reduced failures; and minimal smoke (`typeof Buffer === 'undefined'`,
   non-Node JS green).
-- [ ] **N7.3** Docs: `doc/Lambda_Jube_Runtime.md` gains the node-module
+- [ ] **N7.3** Docs: `doc/dev/Lambda_Jube_Runtime.md` gains the node-module
   bundle section; `vibe/Lambda_Design_Jube_Node_Hosting.md` status flips to
   implemented-with-deltas; the native-module doc's POC 2 marked delivered;
   memory/ledger docs updated.

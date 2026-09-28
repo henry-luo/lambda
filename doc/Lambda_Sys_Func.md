@@ -382,7 +382,7 @@ Functions for string manipulation. `replace`, `split`, and `find` accept either 
 
 ### String Pattern Recap
 
-String patterns are defined in the type system (see [Lambda_Type.md](Lambda_Type.md) § String Patterns) and can be used as arguments to string functions, either named or written inline:
+String patterns are defined in the type system (see [Lambda_String_Pattern.md](Lambda_String_Pattern.md)) and can be used as arguments to string functions, either named or written inline:
 
 ```lambda
 type digits = \(d+)              // one or more digits
@@ -823,8 +823,8 @@ empty. Generic arrays and lists retain their ordinary collection behavior.
 | `reverse(vec)`       | Reverse order                       | `reverse([1, 2, 3])`                   | `[3, 2, 1]`        |
 | `sort(vec)`          | Sort ascending                      | `sort([3, 1, 2])`                      | `[1, 2, 3]`        |
 | `sort(vec, 'desc')`   | Sort descending                     | `sort([1, 2, 3], 'desc')`               | `[3, 2, 1]`        |
-| `sort(vec, fn)`      | Sort by key function                | `sort(users, ~.age)`                   | Sorted by age      |
-| `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc', by: ~.age})` | Sorted by age desc |
+| `sort(vec, fn)`      | Sort by key function                | `sort(users, (u) => u.age)`            | Sorted by age      |
+| `sort(vec, options)` | Sort with options map               | `sort(users, {dir: 'desc', by: (u) => u.age})` | Sorted by age desc |
 | `unique(vec)`        | Remove duplicates (preserves order) | `unique([1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `unique(a, b, ...)`  | Union: `unique(a ++ b ++ ...)`      | `unique([1, 2], [2, 3])`               | `[1, 2, 3]`        |
 | `intersect(a, b, ...)` | Items of `a` held by every other  | `intersect([1, 2, 3], [2, 3, 4])`      | `[2, 3]`           |
@@ -883,8 +883,9 @@ sort([1, 2, 3], 'desc')     // [3, 2, 1]
 
 // Sort by key function
 let users = [{name: "Bob", age: 30}, {name: "Alice", age: 25}]
-sort(users, ~.age)         // sorted by age ascending
-sort(users, {dir: 'desc', by: ~.age})   // sorted by age descending
+sort(users, (u) => u.age)  // sorted by age ascending
+sort(users, {dir: 'desc', by: (u) => u.age})   // sorted by age descending
+// the key is a function: `~` is bound only inside a pipe body (S10.1.3)
 
 unique([1, 2, 2, 3, 3])    // [1, 2, 3]
 zip([1, 2], ["a", "b"])    // [[1, "a"], [2, "b"]]
@@ -1051,6 +1052,8 @@ the documents live for the evaluation.
 Creation is immediate and outside any write set — document management like
 `io.mkdir`, not a Tier-3 edit — so the document is readable in the same
 evaluation without a `commit`. The dotted form `temp.'name'` addresses it.
+See [Lambda_Document_Updates.md](Lambda_Document_Updates.md) for writing to
+documents.
 
 | Format | Description | Example |
 |--------|-------------|---------|
@@ -1179,7 +1182,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `print(args...)` | Print values to console | `print("x =", x)` |
 | `output(data, target)` | Write data to file/URL | `output(data, /.'out.json')` |
 | `output(data, target, {mode: "append"})` | Append data to file/URL | `output(line, /.'log.txt', {mode: "append"})` |
-| `io.copy(src, dst)` | Copy file or directory | `io.copy(/.'a.txt', /.'b.txt')` |
+| `io.copy(src, dst)` | Copy a file (directory copy not yet implemented) | `io.copy(/.'a.txt', /.'b.txt')` |
 | `io.move(src, dst)` | Move/rename file or directory | `io.move(/.old, /.new)` |
 | `io.delete(target)` | Delete file or directory | `io.delete(/.'temp.txt')` |
 | `io.mkdir(path)` | Create directory | `io.mkdir(/.data)` |
@@ -1193,15 +1196,13 @@ Functions that have side effects (I/O, state changes). These are only available 
 
 #### print(args...)
 
-Prints values to the console (stdout). Arguments are stringified and joined
-with a single space separator.
+Prints values to the console (stdout). Arguments are stringified and joined with a single space separator. **No newline is added**: end a line with `"\n"` yourself.
 
 ```lambda
 pn main() {                  // print is a pn: only a pn may call it
-    print("Hello, world!")
-    print(42)
-    print([1, 2, 3])
-    print("x =", 42)
+    print("Hello, world!\n")
+    print(42, "\n")          // "42 " then a newline: arguments are space-joined
+    print("x =", 42, "\n")
 }
 ```
 
@@ -1283,14 +1284,15 @@ The `io` module provides procedural functions for file system operations.
 
 ##### io.copy(source, destination)
 
-Copy a file or directory to a new location.
+Copy a file to a new location.
 
 ```lambda
 pn backup_config() {
     io.copy(/.'config.json', /.backup.'config.json')^
-    io.copy(/.data, /.backup.data)^  // Copy directory recursively
 }
 ```
+
+> **Not yet implemented.** Copying a directory: `io.copy` on a folder reports success but writes an empty file instead of a recursive copy. Copy the files one by one. `io.delete` on a folder does delete it recursively.
 
 ##### io.move(source, destination)
 
@@ -1418,61 +1420,7 @@ pn benchmark() {
 
 ## Concurrency Functions
 
-Concurrency is available only inside `pn`. A procedure becomes resumable when
-it calls a suspending operation; callers do not need an `async` or `await`
-annotation. Use `^` to propagate, or `e ^ { … }` to handle locally, with
-operations that return `T^E`.
-
-| Function | Result | Behavior |
-|----------|--------|----------|
-| `start(target, args = [], options = {})` | task handle | Enqueue a child procedure without blocking the parent. It is an ordinary-call builtin `pn` under S13.1.1v2. `target` resolves to a `pn`, `args` is an array, and the options literal accepts `mode: 'task' \| 'thread' \| 'process'`. Task mode is the default and current implementation; isolated modes report not implemented. |
-| `send(handle, value)` | `ok^E` | Append to the target's bounded FIFO mailbox. The default capacity is 1024; a full mailbox returns an error. |
-| `receive()` | `item^E` | Remove the current task's oldest mailbox item, parking while empty. |
-| `wait(handle)` | `T^E` | Park until the task finishes and return its value or error. |
-| `wait(handle, timeout: ms)` | `T^E` | As above, but return a timeout error without cancelling the target. |
-| `select(h1, h2, ..., timeout: ms)` | `handle^E` | Return the first completed handle, with readiness ties resolved FIFO. |
-| `sleep(ms)` | `null^E` | Park on the shared libuv timer queue. |
-| `self()` | task handle | Return the current task's handle. |
-| `cancel(handle)` | `null` | Request cancellation. It is idempotent; cancellation is observed at park points. |
-| `toPromise(handle)` | JS Promise | Adapt a handle when a JavaScript runtime is active. Lambda normally consumes the Promise with `wait`. |
-
-```lambda
-pn worker() {
-    let message = receive()^
-    sleep(1)^
-    return upper(message)
-}
-
-pn main() {
-    let handle = start(worker)
-    send(handle, "ready")^
-    print(wait(handle)^)       // READY
-}
-```
-
-Every non-escaped child belongs to the lexical block where it was started.
-Normal block exit joins it; error exit cancels and then joins it. Returning the
-handle transfers it to the caller. Sending a handle as a message does not
-transfer scope ownership.
-
-`wait` also accepts a JavaScript Promise imported from a `.js` module. Promise
-fulfillment resumes the Lambda task at macrotask position; rejection becomes a
-Lambda error value. Conversely, every exported Lambda `pn` is a Promise-returning
-function when called from JavaScript.
-
-### io.read(target)
-
-`io.read` is the asynchronous file-reading operation. It opens, stats, reads,
-and closes a local file through libuv, parking the current task without blocking
-the shared event loop. It returns the file contents as a string or a `T^E` file
-error.
-
-```lambda
-pn main() {
-    let text = io.read("data.txt") ^ { print(~.message); return }
-    print(text)
-}
-```
+The task built-ins — `start`, `wait`, `select`, `send`, `receive`, `sleep`, `self`, `cancel`, `io.read` and `toPromise` — are available only inside a `pn`. Their signatures, results and error codes are listed in [Lambda_Concurrency.md § Function Reference](Lambda_Concurrency.md#function-reference), with the model they belong to.
 
 ---
 
@@ -1670,7 +1618,7 @@ yet; their signatures come from the system-function registry
 |----------|------|-------------|
 | `print` | 0+ | Print values to console |
 | `output` | 2-3 | Write to file/URL |
-| `io.copy` | 2 | Copy file/directory |
+| `io.copy` | 2 | Copy a file |
 | `io.move` | 2 | Move file/directory |
 | `io.delete` | 1 | Delete file/directory |
 | `io.mkdir` | 1 | Create directory |

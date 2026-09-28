@@ -1,17 +1,12 @@
 # Markup & Data Format Support
 
-Lambda parses a wide variety of text and binary formats into a single, uniform in-memory
-representation — the **Lambda/Mark node tree** — so that all downstream transformation,
-validation, layout and rendering code works on the same data model regardless of the
-original source format.
+Lambda parses a wide variety of text and binary formats into a single, uniform in-memory representation — the **Lambda/Mark node tree** — so that all downstream transformation, validation, layout and rendering code works on the same data model regardless of the original source format.
 
 ```
 [Source file]  →  [parser]  →  [Lambda/Mark tree]  →  [transform / validate / format / render]
 ```
 
-Every tree shown below is the real output of `lambda convert <file> -t mark` on the
-current build; where a parser's output differs from the shape it is heading for, the
-difference is stated. This document covers:
+Every tree shown below is the real output of `lambda convert <file> -t mark` on the current build; where a parser's output differs from the shape it is heading for, the difference is stated. This document covers:
 
 1. [Lightweight markup languages](#1-lightweight-markup-languages) — human-authored prose that maps to the **Mark Doc** element schema
 2. [Data-interchange formats](#2-data-interchange-formats) — structured data that maps to Lambda **maps, arrays and elements**
@@ -23,11 +18,7 @@ difference is stated. This document covers:
 
 ## 1. Lightweight Markup Languages
 
-All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse into the same
-**Mark Doc schema** — an element tree rooted at `<doc>` (see [Doc_Schema.md](Doc_Schema.md)).
-Block structure (headings, paragraphs, lists, code blocks, tables) and inlines (emphasis, links,
-code spans) use HTML element names wherever HTML has one, plus a few custom elements for
-features HTML lacks (math, citations, footnotes).
+All lightweight markup flavors (Markdown, reStructuredText, AsciiDoc, …) parse into the same **Mark Doc schema** — an element tree rooted at `<doc>` (see [Doc_Schema.md](Doc_Schema.md)). Block structure (headings, paragraphs, lists, code blocks, tables) and inlines (emphasis, links, code spans) use HTML element names wherever HTML has one, plus a few custom elements for features HTML lacks (math, citations, footnotes).
 
 ### 1.1 Supported Flavors
 
@@ -58,8 +49,7 @@ let html = input("index.html",   'html')^
 
 ### 1.2 Unified Mark Doc Schema
 
-Every prose parser produces the same element-tree shape. Element names are aligned with HTML
-so the tree passes straight to the Radiant layout engine.
+Every prose parser produces the same element-tree shape. Element names are aligned with HTML so the tree passes straight to the Radiant layout engine.
 
 | Category | Mark element(s) | Notes |
 |----------|-----------------|-------|
@@ -138,9 +128,7 @@ with a [link](https://example.com).
 
 ### 1.4 HTML → Mark
 
-HTML5 is a first-class input format and is preserved verbatim, whitespace text nodes included:
-the root is the `<#document>` node with its doctype, and the `<html>`, `<head>` and `<body>`
-elements come through as parsed. There is no `<doc>` wrapper.
+HTML5 is a first-class input format and is preserved verbatim, whitespace text nodes included: the root is the `<#document>` node with its doctype, and the `<html>`, `<head>` and `<body>` elements come through as parsed. There is no `<doc>` wrapper.
 
 <table>
 <thead>
@@ -187,9 +175,7 @@ elements come through as parsed. There is no `<doc>` wrapper.
 
 ## 2. Data-Interchange Formats
 
-Structured data formats map to Lambda's **map** (`{…}`), **array** (`[…]`) and **element**
-(`<tag …>`) values. Once parsed you have a live Lambda value that you can query, transform and
-export to any other format.
+Structured data formats map to Lambda's **map** (`{…}`), **array** (`[…]`) and **element** (`<tag …>`) values. Once parsed you have a live Lambda value that you can query, transform and export to any other format.
 
 ### 2.1 Supported Formats
 
@@ -207,8 +193,7 @@ export to any other format.
 
 ### 2.2 JSON → Lambda Map / Array
 
-JSON is the closest format to Lambda's native literal syntax. Object keys become map keys and
-value types are preserved.
+JSON is the closest format to Lambda's native literal syntax. Object keys become map keys and value types are preserved.
 
 <table>
 <thead>
@@ -267,9 +252,7 @@ data.address.city       // "New York"
 
 ### 2.3 XML → Lambda Element Tree
 
-XML maps one-to-one onto Lambda **elements**: a tag, attributes, and ordered children. The
-parser wraps the result in a `<document>` element that also carries the XML declaration, and
-attribute values stay **strings** (`id: "1"`, never `id: 1`).
+XML maps one-to-one onto Lambda **elements**: a tag, attributes, and ordered children. The parser wraps the result in a `<document>` element that also carries the XML declaration, and attribute values stay **strings** (`id: "1"`, never `id: 1`).
 
 <table>
 <thead>
@@ -308,8 +291,7 @@ attribute values stay **strings** (`id: "1"`, never `id: 1`).
 </tbody>
 </table>
 
-**Querying with the `?` operator** — a child element's text is its first child, so project
-with `[0]`:
+**Querying with the `?` operator** — a child element's text is its first child, so project with `[0]`:
 
 ```lambda
 let lib = input("library.xml", 'xml')^
@@ -321,9 +303,7 @@ lib?<book>?<year> |> int(~[0])   // [2008, …]
 
 ### 2.4 YAML → Lambda Map / Array
 
-YAML documents (including multi-document streams) map to the same map/array model as JSON.
-All YAML scalar types — strings, ints, floats, booleans, nulls and timestamps — become their
-Lambda equivalents.
+YAML documents (including multi-document streams) map to the same map/array model as JSON. All YAML scalar types — strings, ints, floats, booleans, nulls and timestamps — become their Lambda equivalents.
 
 <table>
 <thead>
@@ -376,8 +356,7 @@ features:
 
 ### 2.5 TOML → Lambda Map
 
-TOML section headers become nested map keys; dotted keys are expanded into nested maps and
-arrays of tables into arrays of maps.
+TOML section headers become nested map keys; dotted keys are expanded into nested maps and arrays of tables into arrays of maps.
 
 <table>
 <thead>
@@ -437,8 +416,7 @@ enabled = false
 
 ### 2.6 CSV → Lambda Array of Maps
 
-The first row is the header and supplies the map keys for every following row. Values are
-**strings**; a missing trailing field is `null`. Convert numbers where you use them.
+The first row is the header and supplies the map keys for every following row. Values are **strings**; a missing trailing field is `null`. Convert numbers where you use them.
 
 <table>
 <thead>
@@ -483,9 +461,7 @@ for (r in rows where int(r.age) >= 30)
 
 ### 2.7 INI / .properties
 
-Flat or lightly nested configuration formats map to one or two levels of maps, and their values
-are **typed**: `5432` is an int, `true`/`yes`/`on` a bool, `null`/`empty` a `null`, `3.14` a
-float. Keys before the first `[section]` land in a `global` map.
+Flat or lightly nested configuration formats map to one or two levels of maps, and their values are **typed**: `5432` is an int, `true`/`yes`/`on` a bool, `null`/`empty` a `null`, `3.14` a float. Keys before the first `[section]` land in a `global` map.
 
 <table>
 <thead>
@@ -543,8 +519,7 @@ cfg.'server.port'     // 8080
 
 ### 2.8 Format Conversion
 
-A parsed value can be written back out in any format that has a formatter (§5), through the
-`format()` function or the `lambda convert` command:
+A parsed value can be written back out in any format that has a formatter (§5), through the `format()` function or the `lambda convert` command:
 
 ```lambda
 // In a Lambda script
@@ -560,9 +535,7 @@ lambda convert data.csv  -t yaml -o data.yaml
 lambda convert page.md   -t html -o page.html
 ```
 
-Not every direction exists: there is no CSV writer, so a CSV can be read and converted to any
-other format but nothing converts *to* CSV, and the prose formats AsciiDoc, man and Typst are
-read-only as well.
+Not every direction exists: there is no CSV writer, so a CSV can be read and converted to any other format but nothing converts *to* CSV, and the prose formats AsciiDoc, man and Typst are read-only as well.
 
 ---
 
@@ -570,11 +543,7 @@ read-only as well.
 
 ### 3.1 LaTeX
 
-LaTeX source (`.tex`) is parsed by a direct (hand-written) parser into a `latex_document` tree
-whose elements are named after the commands and environments they came from — `<documentclass>`,
-`<section title: <curly_group …>>`, `<textbf>`, `<paragraph>` — rather than into the Mark Doc
-schema. The Lambda-side `latex` package turns that tree into HTML; `lambda view` and
-`lambda convert paper.tex -t html` use it.
+LaTeX source (`.tex`) is parsed by a direct (hand-written) parser into a `latex_document` tree whose elements are named after the commands and environments they came from — `<documentclass>`, `<section title: <curly_group …>>`, `<textbf>`, `<paragraph>` — rather than into the Mark Doc schema. The Lambda-side `latex` package turns that tree into HTML; `lambda view` and `lambda convert paper.tex -t html` use it.
 
 ```lambda
 let doc = input("paper.tex", 'latex')^
@@ -590,15 +559,11 @@ doc?<section> |> ~.title[0]           // section titles
     <paragraph <textbf "Bold text"> " and " <textit "italic text"> ".">>>
 ```
 
-`format(doc, 'html')` serializes this raw tree; for rendered HTML use
-`lambda convert paper.tex -t html -o paper.html --full-document`. Math inside the document is
-parsed by the math parser (see [Math_Support.md](Math_Support.md)).
+`format(doc, 'html')` serializes this raw tree; for rendered HTML use `lambda convert paper.tex -t html -o paper.html --full-document`. Math inside the document is parsed by the math parser (see [Math_Support.md](Math_Support.md)).
 
 ### 3.2 PDF
 
-PDF documents are parsed into an element tree with best-effort text-flow reconstruction;
-compressed streams are decoded first. A separate PDF package written in Lambda interprets page
-content streams for viewing and rendering.
+PDF documents are parsed into an element tree with best-effort text-flow reconstruction; compressed streams are decoded first. A separate PDF package written in Lambda interprets page content streams for viewing and rendering.
 
 ```lambda
 let report = input("annual_report.pdf", 'pdf')^
@@ -607,15 +572,11 @@ report?<p> |> ~[0]             // first text of each paragraph
 
 ### 3.3 RTF
 
-The RTF parser is **experimental**: it currently yields the document's control groups as raw
-maps (`{content: [...], formatting: {pard: true, qc: true, fs: 28, …}}`) rather than a Mark Doc
-tree, so RTF is not yet usable for conversion.
+The RTF parser is **experimental**: it currently yields the document's control groups as raw maps (`{content: [...], formatting: {pard: true, qc: true, fs: 28, …}}`) rather than a Mark Doc tree, so RTF is not yet usable for conversion.
 
 ### 3.4 Email (EML / RFC 822)
 
-E-mail files parse into a map of the well-known headers plus a `headers` map with every header
-as written; `date` is kept as the header string, and `body` holds the text when the message has
-one. `.eml` is not auto-detected by `lambda convert`, so give the type explicitly.
+E-mail files parse into a map of the well-known headers plus a `headers` map with every header as written; `date` is kept as the header string, and `body` holds the text when the message has one. `.eml` is not auto-detected by `lambda convert`, so give the type explicitly.
 
 <table>
 <thead>
@@ -667,11 +628,7 @@ mail.subject
 
 ### 3.5 vCard (VCF)
 
-Contact cards parse into a map with descriptive keys: `version`, `full_name`, a structured
-`name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`,
-`title`, structured `address` maps, `url`, `birthday`, `note`. A property that repeats (two
-phone numbers) appears as a repeated key, and a file holding several cards is currently flattened
-into one map — one card per file is the reliable shape.
+Contact cards parse into a map with descriptive keys: `version`, `full_name`, a structured `name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`, `title`, structured `address` maps, `url`, `birthday`, `note`. A property that repeats (two phone numbers) appears as a repeated key, and a file holding several cards is currently flattened into one map — one card per file is the reliable shape.
 
 ```lambda
 let contact = input("alice.vcf", 'vcf')^
@@ -683,11 +640,7 @@ contact.name.given     // "Alice"
 
 ### 3.6 iCalendar (ICS)
 
-Calendar files parse into a flat map — `version`, `product_id`, `calendar_scale`, `method` — with
-a `components` array. Each component carries its `type` (`"VEVENT"`, `"VTODO"`, …), the common
-properties by name (`uid`, `summary`, `description`, `location`, `status`, `organizer`,
-`attendee`), `start_time`/`end_time` as maps of date parts, and a `properties` map with every
-property as written.
+Calendar files parse into a flat map — `version`, `product_id`, `calendar_scale`, `method` — with a `components` array. Each component carries its `type` (`"VEVENT"`, `"VTODO"`, …), the common properties by name (`uid`, `summary`, `description`, `location`, `status`, `organizer`, `attendee`), `start_time`/`end_time` as maps of date parts, and a `properties` map with every property as written.
 
 ```lambda
 let cal = input("events.ics", 'ics')^
@@ -696,9 +649,7 @@ cal.components |: ~.type == "VEVENT" |> ~.summary    // ["Team standup", "Sprint
 
 ### 3.7 Graph and Diagram Formats
 
-Diagram description languages parse into a `<graph>` element. Four flavors are supported
-through the `graph` type; the flavor comes from the file extension, or explicitly as
-`{type: 'graph', flavor: 'mermaid'}` in a script and `-f graph:mermaid` on the command line.
+Diagram description languages parse into a `<graph>` element. Four flavors are supported through the `graph` type; the flavor comes from the file extension, or explicitly as `{type: 'graph', flavor: 'mermaid'}` in a script and `-f graph:mermaid` on the command line.
 
 | Flavor | Explicit form | File extension |
 |--------|:-------------:|:--------------:|
@@ -707,11 +658,7 @@ through the `graph` type; the flavor comes from the file extension, or explicitl
 | Mermaid diagrams | `graph:mermaid` | `.mmd` |
 | Structurizr / C4 DSL | `graph:structurizr` | `.dsl`, `.structurizr` |
 
-Mermaid and D2 produce `<node id: …, label: …, shape: …>` and `<edge from: …, to: …>` children.
-DOT keeps a source-preserving statement structure (`<dot-attr-statement>`, `<dot-edge-statement>`
-with `<dot-endpoint>` children, `<subgraph>`), so it can be written back exactly; every element
-also carries `source-line`/`source-column` attributes. The `graph` package lays these trees out
-for `lambda render` and `lambda view`.
+Mermaid and D2 produce `<node id: …, label: …, shape: …>` and `<edge from: …, to: …>` children. DOT keeps a source-preserving statement structure (`<dot-attr-statement>`, `<dot-edge-statement>` with `<dot-endpoint>` children, `<subgraph>`), so it can be written back exactly; every element also carries `source-line`/`source-column` attributes. The `graph` package lays these trees out for `lambda render` and `lambda view`.
 
 ```lambda
 let g = input("flow.mmd", {type: 'graph', flavor: 'mermaid'})^
@@ -730,16 +677,11 @@ g?<edge> |> [~.from, ~.to]         // [["A", "B"], ["B", "C"]]
 
 ### 3.8 CSS
 
-`input(path, 'css')` parses a stylesheet for the Radiant engine. The result is an opaque
-stylesheet object, not a Lambda data structure: converting it to `mark` or `json` does not
-produce a rule list today, so CSS is not yet queryable as data.
+`input(path, 'css')` parses a stylesheet for the Radiant engine. The result is an opaque stylesheet object, not a Lambda data structure: converting it to `mark` or `json` does not produce a rule list today, so CSS is not yet queryable as data.
 
 ### 3.9 JSX / MDX
 
-MDX files interleave Markdown with JSX. The parser splits them into an `<mdx_document>` whose
-`<body>` holds the Markdown segments as `<doc>` trees and each JSX block as a `<jsx_element>`
-carrying the raw source in its `content` attribute; the components are not parsed into elements,
-so `page?<Card>` finds nothing.
+MDX files interleave Markdown with JSX. The parser splits them into an `<mdx_document>` whose `<body>` holds the Markdown segments as `<doc>` trees and each JSX block as a `<jsx_element>` carrying the raw source in its `content` attribute; the components are not parsed into elements, so `page?<Card>` finds nothing.
 
 ```lambda
 let page = input("Page.mdx", 'mdx')^
@@ -748,8 +690,7 @@ page?<jsx_element> |> ~.content    // the raw JSX blocks
 
 ### 3.10 Math
 
-Mathematical notation is parsed standalone from LaTeX math or ASCII math into a `<math>`
-element tree with `parse()` (strings) or `input()` (files):
+Mathematical notation is parsed standalone from LaTeX math or ASCII math into a `<math>` element tree with `parse()` (strings) or `input()` (files):
 
 ```lambda
 let tex_expr = parse("\\frac{a}{b}", 'math')^
@@ -761,8 +702,7 @@ See [Math_Support.md](Math_Support.md).
 
 ### 3.11 Directory Listing
 
-A directory path is an input too: it yields an array of **path** values, one per entry. Each has
-a `name`, and `string(p)` gives its spelling.
+A directory path is an input too: it yields an array of **path** values, one per entry. Each has a `name`, and `string(p)` gives its spelling.
 
 ```lambda
 let files = input("./src")^
@@ -792,9 +732,7 @@ let url_data = input("https://api.example.com/data.json")^
 let str_data = parse("a: 1\nb: [1, 2]", 'yaml')^
 ```
 
-`input` and `parse` raise on failure, so propagate with `^` or handle with `^ { … }`. **Auto-detection**
-inspects the file's leading bytes and its extension; `.eml` and `.ini` are exceptions and need an
-explicit type.
+`input` and `parse` raise on failure, so propagate with `^` or handle with `^ { … }`. **Auto-detection** inspects the file's leading bytes and its extension; `.eml` and `.ini` are exceptions and need an explicit type.
 
 **CLI equivalent — `lambda convert`:**
 
@@ -819,9 +757,7 @@ lambda convert arch.mmd    -f graph:mermaid -t mark -o arch.mark
 | **Math** | `math-latex`, `math-ascii` (`math-typst` and `math-mathml` are stubs) |
 | **Diagrams** | graph as `dot`, `mermaid` or `d2` |
 
-Where a target lacks a concept the conversion is predictable rather than silently lossy: a
-`binary` value becomes a base64 string in JSON and YAML, and an element written to a data format
-becomes its map-and-array projection. There is no CSV writer.
+Where a target lacks a concept the conversion is predictable rather than silently lossy: a `binary` value becomes a base64 string in JSON and YAML, and an element written to a data format becomes its map-and-array projection. There is no CSV writer.
 
 ---
 
@@ -837,9 +773,7 @@ becomes its map-and-array projection. There is no CSV writer.
 | **Web / code** | CSS (for Radiant), JSX, Math (LaTeX math, ASCII math) |
 | **System** | Directory listing, plain text |
 
-Every format produces a **Lambda/Mark node tree** that can be uniformly queried with `?`,
-transformed with pipes and `for`-expressions, validated against schemas, and exported to any
-of the output formats above.
+Every format produces a **Lambda/Mark node tree** that can be uniformly queried with `?`, transformed with pipes and `for`-expressions, validated against schemas, and exported to any of the output formats above.
 
 ---
 

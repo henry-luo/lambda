@@ -176,13 +176,17 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/Lambda_Reference.md` — Language overview and quick reference
 - `doc/Lambda_Data.md` — Literals and collections (primitives, arrays, lists, maps, elements, ranges)
 - `doc/Lambda_Type.md` — Type system (union types, function types, type patterns)
+- `doc/Lambda_String_Pattern.md` — String patterns (`\(...)` pattern language, pattern-aware `find`/`replace`/`split`)
 - `doc/Lambda_Expr_Stam.md` — Expressions and statements (operators, pipes, control flow)
 - `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
 - `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, postfix `^` propagation, `expr ^ { ... }` handlers)
 - `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
+- `doc/Lambda_Modules.md`, `doc/Lambda_Concurrency.md`, `doc/Lambda_Document_Updates.md` — Modules and imports; tasks, mailboxes and cancellation; references, `put`/`del` and transactions
+- `doc/Lambda_Packages.md`, `doc/HTML_CSS_SVG_Support.md` — Bundled Lambda packages; Radiant's HTML/CSS/SVG support matrix
+- `doc/tutorial/README.md` — Ten-chapter tutorial; `make check-tutorial` replays its examples and checks their output
 - `doc/Lambda_Validator_Guide.md` — Schema-based data validation
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
-- `doc/Lambda_Jube_Runtime.md` — Polyglot runtime build (Python, Bash, Ruby, C2MIR)
+- `doc/dev/Lambda_Jube_Runtime.md` — Hosted-language (Jube) module build and packaging (Python ships; the Bash and Ruby front ends are compiled out)
 - `doc/dev/radiant/RAD_00_Overview.md` — Radiant engine detailed design — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table/positioned), the rendering pipeline (paint IR, display list, painters, PDF/SVG), vector graphics, events, animation, editing, forms, interaction state, application shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set)
 - `doc/dev/lambda/LR_00_Overview.md` — Lambda core-runtime detailed design — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, runtime builtins, error handling, the Mark data API, the procedural runtime, and the schema validator (index to the LR_01–LR_13 set)
 - `doc/dev/js/JS_00_Overview.md` — LambdaJS runtime detailed design — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility (index to the JS_01–JS_16 set)

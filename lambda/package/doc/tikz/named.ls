@@ -128,27 +128,12 @@ fn edge_geometry(child, nodes) any^ {
     }
 }
 
-fn arrow_head(edge) {
-    let dx = edge.end.x - edge.start.x
-    let dy = edge.end.y - edge.start.y
-    let length = math.sqrt(dx * dx + dy * dy)
-    let ux = dx / length
-    let uy = dy / length
-    let base_x = edge.end.x - ux * 8.0
-    let base_y = edge.end.y - uy * 8.0
-    let wing_x = uy * 3.0
-    let wing_y = 0.0 - ux * 3.0;
-    <path d: svg.M(edge.end.x, edge.end.y) ++ " " ++
-        svg.L(base_x + wing_x, base_y + wing_y) ++ " " ++
-        svg.L(base_x - wing_x, base_y - wing_y) ++ " Z",
-        fill: edge.color>
-}
-
 fn edge_svg(edge) {
     let line = <path d: svg.M(edge.start.x, edge.start.y) ++ " " ++
         svg.L(edge.end.x, edge.end.y), fill: "none", stroke: edge.color,
         'stroke-width': 1.2>;
-    if (edge.arrow_end) <g line arrow_head(edge)>
+    if (edge.arrow_end) <g line svg.arrow_head(edge.start.x, edge.start.y,
+        edge.end.x, edge.end.y, edge.color)>
     else <g line>
 }
 

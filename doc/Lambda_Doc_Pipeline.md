@@ -2,11 +2,15 @@
 
 **One data model. Many document workflows.**
 
+> *"It is better to have 100 functions operate on one data structure than 10 functions on 10 data structures."*
+>
+> — Alan Perlis, *Epigrams on Programming*, 1982
+
 Lambda Script and its Radiant engine form a complete document-processing pipeline in a single executable of about 20 MB, built from scratch in C/C++. It parses some thirty document and data formats into one structured value, validates or transforms that value with a typed functional language, and then either writes it back out in any of two dozen formats, lays it out with browser-compatible CSS and renders it to SVG, PDF or a bitmap, or opens it in an interactive viewer and editor. This article introduces the ideas behind the pipeline: the data model everything shares, how each input format maps onto it, the workflows the command line and the language expose, and how the whole compares with other document toolchains. It stays at the level of concepts and architecture; the reference documents linked throughout carry the details.
 
 > **Related documentation**: [Lambda Reference](Lambda_Reference.md) · [Lambda Data](Lambda_Data.md) · [Markup & Data Format Support](Markup_Formats_Support.md) · [Mark Doc Schema](Doc_Schema.md) · [Validator Guide](Lambda_Validator_Guide.md) · [CLI Reference](Lambda_CLI.md) · [Reactive UI](Reactive_UI.md) · [Radiant Design Overview](dev/radiant/RAD_00_Overview.md) · [Lambda Core Runtime Overview](dev/lambda/LR_00_Overview.md) · [LambdaJS Overview](dev/js/JS_00_Overview.md)
 
-![Lambda and Radiant document pipeline](lambda-radiant-pipeline.svg)
+![Lambda and Radiant document pipeline](img/lambda-radiant-pipeline.svg)
 
 ---
 
@@ -259,7 +263,7 @@ lambda render page.html -o shot.png -vw 1920 -vh 1080 --pixel-ratio 2.0
 lambda render architecture.mmd -o architecture.svg -t github-dark
 ```
 
-Layout fidelity is measured, not assumed: the layout test suite compares Radiant's view tree against reference layouts captured from a real browser, and the CSS, DOM and editing behaviours are exercised against subsets of the Web Platform Tests. `lambda layout` exposes the computed view tree directly, which is also how those comparisons are made.
+Layout fidelity is measured, not assumed: the layout test suite compares Radiant's view tree against reference layouts captured from a real browser, and the CSS, DOM and editing behaviours are exercised against subsets of the Web Platform Tests. `lambda layout` exposes the computed view tree directly, which is also how those comparisons are made. [HTML_CSS_SVG_Support.md](HTML_CSS_SVG_Support.md) lists which HTML elements, CSS features and SVG features are supported, with the conformance figures and the differences between the output formats.
 
 ### 3.5 View, interact, script
 
