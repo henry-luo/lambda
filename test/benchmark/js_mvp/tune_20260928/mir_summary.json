@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "numeric_functions": [
+    {
+      "benchmark": "mbrot",
+      "control": {
+        "mir_sha256": "4333b99d8c050b8e9e0f9e71d94eac4d1902efdd2eca6665e0917a8d1be5e5a2",
+        "signature": "_js_count_292_n:\tfunc\td, i64, p:ctx, i64:%p0, i64:%p1, d:%p2, d:%p3, d:%p4",
+        "helper_calls": {
+          "js_add": 5,
+          "js_subtract": 1,
+          "js_multiply": 4,
+          "js_cmp_raw": 1
+        },
+        "native_ops": {
+          "dadd": 1,
+          "dsub": 0,
+          "dmul": 2,
+          "dlt": 1,
+          "dgt": 0
+        }
+      },
+      "final": {
+        "mir_sha256": "c421d8375647b40c9e09f5b547a4cae1db5e61d91026f13bdc749ff9c08a095b",
+        "signature": "_js_count_292_n:\tfunc\td, i64, p:ctx, d:%p0, d:%p1, d:%p2, d:%p3, d:%p4",
+        "helper_calls": {
+          "js_add": 0,
+          "js_subtract": 0,
+          "js_multiply": 0,
+          "js_cmp_raw": 0
+        },
+        "native_ops": {
+          "dadd": 6,
+          "dsub": 1,
+          "dmul": 6,
+          "dlt": 1,
+          "dgt": 1
+        }
+      }
+    },
+    {
+      "benchmark": "mandelbrot",
+      "control": {
+        "mir_sha256": "b868cdd7d4c72ac8dd7a088aba74baf575a1b43d0673b2e8932d1e05f5bdda59",
+        "signature": "Mandelbrot_mandelbrot_4_n:\tfunc\td, i64, p:ctx, d:%p0",
+        "helper_calls": {
+          "js_add": 3,
+          "js_subtract": 1,
+          "js_multiply": 4,
+          "js_cmp_raw": 1
+        },
+        "native_ops": {
+          "dadd": 5,
+          "dsub": 4,
+          "dmul": 2,
+          "dlt": 3,
+          "dgt": 0
+        }
+      },
+      "final": {
+        "mir_sha256": "599bf879d044a49dea559fd4d1d9b55d6119072d410043c116822fb5f615b28a",
+        "signature": "Mandelbrot_mandelbrot_4_n:\tfunc\td, i64, p:ctx, d:%p0",
+        "helper_calls": {
+          "js_add": 0,
+          "js_subtract": 0,
+          "js_multiply": 0,
+          "js_cmp_raw": 0
+        },
+        "native_ops": {
+          "dadd": 8,
+          "dsub": 5,
+          "dmul": 6,
+          "dlt": 3,
+          "dgt": 1
+        }
+      }
+    }
+  ],
+  "unchanged_diagnostics": [
+    {
+      "benchmark": "text-search",
+      "control": {
+        "sha256": "8681e6a404f158664eb7bc1763bb76fe7da68a9a79d606c12b83e72ddc6abeae",
+        "normalized_sha256": "f1dd9b84765af70a5e2454785ad106e2ffee8e8d2cf2e2c59460b73ccb164e79"
+      },
+      "final": {
+        "sha256": "6af11a6128def3715a7e13579d1325dfd13789b419c2ee16f8d20cac6532d519",
+        "normalized_sha256": "f1dd9b84765af70a5e2454785ad106e2ffee8e8d2cf2e2c59460b73ccb164e79"
+      },
+      "normalized_equal": true,
+      "source": "reduced rounds with same function bodies"
+    },
+    {
+      "benchmark": "three-way",
+      "control": {
+        "sha256": "dcb83ba0af448a628f6dd6a354ace2faf8a94c3ff5f520ea9b6ef8a9b55b67fd",
+        "normalized_sha256": "2747dabc565f172e960394115ccbe49e0316ea2465a35c9bf627c45a4297cd30"
+      },
+      "final": {
+        "sha256": "435c94ee31992c5b6377f16b2fdb25a4f8bcbeb19da26125a79c28fc10795476",
+        "normalized_sha256": "2747dabc565f172e960394115ccbe49e0316ea2465a35c9bf627c45a4297cd30"
+      },
+      "normalized_equal": true,
+      "source": "canonical"
+    }
+  ]
+}

@@ -1,7 +1,9 @@
 # JS MVP release-profile comparison and further LambdaJS tuning
 
-**Date:** 2026-09-28. **Status:** build integration and measurement complete;
-optimization proposals below are not implemented or claimed as speedups.
+**Date:** 2026-09-28. **Status:** build integration and MVP comparison complete;
+the first two numeric-path items now have a guarded production implementation
+and ordinary-release A/B evidence. Array consumers, property/call cost, and
+string/RegExp materialization remain investigation targets.
 
 Authority: [Formal Semantics](../../doc/Lambda_Formal_Semantics.md) **S1.11**
 (hosted JS follows ECMAScript); [Formal Design](../../doc/Lambda_Formal_Design.md)
@@ -213,4 +215,5 @@ Test262 **40,261/40,261** with zero regressions and no retries. The release-prof
 build, isolation/manifest audits and CLI/harness checks pass. The Premake
 self-test stops at an existing Linux multiarch probe on macOS, reproduced with
 the unmodified generator; that does not prevent the actual profile build.
-The production optimizer has not been changed by this task.
+The numeric-path implementation and its validation are recorded in the
+[follow-up report](../../test/benchmark/js_mvp/tune_20260928/README.md).

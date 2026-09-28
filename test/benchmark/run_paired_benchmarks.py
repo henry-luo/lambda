@@ -471,6 +471,8 @@ def main():
         "language": args.language,
         "control_js_runtime": args.control_js_runtime if args.language == "js" else None,
         "candidate_js_runtime": args.candidate_js_runtime if args.language == "js" else None,
+        "js_execution_backend": os.environ.get("JS_EXECUTION_BACKEND")
+        if args.language == "js" else None,
         "tier": args.tier,
         "pairs": args.pairs,
         "paired_uncertainty": {

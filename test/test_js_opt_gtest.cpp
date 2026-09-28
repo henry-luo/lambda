@@ -942,6 +942,129 @@ TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
     expect_trace_off_same("mir_number_plan", source, output);
 }
 
+TEST(JsOpt, GuardedNumericPeerCarriesNumberThroughLoopState) {
+    const char* source =
+        "function blend(r, x, step) { return r + x * step; }\n"
+        "function orbit(r, i, step, x, y) {\n"
+        "  const cr = r + x * step, ci = i + y * step;\n"
+        "  let zr = cr, zi = ci, count = 0;\n"
+        "  while (count < 64) {\n"
+        "    const zr2 = zr * zr, zi2 = zi * zi;\n"
+        "    if (zr2 + zi2 > 16) return count;\n"
+        "    const next = zr2 - zi2 + cr;\n"
+        "    zi = 2 * zr * zi + ci; zr = next; count++;\n"
+        "  }\n"
+        "  return count;\n"
+        "}\n"
+        "function rewritten(r, x, step) { r += 'x'; return r + x * step; }\n"
+        "function captured(r, x, step) {\n"
+        "  function change() { r = '2'; }\n"
+        "  change(); return r + x * step;\n"
+        "}\n"
+        "let coercions = 0;\n"
+        "const values = ['2', 1n, { valueOf() { coercions++; return 3; } }];\n"
+        "if (blend(2, 3, 0.5) !== 3.5 || blend(values[0], 2, 0.5) !== '21' ||\n"
+        "    blend(values[2], 2, 0.5) !== 4 || coercions !== 1 ||\n"
+        "    orbit(-1, -0.5, 0.005, 0, 0) !== 5 ||\n"
+        "    rewritten(2, 2, 0.5) !== '2x1' ||\n"
+        "    captured(2, 2, 0.5) !== '21')\n"
+        "  throw new Error('guarded numeric peer changed semantics');\n"
+        "let threw = false;\n"
+        "try { blend(values[1], 2, 0.5); } catch (error) { threw = error instanceof TypeError; }\n"
+        "if (!threw) throw new Error('BigInt addition did not retain the boxed path');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("guarded_numeric_peer", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("guarded_numeric_peer");
+    ASSERT_NE(mir, nullptr);
+    const char* end = NULL;
+    const char* native = find_mir_function(mir, "_js_orbit_", &end);
+    ASSERT_NE(native, nullptr);
+    ASSERT_NE(end, nullptr);
+    EXPECT_NE(strstr(native, "d:%p0, d:%p1, d:%p2, d:%p3, d:%p4"), nullptr);
+    EXPECT_NE(strstr(native, "\n\tdadd\t"), nullptr);
+    const char* helpers[] = {"js_add", "js_subtract", "js_multiply",
+        "js_cmp_raw"};
+    for (const char* helper : helpers) {
+        char marker[64];
+        snprintf(marker, sizeof(marker), "\n\tcall\t%s", helper);
+        const char* boxed_call = strstr(native, marker);
+        EXPECT_FALSE(boxed_call && boxed_call < end) << helper;
+    }
+    free(mir);
+    expect_trace_off_same("guarded_numeric_peer", source, output);
+}
+
+TEST(JsOpt, NumericBindingProofSeparatesInitializersFromLoopWrites) {
+    const char* source =
+        "function rotate(size) {\n"
+        "  let a = 0, b = 0, c = 0, index = 0;\n"
+        "  while (index < size) {\n"
+        "    const next = a - b + size;\n"
+        "    b = 2 * next * b + size;\n"
+        "    a = next * next; c = b * b; index++;\n"
+        "  }\n"
+        "  return a + c;\n"
+        "}\n"
+        "function mutableSource(size) {\n"
+        "  let seed = 0; seed = '2';\n"
+        "  let carried = seed; const doubled = size * 2;\n"
+        "  return carried + doubled;\n"
+        "}\n"
+        "function cycleWiden(size) {\n"
+        "  let a = 0, b = 0, index = 0;\n"
+        "  while (index < size) { a = b; b = a + 'x'; index++; }\n"
+        "  return a;\n"
+        "}\n"
+        "function initializerCycle(size) {\n"
+        "  let first = second, second = first; return first + size;\n"
+        "}\n"
+        "const dynamic = ['2'];\n"
+        "if (rotate(1) !== 2 || rotate(2) !== 340 ||\n"
+        "    rotate(dynamic[0]) !== 778408 || mutableSource(2) !== '24' ||\n"
+        "    cycleWiden(2) !== '0x')\n"
+        "  throw new Error('numeric binding cycle changed semantics');\n"
+        "let rejected = false;\n"
+        "try { initializerCycle(1); }\n"
+        "catch (error) { rejected = error instanceof ReferenceError; }\n"
+        "if (!rejected) throw new Error('initializer cycle lost its TDZ error');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("numeric_binding_cycle", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("numeric_binding_cycle");
+    ASSERT_NE(mir, nullptr);
+    const char* rotate_end = NULL;
+    const char* rotate = find_mir_function(mir, "_js_rotate_", &rotate_end);
+    ASSERT_NE(rotate, nullptr);
+    ASSERT_NE(rotate_end, nullptr);
+    EXPECT_NE(strstr(rotate, "\n\tdmul\t"), nullptr);
+    const char* helpers[] = {"js_add", "js_subtract", "js_multiply",
+        "js_cmp_raw"};
+    for (const char* helper : helpers) {
+        char marker[64];
+        snprintf(marker, sizeof(marker), "\n\tcall\t%s", helper);
+        const char* boxed_call = strstr(rotate, marker);
+        EXPECT_FALSE(boxed_call && boxed_call < rotate_end) << helper;
+    }
+    const char* mutable_end = NULL;
+    const char* mutable_body = find_mir_function(mir, "_js_mutableSource_",
+        &mutable_end, "_body:\tfunc");
+    ASSERT_NE(mutable_body, nullptr);
+    ASSERT_NE(mutable_end, nullptr);
+    const char* generic_add = strstr(mutable_body, "\n\tcall\tjs_add");
+    EXPECT_TRUE(generic_add && generic_add < mutable_end);
+    free(mir);
+    expect_trace_off_same("numeric_binding_cycle", source, output);
+}
+
 TEST(JsOpt, NativeNumberUpdatesKeepPostfixAndGenericSemantics) {
     const char* source =
         "function nativeUpdate(value) {\n"
@@ -2980,4 +3103,3 @@ TEST(JsOpt, UriErrorCacheRegistersRootAndHits) {
     EXPECT_GE(trace.events[JS_OPT_URI_ERROR_CACHE_HIT][1], 255u);
     expect_trace_off_same("uri_error_cache", source, output);
 }
-
