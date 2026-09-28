@@ -1,0 +1,22 @@
+{
+  "name": "Doc editor renders RST headings and contents",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "comprehensive_test.rst"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_comprehensive_test_rst .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rst-heading-2"}, "contains": "RST Directives Test"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview h2#rst-heading-11"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .rst-contents"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rst-heading-11"}, "contains": "Heading Levels"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview h3#rst-heading-19"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".rst-contents a[href='#rst-heading-11']"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Primary Heading"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": ".. contents:: Table of Contents"}
+  ]
+}

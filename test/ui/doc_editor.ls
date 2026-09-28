@@ -11,6 +11,9 @@
 
 import pdf: lambda.pdf.pdf
 import pdf_html: lambda.pdf.html
+import latex: lambda.latex.latex
+import latex_css: lambda.latex.css
+import math_css: lambda.doc.math.css
 
 let PROJECT_ROOT = "."
 
@@ -45,14 +48,15 @@ fn bounded_text_offset(value, offset) {
 fn text_before_input(value, evt) {
   let selection_start = evt["selection_start"]
   let caret_pos = evt["caret_pos"]
-  if (selection_start != null) { bounded_text_offset(value, selection_start) }
-  else if (caret_pos != null) { bounded_text_offset(value, caret_pos) }
+  // Optional event offsets can be undefined; only integers are valid slice indices.
+  if (type(selection_start) == int) { bounded_text_offset(value, selection_start) }
+  else if (type(caret_pos) == int) { bounded_text_offset(value, caret_pos) }
   else { len(value) }
 }
 
 fn text_after_input(value, evt) {
   let selection_end = evt["selection_end"]
-  if (selection_end != null) { bounded_text_offset(value, selection_end) }
+  if (type(selection_end) == int) { bounded_text_offset(value, selection_end) }
   else { text_before_input(value, evt) }
 }
 
@@ -94,6 +98,7 @@ fn document_format(extension) {
   if (contains(["md", "markdown", "mdown", "mkdn"], ext)) { "markdown" }
   else if (contains(["wiki", "mediawiki"], ext)) { "wiki" }
   else if (contains(["rst", "rest"], ext)) { "rst" }
+  else if (ext == "textile") { "textile" }
   else if (contains(["htm", "html"], ext)) { "html" }
   else { null }
 }
@@ -104,14 +109,12 @@ fn is_latex_document(extension) {
 }
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
+fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
+fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
 
 fn is_renderable_document(extension) =>
-  document_format(extension) != null or is_latex_document(extension) or is_pdf_document(extension)
-
-fn preview_frame_id(extension) {
-  if (document_format(extension) == "html") { "html-preview" }
-  else { "latex-preview" }
-}
+  document_format(extension) != null or is_latex_document(extension) or
+    is_pdf_document(extension) or is_image_document(extension)
 
 fn selected_source(file) {
   if (file == null) { "" }
@@ -126,11 +129,20 @@ fn selected_preview(file) {
   else {
     let selected_path = file["file_path"]
     let format = document_format(file["extension"])
-    if (is_pdf_document(file["extension"])) {
+    if (is_image_document(file["extension"])) {
+      <img src:absolute_file_path(selected_path), alt:file["name"]>
+    }
+    else if (is_pdf_document(file["extension"])) {
       // Render in this document's runtime; a nested PDF iframe cannot start another runtime.
       let parsed = input(selected_path, 'pdf') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected PDF"> }
       else { pdf.pdf_to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PDF"> } }
+    }
+    else if (is_latex_document(file["extension"])) {
+      // The editor already owns the runtime, so render LaTeX inline instead of loading an iframe.
+      let parsed = input(selected_path, 'latex') ^ { null }
+      if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
+      else { latex.render(parsed, null) ^ { <p class:"preview-error", "Unable to render selected LaTeX"> } }
     }
     else if (format == null) { null }
     else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
@@ -159,12 +171,12 @@ view <title> { "" }
 view <script> { "" }
 view <style> { "" }
 view <body> { <div class:"document-body", *[rendered_children(~)]> }
-view <h1> { <h1 *[rendered_children(~)]> }
-view <h2> { <h2 *[rendered_children(~)]> }
-view <h3> { <h3 *[rendered_children(~)]> }
-view <h4> { <h4 *[rendered_children(~)]> }
-view <h5> { <h5 *[rendered_children(~)]> }
-view <h6> { <h6 *[rendered_children(~)]> }
+view <h1> { <h1 id:~.id, *[rendered_children(~)]> }
+view <h2> { <h2 id:~.id, *[rendered_children(~)]> }
+view <h3> { <h3 id:~.id, *[rendered_children(~)]> }
+view <h4> { <h4 id:~.id, *[rendered_children(~)]> }
+view <h5> { <h5 id:~.id, *[rendered_children(~)]> }
+view <h6> { <h6 id:~.id, *[rendered_children(~)]> }
 view <p> { <p *[rendered_children(~)]> }
 view <span> { <span *[rendered_children(~)]> }
 view <strong> { <strong *[rendered_children(~)]> }
@@ -233,10 +245,9 @@ view <tree_entry> state is_open: ~.initial_open, children: null {
             extension:child.extension,
             is_dir:child.is_dir,
             depth:(~.depth + 1),
-            ancestor_paths:[*~.ancestor_paths, entry_path],
-            initial_open:path_is_open(~.restored_open_paths,
+            initial_open:path_is_open(~.open_paths,
                                       child_path(entry_path, child.name)),
-            restored_open_paths:~.restored_open_paths,
+            open_paths:~.open_paths,
             selected_path:~.selected_path,
             filter_text:~.filter_text
           >)
@@ -253,15 +264,16 @@ on click(evt) {
       (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
     if (is_open) {
       is_open = false
+      emit("directory_toggle", {path:entry_path, is_open:false})
     } else {
       // Directory input performs a stat for every child, so retain the result
       // for this row and never repeat that work while it remains mounted.
       if (children == null) { children = directory_entries(entry_path) }
       is_open = true
+      emit("directory_toggle", {path:entry_path, is_open:true})
     }
   } else if (not ~.is_dir) {
-    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
-                          ancestor_paths:~.ancestor_paths})
+    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
   }
 }
 
@@ -272,7 +284,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, HTML, LaTeX, and PDF files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, Textile, HTML, LaTeX, PDF, and image files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -285,14 +297,16 @@ view <document_pane> {
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
       if (~.preview_mode == "view") {
-        if (is_pdf_document(~.file["extension"])) {
+        if (is_image_document(~.file["extension"])) {
+          let preview = selected_preview(~.file);
+          <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
+        } else if (is_pdf_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"pdf-preview", class:"rendered-preview pdf-preview",
             apply(preview)>
-        } else if (document_format(~.file["extension"]) == "html" or
-                   is_latex_document(~.file["extension"])) {
+        } else if (document_format(~.file["extension"]) == "html") {
           // defer optional document transforms until their file is selected.
-          <iframe id:preview_frame_id(~.file["extension"]), class:"document-preview",
+          <iframe id:"html-preview", class:"document-preview",
             src:absolute_file_path(~.file["file_path"])>
         } else {
           let preview = selected_preview(~.file);
@@ -307,7 +321,9 @@ view <document_pane> {
       }
       <nav class:"document-tabs"
       , <button class:(if (~.preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
-        <button class:(if (~.preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
+        if (not is_raster_document(~.file["extension"])) {
+          <button class:(if (~.preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
+        }
       >
     >
   } else {
@@ -336,7 +352,7 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
@@ -346,8 +362,13 @@ edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_tex
         , <span class:"project-icon", "⌘">
           <span "lambda">
         >
-        <input id:"file-filter", type:"search", class:"tree-filter", value:filter_text,
-          placeholder:"Filter file names">
+        <div class:"tree-filter-wrap"
+        , <input id:"file-filter", type:"search", class:"tree-filter", value:filter_text,
+            placeholder:"Filter file names">
+          if (filter_text != "") {
+            <button class:"tree-filter-clear", title:"Clear file name filter", "×">
+          }
+        >
       >
       <div id:"project-tree", class:"project-tree"
       , <div class:"tree-row project-root"
@@ -365,10 +386,9 @@ edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_tex
                 extension:entry.extension,
                 is_dir:entry.is_dir,
                 depth:1,
-                ancestor_paths:[],
-                initial_open:path_is_open(restored_open_paths,
+                initial_open:path_is_open(open_paths,
                                           child_path(PROJECT_ROOT, entry.name)),
-                restored_open_paths:restored_open_paths,
+                open_paths:open_paths,
                 selected_path:(if (selected_file == null) "" else selected_file["file_path"]),
                 filter_text:filter_text
               >)
@@ -382,6 +402,19 @@ edit <doc_editor_app> state root_open: true, restored_open_paths: [], filter_tex
 }
 on click(evt) {
   if (evt["target_class"] == "root-toggle") { root_open = not root_open }
+  else if (evt["target_class"] == "tree-filter-clear") { filter_text = "" }
+}
+on directory_toggle(entry) {
+  let path = entry["path"]
+  if (entry["is_open"]) {
+    if (not path_is_open(open_paths, path)) {
+      open_paths = [*open_paths, path]
+    }
+  } else {
+    // Closing a directory also forgets its descendants before any remount.
+    open_paths = [for (open_path in open_paths
+      where open_path != path and not starts_with(open_path, path ++ "/")) open_path]
+  }
 }
 on input(evt) {
   let target_class = evt.target_class
@@ -398,11 +431,13 @@ on keydown(evt) {
     if (key == "Backspace") { filter_text = erase_backwards(filter_text, evt) }
     else if (key == "Delete") { filter_text = erase_forwards(filter_text, evt) }
     else if (key == "Escape") { filter_text = "" }
+    else { return }
+    // The model owns this edit; a second native edit would desynchronize it.
+    return 'prevent-default'
   }
 }
 on file_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"], extension: entry["extension"]}
-  restored_open_paths = entry["ancestor_paths"]
   preview_mode = "view"
 }
 on preview_tab(tab) {
@@ -418,6 +453,8 @@ on preview_tab(tab) {
     <meta charset:"UTF-8">
     <title "Lambda Document Editor — Prototype">
     <style pdf_html.DEFAULT_CSS>
+    <style latex_css.STYLESHEET>
+    <style math_css.get_stylesheet(null)>
     <style "
       * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; overflow: hidden; background: #eef1f5; color: #20242c;
@@ -431,10 +468,15 @@ on preview_tab(tab) {
       .project-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 14px;
                        font-size: 14px; font-weight: 700; letter-spacing: 0.02em; color: #f4f6fa; }
       .project-icon { color: #8eb5ff; font-size: 17px; }
+      .tree-filter-wrap { position: relative; }
       .tree-filter { width: 100%; height: 34px; border: 1px solid #465166; border-radius: 6px;
-                     background: #292f3d; color: #f5f7fb; padding: 0 10px; outline: none; }
+                     background: #292f3d; color: #f5f7fb; padding: 0 36px 0 10px; outline: none; }
       .tree-filter:focus { border-color: #79a6ff; box-shadow: 0 0 0 2px rgba(121,166,255,.2); }
       .tree-filter::placeholder { color: #9aa5b7; }
+      .tree-filter-clear { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px;
+                           padding: 0; border: 0; border-radius: 4px; background: transparent;
+                           color: #aeb9ca; cursor: pointer; font-size: 19px; line-height: 26px; }
+      .tree-filter-clear:hover { background: #3b4557; color: #fff; }
       .project-tree { min-height: 0; flex: 1; overflow: auto; padding: 8px 6px 16px; }
       /* Keep long row labels scrollable without recursively measuring every
          expanded descendant for each ancestor's max-content width. */
@@ -453,6 +495,8 @@ on preview_tab(tab) {
       .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
       .file-icon { color: #9bbdfc; }
+      /* Hit-tested text spans need their own cursor value in the file tree. */
+      .tree-label, .tree-icon, .tree-spacer { cursor: pointer; }
       .tree-label { white-space: nowrap; font-size: 13px; }
       .file-panel-footer { padding: 10px 14px; border-top: 1px solid #343c4d; color: #99a5b7;
                            font-size: 11px; }
@@ -475,6 +519,8 @@ on preview_tab(tab) {
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
                         color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .image-preview { display: flex; align-items: center; justify-content: center; }
+      .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
       .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
       .document-tabs { flex: 0 0 auto; display: flex; gap: 2px; justify-content: flex-end;
                        padding: 7px 18px; border-top: 1px solid #e2e6ec; background: #fbfcfe; }
@@ -492,6 +538,10 @@ on preview_tab(tab) {
       .document-body ul, .document-body ol, .latex-output ul, .latex-output ol { padding-left: 1.5em; }
       .document-body blockquote, .latex-output blockquote { margin: 1em 0; padding: .15em 1em;
                      border-left: 4px solid #a6badc; color: #4c5c70; background: #f6f9fd; }
+      .rst-contents { margin: 1.4em 0; padding: 1em 1.4em; background: #f7f9fc;
+                      border-left: 3px solid #adc2de; }
+      .rst-contents-title { margin: 0 0 .5em; font-weight: 650; }
+      .rst-contents ul { margin: 0; padding-left: 1.5em; }
       .document-body code, .latex-output code { padding: 2px 5px; border-radius: 4px; background: #eef1f5;
                      font: .9em 'SF Mono', Menlo, monospace; }
       .document-body pre, .latex-output pre { overflow: auto; padding: 13px 15px; border-radius: 6px;

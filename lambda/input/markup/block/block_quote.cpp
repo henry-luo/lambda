@@ -385,7 +385,8 @@ static Item parse_rst_blockquote(MarkupParser* parser, const char* line) {
         // Restore parser state
         parser->lines = saved_lines;
         parser->line_count = saved_line_count;
-        parser->current_line = saved_current_line + num_lines;
+        // The outer cursor already advanced while collecting the quote lines.
+        parser->current_line = saved_current_line;
 
         // Free content lines
         for (size_t i = 0; i < num_lines; i++) {

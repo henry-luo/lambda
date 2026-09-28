@@ -20,6 +20,7 @@ namespace markup {
  * Handles:
  * - `code` - single backtick
  * - ``code`` - double backtick (can contain single backticks)
+ * - @code@ - Textile inline code
  *
  * @param parser The markup parser
  * @param text Pointer to current position (updated on success)
@@ -28,32 +29,33 @@ namespace markup {
 Item parse_code_span(MarkupParser* parser, const char** text) {
     const char* start = *text;
 
-    // Must start with backtick
-    if (*start != '`') {
+    // Textile uses @ for code; the other formats use backticks.
+    char delimiter = parser->config.format == Format::TEXTILE ? '@' : '`';
+    if (*start != delimiter) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Count opening backticks
-    int backticks = 0;
-    while (*start == '`') {
-        backticks++;
+    // Count the opening delimiter run.
+    int delimiter_count = 0;
+    while (*start == delimiter) {
+        delimiter_count++;
         start++;
     }
 
-    // Find matching closing backticks
+    // Find a matching closing delimiter run.
     const char* pos = start;
     const char* end = nullptr;
 
     while (*pos) {
-        if (*pos == '`') {
+        if (*pos == delimiter) {
             const char* close_start = pos;
             int close_count = 0;
-            while (*pos == '`') {
+            while (*pos == delimiter) {
                 close_count++;
                 pos++;
             }
 
-            if (close_count == backticks) {
+            if (close_count == delimiter_count) {
                 end = close_start;
                 break;
             }
@@ -64,15 +66,14 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
     }
 
     if (!end) {
-        // No matching closing backticks - return UNDEFINED without modifying text
-        // Caller will treat the backtick as literal text
+        // No matching closing run; let the caller keep the delimiter as text.
         return Item{.item = ITEM_UNDEFINED};
     }
 
     // Create code element
     Element* code = create_element(parser, "code");
     if (!code) {
-        *text = end + backticks;
+        *text = end + delimiter_count;
         return Item{.item = ITEM_ERROR};
     }
 
@@ -145,7 +146,7 @@ Item parse_code_span(MarkupParser* parser, const char** text) {
         mem_free(content);
     }
 
-    *text = end + backticks;
+    *text = end + delimiter_count;
     return Item{.item = (uint64_t)code};
 }
 

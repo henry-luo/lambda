@@ -20,6 +20,44 @@ namespace markup {
 // Forward declarations from inline parser (will be extracted in Phase 3)
 extern Item parse_inline_spans(MarkupParser* parser, const char* text);
 
+void rst_heading_id(int line_index, char* out, size_t out_size) {
+    snprintf(out, out_size, "rst-heading-%d", line_index + 1);
+}
+
+bool is_rst_overline_header(MarkupParser* parser, int overline_index) {
+    if (!parser || parser->config.format != Format::RST || overline_index < 0 ||
+        overline_index + 2 >= parser->line_count) return false;
+    const char* overline = parser->lines[overline_index];
+    const char* title = parser->lines[overline_index + 1];
+    const char* underline = parser->lines[overline_index + 2];
+    HeaderInfo over = parser->adapter()->detectHeader(title, overline);
+    HeaderInfo under = parser->adapter()->detectHeader(title, underline);
+    return over.valid && under.valid && overline[0] == underline[0];
+}
+
+int rst_heading_level_at(MarkupParser* parser, int line_index) {
+    char markers[32] = {};
+    bool overlines[32] = {};
+    int style_count = 0;
+    for (int i = 0; i <= line_index && i + 1 < parser->line_count; i++) {
+        HeaderInfo info = parser->adapter()->detectHeader(
+            parser->lines[i], parser->lines[i + 1]);
+        if (!info.valid) continue;
+        char marker = parser->lines[i + 1][0];
+        bool has_overline = i > 0 && is_rst_overline_header(parser, i - 1);
+        int style = 0;
+        while (style < style_count &&
+               (markers[style] != marker || overlines[style] != has_overline)) style++;
+        if (style == style_count && style_count < 32) {
+            markers[style_count] = marker;
+            overlines[style_count] = has_overline;
+            style_count++;
+        }
+        if (i == line_index) return style + 1;
+    }
+    return 1;
+}
+
 /**
  * Get header level from a line using the format adapter
  *
@@ -40,6 +78,10 @@ int get_header_level(MarkupParser* parser, const char* line) {
 
     // Use adapter to detect header
     HeaderInfo info = adapter->detectHeader(line, next_line);
+    if (info.valid && parser->config.format == Format::RST) {
+        info.level = rst_heading_level_at(parser, parser->current_line);
+        if (info.level > 6) info.level = 6;
+    }
 
     return info.valid ? info.level : 0;
 }
@@ -69,6 +111,10 @@ Item parse_header(MarkupParser* parser, const char* line) {
 
     // Detect header using adapter
     HeaderInfo info = adapter->detectHeader(line, next_line);
+    if (info.valid && parser->config.format == Format::RST) {
+        info.level = rst_heading_level_at(parser, parser->current_line);
+        if (info.level > 6) info.level = 6;
+    }
 
     if (!info.valid || info.level == 0) {
         // Not a header - fallback to paragraph
@@ -89,6 +135,11 @@ Item parse_header(MarkupParser* parser, const char* line) {
     char level_str[8];
     snprintf(level_str, sizeof(level_str), "%d", info.level);
     add_attribute_to_element(parser, header, "level", level_str);
+    if (parser->config.format == Format::RST) {
+        char heading_id[48];
+        rst_heading_id(parser->current_line, heading_id, sizeof(heading_id));
+        add_attribute_to_element(parser, header, "id", heading_id);
+    }
 
     // Extract header text
     const char* text_start = info.text_start;

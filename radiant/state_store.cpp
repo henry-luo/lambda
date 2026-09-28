@@ -2837,6 +2837,7 @@ static uint32_t view_state_sync_interaction_flag_path(DocState* state, DomNode* 
 static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode* root) {
     if (!state || !root) return 0;
     uint32_t changed = 0;
+    bool clear_focus_flags = false;
 
     if (state->focus && state->focus->current &&
         !view_tree_contains_view(root, state->focus->current)) {
@@ -2852,6 +2853,16 @@ static uint32_t doc_state_prune_stale_transient_owners(DocState* state, DomNode*
             if (state->last_focused_text_control == elem) state->last_focused_text_control = NULL;
         }
         changed++;
+        clear_focus_flags = true;
+    }
+    if (state->focus && state->focus->previous &&
+        !view_tree_contains_view(root, state->focus->previous)) {
+        // A reactive replacement can retire the last focused button after blur.
+        state->focus->previous = NULL;
+        changed++;
+        if (!state->focus->current) clear_focus_flags = true;
+    }
+    if (clear_focus_flags) {
         changed += view_state_clear_interaction_flag(state, "focus");
         changed += state_map_delete_entries_for_name(state, STATE_FOCUS_WITHIN);
         changed += state_map_delete_entries_for_name(state, STATE_FOCUS_VISIBLE);

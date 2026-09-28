@@ -40,6 +40,9 @@ class FormatAdapter;
  * Handles ATX-style (#), Setext-style (underline), wiki (==), org (*), etc.
  */
 Item parse_header(MarkupParser* parser, const char* line);
+void rst_heading_id(int line_index, char* out, size_t out_size);
+bool is_rst_overline_header(MarkupParser* parser, int overline_index);
+int rst_heading_level_at(MarkupParser* parser, int line_index);
 
 /**
  * Parse a list structure (ul/ol with nested li elements)
@@ -100,6 +103,7 @@ Item parse_inline_spans(MarkupParser* parser, const char* text);
  * Detect the type of block that starts at the given line
  */
 BlockType detect_block_type(MarkupParser* parser, const char* line);
+bool is_rst_definition_term(MarkupParser* parser, int line_index);
 
 /**
  * Check if a line is empty or contains only whitespace

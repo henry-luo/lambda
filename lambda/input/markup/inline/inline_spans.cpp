@@ -387,8 +387,9 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             continue;
         }
 
-        // Check for code span (`)
-        if (*pos == '`') {
+        // Textile code spans use @; the other formats use backticks.
+        if ((format == Format::TEXTILE && *pos == '@') ||
+            (format != Format::TEXTILE && *pos == '`')) {
             parse_code_span_item(parser, span, sb, &pos);
             continue;
         }

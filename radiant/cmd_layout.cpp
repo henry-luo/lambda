@@ -4397,10 +4397,8 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             continue;
         }
 
-        // Reactive templates rebuild result nodes, while form/interaction
-        // state belongs to the retained view identity (S9.1.4). Preserve that
-        // identity for structurally corresponding descendants before retiring
-        // the old subtree.
+        // Reactive templates rebuild result nodes; preserve view state for
+        // structurally corresponding descendants before retiring the old tree.
         view_state_preserve_subtree_identity(state, static_cast<DomNode*>(old_dom),
                                              static_cast<DomNode*>(new_dom));
 
@@ -4424,10 +4422,15 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
             } else {
                 parent_dom->last_child = static_cast<DomNode*>(new_dom);
             }
-        } else if (!dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom),
-                                                static_cast<DomNode*>(new_dom))) {
-            log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
-            continue;
+        } else {
+            // Rebase live Range endpoints before the old subtree is detached;
+            // the splice helper does not publish a DOM removal mutation.
+            if (state) dom_mutation_pre_remove(state, static_cast<DomNode*>(old_dom));
+            if (!dom_node_replace_in_parent(parent_dom, static_cast<DomNode*>(old_dom),
+                                            static_cast<DomNode*>(new_dom))) {
+                log_error("rebuild_lambda_doc_incremental: failed to replace entry %d", i);
+                continue;
+            }
         }
         if (i < 16) new_doms[i] = new_dom;
 
