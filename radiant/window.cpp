@@ -329,10 +329,15 @@ static DomDocument* load_doc_by_format(const char* filename, Url* base_url, int 
                                  top_level_cookie_jar);
         }
 
-        case DOC_FORMAT_TIKZ:
+        case DOC_FORMAT_TIKZ: {
             log_debug("Loading as TikZ/PGF document");
-            return load_html_doc(base_url, (char*)filename, width, height, js_host_config,
-                                 top_level_cookie_jar);
+            Url* tikz_url = url_parse_with_base(filename, base_url);
+            if (!tikz_url) {
+                log_error("Failed to parse TikZ document URL: %s", filename);
+                return nullptr;
+            }
+            return load_tikz_doc(tikz_url, width, height, pool);
+        }
 
         case DOC_FORMAT_XML:
             log_debug("Loading as XML document with CSS stylesheet");

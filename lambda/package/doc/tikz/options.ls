@@ -35,16 +35,22 @@ pub fn numeric_value(source) float^ {
 }
 
 // CSS pixel conversion is explicit because TeX pt and CSS px differ.
-pub fn dimension_px(source) float^ {
+pub fn dimension_px(source, text_width_px = null) float^ {
     let s = trim(source)
-    let units = if (ends_with(s, "cm")) "cm"
+    let units = if (ends_with(s, "\\textwidth")) "textwidth"
+        else if (ends_with(s, "cm")) "cm"
         else if (ends_with(s, "mm")) "mm"
         else if (ends_with(s, "pt")) "pt"
         else if (ends_with(s, "bp")) "bp"
         else if (ends_with(s, "in")) "in"
         else raise error("unsupported TikZ dimension: " ++ source)
-    let magnitude = numeric_value(slice(s, 0, len(s) - len(units)))^
+    let unit_length = if (units == "textwidth") len("\\textwidth") else len(units)
+    let magnitude = numeric_value(slice(s, 0, len(s) - unit_length))^
     if (magnitude <= 0.0) raise error("TikZ dimension must be positive")
+    else if (units == "textwidth") {
+        if (text_width_px == null) raise error("\\textwidth needs a document viewport")
+        else magnitude * float(text_width_px)
+    }
     else if (units == "cm") magnitude * 96.0 / 2.54
     else if (units == "mm") magnitude * 96.0 / 25.4
     else if (units == "pt") magnitude * 96.0 / 72.27
@@ -53,10 +59,12 @@ pub fn dimension_px(source) float^ {
 }
 
 pub fn color(node, fallback) string^ {
-    let named = [for (candidate in ["black", "blue", "red", "green", "orange", "purple", "gray"]
+    let named = [for (candidate in ["black", "blue", "red", "green", "darkgreen",
+            "orange", "purple", "gray"]
         where has(node, candidate)) candidate]
     let color_name = if (len(named) > 0) named[0] else value(node, "color", fallback)
-    if (allowed(color_name, ["black", "blue", "red", "green", "orange", "purple", "gray"]))
+    if (allowed(color_name, ["black", "blue", "red", "green", "darkgreen",
+            "orange", "purple", "gray"]))
         color_name
     else raise error("unsupported TikZ color: " ++ color_name)
 }
