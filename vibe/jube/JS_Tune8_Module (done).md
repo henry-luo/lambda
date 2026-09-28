@@ -1155,7 +1155,7 @@ layering, but it must not perform unrelated decomposition or duplicate a
 | `vibe/Lambda_Design_JS_Cache.md` | Resolve module Phase 6 ownership/key integration; preserve de-pointering gate. |
 | `vibe/Lambda_Design_Jube_Node_Hosting.md` | Supersede JN6/JN11 statements that make `js_modules[]` authoritative; clarify provider/session versus instance ownership. |
 | `vibe/Lambda_Design_MIR_Cache.md` and L1 implementation record | Record definition-index reuse without changing retained Lambda artifact semantics. |
-| `doc/Lambda_Jube_Runtime.md` | Describe one loader/registry across source languages and Jube namespaces. |
+| `doc/dev/Lambda_Jube_Runtime.md` | Describe one loader/registry across source languages and Jube namespaces. |
 
 Every updated design/implementation document cites the governing formal IDs
 listed at the top before using JR9/JM ledger ids, per project rule 17.

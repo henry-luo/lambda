@@ -18,7 +18,7 @@ This document covers Lambda's procedural programming features — mutable state,
 5. [While Loop](#while-loop)
 6. [Break and Continue](#break-and-continue)
 7. [Early Return](#early-return)
-8. [File Output Operators](#file-output-operators)
+8. [File Output Operators](#file-output)
 9. [I/O Module](#io-module)
 10. [Procedural Functions (`pn`)](#procedural-functions-pn)
 11. [Concurrency](#concurrency)
@@ -121,7 +121,7 @@ pn main() {
 This means every mutable root in a Lambda program is owned by a single activation:
 
 - **Script state** lives in `main`'s `var`s, and reaches other `pn`s only as arguments.
-- **Worker state** lives in the `var`s of the `pn` that starts the worker. A spawned task cannot capture a mutable `var` (see [Concurrency](#concurrency)) — copy it to a `let` or use message passing.
+- **Worker state** lives in the `var`s of the `pn` that starts the worker. A spawned task cannot capture a mutable `var` (see [The Capture Rule](Lambda_Concurrency.md#the-capture-rule)) — copy it to a `let` or use message passing.
 - **Template state** lives in a `view`'s `state` entries, isolated per template instance.
 - **Object state** lives in instance fields, reachable only through a `var` receiver.
 - **`fn` functions** hold no mutable state at all.
@@ -528,7 +528,7 @@ Available only in `pn` functions:
 
 | Function | Description |
 |----------|-------------|
-| `io.copy(src, dst)` | Copy file/directory (supports URL sources) |
+| `io.copy(src, dst)` | Copy a file (supports URL sources; directory copy not yet implemented) |
 | `io.move(src, dst)` | Move/rename file or directory |
 | `io.delete(path)` | Delete file or directory |
 | `io.mkdir(path)` | Create directory (recursive) |
@@ -604,7 +604,7 @@ lambda run script.ls           # Execute script.ls via main() (MIR Direct JIT, d
 
 ```lambda
 pn greet(name: string) {
-    print("Hello, " ++ name ++ "!")
+    print("Hello, " ++ name ++ "!\n")   // print adds no newline of its own
 }
 
 pn main() {
@@ -622,11 +622,16 @@ pn main() {
 ```
 
 ```bash
-$ lambda run greet.ls
+lambda run greet.ls
+```
+
+```text
 Hello, Alice!
 Hello, Bob!
-Sum 1..10 = 55
+"Sum 1..10 = 55"
 ```
+
+`print` writes its arguments as text, joined by single spaces, with no newline added. The value `main()` returns is printed afterwards as a Lambda value, which is why the string keeps its quotes.
 
 ### Functional vs Procedural Script Execution
 
@@ -639,7 +644,7 @@ A functional script evaluates top-level expressions and prints results. A proced
 
 ### Calling Between `fn` and `pn`
 
-`pn` functions can call `fn` functions and vice versa. A common pattern is to define pure logic in `fn` and orchestrate I/O in `pn`:
+A `pn` can call an `fn`, but an `fn` cannot call a `pn` — that is error E224 (S12.1.1v2). A common pattern is to define pure logic in `fn` and orchestrate I/O in `pn`:
 
 ```lambda
 fn transform(data) => data |> ~ * 2
@@ -710,11 +715,7 @@ For full object type documentation (inheritance, defaults, constraints, composit
 
 ## Concurrency
 
-Lambda procedures use cooperative, colorless concurrency. There are no
-`async`/`await` keywords: the compiler finds procedures that can suspend and
-selectively lowers them to resumable state machines. A direct call through five
-ordinary `pn` frames can therefore suspend without changing any call-site
-syntax.
+Procedures can run concurrently as **tasks**: `start` launches a child procedure and returns a handle, `wait` collects its result, and `send`/`receive` exchange messages through bounded mailboxes. Concurrency is colorless — there are no `async`/`await` keywords — and structured: every task belongs to the block that started it. It is available only inside a `pn`.
 
 ```lambda
 pn child(value) {
@@ -724,49 +725,11 @@ pn child(value) {
 
 pn main() {
     let handle = start(child, [41])
-    print(wait(handle)^)  // 42
+    wait(handle)^          // 42
 }
 ```
 
-Under S13.1.1v2, `start(target, args = [], options = {})` is a builtin `pn`
-using ordinary call syntax. `target` must resolve to a `pn`; `args` is an array.
-The optional literal map accepts `mode: 'task' | 'thread' | 'process'` and
-defaults to the currently implemented `'task'` mode. It returns an opaque
-identity handle. The child is owned by the current lexical block. Normal exit joins non-escaped children;
-error exit requests cancellation and joins them with cancellation masked during
-cleanup. Returning a handle lets that task outlive its birth block. Copying or
-sending the handle grants another task a capability but does not transfer
-ownership.
-
-A started procedure may capture immutable values, but it may not capture an
-outer `var` by reference. Copy the value to `let` before `start`, or communicate
-through `send`/`receive`:
-
-```lambda
-pn worker() {
-    let value = receive()^
-    return value * 2
-}
-
-pn main() {
-    var mutable = 21
-    let snapshot = mutable
-    let handle = start(worker)
-    send(handle, snapshot)^
-    print(wait(handle)^)
-}
-```
-
-Mailboxes are bounded FIFO queues with a default capacity of 1024. `select`
-returns the first completed handle. `wait(handle, timeout: ms)` times out only
-the waiter and never cancels the target; use `cancel(handle)` explicitly.
-Cancellation is cooperative and observed at suspension points such as `sleep`,
-`wait`, `receive`, `select`, and `io.read`.
-
-JavaScript interop uses one shared libuv loop. Imported Promises are directly
-`wait`-able, and an exported Lambda `pn` is uniformly exposed to JavaScript as a
-Promise-returning function. Promise reactions run as JS microtasks; Lambda task
-resumes run afterward at macrotask position.
+The full model — messages, `select`, timeouts, cancellation, the capture rule and JavaScript interoperability — is described in [Lambda_Concurrency.md](Lambda_Concurrency.md).
 
 ---
 

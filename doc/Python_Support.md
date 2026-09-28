@@ -8,7 +8,7 @@ Lambda runs Python scripts through the hosted-language module `lang-python`:
 ./lambda.exe run --lang python script.py      # the explicit form
 ```
 
-> **Status (alpha).** Python is an external Jube module, not part of the host binary: a dev build gets it with `make build-lang-python` (see [Lambda_Jube_Runtime.md](Lambda_Jube_Runtime.md)), and the full release bundle ships it beside the executable. Without the module every form above prints a hosted-language-unavailable diagnostic. The module passes 39 of its 43 test scripts; module import and package resolution are currently unstable (their tests crash), so treat multi-file Python programs as experimental until that regression is fixed.
+> **Status (alpha).** Python is an external Jube module, not part of the host binary: a dev build gets it with `make build-lang-python` (see [Lambda_Jube_Runtime.md](dev/Lambda_Jube_Runtime.md)), and the full release bundle ships it beside the executable. Without the module every form above prints a hosted-language-unavailable diagnostic. The module passes 39 of its 43 test scripts; module import and package resolution are currently unstable (their tests crash), so treat multi-file Python programs as experimental until that regression is fixed.
 
 Python source is parsed with tree-sitter-python, built into the shared unified AST, and run by the Lambda runtime — interpreted, or compiled to native code through the MIR JIT. All Python values are Lambda `Item` values, so there is no conversion boundary between the two runtimes. Python is a **dialect hosted on Lambda's substrate**: what the tables below do not list is not supported.
 

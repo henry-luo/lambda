@@ -1,6 +1,6 @@
 # Lambda Documentation Convention
 
-**Version:** 1.1.1 (2026-08-27)
+**Version:** 1.1.2 (2026-09-28)
 
 **Status:** normative for how Lambda documentation is organized, written, and
 kept honest. Codifies the conventions previously scattered across CLAUDE.md
@@ -18,7 +18,7 @@ rule 17, the formal specs' own headers, and working practice.
 | **Issue ledger** | `vibe/Lambda_Issue_Ledger.md` | The one central issue ledger for Lambda | Working record, not normative |
 | **Reference grammar** | `lambda/tree-sitter-lambda/grammar.js` | Pseudo design doc: the whole surface language at one glance | **Third in the authority chain** — below vibe (it misses some corner cases) |
 | **Detailed design (final)** | `doc/dev/**` | The distilled, detailed design of each subsystem | Informative — never authority |
-| **User-facing docs** | `doc/*.md` (everything else) | Formal user-facing language and tool documentation | Descriptive of the rulings |
+| **User-facing docs** | `doc/*.md` (everything else), `doc/tutorial/` | Formal user-facing language and tool documentation, and the tutorial | Descriptive of the rulings |
 
 ## 2. Authority and escalation
 
@@ -172,7 +172,10 @@ The remaining `doc/` files are the formal user-facing documentation: the
 language reference set (`Lambda_Reference.md`, `Lambda_Data.md`,
 `Lambda_Type.md`, `Lambda_Expr_Stam.md`, `Lambda_Func.md`, …), tool guides
 (`Lambda_CLI.md`, `Lambda_Validator_Guide.md`), and per-area support docs
-(`Python_Support.md`, `Math_Support.md`, …).
+(`Python_Support.md`, `Math_Support.md`, …). The tutorial lives in
+`doc/tutorial/`; besides the code-fence gate below, `make check-tutorial`
+replays its commands and compares every output it shows. Images and other
+assets live in `doc/img/`.
 
 - They **describe the rulings**; on any doubt the formal specs win.
 - **Every `lambda` code block must parse** against the current grammar. A

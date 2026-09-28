@@ -325,11 +325,13 @@ calculate(2.5, 3.0, "add")
 ### Chained Calls
 
 ```lambda
-// Direct chaining
-process(filter(sort(data)))
+let data = [3, -1, 4, 1, -5];
 
-// Method-style chaining (preferred)
-data.sort().filter((x) => x > 0).process()
+// Direct chaining
+reverse(sort(data));
+
+// Method-style chaining: the same calls, read left to right
+data.sort().reverse()          // [4, 3, 1, -1, -5]
 ```
 
 ### Partial Application
@@ -382,19 +384,16 @@ The two spellings are equivalent:
 | **Math** | `math.sqrt(x)` | `x \|> math.sqrt` |
 #### Method Chaining
 
-Method syntax enables fluent operations:
+Method syntax enables fluent operations. There are no `filter` and `map` methods: filtering and mapping are the pipe stages `|:` and `|>`, which combine with method calls in one chain:
 
 ```lambda
-// Chained method calls
-let chained = data
-    .filter((x) => x > 0)
-    .map((x) => x * 2)
-    .sort()
-    .take(10)
-    .sum()
+let data = [3, -1, 4, 1, -5, 9]
+
+// Filter and map with pipes, then continue with methods
+let chained = (data |: ~ > 0 |> ~ * 2).sort().take(3).sum()    // 2 + 6 + 8 = 16
 
 // Equivalent nested calls (harder to read)
-let nested = sum(take(sort(map(filter(data, (x) => x > 0), (x) => x * 2)), 10))
+let nested = sum(take(sort(data |: ~ > 0 |> ~ * 2), 3))         // 16
 ```
 
 ### Mutating Object Methods

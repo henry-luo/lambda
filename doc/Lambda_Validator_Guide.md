@@ -98,7 +98,7 @@ type Result = {success: true, data: any} | {success: false, error: string}
 
 ### Constrained Types and String Patterns
 
-A `that` clause attaches a runtime predicate, with `~` the value being checked; a string pattern constrains text (see [Lambda_Type.md](Lambda_Type.md#constrained-types-that) and [§ String Patterns](Lambda_Type.md#string-patterns)):
+A `that` clause attaches a runtime predicate, with `~` the value being checked; a string pattern constrains text (see [Lambda_Type.md](Lambda_Type.md#constrained-types-that) and [Lambda_String_Pattern.md](Lambda_String_Pattern.md)):
 
 ```lambda
 type Age = int that (~ >= 0 and ~ <= 150)
@@ -109,6 +109,8 @@ type User = {name: string, age: Age, email: Email}
 200 is Age           // false
 "a@b.com" is Email   // true
 ```
+
+> **Not yet implemented.** The `is` checks above work, but `lambda validate` does not yet apply the same rules to a schema: a constrained type such as `Age` checks only its base type (S11.4.6), and a string pattern used through a **name** (`email: Email`) rejects every string. Until this is fixed, write a pattern inline in the field — `email: \(w+ "@" w+ "." a{2,6})` — which the validator does check.
 
 ### Element Schemas
 
@@ -159,10 +161,10 @@ lambda validate [-s <schema>] [-f <format>] [options] <file>
 |--------|---------|---------|
 | `-s <schema.ls>` | Schema file. Required for data formats; formats with a built-in schema may omit it | built-in by format |
 | `-f <format>` | Input format when the extension does not identify it | auto-detect |
-| `--strict` | Every optional field must be present (`null` is allowed) | off |
+| `--strict` | Accepted, but has no effect yet | off |
 | `--max-errors N` | Stop after N errors | 100 |
 | `--max-depth N` | Maximum nesting depth to validate | 100 |
-| `--allow-unknown` | Accept fields the schema does not declare | off (unknown fields are errors) |
+| `--allow-unknown` | Accepted, but has no effect: map types are open, so undeclared fields always pass (S11.4.6) | off |
 
 One file is validated per invocation. The exit status is 0 when the document is valid and non-zero otherwise, and the report names each problem with a path into the document:
 
@@ -215,8 +217,8 @@ lambda validate export.txt -f csv -s rows_schema.ls --allow-unknown
 ## Validation Semantics
 
 - **Type mismatch**: a value that does not satisfy its declared type is reported with the expected and actual types and the path.
-- **Missing fields**: a required field (no `?`) must be present. An optional field may be absent or `null`; under `--strict` it must be present.
-- **Unknown fields**: fields the map type does not declare are errors unless `--allow-unknown` is given. This is stricter than the language's `is` operator, which treats map types as open (S11.4.6).
+- **Missing fields**: a required field (no `?`) must be present. An optional field may be absent or `null`.
+- **Unknown fields**: fields the map type does not declare pass, as they do for `is`: map types are open (S11.4.6). A closed map type is an open design question (SO9).
 - **Occurrence**: `[T+]` requires at least one item, `[T*]` accepts none, `T[]` requires every item to satisfy `T`.
 - **Depth and error limits**: validation stops at `--max-depth` levels and after `--max-errors` reports.
 
@@ -226,7 +228,7 @@ lambda validate export.txt -f csv -s rows_schema.ls --allow-unknown
 
 ```lambda
 // common types
-type EmailAddress = \(w+ "@" w+ "." a{2,6})
+type EmailAddress = string     // a named pattern here is rejected by the validator today (see above)
 type Timestamp = string
 
 // domain types
@@ -256,7 +258,7 @@ type Person = {
 }
 ```
 
-`{name: "Alice", age: 30, email: null}` and `{name: "Bob", age: 25}` are both valid; under `--strict` only the first is.
+`{name: "Alice", age: 30, email: null}` and `{name: "Bob", age: 25}` are both valid.
 
 ### Choose the Right Array Form
 
@@ -276,7 +278,8 @@ Keep one schema file per document kind with its root type last (or named `Docume
 |-------|---------------|
 | "Unknown type" | A type is used before it is defined, or is misspelled. Define it in the same schema file |
 | Everything validates | The root type may not be the one you expect: name it `Document` or move it last |
-| Extra fields rejected | Unknown fields are errors by default; pass `--allow-unknown` or declare the fields |
+| Extra fields not reported | Map types are open, so undeclared fields always pass; there is no closed-map option yet |
+| A valid string fails a pattern | A pattern used through a name fails in the validator; write it inline in the field |
 | "Maximum depth exceeded" | Raise `--max-depth`, or check for a recursive type that admits cyclic data |
 | Too many errors | `--max-errors 10` stops early so the first problems are readable |
 

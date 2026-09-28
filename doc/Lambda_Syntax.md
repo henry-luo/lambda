@@ -308,14 +308,17 @@ Bare URI imports register a namespace prefix without loading any code. They use 
 
 ### Namespace Prefixes as Reserved Names
 
-Once declared, namespace prefixes are **reserved** — no variable, function, type, or field name may use the same name:
+Once declared, namespace prefixes are **reserved** — no variable, function, type, or field name may use the same name ([Lambda_Namespace2.md](../vibe/Lambda_Namespace2.md), *Name collision*):
 
-```lambda error=E209
+```lambda no-run
+// no-run: the reservation is not enforced yet (see the note below)
 import svg: 'http://www.w3.org/2000/svg'
 
 let svg = 123       // ERROR: 'svg' conflicts with namespace prefix
-fn svg() => ...     // ERROR: 'svg' conflicts with namespace prefix
+fn svg() => 1       // ERROR: 'svg' conflicts with namespace prefix
 ```
+
+> **Not yet implemented.** The compiler does not reserve namespace prefixes yet: `let svg = 123` compiles, and `svg.rect` still reads as the namespaced symbol afterwards. Avoid reusing a prefix as a name.
 
 ### Namespaced Element Tags
 
@@ -432,7 +435,7 @@ Namespaces are **file-local** — they cannot be imported or exported. Each file
 // no-run: shows two files in one block
 // file_a.ls
 import svg: 'http://www.w3.org/2000/svg'
-pub elem = <svg.rect svg.width: 100>
+pub let elem = <svg.rect svg.width: 100>
 
 // file_b.ls
 import a: .file_a
@@ -445,7 +448,7 @@ import s: 'http://www.w3.org/2000/svg'  // can use different prefix
 
 ### Comparison Semantics
 
-Namespaced symbols are compared by both local name AND namespace URL (semantic comparison):
+Namespaced symbols are compared by both local name AND namespace URL (semantic comparison), and element equality includes the namespace (S5.4.3):
 
 ```lambda
 import svg: 'http://www.w3.org/2000/svg'
@@ -454,6 +457,8 @@ import s: 'http://www.w3.org/2000/svg'  // same URL, different prefix
 svg.rect == s.rect    // true (same namespace URL)
 svg.rect == 'svg.rect'  // false (one has namespace, one doesn't)
 ```
+
+> **Not yet implemented.** Comparison by URL does not work yet: `svg.rect == s.rect` is `false` even though both prefixes name the same URL, and element equality ignores the namespace. Compare qualified names under one prefix per file until this is fixed.
 
 ### Example: SVG Document
 

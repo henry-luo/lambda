@@ -1,0 +1,7 @@
+[
+  {"title": "The Pragmatic Programmer", "author": "Andrew Hunt", "year": 1999, "price": 42.5, "tags": ["craft", "career"]},
+  {"title": "Structure and Interpretation of Computer Programs", "author": "Harold Abelson", "year": 1985, "price": 55.0, "tags": ["lisp", "classic"]},
+  {"title": "Clean Code", "author": "Robert Martin", "year": 2008, "price": 37.9, "tags": ["craft"]},
+  {"title": "Designing Data-Intensive Applications", "author": "Martin Kleppmann", "year": 2017, "price": 49.0, "tags": ["data", "systems"]},
+  {"title": "The Art of Computer Programming", "author": "Donald Knuth", "year": 1968, "price": 190.0, "tags": ["classic", "algorithms"]}
+]

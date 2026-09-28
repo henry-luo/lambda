@@ -1,7 +1,7 @@
 # Lambda Alpha Documentation Pass — Record and Structure Review
 
-**Status:** pass 1 done 2026-09-28 (user docs updated to the built features); structure proposals await the user.
-**Scope:** `doc/*.md` user-facing documentation and `README.md`. The formal specs, `vibe/` and `doc/dev` were read, not edited.
+**Status:** pass 1 done 2026-09-28 (user docs updated to the built features). Pass 2 (same day, user-approved): assets and developer docs moved, four topics split into their own docs, packages doc and HTML/CSS/SVG matrix added, tutorial series added — see §5.
+**Scope:** `doc/*.md` user-facing documentation, `doc/tutorial/` and `README.md`. The formal specs were read, not edited; pass 2 touched `vibe/` and `doc/dev/` only to move files and repoint links.
 
 ---
 
@@ -72,6 +72,49 @@ Verified against the debug build of 2026-09-28. Each needs a ledger entry or a d
 23. Python module: `test_py_import`, `test_py_packages`, `test_py_pkg_simple` segfault; `test_py_advanced_oop` wrong output.
 24. Bash and Ruby front ends are compiled out (`LAMBDA_BASH`/`LAMBDA_RUBY` undefined everywhere); 0/37 and 0/22 tests run.
 
+Found in pass 2:
+
+25. A value-producing handler over a `pn` call (`let r = wait(h) ^ { 0 }`, `let t = io.read(p) ^ { … }`, any `let x = pn_call() ^ { … }`) is ruled a compile error (S7.6.7v3: `pn` handlers are statement-only) but compiles, and the binding receives `null` on success and on failure alike. This, not `io.read`, explained the pass-1 claim that `io.read` returns `null`: `io.read(p)^` returns the file text and error 401 for a missing file.
+26. Forcing a reference into a `temp.` document fails: `&doc.a.b` gives `temp.page.a.b`, and `(&doc.a.b)#` raises error 400 (*Error opening file: temp://page/a/b*). The same round trip on a file-backed document works.
+27. Update statements are accepted inside an `fn` (`fn bump(p) { put p#count = 5 }` compiles and writes when called), although PTH55 makes them procedure-family like `output`.
+28. A procedure arrow passed to `start` escapes the capture rule: `start(pn () => { return n + 1 })` compiles with an outer `var n`, where a named nested `pn` is correctly rejected with E221 (S13.1.4).
+29. Committing to a file-backed document updates the in-memory head but never writes the file; the design (`vibe/Lambda_Design_Reference.md` §4.7 `open d = server.dir.'data' { … }`) edits and creates files. `output(p#, path)` is the only way to persist.
+30. `open` blocks inside a `pn` log `interp: scratch overflow depth=N cap=N fn=main` at error level on every run, although the result is correct.
+31. `print` adds no newline; the pass-1 `greet.ls` example in `Lambda_Procedural.md` showed newline-separated output and a quoteless `main` result. Fixed in pass 2 (documentation defect, not a code defect).
+32. Appendix A of the semantics spec says the float printer is not shortest-round-trip (S4.8.1, "`0.1 + 0.2` prints `0.3`"); it prints `0.30000000000000004`, which is the shortest round-trip form. The footnote is stale.
+33. `LAMBDA_HOME` defaults to `./lmd` (release) or `./lambda` (dev) relative to the **current working directory** (`runner.cpp:311-337`), so a release binary on `PATH` cannot find its packages and schemas when run from another folder. The CLI doc and tutorial now tell users to set `LAMBDA_HOME`; resolving the default beside the executable would remove the pitfall.
+34. A method of an imported object type that reads a module-level `let` of its own module returns `null` (`pub type Circle { r: float, fn area() => PI * r * r }` imported elsewhere: `c.area()` is `null`); the same call inside the defining module works.
+35. Namespace rules from `vibe/Lambda_Namespace2.md` are not enforced: prefixes are not reserved (`let svg = 123` compiles), qualified symbols do not compare by URL (`svg.rect == s.rect` is false for the same URL), element equality ignores the namespace (S5.4.3), and `import 'uri'` without an alias is silently ignored. The root cause for URL equality: the namespace target stores only the raw URI text (`lambda/core/target_identity.cpp:4`, `lib/url.c:518`).
+36. Module system: E215 and E216 are defined but never raised (cycles and missing modules both end in E217); an E209 collision from an import is reported at the provider's line against the importer's file; a duplicated alias silently keeps the first module; a dotted bare import other than `lambda.*` drops its first segment; aliased types are rejected in type positions (E100/E103); `import` inside a function fails at run time (*unhandled node kind AST_NODE_IMPORT*).
+37. JavaScript interop: `export const` values do not import (interpreter prints `[unknown type undefined!!]`, JIT fails *import of undefined item*); JS default parameters differ by tier (`opt(1)` with `b = 5` is 6 on the interpreter, 1 on the JIT); LambdaJS rejects `export async function`; JavaScript calling a Lambda `pub fn`/`pub pn` that returns a string literal or calls `print` segfaults (exit 139).
+38. Packages (from the pass-2 packages survey): openapi body validation always reports a type mismatch because `lambda/package/openapi/validate.ls:143,184,261-266` compares `type(value)` with a symbol; `load_spec`/`parse_spec` use `^` without declaring an error return, so callers get E200 on `^` (`openapi.ls:30,37`); latex `render_string`/`render_string_to_html` pass source text to `input()` as a path (`latex.ls:29,86`); Vega-Lite `transform` arrays are ignored (`chart/vega.ls:157-161`); two chart tests have no `.txt` and never run; importing chart prints about 24 shadow-lint warnings for function-local `let`s, which S12.3.7 does not cover, without naming the file (`build_ast.cpp:2543-2549`); the E217 message names a `.js` path because the fallback rewrites the path in place (`build_ast.cpp:13136-13141`); pdf and graph runs log `[ERR!] interp-tier … pinned to T0`.
+
+Found while writing and checking the tutorial (pass 2, all reproduced on the debug build):
+
+39. **An undefined name gets no diagnostic.** `let a = 1` then `foo + a` stops with only `Error: Script execution failed: x.ls` — no code, line or name. The commonest newcomer mistake gets the least help.
+40. Runtime E201 from a typed `var` assignment (`var level: int = 1` then `level = "high"`) carries no file and line, although S11.4.1v3 asks for a location; a return-type mismatch is also reported without one.
+41. E228 names the internal symbol: leaving `^` off `io.mkdir("d")` says *error from 'io_mkdir' must be handled: use 'io_mkdir(...)^'*.
+42. `print({a: 1})` and `string({a: 1})` give `{ a: 1}` — a space after `{` and none before `}`.
+43. Tiers disagree on a procedure's result: with `pn f(var xs) { xs[0] = 1 }`, a `main` whose body is `var a = [0]`, `f(a)`, `for (i in [7, 8]) i` prints `null 7 8` on the interpreter and `7 8` on the JIT; without the `f(a)` call both print `7 8`.
+44. `--dry-run` placement: `lambda run --dry-run x.ls` calls `main` with file operations stubbed, but `lambda --dry-run run x.ls` evaluates only the top level and prints `null`. Under dry run `input` returns a placeholder JSON string whatever the file, so a script that reads CSV fails (`invalid named member write`) and an `error=E400` doc block for a missing file cannot be gated.
+45. `io.copy` on a folder reports success and writes an empty file with the folder's permissions (`pn_io_copy`, `lambda/runtime/lambda-proc.cpp:909` → `file_copy`, `lib/file.c:387`, has no directory case). The docs now say it copies files only.
+46. Validator: a named string-pattern alias used as a field type rejects matching strings; a schema that fails to compile is reported as data errors (*Expected type 'error'*) rather than as a schema error; a mismatch at the root (`[Book+]`) reports no path; `--strict` and `--allow-unknown` are parsed but unused (the guide now says so).
+47. REPL: a line holding just `h` prints the CLI help instead of evaluating a variable named `h` (`let h = 5` then `h`).
+48. **The pipe walks an element's children only.** S10.1.2v4 (and S10.1.6 for `|:`) walk attribute values first, as `for` does: `let e = <e a: 1, "x">; [e |> ~, [for (v in e) v]]` gives `[["x"], [1, "x"]]`. Doc examples that piped a group (`sum(g |> ~.amount)`) only worked because of this; they now use `content(g)`.
+49. **A `~` outside any pipe body is silently `null`** (S10.1.3 scopes `~` to its body): `sort(users, ~.name)` ignores the key and sorts in default map order. `Lambda_Sys_Func.md` showed `sort(users, ~.age)`, which only looked right because `age` is the first key by name; it now shows `(u) => u.age`. A free `~` should be a compile error.
+50. `group by` clauses: a `let` after `group by … into g` is accepted but runs before grouping (`[for (x in [1, 1, 2] group by x as k into g, let n = len(content(g))) n]` is `[error, error]`), and reading the loop variable after `group by` is not a compile error although S14.1.2 takes it out of scope (`[for (x in [1, 2, 2] group by x as k into g) x]` is `[error, error]`).
+51. `len(g)` of a group counts its key attributes as well as its members (S8.3.1v3 with S14.1.1), so `Lambda_Expr_Stam.md` ("`len(g)` counts members"), `Lambda_Reference.md` and the Cheatsheet gave counts one too high per key. Documentation defect, fixed: they use `len(content(g))`.
+52. **Needs a ruling — element scope (S16.5.1*).** A symbol relational inside an `if (…)` or `for (…)` head, a `[…]` or a `{…}` in element content fails with E100 (`<ul for (x in xs where x > 2) <li x>>`, `<p if (a > b) "x" else "y">`); only a bare `( … )` content item is an island. S16.5.1 does not say whether a control-form head is a parenthesized island. `Lambda_Expr_Stam.md` claimed the ambiguity bites only in the tag region; it now states S16.5.1.
+53. Top-level output (S16.7.3v2): a script holding only `for (x in ["a", "b"]) x` prints two lines, but with `let y = 1` above it prints `"ab"`. Top-level strings also print unescaped (`"say \"hi\""` prints `"say "hi""`), while nested strings are escaped.
+54. `format(<p "a" <b "b"> ".">, 'text')` gives `"a b ."`: the text formatter puts spaces between inline children.
+55. `lambda convert notes.md -t html` writes the Mark Doc tree as it is — `<doc version="1.0"><body>…` inside the page's own `<body>`, with `level`, `type="inline"` and `<span>` wrappers — in a page titled "Data". `Lambda_Doc_Pipeline.md` offers this as the publishing route (`lambda convert draft.md -t html`); a Mark-Doc-to-HTML mode is needed.
+56. CSV: `parse(text, {type: 'csv', delimiter: ';'})` ignores `delimiter`, and the resulting field name `a;b` prints unquoted (`{a;b: "1;2"}`), which is not valid Mark.
+57. Spec drift: S10.1.2v4 and S10.1.6 still spell the key accessor `~#`, which PTH47 retired for `~key` (`grammar.js:919`); `~#` now parses as a force and fails at run time. Part of the PTH ratification owed (S9.4).
+58. `lambda render` pads the content bounds by 50 pixels (`radiant/render_output.cpp:294`, `radiant/render_img.cpp:151,358`), so `-vw 600` gives a 650-pixel-wide SVG or PNG with a blank strip on the right and bottom; the comment above `render_png_resolve_auto_size` says the output is viewport × scale.
+59. PDF output draws all text with the base-14 fonts: a family containing `Times` becomes Times-Roman, `Courier` becomes Courier, and everything else — `serif`, `Georgia`, any `@font-face` — becomes Helvetica (`radiant/render_pdf.cpp:117-127`).
+60. A script page drops non-string scalars in element content: rendering `<html <body <p 42> <p 3.5> <p true>>>` paints nothing for the three paragraphs, while `format(…, 'html')` writes `<p>42</p>`. Tutorial chapter 8 wraps numbers in `string(…)` and says why.
+61. `lambda layout` parses `-o` but never uses it (`radiant/cmd_layout.cpp:4557`), and without `--view-output` it writes `./temp/view_tree.json` relative to the current folder, silently writing nothing when that folder has no `temp` subfolder (`radiant/view_pool.cpp:3673`) while still reporting *1 success*. The matrix and tutorial chapter 8 use `--view-output`.
+
 ## 3. Structure review
 
 ### 3.1 Inventory after this pass
@@ -80,7 +123,7 @@ Verified against the debug build of 2026-09-28. Each needs a ledger entry or a d
 
 `Lambda_Reference.md` is now the index: it links every one of these with a one-line description, grouped by role.
 
-### 3.2 Moves (proposed, not done — each is a rename the user should own)
+### 3.2 Moves (pass 2 did the Jube, Bash, root JS262 guide and asset rows — the guide's unique realm-template record went to `vibe/impl/Lambda_Impl_Test262_Harness (done).md`; the other rows remain proposals)
 
 | Item | Proposal | Why |
 |---|---|---|
@@ -96,6 +139,8 @@ Verified against the debug build of 2026-09-28. Each needs a ledger entry or a d
 
 ### 3.3 Content that should move between documents
 
+Pass 2 did the first four bullets (modules, concurrency, document updates, string patterns); the query-operator move and the `Lambda_Func.md` stub remain proposals.
+
 - **Modules and imports** live in `Lambda_Reference.md` §Modules, which otherwise is an overview/index. Give them `Lambda_Modules.md` (relative/absolute imports, `pub`, namespaces from `Lambda_Syntax`, built-in modules `math`/`io`, guest modules, `lambda.sys.*`).
 - **Concurrency** is spread over `Lambda_Procedural.md` §Concurrency, `Lambda_Sys_Func.md` §Concurrency Functions and the Cheatsheet. One `Lambda_Concurrency.md` (tasks, mailboxes, `select`, cancellation, JS Promise interop, S13) with the others pointing at it.
 - **Documents as values** — paths, references, `#`, `&`/`===`, `temp`, `put`/`del`/`commit`/`open` — occupy the last third of `Lambda_Data.md` and a table in the Cheatsheet. They are a distinct topic (S2.4, S9, S10.4–5): `Lambda_Documents.md`.
@@ -103,6 +148,8 @@ Verified against the debug build of 2026-09-28. Each needs a ledger entry or a d
 - `Lambda_Func.md` still carries a "System Functions Reference" stub table that duplicates `Lambda_Sys_Func.md`; drop it.
 
 ### 3.4 Documents to add
+
+Pass 2 added the tutorial series, `Lambda_Packages.md`, the HTML/CSS/SVG matrix (as `HTML_CSS_SVG_Support.md`) and the three split docs (documents became `Lambda_Document_Updates.md`); the known-limitations doc and release notes remain proposals.
 
 | Document | Why it is missing today |
 |---|---|
@@ -131,6 +178,8 @@ Language docs are `Lambda_<Topic>.md`; area docs are `<Area>_Support.md`; `Doc_S
 
 ## 4. Tutorial series — recommendation
 
+**Status:** written in pass 2 as `doc/tutorial/01`–`10` with sample data in `doc/tutorial/data/`; `make check-tutorial` (`utils/check_tutorial.py`) runs every chapter's commands in a sandbox and compares the printed output (§5). The runnable-scripts-under-`test/lambda/tutorial/` idea below was not done; the checker plays that role.
+
 **Yes, add one, in `doc/tutorial/`, as gate-checked Markdown, and generate the site from it.** The reference set is complete but is organized by language feature; nothing walks a newcomer through the pipeline the README sells. The existing `site/docs/quickstart` is the right outline but is hand-written HTML with obsolete syntax.
 
 Proposed chapters (each 150–300 lines, every `lambda` block gated, each ending with a runnable script under `test/lambda/tutorial/` so the examples become regression tests):
@@ -147,3 +196,52 @@ Proposed chapters (each 150–300 lines, every `lambda` block gated, each ending
 10. **Editing and packages** — `lambda edit`, the `math`/`graph`/`chart` packages, JavaScript on the page.
 
 Chapters 1–7 can be written from the updated reference docs alone; 8–10 need the `Lambda_Packages.md` and Radiant support material of §3.4 first.
+
+## 5. Pass 2 (2026-09-28)
+
+The user approved four items: add `Lambda_Packages.md` and an HTML/CSS/SVG support matrix; move the Jube and Bash docs to `doc/dev/` and the assets to `doc/img/`, and delete the stale root `JS262_Test_Guide.md`; split modules, concurrency, document updates and string patterns into their own docs; add a tutorial series. All four are done; nothing is committed.
+
+### 5.1 New and moved documents
+
+| Document | Content |
+|---|---|
+| `doc/Lambda_String_Pattern.md` | The `\(…)` pattern language and pattern-aware `find`/`replace`/`split`, moved out of `Lambda_Type.md`, which keeps a short summary |
+| `doc/Lambda_Modules.md` | `pub`, direct and aliased imports, the resolution table (D7.2), built-in modules, qualified system names, packages, JavaScript modules, known issues |
+| `doc/Lambda_Concurrency.md` | Tasks, mailboxes, `select`, timeouts, cancellation and errors across tasks (S13); every example was run |
+| `doc/Lambda_Document_Updates.md` | References and `#`, identity, the three tiers, `put`/`del`, transactions, `temp.` documents (PTH30–PTH80; S9.4 ratification pending); persisting to disk marked not yet implemented |
+| `doc/Lambda_Packages.md` | The bundled Lambda packages and how to import them |
+| `doc/HTML_CSS_SVG_Support.md` | Radiant's support matrix: conformance figures, HTML elements, selectors, at-rules, cascade, values, properties, layout modes, box model, backgrounds, text and fonts, effects, animation, interaction, SVG, image formats, output targets, known limitations |
+| `doc/tutorial/` | `README.md`, chapters 01–10 and `data/` (`books.json`, `sales.csv`, `notes.md`) |
+| Moves | Six assets to `doc/img/`; `doc/dev/Lambda_Jube_Runtime.md`; `doc/dev/Bash_Support.md`; the root JS262 guide deleted after its realm-template record moved to `vibe/impl/Lambda_Impl_Test262_Harness (done).md` |
+
+`Lambda_Reference.md` (documentation guide), `README.md`, `CLAUDE.md`, `AGENTS.md` and `Doc_Convention.md` (v1.1.2: the tutorial tier, `make check-tutorial`, `doc/img/`) list the new documents.
+
+### 5.2 Tutorial checker
+
+`utils/check_tutorial.py` (`make check-tutorial`) runs each chapter in its own sandbox under `temp/tutorial_run/` with the sample data and `LAMBDA_HOME` set. A `lambda` block whose first line is `// name.ls`, or any block marked `file=NAME`, is saved as that file; a `bash` block runs its `lambda` and `cat` lines; the `text` block that follows is compared exactly with stdout, or as an ordered subset with `text partial`; `text repl` pipes the `λ>` lines into the REPL. `bash norun` and `text nocheck` opt out.
+
+### 5.3 Other documentation fixes in pass 2
+
+- Group counts: `len(g)` counts a group's key attributes as well as its members (S8.3.1v3, S14.1.1), so `Lambda_Expr_Stam.md`, `Lambda_Reference.md` and the Cheatsheet now use `len(content(g))` and `content(g) |> …` (item 51).
+- Sort keys: `Lambda_Sys_Func.md` passed `~.age` to `sort`, which is ignored (item 49); it now passes `(u) => u.age`.
+- Element scope: the `Lambda_Expr_Stam.md` note now states S16.5.1 (no symbol relationals anywhere inside an element).
+- `Lambda_CLI.md`: `LAMBDA_HOME` is relative to the current folder; the `render --theme` default is `light`; `--strict` and `--allow-unknown` have no effect; a pointer to the output-target comparison.
+- `Lambda_Validator_Guide.md`: unknown fields pass (S11.4.6), named patterns and constraints are not enforced by the validator.
+- `Lambda_Procedural.md`, `Lambda_Sys_Func.md`, `Lambda_Error_Handling.md`: `print` adds no newline; an `fn` cannot call a `pn` (E224, S12.1.1v2); `io.copy` copies files only; two broken table-of-contents anchors.
+- `Lambda_Syntax.md`: the namespace-prefix reservation is marked not yet enforced.
+- `Lambda_Func.md`: method-chaining examples replaced with ones that run.
+- `Lambda_Doc_Pipeline.md`: a pointer to the support matrix. `Markup_Formats_Support.md` reflowed to one line per paragraph.
+
+### 5.4 Verification
+
+- `make check-doc-code`: 631 units, 0 violations (492 plain, 68 `expr`, 49 `type`, 22 `error=` honoured, 15 `no-run`).
+- `make check-tutorial`: 94 outputs across the ten chapters, 0 failures, on the debug build of 2026-09-28.
+- Support matrix: drafted from the source and spot checks by four research agents; 17 of its most consequential claims were then re-checked independently (layout JSON and PNG pixels) and all held, among them the `background` shorthand dropping image URLs, stylesheet `!important` beating inline `!important`, `:nth-of-type()` counting every sibling, media range syntax always matching, `em` grid tracks read as pixels, `width: initial` giving 0, gradient fills on SVG paths painting nothing, and garbled non-ASCII PDF text.
+- Links: every link and anchor in the user docs, the tutorial and `README.md` resolves; the remaining broken anchors are in `doc/dev/` and the formal specs and predate this pass.
+- No new document has hard-wrapped prose.
+
+### 5.5 Open after pass 2
+
+- Item 52 needs a user ruling: whether an `if (…)` or `for (…)` head inside element content is a parenthesized island under S16.5.1.
+- Items 39–61 need ledger entries or decisions, like items 1–38.
+- Still proposals: the known-limitations document and release notes (§3.4), the query-operator move and the `Lambda_Func.md` stub (§3.3), the renames (§3.5), and runnable tutorial scripts under `test/lambda/tutorial/` (§4; the checker covers the examples instead).

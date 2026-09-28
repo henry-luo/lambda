@@ -13,7 +13,7 @@
 >
 > **Related plans:** `vibe/impl/Lambda_Impl_Stack_Frame_Py.md`,
 > `vibe/Lambda_Design_Native_Module.md`, and
-> `doc/Lambda_Jube_Runtime.md`
+> `doc/dev/Lambda_Jube_Runtime.md`
 
 ## Implementation progress snapshot — 2026-07-24
 
@@ -1771,7 +1771,7 @@ maintained.
   permanent public-header list with written justification per entry.
 - [ ] **H10.4** Confirm all Python runtime descriptors live in the module and
   all Python symbols disappear from the host binary export/import inventory.
-- [ ] **H10.5** Update `doc/Lambda_Jube_Runtime.md`, CLI/help documentation,
+- [ ] **H10.5** Update `doc/dev/Lambda_Jube_Runtime.md`, CLI/help documentation,
   Python runtime documentation, build instructions, packaging instructions,
   and the design/ADR status records.
 - [ ] **H10.6** Document the extraction template for the next hosted language:

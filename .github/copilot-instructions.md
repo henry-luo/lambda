@@ -158,5 +158,5 @@ Lambda adopts a **C+** coding convention - a subset of C++ that is C compatible.
 - `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
 - `doc/Lambda_Validator_Guide.md` — Schema-based data validation
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
-- `doc/Lambda_Jube_Runtime.md` — Polyglot runtime build (Python, Bash, Ruby, C2MIR)
+- `doc/dev/Lambda_Jube_Runtime.md` — Polyglot runtime build (Python, Bash, Ruby, C2MIR)
 - `doc/dev/radiant/RAD_00_Overview.md` — Radiant engine detailed design — view/DOM model, CSS resolution, layout, rendering pipeline, SVG, events, editing, interaction state, shell, and JS scripting (index to the RAD_01–RAD_22 set)

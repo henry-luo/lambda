@@ -127,10 +127,10 @@ lambda validate [-s <schema>] [-f <format>] [options] <file>
 |------|-----------|-------------|---------|
 | `-s <schema>` | | Schema file (`.ls`) | Auto-selected based on format |
 | `-f <format>` | | Input format | Auto-detect from extension |
-| | `--strict` | Strict mode — all optional fields must be present or null | `false` |
+| | `--strict` | Accepted, but has no effect yet | `false` |
 | | `--max-errors N` | Stop after N errors | `100` |
 | | `--max-depth N` | Maximum validation depth for nested structures | `100` |
-| | `--allow-unknown` | Allow fields not defined in schema | `false` |
+| | `--allow-unknown` | Accepted, but has no effect: map types are open, so undeclared fields always pass | `false` |
 | `-h` | `--help` | Show help | |
 
 **Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`/`.mk`/`.m`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
@@ -244,7 +244,7 @@ lambda layout *.html --output-dir results/ --summary
 
 ### `render` — Render to Image or Document
 
-Render HTML, LaTeX, or diagram files to SVG, PDF, PNG, or JPEG.
+Render HTML, LaTeX, or diagram files to SVG, PDF, PNG, or JPEG. What each output format can draw is compared in [HTML_CSS_SVG_Support.md](HTML_CSS_SVG_Support.md#17-output-targets).
 
 ```
 lambda render <input> -o <output> [options]
@@ -259,7 +259,7 @@ lambda render <input> -o <output> [options]
 | `-vh` | `--viewport-height` | Viewport height in CSS pixels | Auto-size to content |
 | `-s` | `--scale` | Raster export density; does not change logical layout (RSC7) | `1.0` |
 | | `--pixel-ratio` | Device scale for HiDPI/Retina displays; legacy option spelling (RSC7) | `1.0` |
-| `-t` | `--theme <name>` | Color theme for graph diagrams | `zinc-dark` |
+| `-t` | `--theme <name>` | Color theme for graph diagrams | light |
 | | `--view-key <key>` | Select a named view when the source defines several | |
 | `-h` | `--help` | Show help | |
 
@@ -497,7 +497,7 @@ Runs a TypeScript file on LambdaJS. Type annotations are stripped; there is no t
 
 ### Hosted Languages
 
-Guest languages run on the Lambda runtime through Jube modules (see [Lambda_Jube_Runtime.md](Lambda_Jube_Runtime.md)). Python is the one that ships:
+Guest languages run on the Lambda runtime through Jube modules (see [Lambda_Jube_Runtime.md](dev/Lambda_Jube_Runtime.md)). Python is the one that ships:
 
 ```
 lambda py app.py                        # the language alias
@@ -539,7 +539,7 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 
 | Variable | Values | Description |
 |----------|--------|-------------|
-| `LAMBDA_HOME` | path | Runtime asset directory (default: `./lambda` in a dev tree, `./lmd` beside a release binary) |
+| `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lambda` (source checkout) or `./lmd` (release bundle), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
 | `LAMBDA_TIER` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL keeps a persistent interpreter session unless `jit` |
 | `JUBE_MODULE_PATH` | path | Where hosted-language and Node modules are discovered (default: `./modules` beside the executable) |
 | `LAMBDA_LOG_LEVEL` | level name | Minimum log level written to `log.txt` |
