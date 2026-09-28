@@ -1,10 +1,14 @@
 # Mark Doc Schema
 
-This document provides a unified schema (in Mark Notation) for representing document structures from Markdown, wiki, etc, which can be used for document transformation and validation. It is based on Pandoc's Abstract Syntax Tree (AST) as described in the [Pandoc API documentation](https:- **Pandoc AST Fallback**: Custom Mark tags (e.g., `<cite>`, `<math>`). The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom element for 'Pandoc-specific' features (e.g., `<cite>`, `<math>`). Below is a detailed list of all elements and their attributes.
+This document describes the unified element vocabulary — the **Mark Doc schema** — that Lambda's prose parsers produce for Markdown, reStructuredText, AsciiDoc, MediaWiki/DokuWiki, Org-mode, Textile and man pages, and that `lambda validate` checks those documents against. It is modelled on Pandoc's Abstract Syntax Tree ([Pandoc API documentation](https://pandoc.org/using-the-pandoc-api.html)): HTML element names are used wherever HTML has one (`<p>`, `<h1>`, `<a>`), and custom elements cover what HTML lacks (`<math>`, `<citation>`, `<footnote>`).
+
+> **Where it lives.** The schema is `lambda/input/doc_schema.ls`, shipped with the runtime and used as the default validator schema for the formats above (`lambda validate README.md`). See [Markup_Formats_Support.md](Markup_Formats_Support.md) for what each parser emits and [Lambda_Validator_Guide.md](Lambda_Validator_Guide.md) for running the validator.
+>
+> **What the parsers emit today.** The tree is `<doc version: "1.0", <body …>>`. A `<meta>` element is part of the schema but not yet produced — Markdown front matter currently parses as a thematic break and a heading. Inline runs inside `<p>` are wrapped in a `<span>`; headings carry `level` as a string (`level: "1"`); code carries `type: "inline"` or `type: "block"` and math `type: "inline"` or `type: "block"`; strikethrough is `<del>`; footnotes are `<footnote-ref ref: "1">` at the reference and a `<footnote>` block for the text; citations are `<citation key: …>`. The sample and element list below show the schema's target shape, and note these differences where they matter.
 
 ## Mark Schema
 
-Below is the complete Mark schema sample, illustrating all Pandoc AST block and inline elements, including code, citations, math, figures, and emoji shortcodes.
+Below is a complete Mark schema sample, illustrating the Pandoc AST block and inline elements, including code, citations, math and figures.
 
 ```mark
 // Mark Schema for Pandoc AST with HTML elements, illustrating all block and inline elements
@@ -145,16 +149,16 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
     <h2 id:subintro, class:subsection, level:2 "Subsection">
     // Paragraph (Para) with various inline elements
     <p id:p1, class:text
-      "This paragraph includes " <em "emphasized"> ", " <strong "strong"> ", " <s "strikethrough"> ", "
+      "This paragraph includes " <em "emphasized"> ", " <strong "strong"> ", " <del "strikethrough"> ", "
       <sup "superscript"> ", " <sub "subscript"> ", and " <span style:{'font-variant': 'small-caps'} "small caps"> " text. "
       "It also has a " <q type:double "double-quoted"> " and " <q type:single "single-quoted"> " phrase, "
-      "an inline " <code language:python "print(\"Hello\")"> ", and a citation "
+      "an inline " <code type:inline, language:python "print(\"Hello\")"> ", and a citation "
       <cite
         <citation id:smith2020, prefix:"see ", suffix:", p. 15", mode:NormalCitation, 'note-num':1, hash:0>
         <citation id:jones2021, prefix:"", suffix:"", mode:AuthorInText, 'note-num':2, hash:1>
       >
       ". A " <a href:"http://example.com", title:Example "link"> " and " <img src:"inline.jpg", alt:"Inline image", width:50> " are included, "
-      "with a " <br> " line break and " <note id:note2 <p "Inline footnote">> "."
+      "with a " <br> " line break and a footnote reference" <footnote-ref ref:"2"> "."
     >
     // Plain (similar to Para, without paragraph styling)
     <p id:p2, class:plain "Plain text with " <em "minimal"> " formatting.">
@@ -164,9 +168,9 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       <line "Violets are blue">
     >
     // CodeBlock
-    <code language:python, 'data-executable':true
+    <code type:block, language:python, 'data-executable':true
         "def greet(name):\n    return f\"Hello, {name}!\"\nprint(greet(\"World\"))"
-    >	
+    >
     // RawBlock
     <raw format:html, id:raw1 "<div class=\"custom\">Raw HTML content</div>">
     // BlockQuote
@@ -225,17 +229,15 @@ Below is the complete Mark schema sample, illustrating all Pandoc AST block and 
       <img src:"image.jpg", alt:"Sample image", title:Image, width:300, height:200>
       <figcaption "Figure 1: Sample image with " <em "caption">>
     >
-    // Footnote
-    <note id:note1
+    // Footnote text (referenced by <footnote-ref ref:"1">)
+    <footnote id:"1"
       <p "Footnote content with " <strong "strong"> " text.">
     >
-    // Math (display and inline)
-    <math type:display, id:math1
-      "\\[ E = mc^2 \\]"
+    // Math (block and inline); the content is the TeX source without delimiters
+    <math type:block, id:math1
+      "E = mc^2"
     >
-    <p "Inline math: " <math type:inline, id:math2 "\\( x^2 + y^2 = z^2 \\)"> ".">
-    // GitHub Emoji Shortcodes
-    <p "GitHub emoji support: " <emoji "😄"> " " <emoji "❤️"> " " <emoji "🚀"> " " <emoji "🐱"> " " <emoji "👍"> " " <emoji "🔥"> " " <emoji "💻"> " " <emoji "🐛"> " " <emoji "🐙"> ".">
+    <p "Inline math: " <math type:inline, id:math2 "x^2 + y^2 = z^2"> ".">
   >
 >
 ```
@@ -252,6 +254,8 @@ The schema uses HTML elements where possible (e.g., `<p>`, `<h1>`) and custom el
   - **Content**: `<meta>` and `<body>`.
 
 ### Metadata Elements
+
+> **Target design.** The `<meta>` element and the mapping table below describe the intended unified metadata; no parser emits `<meta>` yet.
 
 The Meta schema is designed aiming to unify all the common metadata elements across formats like Markdown (YAML), Docx, JATS, TEI, LaTeX, and Org-mode. It uses Mark/Lambda data types directly without wrapper elements for cleaner and more efficient representation.
 
@@ -364,19 +368,6 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
 | **bibliography** | `bibliography`      | Custom property | `<ref-list>`                     | `<listBibl>`        | `\bibliography{}`          | `#+BIBLIOGRAPHY:` |
 | **status**       | `status`            | Custom property | `<article-type>`                 | `<revisionDesc>`    | Custom command             | `#+STATUS:`       |
 
-- **`<field>`** (deprecated in favor of direct attributes)
-  - **Attributes**:
-    - `name`: String, required, metadata key (e.g., "title", "author", "references").
-    - `type`: String, optional, data type (e.g., 'string', 'list', 'map').
-  - **Purpose**: Represents a metadata 'key-value' pair.
-  - **Content**: `<inlines>` or `<blocks>` (typically `<inlines>`).
-- **`<reference>`** (now part of references array)
-  - **Attributes**:
-    - `id`: String, required, unique citation identifier (e.g., "smith2020").
-    - `type`: String, optional, citation type (e.g., 'book', 'article').
-  - **Purpose**: Stores citation details for `<cite>`.
-  - **Content**: Inline elements (plain text).
-
 ### Block-Level Elements
 - **`<p>`** (Para, Plain)
   - **Attributes**:
@@ -384,7 +375,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
     - `class`: Array of strings, optional, CSS classes (e.g., `['text', 'content']`).
     - `'data-*'`: Custom 'key-value' pairs, optional, for metadata.
   - **Purpose**: Paragraphs or plain text blocks.
-  - **Content**: Inline elements.
+  - **Content**: Inline elements. The Markdown parser wraps a paragraph's inline run in a single `<span>` child.
 - **`<line_block>`**
   - **Attributes**: `id`, `class` (array format for multiple classes), `'data-*'` (same as `<p>`).
   - **Purpose**: Groups lines for poetry or addresses.
@@ -395,6 +386,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Content**: Inline elements.
 - **`<code>`**
   - **Attributes**:
+    - `type`: Symbol, `block` for a code block (`inline` for inline code, below).
     - `language`: String, optional, programming language (e.g., python).
     - `'data-executable'`: Boolean, optional, indicates executable code ("true", "false").
   - **Purpose**: Contains code with syntax highlighting.
@@ -441,7 +433,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
 - **`<h1>` to `<h6>`**
   - **Attributes**:
     - `id`, `class`, `'data-*'` (same as `<p>`).
-    - `level`: Integer, required, header level (1 to 6).
+    - `level`: header level (1 to 6). Declared as an integer in the schema; the parsers currently emit it as a string (`level: "1"`).
   - **Purpose**: Headers with 'level-specific' tags.
   - **Content**: Inline elements.
 - **`<hr>`**
@@ -500,15 +492,15 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**: None.
   - **Purpose**: Figure caption.
   - **Content**: Inline elements.
-- **`<note>`**
+- **`<footnote>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
-  - **Purpose**: Footnote content.
+  - **Purpose**: Footnote content, referenced from the text by `<footnote-ref ref: id>`. (The schema file still names this element `note`.)
   - **Content**: Block elements.
 - **`<math>`**
   - **Attributes**:
-    - `type`: String, required, math type (inline or display).
+    - `type`: Symbol, required, `inline` or `block`.
     - `id`, `class`, `'data-*'` (same as `<p>`).
-  - **Purpose**: Contains LaTeX math expressions.
+  - **Purpose**: Contains a LaTeX math expression, without its `$` delimiters. See [Math_Support.md](Math_Support.md).
   - **Content**: LaTeX code.
 
 ### Inline-Level Elements
@@ -520,9 +512,9 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Strong text.
   - **Content**: Inline elements.
-- **`<s>`**
+- **`<del>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
-  - **Purpose**: Strikethrough text.
+  - **Purpose**: Strikethrough text (the schema file still names it `s`).
   - **Content**: Inline elements.
 - **`<sup>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
@@ -548,13 +540,9 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Contains one or more `<citation>` elements for citation content.
   - **Content**: One or more `<citation>` elements.
-- **`<citations>`** (deprecated)
-  - **Attributes**: None.
-  - **Purpose**: Groups multiple `<citation>` elements (now handled directly by `<cite>`).
-  - **Content**: One or more `<citation>` elements.
 - **`<citation>`**
   - **Attributes**:
-    - `id`: String, required, citation identifier (e.g., "smith2020").
+    - `id`: String, required, citation identifier (e.g., "smith2020"). The Markdown parser emits a bare `<citation key: "smith2020">` for `[@smith2020]`.
     - `prefix`: String, optional, text before citation (e.g., "see ").
     - `suffix`: String, optional, text after citation (e.g., ", p. 15").
     - `mode`: Symbol, required, citation mode (NormalCitation, AuthorInText, SuppressAuthor).
@@ -564,6 +552,7 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
   - **Content**: None (empty element).
 - **`<code>`** (inline)
   - **Attributes**:
+    - `type`: Symbol, `inline`.
     - `id`, `class`, `'data-*'` (same as `<p>`).
     - `language`: Symbol, optional, programming language.
   - **Purpose**: Inline code.
@@ -581,23 +570,10 @@ The Meta schema is designed aiming to unify all the common metadata elements acr
     - `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Hyperlink.
   - **Content**: Inline elements.
-- **`<emoji>`**
-  - **Attributes**:
-    - `id`, `class`, `'data-*'` (same as `<p>`).
-  - **Purpose**: Emoji shortcode converted to Unicode emoji character.
-  - **Content**: Unicode emoji character (e.g., "😄", "❤️", "🚀").
-  - **GitHub Shortcodes**: Supports 200+ GitHub emoji shortcodes including:
-    - **Smileys & Emotion**: `:smile:` (😄), `:heart_eyes:` (😍), `:wink:` (😉), `:joy:` (😂), `:cry:` (😢), `:angry:` (😠), `:sunglasses:` (😎)
-    - **People & Body**: `:thumbsup:` (👍), `:thumbsdown:` (👎), `:clap:` (👏), `:wave:` (👋), `:pray:` (🙏), `:muscle:` (💪)
-    - **Animals & Nature**: `:cat:` (🐱), `:dog:` (🐶), `:bear:` (🐻), `:pig:` (🐷), `:frog:` (🐸), `:bee:` (🐝), `:fish:` (🐟)
-    - **Food & Drink**: `:pizza:` (🍕), `:hamburger:` (🍔), `:coffee:` (☕), `:beer:` (🍺), `:cake:` (🍰), `:apple:` (🍎)
-    - **Activities**: `:soccer:` (⚽), `:basketball:` (🏀), `:guitar:` (🎸), `:video_game:` (🎮), `:art:` (🎨)
-    - **Travel & Places**: `:car:` (🚗), `:airplane:` (✈️), `:rocket:` (🚀), `:house:` (🏠), `:office:` (🏢)
-    - **Objects**: `:computer:` (💻), `:phone:` (📱), `:camera:` (📷), `:bulb:` (💡), `:lock:` (🔒), `:key:` (🔑)
-    - **Symbols**: `:heart:` (❤️), `:star:` (⭐), `:fire:` (🔥), `:zap:` (⚡), `:100:` (💯), `:heavy_check_mark:` (✔️)
-    - **Flags**: `:us:` (🇺🇸), `:uk:` (🇬🇧), `:fr:` (🇫🇷), `:de:` (🇩🇪), `:jp:` (🇯🇵), `:cn:` (🇨🇳)
-    - **GitHub Specific**: `:octocat:` (🐙), `:shipit:` (🚀), `:bowtie:` (👔)
-    - **Programming**: `:bug:` (🐛), `:gear:` (⚙️), `:wrench:` (🔧), `:hammer:` (🔨), `:electric_plug:` (🔌)
+- **`<footnote-ref>`**
+  - **Attributes**: `ref`: String, required, the id of the `<footnote>` holding the text.
+  - **Purpose**: The in-text reference to a footnote (`[^1]` in Markdown).
+  - **Content**: None (empty element).
 - **`<br>`**
   - **Attributes**: `id`, `class`, `'data-*'` (same as `<p>`).
   - **Purpose**: Line break.
@@ -624,37 +600,13 @@ The Mark schema is designed to represent document structures from Markdown, wiki
   - `hash`: Unique identifier for citation instances.
 - **Example**: The schema includes citations for "smith2020" (NormalCitation) and "jones2021" (AuthorInText), demonstrating varied usage with references stored as objects in the metadata.
 
-### GitHub Emoji Shortcodes System
-- **Structure**: Emoji shortcodes use the format `:shortcode:` and are converted to Unicode emoji wrapped in `<emoji>` elements.
-- **Parsing Rules**:
-  - Must be surrounded by colons (`:`)
-  - Shortcode can contain only letters, numbers, underscores, and hyphens
-  - Case-sensitive matching against GitHub's emoji database
-  - Invalid or unknown shortcodes are left as-is (not converted)
-- **Output Format**: `<emoji "Unicode_Emoji">`
-- **Supported Categories**:
-  - **Smileys & Emotion** (30+ emojis): `:smile:`, `:heart_eyes:`, `:wink:`, `:joy:`, `:cry:`, `:angry:`, `:sunglasses:`
-  - **People & Body** (20+ emojis): `:thumbsup:`, `:thumbsdown:`, `:clap:`, `:wave:`, `:pray:`, `:muscle:`
-  - **Animals & Nature** (25+ emojis): `:cat:`, `:dog:`, `:bear:`, `:pig:`, `:frog:`, `:bee:`, `:fish:`
-  - **Food & Drink** (30+ emojis): `:pizza:`, `:hamburger:`, `:coffee:`, `:beer:`, `:cake:`, `:apple:`
-  - **Activities** (20+ emojis): `:soccer:`, `:basketball:`, `:guitar:`, `:video_game:`, `:art:`
-  - **Travel & Places** (30+ emojis): `:car:`, `:airplane:`, `:rocket:`, `:house:`, `:office:`
-  - **Objects** (25+ emojis): `:computer:`, `:phone:`, `:camera:`, `:bulb:`, `:lock:`, `:key:`
-  - **Symbols** (40+ emojis): `:heart:`, `:star:`, `:fire:`, `:zap:`, `:100:`, `:heavy_check_mark:`
-  - **Flags** (15+ country flags): `:us:`, `:uk:`, `:fr:`, `:de:`, `:jp:`, `:cn:`
-  - **GitHub Specific** (3 emojis): `:octocat:`, `:shipit:`, `:bowtie:`
-  - **Programming/Tech** (15+ emojis): `:bug:`, `:gear:`, `:wrench:`, `:hammer:`, `:electric_plug:`
-- **Usage Examples**:
-  - Input: `Great work! :thumbsup: :fire:`
-  - Output: `<p>"Great work! "<emoji "👍">" "<emoji "🔥"></p>`
-- **Compatibility**: Full compatibility with GitHub Flavored Markdown emoji shortcodes
-
-### Implementation Notes
+### Emoji Shortcodes
+A GitHub-style shortcode such as `:smile:` is recognized by the Markdown parser and currently emitted as a bare symbol (`'smile'`) in the inline run; it is not converted to the Unicode character and there is no `<emoji>` element in the schema.
 
 ### Usage
 - **Transformation**: Facilitates conversion between formats (e.g., Markdown to LaTeX) by preserving semantic structure.
 - **Validation**: Ensures documents conform to Pandoc’s AST with valid element nesting and attributes.
-- **Compatibility**: Supports Markdown (e.g., `#`, `*`, `[@ref]`, `:emoji:`), wiki (headings, links), and HTML structures.
+- **Compatibility**: Supports Markdown (e.g., `#`, `*`, `[@ref]`), wiki (headings, links), and HTML structures.
 - **Element Completeness**: The schema illustrates all Pandoc AST elements, including inline (`Str`, `Emph`, `Strong`, etc.) and block elements (`Para`, `CodeBlock`, etc.), with code examples.
 
 ### References

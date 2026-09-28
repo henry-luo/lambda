@@ -116,9 +116,11 @@ This distinction enforces functional purity in `fn` functions while allowing con
 ## Whitespace and Line Breaks
 
 - Whitespace is generally ignored except in strings
-- Line breaks can separate statements
-- Semicolons (`;`) **separate** statements on one line, and are unnecessary
-  when a line break already separates them; a trailing `;` is an error
+- Line breaks separate statements
+- Semicolons (`;`) also separate statements. They are needed to put two
+  statements on one line, and to end a statement whose next line would
+  otherwise continue it (see below); an extra `;` at the end of a line is
+  harmless
 
 These two are equivalent:
 
@@ -129,6 +131,33 @@ let a = 1; let b = 2
 ```lambda
 let a = 1
 let b = 2
+```
+
+### Line Continuation
+
+The parser never guesses where a statement ends (S16.2). A statement continues
+onto the next line in exactly two cases:
+
+- **The expression is incomplete**: a trailing operator, an unclosed bracket,
+  or a keyword form still awaiting its remainder binds the next line
+  (S16.2.1).
+- **The next line starts with a token that can only continue an expression**:
+  `|>`, `|:`, `|`, `&`, `!`, `?`, `.?`, `**`, `++`, `%`, `>`, `=`, `==`, `!=`,
+  `<=`, `>=`, the word operators `and or to in is at div that eq ne lt le ge
+  gt`, and `else`, `case`, `default` (S16.2.2v2). `.name` at line start
+  continues a member chain or a path (S16.2.4v3).
+
+A line that starts with a token that could *either* continue the expression or
+begin a new statement — `(`, `[`, `-`, `+`, `*`, `^`, `/`, `<`, and `.` before
+a digit — is a **syntax error** after a complete statement (S16.2.3v3). The
+repair is explicit: end the previous line with `;`, or move the token onto it.
+
+```lambda
+let total = [1, 2, 3]
+    |> ~ * 2            // continues: `|>` can only continue an expression
+    |> sum
+let pair = [1, 2];      // `;` is required: the next line starts with `[`
+[total, pair]           // [12, [1, 2]]
 ```
 
 ---
@@ -163,21 +192,30 @@ let PascalCase = "type"
 The following are reserved and cannot be used as identifiers:
 
 ```
-let   pub   fn    pn    if    else   for   while
-in    to    by    where order  group  limit offset
-and   or    not   is    as    true   false null
-type  import raise  var   break  continue  return
+let     pub     var     type    fn      pn      view    edit    state   on
+if      else    match   case    default for     while   break   continue return
+raise   import  put     del     commit  rollback open   apply
+not     div     and     or      to      is      in      at      that    as
+where   order   by      group   into    limit   offset  asc     desc    last
+eq      ne      lt      le      ge      gt      true    false   null
 ```
+
+`before`, `after` and `into` inside a `put` statement are clause words, and
+keywords remain legal as *data* names — a map key, a member, an element tag or
+an event name (`{open: true}`, `m.open`, `<del "x">`) — see S16.10.
 
 ### Reserved Type Names
 
 Built-in type names are also reserved:
 
 ```
-int    int64   float   decimal  bool   string  symbol  binary
-array   map     element  range  path    type    any
-null   error   datetime
+null    any     none    bool    int     integer float   f64     decimal complex
+number  string  symbol  binary  datetime date   time    range   list    array
+map     element object  function error  i8 i16 i32 i64  u8 u16 u32 u64  f16 f32
 ```
+
+`int64` is also reserved but is not a usable type name — the 64-bit integer
+type is spelled `i64`. `path` is a type, not a reserved word.
 
 ---
 

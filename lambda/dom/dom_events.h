@@ -70,6 +70,9 @@ Item dom_dispatch_event(Item elem_item, Item event_item);
  */
 Item js_create_event(const char* type, bool bubbles, bool cancelable);
 
+// Browser-generated plain events retain the native trust bit through dispatch.
+Item js_create_native_event(const char* type, bool bubbles, bool cancelable);
+
 /**
  * Create an Event with full EventInit (composed flag set explicitly).
  */
@@ -149,9 +152,9 @@ Item js_create_native_pointer_event(const char* type,
 // Native touch events carry a one-contact snapshot for host-driven gestures.
 // `is_active` selects whether the contact remains in touches/targetTouches.
 Item js_create_native_touch_event(const char* type,
-    double client_x, double client_y,
-    bool ctrl, bool shift, bool alt, bool meta,
-    bool is_active);
+                                  double client_x, double client_y,
+                                  bool ctrl, bool shift, bool alt, bool meta,
+                                  bool is_active, bool cancelable);
 
 Item js_create_native_css_event(const char* type, const char* detail_name,
     const char* detail_value, double elapsed_time);
@@ -168,10 +171,15 @@ Item js_create_native_composition_event(const char* type,
     const char* data);
 
 Item js_create_native_wheel_event(const char* type,
-    double client_x, double client_y,
-    double delta_x, double delta_y,
-    int buttons,
-    bool ctrl, bool shift, bool alt, bool meta);
+                                  double client_x, double client_y,
+                                  double delta_x, double delta_y,
+                                  int buttons,
+                                  bool ctrl, bool shift, bool alt, bool meta,
+                                  bool cancelable);
+
+// Physical wheel/touch input is cancelable while an active non-passive listener
+// on its propagation path can prevent the default action.
+bool dom_input_event_cancelable(void* target_node, const char* type);
 
 // Stage 4C Phase B: native DragEvent factory. DragEvent extends MouseEvent
 // (same clientX/clientY/button geometry) plus a `dataTransfer`. `type` is one

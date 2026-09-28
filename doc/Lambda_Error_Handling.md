@@ -175,17 +175,22 @@ fn load(path: string) Config ^ ParseError | IOError { ... }
 ### Error Forms in Parameters and Let Bindings
 
 In value positions, `T^` and `T | error` both describe a value-or-error
-outcome. The `^` spelling is distinctive on function returns because it adds
-the caller obligation and licenses `raise`.
+outcome (S7.4.2). The `^` spelling is distinctive on function returns because
+it adds the caller obligation and licenses `raise`.
 
-```lambda
+> **Not yet implemented.** The parser currently accepts `T^` only on a
+> function's return type. In a parameter or `let` annotation, write the
+> equivalent `T | error` for now.
+
+```lambda no-run
+// no-run: `T^` in parameter and let position is not yet accepted by the parser
 // Parameter that accepts a value-or-error
 fn process(input: int^) int { ... }
 
 // Let binding that may hold a value-or-error
 let result: int^ = may_fail(x)
 
-// Equivalent value-position spelling
+// Equivalent value-position spelling — use this today
 let result: int | error = may_fail(x)
 ```
 
@@ -502,11 +507,15 @@ Errors are categorized by numeric code ranges:
 | 302 | `index_out_of_bounds` | Array index out of range |
 | 304 | `division_by_zero` | Division or modulo by zero |
 | 318 | `user_error` | User-defined error via `error()` |
+| 319 | `cancelled` | Cooperative task cancellation |
+| 320 | `mailbox_full` | A bounded task mailbox has no capacity |
 | 401 | `file_not_found` | File does not exist |
 | 402 | `file_access_denied` | Permission denied |
+| 405 | `network_error` | Network operation failed |
 | 407 | `parse_error` | Error parsing input format |
+| 411 | `http_error` | HTTP request error |
 
-User-created errors (via `error("message")`) default to code 318 (`user_error`).
+User-created errors (via `error("message")`) default to code 318 (`user_error`). The full enumeration is `lambda/runtime/lambda-error.h`.
 
 ---
 

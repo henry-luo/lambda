@@ -1,8 +1,19 @@
 # Lambda Jube Runtime
 
+> **Scope.** This is a build and packaging note for hosted-language modules,
+> written for developers. Users of hosted Python should start with
+> [Python_Support.md](Python_Support.md).
+>
+> **Status (alpha).** Only the Python module ships. The Bash and Ruby front
+> ends exist in the source tree (`lambda/module/bash`, `lambda/module/rb`) but
+> are not compiled into any current build: their CLI handlers sit behind the
+> `LAMBDA_BASH` and `LAMBDA_RUBY` build flags, which no configuration defines.
+
 Lambda has one host executable: `lambda.exe` (or `lambda` in a release
 bundle). Jube is the native-module system used to add hosted languages without
-recompiling a different runtime.
+recompiling a different runtime. The same mechanism carries the Node.js
+compatibility modules (`node-core`, `node-fs`, `node-net`, `node-crypto`,
+`node-zlib`) that the standard bundle ships beside the Python descriptor.
 
 ## Hosted Python
 
@@ -15,8 +26,10 @@ module.json
   lang-python.dylib | lang-python.so | lang-python.dll
 ```
 
-The build writes a platform-specific SHA-256 for the native library into
-`module.json`; the host verifies it before loading the library.
+A module's `module.json` may carry a platform-specific SHA-256 and a host
+build ID for the native library; when the fields are present the host verifies
+them before loading the library. They are optional, and the Python module is
+not stamped by the current build.
 
 The standard bundle contains the same host binary plus a manifest-only
 `lang-python` descriptor, but omits the Python grammar and native library.

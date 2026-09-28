@@ -455,10 +455,10 @@
         "zlib",
         "brotlidec",
         "brotlicommon",
+        "ThorVG",
         "png",
         "turbojpeg",
         "gif",
-        "ThorVG",
         "pthread"
       ],
       "linux": {
@@ -846,9 +846,9 @@
         "zlib",
         "libuv",
         "pthread",
+        "ThorVG",
         "png",
         "turbojpeg",
-        "ThorVG",
         "glfw"
       ],
       "target_name": "lambda-static",

@@ -60,10 +60,14 @@ Functions for type conversion and inspection.
 | `string(x)` | Convert to string | `string(42)` | `"42"` |
 | `symbol(x)` | Convert to symbol | `symbol("text")` | `'text'` |
 | `binary(x)` | Convert to immutable bytes | `binary("hello")` | `b'\x68656C6C6F'` |
-| `number(x)` | Convert to number (int or float) | `number("3.14")` | `3.14` |
+
+There is no `number(x)` conversion yet (the registry row is a stub): convert
+with `int`, `float` or `decimal`. `symbol(name, url)` builds a namespaced
+symbol (see [Lambda_Syntax.md](Lambda_Syntax.md#namespaces)).
 
 The callable sized-integer conversions are `i8(x)`, `i16(x)`, `i32(x)`,
-`i64(x)`, `u8(x)`, `u16(x)`, `u32(x)`, and `u64(x)` (S17.5.1).
+`i64(x)`, `u8(x)`, `u16(x)`, `u32(x)`, and `u64(x)` (S17.5.1); `f16(x)` and
+`f32(x)` are the sized-float conversions.
 
 ### Return Type of Counts and Indices
 
@@ -136,7 +140,7 @@ mutating the JavaScript result cannot mutate the original Lambda value.
 > - **Global import** (`import math;`): `sqrt(x)`, `pi` — all functions available without prefix
 > - **Aliased import** (`import m:math;`): `m.sqrt(x)`, `m.pi` — use custom prefix
 >
-> Standalone functions like `abs`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `sum`, `avg` are always available without any prefix or import.
+> Standalone functions like `abs`, `round`, `floor`, `ceil`, `trunc`, `sign`, `min`, `max`, `sum`, `avg` are always available without any prefix or import, and so are the bare names `sqrt`, `exp`, `log`, `sin`, `cos` and `tan`. Every system function also has a fully qualified spelling — `lambda.sys.len(x)`, `lambda.math.sqrt(x)`, `lambda.io.copy(a, b)` — which reaches it even when a local binding shadows the short name (S17.2.1).
 
 A `null` argument makes a numeric function's result `null`, as `null + 1` is:
 `abs(null)`, `round(null)`, `math.sqrt(null)`, `math.pow(2, null)` and
@@ -167,7 +171,9 @@ These functions work on both scalars and collections (element-wise).
 | `argmin(vec)` | Index of minimum      | `argmin([5, 2, 8, 1])` | `3` |
 | `argmax(vec)` | Index of maximum      | `argmax([5, 2, 8, 1])` | `2` |
 | `sum(vec)`    | Sum of elements       | `sum([1, 2, 3])`    | `6`    |
+| `sum(matrix, axis)` | Sum along an axis of a nested array | `sum([[1, 2], [3, 4]], 0)` | `[4, 6]` |
 | `avg(vec)`    | Arithmetic mean       | `avg([1, 2, 3])`    | `2.0`  |
+| `avg(vec, true)` | Mean skipping `null` items | `avg([1, null, 3], true)` | `2` |
 
 ```lambda
 abs(-5)                 // 5
@@ -201,7 +207,9 @@ avg([1, 2, 3, 4])       // 2.5
 | `math.max_int` | Largest compact `int` with exact float64 round-trip | `9007199254740991` |
 
 Compact `int` is bounded to ±(2^53 - 1). Use `n` (integer) or `m` (decimal)
-literals for exact arithmetic beyond this compact boundary.
+literals for exact arithmetic beyond this compact boundary. After
+`import math;` the bare names `pi` and `e` are available; `max_int` still
+needs its `math.` prefix.
 
 #### Special Float Checks
 
@@ -209,9 +217,10 @@ Lambda does not provide `isnan()` or `isinf()` built-ins. Use `is` with the
 special float values instead:
 
 ```lambda
-x is inf     // positive infinity only
-x is -inf    // negative infinity only
-x is nan     // NaN check
+let x = 1.0 / 0.0;
+x is inf         // positive infinity only
+x == -inf        // negative infinity: a signed infinity is one value (S4.2.3)
+x is nan         // NaN check — `nan == nan` is false, so `==` cannot test it
 ```
 
 #### Trigonometric
@@ -337,8 +346,8 @@ boxed in the operand's own lane rather than widened to `int64`.
 
 Because no single static type describes them, all seven are declared `any`; the
 concrete type is resolved per operand. A shift whose result leaves the operand's
-lane follows that lane's overflow rule — for `int` that is promotion to `float`,
-so `shl(1, 54)` is `1.8014398509481984e16` (a `float`), not an error. A negative
+lane follows that lane's overflow rule — for `int` that is saturation to `inf`
+(S4.1.3), so `shl(1, 54)` is `inf`, not an error. A negative
 shift count is an error; a count of 64 or more yields `0`.
 
 | Function | Description | Example | Result |
@@ -701,9 +710,10 @@ upper("straße")        // "STRASSE": ß has no one-letter capital
 lower("ΣΑΣ")           // "σας": a final capital sigma becomes ς
 ```
 
-### normalize(str)
+### normalize(str, form?)
 
-Normalize a string (Unicode normalization).
+Unicode-normalize a string. The optional second argument names the form,
+e.g. `'nfc'`; `normalize("e\u0301", 'nfc') == "é"` is `true`.
 
 ### url_resolve(base, relative)
 
@@ -819,8 +829,8 @@ empty. Generic arrays and lists retain their ordinary collection behavior.
 | `unique(a, b, ...)`  | Union: `unique(a ++ b ++ ...)`      | `unique([1, 2], [2, 3])`               | `[1, 2, 3]`        |
 | `intersect(a, b, ...)` | Items of `a` held by every other  | `intersect([1, 2, 3], [2, 3, 4])`      | `[2, 3]`           |
 | `except(a, b)`       | Items of `a` not held by `b`        | `except([1, 2, 3], [2])`               | `[1, 3]`           |
-| `set(vec)`           | Remove duplicates                   | `set([1, 1, 2, 2, 3])`                 | `[1, 2, 3]`        |
 | `zip(v1, v2)`        | Pair elements                       | `zip([1, 2], [3, 4])`                  | `[[1, 3], [2, 4]]` |
+| `clip(vec, lo, hi)`  | Clamp every item into `[lo, hi]`    | `clip([1, 5, 9], 2, 8)`                | `[2, 5, 8]`        |
 
 `reverse`, `sort`, `unique`, `take`, `drop`, and collection `slice` preserve
 the numeric-array carrier and element type when their input is numeric. This
@@ -877,7 +887,7 @@ sort(users, ~.age)         // sorted by age ascending
 sort(users, {dir: 'desc', by: ~.age})   // sorted by age descending
 
 unique([1, 2, 2, 3, 3])    // [1, 2, 3]
-zip([1, 2], ["a", "b"])    // [(1, "a"), (2, "b")]
+zip([1, 2], ["a", "b"])    // [[1, "a"], [2, "b"]]
 
 fill(3, 0)                 // [0, 0, 0]
 range(0, 10, 2)            // [0, 2, 4, 6, 8]
@@ -899,7 +909,10 @@ Functions for date and time operations.
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
 | `datetime()` | Current date and time | `datetime()` | `t'2025-01-23T14:30:00'` |
-| `datetime(x)` | Parse as datetime | `datetime("2025-01-01")` | `t'2025-01-01'` |
+| `datetime(x)` | Parse a string, or a Unix timestamp in milliseconds | `datetime("2025-01-01")` | `t'2025-01-01'` |
+| `date()` / `time()` | Current date / current time | `date()` | `t'2025-01-23'` |
+| `date(y, m, d)` | Date from parts | `date(2025, 4, 26)` | `t'2025-04-26'` |
+| `time(h, m, s)` | Time from parts | `time(10, 30, 45)` | `t'10:30:45'` |
 | `today()` | Current date | `today()` | `t'2025-01-23'` |
 | `now()` | Current timestamp (proc) | `now()` | `t'2025-01-23T14:30:00'` |
 | `justnow()` | Time when current script evaluation started | `justnow()` | `t'14:30:00'` |
@@ -1022,7 +1035,7 @@ Parse content from a file path or URL.
 `p#a.b` forces and then navigates. `input(p, format)` stays the
 explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
-**Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `markdown`, `csv`, `latex`, `rtf`, `pdf`, `css`, `ini`, `math`
+**Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
 
 #### temp(name) / temp(name, content)
 
@@ -1174,8 +1187,8 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.symlink(target, link)` | Create symbolic link | `io.symlink(/.src, /.link)` |
 | `io.chmod(path, mode)` | Change file permissions | `io.chmod(/.'script.sh', "755")` |
 | `io.rename(src, dst)` | Rename file or directory | `io.rename(/.'a.txt', /.'b.txt')` |
-| `io.fetch(url, options)` | HTTP fetch with options | `io.fetch(https.'api.example.com', {method: 'POST'})` |
-| `cmd(command, args...)` | Execute shell command | `cmd("ls", "-la")` |
+| `io.fetch(url, options?)` | HTTP fetch; `fetch(url, options)` is the bare spelling | `io.fetch(https.'api.example.com', {method: 'POST'})` |
+| `cmd(command, args?)` | Execute a shell command; `args` is one array (or string) | `cmd("ls", ["-la"])` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
 #### print(args...)
@@ -1374,17 +1387,16 @@ pn api_operations() {
 }
 ```
 
-#### cmd(command, args...)
+#### cmd(command, args?)
 
-Execute a shell command and return the result.
+Execute a shell command and return its output as a string. The optional
+second argument is **one** value: an array of arguments, or a single string.
 
 ```lambda
 pn run_commands() {
-    let files = cmd("ls", "-la")^
-    let today_str = cmd("date", "+%Y-%m-%d")^
-
-    // With multiple arguments
-    cmd("git", "commit", "-m", "Update files")
+    let files = cmd("ls", ["-la"])^
+    let today_str = cmd("date", ["+%Y-%m-%d"])^
+    cmd("git", ["commit", "-m", "Update files"])^
 }
 ```
 
@@ -1470,22 +1482,43 @@ Functions for creating and handling errors.
 
 | Function | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `error(msg)` | Create error value | `error("Invalid input")` | Error |
+| `error(msg)` | Create error value (code 318) | `error("Invalid input")` | Error |
+| `error(msg, source)` | Create an error wrapping another | `error("load failed", inner)` | Error |
+| `error({code, message})` | Create an error from a parameter map | `error({code: 304, message: "dz"})` | Error |
 
 ```lambda
-// Create an error
-error("Something went wrong")
+// Create an error value
+let e = error("Something went wrong");
+[e is error, e.code, e.message]     // [true, 318, "Something went wrong"]
 
-// Error handling in expressions
-let result = if (x == 0) error("Division by zero") else (y / x)
+// Error values flow as data
+fn safe_div(x, y) => if (x == 0) error("Division by zero") else (y / x)
 
-// Check for error
 pn main() {                  // print is a pn: only a pn may call it
+    let result = safe_div(0, 1)
     if (result is error) {
         print("Error occurred")
     }
 }
 ```
+
+---
+
+## Also Available
+
+These registered functions are callable today but have no detailed section
+yet; their signatures come from the system-function registry
+(`lambda/runtime/sys_func_registry.c`). Treat them as **experimental**.
+
+| Area | Functions |
+|------|-----------|
+| Complex numbers | `complex(re, im)`, `real(z)`, `imag(z)`, `conj(z)` — `complex(1, 2) + 1` is `2+2j` |
+| Array shape | `shape(a)`, `reshape(a, shape)`, `transpose(a)`, `flatten(a)`, `ravel(a)`, `matmul(a, b)`, `concat(a, b)`, `stack(a, b)`, `subview(a, start, end)`, `is_view(a)`, `ndim(a)` |
+| In-place mutation (`pn`) | `push(arr, value)`, `splice(arr, start, count)` |
+| Image processing | `load(path)`, `save(img, path)`, `as_float`, `as_ubyte`, `invert`, `gamma`, `threshold`, `grayscale`, `flip`, `rot90`, `crop(img, w, h)`, `resize(img, w, h)`, `rotate`, `affine_warp`, `convolve`, `blur`, `erode`, `dilate`, `median_filter`, `maxpool`, `avgpool`, `histogram`, `otsu`, `label` |
+| Reactive UI | `apply(target, options?)`, `emit(event, payload)` — see [Reactive_UI.md](Reactive_UI.md) |
+| Editor bridge | `undo()`, `redo()`, `edit_commit(description?)` |
+| HTTP server (`pn`, untested) | `io.http_create_server(config)`, `io.http_listen(server, port)`, `io.http_route(server, method, path, handler)`, `io.http_use(server, middleware)`, `io.http_static(server, url_path, dir)`, `io.http_stop(server)` |
 
 ---
 
@@ -1498,13 +1531,15 @@ pn main() {                  // print is a pn: only a pn may call it
 | `content` | 1 | Element content items (read-only view) |
 | `type` | 1 | Get type |
 | `int` | 1 | Convert to int |
-| `int64` | 1 | Convert to int64 |
+| `i8` … `u64` | 1 | Convert to a sized integer (`i64` is the widening constructor) |
+| `f16`, `f32` | 1 | Convert to a sized float |
 | `float` | 1 | Convert to float |
 | `decimal` | 1 | Convert to decimal |
 | `string` | 1 | Convert to string |
-| `symbol` | 1 | Convert to symbol |
+| `symbol` | 1-2 | Convert to symbol; `symbol(name, url)` is namespaced |
 | `binary` | 1 | Convert to binary |
-| `number` | 1 | Convert to number |
+| `count` | 1 | Size of the run a query answered with |
+| `name` | 1 | Name of an element, function or type |
 
 ### Math Functions
 | Function | Args | Description |
@@ -1550,8 +1585,8 @@ pn main() {                  // print is a pn: only a pn may call it
 | `max` | 1-2 | Maximum |
 | `argmin` | 1 | Index of min |
 | `argmax` | 1 | Index of max |
-| `sum` | 1 | Sum |
-| `avg` | 1 | Average |
+| `sum` | 1-2 | Sum (optional axis for nested arrays) |
+| `avg` | 1-2 | Average (optional axis, or `true` to skip nulls) |
 
 ### Statistical Functions (math Module)
 | Function | Args | Description |
@@ -1566,7 +1601,7 @@ pn main() {                  // print is a pn: only a pn may call it
 | `math.cumprod` | 1 | Cumulative product |
 | `math.dot` | 2 | Dot product |
 | `math.norm` | 1 | Euclidean norm |
-| `math.random` | 0-2 | Random number |
+| `math.random` | 1 | `[value, new_seed]` from an integer seed |
 
 ### String Functions
 | Function | Args | Description |
@@ -1587,7 +1622,7 @@ pn main() {                  // print is a pn: only a pn may call it
 | `find` | 2 | Find all pattern/substring matches |
 | `ord` | 1 | Unicode code point of first character (`null` if absent) |
 | `chr` | 1 | Character from Unicode code point (`""` if absent/invalid) |
-| `normalize` | 1 | Normalize string |
+| `normalize` | 1-2 | Unicode-normalize a string (optional form) |
 | `url_resolve` | 2 | Resolve relative URL against base |
 
 ### Collection Functions
@@ -1597,7 +1632,6 @@ pn main() {                  // print is a pn: only a pn may call it
 | `index_of` | 2 | Index of first matching element (`null` if absent) |
 | `last_index_of` | 2 | Index of last matching element (`null` if absent) |
 | `slice` | 2 or 3 | Extract slice; 2-arg form slices to end |
-| `set` | 1+ | Remove duplicates |
 | `all` | 1 | All truthy |
 | `any` | 1 | Any truthy |
 | `reverse` | 1 | Reverse order |
@@ -1611,13 +1645,14 @@ pn main() {                  // print is a pn: only a pn may call it
 | `fill` | 2 | Fill vector |
 | `range` | 3 | Range with step |
 | `reduce` | 2 | Reduce with binary fn |
+| `clip` | 3 | Clamp items into a range |
 
 ### Date/Time Functions
 | Function | Args | Description |
 |----------|------|-------------|
-| `datetime` | 0-1 | Date and time |
-| `date` | 1 | Extract date |
-| `time` | 1 | Extract time |
+| `datetime` | 0-1 | Date and time (string or Unix milliseconds) |
+| `date` | 0, 1 or 3 | Today, extract date, or `date(y, m, d)` |
+| `time` | 0, 1 or 3 | Now, extract time, or `time(h, m, s)` |
 | `today` | 0 | Current date (proc) |
 | `now` | 0 | Current time (proc) |
 | `justnow` | 0 | Time only |
@@ -1644,8 +1679,8 @@ pn main() {                  // print is a pn: only a pn may call it
 | `io.chmod` | 2 | Change permissions |
 | `io.rename` | 2 | Rename file/directory |
 | `io.read` | 1 | Asynchronously read a local file (proc) |
-| `io.fetch` | 2 | HTTP request |
-| `cmd` | 1+ | Shell command |
+| `io.fetch` | 1-2 | HTTP request (`fetch` is the bare spelling) |
+| `cmd` | 1-2 | Shell command; arguments as one array |
 | `clock` | 0 | Monotonic clock (seconds) |
 
 ### Concurrency Functions
@@ -1664,6 +1699,6 @@ pn main() {                  // print is a pn: only a pn may call it
 ### Other Functions
 | Function | Args | Description |
 |----------|------|-------------|
-| `error` | 1 | Create error |
+| `error` | 1-2 | Create error, optionally wrapping a source error |
 | `varg` | 0-1 | Variadic args |
 | `call` | 2 | Apply `f` to an array of arguments |

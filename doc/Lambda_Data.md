@@ -52,7 +52,7 @@ Lambda Script has a rich type system with both primitive and composite types:
 | `float`    | 64-bit floating point       | `3.14`, `1.5e-10`     |
 | `i8` `i16` `i32` | Sized signed integers | `42i8`, `1000i16`     |
 | `u8` `u16` `u32` | Sized unsigned integers | `255u8`, `60000u16` |
-| `i64`      | 64-bit signed (alias for `int64`) | `100i64`        |
+| `i64`      | 64-bit signed integer       | `100i64`              |
 | `u64`      | 64-bit unsigned integer     | `1000u64`             |
 | `f16` `f32`| Sized floating point        | `0.5f16`, `3.14f32`   |
 | `f64`      | 64-bit float (alias for `float`) | `2.7f64`         |
@@ -117,7 +117,7 @@ Lambda treats empty strings as real `string` values. The empty symbol literal
 | `42i8` | Sized int | 8-bit signed, `[-128, 127]` |
 | `1000i16` | Sized int | 16-bit signed, `[-32768, 32767]` |
 | `100000i32` | Sized int | 32-bit signed, `[-2^31, 2^31-1]` |
-| `100i64` | Sized int | 64-bit signed — alias for `int64` |
+| `100i64` | Sized int | 64-bit signed, `[-2^63, 2^63-1]` |
 | `255u8` | Sized int | 8-bit unsigned, `[0, 255]` |
 | `60000u16` | Sized int | 16-bit unsigned, `[0, 65535]` |
 | `3000000000u32` | Sized int | 32-bit unsigned, `[0, 2^32-1]` |
@@ -361,7 +361,7 @@ dt.is_utc        // false      (bool)
 **Meta Properties:**
 
 ```lambda
-dt.unix          // 1745635845123 (int, Unix timestamp in milliseconds)
+dt.unix          // 1745643645123 (int, Unix timestamp in milliseconds)
 dt.is_date       // true       (bool, has date component)
 dt.is_time       // true       (bool, has time component)
 dt.is_leap_year  // false      (bool)
@@ -393,7 +393,6 @@ dt.format("MMM DD, YYYY")            // "Apr 26, 2025"
 
 // Predefined format names (symbol argument)
 dt.format('iso')                      // "2025-04-26T10:30:45"
-dt.format('human')                    // "April 26, 2025 10:30 AM"
 dt.format('date')                     // "2025-04-26"
 dt.format('time')                     // "10:30:45"
 ```
@@ -433,31 +432,26 @@ datetime()                           // current UTC datetime
 // Parse from string
 datetime("2025-04-26T10:30:00")      // parse ISO 8601 string
 
-// From components
-datetime(2025, 4, 26)                // date only: t'2025-04-26'
-datetime(2025, 4, 26, 10, 30)        // date + time: t'2025-04-26 10:30'
-datetime(2025, 4, 26, 10, 30, 45)    // full: t'2025-04-26 10:30:45'
-
-// From Unix timestamp
-datetime(1714100000)                 // from Unix timestamp (seconds)
-
-// From map
-datetime({year: 2025, month: 4, day: 26, hour: 10, minute: 30})
+// From a Unix timestamp in milliseconds (the unit of dt.unix)
+datetime(1745643645123)              // t'2025-04-26 05:00:45.123z'
 ```
+
+Component constructors exist for dates and times (below); `datetime` itself
+takes a string or a timestamp.
 
 **`date(...)` — Date Constructor:**
 
 ```lambda
+let some_datetime = t'2025-04-26T10:30:45'
+
 // Current date
 date()                   // same as today()
 
 // Extract from datetime
-date(some_datetime)      // extract date part
+date(some_datetime)      // t'2025-04-26'
 
 // From components
 date(2025, 4, 26)        // t'2025-04-26'
-date(2025, 4)            // t'2025-04'   (year-month)
-date(2025)               // t'2025'      (year only)
 
 // Parse from string
 date("2025-04-26")       // parse date string
@@ -466,16 +460,16 @@ date("2025-04-26")       // parse date string
 **`time(...)` — Time Constructor:**
 
 ```lambda
+let some_datetime = t'2025-04-26T10:30:45'
+
 // Current time
 time()                   // same as justnow()
 
 // Extract from datetime
-time(some_datetime)      // extract time part
+time(some_datetime)      // t'10:30:45'
 
 // From components
-time(10, 30)             // t'10:30'
 time(10, 30, 45)         // t'10:30:45'
-time(10, 30, 45, 500)    // t'10:30:45.500'
 
 // Parse from string
 time("10:30:45")         // parse time string
@@ -504,8 +498,8 @@ The `path` type represents file system paths and URLs in a unified, platform-ind
 | `/.etc.hosts` | Rooted logical (starts `/.`) | `/etc/hosts` |
 | `/.home.user.documents` | Rooted logical | `/home/user/documents` |
 | `/.usr.local.bin.lambda` | Rooted logical | `/usr/local/bin/lambda` |
-| `\.config.json` | Relative (starts `\.`) | `./config.json` |
-| `\.src.main.ls` | Relative | `./src/main.ls` |
+| `\.'config.json'` | Relative (starts `\.`) | `./config.json` — a dot inside a name makes it one quoted step |
+| `\.src.'main.ls'` | Relative | `./src/main.ls` |
 | `\.~~.parent.file` | Relative, parent step `\.~~` | `../parent/file` |
 | `/.var.log.'app.log'` | Quoted segment | `/var/log/app.log` |
 | `\.data.'my-file.json'` | Quoted segment | `./data/my-file.json` |
@@ -513,9 +507,9 @@ The `path` type represents file system paths and URLs in a unified, platform-ind
 | `http.api.github.com.users` | HTTP URL | `http://api.github.com/users` |
 | `https.example.com.data` | HTTPS URL | `https://example.com/data` |
 | `https.httpbin.org.json` | HTTPS URL | `https://httpbin.org/json` |
-| `sys.env.HOME` | System | environment variable `$HOME` |
-| `sys.env.PATH` | System | environment variable `$PATH` |
-| `sys.platform` | System | operating system platform |
+| `sys.proc.self.env.HOME` | System | environment variable `$HOME` |
+| `sys.proc.self.env.PATH` | System | environment variable `$PATH` |
+| `sys.os.platform` | System | operating system platform |
 | `\.src.*` | Wildcard, single-level | all items in `./src` |
 | `\.test.**` | Wildcard, recursive | all under `./test` |
 | `/.var.log.'*.log'` | Wildcard in filename | pattern match on the name |
@@ -529,7 +523,7 @@ The `path` type represents file system paths and URLs in a unified, platform-ind
 | Relative (parent)  | `\.~~`      | `\.~~.shared.lib`        | `../shared/lib`             |
 | HTTP               | `http`      | `http.'api.example.com'` | `http://api.example.com`    |
 | HTTPS              | `https`     | `https.'secure.api'`     | `https://secure.api`        |
-| System             | `sys`       | `sys.env.PATH`           | System environment variable |
+| System             | `sys`       | `sys.proc.self.env.PATH` | System environment variable |
 | Temporary          | `temp`      | `temp.'scratch'`         | An in-memory document       |
 
 ### Wildcards
@@ -555,7 +549,7 @@ let config = base ++ "config" ++ "settings.json"
 
 let project = \.src
 let file = project ++ "main.ls"
-// Result: .src.'main.ls'
+// Result: \.src.'main.ls'
 ```
 
 ### Path vs String
@@ -586,7 +580,7 @@ let data2 = input(s, 'json')^
 ```lambda
 // Check existence
 exists(/.etc.hosts)           // true or false
-exists(\.config.json)         // true or false
+exists(\.'config.json')       // true or false
 
 // Load content
 let content = input(/.etc.hosts, 'text')^   // Load file content
@@ -614,9 +608,9 @@ fragment step.
 `reference` is the type `symbol | path` — a URI is a URN or a URL:
 
 ```lambda
-/.etc.hosts is path        // true
-/.etc.hosts is symbol      // false — `path` is its own scalar type
-/.etc.hosts is reference   // true
+/.etc.hosts is path;       // true
+/.etc.hosts is symbol;     // false — `path` is its own scalar type
+/.etc.hosts is reference;  // true
 'name' is reference        // true
 ```
 
@@ -626,16 +620,19 @@ Containers **inside a document** carry an identity: their path within it.
 Prefix `&` reads that identity, or `null`; `===` compares two of them.
 
 ```lambda
-let doc = \.data.'page.json'#
-&doc.a.b          // \.data.'page.json'.a.b
-&doc.title        // null — a scalar is a value, not a place
-&{x: 1}           // null — runtime-constructed data has none
-(&doc.a.b)#       // round trip: the reference forces back to the node
+let doc = temp('page', {a: {b: {c: 1}}, title: "T"})^;   // or: \.data.'page.json'#
+&doc.a.b;         // temp.page.a.b — the node's path within its document
+&doc.title;       // null — a scalar is a value, not a place
+&{x: 1};          // null — runtime-constructed data has none
+(&doc.a.b)#;      // {c: 1} — round trip: the reference forces back to the node
 
-doc.a === doc.a   // true
-doc.a === doc.b   // false
+doc.a === doc.a;  // true
+doc.a === doc.b;  // false
 1 === 1           // false — identity-less operands compare false, never error
 ```
+
+A line that starts with `&` after a complete statement needs the `;` shown
+above: `&` is also the infix intersection operator (S16.2.3v3).
 
 `&` binds looser than the postfix steps, so `&x.y` is `&(x.y)`, as in C. Because
 `&` is also infix set intersection, a line that *starts* with `&` after an
@@ -655,26 +652,26 @@ The `sys` path scheme provides cross-platform access to system information. Valu
 | `sys.proc` | Map | Process information |
 | `sys.home` | Path | User home directory |
 | `sys.temp` | Path | System temporary directory |
-| `sys.time` | Map | Current time and timezone |
+| `sys.time` | Map | Current time and uptime |
 | `sys.lambda` | Map | Lambda runtime information |
-| `sys.locale` | Map | Locale settings |
 
 #### OS Information (`sys.os.*`)
 
 ```lambda
 sys.os.name              // "Darwin", "Linux", "Windows"
-sys.os.version           // "23.2.0", "6.5.0", "10.0.22631"
+sys.os.version           // "25.3.0", "6.5.0", "10.0.22631"
 sys.os.kernel            // Full kernel version string
 sys.os.platform          // "darwin", "linux", "windows"
+sys.os.machine           // "arm64", "x86_64"
 sys.os.hostname          // Machine hostname
 ```
 
 #### CPU Information (`sys.cpu.*`)
 
 ```lambda
-sys.cpu.model            // "Apple M2", "Intel Core i7-12700K"
-sys.cpu.cores            // Number of CPU cores (e.g., 8)
-sys.cpu.architecture     // "arm64", "x86_64"
+sys.cpu.cores            // Number of CPU cores (e.g., 10)
+sys.cpu.threads          // Number of hardware threads
+sys.cpu.arch             // "arm64", "x86_64"
 ```
 
 #### Memory Information (`sys.memory.*`)
@@ -690,20 +687,13 @@ sys.memory.used          // Used memory in bytes
 ```lambda
 // Current process
 sys.proc.self.pid        // Current process ID
-sys.proc.self.ppid       // Parent process ID
-sys.proc.self.uid        // User ID (Unix)
-sys.proc.self.gid        // Group ID (Unix)
 sys.proc.self.argv       // Argument array, including executable at index 0 (S17.3.1)
-sys.proc.self.cwd        // Current working directory (as Path)
-sys.process              // Alias for sys.proc.self
+sys.proc.self.cwd        // Current working directory (a string)
 
 // Environment variables
 sys.proc.self.env        // Map of all environment variables
 sys.proc.self.env.PATH   // Specific variable: $PATH
 sys.proc.self.env.HOME   // Specific variable: $HOME
-
-// System uptime
-sys.proc.uptime          // System uptime in seconds
 ```
 
 #### Directory Paths (`sys.home`, `sys.temp`)
@@ -722,27 +712,18 @@ let tempfile = sys.temp ++ "output.txt"
 // Result: /tmp.'output.txt'
 ```
 
-#### Lambda Runtime Paths (`sys.lambda.*`)
-
-```lambda
-sys.lambda.version       // Lambda runtime version
-sys.lambda.home          // Package and runtime asset directory
-```
-
 #### Time Information (`sys.time.*`)
 
 ```lambda
-sys.time.now             // Current datetime
-sys.time.zone            // Timezone name (e.g., "America/Los_Angeles")
-sys.time.offset          // UTC offset in seconds
+sys.time.now             // Current Unix time in seconds (int)
+sys.time.uptime          // System uptime in seconds
 ```
 
 #### Lambda Runtime (`sys.lambda.*`)
 
 ```lambda
-sys.lambda.version       // Lambda version (e.g., "0.9.0")
-sys.lambda.build         // Build date
-sys.lambda.features      // List of enabled features
+sys.lambda.version       // Lambda runtime version (e.g., "0.1.0")
+sys.lambda.home          // Package and runtime asset directory
 ```
 
 #### Full Example
@@ -751,7 +732,7 @@ sys.lambda.features      // List of enabled features
 // Build a system report
 let report = {
     os: sys.os.name ++ " " ++ sys.os.version,
-    cpu: sys.cpu.model,
+    cpu: sys.cpu.arch,
     cores: sys.cpu.cores,
     memory_gb: sys.memory.total / (1024 ** 3),
     home: sys.home,
@@ -827,11 +808,13 @@ count/structural patterns rather than alternate spellings of `T[]`
 ```lambda
 type Variable = {value: int}
 
-var values: Variable[] = [{value: 1}]
-values[0] = {value: 2}
+pn update() {
+    var values: Variable[] = [{value: 1}]
+    values[0] = {value: 2}
 
-var bytes: u8[] = [1u8, 2u8]
-bytes[1] = 9u8
+    var bytes: u8[] = [1u8, 2u8]
+    bytes[1] = 9u8
+}
 ```
 
 Typed numeric arrays may use compact native lanes internally. That carrier is
@@ -1119,7 +1102,9 @@ When updating an existing map or record-shaped state, spread the original value
 first and then list the fields to change:
 
 ```lambda
-let next_state = {*:state, fill: "red", font_size: 12}
+let style = {fill: "blue", font_size: 10, stroke: "black"}
+let next_style = {*:style, fill: "red", font_size: 12}
+// {fill: "red", font_size: 12, stroke: "black"}
 ```
 
 A fresh map literal contains exactly the fields written in the literal. It does
@@ -1263,13 +1248,13 @@ int(3.14)                   // 3
 
 // To float
 float("3.14")               // 3.14
-float(42)                   // 42.0
+float(42)                   // 42 (a float)
 
 // To symbol
-symbol("hello")             // 'hello'
+symbol("hello");            // 'hello'
 
-// To array
-array((1, 2, 3))            // [1, 2, 3]
+// A list becomes an array by spreading it into an array literal
+[*(1, 2, 3)]                // [1, 2, 3]
 ```
 
 ---
@@ -1307,11 +1292,13 @@ Outside `open`, each statement is its own transaction and commits at once — th
 shell case. Inside `open`, every statement forms one write set:
 
 ```lambda
+let scratch = temp('scratch', {n: 1})^
 open t = temp.'scratch' {
     put t.n = 5;
     put t.tag = 'x';
     commit                    // or: the block commits at its end
 }                             // an unhandled error always rolls back
+temp('scratch')               // {n: 5, tag: 'x'}
 ```
 
 The `open` alias is the opened document (`#` is implied); `&t` recovers its

@@ -153,6 +153,27 @@ sequence-plus-sequence. Use `++` when the intent is list/array concatenation:
 | `[1, 2] + [3, 4]` | `[4, 6]` | element-wise addition |
 | `[1, 2] ++ [3, 4]` | `[1, 2, 3, 4]` | concatenation |
 
+### Element-wise Comparison
+
+The symbolic comparisons `< <= > >= == !=` are scalar-only and never
+element-wise (S10.2.2). Element-wise comparison has its own keyword
+operators — `eq`, `ne`, `lt`, `le`, `gt`, `ge` — which broadcast like
+arithmetic and yield a bool **mask**. A mask is consumed explicitly
+(S10.2.3): `sum(mask)` counts the true lanes, `all`/`any` reduce it, and
+`arr[mask]` selects by it.
+
+| Expression | Result | |
+|---|---|---|
+| `[1, 2, 3] eq 2` | `[false, true, false]` | scalar broadcast |
+| `[1, 2, 3] gt 1` | `[false, true, true]` | |
+| `[1, 2] ne [1, 3]` | `[false, true]` | element-wise |
+| `2 lt 3` | `true` | scalars compare as scalars |
+| `sum([1, 2, 3] gt 1)` | `2` | count the true lanes |
+| `[10, 20, 30][[1, 2, 3] ge 2]` | `[20, 30]` | boolean indexing |
+
+A mask is a container, and containers are truthy, so `if ([1, 2] eq 1)`
+does not test the lanes — reduce it first with `all` or `any`.
+
 ---
 
 ## Comparison Expressions
@@ -365,10 +386,10 @@ arr.len()          // Same as len(arr)
 "hello".upper()    // Same as upper("hello")
 items.sort()       // Same as sort(items)
 
-// Null receiver returns null
+// Null receiver
 let items = null
 items.len()        // 0 (len of null is 0)
-items.reverse()    // null
+items.reverse()    // []
 ```
 
 ---
@@ -1313,7 +1334,7 @@ From highest to lowest:
 | 4          | `*`, `/`, `div`, `%`       | Multiplicative  |
 | 5          | `+`, `-`, `++`             | Additive, concatenation |
 | 6          | `<`, `<=`, `>`, `>=`       | Relational      |
-| 7          | `==`, `!=`, `===`          | Equality (`===`: reference equality) |
+| 7          | `==`, `!=`, `===`, `eq`, `ne`, `lt`, `le`, `gt`, `ge` | Equality (`===`: reference equality); the word forms are element-wise (S10.2.2) |
 | 8          | `to`                       | Range           |
 | 9          | `&`                        | Type intersection |
 | 10         | `!`                        | Type exclusion  |
@@ -1362,13 +1383,17 @@ position `!T` is the complement type, as in `x is !null`. The type operators
 | `or` | Logical OR | `true or false` | `true` |
 | `not` | Logical NOT | `not true` | `false` |
 
-### Set Operators
+### Type Operators (`|`, `&`, `!`)
 
-| Operator | Description  | Example        |
-| -------- | ------------ | -------------- |
-| `&`      | Intersection | `set1 & set2`  |
-| `\|`     | Union        | `set1 \| set2` |
-| `!`      | Exclusion    | `set1 ! set2`  |
+`|`, `&` and `!` are type operators everywhere, expressions included
+(S10.1.1v3); they never merge containers. For set algebra on collections use
+`unique`, `intersect` and `except` (see [Lambda_Sys_Func.md](Lambda_Sys_Func.md)).
+
+| Operator | Description  | Example        | Result |
+| -------- | ------------ | -------------- | ------ |
+| `\|`     | Union        | `int \| string` | the type admitting an int or a string |
+| `&`      | Intersection | `int & number` | `int` |
+| `!`      | Exclusion    | `any ! null`   | every non-null value |
 
 ### Type Operators
 
@@ -1384,7 +1409,6 @@ position `!T` is the complement type, as in `x is !null`. The type operators
 
 | Operator | Description | Example | Result |
 |----------|-------------|---------|--------|
-| `\|` | Union | `[1, 2] \| [2, 3]` | `[1, 2, 3]` |
 | `\|>` | Pipe (transform) | `[1, 2, 3] \|> ~ * 2` | `[2, 4, 6]` |
 | `\|:` | Filter | `[1, 2, 3, 4] \|: (~ > 2)` | `[3, 4]` |
 | `that` | Proviso (one value) | `[1, 2, 3, 4] that len(~) > 2` | `[1, 2, 3, 4]` |

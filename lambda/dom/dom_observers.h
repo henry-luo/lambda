@@ -34,6 +34,7 @@ void dom_notify_mutation_detail(DomJsMutationKind kind,
                                    void* target, void* parent,
                                    const char* attribute_name,
                                    const char* old_value);
+void dom_notify_scroll_position_change(void* element, float old_x, float old_y);
 
 #ifdef __cplusplus
 struct JsRuntimeState;

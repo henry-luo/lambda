@@ -158,10 +158,10 @@ Run the full baseline:
 container exec lambda-linux-dev bash -lc 'make test-lambda-baseline'
 ```
 
-For the Radiant baseline, mount the external layout, render, and PDF fixture
-trees when creating the test container. The PDF iframe fixture needs the PDF
-mount, and visual rendering needs the fixture's Liberation and other test fonts
-registered with fontconfig:
+For the Radiant baseline, mount the external fixture trees when creating the
+test container. The PDF iframe fixture needs the PDF mount; DOM UI and CSS
+syntax need the jQuery UI and WPT mounts. Visual rendering needs the fixture's
+Liberation and other test fonts registered with fontconfig:
 
 ```bash
 container run --detach --name lambda-linux-radiant --cpus 8 --memory 16G \
@@ -169,21 +169,21 @@ container run --detach --name lambda-linux-radiant --cpus 8 --memory 16G \
   --volume /Users/henryluo/Projects/lambda-test/layout:/lambda/test/layout:ro \
   --volume /Users/henryluo/Projects/lambda-test/render:/lambda/test/render:ro \
   --volume /Users/henryluo/Projects/lambda-test/pdf:/lambda/test/pdf:ro \
+  --volume /Users/henryluo/Projects/lambda-test/jquery-ui:/lambda-test/jquery-ui:ro \
+  --volume /Users/henryluo/Projects/lambda/ref/wpt:/lambda/ref/wpt:ro \
   --workdir /lambda lambda-linux-arm64:latest sleep infinity
 container exec lambda-linux-radiant bash -lc \
   'mkdir -p /usr/local/share/fonts/lambda-test && cp test/layout/data/font/*.ttf test/layout/data/font/*.otf /usr/local/share/fonts/lambda-test/ && fc-cache -f /usr/local/share/fonts/lambda-test'
 ```
 
-The development container has Premake and the built native dependencies. To
-reuse its workspace build artifacts with the fixture-mounted test container:
+Provision Premake and the native libraries in the fixture-mounted container,
+then run the complete target there. A fresh ARM64 image does not contain the
+locally built Premake, mbedTLS, or ThorVG libraries:
 
 ```bash
-container exec lambda-linux-dev bash -lc 'make build-radiant-baseline'
-container exec lambda-linux-radiant bash -lc 'make run-radiant-baseline'
+container exec lambda-linux-radiant bash -lc './setup-linux-deps.sh'
+container exec lambda-linux-radiant bash -lc 'make test-radiant-baseline'
 ```
-
-On a separately provisioned container with Premake and native dependencies,
-`make test-radiant-baseline` performs both steps.
 
 The ordinary Linux debug build does not use AddressSanitizer. The explicit
 `debug_asan` profile produces `lambda-debug-asan.exe`; keep sanitizer-specific
@@ -200,6 +200,17 @@ Validated on 2026-09-28 with `lambda-linux-arm64:latest` and
 - Input baseline: **2,104/2,104 passed**.
 - Lambda runtime baseline: **3,888/3,888 passed**.
 - Combined `make test-lambda-baseline`: **5,992/5,992 passed**.
+
+Radiant validation remains in progress. The final split build/run in the
+layout/render/PDF-mounted container reported **3,280 passed, 308 partially
+passing, 316 failed**. Within that result, form layout has **5 failures**,
+render visuals have **33 baseline regressions**, and the view command, view UI,
+and page-load suites pass. This particular container lacks WPT and jQuery UI
+mounts and the native development libraries, so DOM UI and CSS syntax could not
+run there. In the provisioned development container, DOM UI separately passed
+**127/127**, WPT CSS syntax passed **38** with **6 skips**, and WPT input events
+passed **20** with **12 skips**. A single fully provisioned container with all
+mounts is still needed for an authoritative `make test-radiant-baseline` count.
 
 Review platform behavior before updating golden files or MIR budgets. The
 Linux `libm` output keeps its own exact golden (S4.8.1), sequence functions

@@ -14,17 +14,19 @@
 
 ## Introduction
 
-Lambda Script is a **general-purpose, cross-platform, pure functional scripting language** designed for data processing and document presentation. Built from scratch in C with JIT compilation using MIR (Medium Internal Representation) and reference counting memory management.
+Lambda Script is a **general-purpose, cross-platform, pure functional scripting language** designed for data processing and document presentation. It is built from scratch in C/C++: a script starts on an AST interpreter and hot functions are compiled to native code through the MIR (Medium Internal Representation) JIT, over a garbage-collected value heap.
+
+> **Alpha status.** The language is usable but still evolving. Features that the formal specification rules but the current build does not yet implement are marked **Not yet implemented** where they appear in these documents; the authoritative list is Appendix A of [Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md).
 
 ### Key Features
 
-- **Pure Functional**: Immutable data structures and functional programming paradigms
-- **JIT Compilation**: Near-native performance through MIR-based compilation
-- **Cross-Platform**: Runs on macOS, Linux, Windows with consistent behavior
-- **Rich Type System**: Strong typing with type inference and advanced type constructs
-- **Document Processing**: Built-in support for 12+ input formats and multiple output formats
-- **Unicode Support**: Configurable Unicode support with ICU integration
-- **Memory Safe**: Reference counting and pool-based memory management
+- **Pure functional core**: immutable data (arrays, maps, elements), first-class functions and types; `pn` procedures for controlled side effects
+- **Two execution tiers**: an AST interpreter runs a script immediately and the MIR JIT compiles hot functions to native code (D8.1.1)
+- **Cross-platform**: macOS, Linux and Windows with consistent behavior
+- **Rich type system**: static checking with inference; union, occurrence and element types, string patterns, constrained types, nominal object types — and every type doubles as a schema
+- **Document processing**: some 30 input formats and 20 output formats through one Mark data model, plus the Radiant layout and rendering engine (see [Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md))
+- **Unicode**: UTF-8 strings indexed by code point; case mapping, case folding and normalization via utf8proc
+- **Memory**: a non-moving mark-and-sweep garbage collector with precise rooting; copy-on-write value semantics
 
 ---
 
@@ -49,35 +51,64 @@ Lambda Script is designed around functional programming principles with modern s
 
 ## Documentation Guide
 
-The Lambda language documentation is organized into focused sub-documents for easier navigation and maintenance:
+The Lambda documentation is organized into focused documents. Read them in the order of the first table for a tour of the language; the other tables are references.
 
-### Core Documentation
-
-| Document | Description |
-|----------|-------------|
-| **[Lambda_Syntax.md](Lambda_Syntax.md)** | **Syntax Fundamentals** — Comments, identifiers, names, symbols, namespaces |
-| **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals, arrays, maps, elements, ranges, and data composition expressions |
-| **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union types, function types, type patterns, and string patterns |
-| **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic, comparisons, logical operations, pipe expressions, query expressions (`?` `.?` `[T]`), control flow, and operators |
-| **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — Function declarations, parameters, closures, higher-order functions, and procedural functions (`fn` and `pn`) |
-| **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — Mutable variables, assignment, while loops, I/O module, `pn` functions, and `main()` entry point |
-| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error types, `raise` keyword, `^` propagation, the `^ { }` handler, compile-time enforcement |
-
-### Reference Documentation
+### Language Reference
 
 | Document | Description |
 |----------|-------------|
-| **[Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)** | **Formal Semantics (normative ADR)** — the core principles and decided semantics: value domain, truthiness, numerics, equality, total sort order, absence/errors, mutable value semantics, operators, metaprogramming. The authority when documentation or implementation disagree |
-| **[Lambda_CLI.md](Lambda_CLI.md)** | **CLI Reference** — Commands, flags, and usage for the Lambda command-line interface |
-| **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** | **System Functions** — Complete reference for all built-in functions (type, math, string, collection, I/O, date/time) |
-| **[Lambda_Validator_Guide.md](Lambda_Validator_Guide.md)** | **Validation** — Schema-based validation for data structures |
+| **[Lambda_Syntax.md](Lambda_Syntax.md)** | **Syntax Fundamentals** — Comments, statements and line continuation, identifiers and reserved words, strings, symbols, namespaces |
+| **[Lambda_Data.md](Lambda_Data.md)** | **Literals and Collections** — Primitive types, path literals and references, arrays, maps, elements, ranges, data composition, document updates |
+| **[Lambda_Type.md](Lambda_Type.md)** | **Type System** — First-class types, type hierarchy, union/occurrence/element types, function types, object types, constrained types, string patterns |
+| **[Lambda_Expr_Stam.md](Lambda_Expr_Stam.md)** | **Expressions and Statements** — Arithmetic and vector arithmetic, comparisons, pipes (`\|>` `\|:` `that`), queries (`?` `.?` `[T]`), `if`/`for`/`match`, operators and precedence |
+| **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — `fn` and `pn` declarations, parameters, closures, higher-order and colour-polymorphic functions, method-style calls |
+| **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — `var`, assignment, value semantics, `while`, `return`, file output, the `io` module, `main()`, concurrency |
+| **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error values, `raise`, `T^E` return types, postfix `^` propagation, the `^ { }` handler, compile-time enforcement, error codes |
+| **[Lambda_Cheatsheet.md](Lambda_Cheatsheet.md)** | **Cheatsheet** — One-page syntax summary |
+
+### Library and Tools
+
+| Document | Description |
+|----------|-------------|
+| **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** | **System Functions** — Every built-in function: type, math, string, collection, date/time, I/O, concurrency |
+| **[Lambda_CLI.md](Lambda_CLI.md)** | **CLI Reference** — Commands, flags, environment variables and usage of `lambda.exe` |
+| **[Lambda_Validator_Guide.md](Lambda_Validator_Guide.md)** | **Validation** — Writing schemas with `type` declarations and validating files with `lambda validate` |
+
+### Documents, Rendering and UI
+
+| Document | Description |
+|----------|-------------|
+| **[Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md)** | **Document Pipeline** — The Mark data model, how input formats map onto it, the convert/validate/transform/render/view/edit workflows, and how Lambda compares with Pandoc, the XML stack, Typst and browsers |
+| **[Markup_Formats_Support.md](Markup_Formats_Support.md)** | **Input and Output Formats** — Every supported markup and data format and the Mark tree each one produces |
+| **[Doc_Schema.md](Doc_Schema.md)** | **Mark Doc Schema** — The shared element vocabulary for prose documents (Markdown, HTML, RST, wiki, …) |
+| **[Math_Support.md](Math_Support.md)** | **Math** — LaTeX and ASCII math input, the `math` rendering package, supported commands |
+| **[Reactive_UI.md](Reactive_UI.md)** | **Reactive UI** — `view` and `edit` templates, `apply()` dispatch, template state and `on` event handlers |
+| **[JS_DOM_Support.md](JS_DOM_Support.md)** | **LambdaJS** — The embedded JavaScript engine and browser DOM: conformance status, Node compatibility, benchmarks |
+
+### Hosted Languages
+
+| Document | Description |
+|----------|-------------|
+| **[Python_Support.md](Python_Support.md)** | **Python** — Running Python on the Lambda runtime through the `lang-python` Jube module |
+| **[Bash_Support.md](Bash_Support.md)** | **Bash** — The Bash front end (not compiled into the current builds; see its status banner) |
+| **[Lambda_Jube_Runtime.md](Lambda_Jube_Runtime.md)** | **Jube Runtime** — How hosted-language modules are built, packaged and discovered |
+
+### Normative Specifications
+
+| Document | Description |
+|----------|-------------|
+| **[Lambda_Formal_Semantics.md](Lambda_Formal_Semantics.md)** | **Formal Semantics** — `S`-numbered rulings: value domain, truthiness, numerics, equality, ordering, absence and errors, mutability, operators, types, functions, concurrency, syntax. The authority when documentation or implementation disagree; Appendix A lists what is not yet implemented |
+| **[Lambda_Formal_Design.md](Lambda_Formal_Design.md)** | **Formal Design** — `D`-numbered rulings on the runtime's architecture, data representation, memory, stacks, functions, modules and compilation pipeline |
+| **[Doc_Convention.md](Doc_Convention.md)** | **Documentation Convention** — Document tiers, authority order, code-fence markers and the doc-example gate |
 
 ### Developer Documentation
 
 | Document | Description |
 |----------|-------------|
-| **[Developer_Guide.md](dev/Developer_Guide.md)** | **Developer Guide** — Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT |
-| **[lambda/LR_00_Overview.md](dev/lambda/LR_00_Overview.md)** | **Lambda Core Runtime** — Runtime internals and architecture: compilation pipeline, value & type model, MIR-Direct transpiler and JIT, memory & GC, builtins |
+| **[Developer_Guide.md](dev/Developer_Guide.md)** | **Developer Guide** — Build from source, dependencies, testing, grammar, MIR JIT |
+| **[lambda/LR_00_Overview.md](dev/lambda/LR_00_Overview.md)** | **Lambda Core Runtime** — Compilation pipeline, value & type model, MIR-Direct transpiler and JIT, memory & GC, builtins |
+| **[radiant/RAD_00_Overview.md](dev/radiant/RAD_00_Overview.md)** | **Radiant Engine** — CSS resolution, layout, rendering, events, editing, the application shell |
+| **[js/JS_00_Overview.md](dev/js/JS_00_Overview.md)** | **LambdaJS Runtime** — The JavaScript engine's pipeline, value model, runtime, DOM and Node compatibility |
 
 ### Quick Reference
 
@@ -123,13 +154,16 @@ let a: i8 = 42i8
 let b: u32 = 255u32
 let c: f32 = 3.14f32
 
-// Typed array annotations
-var arr: int[] = [1, 2, 3]     // Native int array
-var data: float[] = [0.1, 0.2] // Native float array
+// Typed arrays are native storage; writing to one needs a pn
+pn fill_native() {
+    var arr: int[] = [1, 2, 3]       // native int array
+    var data: float[] = [0.1, 0.2]   // native float array
+    arr[0] = 9
+}
 
-// Union types
-int | string           // Either int or string
-int?                   // Nullable (int | null)
+// Union and optional types
+type IntOrString = int | string    // either int or string
+type MaybeInt = int?               // nullable: int | null
 
 // Type declarations
 type User = {name: string, age: int}
@@ -196,7 +230,7 @@ fn add(a: int, b: int) => a + b
 pn process() {
     var x = 42
     x = 3.14             // type widening (int → float)
-    let obj = {a: 1}
+    var obj = {a: 1}
     obj.a = "hello"       // map field type change
 }
 
@@ -478,9 +512,9 @@ let fibs = (for (i in 1 to 15) fibonacci(i));
 pn main() {
     print("Starting processing...")
 
-    // Load configuration
-    let config = if exists(\.config.json) {
-        input(\.config.json, 'json')^
+    // Load configuration (a file name with an extension is one quoted step)
+    let config = if exists(\.'config.json') {
+        input(\.'config.json', 'json')^
     } else {
         {default: true}
     }
@@ -528,12 +562,10 @@ Strong typing prevents runtime errors:
 
 ### Performance
 
-JIT compilation provides excellent performance:
-
-1. **MIR Backend**: Uses MIR for efficient code generation
-2. **Memory Pools**: Efficient memory allocation strategies
-3. **Reference Counting**: Automatic memory management without GC pauses
-4. **Structural Sharing**: Efficient copying of immutable data
+1. **Two tiers**: an AST interpreter starts a script immediately; the MIR JIT compiles hot functions to native code
+2. **Garbage collection**: a non-moving mark-and-sweep collector with precise rooting reclaims values; documents loaded by a parser live in an arena released as a whole
+3. **Copy-on-write**: values are copied observably, but storage is shared until something changes
+4. **Native lanes**: typed arrays and sized numbers run unboxed
 
 ### Expressiveness
 
