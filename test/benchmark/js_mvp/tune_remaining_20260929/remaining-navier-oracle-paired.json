@@ -1,0 +1,122 @@
+{
+  "_metadata": {
+    "schema_version": 3,
+    "started_at": "2026-09-29T01:30:21",
+    "platform": "Darwin arm64",
+    "control": {
+      "path": "/Users/henryluo/Projects/Lambda/temp/js-tune-20260928/final-release.exe",
+      "sha256": "b72a797657f32a4717c5a912406bd6ebad802fffb8fb5db7bb9fcb3769c55574"
+    },
+    "candidate": {
+      "path": "/Users/henryluo/Projects/Lambda/temp/js-tune-20260928/ascii-decimal-release.exe",
+      "sha256": "f684c7a9e967f74b527f7d94fe4294082a12e88adab35bf5de8782f774f6b561"
+    },
+    "git_commit": "2126e6581a3f3a48a115dac9d2872587e4c77692",
+    "power_state": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22544483)\t80%; AC attached; not charging present: true",
+    "suite_filters": [
+      "jetstream"
+    ],
+    "bench_filters": [
+      "navier_stokes"
+    ],
+    "variants": [
+      "js"
+    ],
+    "language": "js",
+    "control_js_runtime": "legacy",
+    "candidate_js_runtime": "legacy",
+    "js_execution_backend": "mir",
+    "tier": "jit",
+    "pairs": 1,
+    "paired_uncertainty": {
+      "method": "paired_bootstrap_ratio_of_medians",
+      "confidence": 0.95,
+      "tail": "one_sided_upper",
+      "resamples": 10000,
+      "seed": 260026
+    },
+    "timeout_s": 180,
+    "jetstream_post_timing_oracle": "navier_stokes_density_v1",
+    "command": "test/benchmark/run_paired_benchmarks.py --control temp/js-tune-20260928/final-release.exe --candidate temp/js-tune-20260928/ascii-decimal-release.exe --language js --suite jetstream --bench navier_stokes --pairs 1 --timeout 180 --jetstream-post-timing-oracle navier_stokes_density_v1 --output temp/js-tune-20260928/remaining-final2-navier-oracle-paired.json",
+    "finished_at": "2026-09-29T01:30:50"
+  },
+  "rows": [
+    {
+      "suite": "jetstream",
+      "name": "navier_stokes",
+      "variant": "js",
+      "script": "temp/_ljs_jetstream_navier_stokes.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_navier_stokes.js",
+        "sha256": "36a797882a8b80b273cce15c016f18416e7c56b13a2843dca67750f3a37af46d",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "2f3aa6fc39d242f90439a49778a7240f47b0b15cfcaa070f689c63e4b7af19ce"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_navier_stokes.js",
+        "sha256": "36a797882a8b80b273cce15c016f18416e7c56b13a2843dca67750f3a37af46d",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "2f3aa6fc39d242f90439a49778a7240f47b0b15cfcaa070f689c63e4b7af19ce"
+      },
+      "control_script": "temp/_ljs_jetstream_navier_stokes.js",
+      "candidate_script": "temp/_ljs_jetstream_navier_stokes.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 214.635,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 209.845,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9776830433060778,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9776830433060778
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": true,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 3447.46075,
+            "exec_ms": 214.635,
+            "returncode": 0,
+            "stdout_sha256": "41e342ef50999ec16395abc4ad1a771e518cd6e5a5a5ff5c037f625ec8db57b6",
+            "stderr_sha256": "323d1942e48bce403b831aabb56d1b485fb8ab0dc76d6f0ff8cbf1bd524496bd",
+            "stdout_contains_expected": true
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 3350.742834,
+            "exec_ms": 209.845,
+            "returncode": 0,
+            "stdout_sha256": "41e342ef50999ec16395abc4ad1a771e518cd6e5a5a5ff5c037f625ec8db57b6",
+            "stderr_sha256": "3efeef350e426031c0b19006a58987a863ada2fdaac141e7457ba2ec7ce215c7",
+            "stdout_contains_expected": true
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    }
+  ]
+}

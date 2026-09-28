@@ -1,0 +1,84 @@
+{
+  "date": "2026-09-29",
+  "git_commit_before_changes": "2126e6581a3f3a48a115dac9d2872587e4c77692",
+  "control_release": {
+    "path": "temp/js-tune-20260928/final-release.exe",
+    "sha256": "b72a797657f32a4717c5a912406bd6ebad802fffb8fb5db7bb9fcb3769c55574"
+  },
+  "candidate_release": {
+    "path": "temp/js-tune-20260928/ascii-decimal-release.exe",
+    "sha256": "f684c7a9e967f74b527f7d94fe4294082a12e88adab35bf5de8782f774f6b561"
+  },
+  "lambda_exe_matches_candidate": true,
+  "build": {
+    "release": {
+      "command": "make release",
+      "status": "pass",
+      "log": "temp/js-tune-20260928/ascii-decimal-release-build.log"
+    },
+    "debug_host": {
+      "command": "make build",
+      "status": "pass",
+      "log": "temp/js-tune-20260928/ascii-decimal-debug-build.log"
+    },
+    "optimizer_runner": {
+      "command": "make -C build/premake config=debug_native test_js_opt_gtest -j8",
+      "status": "pass",
+      "log": "temp/js-tune-20260928/ascii-decimal-opt-build.log"
+    },
+    "generator_self_test": {
+      "command": "make build-test",
+      "status": "blocked_by_existing_macos_linux_multiarch_probe",
+      "log": "temp/js-remaining-build-test.log"
+    }
+  },
+  "checks": {
+    "focused_optimizer": {
+      "passed": 3,
+      "failed": 0,
+      "log": "temp/js-tune-20260928/ascii-decimal-focused.log"
+    },
+    "forced_gc_optimizer": {
+      "passed": 5,
+      "failed": 0,
+      "environment": [
+        "LAMBDA_GC_FORCE_EVERY=1",
+        "LAMBDA_GC_POISON_FREED=1"
+      ],
+      "log": "temp/js-tune-20260928/ascii-decimal-forced-gc.log"
+    },
+    "lambda_baseline": {
+      "command": "make test-lambda-baseline",
+      "passed": 6003,
+      "total": 6003,
+      "optimizer_passed": 84,
+      "log": "temp/js-tune-20260928/lambda-baseline-ascii-final.log"
+    },
+    "test262_baseline": {
+      "command": "make test262-baseline",
+      "passed": 40261,
+      "total": 40261,
+      "regressions": 0,
+      "log": "temp/js-tune-20260928/test262-baseline-ascii-final.log"
+    },
+    "canonical_js_screen": {
+      "rows": 63,
+      "completed": 63,
+      "equal_stdout": 63,
+      "pairs_per_row": 1,
+      "artifact": "test/benchmark/js_mvp/tune_remaining_20260929/remaining-final-canonical-screen.json"
+    },
+    "navier_stokes_post_timing_oracle": {
+      "control_passed": true,
+      "candidate_passed": true,
+      "artifact": "test/benchmark/js_mvp/tune_remaining_20260929/remaining-navier-oracle-paired.json"
+    },
+    "git_diff_check": "pass",
+    "final_control_replay": {
+      "rows": 5,
+      "pairs_per_row": 21,
+      "equal_stdout_rows": 5,
+      "artifact": "test/benchmark/js_mvp/tune_remaining_20260929/remaining-final-control-replay-paired.json"
+    }
+  }
+}

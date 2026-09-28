@@ -166,6 +166,22 @@ extern "C" Item js_to_number(Item value) {
         if (!str || str->len == 0) {
             return js_make_number(0.0);  // Empty string -> 0
         }
+        // An unsigned ASCII decimal of at most 15 digits is exactly
+        // representable as Number. Avoid copying it for strtod; signs,
+        // whitespace, radix prefixes and larger values use the full parser.
+        if (str->is_ascii && str->len <= 15) {
+            uint64_t decimal = 0;
+            bool digits_only = true;
+            for (int index = 0; index < str->len; index++) {
+                unsigned char digit = (unsigned char)str->chars[index];
+                if (digit < '0' || digit > '9') {
+                    digits_only = false;
+                    break;
+                }
+                decimal = decimal * 10 + (uint64_t)(digit - '0');
+            }
+            if (digits_only) return js_make_number((double)decimal);
+        }
         // v20: Trim whitespace before parsing (ES spec: WhiteSpace + LineTerminator)
         // Includes full Unicode StrWhiteSpaceChar set
         const char* start = js_skip_ecma_whitespace(
