@@ -10,7 +10,7 @@ native reference.
 |---|---|
 | Upstream | https://github.com/vnmakarov/mir |
 | Commit | `99c65079038f3ba9242ef646f308c266cfd7a8e5` (2024-08-29) |
-| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch` |
+| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch` |
 
 **The patches under `patches/` are already applied to the source here.** They
 are kept as the record of our delta versus upstream, so a future re-sync can
@@ -98,6 +98,26 @@ degrades to a plain call instead of being "inlined" as nothing. Used by
 link+gen of a module (skipped for MIR-interp scripts and lazy-pending
 functions via the `func->machine_code != NULL` gate; `LAMBDA_MIR_KEEP_IR=1`
 disables it).
+
+### `mir-spilled-reg-bounds.patch` — bounds spilled-register operand rewrites
+
+Adapted from [upstream PR #468](https://github.com/vnmakarov/mir/pull/468).
+In `try_spilled_reg_mem`, register coalescing can make an instruction's output
+and both inputs refer to the same spilled register (`dmul r, r, r` or
+`dsub r, r, r`). The two-entry undo array then overflows when assertions are
+disabled. On Linux x86-64 this triggers the stack protector in the `tune27`
+nullable-float and `larceny_ray2` fixtures; other targets can avoid this
+allocation pattern or fail to detect the overwrite.
+
+The patch expands the array to three entries and checks its capacity before
+changing an operand. If it fills, prior substitutions are restored and normal
+register reload handling continues. The runtime check also protects
+instructions with more operands, including variadic instructions.
+
+Touches only `mir-gen.c`. Regression coverage comes from the existing
+`tune27_float_literal_nullable` MIR emission and forced-GC fixtures, the
+`Tune27FixturesAgreeOnEveryTier` parity test, and `larceny_ray2` in the Lambda
+script corpus (D8.6.2–D8.6.3).
 
 ## Not vendored: the NULL-label workaround
 
