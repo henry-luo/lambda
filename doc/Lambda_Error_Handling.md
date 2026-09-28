@@ -19,8 +19,8 @@ This document covers Lambda's error handling system — how errors are created, 
 5. [Error Return Types (`T^E`)](#error-return-types-te)
 6. [Error Handling at Call Sites](#error-handling-at-call-sites)
 7. [Error Propagation (`^` Operator)](#error-propagation--operator)
-8. [Error Handling (`e ^ { … }`)](#error-handling-e---)
-9. [Procedure-Call Statement Handler (`pn_call() ^ { … }`)](#procedure-call-statement-handler-pn_call---)
+8. [Error Handling (`e ^ { … }`)](#error-handling-e----)
+9. [Procedure-Call Statement Handler (`pn_call() ^ { … }`)](#procedure-call-statement-handler-pn_call----)
 10. [Compile-Time Enforcement](#compile-time-enforcement)
 11. [System Functions That Can Raise](#system-functions-that-can-raise)
 12. [Error Code Categories](#error-code-categories)
@@ -448,7 +448,7 @@ The following built-in functions perform I/O and may fail. They enforce the same
 | `output(data, target)` | Write data to file |
 | `output(data, target, options)` | Write with format/options |
 | `cmd(command)` | Execute shell command |
-| `io.copy(src, dst)` | Copy file or directory |
+| `io.copy(src, dst)` | Copy a file |
 | `io.move(src, dst)` | Move/rename file or directory |
 | `io.delete(path)` | Delete file or directory |
 | `io.mkdir(path)` | Create directory (recursive) |

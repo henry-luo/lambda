@@ -24,11 +24,11 @@ Internally, Lambda treats documents as structured data. Different input formats 
 ## Demo
 
 <p align="center">
-  <img src="doc/demo.png" width="49%" />
-  <img src="doc/demo2.png" width="49%" />
+  <img src="doc/img/demo.png" width="49%" />
+  <img src="doc/img/demo2.png" width="49%" />
 </p>
 <p align="center">
-  <img src="doc/demo3.png" width="80%" />
+  <img src="doc/img/demo3.png" width="80%" />
 </p>
 
 **Try it:** download the Lambda binary from the [Releases](https://github.com/henry-luo/lambda/releases) page, unzip, and run:
@@ -55,7 +55,7 @@ lambda view
 - **Rich type system** with type inference and explicit type annotations, similar to and beyond that of TypeScript.
 - **Schema-based validation** for structured data and document trees (including element schemas for HTML/XML-like structures).
 
-![Type Hierarchy](doc/type_hierarchy.svg)
+![Type Hierarchy](doc/img/type_hierarchy.svg)
 
 **Radiant HTML/CSS/SVG/JS layout, rendering & viewer**
 - **Browser-compatible layout engine** supporting html block, inline, flex, grid, and tables.
@@ -276,6 +276,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 
 | Document                                            | Description                                         |
 | --------------------------------------------------- | --------------------------------------------------- |
+| [Tutorial](doc/tutorial/README.md)                  | Ten chapters from installation to a reactive app, with checked examples |
 | [Cheatsheet](doc/Lambda_Cheatsheet.md)              | Quick reference for syntax and common patterns      |
 | [Lambda Reference](doc/Lambda_Reference.md)         | Language overview, the documentation index, modules, and examples |
 | [Syntax](doc/Lambda_Syntax.md)                      | Statements, line continuation, reserved words, symbols, namespaces |
@@ -285,12 +286,18 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Functions](doc/Lambda_Func.md)                     | Function declarations, closures, and procedures     |
 | [Procedural Programming](doc/Lambda_Procedural.md)  | `var`, assignment, value semantics, I/O, `main()`, concurrency |
 | [Error Handling](doc/Lambda_Error_Handling.md)      | `raise`, `T^E`, postfix `^`, the `^ { }` handler, error codes |
+| [String Patterns](doc/Lambda_String_Pattern.md)     | The pattern language inside `\(…)` and pattern-aware string functions |
+| [Modules](doc/Lambda_Modules.md)                    | Imports, `pub` exports, built-in, package, JavaScript and Python modules |
+| [Concurrency](doc/Lambda_Concurrency.md)            | Tasks, mailboxes, `select`, timeouts and cancellation |
+| [Document Updates](doc/Lambda_Document_Updates.md)  | References, node identity, `put`/`del` and transactions |
 | [System Functions](doc/Lambda_Sys_Func.md)          | Built-in functions (math, string, collection, I/O, concurrency) |
+| [Packages](doc/Lambda_Packages.md)                  | Libraries written in Lambda that ship with the runtime (math, chart, graph, LaTeX, PDF, …) |
 | [CLI Reference](doc/Lambda_CLI.md)                  | Commands, flags, and usage for the Lambda CLI       |
 | [Validator Guide](doc/Lambda_Validator_Guide.md)    | Schema-based validation with `lambda validate`      |
 | [Document Pipeline](doc/Lambda_Doc_Pipeline.md)     | The Mark data model and the convert/validate/render/view/edit workflows |
 | [Markup & Data Format Support](doc/Markup_Formats_Support.md) | Supported input and output formats and how they map to Lambda/Mark |
 | [Doc Schema](doc/Doc_Schema.md)                     | Schema for lightweight markup (Markdown, Wiki, RST) |
+| [HTML, CSS and SVG Support](doc/HTML_CSS_SVG_Support.md) | What the Radiant layout and rendering engine supports |
 | [Math Support](doc/Math_Support.md)                 | LaTeX and ASCII math input and rendering            |
 | [Reactive UI](doc/Reactive_UI.md)                   | `view`/`edit` templates, `apply()` and event handlers |
 | [Formal Semantics](doc/Lambda_Formal_Semantics.md)  | Normative semantics specification — S-numbered rulings; the semantic authority when docs or implementation disagree |
@@ -306,7 +313,7 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
 | [Radiant Engine Design](doc/dev/radiant/RAD_00_Overview.md) | Detailed design of the HTML/CSS layout, rendering, and interaction engine — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table), rendering pipeline, SVG, events, editing, state, shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set) |
 | [Python Support](doc/Python_Support.md)               | Running Python on the Lambda runtime through the `lang-python` module |
-| [Lambda Jube Runtime](doc/Lambda_Jube_Runtime.md)      | How hosted-language modules are built, packaged and discovered (Python ships; the Bash and Ruby front ends are not compiled into current builds) |
+| [Lambda Jube Runtime](doc/dev/Lambda_Jube_Runtime.md)      | How hosted-language modules are built, packaged and discovered (Python ships; the Bash and Ruby front ends are not compiled into current builds) |
 | [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
 | [LambdaJS Runtime Design](doc/dev/js/JS_00_Overview.md) | Detailed design of the embedded JavaScript engine — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility |
 

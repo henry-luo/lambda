@@ -5,7 +5,7 @@
 **Supersedes/absorbs:** `vibe/impl/Lambda_Impl_Unified_AST_Python.md` (2026-07-18) — its content is Track A below; that file has been deleted (recoverable from git history).
 **Design authorities:**
 - Track F (frames/rooting/ownership): `vibe/Lambda_Design_Stack_Frame_Python.md` (PS1–PS10, PO1–PO9), over `vibe/Lambda_Design_Stack_Frame.md` (SF1–SF20) and **`vibe/Lambda_Design_Stack_API.md` (implemented + verified 2026-07-20)** — the latter now defines the actual shared-emitter surface Python targets. Prior phase records: `vibe/impl/Lambda_Impl_Stack_Frame.md`, `…_JS.md`, `…_JS2.md`.
-- Track A (unified AST port): `vibe/Lambda_Design_Unified_AST.md` (U1–U26; esp. §2.3 catalog, §2.4 coverage, §7 guest formula, §8 Phase 6), `vibe/Lambda_Unified_AST_Impl_Plan.md` (main track), `doc/Lambda_Jube_Runtime.md`, `vibe/Lambda_Design_Concurrency.md` (K17 layers).
+- Track A (unified AST port): `vibe/Lambda_Design_Unified_AST.md` (U1–U26; esp. §2.3 catalog, §2.4 coverage, §7 guest formula, §8 Phase 6), `vibe/Lambda_Unified_AST_Impl_Plan.md` (main track), `doc/dev/Lambda_Jube_Runtime.md`, `vibe/Lambda_Design_Concurrency.md` (K17 layers).
 
 ---
 

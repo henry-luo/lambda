@@ -123,3 +123,20 @@ The pre-change full baseline collected in this session had 5,451 MIR failures,
 so its 82.3 s total is not an equivalent successful-run performance baseline.
 The saved September 9 successful 58.4 s log also belongs to an earlier binary.
 Neither is used to claim a controlled full-suite percentage improvement.
+
+## Appendix: Realm-template experiment (2026-08-29, reverted)
+
+On 2026-08-29, the AST native-harness path was measured with and without a pristine realm template. Both runs used the same release binary, test set, worker count, 600-test AST batch size, and mixed-mode partitioning.
+
+| Mode | Process wall time | Batched wall time | Peak RSS | Result |
+|---|---:|---:|---:|---|
+| Template enabled | 141.64 s | 138.2 s | 3,038.9 MB | 35,047/35,047 passed; one AST batch was SIGKILLed and recovered through the retry path |
+| Template disabled | 59.62 s | 58.2 s | 430.2 MB | 35,047/35,047 passed; no retry or batch crash |
+
+The template was approximately 2.38x slower and used approximately 7x more memory. CPU time was nearly unchanged, so the regression came from retaining per-test allocations in the reused heap. The template reset restored rooted realm snapshots but did not reclaim unreachable test objects between tests.
+
+This experiment was reverted. The current harness uses the ordinary AST realm recycle path. The raw records are preserved in `temp/js262_realm_template_enabled.log` and `temp/js262_realm_template_disabled.log`.
+
+The result is consistent with the ownership constraints in D4.3.1 (the non-moving mark-and-sweep heap) and D5.3.3 (precise `RootFrame`/`Rooted` ownership): a snapshot can preserve realm identity, but it does not by itself define a reclaimable per-test allocation boundary.
+
+*Relocated on 2026-09-28 from the retired root `JS262_Test_Guide.md`; the maintained harness guide is `test/js262/JS262_Test_Guide.md` in the lambda-test repository. The raw logs were untracked scratch files.*

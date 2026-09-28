@@ -51,7 +51,7 @@ Lambda Script is designed around functional programming principles with modern s
 
 ## Documentation Guide
 
-The Lambda documentation is organized into focused documents. Read them in the order of the first table for a tour of the language; the other tables are references.
+The Lambda documentation is organized into focused documents. New to Lambda? Start with the **[Tutorial](tutorial/README.md)**: ten chapters from installation to a reactive app, every example checked against the current build. Read the language reference in the order of its table for a complete tour; the other tables are references.
 
 ### Language Reference
 
@@ -64,6 +64,10 @@ The Lambda documentation is organized into focused documents. Read them in the o
 | **[Lambda_Func.md](Lambda_Func.md)** | **Functions** — `fn` and `pn` declarations, parameters, closures, higher-order and colour-polymorphic functions, method-style calls |
 | **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — `var`, assignment, value semantics, `while`, `return`, file output, the `io` module, `main()`, concurrency |
 | **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error values, `raise`, `T^E` return types, postfix `^` propagation, the `^ { }` handler, compile-time enforcement, error codes |
+| **[Lambda_String_Pattern.md](Lambda_String_Pattern.md)** | **String Patterns** — The pattern language inside `\(…)`: character classes, ranges, quantifiers, negation, and pattern-aware `find`/`replace`/`split` |
+| **[Lambda_Modules.md](Lambda_Modules.md)** | **Modules and Imports** — Import forms and resolution, `pub` exports, built-in and package modules, JavaScript and Python modules |
+| **[Lambda_Concurrency.md](Lambda_Concurrency.md)** | **Concurrency** — Tasks with `start`/`wait`, mailboxes, `select`, timeouts, cancellation, structured scope, JavaScript Promises |
+| **[Lambda_Document_Updates.md](Lambda_Document_Updates.md)** | **Document Updates** — References and the force step `#`, node identity, `put`/`del`, transactions with `open`/`commit`/`rollback`, `temp.` documents |
 | **[Lambda_Cheatsheet.md](Lambda_Cheatsheet.md)** | **Cheatsheet** — One-page syntax summary |
 
 ### Library and Tools
@@ -72,6 +76,7 @@ The Lambda documentation is organized into focused documents. Read them in the o
 |----------|-------------|
 | **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** | **System Functions** — Every built-in function: type, math, string, collection, date/time, I/O, concurrency |
 | **[Lambda_CLI.md](Lambda_CLI.md)** | **CLI Reference** — Commands, flags, environment variables and usage of `lambda.exe` |
+| **[Lambda_Packages.md](Lambda_Packages.md)** | **Packages** — The libraries written in Lambda that ship with the runtime: math, chart, graph, LaTeX, PDF, OpenAPI and the engine packages |
 | **[Lambda_Validator_Guide.md](Lambda_Validator_Guide.md)** | **Validation** — Writing schemas with `type` declarations and validating files with `lambda validate` |
 
 ### Documents, Rendering and UI
@@ -81,6 +86,7 @@ The Lambda documentation is organized into focused documents. Read them in the o
 | **[Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md)** | **Document Pipeline** — The Mark data model, how input formats map onto it, the convert/validate/transform/render/view/edit workflows, and how Lambda compares with Pandoc, the XML stack, Typst and browsers |
 | **[Markup_Formats_Support.md](Markup_Formats_Support.md)** | **Input and Output Formats** — Every supported markup and data format and the Mark tree each one produces |
 | **[Doc_Schema.md](Doc_Schema.md)** | **Mark Doc Schema** — The shared element vocabulary for prose documents (Markdown, HTML, RST, wiki, …) |
+| **[HTML_CSS_SVG_Support.md](HTML_CSS_SVG_Support.md)** | **HTML, CSS and SVG** — What Radiant supports: HTML elements, CSS selectors, properties and layout modes, SVG, fonts, images and output targets |
 | **[Math_Support.md](Math_Support.md)** | **Math** — LaTeX and ASCII math input, the `math` rendering package, supported commands |
 | **[Reactive_UI.md](Reactive_UI.md)** | **Reactive UI** — `view` and `edit` templates, `apply()` dispatch, template state and `on` event handlers |
 | **[JS_DOM_Support.md](JS_DOM_Support.md)** | **LambdaJS** — The embedded JavaScript engine and browser DOM: conformance status, Node compatibility, benchmarks |
@@ -90,8 +96,6 @@ The Lambda documentation is organized into focused documents. Read them in the o
 | Document | Description |
 |----------|-------------|
 | **[Python_Support.md](Python_Support.md)** | **Python** — Running Python on the Lambda runtime through the `lang-python` Jube module |
-| **[Bash_Support.md](Bash_Support.md)** | **Bash** — The Bash front end (not compiled into the current builds; see its status banner) |
-| **[Lambda_Jube_Runtime.md](Lambda_Jube_Runtime.md)** | **Jube Runtime** — How hosted-language modules are built, packaged and discovered |
 
 ### Normative Specifications
 
@@ -108,6 +112,8 @@ The Lambda documentation is organized into focused documents. Read them in the o
 | **[Developer_Guide.md](dev/Developer_Guide.md)** | **Developer Guide** — Build from source, dependencies, testing, grammar, MIR JIT |
 | **[lambda/LR_00_Overview.md](dev/lambda/LR_00_Overview.md)** | **Lambda Core Runtime** — Compilation pipeline, value & type model, MIR-Direct transpiler and JIT, memory & GC, builtins |
 | **[radiant/RAD_00_Overview.md](dev/radiant/RAD_00_Overview.md)** | **Radiant Engine** — CSS resolution, layout, rendering, events, editing, the application shell |
+| **[Lambda_Jube_Runtime.md](dev/Lambda_Jube_Runtime.md)** | **Jube Runtime** — How hosted-language modules are built, packaged and discovered |
+| **[Bash_Support.md](dev/Bash_Support.md)** | **Bash front end** — Feature status of the Bash front end, which is not compiled into current builds |
 | **[js/JS_00_Overview.md](dev/js/JS_00_Overview.md)** | **LambdaJS Runtime** — The JavaScript engine's pipeline, value model, runtime, DOM and Node compatibility |
 
 ### Quick Reference
@@ -197,13 +203,13 @@ p is Point                                // true (nominal)
 | | `el[string]` | attribute values + text children |
 | | `html[body]?<p>` | child then recursive (given `type body = <body>`) |
 | For expression | `(for (x in [1,2,3] where x > 1 order by x desc) x * 2)` | clauses: `let` / `where` / `group by` / `order by` / `limit` / `offset` |
-| | `(for (x in sales group by x.region into g) {region: g.region, n: len(g)})` | each group `g` is a `<group>` element — keys become attributes, members children |
+| | `(for (x in sales group by x.region into g) {region: g.region, n: len(content(g))})` | each group `g` is a `<group>` element — keys become attributes, members children, and `content(g)` is the members |
 | | `(for (o in orders, c in customers on o.cust_id == c.id) {id: o.id, name: c.name})` | equi-join; `c?` = left join, `c` is null on no match |
 | If | `if (x > 0) "positive" else "negative"` | |
 | | `if x > 0 { compute(x) } else "default"` | block form, expression `else` |
 
 ```lambda
-// String patterns (see Lambda_Type.md § String Patterns)
+// String patterns (see Lambda_String_Pattern.md)
 type digits = \(d+)
 type email = \(w+ "@" w+ "." a{2,6})
 type ident = \symbol(a w*)       // \symbol(...) matches symbols, \(...) strings
@@ -253,13 +259,9 @@ pn main() {
 }
 ```
 
-#### Concurrency
+#### Concurrency (see [Lambda_Concurrency.md](Lambda_Concurrency.md))
 
-`pn` concurrency is colorless: suspending callees do not add syntax to their
-callers. Under S13.1.1v2, the builtin
-`start(target, args = [], options = {})` launches a scoped child and returns a
-task handle; `args` is an array and `options.mode` is `'task'`, `'thread'`, or
-`'process'` (only task mode is implemented currently).
+`pn` concurrency is colorless — there are no `async`/`await` keywords — and structured: `start(target, args)` launches a child task that belongs to the enclosing block, `wait` collects its result, and `send`/`receive` exchange messages through bounded mailboxes (S13).
 
 ```lambda
 pn worker() {
@@ -270,138 +272,34 @@ pn worker() {
 pn main() {
     let handle = start(worker)
     send(handle, "job")^
-    print(wait(handle)^)
+    wait(handle)^          // "done: job"
 }
 ```
-
-The task operations are `send`, `receive`, `wait`, `select`, `sleep`, `self`,
-and `cancel`. Mailboxes are bounded FIFO queues. A normal lexical-block exit
-joins non-escaped children; an error exit cancels and joins them. A started
-procedure cannot capture an outer mutable `var`; use an immutable `let`
-snapshot or messages. `wait(handle, timeout: ms)` does not cancel the target.
-
-JavaScript Promises and Lambda task handles share the same libuv loop. Lambda
-can `wait` on an imported Promise; JavaScript sees every exported Lambda `pn` as
-a Promise-returning function. `toPromise(handle)` is the explicit handle adapter.
 
 ---
 
 ## Modules and Imports
 
-### Import Statements
-
-```lambda no-run
-// no-run: catalogue of import forms; the modules do not exist
-// Relative import — resolved relative to the importing script's directory
-import .relative_module
-import .path.to.module
-
-// Absolute import — resolved relative to CWD/project root
-import module_name
-
-// Import with alias
-import alias: .module
-import my_utils: .utilities
-```
-
-**Import resolution:**
-- `.module` (dot prefix) — resolved relative to the importing script's directory. Nested imports work correctly: if `A.ls` imports `B.ls` and `B.ls` imports `C.ls`, `C.ls` resolves relative to `B.ls`'s directory.
-- `module` (no dot) — resolved relative to the current working directory / project root.
-- Paths are normalized via `realpath()` to prevent redundant compilation when the same file is imported through different relative paths.
-
-### Module Structure
-
-Each Lambda Script file is a module that can export public declarations — variables, functions, procedures, type aliases, and object types:
+Each script file is a module. Declarations marked `pub` are exported, and `import` brings them into another file — directly, or under an alias. The same statement imports the built-in `math` and `io` modules, shipped packages under `lambda.*`, and JavaScript modules.
 
 ```lambda
-// math_utils.ls
-
-// Public values
+// shapes.ls
 pub let PI = 3.14159
-pub let E = 2.71828
-
-// Public functions
-pub fn square(x: float) => x * x
-pub fn cube(x: float) => x * x * x
-
-// Public type alias
-pub type Angle = float
-
-// Public object type with methods
-pub type Vec2 {
-    x: float = 0.0, y: float = 0.0,
-    fn len() => math.sqrt(x**2 + y**2)
-    fn scale(f) => <Vec2 x: x*f, y: y*f>
-}
-
-// Public, with the error handled at the binding
-pub let config = input("config.json", 'json') ^ { {} }
-
-// Private (not exported)
-let v = 123
-fn helper(x: float) => x + 1
-type Internal = {a: int, b: int}
+pub fn area(r: float) => PI * r * r
+pub type Circle { r: float, fn diameter() => r * 2 }
 ```
-
-### Using Imported Modules
 
 ```lambda no-run
-// no-run: shows two files in one block
-// main.ls
-import .math_utils
+// no-run: imports shapes.ls, shown above
+import .shapes             // binds PI, area and Circle directly
+import s: .shapes          // or: s.PI, s.area, s.Circle
+import m: math             // a built-in module under an alias
+import tex: lambda.doc.math.math   // a shipped package
 
-// Imported values and functions are available directly
-let area = PI * square(radius)
-
-// Imported types can be used for annotations, construction, and type checks
-let angle: Angle = 1.57
-let v = <Vec2 x: 3.0, y: 4.0>
-v.len()          // 5.0
-v is Vec2        // true
+area(1.0)                  // 3.14159
 ```
 
-### Export Visibility
-
-| Declaration | Visibility |
-|-------------|------------|
-| `pub x = ...` | Public (exported) |
-| `pub fn f()` / `pub pn p()` | Public function/procedure |
-| `pub type T = ...` | Public type alias |
-| `pub type T { ... }` | Public object type |
-| `let x = ...` | Private (module-local) |
-| `fn f()` / `pn p()` | Private function/procedure |
-| `type T = ...` / `type T { ... }` | Private type |
-
-### Built-in Module Imports
-
-Lambda provides built-in modules (`math`, `io`) for mathematical functions and file system operations. These modules support three import styles:
-
-```lambda
-// 1. No import — use full module prefix (default, always available)
-math.sqrt(16)         // 4
-math.pi               // 3.1415926536
-pn backup() {         // io writes the filesystem: call it from a pn
-    io.copy(\.a, \.b)^
-}
-
-// 2. Global import — all functions available without prefix
-import math;
-sqrt(16)              // 4
-pi                    // 3.1415926536
-sin(0)                // 0
-
-// 3. Aliased import — use a custom prefix
-import m:math;
-m.sqrt(16)            // 4
-m.pi                  // 3.1415926536
-m.sin(0)              // 0
-```
-
-| Style | Syntax | Usage | Best For |
-|-------|--------|-------|----------|
-| No import | *(none)* | `math.sqrt(x)` | Clarity, avoiding name conflicts |
-| Global import | `import math;` | `sqrt(x)` | Math-heavy scripts, brevity |
-| Aliased import | `import m:math;` | `m.sqrt(x)` | Short prefix, avoiding conflicts |
+A relative import `.a.b` resolves beside the importing file; a bare `a` resolves in the current working directory; `lambda.*` paths resolve under `LAMBDA_HOME`. Import forms, resolution, instantiation, JavaScript modules and known issues are described in [Lambda_Modules.md](Lambda_Modules.md).
 
 ---
 
@@ -449,7 +347,7 @@ let high_value = data.sales |: ~.amount > 1000;
 // Summarize by region — each group `g` is a <group> element
 // (grouping key becomes an attribute, members become children)
 let by_region = for (s in data.sales group by s.region into g)
-    {region: g.region, total: sum(g |> ~.amount), count: len(g)};
+    {region: g.region, total: sum(content(g) |> ~.amount), count: len(content(g))};
 
 // Generate report
 let report = {

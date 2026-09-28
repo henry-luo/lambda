@@ -398,7 +398,7 @@ Each entry takes `binary → binary`; the streaming forms are exactly the PL6 tr
 
 > **Status 2026-07-15:** the original safe copy bridge shipped in [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md); [Lambda_Impl_Binary2.md](impl/Lambda_Impl_Binary2.md) has now replaced eligible copies with retained `ByteStorage` spans. `Buffer.from(Binary)`, `Uint8Array` construction, and `binary(Uint8Array/Uint8ClampedArray/Buffer/DataView)` share non-shared storage until the first JS write, when the stable ArrayBuffer handle COWs. SharedArrayBuffer remains a mandatory snapshot copy. **The value types stay distinct — see §10; only storage ownership is shared.**
 
-Make Lambda `binary` share the **same physical buffer** as JS `Uint8Array` and (future) Python `bytes`/`bytearray`. Lambda's [Jube runtime](../doc/Lambda_Jube_Runtime.md) is the right place to define the contract:
+Make Lambda `binary` share the **same physical buffer** as JS `Uint8Array` and (future) Python `bytes`/`bytearray`. Lambda's [Jube runtime](../doc/dev/Lambda_Jube_Runtime.md) is the right place to define the contract:
 
 - A shared refcounted buffer ABI — this is exactly PL5's refcounted immutable flat buffer ([Lambda_Design_Pipeline.md](Lambda_Design_Pipeline.md) §4); the `BufferDescriptor { ptr; len; owner; refcount; readonly }` sketched here and PL5 are one design, and the `ArrayNum` external-view machinery (`is_view`/`is_pinned`/`ArrayNumShape`, already GC-aware and already backing every JS typed array) is the implementation template.
 - `js.Uint8Array`/Node `Buffer` constructed from a storage-backed Lambda `binary` share storage with COW; inline constants perform one promotion copy.

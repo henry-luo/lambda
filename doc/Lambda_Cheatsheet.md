@@ -430,6 +430,8 @@ Data type determines output format:
 
 ## References & Document Updates
 
+Full reference: [Lambda_Document_Updates.md](Lambda_Document_Updates.md).
+
 A `path` is a reference: it reads nothing until the postfix `#` forces it.
 
 | Form | Meaning |
@@ -500,7 +502,7 @@ match input {
 }
 ```
 
-For Expressions: (produce spreadable arrays — pipe/filter also spread, see above)
+For Expressions: (produce spreadable lists; pipe and filter results are arrays and do not spread, see above)
 
 | Expression | Result | |
 |---|---|---|
@@ -523,7 +525,7 @@ for (x in data, let y=x*2
     where y>5 order by y desc limit 3) y
 // group by → g is an <group> element (keys=attrs, members=children)
 for (x in sales group by x.region into g)
-    {region: g.region, n: len(g)}
+    {region: g.region, n: len(content(g))}   // content(g) = the members
 ```
 
 **Joins (`on`):** relate comma sources; `?` = left join
@@ -573,6 +575,8 @@ Function Declaration:
 
 ## Concurrency (`pn` only)
 
+Full reference: [Lambda_Concurrency.md](Lambda_Concurrency.md).
+
 ```lambda
 pn worker() { return receive()^ }
 pn job(n) { sleep(n)^; return n }
@@ -610,7 +614,7 @@ Advanced Features:
 
 ## String Patterns
 
-Define named patterns for string validation and matching. Uses regex-like syntax integrated into the type system.
+Define named patterns for string validation and matching. Uses regex-like syntax integrated into the type system. Full reference: [Lambda_String_Pattern.md](Lambda_String_Pattern.md).
 
 Definition:
 
@@ -751,6 +755,8 @@ format(data, 'yaml')                // Format as YAML
 ```
 
 ## Modules, Imports & Exports
+
+Full reference: [Lambda_Modules.md](Lambda_Modules.md).
 
 Import Syntax:
 

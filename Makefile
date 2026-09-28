@@ -1513,8 +1513,8 @@ intellisense:
 
 # Generate type hierarchy chart
 type-chart:
-	dot -Tsvg doc/type_hierarchy.dot -o doc/type_hierarchy.svg
-	@echo "Type hierarchy chart generated: doc/type_hierarchy.svg"
+	dot -Tsvg doc/img/type_hierarchy.dot -o doc/img/type_hierarchy.svg
+	@echo "Type hierarchy chart generated: doc/img/type_hierarchy.svg"
 
 # Generate grammar explicitly (useful for development)
 generate-grammar: $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON)
@@ -3219,6 +3219,13 @@ struct-census:
 #   make check-doc-code ARGS='--write-baseline temp/doc_baseline.json'
 check-doc-code:
 	@python3 utils/check_doc_blocks.py $(ARGS)
+
+# Replay the tutorial (doc/tutorial/NN_*.md) in sandboxes under temp/tutorial_run/
+# and compare every output it shows with what lambda.exe prints.
+#   make check-tutorial                        # every chapter
+#   make check-tutorial ARGS='--filter 03'     # one chapter
+check-tutorial:
+	@python3 utils/check_tutorial.py $(ARGS)
 
 # Lizard duplicate-code reports with documented generated-file and block exclusions.
 check-code-dup:

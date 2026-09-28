@@ -33,6 +33,10 @@ def elog(*args, **kwargs):
     kwargs.setdefault('file', sys.stderr)
     print(*args, **kwargs)
 
+def glob_premake_paths(pattern: str) -> List[str]:
+    """Return glob matches with Lua-safe, platform-neutral separators."""
+    return [Path(match).as_posix() for match in glob.glob(pattern, recursive=False)]
+
 class PremakeGenerator:
     def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None):
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -216,7 +220,7 @@ class PremakeGenerator:
         configured = {target.get('name'): target for target in targets if target.get('name')}
         inherited_keys = (
             'source_files', 'sources', 'source_patterns', 'exclude_patterns',
-            'release_exclude_patterns',
+            'release_exclude_patterns', 'release_profile_exclude_patterns',
             'objcxx_source_files', 'libraries', 'macos', 'linux', 'windows',
             'defines', 'include',
         )
@@ -978,7 +982,9 @@ class PremakeGenerator:
             '    ',
             '    filter "configurations:release_profile"',
             '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE", "LAMBDA_JS_EXEC_PROFILE"' +
-            ''.join(f', "{define}"' for define in self.config.get('release_defines', [])) + ' }',
+            ''.join(f', "{define}"' for define in (
+                self.config.get('release_defines', []) +
+                self.config.get('release_profile_defines', []))) + ' }',
             '        -- LAMBDA_JS_EXEC_PROFILE: keep JS execution instrumentation in an optimized build',
             '        -- LAMBDA_HOME_RELEASE: release binary loads assets from ./lmd/ instead of ./lambda/',
             '        symbols "Off"',
@@ -1417,12 +1423,14 @@ class PremakeGenerator:
                 '    '
             ])
 
-        # Keep debug-only source groups available to debug-family builds while
-        # removing them from optimized host configurations.
-        release_exclude_patterns = list(lib.get('release_exclude_patterns', []))
-        if release_exclude_patterns:
+        # Profiling may opt diagnostic runtimes back in without shipping them.
+        for configuration in ('release', 'release_profile'):
+            release_exclude_patterns = lib.get(
+                configuration + '_exclude_patterns', lib.get('release_exclude_patterns', []))
+            if not release_exclude_patterns:
+                continue
             self.premake_content.extend([
-                '    filter "configurations:release or release_profile"',
+                f'    filter "configurations:{configuration}"',
                 '        removefiles {',
             ])
             for release_exclude_pattern in release_exclude_patterns:
@@ -3453,22 +3461,21 @@ class PremakeGenerator:
             additional_files.extend(macos_config.get('additional_source_files', []))
 
         for source_dir in source_dirs:
-            import glob
             c_pattern = f"{source_dir}/*.c"
             cpp_pattern = f"{source_dir}/*.cpp"
 
             # Find all C files (one level only, non-recursive)
-            c_files = glob.glob(c_pattern, recursive=False)
+            c_files = glob_premake_paths(c_pattern)
             all_source_files.extend(c_files)
 
             # Find all C++ files (one level only, non-recursive)
-            cpp_files = glob.glob(cpp_pattern, recursive=False)
+            cpp_files = glob_premake_paths(cpp_pattern)
             all_source_files.extend(cpp_files)
 
             # Find Objective-C++ files on macOS (one level only, non-recursive)
             if self.use_macos_config:
                 mm_pattern = f"{source_dir}/*.mm"
-                mm_files = glob.glob(mm_pattern, recursive=False)
+                mm_files = glob_premake_paths(mm_pattern)
                 all_source_files.extend(mm_files)
 
         # On macOS, remove _stub.cpp files when a platform-specific .mm exists
@@ -3530,10 +3537,14 @@ class PremakeGenerator:
             '    ',
         ])
 
-        release_exclude_files = self.config.get('release_exclude_source_files', [])
-        if release_exclude_files:
+        for configuration in ('release', 'release_profile'):
+            release_exclude_files = self.config.get(
+                configuration + '_exclude_source_files',
+                self.config.get('release_exclude_source_files', []))
+            if not release_exclude_files:
+                continue
             self.premake_content.extend([
-                '    filter "configurations:release or release_profile"',
+                f'    filter "configurations:{configuration}"',
                 '        removefiles {',
             ])
             for release_exclude_file in release_exclude_files:

@@ -483,12 +483,7 @@ read the same text two ways. Like a `|>` body and unlike a `that` body, a `|:`
 body reads bare names as ordinary names — write `~.field` for a field of the
 current item (S10.1.7v2).
 
-> **Note:** A `|:` (or `|>`) condition needs no parentheses around the
-> relational operators `<`, `>`, `<=`, `>=` — `items |: ~ > 0` is fine, and
-> the parenthesized form is only a readability choice. The element-tag
-> ambiguity is resolved by context and bites solely inside an element's tag
-> region, where `>` closes the tag: `<div w: 1 > 2>` is rejected, so wrap that
-> operand — `<div w: (1 > 2)>`.
+> **Note:** A `|:` (or `|>`) condition needs no parentheses around the relational operators `<`, `>`, `<=`, `>=` — `items |: ~ > 0` is fine, and the parenthesized form is only a readability choice. Inside an element, attribute values and content alike, the symbol relationals are not operators: `>` closes the element and `<` opens a child (S16.5.1). Write a comparison there as a parenthesized island — `<div w: (1 > 2)>`, `<ul for (x in xs where (x > 2)) <li x>>` — or compute it before building the element.
 
 ### The `that` Proviso
 
@@ -753,7 +748,7 @@ When `else` is omitted (block form only), the result is `null`.
 
 ### For Expressions
 
-For expressions produce **spreadable arrays** that automatically flatten when nested in collections (pipe and filter expressions also spread — see [Pipe § Spreading in Array Literals](#spreading-in-array-literals)):
+For expressions produce **spreadable lists** that automatically flatten when nested in collections. Pipe and filter results do not: they are arrays and stay one item (see [Pipe Results in Array Literals](#pipe-results-in-array-literals)):
 
 ```lambda
 // Basic iteration - produces spreadable array
@@ -941,31 +936,28 @@ group to a name via `into`:
 group by <key-expr> [as <alias>] [, <key-expr> [as <alias>] ...] into <group-name>
 ```
 
-**The group binding is an element** (tag `group`): the grouping keys become its *attributes*
-and the group's members become its *children*. One value carries the whole group, reusing
-Lambda's element duality — so `g.region` reads a key, `len(g)` counts members, `g[0]` indexes
-them, and `g |> ~["amount"]` projects a field across members.
+**The group binding is an element** (tag `group`): the grouping keys become its *attributes* and the group's members become its *children* (S14.1.1). One value carries the whole group, reusing Lambda's element duality — so `g.region` reads a key, `g[0]` indexes the members, and `content(g)` is the array of members: `len(content(g))` counts them and `content(g) |> ~["amount"]` projects a field across them. Plain `len(g)` would count the key attributes as well, because `len` counts what `for` walks, and `for` walks an element's attributes before its children (S8.3.1v3).
 
 ```lambda
 // single key — attribute name inferred from the trailing field access (g.region)
 for (x in sales group by x.region into g)
-  {region: g.region, total: sum(g |> ~["amount"])}
+  {region: g.region, total: sum(content(g) |> ~["amount"])}
 
 // multiple keys — each becomes a named attribute (no positional g.key[i])
 for (o in orders group by o.year, o.month into g)
-  {year: g.year, month: g.month, n: len(g)}
+  {year: g.year, month: g.month, n: len(content(g))}
 
 // computed key — an alias is required (only trailing field access is inferable)
 for (w in words group by len(w) as wlen into g)
-  {length: g.wlen, n: len(g)}
+  {length: g.wlen, n: len(content(g))}
 
 // grouping by the loop item itself also requires an alias
 for (w in doc.words
      where len(w) > 3
      group by w as word into g
-     order by len(g) desc
+     order by len(content(g)) desc
      limit 10)
-  {word: g.word, freq: len(g)}
+  {word: g.word, freq: len(content(g))}
 ```
 
 Semantics:
@@ -1294,29 +1286,7 @@ pn main() {                      // print is a pn: only a pn may call it
 
 ### Document Update Statements
 
-`put`, `del`, `commit`, `rollback` and the block form of `open` write documents.
-They are statements, never expressions: `=` has no external effect, so a
-document write has exactly one spelling.
-
-| Statement | Meaning |
-|---|---|
-| `put target = v` | upsert at a location; a position replaces, a key upserts |
-| `put v before t` / `put v after t` | insert around a head node |
-| `put v into t` | add a member: sequence append, map upsert, element child |
-| `del target` | remove a location; an absent one raises at commit |
-| `put a = 1, b = 2` | comma-joined edits: one statement, written order |
-| `commit` / `rollback` | end the write set, or discard it |
-| `open v = target { … }` | one bounded transaction; `#` implied on `v` |
-
-Edits accumulate into a write-only next version. Nothing a reader can see
-changes until `commit`, and every value operand reads the head. Outside `open`,
-each statement is its own transaction and commits at once.
-
-`put`, `del`, `commit`, `rollback` and `open` are reserved as binding names.
-They remain legal as **data** names — a map key, a member, an element tag, an
-event handler — so `{open: true}`, `m.open` and `<del "x">` are unchanged.
-`before`, `after` and `into` are clause words inside the statement and stay
-bindable. See [Document Updates](Lambda_Data.md#document-updates).
+`put`, `del`, `commit`, `rollback` and the block form of `open` write documents. They are statements, never expressions: `=` has no external effect, so a document write has exactly one spelling. The statements, transactions and their rules are described in [Lambda_Document_Updates.md](Lambda_Document_Updates.md).
 
 ---
 

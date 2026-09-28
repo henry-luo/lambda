@@ -25,7 +25,7 @@ What is missing is an **independent oracle**: a definition of what Lambda progra
 
 The Lambda engine already executes, or plans to execute, multiple guest languages:
 JavaScript/TypeScript in core, and Python, Bash, Ruby in the Jube build
-(`doc/Lambda_Jube_Runtime.md`). Each guest runtime faces the same oracle problem —
+(`doc/dev/Lambda_Jube_Runtime.md`). Each guest runtime faces the same oracle problem —
 LambdaJS's Node-compat baseline, for example, is measured against Node's observed
 behavior, with no formal account of *why* an output is right.
 

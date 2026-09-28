@@ -469,6 +469,24 @@ TEST_F(UrlExtraTest, FromLocalPathNull) {
     EXPECT_EQ(url_from_local_path(nullptr), nullptr);
 }
 
+TEST_F(UrlExtraTest, ParseNativeAbsolutePath) {
+#ifdef _WIN32
+    const char* path = "C:\\Projects\\lambda\\test file.html";
+#else
+    const char* path = "/var/data/test file.html";
+#endif
+    Url* url = url_parse_path_or_url(path, nullptr);
+    ASSERT_NE(url, nullptr);
+    EXPECT_EQ(url_get_scheme(url), URL_SCHEME_FILE);
+
+    char* roundtrip = url_to_local_path(url);
+    ASSERT_NE(roundtrip, nullptr);
+    EXPECT_STREQ(roundtrip, path);
+
+    free(roundtrip);
+    url_destroy(url);
+}
+
 // ── url_decode_form: %XX plus '+' -> space ──
 TEST_F(UrlExtraTest, DecodeForm) {
     size_t out_len = 0;
