@@ -34,6 +34,7 @@ struct RdtVectorImpl {
     int height;
     int stride;
     int batch_depth;
+    uint64_t clip_mask_count;
     float tile_offset_x;  // physical-pixel X start of current tile (0 = full page)
     float tile_offset_y;  // physical-pixel Y start of current tile (0 = full page)
 };
@@ -1033,10 +1034,14 @@ static void tvg_draw_paint_now(RdtVectorImpl* impl, Tvg_Paint shape) {
     tvg_canvas_remove(impl->canvas, NULL);
 }
 
+static void apply_clip_masks(RdtVectorImpl* impl, Tvg_Paint shape);
+
 static void tvg_flush_batch_scene(RdtVectorImpl* impl) {
     if (!impl || !impl->batch_scene) return;
     Tvg_Paint scene = impl->batch_scene;
     impl->batch_scene = nullptr;
+    // Clip the whole stable scene once; path-by-path masks multiply SVG work.
+    apply_clip_masks(impl, scene);
     tvg_draw_paint_now(impl, scene);
 }
 
@@ -1191,6 +1196,10 @@ void rdt_vector_end_batch(RdtVector* vec) {
     if (impl->batch_depth == 0) {
         tvg_flush_batch_scene(impl);
     }
+}
+
+uint64_t rdt_vector_clip_mask_count(const RdtVector* vec) {
+    return vec && vec->impl ? vec->impl->clip_mask_count : 0;
 }
 
 // ============================================================================
@@ -1694,24 +1703,8 @@ void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
 // Clipping
 // ============================================================================
 
-// ThorVG doesn't have a clip stack. We implement clipping by applying alpha masks
-// to each shape at draw time. For rdt_push_clip / rdt_pop_clip, we store the
-// clip path and apply it when shapes are drawn.
-//
-// For this ThorVG backend, push_clip/pop_clip use a simple approach:
-// save the clip path, and rdt_fill_*/rdt_stroke_* check for active clips.
-// However, since the current usage pattern is: push_clip → draw → pop_clip
-// (always bracketed tightly), and ThorVG applies masks per-shape,
-// we implement this by storing the clip state and applying it in the
-// push_draw_remove helper.
-
-// For simplicity and correctness, we use the same approach as the existing
-// render code: create a mask shape for each drawn shape and call
-// tvg_paint_set_mask_method.
-
-// But this means we need to thread the clip through all draw calls.
-// A cleaner approach for this backend: since clips are always bracketed,
-// store the active clip path(s) in the impl and apply in tvg_push_draw_remove.
+// ThorVG has no clip stack. Keep active clip paths until a batch or immediate
+// paint is submitted, then compose one alpha mask for that submission.
 
 // Active clip state
 #define RDT_INITIAL_CLIP_DEPTH 8
@@ -1763,6 +1756,8 @@ void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transfor
         return;
     }
 
+    tvg_flush_batch_scene(vec->impl);
+
     // copy the path for the duration of the clip
     RdtPath* copy = (RdtPath*)mem_calloc(1, sizeof(RdtPath), MEM_CAT_RENDER);
     if (clip_path->count > 0) {
@@ -1784,6 +1779,7 @@ void rdt_pop_clip(RdtVector* vec) {
         log_error("rdt_pop_clip: clip stack underflow");
         return;
     }
+    tvg_flush_batch_scene(vec->impl);
     s_clip_depth--;
     ClipEntry* entry = &s_clip_stack[s_clip_depth];
     rdt_path_free(entry->path);
@@ -1804,11 +1800,12 @@ void rdt_clip_restore_depth(int saved_depth) {
     s_clip_depth = saved_depth;
 }
 
-// Apply active clip masks to a shape (called before tvg_push_draw_remove)
+// Apply active clip masks to an immediate paint or a completed batch scene.
 // Multiple clips are composed as intersection by nesting masks: the innermost
-// mask is masked by the next outer one, and finally applied to the shape.
-static void apply_clip_masks(Tvg_Paint shape) {
+// mask is masked by the next outer one, and finally applied to the paint.
+static void apply_clip_masks(RdtVectorImpl* impl, Tvg_Paint shape) {
     if (s_clip_depth <= 0) return;
+    impl->clip_mask_count++;
 
     // Build a single composed mask from all clip entries.
     // Start from the outermost clip (index 0) and nest inward.
@@ -1830,8 +1827,8 @@ static void apply_clip_masks(Tvg_Paint shape) {
 
 // Clip-aware version of tvg_push_draw_remove
 static void tvg_push_draw_remove_clipped(RdtVectorImpl* impl, Tvg_Paint shape) {
-    if (s_clip_depth > 0) {
-        apply_clip_masks(shape);
+    if (s_clip_depth > 0 && impl->batch_depth <= 0) {
+        apply_clip_masks(impl, shape);
     }
     tvg_push_draw_remove(impl, shape);
 }

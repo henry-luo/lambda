@@ -1,0 +1,20 @@
+{
+  "name": "Prince PDF editor wheel scroll performance repro",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_pdf_PrinceCatalogue_pdf"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "PrinceCatalogue.pdf"},
+    {"type": "assert_count", "target": {"selector": "#pdf-preview .pdf-page"}, "count": 4},
+    {"type": "resize", "width": 1280, "height": 900, "x": 1280, "y": 900},
+    {"type": "scroll", "x": 700, "y": 450, "dx": 0, "dy": -5},
+    {"type": "assert_state_store", "target": {"selector": "#pdf-preview"}, "view_scroll_y": 250, "tolerance": 20},
+    {"type": "scroll", "x": 700, "y": 450, "dx": 0, "dy": -5},
+    {"type": "assert_state_store", "target": {"selector": "#pdf-preview"}, "view_scroll_y": 500, "tolerance": 20},
+    {"type": "scroll", "x": 700, "y": 450, "dx": 0, "dy": -5},
+    {"type": "assert_pixel", "x": 700, "y": 410, "force_render": false,
+     "max_r": 220, "max_g": 220, "max_b": 220}
+  ]
+}

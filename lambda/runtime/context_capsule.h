@@ -54,6 +54,8 @@ typedef enum ContextCapsuleId {
     CONTEXT_CAPSULE_JS_RUNTIME,
     // sys.* Mark data lives in the owning evaluation context's Input.
     CONTEXT_CAPSULE_SYSINFO,
+    // UI result-arena attributes may retain GC values beyond one evaluation.
+    CONTEXT_CAPSULE_UI_ATTRIBUTE_ROOTS,
     CONTEXT_CAPSULE_COUNT
 } ContextCapsuleId;
 
