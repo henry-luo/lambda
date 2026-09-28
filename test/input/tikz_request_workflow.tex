@@ -1,4 +1,4 @@
-% Project-authored capability fixture: named nodes and arrows are not yet rendered.
+% Project-authored workflow fixture: named nodes, diamond shape, and arrow tips.
 \documentclass{article}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,shapes.geometric}
@@ -31,6 +31,6 @@ document commonly would.
 \label{fig:request-pipeline}
 \end{figure}
 
-This picture is retained as a source-preservation and visible-diagnostic test
-until named coordinates and arrow semantics enter the native profile.
+The branch to the worker handles accepted requests, while rejected requests
+follow the downward path. The node labels remain readable inside their shapes.
 \end{document}

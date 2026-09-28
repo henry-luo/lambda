@@ -2,6 +2,7 @@
 import opts: .options
 import labels: .labels
 import plots: .pgfplots
+import named: .named
 import svg: lambda.chart.svg
 
 fn children_named(node, tag) => [for (child in node
@@ -102,10 +103,17 @@ fn render_picture(picture) any^ {
              string(name(child)) == "semilogyaxis" or
              string(name(child)) == "loglogaxis")) child]
     let paths = drawing_nodes(picture)
+    let named_nodes = [for (child in paths where string(name(child)) == "node" and
+        (child.id != null or opts.has(child, "draw") or opts.has(child, "diamond"))) child]
+    let named_refs = [for (child in paths,
+        point in if (string(name(child)) == "path") children_named(child, "point") else []
+        where point.ref != null) point]
     if (len(axes) == 1 and len(paths) == 0 and len(picture) == 1)
         plots.render_axis(axes[0])^
     else if (len(axes) == 0 and len(paths) > 0 and len(paths) == len(picture))
-        render_drawing(picture)^
+        if (len(named_nodes) > 0 or len(named_refs) > 0)
+            named.render(picture)^
+        else render_drawing(picture)^
     else raise error("mixed or scoped TikZ pictures are not supported yet")
 }
 
