@@ -1,0 +1,19 @@
+{
+  "name": "Doc editor keeps long file names aligned",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "resize", "width": 1280, "height": 900},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_test_graph_parser_gtest_cpp"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_test_css_cascade_memory_gtest_cpp"}, "count": 1},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_test_graph_parser_gtest_cpp .file-icon"}, "x": 60},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_test_css_cascade_memory_gtest_cpp .file-icon"}, "x": 60},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_test_graph_parser_gtest_cpp .tree-label"}, "x": 82},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_test_css_cascade_memory_gtest_cpp .tree-label"}, "x": 82},
+    {"type": "resize", "width": 700, "height": 900},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_test_graph_parser_gtest_cpp .file-icon"}, "x": 60},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_test_css_cascade_memory_gtest_cpp .file-icon"}, "x": 60},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_test_css_cascade_memory_gtest_cpp .tree-label"}, "x": 82}
+  ]
+}

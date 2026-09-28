@@ -18,7 +18,12 @@ let PROJECT_ROOT = "."
 // Filesystem and selection helpers
 // --------------------------------------------------------------------------
 
-fn directory_entries(path) => input(path, 'dir') ^ { [] }
+fn directory_entries(path) {
+  let entries = input(path, 'dir') ^ { [] };
+  // The directory reader sorts names; keep that order within each group.
+  [for (entry in entries where entry.is_dir) entry] ++
+    [for (entry in entries where not entry.is_dir) entry]
+}
 fn child_path(parent_path, child_name) => join([parent_path, child_name], "/")
 fn absolute_file_path(path) => sys.proc.self.cwd# ++ "/" ++ path
 
@@ -444,6 +449,8 @@ on preview_tab(tab) {
       .tree-toggle:hover, .root-toggle:hover { color: #fff; }
       .tree-spacer { width: 22px; height: 24px; }
       .tree-icon { width: 18px; margin-right: 4px; text-align: center; font-size: 13px; }
+      /* Keep the indentation and icon fixed when a file name overflows. */
+      .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
       .file-icon { color: #9bbdfc; }
       .tree-label { white-space: nowrap; font-size: 13px; }
