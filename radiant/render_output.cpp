@@ -3,6 +3,7 @@
 #include "event.hpp"
 
 #include "../lib/tagged.hpp"
+#include "../lambda/runtime/transpiler.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
@@ -78,9 +79,20 @@ static DomDocument* render_export_load_transform_document(RenderExportSession* s
         pool_destroy(pool);
         return nullptr;
     }
+    char text_width_px[32];
+    LambdaDocumentTransformOption tikz_option = {};
+    const LambdaDocumentTransformOption* transform_options = transform_request->options;
+    int transform_option_count = transform_request->option_count;
+    if (strcmp(transform_request->transform->input_type, "tikz") == 0) {
+        snprintf(text_width_px, sizeof(text_width_px), "%d", layout_width);
+        tikz_option = {"text_width_px", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING,
+            text_width_px, false};
+        transform_options = &tikz_option;
+        transform_option_count = 1;
+    }
     DomDocument* doc = load_lambda_document_transform_doc(document_url,
-        transform_request->transform, transform_request->options,
-        transform_request->option_count, layout_width, layout_height, pool);
+        transform_request->transform, transform_options, transform_option_count,
+        layout_width, layout_height, pool);
     if (!doc) {
         url_destroy(document_url);
         pool_destroy(pool);

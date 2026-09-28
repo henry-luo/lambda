@@ -182,37 +182,10 @@ Target* item_to_target(uint64_t item, Url* cwd) {
         // Store original string for relative path preservation
         target->original = url_str;
 
-        // Parse URL with optional base (cwd)
-        Url* url;
-        bool native_absolute_path = url_str[0] == '/';
-#ifdef _WIN32
-        native_absolute_path = isalpha((unsigned char)url_str[0]) && url_str[1] == ':' &&
-            (url_str[2] == '/' || url_str[2] == '\\');
-#endif
-        if (native_absolute_path) {
-            // Native absolute paths are independent of the document URL base.
-            char* file_url_buf = url_from_local_path(url_str);
-            url = url_parse(file_url_buf ? file_url_buf : url_str);
-            if (file_url_buf) mem_free(file_url_buf);
-        } else if (cwd) {
-            url = url_parse_with_base(url_str, cwd);
-        } else {
-            // Check if relative path - need to resolve against cwd
-            if (url_str[0] != '/' && strncmp(url_str, "file://", 7) != 0 &&
-                strncmp(url_str, "http://", 7) != 0 && strncmp(url_str, "https://", 8) != 0 &&
-                strncmp(url_str, "sys://", 6) != 0) {
-                // Relative path - get cwd as base
-                Url* cwd_url = get_cwd_url();
-                if (cwd_url) {
-                    url = url_parse_with_base(url_str, cwd_url);
-                    url_destroy(cwd_url);
-                } else {
-                    url = url_parse(url_str);
-                }
-            } else {
-                url = url_parse(url_str);
-            }
-        }
+        // Resolve relative paths from cwd while native absolute paths bypass it.
+        Url* owned_cwd = cwd ? NULL : get_cwd_url();
+        Url* url = url_parse_path_or_url(url_str, cwd ? cwd : owned_cwd);
+        if (owned_cwd) url_destroy(owned_cwd);
 
         if (!url) {
             log_error("item_to_target: failed to parse URL '%s'", url_str);

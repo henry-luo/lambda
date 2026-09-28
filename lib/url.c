@@ -12,6 +12,7 @@
 #include "url.h"
 #include "file.h"
 #include "log.h"
+#include "path_str.h"
 #include "str.h"
 #include "hex.h"
 
@@ -1113,6 +1114,24 @@ char* url_from_local_path(const char* abs_path) {
     if (!result) { mem_free(enc); return NULL; }
     snprintf(result, rlen, "file://%s%s", need_slash ? "/" : "", enc);
     mem_free(enc);
+    return result;
+}
+
+Url* url_parse_path_or_url(const char* input, const Url* base) {
+    if (!input) return NULL;
+
+#ifdef _WIN32
+    bool native_absolute = path_str_win32_is_absolute(input);
+#else
+    bool native_absolute = path_str_posix_is_absolute(input);
+#endif
+    if (!native_absolute) return url_parse_with_base(input, base);
+
+    // A Windows drive colon is a path delimiter, not a URL scheme delimiter.
+    char* file_url = url_from_local_path(input);
+    if (!file_url) return NULL;
+    Url* result = url_parse(file_url);
+    mem_free(file_url);
     return result;
 }
 

@@ -1402,8 +1402,11 @@ static CssStylesheet* parse_inline_style_chunks(CssEngine* engine,
     }
     css[offset] = '\0';
     int before = *count;
+    // Inline CSS resources resolve against the owning document, so retain its
+    // URL as the stylesheet origin instead of the diagnostic-only label.
+    const char* inline_origin = base_path ? base_path : "<inline-style>";
     CssStylesheet* stylesheet = parse_and_collect_stylesheet(
-        engine, css, "<inline-style>", base_path, pool, stylesheets, count, capacity, 0);
+        engine, css, inline_origin, base_path, pool, stylesheets, count, capacity, 0);
     for (int i = before; i < *count; i++) {
         (*stylesheets)[i]->owner_element = owner;
     }
@@ -3472,7 +3475,12 @@ DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_heigh
         log_error("document-transform: TikZ runtime configuration is missing");
         return nullptr;
     }
-    return load_lambda_document_transform_doc(tikz_url, transform, nullptr, 0,
+    char text_width_px[32];
+    snprintf(text_width_px, sizeof(text_width_px), "%d", viewport_width);
+    LambdaDocumentTransformOption option = {
+        "text_width_px", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, text_width_px, false
+    };
+    return load_lambda_document_transform_doc(tikz_url, transform, &option, 1,
                                               viewport_width, viewport_height, pool);
 }
 
@@ -5000,7 +5008,13 @@ static bool layout_single_file(
         disable_animations
     };
 
-    Url* input_url = url_parse_with_base(input_file, cwd);
+    Url* input_url = url_parse_path_or_url(input_file, cwd);
+    if (!input_url) {
+        js_mir_end_document_phase_timing(&document_js_timing);
+        log_error("Failed to parse layout input: %s", input_file);
+        pool_destroy(pool);
+        return false;
+    }
     EventStateLog* event_log = nullptr;
     if (enable_event_log && input_url) {
         event_log = event_state_log_open(input_file, url_get_href(input_url));
@@ -5033,6 +5047,7 @@ static bool layout_single_file(
                       response ? response->status_code : 0);
             if (response) free_fetch_response(response);
             layout_close_failed_load_logs(&event_log, &state_dump);
+            url_destroy(input_url);
             pool_destroy(pool);
             return false;
         }
@@ -5106,6 +5121,7 @@ static bool layout_single_file(
         write_layout_phase_timing(timing_file, input_file, false, &timing);
         log_error("Failed to load document: %s", input_file);
         layout_close_failed_load_logs(&event_log, &state_dump);
+        url_destroy(input_url);
         pool_destroy(pool);
         return false;
     }

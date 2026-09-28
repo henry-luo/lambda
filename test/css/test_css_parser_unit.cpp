@@ -969,6 +969,16 @@ TEST_F(CssParserUnitTest, FontFace_FileUrlResolvesToLocalPath) {
     mem_free(resolved);
 }
 
+TEST_F(CssParserUnitTest, FontFace_WindowsBasePathResolvesParentDirectory) {
+    char* resolved = css_resolve_font_url(
+        "../font/Ahem.ttf",
+        "C:\\project\\test\\layout\\data\\baseline\\font-001.htm", nullptr);
+
+    ASSERT_NE(resolved, nullptr);
+    EXPECT_STREQ(resolved, "C:\\project\\test\\layout\\data\\font\\Ahem.ttf");
+    mem_free(resolved);
+}
+
 typedef struct FontResourceWeightSet {
     bool has_regular;
     bool has_bold;

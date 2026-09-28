@@ -374,31 +374,139 @@ private:
         return true;
     }
 
-    bool append_points(ElementBuilder& parent, size_t begin, size_t end, bool physical,
-                       bool path_operators) {
+    bool path_word(size_t* at, size_t end, const char* expected) {
+        skip_inner_space(source_, at, end);
+        size_t n = strlen(expected);
+        if (*at + n > end || memcmp(source_ + *at, expected, n) != 0) return false;
+        if (*at + n < end && isalpha((unsigned char)source_[*at + n])) return false;
+        *at += n;
+        return true;
+    }
+
+    bool append_point(ElementBuilder& parent, double x, double y) {
+        if (++points_ > 10000) { error("picture exceeds the 10000 point limit"); return false; }
+        parent.child(builder_.element("point").attr("x", x).attr("y", y).final());
+        return true;
+    }
+
+    bool append_path_vertex(ElementBuilder& parent, size_t* at, size_t end,
+                            double* x, double* y, bool* cartesian) {
+        skip_inner_space(source_, at, end);
+        size_t start = *at;
+        if (coordinate(at, end, true, x, y)) {
+            if (!append_point(parent, *x, *y)) return false;
+            *cartesian = true;
+            return true;
+        }
+        *at = start;
+        if (++points_ > 10000) { error("picture exceeds the 10000 point limit"); return false; }
+        if (!append_path_point(parent, at, end)) return false;
+        *cartesian = false;
+        return true;
+    }
+
+    bool ellipse_radii(size_t* at, size_t end, double* rx, double* ry) {
+        skip_inner_space(source_, at, end);
+        if (*at >= end || source_[(*at)++] != '(' || !number(at, end, true, rx)) return false;
+        skip_inner_space(source_, at, end);
+        if (*at + 3 > end || memcmp(source_ + *at, "and", 3) != 0) return false;
+        *at += 3;
+        if (!number(at, end, true, ry)) return false;
+        skip_inner_space(source_, at, end);
+        if (*at >= end || source_[(*at)++] != ')' || *rx <= 0.0 || *ry <= 0.0) return false;
+        return true;
+    }
+
+    bool append_cubic(ElementBuilder& parent, double x0, double y0,
+                      double x1, double y1, double x2, double y2,
+                      double x3, double y3) {
+        // Sampling keeps the path renderer bounded while preserving TikZ's cubic shape.
+        const int steps = 32;
+        for (int i = 1; i <= steps; i++) {
+            double t = (double)i / (double)steps;
+            double u = 1.0 - t;
+            double x = u * u * u * x0 + 3.0 * u * u * t * x1 +
+                3.0 * u * t * t * x2 + t * t * t * x3;
+            double y = u * u * u * y0 + 3.0 * u * u * t * y1 +
+                3.0 * u * t * t * y2 + t * t * t * y3;
+            if (!append_point(parent, x, y)) return false;
+        }
+        return true;
+    }
+
+    bool append_path_geometry(ElementBuilder& parent, size_t begin, size_t end) {
+        size_t at = begin;
+        double x = 0.0, y = 0.0;
+        bool cartesian = false;
+        if (!append_path_vertex(parent, &at, end, &x, &y, &cartesian)) {
+            error("expected TikZ path coordinate"); return false;
+        }
+        while (true) {
+            skip_inner_space(source_, &at, end);
+            if (at == end) return true;
+            if (path_word(&at, end, "rectangle")) {
+                double x2 = 0.0, y2 = 0.0;
+                if (!cartesian || !coordinate(&at, end, true, &x2, &y2)) {
+                    error("rectangle requires a second coordinate"); return false;
+                }
+                if (!append_point(parent, x2, y2)) return false;
+                parent.attr("shape", "rectangle");
+                x = x2; y = y2;
+                skip_inner_space(source_, &at, end);
+                if (at != end) { error("rectangle must end after its second coordinate"); return false; }
+                return true;
+            } else if (path_word(&at, end, "ellipse")) {
+                double rx = 0.0, ry = 0.0;
+                if (!cartesian || !ellipse_radii(&at, end, &rx, &ry)) {
+                    error("ellipse requires positive x and y radii"); return false;
+                }
+                parent.attr("shape", "ellipse").attr("rx", rx).attr("ry", ry);
+                skip_inner_space(source_, &at, end);
+                if (at != end) { error("ellipse must end after its radii"); return false; }
+                return true;
+            } else if (at + 2 <= end && memcmp(source_ + at, "--", 2) == 0) {
+                at += 2;
+                double x2 = 0.0, y2 = 0.0;
+                bool next_cartesian = false;
+                if (!append_path_vertex(parent, &at, end, &x2, &y2, &next_cartesian)) {
+                    error("line segment requires a second coordinate"); return false;
+                }
+                x = x2; y = y2; cartesian = next_cartesian;
+            } else if (at + 2 <= end && memcmp(source_ + at, "..", 2) == 0) {
+                at += 2;
+                if (!cartesian || !path_word(&at, end, "controls")) {
+                    error("TikZ curve requires control points"); return false;
+                }
+                double x1 = 0.0, y1 = 0.0, x2 = 0.0, y2 = 0.0;
+                double x3 = 0.0, y3 = 0.0;
+                if (!coordinate(&at, end, true, &x1, &y1) ||
+                        !path_word(&at, end, "and") ||
+                        !coordinate(&at, end, true, &x2, &y2) ||
+                        !path_word(&at, end, "..") ||
+                        !coordinate(&at, end, true, &x3, &y3)) {
+                    error("TikZ cubic curve requires two controls and an endpoint"); return false;
+                }
+                if (!append_cubic(parent, x, y, x1, y1, x2, y2, x3, y3)) return false;
+                x = x3; y = y3; cartesian = true;
+            } else {
+                error("unsupported path operator in TikZ geometry"); return false;
+            }
+        }
+    }
+
+    bool append_points(ElementBuilder& parent, size_t begin, size_t end, bool physical) {
         size_t at = begin;
         size_t count = 0;
         while (at < end) {
             skip_inner_space(source_, &at, end);
             if (at == end) break;
-            if (count > 0 && path_operators) {
-                if (at + 2 <= end && memcmp(source_ + at, "--", 2) == 0) {
-                    at += 2;
-                    skip_inner_space(source_, &at, end);
-                }
-                else { error("unsupported path operator"); return false; }
-            }
             if (++points_ > 10000) { error("picture exceeds the 10000 point limit"); return false; }
-            if (path_operators) {
-                if (!append_path_point(parent, &at, end)) return false;
-            } else {
-                double x = 0.0, y = 0.0;
-                if (!coordinate(&at, end, physical, &x, &y)) {
-                    error("expected finite Cartesian coordinate");
-                    return false;
-                }
-                parent.child(builder_.element("point").attr("x", x).attr("y", y).final());
+            double x = 0.0, y = 0.0;
+            if (!coordinate(&at, end, physical, &x, &y)) {
+                error("expected finite Cartesian coordinate");
+                return false;
             }
+            parent.child(builder_.element("point").attr("x", x).attr("y", y).final());
             count++;
         }
         if (!count) { error("empty coordinate list"); return false; }
@@ -441,7 +549,7 @@ private:
         if (word("coordinates")) {
             node.attr("input_kind", "coordinates");
             if (!group('{', '}', &begin, &end)) return false;
-            if (!append_points(node, begin, end, false, false)) return false;
+            if (!append_points(node, begin, end, false)) return false;
         } else {
             node.attr("input_kind", "expression");
             if (!group('{', '}', &begin, &end)) return false;
@@ -465,7 +573,7 @@ private:
         size_t begin = position_, end = 0;
         if (!semicolon(&end)) return false;
         node.attr("source", source_item(begin, end));
-        if (!append_points(node, begin, end, true, true)) return false;
+        if (!append_path_geometry(node, begin, end)) return false;
         parent.child(node.final());
         return true;
     }
