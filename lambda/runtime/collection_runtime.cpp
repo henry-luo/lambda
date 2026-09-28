@@ -451,8 +451,10 @@ void list_push(List* list, Item item) {
         if (text && text->len == 0) return;
 
         Arena* ui_arena = ui_collection_arena();
-        bool is_ui = ui_arena != nullptr;
-        if (is_ui && list->is_spreadable) {
+        // UI element content is arena-owned even though elements are not
+        // spreadable lists. A GC string here would outlive its traced owner.
+        bool is_ui_content = ui_arena && list->type_id == LMD_TYPE_ELEMENT;
+        if (is_ui_content) {
             item = ui_copy_string_to_arena(ui_arena, item);
         }
 
@@ -467,7 +469,7 @@ void list_push(List* list, Item item) {
                 String* previous = previous_item.get_safe_string();
                 String* next = item.get_safe_string();
                 if (previous && next) {
-                    if (is_ui) {
+                    if (is_ui_content) {
                         list->items[list->length - 1] = ui_merge_strings_to_arena(
                             ui_arena, previous, next);
                         return;
