@@ -5451,9 +5451,7 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         return;
     }
 
-    Element* svg_elem = dom_element_to_element(dom_elem);
     float scale = rdcon->raster_scale;
-
 
     Rect content_rect = render_geometry_block_content_rect(&rdcon->block, view, scale);
     float viewport_width = scale > 0.0f ? content_rect.width / scale : content_rect.width;
@@ -5462,6 +5460,16 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
         return;
     }
 
+    // SVG paint is clipped to its content box. Cull that box itself, since
+    // the generic block marker can miss painted zero-height inline SVGs.
+    if (!rdcon->has_transform &&
+        !(view->transform && view->transformp()->functions) &&
+        !view_geometry_bounds_intersect(view_geometry_rect_to_bound(content_rect),
+                                        rdcon->block.clip)) {
+        return;
+    }
+
+    Element* svg_elem = dom_element_to_element(dom_elem);
 
     // build base transform: Translate(x,y) * Scale(scale)
     RdtMatrix base_transform = {
