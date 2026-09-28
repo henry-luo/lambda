@@ -1,6 +1,6 @@
-==================
+===================
 RST Directives Test
-==================
+===================
 
 This document contains comprehensive testing of reStructuredText directives.
 
@@ -70,7 +70,7 @@ Another transition with equals signs.
 Yet another transition with asterisks.
 
 Definition Lists
----------------
+----------------
 
 term 1
     Definition of the first term. This can be a longer
@@ -151,7 +151,7 @@ Code Directives
    }
 
 Admonition Directives
-====================
+=====================
 
 .. note::
    This is a note admonition. It contains important information
@@ -254,7 +254,7 @@ The solution to equation :eq:`quadratic` is:
    x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
 
 Container Directives
-===================
+====================
 
 .. container:: custom-class
 
@@ -270,7 +270,7 @@ Container Directives
    It can contain any reStructuredText elements.
 
 Inclusion Directives
-===================
+====================
 
 .. include:: /path/to/included/file.rst
 
@@ -295,7 +295,7 @@ Raw Content Directives
    \end{equation}
 
 Replacement Directives
-=====================
+======================
 
 .. |date| date::
 .. |time| date:: %H:%M
@@ -330,7 +330,7 @@ Meta Directives
 .. title:: Custom Document Title
 
 Custom Directives
-================
+=================
 
 .. highlight:: python
    :linenothreshold: 5

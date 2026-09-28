@@ -471,6 +471,33 @@ TEST_F(FormatAdapterTest, RstDetection) {
                 json_contains(json->chars, "\"$\": \"h2\""));
 }
 
+TEST_F(FormatAdapterTest, RstContentsKeepsFollowingHeadings) {
+    const char* content =
+        "==========\n"
+        "RST Sample\n"
+        "==========\n"
+        "\n"
+        "Introduction.\n"
+        "\n"
+        ".. contents:: Sections\n"
+        "   :depth: 2\n"
+        "\n"
+        "Next Heading\n"
+        "============\n"
+        "\n"
+        "Body text.\n";
+
+    String* json = parse_to_json(content, "test.rst");
+    ASSERT_NE(json, nullptr);
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"nav\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "Next Heading"));
+    EXPECT_TRUE(json_contains(json->chars, "#rst-heading-10"));
+    EXPECT_FALSE(json_contains(json->chars, "\"$\": \"hr\""));
+    EXPECT_FALSE(json_contains(json->chars, ".. contents::"));
+}
+
 // Test Wiki format detection
 TEST_F(FormatAdapterTest, WikiDetection) {
     const char* content =

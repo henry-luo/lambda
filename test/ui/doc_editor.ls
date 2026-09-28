@@ -109,9 +109,12 @@ fn is_latex_document(extension) {
 }
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
+fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
+fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
 
 fn is_renderable_document(extension) =>
-  document_format(extension) != null or is_latex_document(extension) or is_pdf_document(extension)
+  document_format(extension) != null or is_latex_document(extension) or
+    is_pdf_document(extension) or is_image_document(extension)
 
 fn selected_source(file) {
   if (file == null) { "" }
@@ -126,7 +129,10 @@ fn selected_preview(file) {
   else {
     let selected_path = file["file_path"]
     let format = document_format(file["extension"])
-    if (is_pdf_document(file["extension"])) {
+    if (is_image_document(file["extension"])) {
+      <img src:absolute_file_path(selected_path), alt:file["name"]>
+    }
+    else if (is_pdf_document(file["extension"])) {
       // Render in this document's runtime; a nested PDF iframe cannot start another runtime.
       let parsed = input(selected_path, 'pdf') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected PDF"> }
@@ -165,12 +171,12 @@ view <title> { "" }
 view <script> { "" }
 view <style> { "" }
 view <body> { <div class:"document-body", *[rendered_children(~)]> }
-view <h1> { <h1 *[rendered_children(~)]> }
-view <h2> { <h2 *[rendered_children(~)]> }
-view <h3> { <h3 *[rendered_children(~)]> }
-view <h4> { <h4 *[rendered_children(~)]> }
-view <h5> { <h5 *[rendered_children(~)]> }
-view <h6> { <h6 *[rendered_children(~)]> }
+view <h1> { <h1 id:~.id, *[rendered_children(~)]> }
+view <h2> { <h2 id:~.id, *[rendered_children(~)]> }
+view <h3> { <h3 id:~.id, *[rendered_children(~)]> }
+view <h4> { <h4 id:~.id, *[rendered_children(~)]> }
+view <h5> { <h5 id:~.id, *[rendered_children(~)]> }
+view <h6> { <h6 id:~.id, *[rendered_children(~)]> }
 view <p> { <p *[rendered_children(~)]> }
 view <span> { <span *[rendered_children(~)]> }
 view <strong> { <strong *[rendered_children(~)]> }
@@ -278,7 +284,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, Textile, HTML, LaTeX, and PDF files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, Textile, HTML, LaTeX, PDF, and image files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -291,7 +297,10 @@ view <document_pane> {
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
       if (~.preview_mode == "view") {
-        if (is_pdf_document(~.file["extension"])) {
+        if (is_image_document(~.file["extension"])) {
+          let preview = selected_preview(~.file);
+          <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
+        } else if (is_pdf_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"pdf-preview", class:"rendered-preview pdf-preview",
             apply(preview)>
@@ -312,7 +321,9 @@ view <document_pane> {
       }
       <nav class:"document-tabs"
       , <button class:(if (~.preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
-        <button class:(if (~.preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
+        if (not is_raster_document(~.file["extension"])) {
+          <button class:(if (~.preview_mode == "source") "document-tab tab-source active" else "document-tab tab-source"), "Source">
+        }
       >
     >
   } else {
@@ -508,6 +519,8 @@ on preview_tab(tab) {
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
                         color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .image-preview { display: flex; align-items: center; justify-content: center; }
+      .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
       .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
       .document-tabs { flex: 0 0 auto; display: flex; gap: 2px; justify-content: flex-end;
                        padding: 7px 18px; border-top: 1px solid #e2e6ec; background: #fbfcfe; }
@@ -525,6 +538,10 @@ on preview_tab(tab) {
       .document-body ul, .document-body ol, .latex-output ul, .latex-output ol { padding-left: 1.5em; }
       .document-body blockquote, .latex-output blockquote { margin: 1em 0; padding: .15em 1em;
                      border-left: 4px solid #a6badc; color: #4c5c70; background: #f6f9fd; }
+      .rst-contents { margin: 1.4em 0; padding: 1em 1.4em; background: #f7f9fc;
+                      border-left: 3px solid #adc2de; }
+      .rst-contents-title { margin: 0 0 .5em; font-weight: 650; }
+      .rst-contents ul { margin: 0; padding-left: 1.5em; }
       .document-body code, .latex-output code { padding: 2px 5px; border-radius: 4px; background: #eef1f5;
                      font: .9em 'SF Mono', Menlo, monospace; }
       .document-body pre, .latex-output pre { overflow: auto; padding: 13px 15px; border-radius: 6px;

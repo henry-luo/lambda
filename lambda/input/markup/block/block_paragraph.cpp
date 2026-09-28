@@ -9,6 +9,7 @@
  */
 #include "block_common.hpp"
 #include "../../../../lib/mem.h"
+#include <cstdio>
 #include <cstring>
 #include "lib/arraylist.h"
 #include "lib/str.h"
@@ -317,7 +318,9 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
         // For HEADER: we need to check if it's an ATX header (starts with #)
         // Setext headers are handled by detecting the underline above
         if (next_type == BlockType::HEADER) {
-            // Only ATX headers (starting with #) interrupt paragraphs
+            // RST underline headings start on the title line and must end the paragraph.
+            if (parser->config.format == Format::RST) break;
+            // Only ATX headers (starting with #) interrupt Markdown paragraphs
             const char* pos = current;
             skip_whitespace(&pos);
             if (*pos == '#') {
@@ -363,6 +366,7 @@ Item parse_paragraph(MarkupParser* parser, const char* line) {
             }
         } else if (next_type == BlockType::QUOTE ||
                    next_type == BlockType::DIVIDER ||
+                   next_type == BlockType::DIRECTIVE ||
                    next_type == BlockType::TABLE ||
                    next_type == BlockType::MATH) {
             break;  // These block types interrupt paragraphs
@@ -689,6 +693,71 @@ Item parse_rst_image_directive(MarkupParser* parser, const char* line) {
     return Item{.item = (uint64_t)img};
 }
 
+// Build the contents directive from headings already present in the source.
+Item parse_rst_contents_directive(MarkupParser* parser, const char* line) {
+    if (!parser || !line) return Item{.item = ITEM_ERROR};
+    const char* marker = strstr(line, ".. contents::");
+    if (!marker) return Item{.item = ITEM_ERROR};
+    const char* title = marker + 13;
+    title = str_skip_line_space(title);
+    if (!*title) title = "Contents";
+
+    parser->current_line++;
+    int depth = 6;
+    while (parser->current_line < parser->line_count) {
+        const char* option = parser->lines[parser->current_line];
+        if (*option != ' ' && *option != '\t') break;
+        option = str_skip_line_space(option);
+        if (*option != ':') break;
+        if (strncmp(option, ":depth:", 7) == 0) {
+            const char* value = str_skip_line_space(option + 7);
+            int parsed_depth = 0;
+            while (*value >= '0' && *value <= '9') {
+                parsed_depth = parsed_depth * 10 + (*value - '0');
+                value++;
+            }
+            if (parsed_depth > 0) depth = parsed_depth;
+        }
+        parser->current_line++;
+    }
+
+    Element* nav = create_element(parser, "nav");
+    if (!nav) return Item{.item = ITEM_ERROR};
+    add_attribute_to_element(parser, nav, "class", "rst-contents");
+    Element* heading = create_element(parser, "p");
+    if (heading) {
+        add_attribute_to_element(parser, heading, "class", "rst-contents-title");
+        String* title_text = parser->builder.createString(title);
+        if (title_text) list_push((List*)heading, Item{.item = s2it(title_text)});
+        list_push((List*)nav, Item{.item = (uint64_t)heading});
+    }
+
+    Element* list = create_element(parser, "ul");
+    if (list) {
+        for (int i = parser->current_line; i + 1 < parser->line_count; i++) {
+            HeaderInfo info = parser->adapter()->detectHeader(
+                parser->lines[i], parser->lines[i + 1]);
+            if (!info.valid || rst_heading_level_at(parser, i) > depth ||
+                !info.text_start || !info.text_end) continue;
+            Element* item = create_element(parser, "li");
+            Element* link = create_element(parser, "a");
+            if (!item || !link) continue;
+            char heading_id[48];
+            char href[52];
+            rst_heading_id(i, heading_id, sizeof(heading_id));
+            snprintf(href, sizeof(href), "#%s", heading_id);
+            add_attribute_to_element(parser, link, "href", href);
+            String* text = parser->builder.createString(
+                info.text_start, (size_t)(info.text_end - info.text_start));
+            if (text) list_push((List*)link, Item{.item = s2it(text)});
+            list_push((List*)item, Item{.item = (uint64_t)link});
+            list_push((List*)list, Item{.item = (uint64_t)item});
+        }
+        list_push((List*)nav, Item{.item = (uint64_t)list});
+    }
+    return Item{.item = (uint64_t)nav};
+}
+
 /**
  * parse_rst_definition_list - Parse RST definition list
  *
@@ -713,16 +782,15 @@ Item parse_rst_definition_list(MarkupParser* parser, const char* line) {
     while (parser->current_line < parser->line_count) {
         const char* current = parser->lines[parser->current_line];
 
-        // Skip empty lines
+        // Skip blank separators only while another term and definition follow.
         if (is_empty_line(current)) {
             parser->current_line++;
+            if (!is_rst_definition_term(parser, parser->current_line)) break;
             continue;
         }
 
-        // Term must start at column 0 (no leading whitespace)
-        if (*current == ' ' || *current == '\t') {
-            break; // End of definition list
-        }
+        // Stop before the next block instead of consuming it as an orphan term.
+        if (!is_rst_definition_term(parser, parser->current_line)) break;
 
         // This is a term
         const char* term_start = current;
