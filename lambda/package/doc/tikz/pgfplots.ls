@@ -111,21 +111,24 @@ fn label_at(raw, x, y, extra = "") any^ {
 fn legend_labels(axis_node) => [for (child in axis_node
     where child is element and string(name(child)) == "legend_entry") child.source]
 
-fn render_legend(entries, plots, index, width, acc) any^ {
+fn render_legend(entries, plots, index, left, acc) any^ {
     if (index >= len(entries)) acc
     else {
         let prepared = labels.prepare(entries[index])^
         let color = series_color(plots[index], index)^
-        let y = 28.0 + float(index) * 22.0
-        let sample = <span style: "display:inline-block;width:18px;border-top:2px solid " ++
-            color ++ ";vertical-align:middle;margin-right:4px;">
+        let y = 7.0 + float(index) * 22.0
+        let sample = if (opts.has(plots[index], "only marks"))
+            <span style: "display:inline-block;width:18px;margin-right:4px;" ++
+                "color:" ++ color ++ ";text-align:center;", "●">
+            else <span style: "display:inline-block;width:18px;border-top:2px solid " ++
+                color ++ ";vertical-align:middle;margin-right:4px;">
         let el = <span class: "tikz-legend-entry",
-            style: "position:absolute;left:" ++ string(width - 105.0) ++
+            style: "position:absolute;left:" ++ string(left) ++
                 "px;top:" ++ string(y) ++ "px;white-space:nowrap;",
             sample
             prepared.element
         >
-        render_legend(entries, plots, index + 1, width, [*acc, el])^
+        render_legend(entries, plots, index + 1, left, [*acc, el])^
     }
 }
 
@@ -157,10 +160,16 @@ pub fn render_axis(axis_node) any^ {
         else raise error("PGFPlots clipping outside axis limits is not supported yet")
     let width = opts.dimension_px(opts.value(axis_node, "width", "8cm"))^
     let height = opts.dimension_px(opts.value(axis_node, "height", "5cm"))^
+    let entries = legend_labels(axis_node)
+    if (len(entries) > len(plots))
+        raise error("PGFPlots has more legend entries than plots")
+    // keep legends in a separate band so rising curves and scatter points stay visible.
+    let legend_band = if (len(entries) > 0) 6.0 + float(len(entries)) * 22.0 else 0.0
+    let total_height = height + legend_band
     let left = 48.0
-    let top = 20.0
+    let top = 20.0 + legend_band
     let pw = width - left - 18.0
-    let ph = height - top - 43.0
+    let ph = height - 20.0 - 43.0
     if (pw <= 0.0 or ph <= 0.0) raise error("PGFPlots axis dimensions are too small")
     let xs = if (xlog) scale.log_scale(xdomain[0], xdomain[1], 0.0, pw, 10.0)
         else scale.linear_scale(xdomain[0], xdomain[1], 0.0, pw)
@@ -177,8 +186,8 @@ pub fn render_axis(axis_node) any^ {
     let plot_view = <g
         for (part in plot_elements) part>
     let graphic = <svg xmlns: "http://www.w3.org/2000/svg",
-        width: width, height: height,
-        viewBox: "0 0 " ++ string(width) ++ " " ++ string(height),
+        width: width, height: total_height,
+        viewBox: "0 0 " ++ string(width) ++ " " ++ string(total_height),
         <g transform: svg.translate(left, top),
             if (grid_x != null) grid_x
             if (grid_y != null) grid_y
@@ -188,15 +197,12 @@ pub fn render_axis(axis_node) any^ {
         >
     >
     let x_label = label_at(opts.value(axis_node, "xlabel", null),
-        left + pw / 2.0, height - 6.0)^
+        left + pw / 2.0, total_height - 6.0)^
     let y_label = label_at(opts.value(axis_node, "ylabel", null),
         12.0, top + ph / 2.0, "transform:translate(-50%,-50%) rotate(-90deg);")^
-    let entries = legend_labels(axis_node)
-    if (len(entries) > len(plots))
-        raise error("PGFPlots has more legend entries than plots")
-    let legend = render_legend(entries, plots, 0, width, [])^
+    let legend = render_legend(entries, plots, 0, left, [])^
     let style = "position:relative;display:inline-block;width:" ++ string(width) ++
-        "px;height:" ++ string(height) ++ "px;vertical-align:bottom;";
+        "px;height:" ++ string(total_height) ++ "px;vertical-align:bottom;";
     <div class: "tikz-axis", style: style,
         graphic
         if (x_label != null) x_label
