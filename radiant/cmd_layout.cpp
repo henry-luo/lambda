@@ -3472,7 +3472,12 @@ DomDocument* load_tikz_doc(Url* tikz_url, int viewport_width, int viewport_heigh
         log_error("document-transform: TikZ runtime configuration is missing");
         return nullptr;
     }
-    return load_lambda_document_transform_doc(tikz_url, transform, nullptr, 0,
+    char text_width_px[32];
+    snprintf(text_width_px, sizeof(text_width_px), "%d", viewport_width);
+    LambdaDocumentTransformOption option = {
+        "text_width_px", LAMBDA_DOCUMENT_TRANSFORM_OPTION_STRING, text_width_px, false
+    };
+    return load_lambda_document_transform_doc(tikz_url, transform, &option, 1,
                                               viewport_width, viewport_height, pool);
 }
 

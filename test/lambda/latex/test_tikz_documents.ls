@@ -62,6 +62,7 @@ let workflow_paths = children_named(workflow_picture, "path");
         "\\draw (a) -- (missing);\\end{tikzpicture}") ^ { ^.message },
         "unknown TikZ node: missing"),
     contains(tikz.render("\\begin{tikzpicture}\\node (a) at (0,0) {A};" ++
-        "\\node (a) at (1,0) {B};\\end{tikzpicture}") ^ { ^.message },
+        "\\node (a) at (1,0) {B};\\node (b) at (2,0) {C};" ++
+        "\\draw (a) -- (b);\\end{tikzpicture}") ^ { ^.message },
         "duplicate TikZ node: a")
 ]

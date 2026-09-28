@@ -221,9 +221,10 @@ fn render_polar_axis(axis_node) any^ {
     >
 }
 
-fn render_cartesian_axis(axis_node) any^ {
+fn render_cartesian_axis(axis_node, options) any^ {
     let checked = opts.check(axis_node, ["xmin", "xmax", "ymin", "ymax", "width", "height",
-        "xlabel", "ylabel", "grid", "domain", "samples", "mark"])^
+        "xlabel", "ylabel", "grid", "domain", "samples", "mark", "axis x line",
+        "axis y line", "xlabel near ticks", "ylabel near ticks", "xticklabel style"])^
     let plots = children_named(axis_node, "plot")
     if (len(plots) == 0) raise error("PGFPlots axis has no coordinate plots")
     let series_list = resolve_plots(plots, axis_node, 0, [])^
@@ -247,8 +248,17 @@ fn render_cartesian_axis(axis_node) any^ {
               point.y < ydomain[0] or point.y > ydomain[1]) point]
     let in_bounds = if (len(outside) == 0) true
         else raise error("PGFPlots clipping outside axis limits is not supported yet")
-    let width = opts.dimension_px(opts.value(axis_node, "width", "8cm"))^
-    let height = opts.dimension_px(opts.value(axis_node, "height", "5cm"))^
+    let text_width_px = if (options == null) null else options.text_width_px
+    let width = opts.dimension_px(opts.value(axis_node, "width", "8cm"), text_width_px)^
+    let height = opts.dimension_px(opts.value(axis_node, "height", "5cm"), text_width_px)^
+    let x_line = opts.value(axis_node, "axis x line", "bottom")
+    let y_line = opts.value(axis_node, "axis y line", "left")
+    let tick_label_style = opts.value(axis_node, "xticklabel style", null)
+    if (x_line != "bottom" or y_line != "left")
+        raise error("only bottom/left PGFPlots axis lines are supported")
+    if (tick_label_style != null and
+            tick_label_style != "/pgf/number format/1000 sep=")
+        raise error("unsupported PGFPlots x tick label style")
     let legend_entries = legend_nodes(axis_node)
     let surplus_explicit = [for (index, entry in legend_entries
         where index >= len(plots) and entry.from_list != true) entry]
@@ -270,11 +280,12 @@ fn render_cartesian_axis(axis_node) any^ {
     let ys = if (ylog) scale.log_scale(ydomain[0], ydomain[1], ph, 0.0, 10.0)
         else scale.linear_scale(ydomain[0], ydomain[1], ph, 0.0)
     let grid = opts.value(axis_node, "grid", "none")
-    if (grid != "none" and grid != "major")
+    if (grid != "none" and grid != "major" and grid != "both")
         raise error("unsupported PGFPlots grid option: " ++ grid)
+    let grid_mode = if (grid == "both") "major" else grid
     let config = {tick_count: 5}
-    let grid_x = if (grid == "major") chart_axis.x_axis_grid(xs, pw, ph, config) else null
-    let grid_y = if (grid == "major") chart_axis.y_axis_grid(ys, pw, ph, config) else null
+    let grid_x = if (grid_mode == "major") chart_axis.x_axis_grid(xs, pw, ph, config) else null
+    let grid_y = if (grid_mode == "major") chart_axis.y_axis_grid(ys, pw, ph, config) else null
     let plot_elements = render_series(series_list, axis_node, 0, xs, ys, [])^
     // Keep plots in the axis coordinate space; nested SVG viewports shift in Radiant.
     let plot_view = <g
@@ -290,10 +301,13 @@ fn render_cartesian_axis(axis_node) any^ {
             chart_axis.y_axis(ys, pw, ph, config, null)
         >
     >
+    let x_label_y = if (opts.has(axis_node, "xlabel near ticks")) height - 22.0
+        else total_height - 6.0
+    let y_label_x = if (opts.has(axis_node, "ylabel near ticks")) left / 2.0 else 12.0
     let x_label = label_at(opts.value(axis_node, "xlabel", null),
-        left + pw / 2.0, total_height - 6.0)^
+        left + pw / 2.0, x_label_y)^
     let y_label = label_at(opts.value(axis_node, "ylabel", null),
-        12.0, top + ph / 2.0, "transform:translate(-50%,-50%) rotate(-90deg);")^
+        y_label_x, top + ph / 2.0, "transform:translate(-50%,-50%) rotate(-90deg);")^
     let legend = render_legend(entries, plots, 0, left, [])^
     let style = "position:relative;display:inline-block;width:" ++ string(width) ++
         "px;height:" ++ string(total_height) ++ "px;vertical-align:bottom;";
@@ -305,6 +319,6 @@ fn render_cartesian_axis(axis_node) any^ {
     >
 }
 
-pub fn render_axis(axis_node) any^ =>
+pub fn render_axis(axis_node, options = null) any^ =>
     if (string(name(axis_node)) == "polaraxis") render_polar_axis(axis_node)^
-    else render_cartesian_axis(axis_node)^
+    else render_cartesian_axis(axis_node, options)^
