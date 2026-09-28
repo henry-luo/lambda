@@ -624,8 +624,11 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_format2", FPTR(fn_format2), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
-    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false, false, LMD_TYPE_ANY, false,
+    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, true, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_error", FPTR(fn_error), NULL, NULL, false, 0},
+
+    {SYSFUNC_ERROR2, "error", 2, &TYPE_ERROR, false, true, false, LMD_TYPE_ANY, false,
+     C_RET_ITEM, NULL, "fn_error2", FPTR(fn_error2), NULL, NULL, false, 0},
 
     // ========================================================================
     // String functions — method-eligible on strings
@@ -2165,6 +2168,8 @@ JitImport jit_runtime_imports[] = {
     {"err2it", FPTR(err2it)},
     {"it2err", FPTR(it2err)},
     {"lambda_type_check", FPTR(lambda_type_check)},
+    {"lambda_error_stamp_site", FPTR(lambda_error_stamp_site)},
+    {"lambda_raise_operand", FPTR(lambda_raise_operand)},
     {"lambda_fn_colour_arg_check", FPTR(lambda_fn_colour_arg_check)},
     {"lambda_fn_colour_guard_list", FPTR(lambda_fn_colour_guard_list)},
     {"lambda_fn_colour_guard_args", FPTR(lambda_fn_colour_guard_args)},

@@ -2270,6 +2270,42 @@ timing stays exempt from S1.6 (S7.11.4).
 
 **Spec linkage.** TE-20 → S11.4.11; the mechanism revised AI17 to AI17v2, and the predicate function revised AI17v2 to AI17v3 (`Lambda_Design_Ast_Interpreter.md` §6.2).
 
+### TE-21 — `raise v` of a non-error is `raise error(v)` (decided 2026-09-27, user)
+
+**The ruling (S7.4.6).** `raise v` with a non-error `v` is shorthand for `raise error(v)`. The
+error constructor (S7.4.4) decides the code and message: a string is the message, a parameter
+map supplies `code`, `message` and `source`. The error is stamped where `v` is written, as the
+written `error(v)` call would be. An error operand is raised unchanged, so `raise` always raises
+an error.
+
+**What forced it ([LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>)).** Nothing ruled a
+non-error operand, and the tiers split. T0 handed it to the return path, so `raise "s"` in an
+`int^` function failed the success contract with E201 and `raise 7` returned 7. The JIT put the
+value itself on the error lane, so a handler received the string as a success value and a
+binding declared `int` held it (SI14). The first fix made the JIT match T0 pending a ruling.
+
+**Three options.** (a) `raise v` returns `v` through the success contract (T0's behaviour).
+(b) A non-error operand is an error of its own: a compile error where the type proves it, E201
+otherwise. (c) Shorthand for `raise error(v)`. (c) won:
+
+- The raised channel carries errors only, so `^` in a handler, `e is error` and E228's
+  obligation mean the same thing whatever was written after `raise`. Under (a) a `raise` could
+  complete normally, which makes the keyword a conditional `return`.
+- It is the common intent: `raise "division by zero"` reads as raising that message.
+- Unlike (b), no program that raises a message string needs rewriting, and nothing new is
+  checked at compile time.
+
+**Consequence.** The constructor's reading of the operand is the whole meaning. `error(v)` takes
+a message only from a string or a map, so `raise 7` raises `error(7)`, whose message is
+`"Error"`; whether the constructor should stringify other values is an S7.4.4 question.
+
+**Implementation.** Both tiers call `lambda_raise_operand` (`lambda-eval.cpp`), which returns an
+error operand as it is and otherwise builds `error(v)` and stamps the operand's site
+(`AstRaiseNode::site_line`/`site_column`). The JIT's return-contract path for a raised
+non-error was removed. Fixture `test/lambda/raise_non_error.ls`, pinned on every tier.
+
+**Spec linkage.** TE-21 → S7.4.6.
+
 ## 8. Phasing
 
 Each phase gates on `make test-lambda-baseline` and `make test262-baseline` at 100% plus new

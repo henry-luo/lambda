@@ -160,7 +160,7 @@ A seven-area survey of runtime behaviour against `doc/Lambda_Formal_Semantics.md
 (probes under `temp/spec_survey/`) surfaced eight defects that return a **wrong
 value with no error**. Each was re-reproduced on both tiers before filing:
 [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>), [LR04-9](#lr04-9), [LR05-9](<Lambda_Issue_Ledger (fixed).md#lr05-9>), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>),
-[LR07-18](#lr07-18), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>), [LR10-8](#lr10-8), [LR12-27](#lr12-27).
+[LR07-18](#lr07-18), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), [LR12-27](#lr12-27).
 The survey's spec gaps (behaviour no `S#` ruling covers) are not filed here —
 they need rulings, not fixes. *2026-09-22:* the list/array kind gaps were ruled
 (S2.5.6–S2.5.8, S10.6.1, S11.1.6v2 and companions, semantics 29.0.0) and filed as
@@ -170,7 +170,7 @@ they need rulings, not fixes. *2026-09-22:* the list/array kind gaps were ruled
 [LR02-19](<Lambda_Issue_Ledger (fixed).md#lr02-19>) (let-group item loss, another wrong value with no error).
 The effect-colour work of the same day (D7.4.6, ES48) fixed
 [LR12-30](<Lambda_Issue_Ledger (fixed).md#lr12-30>) (an `fn` could call a built-in procedure). Moving the
-effect examples into a `pn` found [LR10-9](#lr10-9): E228 is checked only in
+effect examples into a `pn` found [LR10-9](<Lambda_Issue_Ledger (fixed).md#lr10-9>): E228 is checked only in
 top-level expression statements. Triaging the baseline gate against a clean control
 then found and fixed [LR01-16](<Lambda_Issue_Ledger (fixed).md#lr01-16>), an `auto`-tier satellite key-linking
 defect that made 17 baseline scripts and the MathLive gate timing-dependent, and
@@ -208,10 +208,21 @@ Setup note: the checkout first needed `npm install`. `node_modules` still held C
 The "wrong value, no error" group was triaged against the rulings; each defect a ruling covers was fixed on both tiers, and the rest wait on a decision.
 - **Fixed and archived:** [LR03-11](<Lambda_Issue_Ledger (fixed).md#lr03-11>) (sized and literal admission), [LR07-16](<Lambda_Issue_Ledger (fixed).md#lr07-16>) (named arguments on a dynamic call, S12.3.2), [LR07-17](<Lambda_Issue_Ledger (fixed).md#lr07-17>) (imported literals, and a failed module init, D7.2.2), [LR10-7](<Lambda_Issue_Ledger (fixed).md#lr10-7>) (error members).
 - **Fixed in part:** [LR04-9](#lr04-9) (in-band `int()`), [LR07-18](#lr07-18) (error-returning rows, `format`), [LR12-27](#lr12-27) (push). Each keeps its residue.
-- **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](#lr10-8), [LR12-14](#lr12-14) (CW32v2 item 6), [LR12-10](#lr12-10) (CW33 item 2), plus the residues above.
-- **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](#lr07-22), [LR10-10](#lr10-10), [LR12-31](#lr12-31)–[LR12-34](#lr12-34). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
+- **Waiting on a ruling:** [LR03-13](#lr03-13), [LR09-31](#lr09-31), [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>), [LR12-14](#lr12-14) (CW32v2 item 6), [LR12-10](#lr12-10) (CW33 item 2), plus the residues above.
+- **Found on the way, all reproduced:** [LR03-15](<Lambda_Issue_Ledger (fixed).md#lr03-15>), [LR03-16](<Lambda_Issue_Ledger (fixed).md#lr03-16>), [LR07-19](<Lambda_Issue_Ledger (fixed).md#lr07-19>)–[LR07-22](#lr07-22), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>), [LR12-31](#lr12-31)–[LR12-34](#lr12-34). [LR07-21](<Lambda_Issue_Ledger (fixed).md#lr07-21>), the JIT's `for` over bools, has since been fixed and archived.
 
 Three goldens had pinned wrong values and were corrected (`conc/cancel_*`), and several fixtures that are wrong only on the JIT had been hidden because goldens run on `auto`, which starts in T0. The new fixtures are pinned on every tier.
+
+### Error containment pass — 2026-09-27
+
+The six "error containment is only partly built" items were worked on both tiers.
+- **Fixed and archived:** [LR10-9](<Lambda_Issue_Ledger (fixed).md#lr10-9>) (E228 in every position), [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>) (the error members, `error(msg, source)`, `last_error` rooting) and [LR12-25](<Lambda_Issue_Ledger (fixed).md#lr12-25>) (`print` of an error, `string(err)` escaping containment).
+- **Implemented, waiting on a ruling:** [LR03-13](#lr03-13) (a call through a declared function-type contract checks its result).
+- **Ruled and fixed:** [LR10-8](<Lambda_Issue_Ledger (fixed).md#lr10-8>): `raise v` of a non-error is `raise error(v)` (S7.4.6, TE-21, user ruling of 2026-09-27).
+- **TE-17 I3 landed, residue open:** [LR12-24](#lr12-24), with the D6.1.3 `may_defect` fixed point it was blocked on.
+- **Found on the way, all reproduced:** [LR02-31](#lr02-31), [LR10-14](#lr10-14)–[LR10-16](#lr10-16) and [LR12-36](<Lambda_Issue_Ledger (fixed).md#lr12-36>), which was fixed and archived later the same day. A `type` or function value in an `any` map slot read back as an error on both tiers (`typeditem_to_item` had no arm for either); fixed in passing.
+
+Verified: `make test-lambda-baseline` 5974/5974 once the four emission-size probes are re-baselined (`test/mir/mir_budgets.json`, reasons recorded there). New fixtures, pinned on interp, jit and auto: `proc/defect_value_flow`, `proc/rejected_error_value_flow`, `contract_return_check`, `error_members`, `raise_non_error`, `proc/print_error_value`. `normalize_error`'s golden had pinned the hidden early return S7.7.1 forbids and now reads the value flow.
 
 ### JIT golden sweep — 2026-09-25
 
@@ -575,6 +586,9 @@ A datetime (`t'2025-01-01'`), binary (`b'\xDEAD'`), decimal (`1.5m`), suffixed (
 ---
 
 
+<a id="lr02-31"></a>**LR02-31 · `T^` does not parse in a value position · OPEN (found 2026-09-27)**
+**S7.4.2** rules `T^` ≡ `T | error` in value positions, and `doc/Lambda_Error_Handling.md` "Error Forms in Parameters and Let Bindings" shows `let result: int^ = may_fail(x)` and `fn process(input: int^) int`. The C parser rejects both: `let x: int^ = r()` is E100 "expected '=' after let binding" and `fn f(a: int^, b: int)` is E100 "expected ')' after parameters". Only a function's return annotation accepts the caret. The E228 migration therefore spelled such bindings `any | error`.
+
 ## 3. Value & type model (LR_03)
 
 <a id="lr03-2"></a>**LR03-2 · Hard-coded capacity caps · OPEN**
@@ -596,7 +610,7 @@ unproven Item to NaN. It is retained for callers that have already established a
 numeric source; migrating every such native/guest call to a fallible boundary is
 separate work.
 
-<a id="lr03-13"></a>**LR03-13 · A function contract's return type is trusted, never checked · OPEN (found 2026-09-24)**
+<a id="lr03-13"></a>**LR03-13 · A function contract's return type is trusted, never checked · IMPLEMENTED 2026-09-27, waiting on a ruling (found 2026-09-24)**
 `let h: fn (y: int) int = (y) => "s"` is admitted, and so is a function
 declared `string`: admission tests the colour (**S11.1.5v2**), not the return.
 A call through `h` is still typed `int`, so on the JIT `{v: h(3)}` is
@@ -611,6 +625,7 @@ or both. Since 2026-09-24 a signature's return contract is the value type, as
 a declaration's is (`test/lambda/fn_type_curried_call.ls`), so curried
 contracts now behave the same way; before, a curried call typed as a
 function and crashed a map literal instead.
+*Implemented 2026-09-27, both tiers, placement unruled:* a call whose callee is a binding or parameter declared with a function-type contract checks its result against that contract's return where the call is made (`ast_call_contract_return`, `ast.hpp`; T0 `interp_check_contract_return`, the JIT before its unbox). The failure is the call's value (E201 "function return"), as S7.7.3's call-site contagion is. A direct callee's own declared return governs instead, and a contract with a binder or an open return is not checked. The JIT reads such a call as a boxed join (TE-17 I3). The alternative placement, at admission, is not built. Fixture `test/lambda/contract_return_check.ls`.
 
 <a id="lr03-17"></a>**LR03-17 · A repeated key in a map literal keeps both entries; a write updates the first, a read takes the last · OPEN (found 2026-09-25)**
 ```
@@ -917,43 +932,6 @@ The markup formatters skip any text string above a size cap, log an error and ca
 
 ## 10. Error handling (LR_10)
 
-<a id="lr10-8"></a>**LR10-8 · JIT: `raise` of a non-error value escapes the declared return type · OPEN (found 2026-09-21)**
-`fn f(x) int^ { if (x < 0) raise "s" else x }; let v = f(-1) ^ { 0 }` binds
-`v = "s"` (`string`) on the JIT. The interpreter rejects the value at the
-function return (E201) and the handler yields `0`. A binding declared `int`
-holds a string — violates **SI14** and **S1.6**. What `raise` may accept is
-itself unruled.
-
-<a id="lr10-9"></a>**LR10-9 · E228 is checked only in top-level expression statements · OPEN (found 2026-09-22)**
-**S7.5.1** requires a call with a `^` channel to be engaged at the immediate
-expression everywhere, and **S7.5.2** says a bare `let x = a()` never
-acknowledges. The E228 walk (`validate_enforcing_calls_in_expression`,
-`build_ast.cpp`) is entered only once per top-level item. It has no case for
-`let`/`var`/`pub` statements (the `VARIABLE_DECLARATOR` case is unreachable
-from a script) or for `for` in either form, and it returns at every `fn`/`pn`
-node. `if` bodies are walked. Inside an `fn`, E208 catches only an error that
-reaches the return value. So all of these compile with no diagnostic:
-`let x = risky()` at the top level, `for i in xs { risky() }`,
-`io.mkdir("out")` as a statement in `pn main()`, and `let a = risky(); 5`
-inside an `fn`. The existing E228
-fixtures (`type_e228_acknowledgment.ls`,
-`negative/semantic/unhandled_error_expression.ls`,
-`std/negative/unhandled_error.ls`) test only top-level expression statements,
-and the positive fixture's in-function cases are never walked. Closing the gap
-has a wide reach: by **S7.4.5** `input` raises, so every
-`let data = input(...)` would become E228. That is 165 sites in 109
-test/package files and 63 in the docs. `doc/Lambda_Error_Handling.md`
-"Handling System Function Errors" (`error=E228`) fails `check_doc_blocks.py`
-until this is fixed: its `io.mkdir` example moved into a `pn` with LR12-30, and
-neither remaining ❌ line is reported.
-
-<a id="lr10-10"></a>**LR10-10 · S7.4.4's other error members and the two-argument constructor are missing · OPEN (found 2026-09-25)**
-Found while fixing LR10-7, both tiers (S7.4.4: an error carries code, message and source location; constructors `error(msg)`, `error(msg, source)`, `error({...})`):
-- `error(msg, source)` is not registered (`sys_func_registry.c` has arity 1 only): the JIT calls a non-function value (E212), and T0 logs "call target is not a function".
-- `.source`, `.file`, `.line` and `.column` fall through to returning the error itself, so `error("outer").source is error` and `.line is error` are both `true`. The `^.source.message` example in `doc/Lambda_Error_Handling.md` cannot work.
-- A payload-less sentinel error still reads `context->last_error`: after `error("outer")`, `int("abc").message` is `"outer"`. Producers that return the bare `ItemError` need real payloads.
-- `context->last_error` is not a GC root, yet it can hold a GC-heap error.
-
 <a id="lr10-11"></a>**LR10-11 · T0 binds a stack overflow into a `let` instead of faulting · OPEN (found 2026-09-25)**
 ```
 fn f(n) => n + f(n + 1)
@@ -978,6 +956,15 @@ pn main() {
 }
 ```
 S7.6.7v3 says `pn` handlers are statement-only, so a value-producing postfix handler over a `pn` call is a compile error (the ruling names the possibly-suspending case). Both tiers instead compile it and bind `null`, on success as on failure: a wrong value with no error. Over an `fn` the same handler gives `2` and `-1`, `p(1)^` gives `2`, and the statement form `p(-5) ^ { … }` runs its body. Found while probing the procedure arrow (S16.6.7v2), which behaves the same way.
+
+<a id="lr10-14"></a>**LR10-14 · A payload-less `ItemError` reads a stale `last_error` for its members · OPEN (found 2026-09-27)**
+Residue of [LR10-10](<Lambda_Issue_Ledger (fixed).md#lr10-10>). About 800 producers still return the bare `ItemError` sentinel, and `fn_member` answers `.message`, `.code` and the location members of a sentinel from `context->last_error`, which the latest failure anywhere set: after `error("outer")`, `int("abc").message` is `"outer"`. Both tiers. The fix is a payload per producer (`runtime_error_item`, `lambda-eval.cpp`, is the one-call form); the sentinel read stays only as a fallback.
+
+<a id="lr10-15"></a>**LR10-15 · A boundary error carries no source location · OPEN (found 2026-09-27)**
+S7.4.4 gives every error a source location. `error()` calls are stamped with their call site (T0 `eval_call`, the JIT's `lambda_error_stamp_site`), but a failed check (`E201`, "type check at declaration 'n' failed") is built by `lambda_type_check` with no site, so its `.line` and `.column` read `null` on both tiers. The emitter knows the site at every `emit_checked_boundary`; passing it through the checker is the fix.
+
+<a id="lr10-16"></a>**LR10-16 · E228 never credits a named argument's parameter · OPEN (found 2026-09-27)**
+An error-admitting parameter acknowledges a raising argument (S7.5.1), and the E228 walk (`validate_enforcing_calls_in_expression`, `build_ast.cpp`) credits it for a positional argument only. With `fn g(a: int, b: int | error)`, `g(2, risky(1))` is accepted while `g(b: risky(1), a: 2)` is E228. The walk pairs `call->argument` with `signature->param` by position, yet position alone does not explain it: with `fn f(a: int | error, b: int)`, `f(b: risky(1), a: 2)` pairs the raising argument with the error-admitting `a` and is E228 as well, so the named-argument node itself loses the credit. The direct-call path resolves names with `ast_resolve_call_args`; the walk should do the same. Compile time, so both tiers.
 
 ## 11. Mark data API (LR_11)
 
@@ -1093,7 +1080,7 @@ copy is alive, but both writes are visible through the other name. Repro:
 
 *Investigated 2026-09-25:* only a packed matrix leaks. `[fill(3, 1), …]` is promoted to a 2-D ArrayNum, and `m[0]` returns a mutable view onto its buffer (`make_leading_axis_view`, `is_mutable_view = 1`). The place-copy facts are right and both tiers mark the bind, but a view owns no storage: `clone_mutable_array_num` hands back the view itself, so the detach writes the base. A push-built matrix, a generic array of rows and a map of arrays are correct; `row_copy_loop`'s expected value is 9141, not 9110. The fix direction, copying a view into an owned array at a place-copy bind (S9.2.2), is the eager view-alias clone CW32v2 item 6 lists, but item 6 leaves mutable views OPEN/TODO by designer ruling, so it waits on that ruling. The other value boundaries (capture, push, parameter snapshot, call result, reassignment) leak the same view. Record: `temp/wv/LR12-14/`.
 
-<a id="lr12-24"></a>**LR12-24 · TE-15 defect containment — declaration and reassignment boundaries FIXED 2026-09-18; the remaining origination classes are OPEN**
+<a id="lr12-24"></a>**LR12-24 · TE-15 defect containment — declaration and reassignment boundaries FIXED 2026-09-18; TE-17 I3 and the remaining origination classes FIXED 2026-09-27; residue OPEN**
 S7.1.3v2, S7.4.2, S7.4.3, TE-15, TE-18. Four entries were filed separately as
 JIT defects — [LR12-15](<Lambda_Issue_Ledger (fixed).md#lr12-15>), [LR12-16](<Lambda_Issue_Ledger (fixed).md#lr12-16>), [LR12-18](<Lambda_Issue_Ledger (fixed).md#lr12-18>)
 and [LR12-22](<Lambda_Issue_Ledger (fixed).md#lr12-22>). They are one missing feature, not four bugs, and this
@@ -1128,7 +1115,7 @@ unannotated `let` (an acceptor per TE-15), answers `r is error` = true and
 `type(r)` = `error`, and runs the rest of the caller's block. The earlier claim
 that "`print("s=" ++ straight(a, 5))` emits nothing" is real but is a *different*
 question — `print` of an error-valued `++` chain renders nothing on **both**
-tiers — not a containment failure. Recorded as [LR12-25](#lr12-25), together
+tiers — not a containment failure. Recorded as [LR12-25](<Lambda_Issue_Ledger (fixed).md#lr12-25>), together
 with the more serious finding beside it: `string(<contained error>)` re-raises
 it as a top-level fault and terminates the script, on both tiers.
 
@@ -1215,31 +1202,22 @@ diverges: T0 true, JIT false — the S1 store class), `temp/t30/h/err_prop.ls`,
 `Lambda_Impl_Type_Enforce (done).md`, so the tracking pointer is stale and the
 remaining round-2 work reads as finished.
 
-<a id="lr12-25"></a>**LR12-25 · A contained error is invisible to `print` and escapes containment through `string()` · OPEN**
-S7.4.2, TE-18 case 5. Measured 2026-09-18, **identical on both tiers**, with a
-contained defect bound to `r` (`temp/lr1224/print_err3.ls`,
-`temp/lr1224/print_err4.ls`):
+*2026-09-27 — TE-17 I3 and the D6.1.3 fixed point landed; the other origination classes are fixed.*
+- **The fixed point.** `mir_solve_may_defect` (`transpile-mir.cpp`) runs once per compile, before any variant is registered. It first records each function's own origination sites, each judged by the emitter's own gate: declaration and reassignment boundaries, element and field stores, CRUD, `open`, `start`, handler statements, deferred object fields, computed-key maps, call admissions and array boundaries, the system rows that can fail, and the return boundary. It then takes the least fixed point over the call edges. An import reads build_ast's conservative fact (`TypeFunc::defect_known`/`may_defect`, `ast_note_function_defect`); anything else fails closed.
+- **Lane gating (I3).** A call whose value may be an error it does not declare is a boxed join to every planner: the carrier oracle, the lane witness, the lane proof and boundary redundancy. That covers a defect-capable callee, a call through a function-type contract ([LR03-13](#lr03-13)), and a system function that rejects (S11.4.3) or passes through (S7.9.3) an operand that may be one. So are a member or element of such a value and arithmetic over it. `type()` is exempt, since it observes an error (S7.9.1).
+- **Keeping the cost down, within the rulings.** `==`/`!=` of an `int | error` join against an in-band int compares Item words (S5.1.2). Integer arithmetic over joins tests for the first error and runs on the int lanes (S7.9.3), and `int()` of a join is the join itself. A destination whose contract the join's success already satisfies (the callee's own return proved it) tests only the error arm: declarations, reassignments, returns, arguments and the typed-array witness. A record literal built in its contract counts no return boundary in the solve, and a record binding's fields stay on their typed path (its record call has already returned any error).
+- **Literal slots.** build_ast lays literal slots out before either tier runs, so it boxes a slot fed by a value that may be a defect (`build_map_shape_entry`, `resolve_array`), using its own conservative fact, which over-approximates the solve. `{v: f(x)}` had stored the error's pointer bits and `[f(x), 2]` a 0.
+- **Also fixed on the way.** The JIT returned an error from a function through `let x: any | error = raising()`: the let and assign sites now skip only when the contract excludes error. T0 bound a value-carried error into a declared binding that excludes it (S7.7.2), and a type or function value in an `any` map slot read back as an error.
 
-| form | behaviour |
-|---|---|
-| `print(r)` | prints an empty line; execution continues, exit 0 |
-| `print("x " ++ r ++ "\n")` | prints **nothing at all**; execution continues |
-| `string(r)` | **terminates the script** — the contained error is re-raised as a top-level `error[E201]`, exit 1 |
+Fixture `test/lambda/proc/defect_value_flow.ls`, pinned on every tier; the base build fails it (T0 prints pointer bits and `0` for errors, and the JIT crashes). `make test-lambda-baseline` 5974/5974 with the emission budgets re-baselined for four probes (tune4 +14, cube3d +82, deltablue +217, prettier_ast +53 module instructions; reasons in `test/mir/mir_budgets.json`). Runtime: release builds, paired A/B against the base, 15 pairs over 27 typed rows (`run_paired_benchmarks.py`, artifacts `temp/errc/ab*.json`). 20 rows are within ±2% and three are faster (prettier_ast −3.8%). Slower: deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (between −4.5% and +15.6% across four runs), and queens +12% on a 70 µs run. Before the join lowerings, storage and queens had been +22% and cube3d +8%.
 
-The first two are a rendering gap: expression composition correctly does not
-skip (TE-18 case 5 — "the result type is `T | error`; the error flows as a
-value"), so `"x " ++ r` is an error value, but the output surface then discards
-it silently. Every contained defect is therefore invisible in a program's own
-output, which is what made TE-15 containment look like a lost statement.
-
-The third is a **containment escape**, and the more serious of the two: a value
-that `is error` answered true for, and that the block legitimately holds,
-becomes an uncatchable process-level failure the moment it is converted. The
-three failure channels (S7.4.2) do not permit a soft error to promote itself to
-a fault at a conversion boundary.
-
-Split from [LR12-24](#lr12-24), where the `print` half was mis-diagnosed as T0
-over-containment. It is not: T0 contains correctly.
+*Residue (open):*
+1. The skip target is the function, not the declaring block (S7.7.2, S7.7.5): a failed declaration or reassignment inside a nested block or a `for` body returns from the function (`emit_return_if_item_error`).
+2. A failed parameter admission returns from the calling function on both tiers, where S7.7.3 makes the call's value the error: `let e: any | error = chk(dyn("s"))` inside `pn main()` never reaches the next statement. Only an argument that already *is* an error takes the call-site join.
+3. TE-18 S1's runtime report for a failed element store is still not emitted.
+4. The record-call protocol returns an error before a record result is bound, so `let r = f(); …` skips where T0 binds the error. It is observable only through the calling function's later effects.
+5. build_ast's fact over-approximates the solve. For example, it cannot see that a declared `N?` binding re-crossing `N?` cannot fail, so some literal slots are boxed needlessly and some calls take the S11.4.3 join where no error can arrive.
+6. Join arithmetic into a declared accumulator still boxes: `result = result + hashmap_get(hm, i)` boxes the call's native result, tests it, unboxes, adds and re-tests at the assignment. The base branched on the error lane and stayed native, an interior skip, but one observably equivalent when every other operand is pure. Carrying the native value and error lane through pure arithmetic to the skipping boundary would recover hashmap's cost.
 
 <a id="lr12-7"></a>**LR12-7 · The procedural surface is thin and ad hoc · OPEN**
 IO procedures are a hand-curated set in one file with bespoke validation per

@@ -8930,6 +8930,8 @@ static void refresh_hover_color_background_element(DocState* state,
             element->specified_style, properties[i]);
         if (declaration) resolve_css_property(properties[i], declaration, lycon);
     }
+    // paint-only hover skips layout, where transitions normally compare used colors.
+    css_transition_resolve(element, lycon);
 }
 
 static void refresh_hover_color_background_path(DocState* state,

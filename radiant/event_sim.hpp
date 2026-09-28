@@ -355,6 +355,7 @@ struct SimEvent {
     // assert_pixel fields. Values < 0 mean "do not check this bound".
     int pixel_min_r, pixel_min_g, pixel_min_b, pixel_min_a;
     int pixel_max_r, pixel_max_g, pixel_max_b, pixel_max_a;
+    float pixel_search_radius;  // logical pixels around a glyph sample point
     bool pixel_force_render;
     // Phase 7: advance_time fields
     int advance_steps;           // number of tick steps (0 = auto from ms/16)

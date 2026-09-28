@@ -44,7 +44,7 @@ fn double(x: int) => x * 2
 
 // Procedural function — can have side effects
 pn save_result(data) {
-    output(data, "./temp/output.json")
+    output(data, "./temp/output.json")^
 }
 ```
 

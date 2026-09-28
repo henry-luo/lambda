@@ -271,8 +271,9 @@ static bool should_skip(const std::string& name) {
 // Helpers (mirror test_wpt_clipboard_gtest.cpp)
 // ---------------------------------------------------------------------------
 
-static std::string read_file_contents(const char* path) {
+static std::string read_file_contents(const char* path, bool* opened = nullptr) {
     FILE* f = fopen(path, "r");
+    if (opened) *opened = f != nullptr;
     if (!f) return "";
     fseek(f, 0, SEEK_END);
     long sz = ftell(f);
@@ -633,31 +634,32 @@ static WptDomEventsResult run_wpt_dom_events_case(const WptDomEventsParam& p) {
 
     std::string scripts;
     std::string doc_arg = p.html_path;
+    bool source_opened = false;
+    scripts = read_file_contents(p.source_path.c_str(), &source_opened);
+    if (!source_opened) {
+        result.setup_error = "Could not read test file: " + p.source_path;
+        return result;
+    }
+    if (scripts.empty()) {
+        // Zero-byte WPT fixtures have no scripts; an open failure is reported above.
+        result.skipped = true;
+        result.skip_reason = "No scripts (reftest or empty): " + p.source_path;
+        return result;
+    }
 
     if (p.is_any_js) {
         // Bare JS: wrap and treat as a single inline script. Use a blank
         // HTML stub for --document so the document-related globals exist.
-        std::string body = read_file_contents(p.source_path.c_str());
-        if (body.empty()) {
-            result.setup_error = "Could not read test file: " + p.source_path;
-            return result;
-        }
-        std::string wrapped = wrap_any_js(body);
-        scripts = extract_inline_scripts(wrapped, WPT_DIR);
+        scripts = extract_inline_scripts(wrap_any_js(scripts), WPT_DIR);
         // Use a tiny inline blank document for the --document flag.
         // Reuse any existing simple HTML if present; otherwise the test
         // file itself works as a placeholder document.
         doc_arg = "test/wpt/wpt_blank_document.html";
     } else {
-        std::string html = read_file_contents(p.source_path.c_str());
-        if (html.empty()) {
-            result.setup_error = "Could not read test file: " + p.source_path;
-            return result;
-        }
         size_t slash = p.source_path.rfind('/');
         std::string source_dir = slash == std::string::npos
             ? std::string(WPT_DIR) : p.source_path.substr(0, slash);
-        scripts = extract_inline_scripts(html, source_dir);
+        scripts = extract_inline_scripts(scripts, source_dir);
     }
 
     if (scripts.empty()) {

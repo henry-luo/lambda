@@ -1167,6 +1167,11 @@ typedef struct TypeFunc : Type {
     bool is_variadic;           // function accepts variadic args (...)
     bool can_raise;             // true if function may raise errors (T^ or T^E)
     bool may_return_error;      // true if an Item-valued call may contain an ordinary error
+    // D6.1.3: may the result be an error the signature does not declare (a
+    // failed deferred check)? Conservative, set when the body completes
+    // (`defect_known`); build_ast boxes a literal slot fed by such a call.
+    bool may_defect;
+    bool defect_known;
     bool has_explicit_return_contract;
     // S12.1.4v2: declared with `function` — the value is `fn`, but a call is
     // `pn` when a `function`-typed argument is (its polymorphic slots)

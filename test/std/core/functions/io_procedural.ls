@@ -17,6 +17,6 @@ pn main() {
     print("clock works: " ++ (t2 >= t1))
     
     // ===== cmd =====
-    let result = cmd("echo", "hello")
+    let result = cmd("echo", "hello")^
     print("cmd result: " ++ (result))
 }

@@ -122,6 +122,10 @@ fn divide(a, b) int^ {
 **Key properties:**
 
 - `raise` immediately returns the error value to the caller.
+- `raise v` with a value that is not an error is shorthand for
+  `raise error(v)`: `raise "division by zero"` raises the error that
+  `error("division by zero")` builds. The error constructor decides the code
+  and message.
 - A function must declare an error return type (`T^` or `T^E`) to use `raise`.
 - Using `raise` in a function with a plain `T` or `T | error` return type is a
   compile error; the union form returns its error value normally.

@@ -2,7 +2,7 @@
 "=== Enhanced CSS Parser Test ==="
 
 // Test parsing the complete CSS grammar file
-let complete_stylesheet = input('./test/input/complete_css_grammar.css', 'css')
+let complete_stylesheet = input('./test/input/complete_css_grammar.css', 'css')^
 
 "Complete CSS Grammar Stylesheet:"
 type(complete_stylesheet)

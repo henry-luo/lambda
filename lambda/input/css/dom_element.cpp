@@ -216,6 +216,8 @@ bool DomDocument::init(Input* source_input) {
 
     input = source_input;
     root = nullptr;
+    // Factory allocation uses mem_calloc, so DomJsRuntime's constructor is bypassed.
+    js.implicit_doctype = true;
     return true;
 }
 

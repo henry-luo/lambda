@@ -68,6 +68,10 @@ typedef struct AstNavigationNode : AstNode {
 
 typedef struct AstSysFuncNode : AstNode {
     SysFuncInfo* fn_info;
+    // an error() call's 1-based source site; both tiers stamp it onto the
+    // error the call constructs (S7.4.4). Zero for every other callee.
+    uint32_t site_line;
+    uint32_t site_column;
 } AstSysFuncNode;
 
 // Constrained type: type where (constraint)
@@ -139,6 +143,146 @@ static inline AstFuncNode* ast_direct_call_function(AstCallNode* call) {
             node->node_type != AST_NODE_FUNC_EXPR &&
             node->node_type != AST_NODE_PROC)) return NULL;
     return (AstFuncNode*)node;
+}
+
+// D6.1.3 (LR12-24): may a value expression carry an error its static type does
+// not declare? The error enters only through a call (`call_may_defect` decides
+// which) and flows through value positions: operands (not an `or`'s rescued
+// left), branches, a member or index base, and an unannotated binding's
+// initializer; an annotated binding is guarded. build_ast and the MIR solver
+// share this walk and differ only in what they know about a call.
+typedef bool (*AstCallDefectPredicate)(AstCallNode* call, void* ctx);
+
+// The system call a `|>` pipe applies to its whole left operand (`d |> len`,
+// `d |> split(",")`), with its row in `info`: the piped value is the call's
+// first operand, absent from its argument list. The parser marks a call
+// pipe_inject only as a pipe body with no free `~`.
+static inline AstCallNode* ast_pipe_sys_call(AstNode* node, const SysFuncInfo** info) {
+    if (!node || node->node_type != AST_NODE_PIPE ||
+            ((AstBinaryNode*)node)->op != OPERATOR_PIPE) return NULL;
+    AstNode* right = ast_unwrap_primary(((AstBinaryNode*)node)->right);
+    if (!right || right->node_type != AST_NODE_CALL_EXPR ||
+            !((AstCallNode*)right)->pipe_inject) return NULL;
+    AstNode* callee = ast_unwrap_primary(((AstCallNode*)right)->function);
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return NULL;
+    if (info) *info = ((AstSysFuncNode*)callee)->fn_info;
+    return (AstCallNode*)right;
+}
+
+static inline bool ast_value_may_carry_defect(AstNode* node,
+        AstCallDefectPredicate call_may_defect, void* ctx, int depth) {
+    while (node && node->node_type == AST_NODE_PRIMARY && ((AstPrimaryNode*)node)->expr) {
+        node = ((AstPrimaryNode*)node)->expr;
+    }
+    if (!node || depth > 16) return false;
+    switch (node->node_type) {
+    case AST_NODE_CALL_EXPR:
+        return call_may_defect((AstCallNode*)node, ctx);
+    case AST_NODE_IDENT: {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        AstNode* binding = entry ? entry->node : NULL;
+        return binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+            !((AstDeclaratorNode*)binding)->declared_type &&
+            ast_value_may_carry_defect(((AstDeclaratorNode*)binding)->init,
+                call_may_defect, ctx, depth + 1);
+    }
+    case AST_NODE_UNARY:
+        return ((AstUnaryNode*)node)->op != OPERATOR_PROPAGATE &&
+            ast_value_may_carry_defect(((AstUnaryNode*)node)->operand,
+                call_may_defect, ctx, depth + 1);
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        // `or` rescues its left operand's error (S7.5.3)
+        return (binary->op != OPERATOR_OR &&
+                ast_value_may_carry_defect(binary->left, call_may_defect, ctx, depth + 1)) ||
+            ast_value_may_carry_defect(binary->right, call_may_defect, ctx, depth + 1);
+    }
+    case AST_NODE_IF_EXPR:
+        return ast_value_may_carry_defect(((AstIfNode*)node)->then,
+                call_may_defect, ctx, depth + 1) ||
+            ast_value_may_carry_defect(((AstIfNode*)node)->otherwise,
+                call_may_defect, ctx, depth + 1);
+    case AST_NODE_MEMBER_EXPR:
+    case AST_NODE_INDEX_EXPR:
+        return ast_value_may_carry_defect(((AstFieldNode*)node)->object,
+            call_may_defect, ctx, depth + 1);
+    case AST_NODE_PIPE: {
+        // `d |> f(x)` into a system row is `f(d, x)`: the call answers (its
+        // S11.4.3 flag covers `d`), and a row passing an operand's error
+        // through (S7.9.3) carries the piped one
+        const SysFuncInfo* info = NULL;
+        AstCallNode* call = ast_pipe_sys_call(node, &info);
+        return call && (call_may_defect(call, ctx) ||
+            (!sysfunc_observes_error(info) &&
+             ast_value_may_carry_defect(((AstBinaryNode*)node)->left,
+                call_may_defect, ctx, depth + 1)));
+    }
+    default:
+        return false;
+    }
+}
+
+// S11.4.3 (LR12-25, LR12-36): may an error reach a system function's
+// reject-error parameter, making it the call's value? Through an operand whose
+// type admits error -- an explicit `any` included -- or that may carry a
+// defect; each tier asks with what it knows about a call, as for
+// ast_value_may_carry_defect. `piped` is a `|>` pipe's injected left operand.
+static inline bool ast_sys_operands_error_may_reach(const SysFuncInfo* info,
+        AstNode* piped, AstNode* args, AstCallDefectPredicate call_may_defect,
+        void* ctx) {
+    if (!sysfunc_params_reject_error(info)) return false;
+    for (AstNode* arg = piped ? piped : args; arg;
+            arg = arg == piped ? args : arg->next) {
+        if ((arg->type && lambda_type_accepts_error(arg->type)) ||
+                ast_value_may_carry_defect(arg, call_may_defect, ctx, 0)) return true;
+    }
+    return false;
+}
+
+// D6.1.3: the statement and literal kinds that may originate a defect
+// whatever the compiler knows -- a store's bounds, key domain or element type
+// (TE-18 S1), a launch's admission, a statement handler's fresh raise, a
+// deferred object field (S11.4.10), a runtime-shaped map. Both may_defect
+// scans (build_ast's and the MIR solve) ask this before their own gates.
+static inline bool ast_node_originates_defect(AstNode* node) {
+    switch (node->node_type) {
+    case AST_NODE_INDEX_ASSIGN_STAM: case AST_NODE_MEMBER_ASSIGN_STAM:
+    case AST_NODE_CRUD_STAM: case AST_NODE_OPEN_STAM:
+    case AST_NODE_START: case AST_NODE_HANDLER_STAM:
+        return true;
+    case AST_NODE_OBJECT_LITERAL:
+        return ((AstObjectLiteralNode*)node)->deferred_fields != 0;
+    case AST_NODE_MAP:
+        return ((AstMapNode*)node)->has_computed_key;
+    default:
+        return false;
+    }
+}
+
+// LR03-13 (S11.4.1v3, S7.7.1): a call through a declared function-type
+// contract -- a binding or parameter annotated `fn (...) T` -- checks its
+// result against T where the call is made, because admitting the function
+// value tested only its colour (S11.1.5v2). Returns that T, or NULL when a
+// direct callee's own declared return governs, the contract leaves the return
+// open, or a binder makes T depend on the invocation.
+static inline Type* ast_call_contract_return(AstCallNode* call) {
+    AstNode* function = call ? ast_unwrap_primary(call->function) : NULL;
+    if (!function || function->node_type != AST_NODE_IDENT ||
+            ast_direct_call_function(call)) return NULL;
+    AstNode* binding = ((AstIdentNode*)function)->entry
+        ? ((AstIdentNode*)function)->entry->node : NULL;
+    Type* declared = NULL;
+    if (binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        declared = ((AstDeclaratorNode*)binding)->declared_type;
+    } else if (binding && binding->node_type == AST_NODE_PARAM) {
+        TypeParam* parameter = lambda_type_param(binding->type);
+        declared = parameter && parameter->has_explicit_contract
+            ? parameter->contract_type : NULL;
+    }
+    TypeFunc* contract = lambda_type_func_signature(declared);
+    if (!contract || !contract->has_explicit_return_contract || contract->binder_count ||
+            !contract->return_contract || contract->return_contract == &TYPE_ANY) return NULL;
+    return contract->return_contract;
 }
 
 // LR12-11 (S9.1.2): a direct call whose callee may return (part of) a

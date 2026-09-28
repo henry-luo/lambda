@@ -2,7 +2,7 @@
 // autocommits (PTH63v2) on one document retain forty versions, which spill
 // across several retention chunks (4, 8, 16, 32 slots).
 
-let d = temp('retain', {n: 0, rows: [{id: 0}]});
+let d = temp('retain', {n: 0, rows: [{id: 0}]})^;
 let r0 = temp.'retain'#rows;
 put temp.'retain'#n = 1;
 put temp.'retain'#n = 2;

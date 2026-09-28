@@ -56,7 +56,7 @@ fn inner(n) => if (n > 0) [n - 1] is Down else true;
 
 "6 a predicate that answers an error value fails the check";
 fn checked(x) int^ { if (x < 0) raise error("negative") else x }
-type Checked = int that checked(~) > 3;
+type Checked = int that checked(~)^ > 3;
 [5 is Checked, -5 is Checked];
 
 "7 a procedure reaching a predicate as a value fails its colour check";

@@ -1028,9 +1028,13 @@ static bool intrinsic_multicol_child_info(DomNode* child, IntrinsicMulticolChild
     if (!child || !child->is_element() || !info) return false;
     info->element = child->as_element();
     ViewBlock* storage = lam::unsafe_view_block_element_storage(info->element);
-    // Shared element storage is enough for pre-layout style reads, but BFC
-    // checks require a real block view rather than an inline element alias.
+    // intrinsic sizing may precede view typing; block-display storage still
+    // carries the BFC properties needed to find an escaping nested spanner.
     info->block = lam::view_as_block(static_cast<View*>(info->element));
+    if (!info->block && storage &&
+        info->element->display.outer == CSS_VALUE_BLOCK) {
+        info->block = storage;
+    }
     // Intrinsic multicol passes need one pre-layout interpretation of hidden, out-of-flow,
     // and column-spanning children; keeping it here prevents the two tree walks diverging.
     info->skipped = storage && (layout_block_is_display_none(storage) ||
@@ -3944,16 +3948,24 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     replaced_width = native_width;
                 } else {
                     // text, password, number, email, url, search, tel, etc.
-                    // FormDefaults::TEXT_WIDTH is Chrome's UA border-box width.
                     // If author CSS provides padding/border, measure the UA
                     // content box and let the common box addition below apply
                     // the author box. Otherwise keep the UA border-box value.
                     bool has_author_box = css_has_horizontal_box_decl(element->specified_style);
+                    FormControlProp* form = view_block_replaced->form;
+                    FontProp* font = view_block_replaced->font
+                        ? view_block_replaced->font : lycon->font.style;
+                    // Early flex measurements can precede form layout; use
+                    // the selected face instead of the macOS UA width.
+                    float text_content_width = form && form->control_type == FORM_CONTROL_TEXT
+                        ? layout_text_input_content_width(
+                            lycon, view_block_replaced, form, font)
+                        : FormDefaults::TEXT_CONTENT_WIDTH;
                     if (has_author_box || view_block_replaced->bound) {
-                        replaced_width = FormDefaults::TEXT_WIDTH -
-                            2.0f * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
+                        replaced_width = text_content_width;
                     } else {
-                        replaced_width = FormDefaults::TEXT_WIDTH;
+                        replaced_width = text_content_width +
+                            2.0f * (FormDefaults::TEXT_PADDING_H + FormDefaults::TEXT_BORDER);
                         sizes.replaced_includes_pad_border = true;
                     }
                 }

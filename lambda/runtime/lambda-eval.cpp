@@ -57,10 +57,7 @@ static Item publish_recovery_fault_item(Context* runtime_context,
     LambdaError* fallback = it2err(fault_item);
     if (!fallback) return ItemError;
     if (context && (Context*)context == runtime_context) {
-        if (context->last_error && context->last_error != fallback) {
-            err_free(context->last_error);
-        }
-        context->last_error = fallback;
+        eval_context_set_last_error(context, fallback);
     }
     return fault_item;
 }
@@ -168,11 +165,7 @@ void set_runtime_error(LambdaErrorCode code, const char* format, ...) {
     error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
         LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
 
-    // store in context
-    if (context->last_error) {
-        err_free(context->last_error);
-    }
-    context->last_error = error;
+    eval_context_set_last_error(context, error);
 
     log_error("runtime error [%d]: %s", code, error->message);
 }
@@ -201,20 +194,41 @@ extern "C" void set_runtime_error_no_trace(LambdaErrorCode code, const char* mes
     LambdaError* error = create_runtime_error(code, message);
     if (!error) return;
     // Skip stack trace capture - may be called in low-stack conditions
-
-    if (context->last_error) {
-        err_free(context->last_error);
-    }
-    context->last_error = error;
+    eval_context_set_last_error(context, error);
 
     log_error("runtime error [%d]: %s", code, message);
 }
 
 /**
- * fn_error(message) - raise a user error with stack trace
- * This is the Lambda sys func that triggers a runtime error.
+ * The rich error Item every constructed error returns: a diagnostic copy in
+ * last_error plus a GC-heap payload carrying code, message, file and cause
+ * (S7.4.4). Falls back to the payload-less sentinel only without a GC heap.
  */
-Item fn_error(Item message) {
+static Item runtime_error_item(LambdaErrorCode code, const char* message,
+        LambdaError* cause) {
+    set_runtime_error(code, "%s", message);
+    if (context && context->heap && context->heap->gc) {
+        SourceLocation loc = {0};
+        if (context->current_file) loc.file = context->current_file;
+        LambdaError* error = err_create_heap(code, message, &loc);
+        if (error) {
+            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
+                LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
+            err_set_cause(error, cause);
+            return err2it(error);
+        }
+    }
+    return ItemError;
+}
+
+// error(msg) and error({code, message, source}) read their fields here; a
+// field that is absent or not of its documented type keeps its default.
+static Item error_from_fields(Item message, Item source) {
+    // the message's chars are copied only after err_create_heap allocates, and
+    // the operand may be a fresh heap string no frame roots (`raise "x" ++ n`)
+    RootFrame roots(2);
+    Rooted<Item> rooted_message(roots, message);
+    Rooted<Item> rooted_source(roots, source);
     const char* msg = "Error";
     LambdaErrorCode code = ERR_USER_ERROR;
     if (get_type_id(message) == LMD_TYPE_STRING) {
@@ -224,8 +238,7 @@ Item fn_error(Item message) {
         }
     } else if (get_type_id(message) == LMD_TYPE_MAP) {
         // S7.4.4's parameter-map constructor, error({code, message}): it had no
-        // branch, so every map built code 318 "Error" (LR10-7). A field that
-        // is absent or not of its documented type keeps the default.
+        // branch, so every map built code 318 "Error" (LR10-7).
         Item code_item = item_attr(message, "code");
         if (get_type_id(code_item) == LMD_TYPE_INT) {
             double value = lambda_int_unbox_double(code_item.item);
@@ -235,21 +248,46 @@ Item fn_error(Item message) {
         if (get_type_id(message_item) == LMD_TYPE_STRING && it2s(message_item)) {
             msg = it2s(message_item)->chars;
         }
+        if (get_type_id(source) != LMD_TYPE_ERROR) source = item_attr(message, "source");
     }
-    set_runtime_error(code, "%s", msg);
-    if (context && context->heap && context->heap->gc) {
-        SourceLocation loc = {0};
-        if (context->current_file) {
-            loc.file = context->current_file;
-        }
-        LambdaError* error = err_create_heap(code, msg, &loc);
-        if (error) {
-            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
-                LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
-            return err2it(error);
-        }
+    // the payload-less sentinel has no record to chain, so it wraps as no cause
+    return runtime_error_item(code, msg, it2err(source));
+}
+
+/**
+ * fn_error(message) - construct a user error with stack trace
+ * This is the Lambda sys func that builds an error value.
+ */
+Item fn_error(Item message) {
+    return error_from_fields(message, ItemNull);
+}
+
+// S7.4.4's wrapping constructor: `source` is the inner error `.source` reads
+// back; a non-error source wraps nothing (LR10-10).
+Item fn_error2(Item message, Item source) {
+    return error_from_fields(message, source);
+}
+
+// S7.4.6: `raise v` of a non-error value is `raise error(v)`, so the error
+// constructor decides its code and message; an error is raised as it is. Both
+// tiers call this with the operand's site.
+Item lambda_raise_operand(Item value, const char* file, int64_t line, int64_t column) {
+    if (get_type_id(value) == LMD_TYPE_ERROR) return value;
+    return lambda_error_stamp_site(fn_error(value), file, line, column);
+}
+
+// Each tier stamps an error() call's site right after the constructor runs,
+// since the registry ABI carries no location. Only a fresh heap payload with no
+// line yet is stamped: a sentinel has no record, and a static one is shared.
+Item lambda_error_stamp_site(Item error, const char* file, int64_t line,
+        int64_t column) {
+    LambdaError* err = it2err(error);
+    if (err && err->is_heap && err->location.line == 0 && line > 0) {
+        if (file) err->location.file = file;
+        err->location.line = (uint32_t)line;
+        err->location.column = (uint32_t)column;
     }
-    return ItemError;
+    return error;
 }
 
 Bool is_truthy(Item item) {
@@ -534,11 +572,21 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
             }
             return array_concat_inherit_cert({.array_num = result}, left, right);
         }
-        // LMD_TYPE_ARRAY or LMD_TYPE_ARRAY: both use Item* items (same struct layout)
+        // a view or N-D array stores a descriptor in extra, not a scalar tail
+        // count. Reserve one tail word per item so copied wide scalars fit.
         Array *la = left.array, *ra = right.array;
         int64_t total_len = la->length + ra->length;
-        int64_t total_extra = la->extra + ra->extra;
+        int64_t total_extra = (la->is_view || la->is_ndim ? la->length : la->extra) +
+                              (ra->is_view || ra->is_ndim ? ra->length : ra->extra);
+        // destination allocation may collect, so retain both sources and result.
+        RootFrame roots(3);
+        Rooted<Item> rooted_left(roots, left);
+        Rooted<Item> rooted_right(roots, right);
         Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*(total_len + total_extra), left_type);
+        if (!result) return ItemError;
+        Rooted<Array*> rooted_result(roots, result);
+        la = rooted_left.get().array;
+        ra = rooted_right.get().array;
         result->type_id = left_type;
         result->length = total_len;
         result->capacity = total_len + total_extra;
@@ -547,7 +595,8 @@ static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId ri
         // Source tail pointers cannot survive after either operand dies.
         array_copy_owned_items(result, 0, la->items, la->length);
         array_copy_owned_items(result, la->length, ra->items, ra->length);
-        return array_concat_inherit_cert({.array = result}, left, right);
+        return array_concat_inherit_cert({.array = rooted_result.get()},
+                                         rooted_left.get(), rooted_right.get());
     }
     // different types: produce generic Array, convert typed elements to Items
     int64_t left_len = fn_seq_count(left), right_len = fn_seq_count(right);
@@ -1478,18 +1527,7 @@ static Item lambda_dynamic_call_error(LambdaErrorCode code, const char* caller,
         const char* detail) {
     char message[256];
     snprintf(message, sizeof(message), "%s: %s", caller, detail);
-    set_runtime_error(code, "%s", message);
-    if (context && context->heap && context->heap->gc) {
-        SourceLocation loc = {0};
-        if (context->current_file) loc.file = context->current_file;
-        LambdaError* error = err_create_heap(code, message, &loc);
-        if (error) {
-            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
-                LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
-            return err2it(error);
-        }
-    }
-    return ItemError;
+    return runtime_error_item(code, message, NULL);
 }
 
 static Item lambda_dynamic_argument_limit_error(const char* caller, int64_t count,
@@ -2358,18 +2396,7 @@ static Item lambda_type_error_with_validation(Item actual, Type* expected,
         "type check at %s failed: expected %s, got %s%s",
         boundary ? boundary : "typed boundary", expected_name, actual_summary,
         validation_detail);
-    set_runtime_error(ERR_TYPE_MISMATCH, "%s", message);
-    if (context && context->heap && context->heap->gc) {
-        SourceLocation loc = {0};
-        if (context->current_file) loc.file = context->current_file;
-        LambdaError* error = err_create_heap(ERR_TYPE_MISMATCH, message, &loc);
-        if (error) {
-            error->raw_stack_trace = err_capture_raw_stack_trace(context->debug_info,
-                LAMBDA_ERROR_STACK_TRACE_DEFAULT_MAX_FRAMES);
-            return err2it(error);
-        }
-    }
-    return ItemError;
+    return runtime_error_item(ERR_TYPE_MISMATCH, message, NULL);
 }
 
 Item lambda_type_error(Item actual, Type* expected, const char* boundary) {
@@ -6304,6 +6331,21 @@ Item fn_member(Item item, Item key) {
             }
             String* msg = heap_create_name("Error");
             return {.item = s2it(msg)};  // default message
+        }
+        // S7.4.4's other members: the wrapped cause and the source location.
+        // Each had fallen through to the error itself (LR10-10); an absent one
+        // reads null (S7.1.1v3).
+        if (strcmp(k, "source") == 0) {
+            return err && err->cause ? err2it(err->cause) : ItemNull;
+        }
+        if (strcmp(k, "file") == 0) {
+            const char* file = err ? err->location.file : NULL;
+            return file ? (Item){.item = s2it(heap_strcpy(file, strlen(file)))} : ItemNull;
+        }
+        if (strcmp(k, "line") == 0 || strcmp(k, "column") == 0) {
+            uint32_t value = !err ? 0 : k[0] == 'l' ? err->location.line
+                : err->location.column;
+            return value ? (Item){.item = i2it(value)} : ItemNull;
         }
 
         return item;  // error propagation for other properties

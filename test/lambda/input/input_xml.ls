@@ -1,5 +1,5 @@
-let xml = input('./test/input/test.xml', 'xml'), 
-    more_xml = input('./test/input/more_test.xml', 'xml')
+let xml = input('./test/input/test.xml', 'xml')^, 
+    more_xml = input('./test/input/more_test.xml', 'xml')^
 "XML parsing result:"
 xml
 

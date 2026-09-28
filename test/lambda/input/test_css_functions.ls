@@ -2,7 +2,7 @@
 "=== CSS Function Parser Test ==="
 
 // Create a simple CSS file with functions for testing
-let css_with_functions = input('./test/input/css_functions_sample.css', 'css')
+let css_with_functions = input('./test/input/css_functions_sample.css', 'css')^
 
 "Stylesheet:"
 css_with_functions

@@ -7,6 +7,7 @@
 #include "ast_build.hpp"
 #include "write_set.hpp"
 #include "parse_type_pattern.hpp"
+#include "interp.hpp"  // interp_visit_children: the complete Lambda child traversal
 #include "../../lib/time_util.h"
 #ifndef SIMPLE_SCHEMA_PARSER
 #include "module_registry.h"
@@ -1750,6 +1751,152 @@ bool lambda_boundary_is_redundant(Type* source, Type* target) {
     return source->type_id == target->type_id;
 }
 
+// ---------------------------------------------------------------------------
+// D6.1.3 (LR12-24): the conservative `may_defect` fact build_ast needs itself.
+// A literal's slot representation is fixed here, before either tier runs, so a
+// slot fed by a value that may be a contained defect -- an error its static
+// type does not declare -- must be boxed here, or both tiers lay out a native
+// lane the error cannot occupy (`{v: f(x)}` stored the error's pointer bits).
+// It over-approximates the MIR solve (mir_solve_may_defect): a callee that has
+// not completed yet is defect-capable, so no slot the JIT treats as a boxed
+// join is laid out as a native lane.
+// ---------------------------------------------------------------------------
+static bool ast_boundary_cannot_fail(Type* source, Type* target) {
+    if (!source || !target) return false;
+    // a contract the source's static array type fits re-represents it only
+    if (lambda_array_contract_element(target) &&
+            lambda_array_contract_compatible(source, target, false)) return true;
+    return static_boundary_relation(source, target) == STATIC_BOUNDARY_PROVEN;
+}
+
+static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self);
+static AstNode* boundary_unwrap_primary(AstNode* node);
+static bool ast_expr_may_defect(AstNode* node, int depth);
+
+static bool ast_call_defect_pred(AstCallNode* call, void* ctx) {
+    (void)ctx;
+    return ast_call_may_defect(call, NULL);
+}
+
+static bool ast_expr_may_defect(AstNode* node, int depth) {
+    return ast_value_may_carry_defect(node, ast_call_defect_pred, NULL, depth);
+}
+
+// a call's value may be a defect: its admission can fail (S7.7.3), it returns
+// through an unverified contract, or its callee may defect -- a callee still
+// incomplete here (a forward or mutual call) is defect-capable
+static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
+    if (!call || call->propagate) return false;
+    if (call->fn_colour_guard & LAMBDA_COLOUR_GUARD_ARGS) return true;
+    AstNode* callee = boundary_unwrap_primary(call->function);
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (!info) return false;
+        if (sysfunc_returns_optional_int(info)) return true;
+        switch (info->fn) {
+        case SYSFUNC_SHL: case SYSFUNC_SHR: case SYSFUNC_USHR:
+        case SYSFUNC_VMAP_NEW: case SYSPROC_PUSH: case SYSPROC_SPLICE:
+            return true;
+        default:
+            break;
+        }
+        // S11.4.3: a rejected error operand is the call's value (resolved with
+        // the call); any other row passes an operand's error through (S7.9.3)
+        if (call->rejected_error_flows) return true;
+        if (sysfunc_observes_error(info)) return false;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if ((arg->type && lambda_type_has_proven_error(arg->type)) ||
+                    ast_expr_may_defect(arg, 1)) return true;
+        }
+        return false;
+    }
+    AstFuncNode* target = ast_direct_call_function(call);
+    if (!target) {
+        // a dynamic call's result is checked only by its declared type
+        Type* result = ((AstNode*)call)->type;
+        return result && result->type_id != LMD_TYPE_ANY;
+    }
+    TypeFunc* signature = lambda_type_func_signature(((AstNode*)target)->type);
+    if (target != self && (!signature || !signature->defect_known ||
+            signature->may_defect)) return true;
+    int count = ast_linked_node_count(call->argument);
+    AstNode* args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    ast_resolve_call_args(call->argument, target, count, args);
+    TypeParam* parameter = signature ? signature->param : NULL;
+    for (int i = 0; i < count && i < LAMBDA_MAX_FUNCTION_ARGS; i++,
+            parameter = parameter ? parameter->next : NULL) {
+        if (!args[i] || !args[i]->type) continue;
+        if (parameter && parameter->has_explicit_contract && parameter->contract_type) {
+            if (!ast_boundary_cannot_fail(args[i]->type, parameter->contract_type)) return true;
+            // S7.7.3: an argument's error is the call's value unless the
+            // parameter admits it
+            if (!lambda_type_accepts_error(parameter->contract_type) &&
+                    ast_expr_may_defect(args[i], 1)) return true;
+        } else if (lambda_type_has_proven_error(args[i]->type) ||
+                ast_expr_may_defect(args[i], 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+struct AstDefectScan {
+    AstFuncNode* self;
+    Type* return_contract;
+    bool found;
+};
+
+static bool ast_find_defect_origin(AstNode* node, void* data) {
+    AstDefectScan* scan = (AstDefectScan*)data;
+    if (scan->found) return false;
+    switch (node->node_type) {
+    case AST_NODE_LET_STAM:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_PUB_STAM:
+        for (AstNode* d = ((AstLetNode*)node)->declare; d; d = d->next) {
+            if (d->node_type != AST_NODE_VARIABLE_DECLARATOR) continue;
+            AstDeclaratorNode* declarator = (AstDeclaratorNode*)d;
+            if (!declarator->declared_type || declarator->is_type_definition) continue;
+            if (!declarator->init || !ast_boundary_cannot_fail(declarator->init->type,
+                    declarator->declared_type)) scan->found = true;
+        }
+        break;
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assign = (AstAssignStamNode*)node;
+        Type* declared = assign->target_entry ? assign->target_entry->declared_type : NULL;
+        if (declared && (!assign->value ||
+                !ast_boundary_cannot_fail(assign->value->type, declared))) scan->found = true;
+        break;
+    }
+    case AST_NODE_RETURN_STAM: {
+        AstNode* value = ((AstReturnNode*)node)->value;
+        if (scan->return_contract && value &&
+                !ast_boundary_cannot_fail(value->type, scan->return_contract)) scan->found = true;
+        break;
+    }
+    case AST_NODE_CALL_EXPR:
+        scan->found = ast_call_may_defect((AstCallNode*)node, scan->self);
+        break;
+    default:
+        scan->found = ast_node_originates_defect(node);
+        break;
+    }
+    return !scan->found;
+}
+
+static void ast_note_function_defect(AstFuncNode* fn, TypeFunc* signature) {
+    AstDefectScan scan = {fn, signature->has_explicit_return_contract
+        ? signature->return_contract : NULL, false};
+    walk_lambda_ast(fn->body, ast_find_defect_origin, &scan, false);
+    AstNode* body = boundary_unwrap_primary(fn->body);
+    if (!scan.found && scan.return_contract && body && body->node_type != AST_NODE_CONTENT &&
+            !ast_boundary_cannot_fail(body->type, scan.return_contract)) {
+        scan.found = true;   // the tail is the value the declared return checks
+    }
+    signature->may_defect = scan.found;
+    signature->defect_known = true;
+}
+
 // Calls with an error-capable argument have one extra control-flow edge: a
 // parameter that excludes error returns that exact Item before its body starts.
 // Compare only the successful union members here; the MIR caller guard owns
@@ -2542,6 +2689,8 @@ static void resolve_array(Transpiler* tp, AstArrayNode* ast_node) {
                 type_num_sized_kind(nested_type) != type_num_sized_kind(item->type)) {
             nested_type = NULL;
         }
+        // D6.1.3/S7.8.1: a possible defect keeps the array generic
+        if (ast_expr_may_defect(item, 0)) nested_type = NULL;
         type->length++;
     }
     type->nested = nested_type;
@@ -5179,6 +5328,10 @@ static ShapeEntry* build_map_shape_entry(Transpiler* tp, TypeMap* owner, AstNode
             field_type = ((TypeType*)field_type)->type;
         }
     }
+    // D6.1.3/S7.8.1: a slot fed by a possible defect cannot be a native lane
+    if (!is_spread && ast_expr_may_defect(((AstNamedNode*)item)->as, 0)) {
+        field_type = &TYPE_ANY;
+    }
     shape_entry_set_type(shape_entry, field_type);
     if (!shape_entry->name && !(field_type->type_id == LMD_TYPE_MAP ||
                                 field_type->type_id == LMD_TYPE_ANY)) {
@@ -5772,9 +5925,42 @@ static TypeFunc* call_function_signature(AstCallNode* call) {
     return function ? lambda_type_func_signature(function->type) : NULL;
 }
 
+// A declared contract that textually admits error is a receiving position
+// that acknowledges an enforcing call; `any` admits error but engages nothing
+// (S7.5.1, S7.5.2).
+static bool contract_acknowledges_error(Type* contract) {
+    return contract && lambda_type_has_proven_error(contract);
+}
+
 static bool parameter_is_error_acknowledgment(TypeParam* parameter) {
-    return parameter && parameter->has_explicit_contract && parameter->contract_type &&
-        lambda_type_has_proven_error(parameter->contract_type);
+    return parameter && parameter->has_explicit_contract &&
+        contract_acknowledges_error(parameter->contract_type);
+}
+
+typedef struct EnforcingCallWalk {
+    Transpiler* tp;
+    bool return_acknowledgment;
+} EnforcingCallWalk;
+
+static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node,
+        bool immediate_acknowledgment, bool return_acknowledgment);
+
+// Any child that is not one of its parent's acknowledging positions. The
+// generic traversal reaches every construct -- declarations, loops, views,
+// queries -- so no statement form can hide an enforcing call (LR10-9).
+static void validate_enforcing_child(AstNode* child, void* data) {
+    EnforcingCallWalk* walk = (EnforcingCallWalk*)data;
+    validate_enforcing_calls_in_expression(walk->tp, child, false,
+        walk->return_acknowledgment);
+}
+
+static void validate_enforcing_calls_in_list(Transpiler* tp, AstNode* items,
+        bool tail_acknowledgment, bool return_acknowledgment) {
+    for (AstNode* item = items; item; item = item->next) {
+        // a block's value is its last item; the ones before it are statements
+        validate_enforcing_calls_in_expression(tp, item,
+            tail_acknowledgment && !item->next, return_acknowledgment);
+    }
 }
 
 static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node,
@@ -5788,6 +5974,9 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         if (call->can_raise && !call->propagate && !immediate_acknowledgment) {
             record_unhandled_error_call(tp, call);
         }
+        // a computed callee (`make()(x)`) is an operand like any other
+        validate_enforcing_calls_in_expression(tp, call->function, false,
+            return_acknowledgment);
         TypeFunc* signature = call_function_signature(call);
         TypeParam* parameter = signature ? signature->param : NULL;
         for (AstNode* argument = call->argument; argument; argument = argument->next) {
@@ -5805,35 +5994,35 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         }
         return;
     }
+    case AST_NODE_START:
+        // the task captures the launched call's outcome and `wait` carries
+        // its channel, so the launch itself engages nothing
+        validate_enforcing_calls_in_expression(tp, (AstNode*)((AstStartNode*)node)->call,
+            true, return_acknowledgment);
+        return;
     case AST_NODE_HANDLER_EXPR:
     case AST_NODE_HANDLER_STAM: {
         AstHandlerNode* handler = (AstHandlerNode*)node;
         // The operand is the acknowledged error-producing boundary; errors
-        // introduced by the recovery body still need their own acknowledgment.
+        // introduced by an arm still need their own acknowledgment, which an
+        // arm's value has exactly where the handler's value is received.
         validate_enforcing_calls_in_expression(tp, handler->operand, true,
             return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, handler->body, false,
-            return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, handler->value_body, false,
-            return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, handler->body,
+            immediate_acknowledgment, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, handler->value_body,
+            immediate_acknowledgment, return_acknowledgment);
         return;
     }
     case AST_NODE_BINARY:
     case AST_NODE_PIPE: {
         AstBinaryNode* binary = (AstBinaryNode*)node;
-        if (binary->op == OPERATOR_OR) {
-            // `or` consumes an error only from its left operand. An enforcing
-            // call in the fallback remains unhandled by this expression.
-            validate_enforcing_calls_in_expression(tp, binary->left, true,
-                return_acknowledgment);
-            validate_enforcing_calls_in_expression(tp, binary->right, false,
-                return_acknowledgment);
-        } else {
-            validate_enforcing_calls_in_expression(tp, binary->left, false,
-                return_acknowledgment);
-            validate_enforcing_calls_in_expression(tp, binary->right, false,
-                return_acknowledgment);
-        }
+        // `or` consumes an error only from its left operand. An enforcing
+        // call in the fallback remains unhandled by this expression.
+        validate_enforcing_calls_in_expression(tp, binary->left,
+            binary->op == OPERATOR_OR, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, binary->right, false,
+            return_acknowledgment);
         return;
     }
     case AST_NODE_MATCH_EXPR: {
@@ -5841,30 +6030,39 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
         validate_enforcing_calls_in_expression(tp, match->scrutinee,
             match_has_error_handler(match), return_acknowledgment);
         for (AstMatchArm* arm = match->first_arm; arm; arm = (AstMatchArm*)arm->next) {
-            validate_enforcing_calls_in_expression(tp, arm->body, false,
-                return_acknowledgment);
+            // an arm's value is the match's value, so it is received where
+            // the match is (S7.5.1)
+            validate_enforcing_calls_in_expression(tp, arm->body,
+                immediate_acknowledgment, return_acknowledgment);
         }
         return;
     }
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
         validate_enforcing_calls_in_expression(tp, branch->cond, false, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, branch->then, false, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, branch->otherwise, false, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, branch->then,
+            immediate_acknowledgment, return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, branch->otherwise,
+            immediate_acknowledgment, return_acknowledgment);
         return;
     }
+    case AST_NODE_LET_STAM:
+    case AST_NODE_VAR_STAM:
+    case AST_NODE_PUB_STAM:
+        // a bare `let x = a()` never acknowledges (S7.5.2); each declarator
+        // decides from its own annotation
+        validate_enforcing_calls_in_list(tp, ((AstLetNode*)node)->declare, false,
+            return_acknowledgment);
+        return;
     case AST_NODE_VARIABLE_DECLARATOR: {
         AstDeclaratorNode* declarator = (AstDeclaratorNode*)node;
-        bool binding_acknowledgment = declarator->declared_type &&
-            lambda_type_has_proven_error(declarator->declared_type);
         validate_enforcing_calls_in_expression(tp, declarator->init,
-            binding_acknowledgment, return_acknowledgment);
+            contract_acknowledges_error(declarator->declared_type), return_acknowledgment);
         return;
     }
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* named = (AstNamedNode*)node;
-        bool binding_acknowledgment = named->declared_type &&
-            lambda_type_has_proven_error(named->declared_type);
+        bool binding_acknowledgment = contract_acknowledges_error(named->declared_type);
         validate_enforcing_calls_in_expression(tp, named->key, binding_acknowledgment,
             return_acknowledgment);
         validate_enforcing_calls_in_expression(tp, named->as, binding_acknowledgment,
@@ -5873,15 +6071,19 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
     }
     case AST_NODE_NAMED_ARG: {
         AstNamedNode* named = (AstNamedNode*)node;
-        bool binding_acknowledgment = named->declared_type &&
-            lambda_type_has_proven_error(named->declared_type);
-        validate_enforcing_calls_in_expression(tp, named->as, binding_acknowledgment,
-            return_acknowledgment);
+        validate_enforcing_calls_in_expression(tp, named->as,
+            contract_acknowledges_error(named->declared_type), return_acknowledgment);
         return;
     }
     case AST_NODE_RETURN_STAM:
         validate_enforcing_calls_in_expression(tp, ((AstReturnNode*)node)->value,
             return_acknowledgment, return_acknowledgment);
+        return;
+    case AST_NODE_RAISE_EXPR:
+    case AST_NODE_RAISE_STAM:
+        // `raise` delivers its value to the enclosing `^` channel itself
+        validate_enforcing_calls_in_expression(tp, ((AstRaiseNode*)node)->value, true,
+            return_acknowledgment);
         return;
     case AST_NODE_UNARY:
     case AST_NODE_SPREAD: {
@@ -5890,50 +6092,65 @@ static void validate_enforcing_calls_in_expression(Transpiler* tp, AstNode* node
             unary->op == OPERATOR_PROPAGATE, return_acknowledgment);
         return;
     }
-    case AST_NODE_MEMBER_EXPR:
-    case AST_NODE_INDEX_EXPR: {
-        AstFieldNode* field = (AstFieldNode*)node;
-        validate_enforcing_calls_in_expression(tp, field->object, false, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, field->field, false, return_acknowledgment);
-        return;
-    }
-    case AST_NODE_PATH_INDEX_EXPR: {
-        AstPathIndexNode* path = (AstPathIndexNode*)node;
-        validate_enforcing_calls_in_expression(tp, path->base_path, false, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, path->segment_expr, false, return_acknowledgment);
-        return;
-    }
     case AST_NODE_CONTENT:
-    case AST_NODE_LIST:
-    case AST_NODE_ARRAY:
-    case AST_NODE_MAP:
-    case AST_NODE_ELEMENT: {
-        for (AstNode* item = ((AstArrayNode*)node)->item; item; item = item->next) {
-            validate_enforcing_calls_in_expression(tp, item, false, return_acknowledgment);
-        }
+        validate_enforcing_calls_in_list(tp, ((AstListNode*)node)->item,
+            immediate_acknowledgment, return_acknowledgment);
         return;
-    }
+    case AST_NODE_LIST:
+        validate_enforcing_calls_in_list(tp, ((AstListNode*)node)->declare, false,
+            return_acknowledgment);
+        validate_enforcing_calls_in_list(tp, ((AstListNode*)node)->item,
+            immediate_acknowledgment, return_acknowledgment);
+        return;
     case AST_NODE_ASSIGN_STAM:
     case AST_NODE_INDEX_ASSIGN_STAM:
     case AST_NODE_MEMBER_ASSIGN_STAM: {
         AstCompoundAssignNode* assign = (AstCompoundAssignNode*)node;
         validate_enforcing_calls_in_expression(tp, assign->object, false, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, assign->key, false, return_acknowledgment);
-        validate_enforcing_calls_in_expression(tp, assign->value, false, return_acknowledgment);
+        validate_enforcing_calls_in_list(tp, assign->key, false, return_acknowledgment);
+        // a `var` declared to admit error receives the outcome as its
+        // declaration does
+        bool target_acknowledgment = node->node_type == AST_NODE_ASSIGN_STAM &&
+            assign->target_entry &&
+            contract_acknowledges_error(assign->target_entry->declared_type);
+        validate_enforcing_calls_in_expression(tp, assign->value, target_acknowledgment,
+            return_acknowledgment);
         return;
     }
     case AST_NODE_FUNC:
     case AST_NODE_PROC:
     case AST_NODE_FUNC_EXPR:
-        // Nested functions are validated against their own return contract.
+        // Nested functions are validated against their own return contract
+        // by validate_function_enforcing_calls.
         return;
-    default:
+    default: {
+        EnforcingCallWalk walk = {tp, return_acknowledgment};
+        interp_visit_children(node, validate_enforcing_child, &walk);
         return;
+    }
     }
 }
 
 static void validate_top_level_enforcing_calls(Transpiler* tp, AstNode* node) {
     validate_enforcing_calls_in_expression(tp, node, false, false);
+}
+
+// S7.5.1 holds in every body, not only at the script's top level: the one
+// receiving position a body has is its own declared return, which
+// acknowledges its tail and `return` values when it is `T^` or admits error
+// (LR10-9).
+static void validate_function_enforcing_calls(Transpiler* tp, AstFuncNode* fn) {
+    TypeFunc* signature = lambda_type_func_signature(((AstNode*)fn)->type);
+    // a `that` predicate's answer admits an error, which fails the test
+    // (S11.4.11), so its tail is received like a declared `| error` return
+    bool returns_error = fn->is_that_predicate || (signature && (signature->can_raise ||
+        (signature->has_explicit_return_contract &&
+         contract_acknowledges_error(signature->return_contract))));
+    for (AstNamedNode* param = fn->param; param; param = (AstNamedNode*)param->next) {
+        // a default value is evaluated at the call, where nothing receives it
+        validate_enforcing_calls_in_expression(tp, param->as, false, false);
+    }
+    validate_enforcing_calls_in_expression(tp, fn->body, returns_error, returns_error);
 }
 
 // Cross-frame writes are deliberately a source-level invalidation, not a
@@ -8064,6 +8281,7 @@ bool lambda_ast_finalize_script_with_functions(Transpiler* tp,
         if (!function_node || (function_node->node_type != AST_NODE_FUNC &&
                 function_node->node_type != AST_NODE_FUNC_EXPR &&
                 function_node->node_type != AST_NODE_PROC)) continue;
+        validate_function_enforcing_calls(tp, (AstFuncNode*)function_node);
         // E231 is flow-sensitive within a callable body, not only at module scope.
         validate_cross_frame_binding_reads(tp, (AstFuncNode*)function_node);
     }
@@ -8681,6 +8899,10 @@ static Type* direct_pipe_call_result_type(Transpiler* tp, AstNode* source,
     call->type = sys_func_call_result_type(tp, info,
         sys_func_call_may_return_error(tp, info, call->argument, source),
         call->argument, source);
+    // S11.4.3 (LR12-36): the piped source is the call's first operand, so a
+    // rejected error it brings is the pipe's value
+    call->rejected_error_flows = ast_sys_operands_error_may_reach(info, source,
+        call->argument, ast_call_defect_pred, NULL);
     return call->type;
 }
 
@@ -9114,6 +9336,12 @@ static AstNode* direct_sys_function(Transpiler* tp, SourceSpan span,
     AstSysFuncNode* node = (AstSysFuncNode*)alloc_ast_node_from_span(tp,
         AST_NODE_SYS_FUNC, span, sizeof(AstSysFuncNode));
     node->fn_info = info;
+    if (info->fn == SYSFUNC_ERROR || info->fn == SYSFUNC_ERROR2) {
+        // S7.4.4: a constructed error carries its source location (LR10-10)
+        LambdaSourcePoint site = lambda_source_span_start_point(tp->source, span);
+        node->site_line = site.row + 1;
+        node->site_column = site.column + 1;
+    }
     // A resolved call callee carries its return-typed node. A
     // standalone sysfunc value uses the separate callable-signature builder.
     // The transpiler relies on this distinction when boxing native results at
@@ -9519,6 +9747,8 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         call->type = sys_func_call_result_type(tp, info,
             sys_func_call_may_return_error(tp, info, call->argument, NULL),
             call->argument, NULL);
+        call->rejected_error_flows = ast_sys_operands_error_may_reach(info, NULL,
+            call->argument, ast_call_defect_pred, NULL);
         Type* bitwise_type = infer_bitwise_call_type(info->fn,
             call->argument, call->argument ? call->argument->next : NULL);
         if (bitwise_type) {
@@ -12762,6 +12992,7 @@ static void direct_complete_function(Transpiler* tp, SourceSpan span,
         function_type->returned = &TYPE_ANY;
     }
     validate_function_return_contract(tp, fn, function_type);
+    ast_note_function_defect(fn, function_type);
 }
 
 static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
@@ -15960,6 +16191,12 @@ static AstNode* resolve_form(LambdaResolver* r, AstNode* node, uint8_t form) {
         resolve_diagnostics(r, node);
         raise->type = raise->value && raise->value->type
             ? raise->value->type : &TYPE_ERROR;
+        if (raise->value) {
+            LambdaSourcePoint site = lambda_source_span_start_point(tp->source,
+                raise->value->source_span);
+            raise->site_line = site.row + 1;
+            raise->site_column = site.column + 1;
+        }
         break;
     }
     case LSF_TYPE_NEGATION:

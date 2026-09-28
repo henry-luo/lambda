@@ -3,7 +3,7 @@
 
 "\n=== Testing complex iCalendar parsing ==="
 
-let complex_calendar = input('./test/input/calendar.ics', 'ics')
+let complex_calendar = input('./test/input/calendar.ics', 'ics')^
 
 "Complex iCalendar result:"
 complex_calendar

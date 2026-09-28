@@ -641,6 +641,9 @@ struct MirTranspiler {
     // M2 call-site evidence: AstFuncNode* -> CallSiteEntry. Populated by the
     // collect stage of prepass_forward_declare before any body is transpiled.
     struct hashmap* callsite_info;
+    // D6.1.3: AstFuncNode* -> MirDefectFact, solved once before any variant is
+    // registered (mir_solve_may_defect); NULL until then.
+    struct hashmap* defect_facts;
     // A process-unique generation makes FnAnalysis inference memoization safe
     // for retained templates and concurrent prebuild workers.
     uint32_t inference_cache_epoch;
@@ -938,6 +941,17 @@ typedef TypedHashMap<CallSiteEntry,
 static inline HashMap* callsite_info_new(size_t capacity) {
     return CallSiteInfoMap::create(capacity);
 }
+
+// D6.1.3 (LR12-24): one compile's `may_defect` answer per function. The AST is
+// shared by concurrent satellite compiles, so the solved fixed point lives
+// here, per compile, rather than in an FnAnalysis memo another compile can
+// overwrite between a body's lane choice and its callers' planning.
+struct MirDefectFact {
+    AstFuncNode* fn;
+    bool may_defect;
+};
+typedef TypedHashMap<MirDefectFact,
+    HashMapPointerMemberKeyOps<MirDefectFact, &MirDefectFact::fn>> MirDefectFactMap;
 
 // T20-1c: candidate literal shape carried to a parameter declaration node, so a
 // member site inside the body can name a constant for its guard.
@@ -3947,6 +3961,21 @@ static bool mir_expr_native_bool_operand(MirTranspiler* mt, AstNode* node) {
 
 static bool mir_argument_may_return_item_error(MirTranspiler* mt,
         AstNode* argument);
+static bool mir_call_may_defect(MirTranspiler* mt, AstCallNode* call);
+static bool mir_sys_call_error_flows(MirTranspiler* mt, AstCallNode* call);
+static bool mir_sys_operand_error_may_reach(MirTranspiler* mt, AstCallNode* call);
+static bool mir_expr_may_carry_defect(MirTranspiler* mt, AstNode* node);
+
+// S11.4.3 (LR12-36): the call behind a value -- the call itself, or the system
+// call a `|>` pipe applies to its left operand (`m |> len` is `len(m)`, its
+// flag set over `m`) -- so every planner that reads a call's join (TE-17 I3)
+// reads the pipe's the same way
+static AstCallNode* mir_value_call(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node) return NULL;
+    if (node->node_type == AST_NODE_CALL_EXPR) return (AstCallNode*)node;
+    return ast_pipe_sys_call(node, NULL);
+}
 
 // An unannotated ordered comparison can publish only Bool or Null.  Its
 // declaration still owns an Item carrier because the comparison's nullable
@@ -5094,6 +5123,54 @@ static void emit_jump_if_item_error(MirTranspiler* mt, MIR_reg_t item_reg,
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
         MIR_new_label_op(mt->ctx, error_label)));
     emit_label(mt, l_ok);
+}
+
+// S7.7.3 / S11.4.3: an error argument to a parameter that excludes error is
+// the direct call's value and never enters the callee. It jumps to the call's
+// one error join, created by the first guarded argument; a run-time colour
+// check (S12.1.4v2(3)) yields its error through the same edge. Returns the
+// argument, colour-checked when asked.
+static MIR_reg_t emit_parameter_error_guard(MirTranspiler* mt, MIR_reg_t val,
+        bool colour_checked, bool* has_guard, MIR_label_t* error_label,
+        MIR_reg_t* error_result) {
+    if (!*has_guard) {
+        *error_label = new_label(mt);
+        *error_result = new_reg(mt, "param_error", MIR_T_I64);
+        *has_guard = true;
+    }
+    if (colour_checked) {
+        val = emit_call_1(mt, "lambda_fn_colour_arg_check",
+            MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
+    }
+    emit_jump_if_item_error(mt, val, *error_result, *error_label);
+    return val;
+}
+
+// S11.4.3 (LR12-25, LR12-36): a system call that rejects an error operand
+// makes that error its value. The open tests each Item operand (0 skips a
+// native one, which cannot hold an error) and jumps to the join; the close
+// boxes the successful result by the row's C return convention into it.
+struct MirRejectedJoin {
+    MIR_reg_t value;
+    MIR_label_t done;
+};
+
+static MirRejectedJoin emit_rejected_join_open(MirTranspiler* mt,
+        const MIR_reg_t* items, int count) {
+    MirRejectedJoin join = {new_reg(mt, "sys_rejected", MIR_T_I64), new_label(mt)};
+    for (int i = 0; i < count; i++) {
+        if (items[i]) emit_jump_if_item_error(mt, items[i], join.value, join.done);
+    }
+    return join;
+}
+
+static MIR_reg_t emit_rejected_join_close(MirTranspiler* mt, MirRejectedJoin join,
+        MIR_reg_t result, TypeId c_ret_tid) {
+    MIR_reg_t boxed = c_ret_tid == LMD_TYPE_ANY ? result : emit_box(mt, result, c_ret_tid);
+    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
+        MIR_new_reg_op(mt->ctx, join.value), MIR_new_reg_op(mt->ctx, boxed)));
+    emit_label(mt, join.done);
+    return join.value;
 }
 
 static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg) {
@@ -7210,11 +7287,37 @@ static bool mir_is_null_literal(AstNode* node) {
         leaf->type->type_id == LMD_TYPE_NULL;
 }
 
+static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source_node,
+        Type* target);
+
 static bool mir_boundary_is_redundant(MirTranspiler* mt, AstNode* source_node, Type* target) {
     // `return null` against `T?`: the check can only hand the null back
     if (source_node && target && mir_is_null_literal(source_node) &&
             lambda_type_accepts_null(mir_unwrap_decl_type(target))) return true;
     if (!source_node || !source_node->type || !target) return false;
+    // TE-17 I3: the declared type of a defect-capable call proves nothing of
+    // its error arm, which reaches this boundary (TE-18 case 1, LR12-24)
+    AstCallNode* source_call = mir_value_call(source_node);
+    if (source_call && mir_call_may_defect(mt, source_call)) return false;
+    return mir_boundary_success_is_redundant(mt, source_node, target);
+}
+
+// TE-17 I3: a defect-capable call's join is its success or an error, and the
+// success already crossed the callee's own return (or the call site's contract
+// check). When that success alone makes the boundary redundant, only the
+// error arm is left: the destination tests for the error and skips (S7.7.2)
+// instead of re-admitting the value (cube3d's `var n: float[] = calc_normal(...)`).
+static bool mir_boundary_join_success_redundant(MirTranspiler* mt, AstNode* source_node,
+        Type* target) {
+    AstCallNode* call = mir_value_call(source_node);
+    return call && source_node->type && target && mir_call_may_defect(mt, call) &&
+        (mir_call_result_proves_contract((AstNode*)call, target) ||
+         mir_boundary_success_is_redundant(mt, source_node, target));
+}
+
+// the redundancy proofs proper, for a source whose value is its declared type
+static bool mir_boundary_success_is_redundant(MirTranspiler* mt, AstNode* source_node,
+        Type* target) {
     if (lambda_boundary_is_redundant(source_node->type, target)) return true;
     ShapeEntry* scalar_field = mir_record_member_field(mt, source_node);
     // Forward-call projections can keep public Any types. Their scalar cells
@@ -7575,9 +7678,9 @@ static bool mir_argument_may_return_item_error(MirTranspiler* mt,
             mir_expr_proven_nonnull_under_dense_guard(mt, argument)) return false;
     if (mir_int_tree_cannot_error(mt, argument, 0)) return false;
     if (argument->type && lambda_type_accepts_error(argument->type)) return true;
-    AstNode* base = ast_unwrap_primary(argument);
-    return base && base->node_type == AST_NODE_CALL_EXPR &&
-        mir_direct_call_has_parameter_error_guard(mt, (AstCallNode*)base);
+    AstCallNode* call = mir_value_call(argument);
+    return call && (mir_direct_call_has_parameter_error_guard(mt, call) ||
+        mir_call_may_defect(mt, call));
 }
 
 static MIR_reg_t emit_optional_argument_value(MirTranspiler* mt, MIR_reg_t value,
@@ -10603,6 +10706,8 @@ static bool mir_native_analysis_matches(MirTranspiler* mt,
 
 static TypeId mir_direct_native_return_type(MirTranspiler* mt,
         AstCallNode* call) {
+    // TE-17 I3: the lane witness and lane proof reopen through here
+    if (mir_call_may_defect(mt, call)) return LMD_TYPE_ANY;
     NativeFuncInfo* native = mir_direct_native_info(mt, call);
     if (mt && mt->in_inferred_slow_body && native &&
             native->has_inferred_specialization) {
@@ -10694,6 +10799,7 @@ static bool mir_direct_native_scalar_item_can_unbox(MirTranspiler* mt,
     // (D3.2.1, D8.3.3).
     return native && native->has_native && direct_return == expected &&
         signature && call && !call->propagate && !mt->in_handler_operand &&
+        !mir_call_may_defect(mt, call) &&
         (signature->can_raise || mir_direct_call_has_parameter_error_guard(mt, call));
 }
 
@@ -10786,6 +10892,8 @@ static TypeId mir_guarded_array_num_witness(MirTranspiler* mt, AstNode* object) 
 }
 
 static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
+    // TE-17 I3: an object that may be an error proves no element lane
+    if (mir_expr_may_carry_defect(mt, object)) return LMD_TYPE_ANY;
     AstNode* unwrapped = ast_unwrap_primary(object);
     if (unwrapped && unwrapped->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)unwrapped;
@@ -10864,6 +10972,20 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
 // move or a store must ask THIS, never `node->type->type_id`: the two diverge
 // for every boxed producer with a precise static type, and reading the type
 // there is how precise inference turns into a segfault.
+// TE-17 I3: an arithmetic operand that may be an error makes the result a
+// boxed join; the float, sized and pointer recoveries of the generic
+// fallback would unbox that error as a number (`float(f(x)) / 2.0` was nan).
+static bool mir_arith_operand_may_defect(MirTranspiler* mt, AstBinaryNode* bi) {
+    switch (bi->op) {
+    case OPERATOR_ADD: case OPERATOR_SUB: case OPERATOR_MUL: case OPERATOR_DIV:
+    case OPERATOR_IDIV: case OPERATOR_MOD: case OPERATOR_POW:
+        return mir_expr_may_carry_defect(mt, bi->left) ||
+            mir_expr_may_carry_defect(mt, bi->right);
+    default:
+        return false;
+    }
+}
+
 static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
     if (!node) return LMD_TYPE_ANY;
     // Braced handlers join a successful value with a body value in the boxed
@@ -10937,8 +11059,26 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         // return before a nullable local could preserve its null sentinel.
         tid = contract_lane.base_contract->type_id;
     }
+    // TE-17 I3: a member or element of a defect-capable value is `T | error`
+    // too -- the read propagates the error (S7.9.3) -- so its declared field
+    // type reopens no lane (`make(x).n` unboxed the error's bits). A record
+    // binding's field is exempt: its record call skipped on the error.
+    if ((node->node_type == AST_NODE_MEMBER_EXPR || node->node_type == AST_NODE_INDEX_EXPR) &&
+            !mir_record_member_field(mt, node) &&
+            mir_expr_may_carry_defect(mt, ((AstFieldNode*)node)->object)) {
+        return LMD_TYPE_ANY;
+    }
+    if (node->node_type == AST_NODE_PIPE) {
+        // S11.4.3 (LR12-36): `d |> len` joins a rejected error, as the direct
+        // call does; the emitter builds that join on the same answer
+        AstCallNode* call = ast_pipe_sys_call(node, NULL);
+        if (call && mir_sys_call_error_flows(mt, call)) return LMD_TYPE_ANY;
+    }
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
+        // TE-17 I3: a defect-capable call's result is `T | error`; its
+        // declared scalar type must not reopen a native lane (LR12-24)
+        if (mir_call_may_defect(mt, call)) return LMD_TYPE_ANY;
         if (!call->propagate && mir_direct_call_has_parameter_error_guard(mt, call)) {
             // The native call is skipped when an argument is ItemError, and
             // the normal/error join therefore publishes one boxed carrier.
@@ -11343,6 +11483,8 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
             // (D2.4.1-D2.4.3, D8.2.6).
             return LMD_TYPE_FLOAT;
         }
+
+        if (mir_arith_operand_may_defect(mt, bi)) return LMD_TYPE_ANY;
 
         if ((tid == LMD_TYPE_DECIMAL || tid == LMD_TYPE_COMPLEX) &&
                 (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
@@ -12333,12 +12475,13 @@ static bool mir_native_int_bitwise_value_proven(MirTranspiler* mt,
             }
         }
     }
-    if ((!base || base->node_type != AST_NODE_CALL_EXPR) &&
+    if (!mir_value_call(node) &&
             mir_bitwise_kind_for_node(mt, node) == LAMBDA_NUM_INT) {
         // A live int local, literal, arithmetic node, or typed-array read can
         // be a native lane even when AST inference leaves it as ANY. Keep this
         // fallback limited to non-call nodes so an Item-returning int() or
-        // bitwise call cannot masquerade as a lane (S4.1, D3.2.1).
+        // bitwise call cannot masquerade as a lane (S4.1, D3.2.1) -- nor a
+        // `|>` into one, which may join a rejected error (S11.4.3)
         return true;
     }
     return mir_expr_proves_native_return_lane(mt, node, LMD_TYPE_INT);
@@ -14080,6 +14223,100 @@ static bool mir_emit_local_versioned_tree(MirTranspiler* mt, AstBinaryNode* bi,
     return true;
 }
 
+static bool mir_join_int_success(MirTranspiler* mt, AstNode* node);
+
+// integer arithmetic a join can take natively (int lanes in, int lane out)
+static bool mir_join_int_arith_op(Operator op) {
+    return op == OPERATOR_ADD || op == OPERATOR_SUB || op == OPERATOR_MUL ||
+        op == OPERATOR_IDIV || op == OPERATOR_MOD;
+}
+
+// an operand of join arithmetic: a join, or a non-null int lane
+static bool mir_join_arith_operand(MirTranspiler* mt, AstNode* node, bool* is_join) {
+    *is_join = mir_join_int_success(mt, node);
+    return *is_join || (mir_native_arithmetic_operand_type(mt, node) == LMD_TYPE_INT &&
+        !mir_expr_may_be_null(mt, node));
+}
+
+// A defect-capable call whose success is a plain `int`: its join is an int
+// Item or an error (TE-17 I3), never a null or an in-band float. So is integer
+// arithmetic over such joins and int lanes, which answers the first error or
+// an int (`(random_next(s) % 10) + 1`).
+static bool mir_join_int_success(MirTranspiler* mt, AstNode* node) {
+    AstNode* call = ast_unwrap_primary(node);
+    if (call && call->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)call;
+        bool left_join = false, right_join = false;
+        return mir_join_int_arith_op(binary->op) &&
+            mir_join_arith_operand(mt, binary->left, &left_join) &&
+            mir_join_arith_operand(mt, binary->right, &right_join) &&
+            (left_join || right_join);
+    }
+    if (call && call->node_type == AST_NODE_IDENT) {
+        // an unannotated `let` holds its initializer's join
+        NameEntry* entry = ((AstIdentNode*)call)->entry;
+        AstNode* binding = entry && !entry->is_mutable ? entry->node : NULL;
+        call = binding && binding->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+            !((AstDeclaratorNode*)binding)->declared_type
+            ? ast_unwrap_primary(((AstDeclaratorNode*)binding)->init) : NULL;
+    }
+    if (!call || call->node_type != AST_NODE_CALL_EXPR ||
+            !mir_call_may_defect(mt, (AstCallNode*)call)) return false;
+    // a forward or self call is typed `any`; its callee's contract is not
+    AstFuncNode* callee = ast_direct_call_function((AstCallNode*)call);
+    TypeFunc* signature = callee
+        ? lambda_type_func_signature(((AstNode*)callee)->type) : NULL;
+    Type* success = mir_unwrap_decl_type(signature &&
+        signature->has_explicit_return_contract ? signature->return_contract : call->type);
+    return success && success->type_id == LMD_TYPE_INT &&
+        success->kind == TYPE_KIND_SIMPLE && !success->is_literal &&
+        !success->is_const && !lambda_type_accepts_null(success);
+}
+
+// an int operand whose Item is the compact in-band encoding
+static bool mir_int_operand_in_band(MirTranspiler* mt, AstNode* node) {
+    int64_t value = 0;
+    if (mir_int_literal_value(mt, node, &value)) {
+        return value >= INT53_MIN && value <= INT53_MAX;
+    }
+    return mir_expr_carrier_type(mt, node) == LMD_TYPE_INT &&
+        mir_int_lane_operand_proven_in_band(mt, node);
+}
+
+// TE-17 I3 ordering over an int join (`i < len(keys)`, `keys` read as `any`,
+// S11.4.3): both operands are joins or non-null int lanes, one a join
+static bool mir_join_int_ordering(MirTranspiler* mt, AstNode* node) {
+    AstNode* base = ast_unwrap_primary(node);
+    if (!base || base->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* bi = (AstBinaryNode*)base;
+    if (bi->op != OPERATOR_LT && bi->op != OPERATOR_LE &&
+            bi->op != OPERATOR_GT && bi->op != OPERATOR_GE) return false;
+    bool left_join = false, right_join = false;
+    return mir_join_arith_operand(mt, bi->left, &left_join) &&
+        mir_join_arith_operand(mt, bi->right, &right_join) &&
+        (left_join || right_join) &&
+        !mir_expr_may_be_null(mt, bi->left) && !mir_expr_may_be_null(mt, bi->right);
+}
+
+// The operands of a join lowering as int lanes: a join is boxed and its error
+// jumps to `result` at `done`, the first error being the value (S7.9.3); a
+// non-null int lane is taken as it is.
+static void mir_join_operand_lanes(MirTranspiler* mt, AstBinaryNode* bi,
+        MIR_reg_t result, MIR_label_t done, LaneReg* left_lane, LaneReg* right_lane) {
+    bool left_join = mir_join_int_success(mt, bi->left);
+    bool right_join = mir_join_int_success(mt, bi->right);
+    MirValue left_value = left_join ? mir_value_from_reg(mt, bi->left,
+            transpile_box_item(mt, bi->left), VALUE_REP_ITEM, &TYPE_INT, LMD_TYPE_INT)
+        : transpile_expr_value(mt, bi->left);
+    MirValue right_value = right_join ? mir_value_from_reg(mt, bi->right,
+            transpile_box_item(mt, bi->right), VALUE_REP_ITEM, &TYPE_INT, LMD_TYPE_INT)
+        : transpile_expr_value(mt, bi->right);
+    if (left_join) emit_jump_if_item_error(mt, left_value.reg, result, done);
+    if (right_join) emit_jump_if_item_error(mt, right_value.reg, result, done);
+    *left_lane = emit_int_native_lane_typed(mt, left_value);
+    *right_lane = emit_int_native_lane_typed(mt, right_value);
+}
+
 static MirValue emit_binary_value(MirTranspiler* mt, AstBinaryNode* bi,
         bool native_int_out) {
     MirValue versioned;
@@ -14830,6 +15067,67 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         return publish(emit_uext8(mt, result), VALUE_REP_I64);
     }
 
+    // TE-17 I3 integer arithmetic over joins: the first error operand is the
+    // value, as fn_add answers (S7.9.3); otherwise the unboxed lanes take the
+    // ordinary int-lane arithmetic and box into a new join. No fn_add call
+    // for hashmap's `result + hashmap_get(hm, i)`.
+    if (mir_join_int_arith_op(bi->op) && mir_join_int_success(mt, (AstNode*)bi)) {
+        MIR_reg_t result = new_reg(mt, "join_arith", MIR_T_I64);
+        MIR_label_t done = new_label(mt);
+        LaneReg left_lane(0), right_lane(0);
+        mir_join_operand_lanes(mt, bi, result, done, &left_lane, &right_lane);
+        LaneReg lane = bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD
+            ? emit_int_lane_divmod(mt, bi->op, bi->left, left_lane, bi->right,
+                right_lane, false, false)
+            : emit_int_lane_arith(mt, bi->op, bi->left, left_lane, bi->right,
+                right_lane, false, false, false, false);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, emit_box(mt, lane.r, LMD_TYPE_INT))));
+        emit_label(mt, done);
+        return publish(result, VALUE_REP_ITEM);
+    }
+
+    // TE-17 I3 join against an in-band int: `place_queen(...) == 1`. The join
+    // holds an int or an error; an in-band int's Item is its one canonical
+    // encoding and an error equals nothing (S5.1.2), so the Item words decide
+    // `==`/`!=` exactly and the join never reaches fn_eq.
+    if (bi->op == OPERATOR_EQ || bi->op == OPERATOR_NE) {
+        bool left_join = mir_join_int_success(mt, bi->left);
+        if ((left_join && mir_int_operand_in_band(mt, bi->right)) ||
+                (!left_join && mir_join_int_success(mt, bi->right) &&
+                 mir_int_operand_in_band(mt, bi->left))) {
+            MIR_reg_t boxl = transpile_box_item(mt, bi->left);
+            MIR_reg_t boxr = transpile_box_item(mt, bi->right);
+            MIR_reg_t result = new_reg(mt, bi->op == OPERATOR_EQ ? "jeq" : "jne", MIR_T_I64);
+            emit_insn(mt, MIR_new_insn(mt->ctx, bi->op == OPERATOR_EQ ? MIR_EQ : MIR_NE,
+                MIR_new_reg_op(mt->ctx, result),
+                MIR_new_reg_op(mt->ctx, boxl), MIR_new_reg_op(mt->ctx, boxr)));
+            return publish(result, VALUE_REP_I64);
+        }
+    }
+
+    // TE-17 I3 ordering over an int join: the first error operand is the
+    // value, as fn_lt answers (S7.9.3); otherwise the int lanes compare as a
+    // native int comparison does, and the 0/1 answer tags as a bool Item.
+    // No fn_lt call for cd's `while (i < len(keys))` (S11.4.3).
+    if (mir_join_int_ordering(mt, (AstNode*)bi)) {
+        MIR_reg_t result = new_reg(mt, "join_cmp", MIR_T_I64);
+        MIR_label_t done = new_label(mt);
+        LaneReg left_lane(0), right_lane(0);
+        mir_join_operand_lanes(mt, bi, result, done, &left_lane, &right_lane);
+        MIR_insn_code_t int_op = bi->op == OPERATOR_LT ? MIR_LT
+            : bi->op == OPERATOR_LE ? MIR_LE : bi->op == OPERATOR_GT ? MIR_GT : MIR_GE;
+        MIR_reg_t answer = new_reg(mt, "join_cmp_bool", MIR_T_I64);
+        if (!mir_emit_int_ordered_compare(mt, bi, left_lane, right_lane, int_op, answer)) {
+            log_error("mir-join-cmp: non-null int lanes refused the ordered compare");
+            abort();
+        }
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_OR, MIR_new_reg_op(mt->ctx, result),
+            MIR_new_reg_op(mt->ctx, answer), MIR_new_int_op(mt->ctx, (int64_t)ITEM_FALSE)));
+        emit_label(mt, done);
+        return publish(result, VALUE_REP_ITEM);
+    }
+
     // ======================================================================
     // Inline string/symbol comparison: avoid boxing + type dispatch
     // Fast path: pointer identity (single MIR_EQ, no function call)
@@ -14946,9 +15244,10 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxr));
 
     ValueRep result_rep = VALUE_REP_ITEM;
-    if (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
+    const bool operand_may_defect = mir_arith_operand_may_defect(mt, bi);
+    if (!operand_may_defect && (bi->op == OPERATOR_ADD || bi->op == OPERATOR_SUB ||
         bi->op == OPERATOR_MUL || bi->op == OPERATOR_DIV ||
-        bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD) {
+        bi->op == OPERATOR_IDIV || bi->op == OPERATOR_MOD)) {
         result = mir_unbox_exact_native_numeric_result(mt, bi, result);
         LambdaNumericDecision decision = {};
         if (mir_binary_numeric_decision(bi, &decision)) {
@@ -14972,6 +15271,7 @@ static MirValue emit_binary_value_body(MirTranspiler* mt, AstBinaryNode* bi,
     // enter a pointer lane for a concrete decimal/complex expression.
     TypeId result_tid = mir_decl_type_id(bi->type);
     if ((result_tid == LMD_TYPE_DECIMAL || result_tid == LMD_TYPE_COMPLEX) &&
+            !operand_may_defect &&
             bi->op != OPERATOR_IDIV && bi->op != OPERATOR_MOD) {
         // Generic arithmetic helpers still return a tagged Item. The result
         // must re-enter the pointer lane before a typed local or call treats
@@ -15246,6 +15546,14 @@ static MirValue mir_profile_lower_value(void* owner, AstNode* node) {
 static MIR_reg_t mir_profile_emit_condition(void* owner, MirValue value) {
     MirTranspiler* mt = (MirTranspiler*)owner;
     AstNode* condition_node = (AstNode*)value.provenance_node;
+    if (value.rep == VALUE_REP_ITEM && mir_join_int_ordering(mt, condition_node)) {
+        // an ordering join is an error or a bool Item, so only `true` is
+        // truthy: one word compare instead of is_truthy
+        MIR_reg_t truthy = new_reg(mt, "join_cmp_truthy", MIR_T_I64);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ, MIR_new_reg_op(mt->ctx, truthy),
+            MIR_new_reg_op(mt->ctx, value.reg), MIR_new_int_op(mt->ctx, (int64_t)ITEM_TRUE)));
+        return truthy;
+    }
     // Truthiness selects an ABI from the producer descriptor. An `any`-typed
     // comparison can still publish a raw Bool lane, so contract inference is
     // not permitted to choose the Item fallback here (D2.4.1-D2.4.3).
@@ -20410,6 +20718,17 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // admitted in the callee and again here) (D8.3.2).
                     declaration_boundary_redundant = false;
                 }
+                // TE-17 I3: a proved join leaves only its error arm, which
+                // skips the binding (S7.7.2); the unbox below still applies
+                if (declaration_boundary_applies && !declaration_boundary_redundant &&
+                        !map_contract_constructed &&
+                        mir_boundary_join_success_redundant(mt, asn->init,
+                            declared_value_type)) {
+                    if (!lambda_type_accepts_error(declared_value_type)) {
+                        emit_return_if_item_error(mt, val);
+                    }
+                    declaration_boundary_redundant = true;
+                }
                 bool native_numeric_fill_array_declaration =
                     declaration_boundary_applies && declared_array_contract &&
                     mir_fill_proves_nonempty_numeric_array_contract(mt,
@@ -20494,10 +20813,11 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                             ? VALUE_REP_INT_LANE : VALUE_REP_NONE,
                         declared_array_contract && mir_member_read_carries_contract(mt,
                             ast_unwrap_primary(asn->init), declared_value_type));
-                    // `any` intentionally admits error values. Every other
-                    // plain annotation short-circuits before its binding can
-                    // receive the failed value.
-                    if (declared_value_type->type_id != LMD_TYPE_ANY) {
+                    // A contract that admits error -- `any`, `T | error` --
+                    // receives the error as the binding's value (S7.5.1,
+                    // S7.8.1); every other annotation short-circuits before
+                    // its binding can receive the failed value.
+                    if (!lambda_type_accepts_error(declared_value_type)) {
                         emit_return_if_item_error(mt, val);
                     }
                     expr_tid = LMD_TYPE_ANY;
@@ -22510,6 +22830,50 @@ static bool mir_map_literal_field_proven(AstNode* field_value, Type* expected) {
     return proven && mir_map_field_contract_compatible(proven, expected);
 }
 
+// Does an adopted literal take the raw per-field store loop? The loop writes
+// each value with NO admission, so it needs the literal's value proof and a
+// slot it can write for every field; any other adopted literal fills through
+// map_fill, admitting each unproven field (the defect solve asks the same).
+static bool mir_map_literal_stores_direct(AstMapNode* map_node, TypeMap* map_type,
+        int val_count) {
+    if (!mir_map_literal_matches_contract(map_node, map_type) || !has_fixed_shape(map_type) ||
+            map_type->byte_size <= 0 || val_count <= 0 || val_count != (int)map_type->length) {
+        return false;
+    }
+    // every field: named, typed, 8-byte aligned, of a storage class it writes
+    for (ShapeEntry* check = map_type->shape; check;
+            check = typemap_next_field(map_type, check)) {
+        if (!check->name || !check->type ||
+            check->byte_offset % sizeof(void*) != 0) {
+            return false;
+        }
+        LaneStorageDesc check_lane = {};
+        if (shape_entry_uses_native_lane(check, &check_lane) &&
+                check_lane.kind == LANE_STORAGE_TYPED_ITEM) {
+            // The direct loop writes one raw word, while a wide optional
+            // field owns a tagged TypedItem. Route it through map_fill's
+            // descriptor-aware writer (D2.5.2v3, D2.6.4v3).
+            return false;
+        }
+        TypeId ft = shape_entry_storage_type_id(check);
+        if (ft == LMD_TYPE_ANY) return false;
+        // ⚠ This admission MUST match the store switch in transpile_map exactly.
+        // It used to ask mir_is_native_scalar_value_type, which also admits
+        // SYMBOL, BINARY, DECIMAL, DTIME and COMPLEX -- none of which the
+        // loop has a branch for, so those fields fell off the end of the
+        // if-chain and were NEVER WRITTEN. An annotated `{v: decimal}` read
+        // back as null; the same held for symbol/binary/datetime/complex
+        // fields. Admitting less sends them through map_fill, whose
+        // set_field_value covers every storage class.
+        bool stored_by_loop = ft == LMD_TYPE_NULL || ft == LMD_TYPE_FLOAT ||
+            is_integer_type_id(ft) || ft == LMD_TYPE_UINT64 ||
+            ft == LMD_TYPE_BOOL || ft == LMD_TYPE_STRING ||
+            mir_is_container_field_type(ft);
+        if (!stored_by_loop) return false;
+    }
+    return true;
+}
+
 static void mir_select_union_map_contract(AstMapNode* literal, Type* target,
         TypeMap** selected, bool* ambiguous, int depth = 0) {
     target = mir_unwrap_decl_type(target);
@@ -22772,52 +23136,8 @@ static MIR_reg_t emit_map_storage(MirTranspiler* mt, AstMapNode* map_node) {
     // so it keeps the full value proof. A shape-matched literal whose values are
     // not all proven still adopts the contract -- it just fills through the
     // generic path below, where each unproven field crosses a checked boundary.
-    if (map_contract && mir_map_literal_matches_contract(map_node, map_type) &&
-        has_fixed_shape(map_type) &&
-        map_type->byte_size > 0 && val_count > 0 && val_count == (int)map_type->length) {
-        // Check all fields: named, typed, 8-byte aligned offsets, supported types
-        bool all_direct = true;
-        ShapeEntry* check = map_type->shape;
-        while (check) {
-            if (!check->name || !check->type ||
-                check->byte_offset % sizeof(void*) != 0) {
-                all_direct = false;
-                break;
-            }
-            LaneStorageDesc check_lane = {};
-            if (shape_entry_uses_native_lane(check, &check_lane) &&
-                    check_lane.kind == LANE_STORAGE_TYPED_ITEM) {
-                // The direct loop writes one raw word, while a wide optional
-                // field owns a tagged TypedItem. Route it through map_fill's
-                // descriptor-aware writer (D2.5.2v3, D2.6.4v3).
-                all_direct = false;
-                break;
-            }
-            TypeId ft = shape_entry_storage_type_id(check);
-            if (ft == LMD_TYPE_ANY) {
-                all_direct = false;
-                break;
-            }
-            // ⚠ This admission MUST match the store switch below exactly.
-            // It used to ask mir_is_native_scalar_value_type, which also admits
-            // SYMBOL, BINARY, DECIMAL, DTIME and COMPLEX -- none of which the
-            // loop has a branch for, so those fields fell off the end of the
-            // if-chain and were NEVER WRITTEN. An annotated `{v: decimal}` read
-            // back as null; the same held for symbol/binary/datetime/complex
-            // fields. Admitting less sends them through map_fill, whose
-            // set_field_value covers every storage class.
-            bool stored_by_loop = ft == LMD_TYPE_NULL || ft == LMD_TYPE_FLOAT ||
-                is_integer_type_id(ft) || ft == LMD_TYPE_UINT64 ||
-                ft == LMD_TYPE_BOOL || ft == LMD_TYPE_STRING ||
-                mir_is_container_field_type(ft);
-            if (!stored_by_loop) {
-                all_direct = false;
-                break;
-            }
-            check = typemap_next_field(map_type, check);
-        }
-
-        if (all_direct) {
+    if (map_contract) {
+        if (mir_map_literal_stores_direct(map_node, map_type, val_count)) {
             // Target-shape proof has already established every field's
             // nullable/native representation; avoid rebuilding that proof
             // through map_fill's boxed varargs path for compiler-produced maps.
@@ -24172,6 +24492,11 @@ static void mir_record_copy_cells(MirTranspiler* mt, MIR_reg_t destination,
 static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
     AstNode* node = (AstNode*)field_node;
     MirRecordValue temporary = {};
+    // TE-17 I3: an object that may be an error is read dynamically, which
+    // propagates the error (S7.9.3); no fixed-shape path may load from it. A
+    // record binding or record call is exempt: mir_emit_record_call returns
+    // an error before any field exists.
+    const bool object_may_defect = mir_expr_may_carry_defect(mt, field_node->object);
     MirRecordValue* scalar = mir_record_binding(mt, field_node->object);
     AstNode* object = ast_unwrap_primary(field_node->object);
     AstNode* member = ast_unwrap_primary(field_node->field);
@@ -24273,7 +24598,7 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
     // A trusted named map already carries the field contract in its packed
     // ShapeEntry. Reading through fn_member re-admits the same nested map on
     // every access; keep that generic path for dynamic/open shapes only.
-    if ((ast_obj_tid == LMD_TYPE_MAP) &&
+    if ((ast_obj_tid == LMD_TYPE_MAP) && !object_may_defect &&
         field_node->field->node_type == AST_NODE_IDENT &&
         field_node->object->type) {
         Type* object_type = ast_obj_type;
@@ -24353,7 +24678,7 @@ static MirValue emit_member_value(MirTranspiler* mt, AstFieldNode* field_node) {
     MIR_reg_t guarded_result = 0;
     MIR_label_t guarded_done = 0;
     bool static_receiver_is_map =
-        (ast_obj_tid == LMD_TYPE_MAP) &&
+        (ast_obj_tid == LMD_TYPE_MAP) && !object_may_defect &&
         ast_obj_type && ast_obj_type != &TYPE_MAP && ast_obj_type != &TYPE_OBJECT &&
         !((TypeMap*)ast_obj_type)->is_trusted_contract &&
         mir_shape_layout_is_addressable((TypeMap*)ast_obj_type);
@@ -27648,6 +27973,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         // Count arguments
         AstNode* arg = call_node->argument;
         int arg_count = em_linked_node_count(arg);
+        // S11.4.3: the planners read this call as a boxed join, so no native
+        // specialization below may lower it; under `^` (`split(m, ",")^`) it
+        // joins too, and the propagation takes the error arm
+        const bool rejected_flow = mir_sys_operand_error_may_reach(mt, call_node);
 
         if (info->fn == SYSPROC_PRINT) {
             arg = call_node->argument;
@@ -27913,7 +28242,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         // ==== Native len() for typed collections/strings ====
         // When the argument type is known, dispatch to type-specific fn_len_* variants
         // that take native pointers and return int64_t directly (no boxing overhead).
-        if (info->fn == SYSFUNC_LEN && arg_count == 1) {
+        if (info->fn == SYSFUNC_LEN && arg_count == 1 && !rejected_flow) {
             arg = call_node->argument;
             MirVarEntry* cached_array = mir_typed_array_cache_for_object(mt, arg);
             if (cached_array && !cached_array->is_var_param &&
@@ -28054,7 +28383,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         }
 
         // ==== Native ord() for typed strings ====
-        if (info->fn == SYSFUNC_ORD && arg_count == 1) {
+        if (info->fn == SYSFUNC_ORD && arg_count == 1 && !rejected_flow) {
             arg = call_node->argument;
             TypeId a1_tid = mir_expr_carrier_type(mt, arg);
             if (a1_tid == LMD_TYPE_STRING) {
@@ -28093,6 +28422,11 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         if (arg_count == 1 && info->fn == SYSFUNC_INT) {
             arg = call_node->argument;
             TypeId arg_tid = mir_expr_carrier_type(mt, arg);
+            // an int join is already int() of itself: int(n) is n and int(e)
+            // is e (S7.9.3); the call is typed as the same join
+            if (mir_join_int_success(mt, arg)) {
+                RETURN_CALL_VALUE(transpile_box_item(mt, arg));
+            }
             if (arg_tid == LMD_TYPE_INT) {
                 // int() consumes the native lane. Reopen nested exact int
                 // arithmetic instead of feeding its ordinary boxed Item to
@@ -28498,12 +28832,17 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 arg_ops[ai] = MIR_new_reg_op(mt->ctx, abi_arg.reg);
                 ai++;
             }
-            if (sysfunc_params_reject_error(info)) {
+            // S11.4.3 (LR12-25, LR12-36): the rejected error is the call's
+            // value, which the planners already read as a boxed join. An
+            // unflagged call has no operand that can be an error, so it tests
+            // none and never returns from the activation (S7.7.3).
+            MirRejectedJoin rejected = {};
+            if (rejected_flow) {
+                MIR_reg_t items[LAMBDA_MAX_FUNCTION_ARGS];
                 for (int i = 0; i < ai; i++) {
-                    if (arg_reps[i] == VALUE_REP_ITEM) {
-                        emit_return_if_item_error(mt, arg_regs[i]);
-                    }
+                    items[i] = arg_reps[i] == VALUE_REP_ITEM ? arg_regs[i] : 0;
                 }
+                rejected = emit_rejected_join_open(mt, items, ai);
             }
             for (int i = 0; i < ai; i++) {
                 if (arg_reps[i] == VALUE_REP_ITEM) {
@@ -28513,6 +28852,23 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = em_call_with_args(&mt->em, sys_fn_name, mir_ret_type,
                 ai, arg_types, arg_ops, false);
+            if (rejected.value) {
+                // boxed even under `^`, whose propagation reads it as an Item
+                returned_boxed_item = true;
+                RETURN_CALL_VALUE(emit_rejected_join_close(mt, rejected, result, c_ret_tid));
+            }
+            if (info->fn == SYSFUNC_ERROR || info->fn == SYSFUNC_ERROR2) {
+                // S7.4.4: stamp the error() call site, as T0's eval_call does
+                AstSysFuncNode* site = sys;
+                MIR_reg_t file = emit_load_string_literal(mt,
+                    mt->owner_script && mt->owner_script->reference
+                        ? mt->owner_script->reference : "");
+                result = emit_call_4(mt, "lambda_error_stamp_site", MIR_T_I64,
+                    MIR_T_I64, MIR_new_reg_op(mt->ctx, result),
+                    MIR_T_P, MIR_new_reg_op(mt->ctx, file),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site->site_line),
+                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)site->site_column));
+            }
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
             POST_PROCESS_UNBOX(result);
@@ -29377,6 +29733,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     mir_param_short_circuits_item_error(type_param) &&
                     mir_argument_may_return_item_error(mt, resolved_args[i]);
                 if (binder_raw_direct_call) short_circuit_error = false;
+                // TE-17 I3: with the error arm guarded (S7.7.3), a join whose
+                // success its callee's return already proved needs no admission
+                const bool join_success_admitted = short_circuit_error &&
+                    parameter_contract &&
+                    mir_boundary_join_success_redundant(mt, resolved_args[i],
+                        parameter_contract);
                 bool inferred_native_argument = native_call && call_nfi &&
                     mir_inferred_native_argument_proven(mt, call_nfi, i,
                         resolved_args[i]);
@@ -29457,6 +29819,17 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     bool proven_array_witness = mir_boundary_is_redundant(mt,
                         resolved_args[i], parameter_contract) ||
                         argument_contract.array_constructed();
+                    // S7.7.3 / S11.4.3 (LR12-36): an error argument is the
+                    // call's value, as on the other argument paths, not a
+                    // return from this activation. With that arm guarded, a
+                    // join whose success its callee's return proved needs no
+                    // admission (TE-17 I3; raytrace's `vec_add(vec_scale(..), ..)`).
+                    if (short_circuit_error) {
+                        val = emit_parameter_error_guard(mt, val, colour_checked,
+                            &has_parameter_error_guard, &parameter_error_label,
+                            &parameter_error_result);
+                        if (join_success_admitted) proven_array_witness = true;
+                    }
                     MIR_reg_t array_item = val;
                     if (!proven_array_witness) {
                         MIR_reg_t admitted_array = emit_checked_boundary(mt, val,
@@ -29644,17 +30017,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                             // boxed result so an enclosing `or` can consume
                             // it; returning from the enclosing function here
                             // bypasses that documented fallback boundary.
-                            if (!has_parameter_error_guard) {
-                                parameter_error_label = new_label(mt);
-                                parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
-                            }
-                            if (colour_checked) {
-                                val = emit_call_1(mt, "lambda_fn_colour_arg_check",
-                                    MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                            }
-                            emit_jump_if_item_error(mt, val, parameter_error_result,
-                                parameter_error_label);
-                            has_parameter_error_guard = true;
+                            val = emit_parameter_error_guard(mt, val, colour_checked,
+                                &has_parameter_error_guard, &parameter_error_label,
+                                &parameter_error_result);
                             short_circuit_error = false;
                         }
                         // T-A1: `val_tid` is a representation label, not the
@@ -29664,7 +30029,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                         // check the AST checker already proved, or every typed
                         // call re-boxes.
                         if (!binder_raw_direct_call && !inferred_native_argument && parameter_contract &&
-                                parameter_contract != &TYPE_ANY &&
+                                parameter_contract != &TYPE_ANY && !join_success_admitted &&
                                 !mir_boundary_is_redundant(mt, resolved_args[i],
                                     parameter_contract) &&
                                 (val_tid == LMD_TYPE_ANY ||
@@ -29773,17 +30138,9 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                             // still continues through the normal borrow-home
                             // setup below; skipping it lost COW replacements
                             // whenever an open argument needed this guard.
-                            if (!has_parameter_error_guard) {
-                                parameter_error_label = new_label(mt);
-                                parameter_error_result = new_reg(mt, "param_error", MIR_T_I64);
-                            }
-                            if (colour_checked) {
-                                val = emit_call_1(mt, "lambda_fn_colour_arg_check",
-                                    MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, val));
-                            }
-                            emit_jump_if_item_error(mt, val, parameter_error_result,
-                                parameter_error_label);
-                            has_parameter_error_guard = true;
+                            val = emit_parameter_error_guard(mt, val, colour_checked,
+                                &has_parameter_error_guard, &parameter_error_label,
+                                &parameter_error_result);
                         } else {
                             // An explicit var parameter borrows the caller's writable root.
                             // Detach before passing it because the callee's raw stores cannot
@@ -29836,7 +30193,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                                 resolved_args[i], parameter_contract);
                         // T-A1, boxed-ABI mirror of the native-param site above.
                         if (!binder_raw_direct_call && parameter_contract && parameter_contract != &TYPE_ANY &&
-                                !producer_array_contract_proven &&
+                                !producer_array_contract_proven && !join_success_admitted &&
                                 !mir_boundary_is_redundant(mt, resolved_args[i],
                                     parameter_contract) &&
                                 (val_tid == LMD_TYPE_ANY ||
@@ -30602,6 +30959,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     // T21-3b: reload the transported `var` bindings (see the direct path).
     mir_emit_var_home_reload(mt, dyn_homes, dyn_home_count);
 
+    // LR03-13: a call through a declared function-type contract crosses its
+    // return where it is made, as T0's interp_check_contract_return does; the
+    // planners read such a call as a join (mir_call_may_defect), so the
+    // failure flows as the call's value
+    if (Type* contract = ast_call_contract_return(call_node)) {
+        dyn_result = emit_checked_boundary(mt, dyn_result, LMD_TYPE_ANY,
+            mir_unwrap_decl_type(contract), "function return");
+    }
+
     // Dynamic calls (fn_call0/1/2/3) return Item (already boxed).
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
@@ -30831,24 +31197,35 @@ static MirValue emit_pipe_value(MirTranspiler* mt, AstPipeNode* pipe_node) {
                     TypeId c_ret_tid = sysfunc_c_ret_type_id(info);
                     MIR_type_t ret_t = sysfunc_c_ret_mir_type(c_ret_tid);
                     MIR_reg_t piped = 0;
-                    if (arg_count == 0) {
-                        piped = emit_call_1(mt, sys_fn_name, ret_t,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left));
-                    } else if (arg_count == 1) {
-                        arg = call_node->argument;
-                        MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-                        piped = emit_call_2(mt, sys_fn_name, ret_t,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1));
-                    } else if (arg_count == 2) {
-                        arg = call_node->argument;
-                        MIR_reg_t boxed_a1 = transpile_box_item(mt, arg);
-                        arg = arg->next;
-                        MIR_reg_t boxed_a2 = transpile_box_item(mt, arg);
-                        piped = emit_call_3(mt, sys_fn_name, ret_t,
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_left),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a1),
-                            MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_a2));
+                    if (arg_count <= 2) {
+                        // the piped value is operand 0; the written ones follow
+                        MIR_reg_t operands[3] = {boxed_left, 0, 0};
+                        int count = 1;
+                        for (arg = call_node->argument; arg; arg = arg->next) {
+                            operands[count++] = transpile_box_item(mt, arg);
+                        }
+                        // S11.4.3 (LR12-36): a rejected error operand, the
+                        // piped one included, is the pipe's value (fn_len read
+                        // `err |> len` as 0)
+                        MirRejectedJoin rejected = {};
+                        if (mir_sys_call_error_flows(mt, call_node)) {
+                            rejected = emit_rejected_join_open(mt, operands, count);
+                        }
+                        piped = count == 1
+                            ? emit_call_1(mt, sys_fn_name, ret_t,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, operands[0]))
+                            : count == 2
+                            ? emit_call_2(mt, sys_fn_name, ret_t,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, operands[0]),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, operands[1]))
+                            : emit_call_3(mt, sys_fn_name, ret_t,
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, operands[0]),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, operands[1]),
+                                MIR_T_I64, MIR_new_reg_op(mt->ctx, operands[2]));
+                        if (rejected.value) {
+                            return publish(emit_rejected_join_close(mt, rejected,
+                                piped, c_ret_tid), VALUE_REP_ITEM);
+                        }
                     }
                     if (piped) {
                         // Nullable scalar sys funcs return a boxed Item from
@@ -31145,6 +31522,20 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
         // Evaluate the raise value and return it directly (like C transpiler)
         // The value is typically already an error from error() call
         MIR_reg_t boxed = transpile_box_item(mt, raise_node->value);
+        Type* payload = raise_node->value->type;
+        if (!payload || payload->type_id != LMD_TYPE_ERROR) {
+            // S7.4.6 (LR10-8): a non-error operand raises error(v); T0 calls
+            // the same helper. On the error lane as it was, `raise "s"` had
+            // escaped an `int^` return and `raise null` read as "no error".
+            MIR_reg_t file = emit_load_string_literal(mt,
+                mt->owner_script && mt->owner_script->reference
+                    ? mt->owner_script->reference : "");
+            boxed = emit_call_4(mt, "lambda_raise_operand", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed),
+                MIR_T_P, MIR_new_reg_op(mt->ctx, file),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)raise_node->site_line),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)raise_node->site_column));
+        }
         // Return the error value from the function
         async_track_pending_reg(mt, boxed);
         transpile_task_scope_unwind(mt, true);
@@ -31283,7 +31674,16 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
         // as ANY, so the native-return conversion below sees the same input.
         bool array_return_contract =
             mir_return_contract_is_homogeneous_array(mt->current_return_type);
-        if (return_contract_needs_checked_boundary(mt->current_return_type) &&
+        // TE-17 I3: a proved join returns its error arm as this function's
+        // error and its success as the declared value, never re-admitted
+        bool join_error_arm_only = !array_return_contract &&
+            return_contract_needs_checked_boundary(mt->current_return_type) &&
+            !map_contract_constructed && !empty_array_result_admitted &&
+            mir_boundary_join_success_redundant(mt, ret_node->value,
+                mir_unwrap_decl_type(mt->current_return_type));
+        if (join_error_arm_only) emit_return_if_item_error(mt, val);
+        if (!join_error_arm_only &&
+                return_contract_needs_checked_boundary(mt->current_return_type) &&
                 !map_contract_constructed && !empty_array_result_admitted &&
                 (array_return_contract ||
                  (!mir_boundary_is_redundant(mt, ret_node->value,
@@ -31372,6 +31772,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     mt->block_returned = true;
     return r;
 }
+
 
 // ============================================================================
 // Assignment statement (procedural)
@@ -31489,8 +31890,16 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
         // site, eliding needs no carrier repair: the checked path also left
         // val_tid as ANY, so the widening below sees the same representation
         // either way.
-        bool assignment_boundary_applies = mir_assignment_boundary_applies(mt,
-            assign->value, val_tid, contract);
+        // TE-17 I3: as at a declaration, a proved join leaves only its
+        // error arm, which skips (S7.7.4)
+        bool join_error_arm_only = contract && contract->type_id != LMD_TYPE_ANY &&
+            mir_boundary_join_success_redundant(mt, assign->value, contract);
+        if (join_error_arm_only && !lambda_type_accepts_error(contract)) {
+            emit_return_if_item_error(mt, val);
+            boxed_assignment_error_checked = true;
+        }
+        bool assignment_boundary_applies = !join_error_arm_only &&
+            mir_assignment_boundary_applies(mt, assign->value, val_tid, contract);
         // T19-A: a REBINDING of a declared scalar had no equivalent of the
         // declaration site's native fast boundary, so `k = perm[0]` boxed the
         // int lane and called lambda_type_check once per iteration purely to
@@ -31521,7 +31930,8 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
             snprintf(boundary, sizeof(boundary), "assignment to '%.*s'",
                 (int)assign->target->len, assign->target->chars);
             val = emit_checked_boundary(mt, val, val_tid, contract, boundary);
-            emit_return_if_item_error(mt, val);
+            // as at the declaration: an error-admitting `var` receives it
+            if (!lambda_type_accepts_error(contract)) emit_return_if_item_error(mt, val);
             boxed_assignment_error_checked = true;
             val_tid = LMD_TYPE_ANY;
             value_producer = mir_value_from_reg(mt, assign->value, val,
@@ -36368,7 +36778,44 @@ static bool mir_assignment_boundary_applies(MirTranspiler* mt, AstNode* value,
 // Either way a check is emitted unless the annotation is redundant against the
 // initializer. Anything this misses would be a silent miscompile, so unknown
 // shapes must answer "may check".
-static bool declaration_may_check_boundary(AstNode* stam, MirTranspiler* mt = NULL) {
+// A contract the source's static array type already fits re-represents the
+// value but cannot reject it: the check the emitter forces for an array
+// contract (reification) is no origination site (LR12-24).
+static bool mir_array_admission_cannot_fail(AstNode* source, Type* contract) {
+    return source && source->type && lambda_array_contract_element(contract) &&
+        lambda_array_contract_compatible(source->type, contract, false);
+}
+
+// A record literal that adopts its destination contract is built in that
+// contract's layout (MirMapContractScope, D3.2.2v2(a)): no boundary is
+// emitted, and only a field the literal cannot prove is admitted -- and can
+// fail -- at construction. Returns whether `value` is so built; `*may_fail`
+// then answers for its construction. (prettier_ast2's doc_leaf had counted a
+// return boundary its emitter never builds.)
+static bool mir_adopted_literal(AstNode* value, Type* contract,
+        bool require_proven_fields, bool* may_fail) {
+    Type* adopted = mir_direct_map_contract(value, contract);
+    AstMapNode* literal = adopted ? (AstMapNode*)ast_unwrap_primary(value) : NULL;
+    if (!literal || (require_proven_fields &&
+            !mir_map_literal_matches_contract(literal, (TypeMap*)adopted, true))) return false;
+    *may_fail = false;
+    // the raw store loop admits nothing
+    if (mir_map_literal_stores_direct(literal, (TypeMap*)adopted,
+            em_linked_node_count(literal->item))) return true;
+    ShapeEntry* field = ((TypeMap*)adopted)->shape;
+    for (AstNode* item = literal->item; item && !*may_fail; item = item->next) {
+        Type* field_contract = field ? field->type : NULL;
+        if (field) field = typemap_next_field((TypeMap*)adopted, field);
+        AstNode* field_value = item->node_type == AST_NODE_KEY_EXPR
+            ? ((AstNamedNode*)item)->as : NULL;
+        *may_fail = field_value && field_contract &&
+            !mir_map_literal_field_proven(field_value, field_contract);
+    }
+    return true;
+}
+
+static bool declaration_may_check_boundary(AstNode* stam, MirTranspiler* mt = NULL,
+        bool failure_only = false) {
     AstNode* declare = stam->node_type == AST_NODE_LET_STAM ||
         stam->node_type == AST_NODE_VAR_STAM || stam->node_type == AST_NODE_PUB_STAM
         ? ((AstLetNode*)stam)->declare : NULL;
@@ -36384,6 +36831,14 @@ static bool declaration_may_check_boundary(AstNode* stam, MirTranspiler* mt = NU
             // nothing; the AST arm reaches the same answer through its own
             // redundancy test.
             if (declared->type_id == LMD_TYPE_ANY) continue;
+            if (failure_only && mir_array_admission_cannot_fail(asn->init, declared)) continue;
+            // a literal built in the declared contract crosses no boundary
+            bool construction_fails = false;
+            if (failure_only && mir_adopted_literal(asn->init, declared, false,
+                    &construction_fails)) {
+                if (construction_fails) return true;
+                continue;
+            }
             if (!mir_boundary_is_redundant(mt, asn->init, declared)) return true;
             continue;
         }
@@ -36422,21 +36877,147 @@ static bool function_body_may_check_boundary(AstFuncNode* fn_node) {
 // body an ERROR lane beside it (shape 4), which is TE-15's prescribed
 // cross-function ABI: "native-returning calls check the context error lane --
 // one load-and-branch after the call, the Swift-`throws` shape".
+// An `if (x is T)` condition types `x` as T in its then-branch -- the flow
+// fact the emitter proves admissions with, replayed for the solver's scan.
+#define MIR_DEFECT_NARROWING_DEPTH 4
 struct MirDefectOriginScan {
     MirTranspiler* mt;
     bool found;
+    AstNode* site;   // the first origination found, for the solver's log
+    NameEntry* narrowed_entry[MIR_DEFECT_NARROWING_DEPTH];
+    Type* narrowed_type[MIR_DEFECT_NARROWING_DEPTH];
+    int narrowed_count;
 };
+
+// `x.f` under a narrowing of `x` to a map type reads that type's declared field
+static Type* mir_narrowed_member_type(const MirDefectOriginScan* scan, AstNode* node) {
+    AstNode* member = ast_unwrap_primary(node);
+    if (!scan || !member || member->node_type != AST_NODE_MEMBER_EXPR) return NULL;
+    AstNode* object = ast_unwrap_primary(((AstFieldNode*)member)->object);
+    AstNode* key = ast_unwrap_primary(((AstFieldNode*)member)->field);
+    if (!object || object->node_type != AST_NODE_IDENT || !key ||
+            key->node_type != AST_NODE_IDENT) return NULL;
+    for (int i = scan->narrowed_count - 1; i >= 0; i--) {
+        if (scan->narrowed_entry[i] != ((AstIdentNode*)object)->entry) continue;
+        Type* shape = mir_unwrap_decl_type(scan->narrowed_type[i]);
+        if (!shape || shape->type_id != LMD_TYPE_MAP) return NULL;
+        String* name = ((AstIdentNode*)key)->name;
+        ShapeEntry* field = find_shape_field_by_name((TypeMap*)shape, name->chars, name->len);
+        return field ? field->type : NULL;
+    }
+    return NULL;
+}
+
+static bool mir_call_may_check_array_boundary(MirTranspiler* mt, AstCallNode* call,
+    bool failure_only = false);
+
+// S7.7.3 parameter admission, judged before emission: an explicit contract
+// the argument's static type does not prove is a deferred check, while an
+// implicit `any \ error` one rejects only an argument that can be an error
+// -- a type that proves one; a defect-capable argument is a call edge the
+// solver follows instead. The emitter's own guard reads per-body lanes this
+// pass does not have yet (LR12-24).
+static bool mir_call_admission_may_fail(MirTranspiler* mt, AstCallNode* call,
+        const MirDefectOriginScan* scan) {
+    if (call->fn_colour_guard & LAMBDA_COLOUR_GUARD_ARGS) return true;
+    AstFuncNode* callee = ast_direct_call_function(call);
+    if (!callee) return false;
+    int count = em_linked_node_count(call->argument);
+    AstNode* args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
+    ast_resolve_call_args(call->argument, callee, count, args);
+    for (int i = 0; i < count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+        if (!args[i] || !args[i]->type) continue;
+        AstNamedNode* named = mir_param_at(callee, i);
+        TypeParam* parameter = lambda_type_param(named ? named->type : NULL);
+        Type* contract = mir_named_contract(named);
+        if (parameter && parameter->has_explicit_contract && contract &&
+                contract != &TYPE_ANY) {
+            // the direct-call emitter's own admission condition
+            if (mir_boundary_is_redundant(mt, args[i], contract)) continue;
+            Type* narrowed = mir_narrowed_member_type(scan, args[i]);
+            if (narrowed && mir_unwrap_decl_contract(narrowed) ==
+                    mir_unwrap_decl_contract(contract)) continue;
+            TypeId tid = mir_expr_carrier_type(mt, args[i]);
+            if (tid == LMD_TYPE_ANY ||
+                    (mir_expr_may_be_null(mt, args[i]) && !lambda_type_accepts_null(contract)) ||
+                    mir_map_contract_needs_reification(contract, args[i], tid) ||
+                    mir_boundary_statically_deferred(args[i], contract, tid, parameter)) {
+                return true;
+            }
+        } else if (lambda_type_has_proven_error(args[i]->type)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A call is an origination site of its own, apart from what its callee may
+// return: a parameter admission it performs (S7.7.3), a system function that
+// rejects an error operand or whose unboxing can fail, or a dynamic call whose
+// result is consumed as a declared scalar (LR12-24).
+static bool mir_call_originates_defect(MirTranspiler* mt, AstCallNode* call,
+        const MirDefectOriginScan* scan) {
+    if (mir_call_admission_may_fail(mt, call, scan) ||
+            mir_call_may_check_array_boundary(mt, call, true)) return true;
+    AstNode* callee = ast_unwrap_primary(call->function);
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
+        SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
+        if (!info) return false;
+        if (sysfunc_returns_optional_int(info)) return true;
+        switch (info->fn) {
+        case SYSFUNC_SHL: case SYSFUNC_SHR: case SYSFUNC_USHR:
+        case SYSFUNC_VMAP_NEW: case SYSPROC_PUSH: case SYSPROC_SPLICE:
+            return true;
+        default:
+            break;
+        }
+        // as for an implicit parameter: only an operand that can be an error
+        return mir_sys_call_error_flows(mt, call);
+    }
+    // a dynamic callee publishes a boxed Item; a declared scalar consumer of
+    // it checks before unboxing
+    return !ast_direct_call_function(call) && ((AstNode*)call)->type &&
+        mir_is_native_scalar_value_type(mir_value_type_id(((AstNode*)call)->type));
+}
 
 static bool mir_find_defect_origin(AstNode* node, void* data) {
     MirDefectOriginScan* scan = (MirDefectOriginScan*)data;
     if (scan->found) return false;
+    scan->site = node;
+    if (ast_node_originates_defect(node)) {
+        scan->found = true;
+        return false;
+    }
     switch (node->node_type) {
+    case AST_NODE_CALL_EXPR:
+        scan->found = mir_call_originates_defect(scan->mt, (AstCallNode*)node, scan);
+        break;
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        AstNode* cond = ast_unwrap_primary(branch->cond);
+        walk_lambda_ast(branch->cond, mir_find_defect_origin, scan, false);
+        bool narrows = cond && cond->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)cond)->op == OPERATOR_IS &&
+            scan->narrowed_count < MIR_DEFECT_NARROWING_DEPTH;
+        AstNode* subject = narrows ? ast_unwrap_primary(((AstBinaryNode*)cond)->left) : NULL;
+        AstNode* pattern = narrows ? ast_unwrap_primary(((AstBinaryNode*)cond)->right) : NULL;
+        narrows = subject && subject->node_type == AST_NODE_IDENT && pattern && pattern->type;
+        if (narrows) {
+            scan->narrowed_entry[scan->narrowed_count] = ((AstIdentNode*)subject)->entry;
+            scan->narrowed_type[scan->narrowed_count] = pattern->type;
+            scan->narrowed_count++;
+        }
+        walk_lambda_ast(branch->then, mir_find_defect_origin, scan, false);
+        if (narrows) scan->narrowed_count--;
+        walk_lambda_ast(branch->otherwise, mir_find_defect_origin, scan, false);
+        return false;   // the branches are walked above
+    }
     case AST_NODE_LET_STAM:
     case AST_NODE_VAR_STAM:
     case AST_NODE_PUB_STAM:
         // TE-18 case 1: a failed declaration skips to the end of its own block.
         // `mt` selects the emitter's own redundancy test -- see the helper.
-        scan->found = declaration_may_check_boundary(node, scan->mt);
+        scan->found = declaration_may_check_boundary(node, scan->mt, true);
         break;
     case AST_NODE_ASSIGN_STAM: {
         // TE-18 case 7: a failed reassignment skips to the block that DECLARES
@@ -36479,28 +37060,348 @@ static void mir_cached_defect_origin_set(FnAnalysis* analysis, uint32_t epoch,
         __ATOMIC_RELEASE);
 }
 
-// `descend_functions=false`: a nested function owns its own return lane, and
-// its defects reach this body only through its call result, which is already a
-// checked boundary here.
-static bool function_body_may_originate_defect(MirTranspiler* mt,
-        AstFuncNode* fn_node) {
+static AstFuncNode* mir_callsite_canonical_fn(MirTranspiler* mt, AstFuncNode* fn);
+static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
+        TypeId expected, int* return_count, bool wide_free = false);
+
+// S7.7.1: a declared return is a boundary. A body the contract cannot prove
+// hands back the check's error, and a boxed return carries it to the caller
+// (LR12-24).
+static bool mir_return_value_may_fail(MirTranspiler* mt, AstNode* value,
+        Type* contract) {
+    Type* expected = mir_unwrap_decl_type(contract);
+    if (!value) return true;
+    if (mir_array_admission_cannot_fail(value, expected)) return false;
+    if (mir_return_contract_is_homogeneous_array(contract)) return true;
+    if (mir_boundary_is_redundant(mt, value, expected)) return false;
+    // as transpile_return: a native carrier is converted, not re-admitted
+    TypeId tid = mir_expr_carrier_type(mt, value);
+    return tid == LMD_TYPE_ANY || tid == LMD_TYPE_NULL ||
+        (mir_expr_may_be_null(mt, value) && !lambda_type_accepts_null(expected)) ||
+        mir_map_contract_needs_reification(contract, value, tid);
+}
+
+struct MirReturnScan {
+    MirTranspiler* mt;
+    Type* contract;
+    bool found;
+};
+
+static bool mir_find_failing_return(AstNode* node, void* data) {
+    MirReturnScan* scan = (MirReturnScan*)data;
+    if (scan->found) return false;
+    if (node->node_type == AST_NODE_RETURN_STAM) {
+        AstNode* value = ((AstReturnNode*)node)->value;
+        bool construction_fails = false;
+        scan->found = value && (mir_adopted_literal(value, scan->contract, false,
+                &construction_fails) ? construction_fails
+            : mir_return_value_may_fail(scan->mt, value, scan->contract));
+    }
+    return !scan->found;
+}
+
+// The lane proof above, extended by the narrowing an `if (x is T)` condition
+// gives its then-branch: `x.f` there reads T's declared field. The emitter
+// proves such a return with its flow facts, which do not exist before
+// emission; the solver replays them so a union-dispatching recursion keeps
+// its lane (tune24 `total`).
+static bool mir_solve_value_proves_lane(MirDefectOriginScan* scan, AstNode* node,
+        TypeId lane, int depth) {
+    // a literal is a leaf primary; unwrapping it to NULL would lose the proof
+    AstNode* value = node;
+    while (value && value->node_type == AST_NODE_PRIMARY && ((AstPrimaryNode*)value)->expr) {
+        value = ((AstPrimaryNode*)value)->expr;
+    }
+    if (!value || depth > 32) return false;
+    if (value->node_type == AST_NODE_IF_EXPR) {
+        AstIfNode* branch = (AstIfNode*)value;
+        AstNode* cond = ast_unwrap_primary(branch->cond);
+        AstNode* subject = cond && cond->node_type == AST_NODE_BINARY &&
+            ((AstBinaryNode*)cond)->op == OPERATOR_IS
+            ? ast_unwrap_primary(((AstBinaryNode*)cond)->left) : NULL;
+        AstNode* pattern = subject ? ast_unwrap_primary(((AstBinaryNode*)cond)->right) : NULL;
+        bool narrows = subject && subject->node_type == AST_NODE_IDENT && pattern &&
+            pattern->type && scan->narrowed_count < MIR_DEFECT_NARROWING_DEPTH;
+        if (narrows) {
+            scan->narrowed_entry[scan->narrowed_count] = ((AstIdentNode*)subject)->entry;
+            scan->narrowed_type[scan->narrowed_count] = pattern->type;
+            scan->narrowed_count++;
+        }
+        bool then_proven = branch->then &&
+            mir_solve_value_proves_lane(scan, branch->then, lane, depth + 1);
+        if (narrows) scan->narrowed_count--;
+        return then_proven && branch->otherwise &&
+            mir_solve_value_proves_lane(scan, branch->otherwise, lane, depth + 1);
+    }
+    if (value->node_type == AST_NODE_MEMBER_EXPR) {
+        Type* field = mir_narrowed_member_type(scan, value);
+        TypeId field_lane = LMD_TYPE_ANY;
+        if (field && mir_contract_native_scalar_type(field, &field_lane)) {
+            return field_lane == lane || (lane == LMD_TYPE_FLOAT && field_lane == LMD_TYPE_INT);
+        }
+    }
+    if (value->node_type == AST_NODE_CALL_EXPR) {
+        // a self-call returns the lane under proof unless an argument can be
+        // an error its parameter guard would return instead
+        AstCallNode* call = (AstCallNode*)value;
+        AstFuncNode* callee = ast_direct_call_function(call);
+        if (callee && mir_native_analysis_matches(scan->mt, callee) &&
+                scan->mt->native_return_analysis_tid == lane && !call->propagate) {
+            bool clean = true;
+            for (AstNode* arg = call->argument; arg && clean; arg = arg->next) {
+                Type* narrowed = mir_narrowed_member_type(scan, arg);
+                clean = narrowed ? !lambda_type_accepts_error(narrowed)
+                    : !mir_argument_may_return_item_error(scan->mt, arg);
+            }
+            if (clean) return true;
+        }
+    }
+    if (value->node_type == AST_NODE_BINARY) {
+        AstBinaryNode* binary = (AstBinaryNode*)value;
+        if ((binary->op == OPERATOR_ADD || binary->op == OPERATOR_SUB ||
+                binary->op == OPERATOR_MUL) && lane == LMD_TYPE_INT &&
+                mir_solve_value_proves_lane(scan, binary->left, lane, depth + 1) &&
+                mir_solve_value_proves_lane(scan, binary->right, lane, depth + 1)) {
+            return true;
+        }
+    }
+    return mir_expr_proves_native_return_lane(scan->mt, value, lane);
+}
+
+static bool mir_return_boundary_may_fail(MirTranspiler* mt, AstFuncNode* fn) {
+    TypeFunc* signature = fn ? lambda_type_func_signature(((AstNode*)fn)->type) : NULL;
+    if (!signature || !signature->has_explicit_return_contract ||
+            !signature->return_contract ||
+            !return_contract_needs_checked_boundary(signature->return_contract)) return false;
+    AstNode* tail = function_body_result_expr(fn);
+    TypeId lane = LMD_TYPE_ANY;
+    if (mir_contract_native_scalar_type(signature->return_contract, &lane) &&
+            (lane == LMD_TYPE_INT || lane == LMD_TYPE_FLOAT || lane == LMD_TYPE_BOOL)) {
+        // the emitter's own native-lane proof, recursive calls counted at the
+        // lane under proof (infer_proc_native_return_lane): a proven lane is
+        // converted at the return, never re-admitted
+        AstFuncNode* saved_fn = mt->native_return_analysis_fn;
+        TypeId saved_tid = mt->native_return_analysis_tid;
+        mt->native_return_analysis_fn = fn;
+        mt->native_return_analysis_tid = lane;
+        int returns = 0;
+        MirDefectOriginScan narrowing = {};
+        narrowing.mt = mt;
+        bool proven = mir_proc_return_values_prove(mt, fn->body, lane, &returns) &&
+            (!tail || mir_solve_value_proves_lane(&narrowing, tail, lane, 0));
+        mt->native_return_analysis_fn = saved_fn;
+        mt->native_return_analysis_tid = saved_tid;
+        if (proven) return false;
+    }
+    // the emitter's body scope: an expression body's record literal adopts
+    // the contract, a union's arm only with every field proven
+    bool construction_fails = false;
+    if (mir_adopted_literal(fn->body, signature->return_contract,
+            !lambda_type_nonnull_map_contract(signature->return_contract),
+            &construction_fails)) {
+        if (construction_fails) return true;
+    } else if (tail && mir_return_value_may_fail(mt, tail, signature->return_contract)) {
+        return true;
+    }
+    MirReturnScan scan = {mt, signature->return_contract, false};
+    walk_lambda_ast(fn->body, mir_find_failing_return, &scan, false);
+    return scan.found;
+}
+
+// The body's own origination sites, before any call edge. `descend_functions
+// = false`: a nested function owns its own lanes, and its defects reach this
+// body only through its call result -- a call edge, which the solver follows.
+static bool mir_body_originates_defect(MirTranspiler* mt, AstFuncNode* fn_node) {
     FnAnalysis* analysis = fn_node ? fn_node->analysis : NULL;
     bool cached = false;
     if (analysis && mir_cached_defect_origin_get(analysis,
             mt->inference_cache_epoch, &cached)) {
         return cached;
     }
-    MirDefectOriginScan scan = {mt, false};
+    MirDefectOriginScan scan = {};
+    scan.mt = mt;
+    // least fixed point: a self-call returns this function's own lane while
+    // its origination is being decided, as the emitter's inductive proofs
+    // count it (infer_proc_native_return_lane, T21-2c)
+    TypeFunc* signature = fn_node ? lambda_type_func_signature(((AstNode*)fn_node)->type) : NULL;
+    TypeId own_lane = LMD_TYPE_ANY;
+    if (signature && signature->has_explicit_return_contract && signature->return_contract) {
+        (void)mir_contract_native_scalar_type(signature->return_contract, &own_lane);
+    }
+    AstFuncNode* saved_fn = mt->native_return_analysis_fn;
+    TypeId saved_tid = mt->native_return_analysis_tid;
+    if (own_lane == LMD_TYPE_INT || own_lane == LMD_TYPE_FLOAT || own_lane == LMD_TYPE_BOOL) {
+        mt->native_return_analysis_fn = fn_node;
+        mt->native_return_analysis_tid = own_lane;
+    }
     walk_lambda_ast(fn_node ? fn_node->body : NULL, mir_find_defect_origin,
         &scan, false);
-    if (analysis) {
-        mir_cached_defect_origin_set(analysis, mt->inference_cache_epoch,
-            scan.found);
+    mt->native_return_analysis_fn = saved_fn;
+    mt->native_return_analysis_tid = saved_tid;
+    bool return_fails = !scan.found && mir_return_boundary_may_fail(mt, fn_node);
+    bool found = scan.found || return_fails;
+    if (found) {
+        log_debug("mir-may-defect: %.*s originates at %s (node %d, byte %u)",
+            fn_node && fn_node->name ? (int)fn_node->name->len : 6,
+            fn_node && fn_node->name ? fn_node->name->chars : "<anon>",
+            return_fails ? "its return boundary" : "a body site",
+            scan.site && !return_fails ? (int)scan.site->node_type : -1,
+            scan.site && !return_fails ? scan.site->source_span.start_byte : 0);
     }
-    return scan.found;
+    if (analysis) {
+        mir_cached_defect_origin_set(analysis, mt->inference_cache_epoch, found);
+    }
+    return found;
 }
 
-static bool mir_call_may_check_array_boundary(MirTranspiler* mt, AstCallNode* call) {
+static MirDefectFact* mir_defect_fact(MirTranspiler* mt, AstFuncNode* fn) {
+    if (!mt || !mt->defect_facts || !fn) return NULL;
+    MirDefectFact key = {mir_callsite_canonical_fn(mt, fn), false};
+    return (MirDefectFact*)hashmap_get(mt->defect_facts, &key);
+}
+
+// D6.1.3/D2.8.3: may this function's result be an error its signature does
+// not declare? The solved fixed point for every function of this compile; a
+// function outside it is defect-capable (fail closed).
+static bool function_body_may_originate_defect(MirTranspiler* mt,
+        AstFuncNode* fn_node) {
+    if (MirDefectFact* fact = mir_defect_fact(mt, fn_node)) return fact->may_defect;
+    if (!mt || !mt->defect_facts) return mir_body_originates_defect(mt, fn_node);
+    // an import: its module's conservative build_ast fact, else fail closed
+    TypeFunc* signature = fn_node ? lambda_type_func_signature(((AstNode*)fn_node)->type) : NULL;
+    return !signature || !signature->defect_known || signature->may_defect;
+}
+
+// TE-17 I3 (D2.8.3): a call whose result may be an error its signature does
+// not declare is not lane-eligible. Every lane planner reads it as a boxed
+// join, so its consumers compute boxed and the error flows as a value --
+// expression interiors never skip (S7.7.1, TE-18 case 5).
+static bool mir_call_may_defect(MirTranspiler* mt, AstCallNode* call) {
+    if (!mt || !call || call->propagate) return false;
+    // LR12-25: a rejected error argument is its value (S11.4.3); the emitter
+    // asks the same question, table or not
+    if (mir_sys_call_error_flows(mt, call)) return true;
+    if (!mt->defect_facts) return false;
+    // LR03-13: its result is checked against the contract where it is made
+    if (ast_call_contract_return(call)) return true;
+    AstNode* function = ast_unwrap_primary(call->function);
+    if (function && function->node_type == AST_NODE_SYS_FUNC) {
+        // S7.9.3: any other system row passes an operand's error through
+        // (`abs(f(x)) * 2` had multiplied the error's bits)
+        if (sysfunc_observes_error(((AstSysFuncNode*)function)->fn_info)) return false;
+        for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            if (mir_expr_may_carry_defect(mt, arg)) return true;
+        }
+        return false;
+    }
+    AstFuncNode* callee = ast_direct_call_function(call);
+    return callee && function_body_may_originate_defect(mt, callee);
+}
+
+static bool mir_call_defect_pred(AstCallNode* call, void* ctx) {
+    return mir_call_may_defect((MirTranspiler*)ctx, call);
+}
+
+// S11.4.3 (LR12-25, LR12-36): may an error reach one of a system call's
+// reject-error operands? Then the emitter makes it the call's value. build_ast
+// flags a call over its conservative facts; where this solve proves no operand
+// can be an error, the call keeps its native lowering (`len(keys)` of a clean
+// `walk(root)` was typed a join yet lowered to a raw fn_len_l).
+static bool mir_sys_operand_error_may_reach(MirTranspiler* mt, AstCallNode* call) {
+    AstNode* callee = call && call->rejected_error_flows
+        ? ast_unwrap_primary(call->function) : NULL;
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return false;
+    // a `|>` body's first operand is the piped value, which this node does
+    // not hold: build_ast's answer, which saw it, stands
+    if (call->pipe_inject) return true;
+    return ast_sys_operands_error_may_reach(((AstSysFuncNode*)callee)->fn_info,
+        NULL, call->argument, mir_call_defect_pred, mt);
+}
+
+// ... and is the call's value therefore a join the planners must read boxed?
+// Not under `f(x)^`, whose propagation takes the error arm.
+static bool mir_sys_call_error_flows(MirTranspiler* mt, AstCallNode* call) {
+    return call && !call->propagate && mir_sys_operand_error_may_reach(mt, call);
+}
+
+// TE-17 I3: a value computed from a defect-capable call is itself `T | error`
+static bool mir_expr_may_carry_defect(MirTranspiler* mt, AstNode* node) {
+    return mt && mt->defect_facts &&
+        ast_value_may_carry_defect(node, mir_call_defect_pred, mt, 0);
+}
+
+struct MirDefectEdgeScan {
+    MirTranspiler* mt;
+    bool found;
+};
+
+static bool mir_find_defect_edge(AstNode* node, void* data) {
+    MirDefectEdgeScan* scan = (MirDefectEdgeScan*)data;
+    if (scan->found) return false;
+    if (node->node_type == AST_NODE_CALL_EXPR &&
+            mir_call_may_defect(scan->mt, (AstCallNode*)node)) {
+        scan->found = true;
+    }
+    return !scan->found;
+}
+
+static bool mir_collect_defect_function(AstNode* node, void* data) {
+    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) {
+        ArrayList* functions = (ArrayList*)data;
+        arraylist_append(functions, node);
+    }
+    return true;
+}
+
+// Solve `may_defect` for every function under `root` before any variant is
+// registered, so a body's error lane (carries_error_lane) and every caller's
+// lane planning read one answer (RV2). A function may defect when its own body
+// originates a defect or it calls one that may; the least fixed point over the
+// call edges resolves forward and recursive calls exactly. An import outside
+// the table is defect-capable.
+static void mir_solve_may_defect(MirTranspiler* mt, AstNode* root) {
+    ArrayList* functions = arraylist_new(32);
+    walk_lambda_ast(root, mir_collect_defect_function, functions, true);
+    // own origination first, with the table absent, so no call edge is read
+    // before it is solved
+    bool* may = (bool*)mem_calloc((size_t)functions->length + 1, sizeof(bool),
+        MEM_CAT_TEMP);
+    for (int i = 0; i < functions->length; i++) {
+        may[i] = mir_body_originates_defect(mt, (AstFuncNode*)functions->data[i]);
+    }
+    mt->defect_facts = MirDefectFactMap::create(functions->length + 8);
+    for (int i = 0; i < functions->length; i++) {
+        MirDefectFact fact = {mir_callsite_canonical_fn(mt,
+            (AstFuncNode*)functions->data[i]), may[i]};
+        hashmap_set(mt->defect_facts, &fact);
+    }
+    // an edge to an import resolves through the table's fail-closed default
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (int i = 0; i < functions->length; i++) {
+            if (may[i]) continue;
+            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
+            MirDefectEdgeScan scan = {mt, false};
+            walk_lambda_ast(fn->body, mir_find_defect_edge, &scan, false);
+            if (!scan.found) continue;
+            may[i] = true;
+            changed = true;
+            log_debug("mir-may-defect: %.*s calls a function that may defect",
+                fn->name ? (int)fn->name->len : 6, fn->name ? fn->name->chars : "<anon>");
+            MirDefectFact fact = {mir_callsite_canonical_fn(mt, fn), true};
+            hashmap_set(mt->defect_facts, &fact);
+        }
+    }
+    mem_free(may);
+    arraylist_free(functions);
+}
+
+// `failure_only` (the defect solve) asks whether such an admission can
+// fail, as declaration_may_check_boundary does: `[]` into `Doc[]` cannot.
+static bool mir_call_may_check_array_boundary(MirTranspiler* mt, AstCallNode* call,
+        bool failure_only) {
     AstFuncNode* callee = ast_direct_call_function(call);
     if (!callee) return false;
     int count = em_linked_node_count(call->argument);
@@ -36508,6 +37409,7 @@ static bool mir_call_may_check_array_boundary(MirTranspiler* mt, AstCallNode* ca
     ast_resolve_call_args(call->argument, callee, count, args);
     for (int i = 0; i < count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
         Type* contract = mir_named_contract(mir_param_at(callee, i));
+        if (failure_only && mir_array_admission_cannot_fail(args[i], contract)) continue;
         if (args[i] && lambda_array_contract_element(contract) &&
                 !mir_boundary_is_redundant(mt, args[i], contract)) return true;
     }
@@ -36585,6 +37487,12 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
         node = ((AstPrimaryNode*)node)->expr;
     }
     if (!node) return false;
+
+    // TE-17 I3: a defect-capable call publishes a boxed join; a system row's C
+    // lane proves nothing once its rejected error is the value (`let n: int =
+    // len(mode)` took the join's bits as the int), called or piped
+    AstCallNode* value_call = mir_value_call(node);
+    if (value_call && mir_call_may_defect(mt, value_call)) return false;
 
     // A can-raise call is an Item-valued merge at every expression boundary:
     // success and failure share one register until `^` or a handler consumes it.
@@ -36976,7 +37884,7 @@ static bool mir_expr_proves_wide_free(MirTranspiler* mt, AstNode* node) {
 // infer_proc_native_return_lane, so an open call cannot become raw by shape
 // coincidence (D3.3.1, D3.3.2).
 static bool mir_proc_return_values_prove(MirTranspiler* mt, AstNode* node,
-        TypeId expected, int* return_count, bool wide_free = false) {
+        TypeId expected, int* return_count, bool wide_free) {
     while (node) {
         AstNode* current = ast_unwrap_primary(node);
         if (!current) {
@@ -37140,6 +38048,20 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
     if (!body) {
         may_defer = true;
         goto done;
+    }
+    if (mir_expr_may_carry_defect(mt, body)) {
+        // TE-17 I3: its value may be a boxed join, whatever its AST type
+        // says (LR12-24)
+        may_defer = true;
+        goto done;
+    }
+    if (AstCallNode* value_call = mir_value_call(body)) {
+        // TE-17 I3: its join is not lane-eligible (LR12-24), called or
+        // piped; asked directly, since the walk above waits for the facts
+        if (mir_call_may_defect(mt, value_call)) {
+            may_defer = true;
+            goto done;
+        }
     }
     if (body->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)body;
@@ -37406,7 +38328,8 @@ static FnVariantAnalysis* analyze_lambda_mir_variants(MirTranspiler* mt,
     public_entry->entry = {FN_ENTRY_PUBLIC_WRAPPER, false, false,
         false, true};
     public_entry->effects = {true, true, false,
-        (type && type->can_raise) || may_return_boundary_error,
+        (type && type->can_raise) || may_return_boundary_error ||
+            function_body_may_originate_defect(mt, fn),
         analysis && analysis->may_await, true};
     public_entry->result.normal = {LMD_TYPE_ANY, VALUE_REP_ITEM,
         // A boxed wrapper can carry a subnormal or wide integer even when
@@ -39609,7 +40532,15 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             TypeId body_tid = mir_expr_carrier_type(mt, fn_node->body);
             bool array_return_contract =
                 mir_return_contract_is_homogeneous_array(mt->current_return_type);
-            if (!body_contract.contract && return_contract_needs_checked_boundary(mt->current_return_type) &&
+            // TE-17 I3: a proved join tail leaves only its error arm, as at
+            // an explicit `return`
+            bool join_error_arm_only = !array_return_contract && !body_contract.contract &&
+                return_contract_needs_checked_boundary(mt->current_return_type) &&
+                mir_boundary_join_success_redundant(mt, fn_node->body,
+                    mir_unwrap_decl_type(mt->current_return_type));
+            if (join_error_arm_only) emit_return_if_item_error(mt, body_result);
+            if (!join_error_arm_only && !body_contract.contract &&
+                    return_contract_needs_checked_boundary(mt->current_return_type) &&
                     (array_return_contract || body_tid == LMD_TYPE_ANY || body_tid == LMD_TYPE_NULL ||
                      (mir_decl_type_id(mt->current_return_type) == LMD_TYPE_MAP &&
                       body_tid == LMD_TYPE_MAP && fn_node->body->type !=
@@ -42158,6 +43089,9 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
         callsite_index = &interp_module_owner->ast_index;
     }
     prepass_collect_call_sites(&mt, callsite_index, callsite_root);
+    // D6.1.3: every body's error lane and every caller's lane planning read
+    // this one solution, so it precedes the first registered variant
+    mir_solve_may_defect(&mt, callsite_root);
 
     // Forward-declare ALL functions first (handles forward references between functions)
     prepass_forward_declare(&mt, script->child);
@@ -42398,6 +43332,7 @@ static void transpile_mir_ast_finalize(MirModuleBuild* build,
     mir_clear_typed_array_cache_locators(&mt);
     arraylist_free(mt.typed_array_caches);
     hashmap_free(mt.callsite_info);
+    if (mt.defect_facts) hashmap_free(mt.defect_facts);
     hashmap_free(mt.shape_hints);
     // native function metadata is compiler-owned and must be released with
     // the other per-transpile registries after MIR generation completes.

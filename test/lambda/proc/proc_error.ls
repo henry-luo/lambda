@@ -42,15 +42,15 @@ pn validate_range(x) int^ {
 
 pn main() {
     // Test successful calls
-    print(may_fail_proc(5))
-    print(may_fail_proc(0))
+    print(may_fail_proc(5)^)
+    print(may_fail_proc(0)^)
     
-    print(safe_divide(20, 4))
-    print(safe_divide(15, 3))
+    print(safe_divide(20, 4)^)
+    print(safe_divide(15, 3)^)
     
-    print(validate_range(50))
-    print(validate_range(0))
-    print(validate_range(100))
+    print(validate_range(50)^)
+    print(validate_range(0)^)
+    print(validate_range(100)^)
     
     print("done")
 }

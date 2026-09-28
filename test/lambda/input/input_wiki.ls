@@ -1,4 +1,4 @@
-let wiki = input('./test/input/test.wiki', 'wiki')
+let wiki = input('./test/input/test.wiki', 'wiki')^
 
 // Test the basic document structure
 wiki

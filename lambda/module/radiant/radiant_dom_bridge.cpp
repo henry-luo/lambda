@@ -2681,9 +2681,13 @@ RADIANT_C_API int radiant_dom_member_child_nodes_any(Item receiver, Item* out) {
     RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_##thunk, JUBE_DOM_##NAME)
 #include "../../dom/dom_element_ops.def"
 
-// HTMLSelectElement.remove(index) and ChildNode.remove() are one ordinal
-// under two member names, so the second binding is an alias, not a row.
-RADIANT_DOM_OPERATION_BINDING(radiant_dom_m4d_remove2, JUBE_DOM_REMOVE)
+// ChildNode.remove() has no argument and returns JS undefined, while the
+// Lambda operation keeps its null result and select's indexed overload.
+RADIANT_C_API int radiant_dom_m4d_remove2(Item receiver, Item* args, int argc, Item* out) {
+    radiant_dom_element_operation(receiver, JUBE_DOM_REMOVE, args, argc);
+    *out = make_js_undefined();
+    return 1;
+}
 
 #undef RADIANT_DOM_OPERATION_BINDING
 
@@ -3059,6 +3063,14 @@ RADIANT_C_API int radiant_dom_document_host_get_property(Item object, Item key, 
         return radiant_dom_document_dynamic_get_result(value, out);
     }
     return radiant_dom_document_dynamic_get_result(dom_document_proxy_get_property(key), out);
+}
+
+RADIANT_C_API int radiant_dom_document_clone_node(Item object,
+                                                  Item* args, int argc, Item* out) {
+    if (!out) return 0;
+    Item deep = argc > 0 && args ? args[0] : ItemNull;
+    *out = dom_clone_document_bridge(object, deep);
+    return 1;
 }
 
 RADIANT_C_API int radiant_dom_document_host_set_property(Item object,

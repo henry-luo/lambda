@@ -727,12 +727,12 @@ Follows ECMAScript `String.prototype.split` (S17.1.1).
 
 **Supported Input Types:** `json`, `xml`, `yaml`, `markdown`, `csv`, `html`, `latex`, `toml`, `rtf`, `css`, `ini`, `math`, `pdf`
 ```lambda
-input("path/file.md", 'markdown')   // Input Markdown
+input("path/file.md", 'markdown')^   // Input Markdown
 ```
 
 **Input with Flavors:** e.g. math flavors: `latex`, `typst`, `ascii`
 ```lambda
-input("math.txt", {'type':'math', 'flavor':'ascii'})
+input("math.txt", {'type':'math', 'flavor':'ascii'})^
 ```
 
 **Output Formatting:** `json`, `yaml`, `xml`, `html`, `markdown`
@@ -846,7 +846,7 @@ the complement type, as in `x is !null`.
 
 **Data Processing:**
 ```lambda
-let data = input("sales.json", 'json')
+let data = input("sales.json", 'json')^
 let total = sum(
   (for (sale in data.sales) sale.amount))
 let report = {total: total,

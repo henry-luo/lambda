@@ -60,7 +60,7 @@ fn invalid_source() => parse(
   "digraph Invalid { graph [ordering=sideways, compound=true] " ++
     "a [ordering=random] subgraph cluster_known { c } " ++
     "a -> b [lhead=cluster_missing] a -> b [lhead=cluster_known] }",
-  {type: "graph", flavor: "dot"})
+  {type: "graph", flavor: "dot"})^
 
 let source = (input(
   "test/lambda/graph/graphviz/ordering_groups.dot", {type: "graph", flavor: "dot"})) ^ { null }

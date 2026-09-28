@@ -504,9 +504,10 @@ DOM_OP(DERIVED, has_child_nodes,  tree, 1, "fn(n: any) -> bool", dom_core_has_ch
 DOM_OP(CORE, normalize,           tree, 1, "pn(n: any) -> null", dom_core_normalize, DOM_F_MUTATES, "", html_element, "", "")
 DOM_OP(CORE, insert_adjacent_element, tree, 3, "pn(n: any, where: string, node: any) -> any", dom_core_insert_adjacent_element, DOM_F_MUTATES, "", html_element, "", "insertAdjacentElement")
 DOM_OP(CORE, insert_adjacent_html,    tree, 3, "pn(n: any, where: string, html: string) -> null", dom_core_insert_adjacent_html, DOM_F_MUTATES, "", html_element, "", "insertAdjacentHTML")
-// remove() is two operations behind one name; the row decides which, so both
-// doors apply the same receiver test (see the DS2 note in the impl doc).
-DOM_OP(CORE, remove_node,         tree, 2, "pn(n: any, index: int) -> null", dom_core_remove_node, DOM_F_MUTATES, "", dom_node, "remove", "")
+DOM_OP(CORE, insert_adjacent_text,    tree, 3, "pn(n: any, where: string, text: string) -> any", dom_core_insert_adjacent_text, DOM_F_MUTATES, "", html_element, "", "insertAdjacentText")
+// The core operation retains Lambda's null result; the JS ChildNode member
+// converts it to undefined and exposes the zero-argument Web IDL signature.
+DOM_OP(CORE, remove_node,         tree, 2, "pn(n: any, index: int) -> null", dom_core_remove_node, DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, attach_shadow,       tree, 2, "pn(n: any, init: any) -> any", dom_core_attach_shadow, DOM_F_MUTATES, "", html_element, "", "attachShadow")
 
 DOM_OP(CORE, compare_document_position, node, 2, "fn(a: any, b: any) -> int", dom_core_compare_document_position, 0, "", dom_node, "", "compareDocumentPosition")

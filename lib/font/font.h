@@ -172,6 +172,9 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint);
 // get the glyph index for a codepoint (0 if not present)
 uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint);
 
+// get the font's .notdef advance when no face covers a codepoint
+float font_get_missing_glyph_advance(FontHandle* handle);
+
 // get kerning between two codepoints (returns 0 if no kerning)
 float font_get_kerning(FontHandle* handle, uint32_t left, uint32_t right);
 

@@ -1,13 +1,13 @@
 // Test advanced PDF parsing capabilities
-let simple_pdf = input('./test/input/simple_test.pdf', 'pdf')
+let simple_pdf = input('./test/input/simple_test.pdf', 'pdf')^
 'simple_pdf:'
 simple_pdf
 
-let advanced_pdf = input('./test/input/advanced_test.pdf', 'pdf')
+let advanced_pdf = input('./test/input/advanced_test.pdf', 'pdf')^
 'advanced_pdf:'
 advanced_pdf
 
-let raw_commands_pdf = input('./test/input/raw_commands_test.pdf', 'pdf')
+let raw_commands_pdf = input('./test/input/raw_commands_test.pdf', 'pdf')^
 'raw_commands_pdf:'
 raw_commands_pdf
 

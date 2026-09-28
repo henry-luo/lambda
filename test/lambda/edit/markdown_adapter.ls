@@ -49,9 +49,9 @@ x = y
 $$
 "
 
-let loaded = md.import_text(source)
+let loaded = md.import_text(source)^
 let written = md.export_text(loaded.doc, loaded.envelope)
-let again = md.import_text(written)
+let again = md.import_text(written)^
 
 "envelope keeps the front matter:"; [loaded.envelope.front_matter]
 "blocks:"; [for (b in loaded.doc.content) b.tag]
@@ -84,7 +84,7 @@ Text[^1] here.
 
 Outro with [a link](https://example.com).
 "
-let kept = md.import_text(kept_source)
+let kept = md.import_text(kept_source)^
 let kept_nodes = [for (b in kept.doc.content where b.tag == 'md_source') b];
 "kept blocks:"; [for (b in kept.doc.content) b.tag]
 "kept source:"; [for (b in kept_nodes) attr_get(b, 'markdown')]
@@ -99,6 +99,6 @@ let edited = node('doc', [node('p', [text("Changed intro.")]), *drop(kept.doc.co
 // inline raw HTML is one tag per atom: a lone tag or a comment shows nothing
 // on its own, so the surface shows its source; a void tag has a view; math
 // shows its TeX source
-let atoms = md.import_text("Press <kbd>K</kbd>, <br> a <!-- c --> and $x$.\n").doc.content[0].content;
+let atoms = md.import_text("Press <kbd>K</kbd>, <br> a <!-- c --> and $x$.\n")^.doc.content[0].content;
 "inline atom views:"; [for (a in atoms where a.kind == 'node') [a.tag, len(attr_get(a, view_attr))]]
 "declined commands:"; md.unsupported_input_types

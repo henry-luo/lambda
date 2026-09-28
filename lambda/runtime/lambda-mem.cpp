@@ -551,6 +551,8 @@ static void heap_finish_init(void) {
     // has initialized the heap's VM-owned extents.
     context->heap->result_root = context->result.item;
     gc_register_root(context->heap->gc, &context->heap->result_root);
+    context->heap->last_error_root = 0;
+    gc_register_root(context->heap->gc, &context->heap->last_error_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
     heap_configure_gc_force_schedule(context->heap->gc);
     heap_configure_gc_poisoning(context->heap->gc);

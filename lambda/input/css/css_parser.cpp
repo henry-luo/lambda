@@ -1689,7 +1689,22 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
     bool matched = false;  // Track if we found a valid selector
 
     // Parse based on token type
-    if (token->type == CSS_TOKEN_IDENT || token->type == CSS_TOKEN_CUSTOM_PROPERTY) {
+    if (token->type == CSS_TOKEN_DELIM && token->data.delimiter == '*' &&
+        *pos + 2 < token_count &&
+        tokens[*pos + 1].type == CSS_TOKEN_DELIM &&
+        tokens[*pos + 1].data.delimiter == '|' &&
+        (tokens[*pos + 2].type == CSS_TOKEN_IDENT ||
+         (tokens[*pos + 2].type == CSS_TOKEN_DELIM &&
+          tokens[*pos + 2].data.delimiter == '*'))) {
+        // *| selects any namespace; retain the local-name test in the existing matcher.
+        const CssToken* local = &tokens[*pos + 2];
+        selector->type = local->type == CSS_TOKEN_IDENT
+            ? CSS_SELECTOR_TYPE_ELEMENT : CSS_SELECTOR_TYPE_UNIVERSAL;
+        selector->value = local->type == CSS_TOKEN_IDENT
+            ? css_token_value_dup(local, pool) : "*";
+        *pos += 3;
+        matched = selector->value != NULL;
+    } else if (token->type == CSS_TOKEN_IDENT || token->type == CSS_TOKEN_CUSTOM_PROPERTY) {
         // Element/type selector: div, span, --foo, etc.
         selector->type = CSS_SELECTOR_TYPE_ELEMENT;
         // Extract selector value from token

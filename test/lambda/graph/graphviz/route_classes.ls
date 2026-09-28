@@ -6,7 +6,7 @@ import transform: lambda.graph.transform
 
 fn source_for(value) => parse(
   "digraph G { graph [splines=\"" ++ value ++ "\"] a -> b }",
-  {type: "graph", flavor: "dot"})
+  {type: "graph", flavor: "dot"})^
 
 fn lowered(value) {
   let result = normalize.normalize(source_for(value));

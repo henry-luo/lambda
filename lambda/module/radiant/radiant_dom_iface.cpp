@@ -128,7 +128,7 @@ const char radiant_dom_interface_decl[] =
     "    next_sibling: dom_node, previous_sibling: dom_node, child_nodes: any,\n"
     "    contains: fn(a0: any) any, is_equal_node: fn(a0: any) any,\n"
     "    is_same_node: fn(a0: any) any, compare_document_position: fn(a0: any) any,\n"
-    "    get_root_node: fn(a0: any) any, remove: fn(a0: any) any,\n"
+    "    get_root_node: fn(a0: any) any, remove: fn() any,\n"
     "    replace_with: fn(a0: any) any, after: fn(a0: any) any, before: fn(a0: any) any,\n"
     "    has_child_nodes: fn() any, clone_node: fn(a0: any) any,\n"
     "    add_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
@@ -172,6 +172,7 @@ const char radiant_dom_interface_decl[] =
     "    normalize: fn() any, append: fn(a0: any) any, prepend: fn(a0: any) any,\n"
     "    insert_adjacent_element: fn(a0: any, a1: any) any,\n"
     "    insert_adjacent_html: fn(a0: any, a1: any) any,\n"
+    "    insert_adjacent_text: fn(a0: any, a1: any) any,\n"
     "    get_bounding_client_rect: fn() any, get_client_rects: fn() any,\n"
     "    scroll_into_view: fn(a0: any) any,\n"
     "    scroll_into_view_if_needed: fn(a0: any) any,\n"
@@ -303,6 +304,7 @@ const char radiant_dom_interface_decl[] =
     "    contains: fn(a0: any) any,\n"
     "    compare_document_position: fn(a0: any) any,\n"
     "    get_root_node: fn(a0: any) any,\n"
+    "    clone_node: fn(a0: any) any,\n"
     "    add_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    remove_event_listener: fn(a0: any, a1: any, a2: any) any,\n"
     "    dispatch_event: fn(a0: any) any,\n"
@@ -1179,6 +1181,7 @@ static const JubeMemberBind radiant_dom_node_members[] = {
     BIND_FIELD_JS("previous_sibling", "previousSibling", radiant_dom_member_previous_sibling_any),
     BIND_FIELD_JS("child_nodes", "childNodes", radiant_dom_member_child_nodes_any),
     BIND_CALL_JS("get_root_node", "getRootNode", radiant_dom_m4d_get_root_node),
+    BIND_CALL("remove", radiant_dom_m4d_remove2),
     BIND_CALL_JS("replace_with", "replaceWith", radiant_dom_m4d_replace_with),
     BIND_CALL("after", radiant_dom_m4d_after),
     BIND_CALL("before", radiant_dom_m4d_before),
@@ -1550,6 +1553,7 @@ static const JubeMemberBind radiant_document_members[] = {
     DOC_METHOD("contains", NULL, radiant_doc_call_contains),
     DOC_METHOD("compare_document_position", "compareDocumentPosition", radiant_doc_call_compare_document_position),
     DOC_METHOD("get_root_node", "getRootNode", radiant_doc_call_get_root_node),
+    DOC_METHOD("clone_node", "cloneNode", radiant_dom_document_clone_node),
     DOC_METHOD("add_event_listener", "addEventListener", radiant_doc_call_add_event_listener),
     DOC_METHOD("remove_event_listener", "removeEventListener", radiant_doc_call_remove_event_listener),
     DOC_METHOD("dispatch_event", "dispatchEvent", radiant_doc_call_dispatch_event),

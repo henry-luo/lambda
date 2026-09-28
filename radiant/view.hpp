@@ -2720,6 +2720,7 @@ void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
 // Release iframe documents before lifecycle retirement checks their host nodes.
 // The embedded document otherwise keeps an external pin on a detached iframe.
 void view_tree_release_detached_embedded_documents(ViewTree* tree, DomNode* root);
+void view_tree_prepare_detached_subtree(DomNode* root);
 void view_pool_release_detached_form_props(DomNode* root);
 
 // Forward declaration for DocState (full definition in state_store.hpp)

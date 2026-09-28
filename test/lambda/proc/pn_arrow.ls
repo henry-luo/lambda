@@ -66,7 +66,7 @@ pn main() {
 
     // a task target, and a raised error through the arrow
     let task = start(pn (n) => { n * 2 }, [21])
-    print(wait(task))
+    print(wait(task)^)
     print("\n")
     let check = pn (x: int) int^ => {
         if (x < 0) { raise error("negative") }

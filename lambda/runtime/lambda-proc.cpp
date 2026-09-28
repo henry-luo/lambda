@@ -59,6 +59,16 @@ static Item dry_run_fabricated_cmd() {
 Item pn_print(Item item) {
     TypeId type_id = get_type_id(item);
     log_debug("pn_print: %d", type_id);
+    if (type_id == LMD_TYPE_ERROR) {
+        // S7.9.3: print participates in an error -- it inspects instead of
+        // propagating. fn_string has no text for an error (string(err) is the
+        // error), so render it as the printer does inside any value (LR12-25).
+        StrBuf* sb = strbuf_new();
+        print_item(sb, item, 0, null);
+        printf("%s", sb->str); // PRINTF_OK: Lambda's procedural print() builtin.
+        strbuf_free(sb);
+        return ItemNull;
+    }
     String *str = fn_string(item);
     if (str) {
         printf("%s", str->chars); // PRINTF_OK: Lambda's procedural print() builtin.

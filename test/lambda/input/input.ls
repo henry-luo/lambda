@@ -1,2 +1,2 @@
-let text = input('./test/input/test.txt', 'text')
+let text = input('./test/input/test.txt', 'text')^
 text

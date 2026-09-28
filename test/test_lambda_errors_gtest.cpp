@@ -2109,6 +2109,21 @@ TEST_F(NegativeScriptTest, SemanticError_EnforcingCallNeedsImmediateAcknowledgme
         "handle with 'risky(...) ^ { ... }'");
 }
 
+// LR10-9: the E228 walk had covered only top-level expression statements;
+// a declaration, a `for` body, an `fn` interior, a `pn` statement and a
+// reassignment each hid an unengaged `^` call.
+TEST_F(NegativeScriptTest, SemanticError_EnforcingCallInEveryPosition) {
+    const char* script = "test/lambda/negative/semantic/unhandled_error_positions.ls";
+    ScriptResult result = run_lambda_script(script, true);
+    EXPECT_NE(result.exit_code, 0) << result.output;
+    static const char* const sites[] = {":5:13: error[E228]", ":7:33: error[E228]",
+        ":10:13: error[E228]", ":15:5: error[E228]", ":17:9: error[E228]"};
+    for (const char* site : sites) {
+        EXPECT_NE(strstr(result.output.c_str(), site), nullptr)
+            << "missing " << site << "\n" << result.output;
+    }
+}
+
 TEST_F(NegativeScriptTest, SemanticError_DynamicProcedureCallFromFunction) {
     ExpectErrorMessage("test/lambda/negative/semantic/dynamic_call_proc_in_fn.ls",
         "call: cannot call a procedure (pn) from a function (fn)");

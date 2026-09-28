@@ -189,7 +189,7 @@ fn scene_annotation(annotation, graph_box) {
 
 pub fn from_svg(source) {
   let parsed_document = if (source is element) source
-    else parse(string(source), {type: "xml"});
+    else parse(string(source), {type: "xml"})^;
   // svg wrappers are renderer details; the retained role is the stable root.
   let graph = first_or([for (entry in descendants(parsed_document)
     where attr(entry, "data-graph-role", "") == "graph") entry]);

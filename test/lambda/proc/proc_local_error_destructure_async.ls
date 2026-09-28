@@ -1,7 +1,7 @@
 // ER-S3: a local error boundary must be fully retired before this later await
 // spills the async procedure state.
 pn child() {
-    sleep(1)
+    sleep(1)^
     3
 }
 

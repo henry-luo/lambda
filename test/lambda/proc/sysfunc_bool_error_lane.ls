@@ -43,7 +43,8 @@ pn main() {
     print("\n")
 
     // propagation and handlers discharge the error channel
-    print([has_a(dyn("abc")), has_a(dyn(5)) is error, some(dyn([0])), some(dyn(1)) is error,
+    print([has_a(dyn("abc")) ^ { ^ }, has_a(dyn(5)) ^ { ^ } is error,
+        some(dyn([0])) ^ { ^ }, some(dyn(1)) ^ { ^ } is error,
         contains(dyn(5), "a") ^ { "handled" }, all(dyn(5)) ^ { "handled" } ~ { ~ }])
     print("\n")
 }

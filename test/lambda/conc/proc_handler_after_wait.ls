@@ -1,5 +1,5 @@
 pn maybe_fail(flag) int^ {
-    sleep(1)
+    sleep(1)^
     if (flag) {
         raise error("async-handler")
     }

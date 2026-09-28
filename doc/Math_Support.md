@@ -11,7 +11,7 @@ Lambda supports mathematical typesetting via a dedicated LaTeX math parser and a
 Pass a raw math expression string directly to `input()` with type `'math'` or `'math-latex'`:
 
 ```lambda
-let ast = input("\\frac{a+b}{c}", 'math')
+let ast = input("\\frac{a+b}{c}", 'math')^
 ```
 
 | Type string      | Meaning                                  |
@@ -39,7 +39,7 @@ $$
 - **Display block** — delimited by `$$...$$`, either on a single line or spanning multiple lines (opening `$$`, body lines, closing `$$` on its own line).
 
 ```lambda
-let doc = input('./report.md', 'markdown')
+let doc = input('./report.md', 'markdown')^
 ```
 
 ### 1.3 Math in LaTeX Documents
@@ -47,7 +47,7 @@ let doc = input('./report.md', 'markdown')
 When parsing a full LaTeX document (`type: 'latex'`), math mode content inside `$...$`, `$$...$$`, or math environments is detected automatically and parsed by the same tree-sitter-latex-math grammar.
 
 ```lambda
-let doc = input('./paper.tex', 'latex')
+let doc = input('./paper.tex', 'latex')^
 ```
 
 ---
@@ -62,7 +62,7 @@ Math is rendered to HTML using the `lambda.doc.math` package. The package conver
 import math: lambda.doc.math.math
 
 // Parse and render in one step
-let ast     = input("\\sum_{k=1}^{n} k^2", 'math')
+let ast     = input("\\sum_{k=1}^{n} k^2", 'math')^
 let inline  = math.render_inline(ast)        // inline (text) style
 let display = math.render_display(ast)       // display (block) style
 let alone   = math.render_standalone(ast)    // display + embedded CSS
@@ -442,7 +442,7 @@ Supported named colors: CSS color keywords (e.g., `red`, `blue`, `green`, `black
 Lambda supports ASCII Math, a more concise notation parsed by the same grammar with flavor `'ascii'`. ASCII Math uses plain-text tokens for common symbols:
 
 ```lambda
-let ast = input('(a + b) / sqrt(c^2 + d^2)', 'math-ascii')
+let ast = input('(a + b) / sqrt(c^2 + d^2)', 'math-ascii')^
 ```
 
 Key ASCII tokens:

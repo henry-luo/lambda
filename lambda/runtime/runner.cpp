@@ -1173,11 +1173,20 @@ LambdaError* get_persistent_last_error() {
     return context ? context->last_error : NULL;
 }
 
-void clear_persistent_last_error() {
-    if (context && context->last_error) {
-        err_free(context->last_error);
-        context->last_error = NULL;
+void eval_context_set_last_error(EvalContext* ctx, LambdaError* error) {
+    if (!ctx) return;
+    if (ctx->last_error && ctx->last_error != error) err_free(ctx->last_error);
+    ctx->last_error = error;
+    // a published completion is a GC-heap error that no Item slot may hold any
+    // longer; the mirror's own root keeps it from being collected under it.
+    if (ctx->heap) {
+        ctx->heap->last_error_root = error && error->is_heap
+            ? err2it(error).item : 0;
     }
+}
+
+void clear_persistent_last_error() {
+    eval_context_set_last_error(context, NULL);
 }
 
 void preserve_context_last_error(Item result) {
@@ -1188,22 +1197,18 @@ void preserve_context_last_error(Item result) {
 
     if (get_type_id(result) == LMD_TYPE_ERROR) {
         LambdaError* result_error = it2err(result);
-        if (result_error && ctx->last_error != result_error) {
+        if (result_error) {
             // An explicit interpreter/JIT completion can be the only owner of
             // the rich error; publish it for diagnostics without making the
             // diagnostic mirror part of ordinary control flow.
-            if (ctx->last_error) err_free(ctx->last_error);
-            ctx->last_error = result_error;
+            eval_context_set_last_error(ctx, result_error);
         }
         return;
     }
 
-    if (!ctx->last_error) return;
-
     // error() values can be consumed by total equality, so a non-error result must drop stale diagnostics.
     // A completed non-error result cannot retain this context's old diagnostic.
-    err_free(ctx->last_error);
-    ctx->last_error = NULL;
+    eval_context_set_last_error(ctx, NULL);
 }
 
 // C-linkage accessor for the current EvalContext's heap pool; path.c reaches it
@@ -2080,12 +2085,11 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     runtime->script_load_compiles++;
 
     // Register in unified module registry for cross-language imports.
-    // Only when the runtime context (heap, name_pool) is already initialized —
-    // module_build_lambda_namespace creates heap objects (maps, strings).
-    // During pure Lambda→Lambda compilation, context isn't set up yet (it's
-    // initialized later by runner_setup_context). The JS→Lambda path sets up
-    // context before calling load_script, so registration works there.
-    if (!new_script->is_main && context && context->heap) {
+    // A Lambda behavior package can compile inside an initialized evaluator
+    // without a JS realm. Its exports need no JS callable wrappers, whose
+    // allocation requires the active realm's Input owner.
+    if (!new_script->is_main && context && context->heap &&
+            js_runtime_state_thread_matches(context) && js_input) {
         Item ns = module_build_lambda_namespace(new_script);
         module_register_for_runtime(
             runtime, new_script->reference, "lambda", ns, new_script->jit_context);
@@ -2416,11 +2420,8 @@ void runner_setup_context(Runner* runner) {
     ctx->debug_info = runner->script->debug_info;
     ctx->current_file = runner->script->reference;  // source file for error reporting
     ctx->current_vargs = NULL;
-    if (ctx->last_error) {
-        // The canonical context may carry an error until the shell consumes it.
-        err_free(ctx->last_error);
-        ctx->last_error = NULL;
-    }
+    // The canonical context may carry an error until the shell consumes it.
+    eval_context_set_last_error(ctx, NULL);
 
     input_context = (Context*)ctx;
     if (!eval_context_init(ctx)) return;
@@ -2966,13 +2967,10 @@ void runtime_reset_heap(Runtime* runtime) {
         cleanup_context->scheduler = runtime_scheduler(runtime);
         if (js_runtime_state_for(cleanup_context) &&
                 !js_runtime_state_init(cleanup_context)) return;
-        if (cleanup_context->last_error) {
-            // Diagnostics can own allocations from the retiring heap. Clear
-            // them before teardown so the next batch never frees a stale
-            // context-owned error while setting up its fresh heap.
-            err_free(cleanup_context->last_error);
-            cleanup_context->last_error = NULL;
-        }
+        // Diagnostics can own allocations from the retiring heap. Clear
+        // them before teardown so the next batch never frees a stale
+        // context-owned error while setting up its fresh heap.
+        eval_context_set_last_error(cleanup_context, NULL);
         // The editor may retain document Items allocated by this heap. Tear it
         // down while its owning context is still bound.
         edit_bridge_destroy();
@@ -3210,10 +3208,7 @@ void runtime_cleanup(Runtime* runtime) {
     }
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;
-        if (runtime->eval_context->last_error) {
-            err_free(runtime->eval_context->last_error);
-            runtime->eval_context->last_error = NULL;
-        }
+        eval_context_set_last_error(runtime->eval_context, NULL);
         if (runtime->eval_context->validator) {
             // validator registries use heap allocations outside the script pool.
             schema_validator_destroy(runtime->eval_context->validator);

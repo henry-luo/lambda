@@ -6,7 +6,7 @@ pn recurse(n) int^ {
 }
 
 pn fault_after_wait() int^ {
-    sleep(1)
+    sleep(1)^
     return recurse(1000000)
 }
 

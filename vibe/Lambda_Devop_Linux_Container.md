@@ -158,6 +158,33 @@ Run the full baseline:
 container exec lambda-linux-dev bash -lc 'make test-lambda-baseline'
 ```
 
+For the Radiant baseline, mount the external layout, render, and PDF fixture
+trees when creating the test container. The PDF iframe fixture needs the PDF
+mount, and visual rendering needs the fixture's Liberation and other test fonts
+registered with fontconfig:
+
+```bash
+container run --detach --name lambda-linux-radiant --cpus 8 --memory 16G \
+  --volume /Users/henryluo/Projects/lambda-linux:/lambda \
+  --volume /Users/henryluo/Projects/lambda-test/layout:/lambda/test/layout:ro \
+  --volume /Users/henryluo/Projects/lambda-test/render:/lambda/test/render:ro \
+  --volume /Users/henryluo/Projects/lambda-test/pdf:/lambda/test/pdf:ro \
+  --workdir /lambda lambda-linux-arm64:latest sleep infinity
+container exec lambda-linux-radiant bash -lc \
+  'mkdir -p /usr/local/share/fonts/lambda-test && cp test/layout/data/font/*.ttf test/layout/data/font/*.otf /usr/local/share/fonts/lambda-test/ && fc-cache -f /usr/local/share/fonts/lambda-test'
+```
+
+The development container has Premake and the built native dependencies. To
+reuse its workspace build artifacts with the fixture-mounted test container:
+
+```bash
+container exec lambda-linux-dev bash -lc 'make build-radiant-baseline'
+container exec lambda-linux-radiant bash -lc 'make run-radiant-baseline'
+```
+
+On a separately provisioned container with Premake and native dependencies,
+`make test-radiant-baseline` performs both steps.
+
 The ordinary Linux debug build does not use AddressSanitizer. The explicit
 `debug_asan` profile produces `lambda-debug-asan.exe`; keep sanitizer-specific
 runs separate from the normal `test-lambda-baseline` path so that the baseline
@@ -165,23 +192,19 @@ continues to exercise the fast debug host.
 
 ## Current validation snapshot
 
-Validated on 2026-08-06 with `lambda-linux-arm64:latest` and
+Validated on 2026-09-28 with `lambda-linux-arm64:latest` and
 `lambda-linux-dev`:
 
 - ARM64 Linux CLI smoke test passed.
 - Linux build and focused native test linking passed.
 - Input baseline: **2,104/2,104 passed**.
-- Functional baseline with the test-only sanitizer options: **3,514/3,590
-  passed**.
-- Core MIR emission, forced-GC, JS coercion, TypeScript, scalar comparison,
-  error-system, structured, and input suites passed.
+- Lambda runtime baseline: **3,888/3,888 passed**.
+- Combined `make test-lambda-baseline`: **5,992/5,992 passed**.
 
-The remaining failures are not linker failures. They are currently limited to
-one MIR size-budget delta, Linux `libm` floating-point golden differences,
-`node:module`/DOM-library cases, and graph/render/procedural fixtures that do
-not complete in this headless container. Do not update golden files or MIR
-budgets solely to make this environment green; first establish whether the
-Linux result is the intended platform behavior.
+Review platform behavior before updating golden files or MIR budgets. The
+Linux `libm` output keeps its own exact golden (S4.8.1), sequence functions
+print empty arrays (S2.5.7v4), and MIR growth needs a reviewed budget change
+(D8.6.1).
 
 ## Troubleshooting
 

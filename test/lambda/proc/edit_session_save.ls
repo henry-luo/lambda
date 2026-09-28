@@ -7,7 +7,7 @@ import sess: lambda.edit.session
 import lambda.editor.mod_doc
 
 pn reset(path, text) {
-  let written = output(text, path, {format: 'text'})
+  let written: any | error = output(text, path, {format: 'text'})
   if (written is error) { print("setup failed: " ++ path ++ "\n") }
 }
 
@@ -28,7 +28,7 @@ pn main() {
   remove(copy)
 
   let source = input(path, 'text')^
-  let loaded = md.import_text(source)
+  let loaded = md.import_text(source)^
   let session = sess.new_session(path, md.descriptor, source, loaded)
   let edited = node('doc', [*loaded.doc.content, node('p', [text("Added.")])])
   show(["clean", sess.is_dirty(session, loaded.doc), "dirty", sess.is_dirty(session, edited)])

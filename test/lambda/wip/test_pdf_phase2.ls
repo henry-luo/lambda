@@ -7,7 +7,7 @@
 
 // Test 1: Simple PDF with basic text
 "[1] Testing basic PDF parsing...\n"
-let simple_pdf = input('./test/input/test.pdf', 'pdf')
+let simple_pdf = input('./test/input/test.pdf', 'pdf')^
 let version = simple_pdf.version
 "  Version: " + version + "\n"
 let simple_objs = simple_pdf.objects
@@ -15,13 +15,13 @@ let simple_objs = simple_pdf.objects
 
 // Test 2: Advanced PDF
 "\n[2] Testing advanced PDF...\n"
-let advanced_pdf = input('./test/input/advanced_test.pdf', 'pdf')
+let advanced_pdf = input('./test/input/advanced_test.pdf', 'pdf')^
 let adv_objs = advanced_pdf.objects
 "  Objects: " + str(len(adv_objs)) + "\n"
 
 // Test 3: PDF with shapes
 "\n[3] Testing shapes PDF...\n"
-let shapes_pdf = input('./test/input/simple_test.pdf', 'pdf')
+let shapes_pdf = input('./test/input/simple_test.pdf', 'pdf')^
 let shape_objs = shapes_pdf.objects
 "  Objects: " + str(len(shape_objs)) + "\n"
 

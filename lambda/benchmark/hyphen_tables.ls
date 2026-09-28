@@ -15,5 +15,5 @@ pub type HyphenTables = {
 }
 
 pub pn load_hyphen_tables() HyphenTables {
-    return input("test/benchmark/text/hyphen_tables.json", {type: "json"})
+    return input("test/benchmark/text/hyphen_tables.json", {type: "json"})^
 }

@@ -1,7 +1,7 @@
 // test for Properties parsing and formatting
 // this script tests Properties input parsing and various output formats
 
-let prop_data = input('./test/input/test.properties', 'properties')
+let prop_data = input('./test/input/test.properties', 'properties')^
 
 "Properties parsing result:"
 prop_data

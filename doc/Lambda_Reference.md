@@ -404,7 +404,7 @@ pn main() {                     // print is a pn: only a pn may call it
 
 ```lambda
 // Read and process JSON data
-let data = input("sales.json", 'json');
+let data = input("sales.json", 'json')^;
 
 // Calculate total sales
 let total = data.sales |> ~.amount |> sum;
@@ -433,7 +433,7 @@ format(report, 'json')      // the script's result is its output
 
 ```lambda
 // Parse Markdown document
-let doc = input("article.md", 'markdown');
+let doc = input("article.md", 'markdown')^;
 
 // Query for all headings using type-based search
 let headings = doc?(h1 | h2) |> ~.content;
@@ -480,7 +480,7 @@ pn main() {
 
     // Load configuration
     let config = if exists(\.config.json) {
-        input(\.config.json, 'json')
+        input(\.config.json, 'json')^
     } else {
         {default: true}
     }
@@ -493,7 +493,7 @@ pn main() {
     }
 
     // Save results
-    output({processed: count, time: now()}, "./output/summary.json")
+    output({processed: count, time: now()}, "./output/summary.json")^
 
     print("Done! Processed", count, "items")
 }

@@ -14,7 +14,7 @@ pn main() {
     var total = 0
     var iteration = 0
     while (iteration < 20) {
-        total = total + count(tree)
+        total = total + count(tree)^
         iteration = iteration + 1
     }
     var rejected = false

@@ -3,7 +3,7 @@
 "=== CSS Level 3 Comprehensive Parser Test ==="
 
 // Parse the comprehensive CSS3 stylesheet
-let css3_stylesheet = input('./test/input/stylesheet_3_0.css', 'css')
+let css3_stylesheet = input('./test/input/stylesheet_3_0.css', 'css')^
 
 "CSS3 Stylesheet structure:"
 type(css3_stylesheet)
