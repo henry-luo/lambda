@@ -1592,7 +1592,11 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
                 block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
                 break;
             }
-            block->form->intrinsic_width = FormDefaults::TEXT_CONTENT_WIDTH;
+            // Flex can measure the control before form layout; seed it from the
+            // selected face so both passes use the same platform width.
+            block->form->intrinsic_width = layout_text_input_content_width(
+                lycon, block, block->form,
+                block->font ? block->font : lycon->font.style);
             // Content-area height: TEXT_HEIGHT (21 border-box) minus default border+padding.
             // Chrome uses fixed 21px border-box for all text inputs regardless of font-size.
             block->form->intrinsic_height = FormDefaults::TEXT_HEIGHT

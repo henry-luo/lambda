@@ -648,12 +648,13 @@ build_thorvg_v1_0_pre34_for_linux() {
     rm -rf build-linux
     mkdir -p build-linux
 
+    # SVG <image> elements may embed PNG/JPEG data, so their loaders must be linked.
     echo "Configuring ThorVG with Meson..."
     if ! meson setup build-linux \
         --buildtype=plain \
         --default-library=static \
         -Dengines=sw \
-        -Dloaders=svg,ttf \
+        -Dloaders=svg,ttf,png,jpg \
         -Dsavers= \
         -Dbindings=capi \
         -Dtools= \

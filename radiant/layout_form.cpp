@@ -12,6 +12,8 @@
  * Form controls are replaced elements with intrinsic dimensions.
  */
 
+static constexpr float UA_TEXT_FONT_SIZE = 13.3333f;
+
 /**
  * Calculate intrinsic size for a text input based on size attribute and font.
  * Returns CONTENT-AREA dimensions (without border/padding).
@@ -278,7 +280,6 @@ float layout_text_input_content_width(LayoutContext* lycon, ViewBlock* block,
     // HTML Rendering §15.5.6 converts the size attribute as
     // (size - 1) × average character width + maximum character width.
     float default_content_w = FormDefaults::TEXT_CONTENT_WIDTH;
-    float ua_font_size = 13.3333f;
 
     float content_w = 0;
 #ifdef __APPLE__
@@ -319,8 +320,8 @@ float layout_text_input_content_width(LayoutContext* lycon, ViewBlock* block,
     if (content_w <= 0) {
         // Fallback: use calibrated formula (Chrome UA default at 13.3333px)
         content_w = default_content_w * size / FormDefaults::TEXT_SIZE_CHARS;
-        if (font && font->font_size > 0 && font->font_size != ua_font_size) {
-            content_w = content_w * font->font_size / ua_font_size;
+        if (font && font->font_size > 0 && font->font_size != UA_TEXT_FONT_SIZE) {
+            content_w = content_w * font->font_size / UA_TEXT_FONT_SIZE;
         }
     }
     return content_w;
@@ -347,7 +348,7 @@ static void calc_text_input_size(LayoutContext* lycon, ViewBlock* block,
         float def_bp_v = 2 * (FormDefaults::TEXT_PADDING_V + FormDefaults::TEXT_BORDER);
         float default_content_h = FormDefaults::TEXT_HEIGHT - def_bp_v;
         bool has_css_font = form_control_has_specified_font(block) ||
-            (font && font->font_size > 0 && font->font_size != ua_font_size);
+            (font && font->font_size > 0 && font->font_size != UA_TEXT_FONT_SIZE);
         float line_h = form_control_normal_line_height(
             lycon, font, has_css_font && font ? font->font_size * 1.15f : default_content_h);
         float used_line_height = form_control_author_non_normal_line_height(
