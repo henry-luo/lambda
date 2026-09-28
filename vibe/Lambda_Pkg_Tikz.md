@@ -10,7 +10,7 @@
 
 **Spec linkage:** [D7.2.1–D7.2.4](../doc/Lambda_Formal_Design.md#d72-script-packages) govern package ownership, source distribution, and namespace; [D7.1.2v2 and D7.1.5](../doc/Lambda_Formal_Design.md#d71-build-packaging-and-layering) govern IO and Mark construction; [S12.1.1v2](../doc/Lambda_Formal_Semantics.md#s121-the-one-bit-effect-system) governs pure rendering versus procedural effects; [S1.8](../doc/Lambda_Formal_Semantics.md#s1-core-principles) excludes runtime string execution; [S7.4](../doc/Lambda_Formal_Semantics.md#s74-the-three-failure-channels) governs errors. No existing formal ruling is revised here. Proposed package contracts remain recommendations pending ratification; no new ruling-ID series is introduced.
 
-**Implemented slice:** `parse(source, {type: "tikz"})` builds a bounded Mark syntax tree; `lambda.doc.tikz.tikz.render(source)` and `.render_ast(island)` render simple 2D line paths, positioned labels, coordinate/function line and scatter plots, linear/log axes, grids, and legends. The LaTeX bridge preserves raw `tikzpicture` source, embeds successful plots, and shows a source-bearing diagnostic when rendering fails. It reuses chart scale/SVG helpers and the math package's measured box entry point under **D7.2.1–D7.2.4**. This is narrower than the proposed first plotting release in §4: scope/style execution, named coordinates, richer paths, inline tables, explicit tick policy, clipping outside axis limits, portable math-label SVG, and measured plain-text labels remain unimplemented. Unsupported constructs fail visibly rather than being approximated.
+**Implemented slice:** `parse(source, {type: "tikz"})` builds a bounded Mark syntax tree; `lambda.doc.tikz.tikz.render(source)` and `.render_ast(island)` render simple 2D line paths, positioned labels, named rectangular/rounded/diamond nodes, named-node line connections with `-{Latex}` arrow tips, coordinate/function line and scatter plots, linear/log axes, grids, and legends. The LaTeX bridge preserves raw `tikzpicture` source, embeds successful pictures and plots, and shows a source-bearing diagnostic when rendering fails. Named-node boxes use Radiant's measured label dimensions to place shapes and resolve boundary endpoints; the package reuses chart scale/SVG helpers and the math package's measured box entry point under **D7.2.1–D7.2.4**. This is narrower than the proposed first plotting release in §4: scope/style execution, general named coordinates and anchors, richer paths, inline tables, explicit tick policy, clipping outside axis limits, portable math-label SVG, and measured plain-text labels on the simple-path renderer remain unimplemented. Unsupported constructs fail visibly rather than being approximated.
 
 ## 1. Recommendation
 
@@ -352,6 +352,7 @@ lambda/format/format-latex.cpp           preserved graphics-source emission
 
 lambda/package/doc/tikz/
     tikz.ls                             public API
+    named.ls                            measured named-node layout and edges
     pgfplots.ls                         plotting API and axis normalization
     options.ls                          scoped keys/styles and capabilities
     expression.ls                       bounded numeric AST evaluation

@@ -319,6 +319,35 @@ private:
         return true;
     }
 
+    bool identifier(size_t begin, size_t end) {
+        if (begin == end || !(isalpha((unsigned char)source_[begin]) ||
+                              source_[begin] == '_')) return false;
+        for (size_t i = begin + 1; i < end; i++) {
+            if (!isalnum((unsigned char)source_[i]) && source_[i] != '_' &&
+                source_[i] != '-') return false;
+        }
+        return true;
+    }
+
+    bool append_path_point(ElementBuilder& parent, size_t* at, size_t end) {
+        double x = 0.0, y = 0.0;
+        size_t start = *at;
+        if (coordinate(at, end, true, &x, &y)) {
+            parent.child(builder_.element("point").attr("x", x).attr("y", y).final());
+            return true;
+        }
+        size_t begin = 0, finish = 0;
+        size_t after = latex_scan_group_end(source_, end, start, '(', ')', &begin, &finish);
+        trim_span(source_, &begin, &finish);
+        if (!after || !identifier(begin, finish)) {
+            error("expected finite Cartesian coordinate or named node");
+            return false;
+        }
+        *at = after;
+        parent.child(builder_.element("point").attr("ref", source_item(begin, finish)).final());
+        return true;
+    }
+
     bool append_points(ElementBuilder& parent, size_t begin, size_t end, bool physical,
                        bool path_operators) {
         size_t at = begin;
@@ -327,16 +356,23 @@ private:
             skip_inner_space(source_, &at, end);
             if (at == end) break;
             if (count > 0 && path_operators) {
-                if (at + 2 <= end && memcmp(source_ + at, "--", 2) == 0) at += 2;
+                if (at + 2 <= end && memcmp(source_ + at, "--", 2) == 0) {
+                    at += 2;
+                    skip_inner_space(source_, &at, end);
+                }
                 else { error("unsupported path operator"); return false; }
             }
-            double x = 0.0, y = 0.0;
-            if (!coordinate(&at, end, physical, &x, &y)) {
-                error("expected finite Cartesian coordinate");
-                return false;
-            }
             if (++points_ > 10000) { error("picture exceeds the 10000 point limit"); return false; }
-            parent.child(builder_.element("point").attr("x", x).attr("y", y).final());
+            if (path_operators) {
+                if (!append_path_point(parent, &at, end)) return false;
+            } else {
+                double x = 0.0, y = 0.0;
+                if (!coordinate(&at, end, physical, &x, &y)) {
+                    error("expected finite Cartesian coordinate");
+                    return false;
+                }
+                parent.child(builder_.element("point").attr("x", x).attr("y", y).final());
+            }
             count++;
         }
         if (!count) { error("empty coordinate list"); return false; }
@@ -419,6 +455,16 @@ private:
     bool node(ElementBuilder& parent) {
         ElementBuilder el = builder_.element("node");
         if (!options(el)) return false;
+        skip_space_comments();
+        if (position_ < length_ && source_[position_] == '(') {
+            size_t begin = 0, end = 0;
+            if (!group('(', ')', &begin, &end)) return false;
+            trim_span(source_, &begin, &end);
+            if (!identifier(begin, end)) {
+                error("invalid node name"); return false;
+            }
+            el.attr("id", source_item(begin, end));
+        }
         if (!word("at")) { error("node requires an explicit position"); return false; }
         size_t at = position_;
         double x = 0.0, y = 0.0;
