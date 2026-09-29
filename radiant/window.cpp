@@ -70,12 +70,18 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
                                           int wait_ms, double delta_ms, int frame_steps) {
     DomDocument* doc = uicon ? uicon->document : nullptr;
     if (!doc || !doc->js.runtime) {
+        bool pumped = false;
         if (action == RADIANT_JS_LOOP_ADVANCE) {
-            return js_event_loop_advance_virtual_time(delta_ms, frame_steps) > 0;
+            pumped = js_event_loop_advance_virtual_time(delta_ms, frame_steps) > 0;
+        } else if (wait_ms >= 0) {
+            pumped = js_event_loop_pump_wait(wait_ms);
+        } else {
+            js_event_loop_pump_nowait();
         }
-        if (wait_ms >= 0) return js_event_loop_pump_wait(wait_ms);
-        js_event_loop_pump_nowait();
-        return true;
+        uv_loop_t* loop = lambda_uv_loop();
+        if (loop) uv_run(loop, UV_RUN_NOWAIT);
+        return radiant_commit_async_document_loads(uicon) || pumped ||
+            (action == RADIANT_JS_LOOP_PUMP && wait_ms < 0);
     }
 
     Runtime* runtime = doc->js.runtime;
@@ -124,10 +130,23 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     } else {
         js_event_loop_pump_nowait();
     }
+    // Virtual timers may be idle while a native document worker finishes.
+    // Poll libuv on every host turn; its completion only publishes a result.
+    uv_loop_t* loop = lambda_uv_loop();
+    if (loop) uv_run(loop, UV_RUN_NOWAIT);
     if (uicon) radiant_reconcile_dom_mutations(uicon, doc);
     state_end_batch(state);
     input_context = saved_input_ctx;
-    return pumped;
+    bool navigated = false;
+    if (doc->pending_navigation_url) {
+        // D5.4.1: location.assign() can load a new isolate only after the
+        // callback returns and this host turn has closed its state batch.
+        char* target = doc->pending_navigation_url;
+        doc->pending_navigation_url = nullptr;
+        navigated = radiant_execute_location_navigation(uicon, doc, target);
+        mem_free(target);
+    }
+    return radiant_commit_async_document_loads(uicon) || navigated || pumped;
 }
 
 bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
@@ -475,6 +494,15 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height,
                                      nullptr, cookie_jar);
     if (!doc) return nullptr;
+
+    return show_loaded_html_doc(doc, doc_url);
+}
+
+DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
+    if (!doc) return nullptr;
+    Runtime* runtime = dom_document_script_runtime(doc);
+    EvalContext* owner = runtime ? runtime_get_eval_context(runtime) : nullptr;
+    if (owner && !radiant_eval_context_switch(owner)) return nullptr;
 
     doc->viewport.output_scale = 1.0f;
 
@@ -1092,6 +1120,7 @@ static double view_phase_elapsed_ms(uint64_t start_ns, uint64_t end_ns) {
 static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
                                         EnhancedFileCache* file_cache,
                                         bool log_memory, ViewPhaseTiming* timing) {
+    radiant_drain_async_document_loads(&ui_context);
     window_request_document_satellite_cancel();
     uint64_t phase_start = time_now_ns();
     view_cleanup_js_batch_state();
@@ -1352,6 +1381,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
     // stranding its timers. Cleared alongside the UiContext reset before each
     // ui_context_cleanup().
     bool host_driven_loop = (!headless || sim_ctx != nullptr);
+    ui_context.async_script_navigation = host_driven_loop;
 
     // Network resources (owned by this function, shared across document lifetime)
     NetworkThreadPool* thread_pool = nullptr;
@@ -1599,6 +1629,20 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         if (sim_ctx && sim_ctx->is_running) {
             double current_time = 0.0;
             while (sim_ctx->is_running) {
+                SimEvent* next_ev = (sim_ctx->current_index >= 0 &&
+                    sim_ctx->current_index < sim_ctx->events->length)
+                    ? (SimEvent*)sim_ctx->events->data[sim_ctx->current_index]
+                    : nullptr;
+                if (next_ev && next_ev->type == SIM_EVENT_SWITCH_FRAME &&
+                    next_ev->frame_selector &&
+                    radiant_async_document_loads_pending(&ui_context)) {
+                    // A frame switch in a fixture targets a loaded browsing
+                    // context; let native document work finish before entering it.
+                    uv_sleep(50);
+                    radiant_advance_js_event_loop(&ui_context, 50.0, 0);
+                    current_time += 0.05;
+                    continue;
+                }
                 bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
                 if (!running) break;
                 // Tick the JS event loop between sim events so deferred callbacks
@@ -1610,9 +1654,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
                     if (js_event_loop_virtual_clock_enabled()) {
-                        // Assertion retries run on the virtual headless clock;
-                        // a wall-clock pump would wait without advancing the
-                        // timers that complete asynchronous editor startup.
+                        // Native document workers use wall time. Pace virtual
+                        // retries in frame slices while they run so the host
+                        // can still tick the splash animation and JS timers.
+                        if (radiant_async_document_loads_pending(&ui_context)) {
+                            if (retry_wait_ms > 50) retry_wait_ms = 50;
+                            uv_sleep((unsigned int)retry_wait_ms);
+                        }
                         radiant_advance_js_event_loop(&ui_context,
                                                       (double)retry_wait_ms, 0);
                     } else {

@@ -230,6 +230,32 @@ void session_destroy(BrowsingSession* session) {
     log_info("browse_session: destroyed");
 }
 
+static DomDocument* session_finish_navigation(BrowsingSession* session,
+        struct UiContext* uicon, Url* resolved, DomDocument* new_doc,
+        DomDocument* old_doc) {
+    const char* resolved_href = resolved->href->chars;
+    if (old_doc) {
+        assert(old_doc != uicon->document);
+        radiant_cleanup_network_support(old_doc);
+        free_document(old_doc);
+    }
+
+    // Commit history only after the replacement document successfully loaded.
+    const char* title_text = session_extract_title(new_doc);
+    if (!history_append_loaded(session, resolved, title_text, 0.0f, "link")) {
+        log_error("browse_session: failed to append navigation history");
+        url_destroy(resolved);
+    } else {
+        HistoryEntry* entry = &session->history[session->history_index];
+        log_info("browse_session: loaded %s (title: %s, history: %d/%d)",
+                 resolved_href,
+                 entry->title ? entry->title : "(none)",
+                 session->history_index + 1, session->history_count);
+    }
+    session_attach_document(session, new_doc);
+    return new_doc;
+}
+
 DomDocument* BrowsingSession::navigate(struct UiContext* uicon, const char* url,
                                        int vw, int vh) {
     if (!uicon || !url) return nullptr;
@@ -268,33 +294,22 @@ DomDocument* BrowsingSession::navigate(struct UiContext* uicon, const char* url,
         return nullptr;
     }
 
-    if (old_doc) {
-        assert(old_doc != uicon->document);
-        radiant_cleanup_network_support(old_doc);
-        free_document(old_doc);
-    }
-
-    // Commit history only after the replacement document successfully loaded.
-    const char* title_text = session_extract_title(new_doc);
-    if (!history_append_loaded(this, resolved, title_text, 0.0f, "link")) {
-        log_error("browse_session: failed to append navigation history");
-        url_destroy(resolved);
-    } else {
-        HistoryEntry* entry = &history[history_index];
-        log_info("browse_session: loaded %s (title: %s, history: %d/%d)",
-                 resolved_href,
-                 entry->title ? entry->title : "(none)",
-                 history_index + 1, history_count);
-    }
-    session_attach_document(this, new_doc);
-
     mem_free(href_copy);
-    return new_doc;
+    return session_finish_navigation(this, uicon, resolved, new_doc, old_doc);
 }
 
 DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
                               const char* url, int vw, int vh) {
     return session ? session->navigate(uicon, url, vw, vh) : nullptr;
+}
+
+DomDocument* session_navigate_loaded(BrowsingSession* session, struct UiContext* uicon,
+                                    Url* resolved, DomDocument* loaded) {
+    if (!session || !uicon || !resolved || !resolved->href || !loaded) return nullptr;
+    DomDocument* old_doc = uicon->document;
+    DomDocument* new_doc = show_loaded_html_doc(loaded, resolved->href->chars);
+    if (!new_doc) return nullptr;
+    return session_finish_navigation(session, uicon, resolved, new_doc, old_doc);
 }
 
 static DomDocument* session_go_history(BrowsingSession* session, struct UiContext* uicon,

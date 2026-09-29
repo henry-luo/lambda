@@ -5021,6 +5021,11 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                 (int)iframe_content.width : (int)lycon->ui_context->viewport_width; // INT_CAST_OK: iframe viewport expects integer logical pixels
             int iframe_height = block->height > 0 ?
                 (int)iframe_content.height : (int)lycon->ui_context->viewport_height; // INT_CAST_OK: iframe viewport expects integer logical pixels
+            if (!srcdoc && radiant_schedule_async_iframe_load(lycon->ui_context,
+                    (DomElement*)block, src, iframe_width, iframe_height)) {
+                // The parent can finish layout and paint while the child loads.
+                return;
+            }
             lycon->ui_context->iframe_depth++;
             if (srcdoc && *srcdoc) {
                 doc = load_iframe_srcdoc_doc(lycon, srcdoc,

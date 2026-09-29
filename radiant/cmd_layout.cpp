@@ -3664,7 +3664,7 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
 
 // One-shot CLI diagnostic: the loader copies the message out of the error
 // value before the document Runtime that owns it is released.
-static char g_lambda_document_load_diagnostic[512];
+static thread_local char g_lambda_document_load_diagnostic[512];
 
 static void lambda_document_set_load_diagnostic(Item result) {
     LambdaError* error = get_type_id(result) == LMD_TYPE_ERROR ? it2err(result) : nullptr;
