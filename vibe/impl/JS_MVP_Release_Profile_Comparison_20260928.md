@@ -1,11 +1,14 @@
 # JS MVP release-profile comparison and further LambdaJS tuning
 
-**Date:** 2026-09-28. **Status:** build integration and MVP comparison complete.
+**Date:** 2026-09-28. **Status:** build, comparison, and measured tuning follow-ups complete.
 The numeric-entry and loop-state work, guarded array consumer/length slices,
 predicted-field and call-root reductions, guarded RegExp bulk-loop change, and
-bounded ASCII decimal parsing have ordinary-release A/B evidence in the
-follow-up reports. Mixed array arithmetic/stores, broader call capability
-elimination, and split/slice allocation remain coverage targets.
+bounded ASCII decimal parsing, the tagged ASCII split result, and guarded boxed
+loop arithmetic have ordinary-release A/B evidence in the follow-up reports.
+The mixed packed-array, broader call, boxed comparison, and string-cache
+variants were removed after paired replay failed to establish a gain.
+Their performance gaps remain measurable research targets; the proposal's
+guarded candidates and acceptance gates are resolved in the linked reports.
 
 Authority: [Formal Semantics](../../doc/Lambda_Formal_Semantics.md) **S1.11**
 (hosted JS follows ECMAScript); [Formal Design](../../doc/Lambda_Formal_Design.md)
@@ -222,3 +225,7 @@ The numeric-path implementation and its validation are recorded in the
 The subsequent guarded array, property/call, and RegExp work, including its
 63-row output screen and control replay, is in the
 [remaining-items follow-up report](../../test/benchmark/js_mvp/tune_remaining_20260929/README.md).
+The [subsequent split-result and loop follow-up](../../test/benchmark/js_mvp/tune_more_20260929/README.md)
+records the measured tagged-array and boxed-loop arithmetic improvements,
+the rejected mixed-array/call/string experiments, and the typed-array key
+coercion repair (**S1.11**).

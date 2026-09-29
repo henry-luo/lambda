@@ -708,4 +708,4 @@ the modes are structured; it only requires the allocation to disappear.
 
 - [Lambda Reference](../doc/Lambda_Reference.md) - Language reference
 - [Doc Schema](../doc/Doc_Schema.md) - Built-in document schemas
-- [Validator Guide](../doc/Lambda_Validator_Guide.md) - User guide
+- [Validator Guide](../doc/Lambda_Validator.md) - User guide

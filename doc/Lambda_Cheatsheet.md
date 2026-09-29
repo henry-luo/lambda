@@ -60,7 +60,7 @@ Type Operators:
 | `fn (a: int, b: string) bool` | Function type |
 | `fn () int` | Function type with no parameters |
 | `{a: int, b: bool}` | Map type |
-| `<div id:symbol; <br>>` | Element type |
+| `<div id: symbol, <br>>` | Element type |
 
 Type Declarations:
 

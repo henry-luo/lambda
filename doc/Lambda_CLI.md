@@ -8,14 +8,15 @@ The command-line interface of the Lambda runtime. In a development tree the bina
 lambda                                      # Start interactive REPL
 lambda <script.ls> [options]                # Run a functional script
 lambda <command> [options] [arguments]      # Run a subcommand
-lambda <source.js|.ts|.py>                  # Run a JavaScript, TypeScript or Python source
+lambda js [file.js] [options]               # Run JavaScript
+lambda ts <file.ts>                         # Run TypeScript
 ```
 
 ## Default Behavior
 
 When invoked with no arguments, Lambda starts the **REPL** (Read-Eval-Print Loop).
 
-When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script: it starts on the AST interpreter and compiles hot functions with the MIR JIT (`--tier` selects a tier explicitly). A `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` file runs on LambdaJS; a `.py` file runs on the hosted Python module when it is installed (see [Hosted Languages](#hosted-languages)).
+When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script: it starts on the AST interpreter and compiles hot functions with the MIR JIT (`--tier` selects a tier explicitly). Run JavaScript with `lambda js <file.js>` and TypeScript with `lambda ts <file.ts>`.
 
 ---
 
@@ -100,7 +101,6 @@ returns a non-null value, that value is printed to stdout.
 
 ```
 lambda run [options] <script.ls>
-lambda run --lang <language> <source> [args...]   # a hosted-language source (see Hosted Languages)
 ```
 
 **Options:** `--dry-run`, `--no-drain`, `--static-warning`, `--mir-interp` and `--tier=` as in script mode. `--max-errors`, `--optimize` and `-O*` are **not** accepted by `run`.
@@ -146,7 +146,7 @@ lambda validate [-s <schema>] [-f <format>] [options] <file>
 | `asciidoc`, `man`, `markdown`, `rst`, `textile`, `wiki` | `doc_schema.ls` |
 | `.ls` files | Built-in AST validation |
 
-Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pdf`, and `text` require an explicit schema via `-s`. With a custom schema the **root type** is the type named `Document` if the schema defines one, otherwise the last type defined in the file. See [Lambda_Validator_Guide.md](Lambda_Validator_Guide.md).
+Formats such as `json`, `xml`, `yaml`, `csv`, `ini`, `toml`, `latex`, `rtf`, `pdf`, and `text` require an explicit schema via `-s`. With a custom schema the **root type** is the type named `Document` if the schema defines one, otherwise the last type defined in the file. See [Lambda_Validator.md](Lambda_Validator.md).
 
 **Examples:**
 
@@ -451,7 +451,7 @@ lambda fetch https://api.example.com/endpoint -t 5000 -v
 
 ### `js` — JavaScript
 
-Run a JavaScript program on LambdaJS (see [JS_DOM_Support.md](JS_DOM_Support.md)). A `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` file given as the first argument runs the same way without the subcommand.
+Run a JavaScript program on LambdaJS (see [JS_DOM_Support.md](JS_DOM_Support.md)). Pass the JavaScript file after the `js` subcommand.
 
 ```
 lambda js [file.js] [options]
@@ -495,20 +495,6 @@ Runs a TypeScript file on LambdaJS. Type annotations are stripped; there is no t
 
 ---
 
-### Hosted Languages
-
-Guest languages run on the Lambda runtime through Jube modules (see [Lambda_Jube_Runtime.md](dev/Lambda_Jube_Runtime.md)). Python is the one that ships:
-
-```
-lambda py app.py                        # the language alias
-lambda app.py                           # dispatch on the extension
-lambda run --lang python app.py [args]  # the explicit form
-```
-
-All three need the `lang-python` module beside the executable (a `modules/lang-python/` directory, or a directory named by `JUBE_MODULE_PATH`); a dev build gets it with `make build-lang-python`. Without it the command prints a hosted-language-unavailable diagnostic. `lambda --help` does not list these forms. The `bash` and `rb` handlers exist in the source but are compiled out of current builds. See [Python_Support.md](Python_Support.md).
-
----
-
 ### Other commands
 
 - `math` — retired. It prints a message pointing at Lambda script math rendering and exits with status 1.
@@ -541,7 +527,7 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 |----------|--------|-------------|
 | `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lambda` (source checkout) or `./lmd` (release bundle), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
 | `LAMBDA_TIER` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL keeps a persistent interpreter session unless `jit` |
-| `JUBE_MODULE_PATH` | path | Where hosted-language and Node modules are discovered (default: `./modules` beside the executable) |
+| `JUBE_MODULE_PATH` | path | Where Node modules are discovered (default: `./modules` beside the executable) |
 | `LAMBDA_LOG_LEVEL` | level name | Minimum log level written to `log.txt` |
 | `LAMBDA_LOG_FILE` | path | Log file location (default: `./log.txt`) |
 | `LAMBDA_SCRIPT_CACHE` | `0`/`1` | Enable or disable the parsed-script cache |
@@ -591,10 +577,9 @@ lambda edit notes.md
 # Fetch a URL
 lambda fetch https://example.com -o page.html
 
-# Run JavaScript, TypeScript or hosted Python
+# Run JavaScript, TypeScript
 lambda js app.js
 lambda ts app.ts
-lambda py app.py
 
 # Dump the memory context as JSON at exit (+ leak report in log.txt)
 lambda --mem-dump script.ls

@@ -2409,11 +2409,10 @@ static NameEntry* jm_array_local_receiver_binding(JsMemberNode* member) {
         AST_NODE_VARIABLE_DECLARATOR ? binding : NULL;
 }
 
-static bool jm_array_literal_access_is_loop_hot(JsMirTranspiler* mt,
-        JsMemberNode* member) {
-    if (!mt || !mt->tp || !member) return false;
+static bool jm_node_is_loop_hot(JsMirTranspiler* mt, JsAstNode* node) {
+    if (!mt || !mt->tp || !node) return false;
     AstIndex* index = &mt->tp->ast_index;
-    AstNodeId node_id = ast_index_find(index, (AstNode*)member);
+    AstNodeId node_id = ast_index_find(index, (AstNode*)node);
     for (AstNodeId parent = ast_index_parent_id(index, node_id);
             parent != AST_NODE_ID_INVALID; parent = ast_index_parent_id(index,
                 parent)) {
@@ -2433,7 +2432,7 @@ static bool jm_is_array_literal_candidate(JsMirTranspiler* mt,
     JsArrayNode* array = member ? jm_array_literal_receiver(member->object) : NULL;
     NameEntry* binding = array ? NULL : jm_array_local_receiver_binding(member);
     if (!mt || !mt->tp || (!array && !binding)) return false;
-    if (jm_array_literal_access_is_loop_hot(mt, member)) return true;
+    if (jm_node_is_loop_hot(mt, (JsAstNode*)member)) return true;
 
     AstIndex* index = &mt->tp->ast_index;
     int static_accesses = 0;
@@ -4848,21 +4847,21 @@ static MIR_reg_t jm_emit_packed_array_read(JsMirTranspiler* mt,
     return jm_emit_packed_array_read_impl(mt, member, receiver, key, false, 0);
 }
 
-// An Item key can enter a numeric array lane only after an exact Number
-// witness. Other keys retain their original ToPropertyKey continuation.
-static MIR_reg_t jm_emit_guard_boxed_array_number_key(JsMirTranspiler* mt,
-        MIR_reg_t key, MIR_label_t miss) {
-    MIR_reg_t number = jm_new_reg(mt, "dense_boxed_key_number", MIR_T_D);
+// Only immediate integer and inline double Items can enter a no-coercion
+// Number lane. Scalar-home and other values keep the caller's semantic path.
+static MIR_reg_t jm_emit_guard_boxed_inline_number(JsMirTranspiler* mt,
+        MIR_reg_t value, MIR_label_t miss) {
+    MIR_reg_t number = jm_new_reg(mt, "boxed_inline_number", MIR_T_D);
     MIR_label_t numeric = jm_new_label(mt);
     MIR_label_t integer = jm_new_label(mt);
-    MIR_reg_t inline_bits = jm_new_reg(mt, "dense_boxed_key_bits", MIR_T_I64);
-    jm_emit_reg_binary_op(mt, MIR_AND, inline_bits, key,
+    MIR_reg_t inline_bits = jm_new_reg(mt, "boxed_inline_bits", MIR_T_I64);
+    jm_emit_reg_binary_op(mt, MIR_AND, inline_bits, value,
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
     MIR_label_t floating = jm_new_label(mt);
     jm_emit_branch(mt, MIR_BT, floating, inline_bits);
-    MIR_reg_t tag = jm_new_reg(mt, "dense_boxed_key_tag", MIR_T_I64);
+    MIR_reg_t tag = jm_new_reg(mt, "boxed_inline_tag", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_URSH,
-        MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, key),
+        MIR_new_reg_op(mt->ctx, tag), MIR_new_reg_op(mt->ctx, value),
         MIR_new_int_op(mt->ctx, 56)));
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
         MIR_new_label_op(mt->ctx, integer), MIR_new_reg_op(mt->ctx, tag),
@@ -4870,11 +4869,11 @@ static MIR_reg_t jm_emit_guard_boxed_array_number_key(JsMirTranspiler* mt,
     jm_emit_jmp(mt, miss);
 
     jm_emit_label(mt, floating);
-    jm_emit_dmov(mt, number, em_emit_bits_double(&mt->func_em->em, key));
+    jm_emit_dmov(mt, number, em_emit_bits_double(&mt->func_em->em, value));
     jm_emit_jmp(mt, numeric);
 
     jm_emit_label(mt, integer);
-    MIR_reg_t integer_value = jm_emit_unbox_int(mt, key);
+    MIR_reg_t integer_value = jm_emit_unbox_int(mt, value);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
         MIR_new_reg_op(mt->ctx, number),
         MIR_new_reg_op(mt->ctx, integer_value)));
@@ -4898,7 +4897,7 @@ static MIR_reg_t jm_emit_packed_array_read_boxed_number_key(
     MIR_reg_t result = jm_new_reg(mt, "dense_boxed_key_read", MIR_T_I64);
     MIR_label_t miss = jm_new_label(mt);
     MIR_label_t done = jm_new_label(mt);
-    MIR_reg_t number = jm_emit_guard_boxed_array_number_key(mt, key, miss);
+    MIR_reg_t number = jm_emit_guard_boxed_inline_number(mt, key, miss);
     MIR_reg_t dense = jm_emit_packed_array_read_impl(mt, member, receiver,
         number, false, miss);
     jm_emit_mov(mt, result, dense);
@@ -4934,7 +4933,7 @@ static MIR_reg_t jm_emit_packed_array_reference_number(JsMirTranspiler* mt,
     MIR_reg_t key = ref->native_key_reg
         ? jm_emit_native_key_as_number(mt, ref->native_key_reg,
             ref->native_key_type, "packed_strict_key")
-        : jm_emit_guard_boxed_array_number_key(mt, ref->key_reg, miss);
+        : jm_emit_guard_boxed_inline_number(mt, ref->key_reg, miss);
     return jm_emit_packed_array_load_number(mt, member, ref->base_reg, key,
         miss);
 }
@@ -5300,6 +5299,29 @@ static bool jm_try_emit_packed_array_strict_equal(JsMirTranspiler* mt,
     return true;
 }
 
+static bool jm_loop_boxed_number_pair_candidate(JsMirTranspiler* mt,
+        JsBinaryNode* bin) {
+    if (!mt || !bin || (bin->op != OPERATOR_ADD && bin->op != OPERATOR_SUB) ||
+            !jm_node_is_loop_hot(mt, (JsAstNode*)bin)) return false;
+    JsAstNode* left_node = bin->left
+        ? (JsAstNode*)ast_unwrap_primary((AstNode*)bin->left) : NULL;
+    JsAstNode* right_node = bin->right
+        ? (JsAstNode*)ast_unwrap_primary((AstNode*)bin->right) : NULL;
+    if (!left_node || !right_node ||
+            left_node->node_type != AST_NODE_IDENT ||
+            right_node->node_type != AST_NODE_IDENT) return false;
+    JsIdentifierNode* left = (JsIdentifierNode*)left_node;
+    JsIdentifierNode* right = (JsIdentifierNode*)right_node;
+    JsMirVarEntry* left_var = jm_find_var_by_binding(mt, left->entry);
+    JsMirVarEntry* right_var = jm_find_var_by_binding(mt, right->entry);
+    // Only existing boxed locals qualify. Their values may widen at runtime;
+    // the exact Item guard below retains the original operator on every miss.
+    return left_var && right_var && left_var->mir_type == MIR_T_I64 &&
+        right_var->mir_type == MIR_T_I64 && !left_var->from_env &&
+        !right_var->from_env && !left_var->from_shared_env &&
+        !right_var->from_shared_env;
+}
+
 static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         JsBinaryNode* bin) {
     TypeId result_type = jm_get_effective_type(mt, (JsAstNode*)bin);
@@ -5592,6 +5614,26 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     if (left_spill_slot >= 0) {
         jm_gen_spill_load(mt, left, left_spill_slot);
     }
+    MIR_reg_t guarded_result = 0;
+    MIR_label_t guarded_done = 0;
+    if (jm_loop_boxed_number_pair_candidate(mt, bin)) {
+        MIR_label_t miss = jm_new_label(mt);
+        guarded_done = jm_new_label(mt);
+        guarded_result = jm_new_reg(mt, "boxed_loop_number_result", MIR_T_I64);
+        MIR_reg_t left_number = jm_emit_guard_boxed_inline_number(mt, left,
+            miss);
+        MIR_reg_t right_number = jm_emit_guard_boxed_inline_number(mt, right,
+            miss);
+        MIR_reg_t number = jm_new_reg(mt, "boxed_loop_number", MIR_T_D);
+        jm_emit_reg_binary(mt, bin->op == OPERATOR_ADD ? MIR_DADD : MIR_DSUB,
+            number, left_number, right_number);
+        jm_emit_mov(mt, guarded_result, jm_box_native(mt, number,
+            LMD_TYPE_FLOAT));
+        jm_emit_jmp(mt, guarded_done);
+        jm_emit_label(mt, miss);
+        jm_emit_compile_profile(mt, JS_OPT_MIR_BOXED_LOOP_PAIR,
+            JS_OPT_OUTCOME_TAKEN);
+    }
     MIR_reg_t result;
     if (compare_op >= 0) {
         // Tune8 §2.1: js_compare(op, l, r) takes an extra constant op operand.
@@ -5613,6 +5655,12 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     // instanceof and in can throw TypeError — propagate exception to enclosing try/catch
     if (bin->op == OPERATOR_JS_INSTANCEOF || bin->op == OPERATOR_IN) {
         jm_emit_error_lane_propagate_check(mt);
+    }
+    if (guarded_done) {
+        jm_emit_mov(mt, guarded_result, result);
+        jm_emit_value_join(mt, guarded_done, guarded_result,
+            JS_ERROR_LANE_UNKNOWN);
+        result = guarded_result;
     }
     return publish(result, VALUE_REP_ITEM);
 }

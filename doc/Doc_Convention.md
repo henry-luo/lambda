@@ -171,8 +171,8 @@ overview) plus developer guides (`C_Plus_Convention.md`, `Make_Guide.md`,
 The remaining `doc/` files are the formal user-facing documentation: the
 language reference set (`Lambda_Reference.md`, `Lambda_Data.md`,
 `Lambda_Type.md`, `Lambda_Expr_Stam.md`, `Lambda_Func.md`, …), tool guides
-(`Lambda_CLI.md`, `Lambda_Validator_Guide.md`), and per-area support docs
-(`Python_Support.md`, `Math_Support.md`, …). The tutorial lives in
+(`Lambda_CLI.md`, `Lambda_Validator.md`), and per-area support docs
+(`Math_Support.md`, `HTML_CSS_SVG_Support.md`, …). The tutorial lives in
 `doc/tutorial/`; besides the code-fence gate below, `make check-tutorial`
 replays its commands and compares every output it shows. Images and other
 assets live in `doc/img/`.

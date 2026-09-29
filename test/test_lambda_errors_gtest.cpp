@@ -1947,6 +1947,13 @@ TEST_F(NegativeScriptTest, ElementSemicolonCannotOpenContent) {
         "';' cannot open element content");
 }
 
+// S16.9.3: element types take the literal's delimiters; the type-pattern
+// parser used to swallow the retired `;` divider.
+TEST_F(NegativeScriptTest, ElementTypeRejectsSemicolon) {
+    ExpectErrorMessage("test/std/negative/element_type_semicolon.ls",
+        "';' only separates statements; an element pattern takes ','");
+}
+
 // LR02-9: a `&`/`!` contract must be rejected on a non-conforming value AND
 // named in the diagnostic — it used to print the bare word "type".
 TEST_F(NegativeScriptTest, TypeSetOperatorContractIsNamed) {

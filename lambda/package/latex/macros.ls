@@ -1,9 +1,9 @@
 // latex/macros.ls — Basic \newcommand macro expansion
 // Pre-processes the AST to extract macro definitions.
 // Tree-sitter parses \newcommand{\name}[N]{body} as an element:
-//   <newcommand; "\\name", <brack_group; "N">, <curly_group; ...body...>>
+//   <newcommand "\\name" <brack_group "N"> <curly_group ...body...>>
 // Macro invocations like \name{arg} become elements:
-//   <name; "arg">
+//   <name "arg">
 // Expansion happens at render time via render.ls to avoid tree-rebuilding.
 
 import util: .util
@@ -13,7 +13,7 @@ import util: .util
 // ============================================================
 
 // extract macro definitions from the AST
-// returns an array of {name: "...", params: N, body: <curly_group; ...>}
+// returns an array of {name: "...", params: N, body: <curly_group ...>}
 pub fn get_defs(ast) {
     if (ast == null) { [] }
     else if (ast is element) { collect_all_defs(ast, 0, len(ast), []) }

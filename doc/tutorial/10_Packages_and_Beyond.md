@@ -1,6 +1,6 @@
 # 10. Packages and Beyond
 
-This last chapter tours what ships around the language: packages written in Lambda for math, charts and diagrams, modules for splitting your own programs into files, the document editor, and the JavaScript and Python runtimes. It ends with a map of the reference documentation.
+This last chapter tours what ships around the language: packages written in Lambda for math, charts and diagrams, modules for splitting your own programs into files, the document editor, and the JavaScript runtime. It ends with a map of the reference documentation.
 
 ## Typesetting Math
 
@@ -177,34 +177,6 @@ lambda js hello.js
 
 Page scripts run on the same engine inside `lambda view`, with the standard DOM APIs, and `lambda ts app.ts` runs TypeScript. [JS_DOM_Support.md](../JS_DOM_Support.md) lists what is supported, from the language and Node.js modules to the DOM.
 
-## Python
-
-Python runs through a hosted-language module, `lang-python`, which the full release bundle ships beside the executable; in a source checkout, `make build-lang-python` builds it. Without the module, the commands below print a hosted-language-unavailable message. Save this as `hello.py`:
-
-```python file=hello.py
-# hello.py
-def fib(n):
-    a, b = 0, 1
-    for _ in range(n):
-        a, b = b, a + b
-    return a
-
-squares = [n * n for n in range(1, 6)]
-print(f"Hello from Python: {squares}")
-print("fib(30) =", fib(30))
-```
-
-```bash
-lambda py hello.py
-```
-
-```text
-Hello from Python: [1, 4, 9, 16, 25]
-fib(30) = 832040
-```
-
-`lambda hello.py` does the same, choosing the language by the file extension. Python support is at an early stage: [Python_Support.md](../Python_Support.md) lists which parts of the language and the standard library work today.
-
 ## Where to Go Next
 
 The tutorial showed each feature once. The reference documentation covers everything:
@@ -217,9 +189,9 @@ The tutorial showed each feature once. The reference documentation covers everyt
 | Errors, concurrency and document updates | [Lambda_Error_Handling.md](../Lambda_Error_Handling.md), [Lambda_Concurrency.md](../Lambda_Concurrency.md), [Lambda_Document_Updates.md](../Lambda_Document_Updates.md) |
 | Built-in functions and the command line | [Lambda_Sys_Func.md](../Lambda_Sys_Func.md), [Lambda_CLI.md](../Lambda_CLI.md) |
 | Modules and packages | [Lambda_Modules.md](../Lambda_Modules.md), [Lambda_Packages.md](../Lambda_Packages.md) |
-| Documents, formats and schemas | [Lambda_Doc_Pipeline.md](../Lambda_Doc_Pipeline.md), [Markup_Formats_Support.md](../Markup_Formats_Support.md), [Doc_Schema.md](../Doc_Schema.md), [Lambda_Validator_Guide.md](../Lambda_Validator_Guide.md) |
+| Documents, formats and schemas | [Lambda_Doc_Pipeline.md](../Lambda_Doc_Pipeline.md), [Markup_Formats_Support.md](../Markup_Formats_Support.md), [Doc_Schema.md](../Doc_Schema.md), [Lambda_Validator.md](../Lambda_Validator.md) |
 | Rendering, math and interactive pages | [HTML_CSS_SVG_Support.md](../HTML_CSS_SVG_Support.md), [Math_Support.md](../Math_Support.md), [Reactive_UI.md](../Reactive_UI.md) |
-| Other languages | [JS_DOM_Support.md](../JS_DOM_Support.md), [Python_Support.md](../Python_Support.md) |
+| JavaScript | [JS_DOM_Support.md](../JS_DOM_Support.md) |
 | The normative rulings behind the language | [Lambda_Formal_Semantics.md](../Lambda_Formal_Semantics.md) |
 
 ## What You Learned
@@ -228,6 +200,6 @@ The tutorial showed each feature once. The reference documentation covers everyt
 - The `chart` package turns a Vega-Lite map into an `<svg>` element; the `graph` package lays out diagrams.
 - Every file is a module: `pub` exports a declaration, and `import .name` or `import alias: .name` loads it.
 - `lambda edit` edits Markdown, HTML and SVG and saves them without loss.
-- `lambda js` runs JavaScript, with Node.js-style modules, and `lambda py` runs Python when its module is installed.
+- `lambda js` runs JavaScript, with Node.js-style modules.
 
 That completes the tutorial. The [tutorial index](README.md) lists all ten chapters, if you want to revisit one.

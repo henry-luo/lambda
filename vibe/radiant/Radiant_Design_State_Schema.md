@@ -741,7 +741,7 @@ These informed the design above; collecting them so reviewers can weigh each.
   `build_lambda_config.json`→Lua in this repo.
 - **Eventual native authoring in Mark/Lambda.** Long-term, the table could be authored as a
   Mark document and validated by a Lambda schema (the project already has a schema validator,
-  `doc/Lambda_Validator_Guide.md`), making the FSM a first-class, re-parseable Lambda value —
+  `doc/Lambda_Validator.md`), making the FSM a first-class, re-parseable Lambda value —
   symmetric with the Mark state dump in `Radiant_Design_State_Store_Dump.md`. Out of scope
   now, but the struct layout in §3.6 is intentionally flat so it maps cleanly to Mark later.
 

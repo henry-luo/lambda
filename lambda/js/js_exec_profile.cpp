@@ -97,6 +97,7 @@ static const char* g_js_opt_event_names[JS_OPT_EVENT_COUNT] = {
     "runtime_number_compare_head",
     "runtime_string_concat_head",
     "mir_number_admitted", "mir_number_fallback",
+    "mir_boxed_loop_pair",
     "mir_native_index_admitted", "mir_native_index_fallback",
     "mir_dense_index_admitted", "mir_array_length_admitted",
     "mir_packed_strict_equal",

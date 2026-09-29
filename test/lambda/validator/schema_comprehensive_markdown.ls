@@ -2,7 +2,7 @@
 // This schema tests all types, occurrences, and complex nested structures with Markdown elements
 
 // Basic element types matching Markdown parser output
-// Element syntax: <name attr1: type, attr2: type; content_type>
+// Element syntax: <name attr1: type, attr2: type, content_type>
 type HeadingElement = <h1 level: int?, string>
 type ParagraphElement = <p id: string?, class: string*, string>
 type LinkElement = <a href: string, title: string?, target: string?, string>

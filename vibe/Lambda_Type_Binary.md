@@ -22,7 +22,7 @@ Lambda already has a `binary` primitive type with hex and base64 literal syntax 
 - ~~No element operations~~ **(fixed — indexing yields u8, slicing preserves binary, iteration yields u8, membership is byte-based, and `binary ++ binary` concatenates bytes).**
 - No encoding stdlib surface (§5.2), struct packing, hashing, or binary-specific I/O helpers.
 - The JS bridge is **copy-based** (B8); zero-copy sharing awaits the Tier-3.1 / PL5 flat-buffer representation.
-- Python jube docs explicitly mark `bytes`/`bytearray` as **not supported** ([Python_Support.md](../doc/Python_Support.md)).
+- Python jube docs explicitly mark `bytes`/`bytearray` as **not supported** ([Python_Support.md](../doc/dev/Python_Support.md)).
 
 This proposal surveys prior art across scripting languages, identifies the highest‑leverage features to borrow, and lays out a tiered implementation plan starting with a representation refactor.
 
@@ -79,7 +79,7 @@ This proposal surveys prior art across scripting languages, identifies the highe
 | File I/O | `output(bin, path)` writes exact bytes; file reads produce byte binaries | `lambda-proc.cpp` |
 | Element ops | **Implemented:** scalar indexing yields u8, OOB yields `null`, slices remain binary, iteration yields u8, membership is byte-based, and `++` concatenates bytes | `lambda-data-runtime.cpp`, `lambda-vector.cpp`, `lambda-eval.cpp` |
 | JS bridge | **Copy bridge** to `Uint8Array`/`Uint8ClampedArray`/`Buffer`/`DataView` with mutation isolation (B8); zero-copy = Tier 3.1/PL5 | `lambda/js/js_typed_array.cpp`, `js_buffer.cpp` |
-| Python bridge | `bytes`/`bytearray` marked **not supported** | `doc/Python_Support.md` |
+| Python bridge | `bytes`/`bytearray` marked **not supported** | `doc/dev/Python_Support.md` |
 
 **The 2026-07-14 audit that triggered the fix** (kept for the record): literals stored the encoded source text (`len(b'\xDEADBEEF')` was 9-ish source chars, not 4 bytes) while file reads stored real bytes — two producers, inconsistent payloads; two printers disagreed (`b'%s'` vs `0x%s`, both NUL-unsafe); `binary()` and Mark's `parse_binary` returned strings. All fixed; full inventory and verification in [Lambda_Impl_Binary.md](Lambda_Impl_Binary.md).
 
@@ -428,7 +428,7 @@ Expose a stable C ABI matching the descriptor above so MIR‑JIT‑emitted code 
 
 ### 7.2 Validators
 
-Tie into Lambda's [validator framework](../doc/Lambda_Validator_Guide.md):
+Tie into Lambda's [validator framework](../doc/Lambda_Validator.md):
 
 ```lambda
 type PNGFile = binary where {
@@ -457,7 +457,7 @@ Lock down each codec with property tests:
 
 - Update [Lambda_Data.md](../doc/Lambda_Data.md) §Binary Literals with decoded semantics.
 - New section in [Lambda_Sys_Func.md](../doc/Lambda_Sys_Func.md) for the encoding / pack / crypto / compression stdlib.
-- New page `lambda/doc/Binary_Support.md` mirroring the structure of [Python_Support.md](../doc/Python_Support.md), enumerating what's supported and what isn't.
+- New page `lambda/doc/Binary_Support.md` mirroring the structure of [Python_Support.md](../doc/dev/Python_Support.md), enumerating what's supported and what isn't.
 - Cheatsheet update in [Lambda_Cheatsheet.md](../doc/Lambda_Cheatsheet.md).
 
 ---

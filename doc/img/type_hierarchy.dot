@@ -22,6 +22,9 @@ digraph TypeHierarchy {
     // Top type
     any [fillcolor="#E8F0FE", color="#4285F4", penwidth=1.5];
 
+    // Bottom type, beside any (top left)
+    none [fillcolor="#F5F5F5", color="#616161", penwidth=1.5];
+
     // Waypoint nodes for straight any→scalar center line (zero-size)
     dot1 [shape=point, width=0, height=0];
     dot2 [shape=point, width=0, height=0];
@@ -46,6 +49,8 @@ digraph TypeHierarchy {
     // Number subtypes
     int [fillcolor="#FFFDE7", color="#FDD835"];
     float [fillcolor="#FFFDE7", color="#FDD835"];
+    decimal [fillcolor="#FFFDE7", color="#FDD835"];
+    complex [fillcolor="#FFFDE7", color="#FDD835"];
 
     // Container subtypes
     range [fillcolor="#E8F5E9", color="#66BB6A"];
@@ -83,20 +88,25 @@ digraph TypeHierarchy {
     scalar -> number;
     scalar -> string;
     scalar -> symbol;
+    scalar -> path;
     scalar -> datetime;
     scalar -> binary;
-    scalar -> path;
 
     // Number subtypes
     number -> int;
     number -> float;
+    number -> decimal;
+    number -> complex;
+
+    {rank=same; none; any}
+    none -> any [style=invis];
 
     // Rank hints — left | center | right at each level
     {rank=same; null; container; dot1; function; type; error}
     {rank=same; range; array; map; element; dot2; fn; pn}
     {rank=same; scalar}
-    {rank=same; bool; number; string; symbol; datetime; binary; path}
-    {rank=same; int; float}
+    {rank=same; bool; number; string; symbol; path; datetime; binary}
+    {rank=same; int; float; decimal; complex}
 
     // Invisible ordering edges for left-to-right positioning
     // Level 1: null | container | [dot1] | type | function | error
@@ -112,4 +122,8 @@ digraph TypeHierarchy {
     element -> dot2 [style=invis];
     dot2 -> fn [style=invis, minlen=3];
     fn -> pn [style=invis];
+    // Level 4: int | float | decimal | complex
+    int -> float [style=invis];
+    float -> decimal [style=invis];
+    decimal -> complex [style=invis];
 }
