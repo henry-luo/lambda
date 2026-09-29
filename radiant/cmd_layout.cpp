@@ -2696,8 +2696,9 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing);
     } else {
     bool handled = false;
-    doc = load_layout_special_file(full_url, doc_url, viewport_width, viewport_height,
-                                   pool, true, &handled);
+    // Use the parsed pathname so a query does not hide the file extension.
+    doc = load_layout_special_file(full_url, url_get_pathname(full_url),
+                                   viewport_width, viewport_height, pool, true, &handled);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing);
@@ -3777,6 +3778,18 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         release_layout_runtime(runtime);
         pool_destroy(result_pool);
         return nullptr;
+    }
+
+    // The hidden iframe warms the in-process code cache (D8.5.1v7). Keep its
+    // Runtime on the normal document lifetime while omitting the unused UI tree.
+    const char* query = url_get_search(script_url);
+    if (!transform && query && strcmp(query, "?lambda-preload=1") == 0) {
+        MarkBuilder builder(result_input);
+        Item body = builder.element("body").final();
+        ElementBuilder html = builder.element("html");
+        html.child(body);
+        script_output->root = html.final();
+        result_type = LMD_TYPE_ELEMENT;
     }
 
     auto write_svg_wrapped_html = [&](const char* svg_content) -> DomDocument* {
