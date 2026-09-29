@@ -16,6 +16,7 @@ import dom
 import pdf_html: lambda.pdf.html
 import latex: lambda.latex.latex
 import latex_css: lambda.latex.css
+import math_renderer: lambda.doc.math.math
 import math_css: lambda.doc.math.css
 import graph_doc: lambda.graph.document
 
@@ -131,6 +132,7 @@ fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
   else if (ext == "dot") { "dot" }
+  else if (ext == "d2") { "d2" }
   else { null }
 }
 
@@ -221,6 +223,18 @@ view <u> { <u *[rendered_children(~)]> }
 view <code> {
   if (~.type == "block") { <pre <code *[rendered_children(~)]>> }
   else { <code *[rendered_children(~)]> }
+}
+view <math> {
+  // Markup readers keep TeX source in math nodes; parse it for the shared typesetter.
+  let source = if (len(content(~)) > 0) content(~)[0] else ""
+  let parsed = if (~.flavor == "ascii") { null }
+    else { parse(source, {type: "math", flavor: "latex"}) ^ { null } }
+  let display = ~.type == "block"
+  let rendered = if (parsed == null) { null }
+    else { math_renderer.render_math(parsed, {display: display}) ^ { null } }
+  let body = if (rendered == null) { <code class:"math-error", source> } else { rendered }
+  if (display) { <div class:"math-display-container", body> }
+  else { body }
 }
 view <pre> { <pre *[rendered_children(~)]> }
 view <ul> { <ul *[rendered_children(~)]> }

@@ -1,0 +1,26 @@
+{
+  "name": "Doc editor previews D2 graphs and node shapes",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1800},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "d2"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_simple_diagram_d2 .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "simple_diagram.d2"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview graph.lambda-graph"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview graph node"}, "count": 3},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview graph edge"}, "count": 4},
+    {"type": "assert_attribute", "target": {"selector": "#rendered-preview graph node[data-node-id='database']"}, "attribute": "data-shape", "equals": "cylinder"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_system_design_d2 .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "system_design.d2"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview graph node"}, "count": 4},
+    {"type": "assert_attribute", "target": {"selector": "#rendered-preview graph node[data-node-id='web']"}, "attribute": "data-label", "equals": "Web Server"},
+    {"type": "assert_attribute", "target": {"selector": "#rendered-preview graph node[data-node-id='db']"}, "attribute": "data-shape", "equals": "cylinder"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "db.shape: cylinder"},
+    {"type": "click", "target": {"selector": ".tab-view"}},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview graph.lambda-graph"}, "count": 1}
+  ]
+}

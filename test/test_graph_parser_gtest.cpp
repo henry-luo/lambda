@@ -774,6 +774,21 @@ TEST_F(GraphParserTest, ParseD2WithProperties) {
 
     Element* graph = (Element*)input->root.container;
     ASSERT_NE(graph, nullptr);
+    ElementReader parsed(input->root);
+    EXPECT_STREQ(parsed.get_attr_string("ir-stage"), "source");
+    bool styled_server = false;
+    ElementReader child;
+    auto children = parsed.childElements();
+    while (children.next(&child)) {
+        if (child.hasTag("node") && child.get_attr_string("shape") != nullptr) {
+            EXPECT_STREQ(child.get_attr_string("id"), "server");
+            EXPECT_STREQ(child.get_attr_string("shape"), "rectangle");
+            EXPECT_STREQ(child.get_attr_string("fill"), "blue");
+            EXPECT_STREQ(child.get_attr_string("stroke"), "red");
+            styled_server = true;
+        }
+    }
+    EXPECT_TRUE(styled_server);
 
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked
@@ -803,6 +818,26 @@ TEST_F(GraphParserTest, ParseD2MultiLineContent) {
 
     Element* graph = (Element*)input->root.container;
     ASSERT_NE(graph, nullptr);
+    ElementReader parsed(input->root);
+    int64_t edge_count = 0;
+    bool users_circle = false;
+    bool database_cylinder = false;
+    ElementReader child;
+    auto children = parsed.childElements();
+    while (children.next(&child)) {
+        if (child.hasTag("edge")) edge_count++;
+        if (child.hasTag("node")) {
+            const char* id = child.get_attr_string("id");
+            const char* shape = child.get_attr_string("shape");
+            if (id && shape && strcmp(id, "users") == 0 && strcmp(shape, "circle") == 0)
+                users_circle = true;
+            if (id && shape && strcmp(id, "database") == 0 && strcmp(shape, "cylinder") == 0)
+                database_cylinder = true;
+        }
+    }
+    EXPECT_EQ(edge_count, 3);
+    EXPECT_TRUE(users_circle);
+    EXPECT_TRUE(database_cylinder);
 
     // Just verify it's a valid element without accessing potentially unsafe fields
     // The fact that we can get this far means the parsing worked

@@ -21,19 +21,34 @@ static String* parse_d2_identifier(InputContext& ctx);
 static String* parse_d2_quoted_string(InputContext& ctx);
 static String* parse_d2_label(InputContext& ctx);
 static void parse_d2_style_block(InputContext& ctx, Element* element);
-static bool parse_d2_property_assignment(InputContext& ctx, Element* graph, const char* first_id);
-static bool parse_d2_edge(InputContext& ctx, Element* graph, const char* first_id);
-static bool parse_d2_node_with_block(InputContext& ctx, Element* graph, const char* first_id);
+static bool parse_d2_property_assignment(InputContext& ctx, Element* graph,
+                                         const char* first_id, const SourceLocation& source_start);
+static bool parse_d2_edge(InputContext& ctx, Element* graph,
+                          const char* first_id, const SourceLocation& first_start);
+static bool parse_d2_node_with_block(InputContext& ctx, Element* graph,
+                                     const char* first_id, const SourceLocation& source_start);
 
 // skip whitespace and # line comments
 static void skip_whitespace_and_comments_d2(SourceTracker& tracker) {
     skip_wsc(tracker, "#", nullptr, false);
 }
 
-// read D2 identifier: [A-Za-z0-9_\-.]+ (no alpha-start requirement; whitespace skipped first)
+// read a D2 identifier, including dotted paths (no alpha-start requirement)
 static String* parse_d2_identifier(InputContext& ctx) {
     skip_whitespace_and_comments_d2(ctx.tracker);
     return read_graph_identifier(ctx, "-.", false);
+}
+
+// A dotted node path remains an ID unless its suffix names a supported property.
+static const char* d2_property_separator(const char* id) {
+    const char* styled = strstr(id, ".style.");
+    if (styled && styled[7] != '\0') return styled;
+    const char* last = strrchr(id, '.');
+    if (!last) return nullptr;
+    const char* property = last + 1;
+    if (strcmp(property, "shape") == 0 || strcmp(property, "label") == 0 ||
+        strcmp(property, "style") == 0) return last;
+    return nullptr;
 }
 
 // parse a double-quoted string, using the shared escape handler
@@ -59,7 +74,7 @@ static String* parse_d2_label(InputContext& ctx) {
 
     while (!tracker.atEnd()) {
         char c = tracker.current();
-        if (c == '\n' || c == '\r' || c == '{' || c == '}' || c == '#') {
+        if (c == '\n' || c == '\r' || c == '{' || c == '}' || c == '#' || c == ';') {
             break;
         }
         tracker.advance();
@@ -111,21 +126,16 @@ static void parse_d2_style_block(InputContext& ctx, Element* element) {
 
         skip_whitespace_and_comments_d2(tracker);
 
-        String* value = parse_d2_label(ctx);
-        if (value) {
-            // convert D2 style properties to CSS-aligned attributes
-            const char* css_property = property->chars;
-            if (strcmp(property->chars, "fill") == 0) {
-                css_property = "background-color";
-            } else if (strcmp(property->chars, "stroke") == 0) {
-                css_property = "border-color";
-            } else if (strcmp(property->chars, "stroke-width") == 0) {
-                css_property = "border-width";
-            } else if (strcmp(property->chars, "stroke-dash") == 0) {
-                css_property = "stroke-dasharray";
+        if (!tracker.atEnd() && tracker.current() == '{') {
+            // D2's nested style block contributes attributes to the same node.
+            parse_d2_style_block(ctx, element);
+        } else {
+            String* value = parse_d2_label(ctx);
+            if (value) {
+                const char* name = strcmp(property->chars, "stroke-dash") == 0
+                    ? "stroke-dasharray" : property->chars;
+                add_graph_attribute(ctx.input(), element, name, value->chars);
             }
-
-            add_graph_attribute(ctx.input(), element, css_property, value->chars);
         }
 
         skip_whitespace_and_comments_d2(tracker);
@@ -145,55 +155,34 @@ static void parse_d2_style_block(InputContext& ctx, Element* element) {
 
 // Parse node property assignment: node.property: value
 static bool parse_d2_property_assignment(InputContext& ctx,
-                                         Element* graph, const char* first_id) {
+                                         Element* graph, const char* first_id,
+                                         const SourceLocation& source_start) {
     SourceTracker& tracker = ctx.tracker;
-
-    if (tracker.atEnd() || tracker.current() != '.') {
-        return false;
-    }
-
-    tracker.advance(); // skip dot
-
-    String* property = parse_d2_identifier(ctx);
-    if (!property) {
-        ctx.addError(tracker.location(), "Expected property name after '.'");
-        return false;
-    }
-
-    skip_whitespace_and_comments_d2(tracker);
-
-    if (tracker.atEnd() || tracker.current() != ':') {
-        ctx.addError(tracker.location(), "Expected ':' after property name");
-        return false;
-    }
+    const char* separator = d2_property_separator(first_id);
+    if (!separator || tracker.atEnd() || tracker.current() != ':') return false;
+    String* node_id = ctx.builder.createString(first_id, separator - first_id);
+    const char* property = separator + (strncmp(separator, ".style.", 7) == 0 ? 7 : 1);
 
     tracker.advance(); // skip colon
 
     skip_whitespace_and_comments_d2(tracker);
 
     // find or create the node
-    Element* node = create_node_element(ctx.input(), first_id, nullptr);
+    Element* node = node_id ? create_node_element(ctx.input(), node_id->chars, nullptr) : nullptr;
     if (node) {
+        graph_set_source_span(ctx, node, source_start, tracker.location());
         add_node_to_graph(ctx.input(), graph, node);
 
-        if (!tracker.atEnd() && tracker.peek() == '{') {
+        if (!tracker.atEnd() && tracker.current() == '{') {
             // style block
             parse_d2_style_block(ctx, node);
         } else {
             // single property value
             String* value = parse_d2_label(ctx);
             if (value) {
-                // convert D2 properties to CSS-aligned attributes
-                const char* css_property = property->chars;
-                if (strcmp(property->chars, "shape") == 0) {
-                    css_property = "shape";
-                } else if (strcmp(property->chars, "label") == 0) {
-                    css_property = "label";
-                } else if (strcmp(property->chars, "style") == 0) {
-                    css_property = "style";
-                }
-
-                add_graph_attribute(ctx.input(), node, css_property, value->chars);
+                const char* name = strcmp(property, "stroke-dash") == 0
+                    ? "stroke-dasharray" : property;
+                add_graph_attribute(ctx.input(), node, name, value->chars);
             }
         }
     }
@@ -203,7 +192,8 @@ static bool parse_d2_property_assignment(InputContext& ctx,
 
 // Parse edge: node1 -> node2 [: label]
 static bool parse_d2_edge(InputContext& ctx,
-                          Element* graph, const char* first_id) {
+                          Element* graph, const char* first_id,
+                          const SourceLocation& first_start) {
     SourceTracker& tracker = ctx.tracker;
 
     if (tracker.remaining() < 2 || tracker.current() != '-' || tracker.peek(1) != '>') {
@@ -215,6 +205,7 @@ static bool parse_d2_edge(InputContext& ctx,
 
     skip_whitespace_and_comments_d2(tracker);
 
+    SourceLocation second_start = tracker.location();
     String* second_id = parse_d2_identifier(ctx);
     if (!second_id) {
         ctx.addError(tracker.location(), "Expected target node after '->'");
@@ -237,6 +228,10 @@ static bool parse_d2_edge(InputContext& ctx,
                                        edge_label ? edge_label->chars : nullptr);
 
     if (from_node && to_node && edge) {
+        // Source locations distinguish repeated node declarations during normalization.
+        graph_set_source_span(ctx, from_node, first_start, tracker.location());
+        graph_set_source_span(ctx, to_node, second_start, tracker.location());
+        graph_set_source_span(ctx, edge, first_start, tracker.location());
         add_node_to_graph(ctx.input(), graph, from_node);
         add_node_to_graph(ctx.input(), graph, to_node);
         add_edge_to_graph(ctx.input(), graph, edge);
@@ -246,9 +241,10 @@ static bool parse_d2_edge(InputContext& ctx,
 }
 
 // Parse node with attributes block: node: { ... }
-static bool parse_d2_node_with_block(InputContext& ctx, Element* graph, const char* first_id) {
+static bool parse_d2_node_with_block(InputContext& ctx, Element* graph,
+                                     const char* first_id, const SourceLocation& source_start) {
     SourceTracker& tracker = ctx.tracker;
-    if (tracker.atEnd() || tracker.peek() != ':') {
+    if (tracker.atEnd() || tracker.current() != ':') {
         return false;
     }
 
@@ -258,10 +254,14 @@ static bool parse_d2_node_with_block(InputContext& ctx, Element* graph, const ch
 
     Element* node = create_node_element(ctx.input(), first_id, nullptr);
     if (node) {
+        graph_set_source_span(ctx, node, source_start, tracker.location());
         add_node_to_graph(ctx.input(), graph, node);
 
-        if (!tracker.atEnd() && tracker.peek() == '{') {
+        if (!tracker.atEnd() && tracker.current() == '{') {
             parse_d2_style_block(ctx, node);
+        } else {
+            String* label = parse_d2_label(ctx);
+            if (label) add_graph_attribute(ctx.input(), node, "label", label->chars);
         }
     }
 
@@ -283,6 +283,7 @@ void parse_graph_d2(Input* input, const char* d2_string) {
         ctx.addError(SourceLocation(), "Failed to create graph element");
         return;
     }
+    add_graph_attribute(input, graph, "ir-stage", "source");
 
     while (!tracker.atEnd()) {
         skip_whitespace_and_comments_d2(tracker);
@@ -290,6 +291,7 @@ void parse_graph_d2(Input* input, const char* d2_string) {
         if (tracker.atEnd()) break;
 
         // parse node/edge statement
+        SourceLocation first_start = tracker.location();
         String* first_id = parse_d2_identifier(ctx);
         if (!first_id) {
             ctx.addError(tracker.location(), "Expected identifier");
@@ -305,19 +307,20 @@ void parse_graph_d2(Input* input, const char* d2_string) {
 
         // try different D2 statement types
         if (!tracker.atEnd()) {
-            if (tracker.current() == '.') {
+            if (tracker.current() == ':' && d2_property_separator(first_id->chars)) {
                 // node property assignment: node.property: value
-                parse_d2_property_assignment(ctx, graph, first_id->chars);
+                parse_d2_property_assignment(ctx, graph, first_id->chars, first_start);
             } else if (tracker.remaining() >= 2 && tracker.current() == '-' && tracker.peek(1) == '>') {
                 // edge: node1 -> node2 [: label]
-                parse_d2_edge(ctx, graph, first_id->chars);
+                parse_d2_edge(ctx, graph, first_id->chars, first_start);
             } else if (tracker.current() == ':') {
                 // node with attributes block: node: { ... }
-                parse_d2_node_with_block(ctx, graph, first_id->chars);
+                parse_d2_node_with_block(ctx, graph, first_id->chars, first_start);
             } else {
                 // simple node declaration
                 Element* node = create_node_element(input, first_id->chars, nullptr);
                 if (node) {
+                    graph_set_source_span(ctx, node, first_start, tracker.location());
                     add_node_to_graph(input, graph, node);
                 }
             }
