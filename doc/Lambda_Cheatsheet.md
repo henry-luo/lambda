@@ -221,7 +221,7 @@ Indexing & Slicing:
 | `'hello'[1 to 3]` | 'ell' — symbol slicing |
 | `"café"[2 to 3]` | "fé" — UTF-8 aware |
 
-**Namespaces (via `import` with bare URI):**
+**Namespaces:** (via `import` with bare URI)
 ```lambda
 import svg: 'http://www.w3.org/2000/svg'
 import xlink: 'http://www.w3.org/1999/xlink'
@@ -271,15 +271,12 @@ Var Statements (mutable, `pn` only):
 
 Arithmetic:
 
-| Operator | Meaning |
-|---|---|
-| `+` | addition |
-| `-` | subtraction |
-| `*` | multiplication |
-| `/` | division |
-| `div` | integer division |
-| `%` | modulo |
-| `**` | exponentiation |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `+` | addition | `-` | subtraction |
+| `*` | multiplication | `/` | division |
+| `div` | integer division | `%` | modulo |
+| `**` | exponentiation |  |  |
 
 Spread `*`:
 
@@ -289,14 +286,11 @@ Spread `*`:
 
 Comparison:
 
-| Operator | Meaning |
-|---|---|
-| `==` | equal |
-| `!=` | not equal |
-| `<` | less than |
-| `<=` | less or equal |
-| `>` | greater than |
-| `>=` | greater or equal |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `==` | equal | `!=` | not equal |
+| `<` | less than | `<=` | less or equal |
+| `>` | greater than | `>=` | greater or equal |
 
 `==` performs **structural deep equality** on all types:
 
@@ -309,22 +303,18 @@ Comparison:
 
 Logical:
 
-| Operator | Meaning |
-|---|---|
-| `and` | logical and |
-| `or` | logical or |
-| `not` | logical not |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `and` | logical and | `or` | logical or |
+| `not` | logical not |  |  |
 
 Type & Set:
 
-| Operator | Meaning |
-|---|---|
-| `is` | type check |
-| `in` | membership |
-| `to` | range |
-| `\|` | union |
-| `&` | intersection |
-| `!` | exclusion |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `is` | type check | `in` | membership |
+| `to` | range | `\|` | union |
+| `&` | intersection | `!` | exclusion |
 
 Vector Arithmetic:
 
@@ -333,7 +323,7 @@ Vector Arithmetic:
 | `1 + [2, 3]` | `[3, 4]` | scalar broadcast |
 | `[1, 2] * 2` | `[2, 4]` | scalar broadcast |
 | `[1, 2] + [3, 4]` | `[4, 6]` | element-wise |
-| `[1, 2, 3] eq 2` | `[false, true, false]` | element-wise comparison: `eq ne lt le gt ge` (S10.2.2) |
+| `[1, 2, 3] eq 2` | `[false, true, false]` | element-wise comparison: `eq ne lt le gt ge` |
 | `[10, 20, 30][[1, 2, 3] gt 1]` | `[20, 30]` | mask indexing; `sum(mask)` counts |
 Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
@@ -406,23 +396,16 @@ Child-level query `[T]` — search direct attributes + children only:
 
 ## Control Flow
 
-If Expressions (parenthesized condition, else required):
+If Expressions / Statements (else optional):
 
 | Form | Meaning |
 |---|---|
 | `if (x > 0) "positive" else "non-positive"` | Simple |
 | `if (score >= 90) "A" else if (score >= 80) "B" else "C"` | Chained |
 | `if (x > 0) "pos" else { "neg" }` | Block `else` |
-
-If Statements (block body, else optional):
-
-| Form | Meaning |
-|---|---|
 | `if x > 0 { "positive" }` | No `else` |
 | `if condition { something() } else { otherThing() }` | Both blocks |
 | `if x > 0 { compute() } else "default"` | Expression `else` |
-
-Both forms share the same `else` syntax: `else expr`, `else { stam }`, or `else if ...`.
 
 **Match Expressions:**
 ```lambda
@@ -502,6 +485,35 @@ Assignment Targets (in `pn`):
 | `elem.attr = val` | Element attribute reassignment |
 | `elem[i] = val` | Element child reassignment |
 
+## String and Symbol Patterns
+
+Define named patterns for string and symbol validation and matching. Uses regex-like syntax integrated into the type system.
+
+| Form | Meaning |
+|---|---|
+| `type digits = \(d+)` | one or more digits |
+| `type email = \(w+ "@" w+ "." a{2,6})` | email-like |
+| `type ws = \(s+)` | whitespace |
+| `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
+| `type SymIdent = \symbol(a w*)` | symbol pattern |
+
+`\(...)` matches strings, `\symbol(...)` matches symbols.
+Character classes inside `\(...)`: `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string.
+Negation: `!` matches one character outside a set of single characters.
+Quantifiers: `?`, `+`, `*`, `{n}`, `{n,m}`, `{n+}`.
+
+**Inline (unnamed) patterns** work anywhere a type does:
+
+| Form | Meaning |
+|---|---|
+| `"abc" is email` | false |
+| `"123" is digits` | true |
+| `'foo' is SymIdent` | `true` |
+| `"foo" is SymIdent` | `false` — string value, symbol pattern |
+| `"abc" is \(a+)` | `true` |
+| `fn f(x: \(d+)) => x` | Parameter annotation |
+| `match s { case \(d+): "num" default: "other" }` | Match arm |
+
 ## Functions
 
 Function Declaration:
@@ -551,35 +563,6 @@ pn main() {
 No `async`/`await`. Normal block exit joins children; error
 exit cancels then joins. A `start` operand may not capture an outer `var` by
 reference—copy to `let` or use messages.
-
-## String and Symbol Patterns
-
-Define named patterns for string and symbol validation and matching. Uses regex-like syntax integrated into the type system.
-
-| Form | Meaning |
-|---|---|
-| `type digits = \(d+)` | one or more digits |
-| `type email = \(w+ "@" w+ "." a{2,6})` | email-like |
-| `type ws = \(s+)` | whitespace |
-| `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
-| `type SymIdent = \symbol(a w*)` | symbol pattern |
-
-`\(...)` matches strings, `\symbol(...)` matches symbols.
-Character classes inside `\(...)`: `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string.
-Negation: `!` matches one character outside a set of single characters.
-Quantifiers: `?`, `+`, `*`, `{n}`, `{n,m}`, `{n+}`.
-
-**Inline (unnamed) patterns** work anywhere a type does:
-
-| Form | Meaning |
-|---|---|
-| `"abc" is email` | false |
-| `"123" is digits` | true |
-| `'foo' is SymIdent` | `true` |
-| `"foo" is SymIdent` | `false` — string value, symbol pattern |
-| `"abc" is \(a+)` | `true` |
-| `fn f(x: \(d+)) => x` | Parameter annotation |
-| `match s { case \(d+): "num" default: "other" }` | Match arm |
 
 ## System Functions
 
@@ -749,7 +732,7 @@ pn main() {
 13. `not` - Logical NOT: `not a == b` is `not (a == b)`
 14. `and` - Logical AND
 15. `or` - Logical OR
-16. `|>` `|:` `that` - Pipe, Filter and Proviso
+16. `|>` `|:` `that` - Pipe, Filter and Qualifier
 
 There is no unary `!` in expressions: use `not`. In type position `!T` is
 the complement type, as in `x is !null`.
