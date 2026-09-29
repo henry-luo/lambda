@@ -561,7 +561,7 @@ on preview_tab(tab) {
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
       .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: #fcfcfd; }
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
-                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
+                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
