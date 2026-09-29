@@ -205,6 +205,18 @@ TEST(InterpWalker, LiteralsAndArithmetic) {
         "1\n2.5\ntrue\nnull\n'sym'\n\"str\"\n1 + 2 * 3\n(7 - 2) / 2\n-5\nnot true\n");
 }
 
+TEST(InterpWalker, ViewStateAndHandlerAreAdmitted) {
+    // State defaults run with the model rooted; the handler is a separate
+    // activation with the view's state and body bindings (S12.1.3).
+    expect_tiers_agree("view_handler_state",
+        "view int state count: len([1, 2, 3]) + len([4, 5]) {\n"
+        "  let doubled = count * 2\n"
+        "  doubled\n"
+        "}\n"
+        "on click() { count = count + 1 }\n"
+        "apply(42)\n");
+}
+
 TEST(InterpWalker, ShortCircuitAndTruthiness) {
     expect_tiers_agree("shortcircuit",
         "let a = 1\nlet b = 0\na and b\na or b\nfalse and 1\ntrue or 0\n"

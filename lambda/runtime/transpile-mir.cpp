@@ -44385,9 +44385,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         AstListNode* body_list = (AstListNode*)view->body;
         AstNode* body_item = body_list->item;
         while (body_item) {
-            if (body_item->node_type == AST_NODE_LET_STAM ||
-                body_item->node_type == AST_NODE_PUB_STAM ||
-                body_item->node_type == AST_NODE_VAR_STAM) {
+            if (is_view_handler_body_binding(body_item->node_type)) {
                 transpile_let_stam(mt, (AstLetNode*)body_item);
             }
             body_item = body_item->next;

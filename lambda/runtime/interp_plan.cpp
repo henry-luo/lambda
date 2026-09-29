@@ -221,6 +221,9 @@ static bool interp_kind_supported(AstNodeType kind) {
     // active `~` context; unsupported native editor operations still fail
     // closed through the scan below.
     case AST_NODE_VIEW:
+    // The indexed scan visits these declarations before their bodies.
+    case AST_NODE_STATE_ENTRY:
+    case AST_NODE_EVENT_HANDLER:
     // --- P1.2: match ---
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_MATCH_ARM:
@@ -1560,13 +1563,16 @@ static uint32_t plan_need(AstNode* node) {
 static void plan_walk(AstNode* node, void* ctx);
 static void plan_finish(PlanCtx* pc);
 
-static void plan_handler(PlanCtx* outer, AstEventHandler* handler) {
+static void plan_handler(PlanCtx* outer, AstViewNode* view,
+        AstEventHandler* handler) {
     if (!outer || !handler || handler->interp_planned) return;
 
     PlanCtx pc = {};
     pc.script = outer->script;
     pc.plan = &handler->interp_plan;
     pc.storage = BINDING_STORAGE_REGISTER;
+    // Body lets and state bindings use the same slots in the view and handler.
+    pc.next_slot = outer->next_slot;
     // The event parameter is overlaid by the view activation; its slot is
     // harmless but keeps all handler-scope names consistently addressable.
     plan_assign_scope(&pc, handler->vars);
@@ -1577,6 +1583,14 @@ static void plan_handler(PlanCtx* outer, AstEventHandler* handler) {
     // handler plan or the first callee expression can exhaust the scratch
     // window while the model is still live.
     uint32_t body_need = 1 + plan_need(handler->body);
+    if (view->body && view->body->node_type == AST_NODE_CONTENT) {
+        for (AstNode* item = ((AstListNode*)view->body)->item;
+                item; item = item->next) {
+            if (!is_view_handler_body_binding(item->node_type)) continue;
+            uint32_t declaration_need = 1 + plan_need(item);
+            if (declaration_need > body_need) body_need = declaration_need;
+        }
+    }
     if (body_need > pc.max_scratch) pc.max_scratch = body_need;
     plan_finish(&pc);
     if (pc.failed) {
@@ -1584,6 +1598,32 @@ static void plan_handler(PlanCtx* outer, AstEventHandler* handler) {
         return;
     }
     handler->interp_planned = true;
+}
+
+static void plan_view(PlanCtx* outer, AstViewNode* view) {
+    if (!view || !view->body || view->interp_planned) return;
+    PlanCtx pc = {};
+    pc.script = outer->script;
+    pc.plan = &view->interp_plan;
+    pc.storage = BINDING_STORAGE_REGISTER;
+    plan_assign_scope(&pc, view->vars);
+    for (AstStateEntry* state = view->state; state; state = state->next_state) {
+        plan_walk(state->value, &pc);
+        // The model occupies a scratch home while a state default evaluates.
+        uint32_t state_need = 1 + plan_need(state->value);
+        if (state_need > pc.max_scratch) pc.max_scratch = state_need;
+    }
+    plan_walk(view->body, &pc);
+    uint32_t body_need = 1 + plan_need(view->body);
+    if (body_need > pc.max_scratch) pc.max_scratch = body_need;
+    plan_finish(&pc);
+    if (pc.failed) { outer->failed = true; return; }
+    for (AstEventHandler* handler = view->handler; handler;
+            handler = handler->next_handler) {
+        plan_handler(&pc, view, handler);
+        if (pc.failed) { outer->failed = true; return; }
+    }
+    view->interp_planned = true;
 }
 
 // Marks self-recursive calls that sit in tail position, so the walker can turn
@@ -1747,8 +1787,11 @@ static void plan_walk(AstNode* node, void* ctx) {
         // a separate activation, so it never consumes enclosing slots.
         plan_function(pc, (AstFuncNode*)node);
         return;
+    case AST_NODE_VIEW:
+        plan_view(pc, (AstViewNode*)node);
+        return;
     case AST_NODE_EVENT_HANDLER:
-        plan_handler(pc, (AstEventHandler*)node);
+        // The owning view plans handlers after its body bindings.
         return;
     case AST_NODE_VARIABLE_DECLARATOR:
         plan_assign_entry(pc, ((AstDeclaratorNode*)node)->entry);

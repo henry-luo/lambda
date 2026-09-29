@@ -333,7 +333,8 @@ view <document_pane> {
         >
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
-      if (~.preview_mode == "view") {
+      <div class:"document-content"
+      , if (~.preview_mode == "view") {
         if (is_image_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
@@ -356,6 +357,7 @@ view <document_pane> {
         , <pre id:"source-preview", class:"source-preview", source>
         >
       }
+      >
       <nav class:"document-tabs"
       , <button class:(if (~.preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
         if (not is_raster_document(~.file["extension"])) {
@@ -539,6 +541,11 @@ on preview_tab(tab) {
                            font-size: 11px; }
 
       .document-panel { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; background: #fff; }
+      /* A definite pane keeps long documents out of the column flex container's
+         intrinsic-size pass while preserving the preview's own scrolling. */
+      .document-content { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+      .document-content > .rendered-preview, .document-content > .source-tab-panel,
+      .document-content > .document-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
       .document-header { min-height: 77px; display: flex; align-items: center; justify-content: space-between;
                          gap: 18px; padding: 15px 28px; border-bottom: 1px solid #e2e6ec; background: #fbfcfe; }
       .document-path { margin-bottom: 3px; color: #7b8798; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
