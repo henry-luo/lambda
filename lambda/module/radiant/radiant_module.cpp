@@ -1122,16 +1122,18 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
         Rooted<Item> rooted_children(roots, radiant_layout_children_item(context));
         Rooted<Item> rooted_layout_context(roots, radiant_layout_context_item(context));
         Rooted<Item> rooted_result(roots, ItemNull);
-        if (runtime && !interp_has_active_state()) {
+        bool retained_callback = runtime && !interp_has_active_state();
+        if (retained_callback && rooted_fn.get().function->def_module) {
             Item callback_args[] = {
                 rooted_parent.get(), rooted_children.get(), rooted_layout_context.get()};
             // Document transforms finish before their retained layout pass. Route
-            // callbacks through the retained-call bridge so interpreted functions
-            // recreate their dispatch state after that top-level activation ends.
+            // interpreted callbacks through their defining module's retained-call bridge.
             rooted_result.set(interp_call_runtime_function(runtime, rooted_fn.get().function,
                 callback_args, 3));
         } else {
-            // render_svg() invokes layout during its caller's active interpreter pass.
+            // MIR callbacks resolve their own module slab, even after the
+            // document activation ends; reentrant calls keep the active scope.
+            RuntimeExecutionScope execution_scope(retained_callback ? callback_context : nullptr);
             LAMBDA_SCALAR_HOME(callback_result_home);
             rooted_result.set(radiant_lambda_fn_call3_into(rooted_fn.get().function,
                 rooted_parent.get(), rooted_children.get(), rooted_layout_context.get(),
