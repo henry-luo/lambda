@@ -2,7 +2,7 @@
 
 ## Summary
 
-Reduced `lambda/input/latex/fonts/` from **7.4 MB → 2.9 MB** (61% reduction) by removing unused font families and converting WOFF1 → WOFF2.
+Reduced `lmd/package/latex/fonts/` from **7.4 MB → 2.9 MB** (61% reduction) by removing unused font families and converting WOFF1 → WOFF2.
 
 ## Changes
 

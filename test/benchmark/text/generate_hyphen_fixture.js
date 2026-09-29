@@ -7,7 +7,7 @@ const textDir = __dirname;
 const sourcePath = path.join(textDir, "hyphen.js");
 const jsonPath = path.join(textDir, "hyphen_patterns.json");
 const headerPath = path.join(textDir, "c2mir", "hyphen_patterns_data.h");
-const lambdaPath = path.join(textDir, "../../../lambda/benchmark/hyphen_tables.ls");
+const lambdaPath = path.join(textDir, "../hyphen_tables.ls");
 const flatPath = path.join(textDir, "hyphen_tables.json");
 const source = fs.readFileSync(sourcePath, "utf8");
 const fixtureStart = source.indexOf("var hyphen_cases = [");

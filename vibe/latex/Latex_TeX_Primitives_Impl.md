@@ -6,7 +6,7 @@
 
 ### Files Modified:
 - [tex_document_model.cpp](lambda/tex/tex_document_model.cpp) - Added handlers for all primitives (3 locations)
-- [base.css](lambda/input/latex/css/base.css) - Added CSS classes for infinite glue and boxes
+- [base.css](lmd/package/latex/css/base.css) - Added CSS classes for infinite glue and boxes
 
 ### Primitives Implemented:
 | Category | Commands | HTML Output |

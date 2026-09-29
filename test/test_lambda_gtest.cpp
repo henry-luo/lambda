@@ -291,6 +291,15 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/mir/lambda/tune27_place_borrow.ls", "test/mir/lambda/tune27_place_borrow.txt"},
     {"test/mir/lambda/tune27_call_defined_binding.ls", "test/mir/lambda/tune27_call_defined_binding.txt"},
     {"test/mir/lambda/tune27_float_literal_nullable.ls", "test/mir/lambda/tune27_float_literal_nullable.txt"},
+    // the fixed matrix guard keeps short inputs on the checked arm (S7.1.3v2).
+    {"test/mir/lambda/result49_literal_matrix_extent.ls",
+     "test/mir/lambda/result49_literal_matrix_extent.txt"},
+    {"test/mir/lambda/result49_guarded_small_array.ls",
+     "test/mir/lambda/result49_guarded_small_array.txt"},
+    {"test/mir/lambda/result49_read_handle_call.ls",
+     "test/mir/lambda/result49_read_handle_call.txt"},
+    {"test/mir/lambda/result49_char_pair_compare.ls",
+     "test/mir/lambda/result49_char_pair_compare.txt"},
     // List fixes P4 (S12.3.5v2): the retired `item_spread` marked its operand,
     // and on the JIT that operand could be a pooled constant literal -- the
     // same function then returned a list on every later call, where the

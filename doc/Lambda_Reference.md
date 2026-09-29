@@ -289,7 +289,7 @@ import tex: lambda.doc.math.math   // a shipped package
 area(1.0)                  // 3.14159
 ```
 
-A relative import `.a.b` resolves beside the importing file; a bare `a` resolves in the current working directory; `lambda.*` paths resolve under `LAMBDA_HOME`. Import forms, resolution, instantiation, JavaScript modules and known issues are described in [Lambda_Modules.md](Lambda_Modules.md).
+A relative import `.a.b` resolves beside the importing file and `~~.a` one directory up; a bare name is a package, so `lambda.*` paths resolve under `LAMBDA_HOME` and any other bare name is an error (E216). Import forms, resolution, instantiation, JavaScript modules and known issues are described in [Lambda_Modules.md](Lambda_Modules.md).
 
 ---
 

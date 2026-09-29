@@ -1598,9 +1598,9 @@ protected:
         // load_script from a worker would test per-thread compilation instead
         // of shared immutable module execution.
         Script* chart_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/package/chart/chart.ls", NULL, true);
+        "lmd/package/chart/chart.ls", NULL, true);
         Script* pdf_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/package/pdf/pdf.ls", NULL, true);
+        "lmd/package/pdf/pdf.ls", NULL, true);
         ASSERT_NE(chart_package, nullptr);
         ASSERT_NE(pdf_package, nullptr);
         for (int i = 0; i < shared_module_stress_case_count; i++) {

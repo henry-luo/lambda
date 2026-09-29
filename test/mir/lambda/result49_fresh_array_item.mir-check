@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "S9.1.2, S9.3.1, S10.6.1: a plain Array plus one literal item allocates only the fresh result, preserving list splicing and snapshots on fallback.",
+  "checks": [
+    {
+      "in_func": "_append_value_#",
+      "expect": ["call\tfn_join_fresh_array_item_p, fn_join_fresh_array_item"],
+      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end"]
+    }
+  ]
+}

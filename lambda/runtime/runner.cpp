@@ -295,45 +295,17 @@ extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
 // ============================================================================
 // Lambda Home Path
 // ============================================================================
-// g_lambda_home is the directory containing Lambda's runtime assets
-// (package trees, input/).
-//
-//   Dev default  : "./lambda"   (assets live next to source)
-//   Release      : "./lmd"      (set via -DLAMBDA_HOME_RELEASE compile flag,
-//                                or override at runtime with LAMBDA_HOME env var)
+// g_lambda_home is the directory containing Lambda's runtime assets (the
+// package tree). Dev and release share one layout: assets live in ./lmd/ in
+// both the source checkout and the release folder; LAMBDA_HOME overrides it.
 //
 // The name "lmd" avoids a name clash between the lambda executable and a
 // directory of the same name on macOS/Linux.
-
-#ifdef LAMBDA_HOME_RELEASE
 const char* g_lambda_home = "./lmd";
-#else
-const char* g_lambda_home = "./lambda";
-#endif
-
-// check if a directory exists
-static bool dir_exists(const char* path) {
-    return file_is_dir(path);
-}
 
 void lambda_home_init(void) {
-    // 1. environment variable always wins
     const char* env = shell_getenv("LAMBDA_HOME");
-    if (env && env[0]) {
-        g_lambda_home = env;
-        return;
-    }
-
-    // 2. auto-detect: try the compiled-in default first, then the other
-    if (dir_exists(g_lambda_home)) return;
-
-#ifdef LAMBDA_HOME_RELEASE
-    // release binary but ./lmd/ missing — fall back to ./lambda/ (dev tree)
-    if (dir_exists("./lambda")) { g_lambda_home = "./lambda"; }
-#else
-    // dev binary but ./lambda/ missing — try ./lmd/ (release layout)
-    if (dir_exists("./lmd"))    { g_lambda_home = "./lmd"; }
-#endif
+    if (env && env[0]) g_lambda_home = env;
 }
 
 // Build a malloc'd path "<g_lambda_home>/<rel>".  Caller must free().

@@ -524,7 +524,7 @@ S2.5.5v2:
    list-returning function), one-item for-results are their item.
 2. *Library code that treats a bound for-expression as an array* (chart,
    latex, math, pdf, editing, dom-derive; ~120 `let x = (for …)` sites in
-   `lambda/package/`, more as bare function results): at one item the list
+   `lmd/package/`, more as bare function results): at one item the list
    collapses (`hits[0]` on the collapsed map is `null` —
    `pdf/resolve.ls:51 find_obj`; `latex children_array` returns the string, so
    `[0]` is its first character), at zero it is `null`. The migration is not
@@ -541,7 +541,7 @@ S2.5.6 (a bound list spreads wherever it lands: 4). Needs S8.3.3v3.
 **Finding the sites.** A temporary compile-time log in `transpile_for` and in
 the multi-value list/block paths (removed afterwards) recorded every list
 producer that finishes in **value position** — exactly the sites whose meaning
-S2.5.5v2 changed. Importing every `lambda/package` module under
+S2.5.5v2 changed. Importing every `lmd/package` module under
 `LAMBDA_TIER=jit` gave **205 sites** (186 for-expressions, 19 multi-value
 blocks); no other list-literal site existed. Every other for-expression sits in
 an item position, where splicing is unchanged.

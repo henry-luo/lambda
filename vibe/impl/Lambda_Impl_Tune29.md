@@ -478,7 +478,7 @@ column is the archived release binary's dump of the same script.
   Motion)` and its caller read fields. Output identical to the golden on all
   three tiers. `find_intersection` 2,341 → 454 instructions (74 generic
   `fn_mul`/`fn_sub`/`fn_add` calls gone); module 15,036 → 12,182 (with T29-2).
-- **awfy/richards2 (shared core `lambda/benchmark/richards2_core.ls`).**
+- **awfy/richards2 (shared core `test/benchmark/richards2_core.ls`).**
   `tasks: TaskControlBlock?[]`, `pkts: Packet?[]`. `datas` stays `array`: it
   holds four record kinds (the C port's `void *handle`), and a union element
   would stay boxed under D2.5.3. Output identical on all tiers for both the

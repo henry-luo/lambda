@@ -36,7 +36,7 @@ S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
 §5.1–§5.6 → S16.6.1–S16.6.5, §7.1–§7.2 → S16.8.1–S16.8.2, §7.3–§7.5 →
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
-S16.9.4 + S16.9.6, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v3, §7.23 → S16.7 (v2: now points to S2.6),
+S16.9.4 + S16.9.6 + S16.9.8, §7.22 → S16.9.5, §7.14 → S16.1.3v2/S16.2.3v3, §7.23 → S16.7 (v2: now points to S2.6),
 §7.24 → S16.10, §7.25 → S12.3.7, §7.26 → S16.8.9 + S16.4.1v3, §7.27 → S2.5 + S2.6 + S16.1.2v2 + S16.4.1v4 + S16.7.2v2/S16.7.3v2 (2026-09-22: + S2.5.6–S2.5.8, S10.6.1, S12.3.5v2 and the v2/v3 revisions it lists), §7.28 → S11.1.1v3 + S11.1.6v2 + S16.8.6v3, §7.29 → S11.1.5v2 + S16.2.3v3, §7.30 → S16.6.7v2 + S16.4.2v2 + S16.6.8v2.
 **Not ratified into S16 (process, not syntax):** ledger 18 (authority order)
 and 32 (two parsers, §4.4) stay here. A future formal syntax document is
@@ -2194,6 +2194,34 @@ import rule, from the first import commit (2025-06-03), untested, and the C
 parser never accepted it. The C parser in turn accepted an equally
 undocumented `/` separator, which resolved only because the module resolver
 passes `/` through. Both separators are retired.)*
+
+**Import roots (S16.9.8, USER 2026-09-29).** The first token of an import
+path picks its root, and there are three:
+
+1. **A name is a package root.** Names belong to packages: `lambda` is the
+   reserved root for what Lambda ships (D7.2.4), the built-in and registered
+   modules keep their bare names (`import math` ≡ `import lambda.math`), and
+   every other name is held for packages from the future Lambda package
+   registry. A bare root never falls back to a file, so `import
+   test.benchmark.x` is an error (E216) — there is no `test` package.
+2. **`.` or `~~` starts a relative path**, resolved against the importer's
+   directory. `~~` is the path grammar's parent step (S2.4.1v2) in its
+   leading position: `import ~~.a` is `../a`, `import ~~.~~.a.b` is
+   `../../a/b`. It forms the leading run only — `import .~~.a` and `import
+   ~~.a.~~.b` are errors — so every relative module has one spelling.
+3. **`/` is reserved**: `import /.a` is an error, holding the rooted form
+   for a later meaning.
+
+*What this replaces.* Before this ruling a bare `import a.b` loaded
+`./a/b.ls` from the working directory, as `Lambda_Modules.md` documented, but
+the resolver actually swapped the first segment for the Lambda home (a
+leftover of the pre-D7.2.4 `lambda.package.x` scheme), so `import
+test.benchmark.x` had been loading `lambda/benchmark/x.ls`. Working-directory
+resolution also made a module's meaning depend on where the script was run
+from. Package names and relative files now cannot collide: a bare name is a
+package, and a file is always reached relative to its importer. The benchmark
+helpers moved to `test/benchmark/` and are imported as `~~.richards2_core`
+and `~~.~~.benchmark.hyphen_*`.
 
 **Spec impact.** `S2.4.1` takes a **v3** at batch ratification (the
 relative form respelled), and S16.2.4 takes a v2 (the carve-out widened

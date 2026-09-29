@@ -313,7 +313,7 @@ lambda convert "test_output/auto/results/md_001_temp.html" -f html -t markdown -
 # Compare md_001_github_linux_readme.md vs md_001_roundtrip.md
 
 # Schema validation
-lambda validate "test_output/auto/results/md_001_to_html.html" --schema "lambda/input/html5_schema.ls"
+lambda validate "test_output/auto/results/md_001_to_html.html" --schema "lmd/package/doc/html5_schema.ls"
 ```
 
 #### 3.3.4 Performance Monitoring
@@ -328,7 +328,7 @@ lambda validate "test_output/auto/results/md_001_to_html.html" --schema "lambda/
 #### 3.4.1 Schema Selection Logic
 ```python
 SCHEMA_MAPPING = {
-    'html': 'lambda/input/html5_schema.ls',
+    'html': 'lmd/package/doc/html5_schema.ls',
     'markdown': 'lambda/input/markdown_schema.ls',
     'json': 'lambda/input/json_schema.ls',
     'xml': 'lambda/input/xml_schema.ls',
@@ -602,7 +602,7 @@ https://feeds.feedburner.com/oreilly/radar.xml
     "html": {
       "file_extensions": [".html", ".htm"],
       "max_size_mb": 8,
-      "schema_path": "lambda/input/html5_schema.ls",
+      "schema_path": "lmd/package/doc/html5_schema.ls",
       "conversion_targets": ["markdown", "json", "xml"],
       "discovery_sources": ["w3c", "popular_websites", "documentation"]
     }

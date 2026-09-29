@@ -1,6 +1,6 @@
 // typed Liang trie traversal; text stays in strings throughout the pipeline.
-import test.benchmark.hyphen_tables
-import test.benchmark.hyphen_common
+import .hyphen_tables
+import .hyphen_common
 
 type WordCache = {keys: string[], values: string[]}
 type MarkerCache = {keys: string[], values: int[][]}

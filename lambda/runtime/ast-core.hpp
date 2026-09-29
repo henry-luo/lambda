@@ -16,6 +16,14 @@ typedef struct LangProfile LangProfile;
 typedef struct Pool Pool;
 struct hashmap;
 typedef struct _ArrayList ArrayList;
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_join_produces_fresh_array(AstNode* node);
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_type_is_array_contract(Type* type);
 
 typedef enum AstNodeType : uint16_t {
     AST_NODE_NULL = 0,
@@ -765,6 +773,7 @@ typedef struct AstFieldNode : AstNode {
     // T29-1: nonzero when this node spells a synthesized place handle
     uint8_t handle_role;       // AstPlaceHandleRole
     uint16_t handle_slot;      // 1-based, unique within the function
+    bool handle_rooted;        // a read handle retained across a pure call
 } AstFieldNode;
 
 typedef struct AstCallNode : AstNode {
@@ -1200,6 +1209,13 @@ typedef struct AstCowPath {
     int count;
 } AstCowPath;
 
+// Compare stable COW path segments across separately parsed spellings.
+#ifdef __cplusplus
+extern "C"
+#endif
+bool ast_cow_path_segment_equal(AstNode* a, bool a_member,
+        AstNode* b, bool b_member);
+
 static inline bool ast_collect_cow_path(AstCowPath* path, AstNode* node) {
     node = ast_unwrap_primary(node);
     if (!node) return false;
@@ -1237,6 +1253,8 @@ static inline bool ast_expr_produces_owned_container(AstNode* root_expr) {
     case AST_NODE_NEW_EXPR:
     case AST_NODE_CALL_EXPR:
         return true;
+    case AST_NODE_BINARY:
+        return ast_join_produces_fresh_array(root_expr);
     default:
         return false;
     }
@@ -1269,6 +1287,7 @@ static inline bool ast_expr_insertion_needs_capture(AstNode* expr) {
 static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
         TypeId target_tid) {
     if (ast_type_needs_mutable_clone(expr_tid) && expr_tid != LMD_TYPE_ANY) return true;
+    if (expr && ast_type_is_array_contract(expr->type)) return true;
     if (expr_tid != LMD_TYPE_ANY && target_tid != LMD_TYPE_ANY) return false;
 
     AstNode* root_expr = ast_unwrap_primary(expr);
@@ -1287,6 +1306,8 @@ static inline bool ast_expr_may_return_container(AstNode* expr, TypeId expr_tid,
     case AST_NODE_FOR_EXPR:
     case AST_NODE_LOOP:
         return true;
+    case AST_NODE_BINARY:
+        return ast_join_produces_fresh_array(root_expr);
     default:
         // `any` arithmetic/comparison paths are scalar in practice; cloning
         // their boxed result turns tight integer loops into runtime calls.

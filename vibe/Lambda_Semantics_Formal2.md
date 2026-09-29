@@ -2510,7 +2510,7 @@ pending a ruling on the module top level (LR12-26). The designer ruled:
    `fn_call2: …` messages pinned by `test/std/boundary/error_chain_depth`).
 
 **Migration.** Three reliance sites were fixed rather than excused:
-`lambda/package/dom/edit_history.ls` (`clear_history` and `replay_retained` write the
+`lmd/package/dom/edit_history.ls` (`clear_history` and `replay_retained` write the
 session history, so they became `pn`; their only caller `replay` was already `pn`),
 `test/lambda/proc/type_binder_proc_raw.ls` and `test/mir/lambda/tune26_nested_tco_native_result.ls`
 (top-level `pn` calls moved into `pn main()`; goldens unchanged). The DOM JS tests that

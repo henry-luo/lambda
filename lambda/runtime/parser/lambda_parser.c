@@ -166,6 +166,8 @@ static const char* const error_expected_relative_import_component = "expected a 
 static const char* const error_expected_import_module = "expected an import module";
 static const char* const error_expected_import_component = "expected an import component";
 static const char* const error_import_separator = "import paths separate names with '.'";
+static const char* const error_import_rooted = "rooted import paths ('/') are reserved; use '.' or '~~' for a relative module";
+static const char* const error_import_parent_step = "'~~' steps lead a relative import ('~~.a', '~~.~~.a')";
 static const char* const error_pub_declaration = "'pub' modifies a declaration; write 'pub let'";
 // S16.10.1: an import alias is a binding, so it takes no keyword and no
 // quoted spelling — a quoted use site would be a symbol, which never reads a
@@ -2365,16 +2367,31 @@ static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
 // S16.9.6: `.` is the only import separator (`import .a.b`). The parser used
 // to take `/` as well, undocumented, and `import .a/b` resolved only because
 // the resolver passes `/` through.
+// S16.9.8: a path starts with a package name, `.` (beside the importer) or a
+// leading run of `~~` parent steps (`~~.~~.a`); a rooted `/` path is reserved.
+// `~~` never follows a name or the `.` root, so each module has one spelling.
 static bool parser_parse_import_module(LambdaRdParser* parser, LambdaToken* first_out, LambdaToken* last_out) {
     LambdaToken first = parser->current;
     LambdaToken last = first;
-    bool relative = first.kind == LAMBDA_TOK_DOT;
-    if (relative) parser_advance(parser);
+    if (first.kind == LAMBDA_TOK_SLASH) return parser_fail(parser, error_import_rooted, LAMBDA_TOK_DOT);
+    bool parent = first.kind == LAMBDA_TOK_PARENT;
+    while (parser->current.kind == LAMBDA_TOK_PARENT) {
+        parser_advance(parser);
+        if (!parser_expect_message(parser, LAMBDA_TOK_DOT, error_expected_relative_import_component)) return false;
+    }
+    bool relative = parent || first.kind == LAMBDA_TOK_DOT;
+    if (first.kind == LAMBDA_TOK_DOT) parser_advance(parser);
+    if (parser->current.kind == LAMBDA_TOK_PARENT) {
+        return parser_fail(parser, error_import_parent_step, LAMBDA_TOK_IDENTIFIER);
+    }
     if (!parser_take_name(parser, token_is_key, relative
             ? error_expected_relative_import_component : error_expected_import_module, &last)) return false;
     if (!relative) first = last;
     while (parser->current.kind == LAMBDA_TOK_DOT) {
         parser_advance(parser);
+        if (parser->current.kind == LAMBDA_TOK_PARENT) {
+            return parser_fail(parser, error_import_parent_step, LAMBDA_TOK_IDENTIFIER);
+        }
         if (!parser_take_name(parser, token_is_key,
                 error_expected_import_component, &last)) return false;
     }

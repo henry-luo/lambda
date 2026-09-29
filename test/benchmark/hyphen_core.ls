@@ -2,7 +2,7 @@
 // The en-US trie is mechanically extracted from hyphen.js before timing starts.
 
 let hyphen_data_path = "test/benchmark/text/hyphen_patterns.json"
-import test.benchmark.hyphen_common
+import .hyphen_common
 
 pn trie_child(nodes, edges, node_index: int, code: int) int {
     let node = nodes[node_index]

@@ -3406,7 +3406,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     // Step 3: Load the document stylesheet.
     auto step3_start = time_now_ns();
     CssStylesheet* markdown_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/markdown.css", "Lambda Markdown", "markdown stylesheet", true);
+        css_engine, pool, "package/doc/markdown.css", "Lambda Markdown", "markdown stylesheet", true);
     if (!markdown_stylesheet) {
         log_warn("Continuing without stylesheet - markdown will use browser defaults");
     }
@@ -3420,9 +3420,9 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     CssStylesheet* katex_stylesheet = nullptr;
     {
         math_stylesheet = load_home_stylesheet(
-            css_engine, pool, "input/math.css", "Lambda Markdown", "math stylesheet", false);
+            css_engine, pool, "package/math/math.css", "Lambda Markdown", "math stylesheet", false);
         katex_stylesheet = load_home_stylesheet(
-            css_engine, pool, "input/latex/css/katex.css", "Lambda Markdown", "KaTeX font stylesheet", false);
+            css_engine, pool, "package/math/katex.css", "Lambda Markdown", "KaTeX font stylesheet", false);
     }
 
     // Step 5: Apply CSS cascade to DOM tree
@@ -3454,7 +3454,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {
     return load_home_styled_source_doc(
         wiki_url, viewport_width, viewport_height, pool,
-        "wiki", "Lambda Wiki", "input/wiki.css", "wiki stylesheet");
+        "wiki", "Lambda Wiki", "package/doc/wiki.css", "wiki stylesheet");
 }
 
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {
@@ -3913,7 +3913,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     CssStylesheet** inline_stylesheets = nullptr;
 
     if (!is_html_document) {
-        char* css_filename = lambda_home_path("input/script.css");
+        char* css_filename = lambda_home_path("package/doc/script.css");
         script_stylesheet = load_pool_backed_stylesheet(
             css_engine, pool, css_filename, "Lambda Script", "script.css", true);
         mem_free(css_filename);

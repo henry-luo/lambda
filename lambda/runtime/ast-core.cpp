@@ -1,9 +1,70 @@
 #include "ast-core.hpp"
+#include "type_contract.hpp"
+#include "../lambda-data.hpp"
 
 #include <stdlib.h>
 #include <string.h>
 #include "../../lib/mempool.h"
 #include "../../lib/log.h"
+
+extern "C" bool ast_cow_path_segment_equal(AstNode* a, bool a_member,
+        AstNode* b, bool b_member) {
+    if (a_member != b_member) return false;
+    a = ast_unwrap_primary_to_leaf(a);
+    b = ast_unwrap_primary_to_leaf(b);
+    if (!a || !b || a->node_type != b->node_type) return false;
+    if (a->node_type == AST_NODE_IDENT) {
+        AstIdentNode* left = (AstIdentNode*)a;
+        AstIdentNode* right = (AstIdentNode*)b;
+        if (!a_member) return left->entry && left->entry == right->entry;
+        String* ln = left->name;
+        String* rn = right->name;
+        return ln && rn && (ln == rn ||
+            (ln->len == rn->len && memcmp(ln->chars, rn->chars, ln->len) == 0));
+    }
+    if (a_member) return false;
+    if (a->node_type == AST_NODE_PRIMARY) {
+        AstPrimaryNode* left = (AstPrimaryNode*)a;
+        AstPrimaryNode* right = (AstPrimaryNode*)b;
+        return left->literal_value_kind == AST_PRIMARY_LITERAL_VALUE_INT &&
+            right->literal_value_kind == AST_PRIMARY_LITERAL_VALUE_INT &&
+            left->literal_value == right->literal_value;
+    }
+    if (a->node_type != AST_NODE_LITERAL) return false;
+    AstLiteralNode* left = (AstLiteralNode*)a;
+    AstLiteralNode* right = (AstLiteralNode*)b;
+    return left->literal_type == AST_LITERAL_NUMBER &&
+        right->literal_type == AST_LITERAL_NUMBER && !left->has_decimal &&
+        !right->has_decimal && !left->is_bigint && !right->is_bigint &&
+        left->value.number_value == right->value.number_value;
+}
+
+extern "C" bool ast_type_is_array_contract(Type* type) {
+    if (!type) return false;
+    if (type->type_id == LMD_TYPE_ARRAY || type->type_id == LMD_TYPE_ARRAY_NUM) {
+        return true;
+    }
+    LambdaArrayContractInfo info = {};
+    return lambda_array_contract_info(type, &info);
+}
+
+static bool ast_nonnull_array_type(Type* type) {
+    return type && !lambda_type_accepts_null(type) &&
+        ast_type_is_array_contract(type);
+}
+
+extern "C" bool ast_join_produces_fresh_array(AstNode* node) {
+    node = ast_unwrap_primary(node);
+    if (!node || node->node_type != AST_NODE_BINARY) return false;
+    AstBinaryNode* binary = (AstBinaryNode*)node;
+    if (binary->op != OPERATOR_JOIN) return false;
+    AstNode* left = ast_unwrap_primary(binary->left);
+    AstNode* right = ast_unwrap_primary(binary->right);
+    // A pair of non-null array operands enters fn_join_sequences, which
+    // produces a fresh owner even for empty inputs (S10.6.1, S9.1.2).
+    return left && right && ast_nonnull_array_type(left->type) &&
+        ast_nonnull_array_type(right->type);
+}
 
 // Names are stable report keys, not prose: the census baseline file and the
 // AST dump are diffed across builds [Type_Infer TI3].

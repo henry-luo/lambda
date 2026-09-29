@@ -708,7 +708,7 @@ TEST_F(ValidatorTest, DISABLED_EmlAutoDetection) {
 
 TEST_F(ValidatorTest, DISABLED_EmlFormatDetection) {
     test_cli_validation_helper("test/lambda/validator/sample.eml",
-                              "lambda/input/eml_schema.ls", "eml", true);
+                              "lmd/package/doc/eml_schema.ls", "eml", true);
 }
 
 TEST_F(ValidatorTest, DISABLED_EmlSchemaStructure) {
@@ -718,7 +718,7 @@ TEST_F(ValidatorTest, DISABLED_EmlSchemaStructure) {
         "MIME-Version:", "X-Mailer:", "Reply-To:",
         "Cc:", "Bcc:", "In-Reply-To:", "References:"
     };
-    verify_schema_features("lambda/input/eml_schema.ls",
+    verify_schema_features("lmd/package/doc/eml_schema.ls",
                           eml_features, sizeof(eml_features)/sizeof(eml_features[0]));
 }
 
@@ -730,7 +730,7 @@ TEST_F(ValidatorTest, DISABLED_VcfAutoDetection) {
 
 TEST_F(ValidatorTest, DISABLED_VcfFormatDetection) {
     test_cli_validation_helper("test/lambda/validator/sample.vcf",
-                              "lambda/input/vcf_schema.ls", "vcf", true);
+                              "lmd/package/doc/vcf_schema.ls", "vcf", true);
 }
 
 TEST_F(ValidatorTest, DISABLED_VcfSchemaStructure) {
@@ -739,7 +739,7 @@ TEST_F(ValidatorTest, DISABLED_VcfSchemaStructure) {
         "ORG:", "TEL:", "EMAIL:", "ADR:", "URL:",
         "BDAY:", "NOTE:", "PHOTO:", "TITLE:", "ROLE:"
     };
-    verify_schema_features("lambda/input/vcf_schema.ls",
+    verify_schema_features("lmd/package/doc/vcf_schema.ls",
                           vcf_features, sizeof(vcf_features)/sizeof(vcf_features[0]));
 }
 
@@ -751,7 +751,7 @@ TEST_F(ValidatorTest, DISABLED_IcsAutoDetection) {
 
 TEST_F(ValidatorTest, DISABLED_IcsFormatDetection) {
     test_cli_validation_helper("test/lambda/validator/sample.ics",
-                              "lambda/input/ics_schema.ls", "ics", true);
+                              "lmd/package/doc/ics_schema.ls", "ics", true);
 }
 
 TEST_F(ValidatorTest, DISABLED_IcsSchemaStructure) {
@@ -760,7 +760,7 @@ TEST_F(ValidatorTest, DISABLED_IcsSchemaStructure) {
         "BEGIN:VEVENT", "END:VEVENT", "UID:", "DTSTART:", "DTEND:",
         "SUMMARY:", "DESCRIPTION:", "LOCATION:", "RRULE:", "EXDATE:"
     };
-    verify_schema_features("lambda/input/ics_schema.ls",
+    verify_schema_features("lmd/package/doc/ics_schema.ls",
                           ics_features, sizeof(ics_features)/sizeof(ics_features[0]));
 }
 
