@@ -3222,15 +3222,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     return !declined;
 }
 
-// EO4: create and bind a document's evaluator at setup, for interactive
-// sessions only. A one-shot layout/render run dispatches no events and needs
-// none. A `.ls` page and a script-bearing page already own one; a script-less
-// HTML page is the only case this adds.
-//
-// Deciding here rather than at first event is the whole point: at setup the
-// parser has already seen whether the page has scripts, whereas at dispatch
-// nothing can tell whether JS will start later — which is what stranded
-// js_active_runtime_state and crashed an iframe page.
+// D5.4.1: a script-less interactive document claims its own evaluator when
+// behavior first needs one; a script-bearing document already owns its realm.
+// A claim may replace the thread binding only outside an active event scope.
+static __thread int s_event_scope_depth = 0;
+
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     if (!doc) return false;
     if (dom_document_script_runtime(doc)) return true;   // EO3: already owns one
@@ -3250,6 +3246,10 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     }
     if (!s_enabled) return false;
     if (doc->js_has_dom_realm) return false;             // EO6 owns that case
+    if (s_event_scope_depth > 0 || (context && context->execution_depth > 0)) {
+        log_debug("document-evaluator: deferred evaluator claim during active dispatch");
+        return false;
+    }
 
     Runtime* rt = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     if (!rt) return false;
@@ -3258,7 +3258,9 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     // mark even a script-less evaluator as UI-owned before loading dom.ls.
     runtime_set_ui_result_arena(rt, doc->input ? doc->input->arena : nullptr);
     EvalContext* ctx = runtime_get_eval_context(rt);
-    if (!ctx || !eval_context_init(ctx)) {
+    // A script-less parent may first need behavior while an iframe evaluator
+    // is bound. Claim its own evaluator at this quiescent input boundary.
+    if (!ctx || !radiant_eval_context_switch(ctx)) {
         log_error("document-evaluator: could not create and bind an evaluator");
         runtime_cleanup(rt);
         mem_free(rt);
@@ -3534,15 +3536,14 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // document-owned script runtime.
     // It remains valid for either document-loader ordering.
     //
-    // EO4: dispatch never creates. The evaluator, if this document is to have
-    // one, was created and bound at document setup by
-    // radiant_document_ensure_evaluator() — which runs after the loader has
-    // executed the page's scripts, so js_has_dom_realm is already settled.
+    // The loader has settled js_has_dom_realm before a direct event can claim
+    // a script-less document's evaluator through radiant_document_ensure_evaluator().
     Runtime* rt = dom_document_script_runtime(doc);
-    if (!rt && context && context->runtime) {
+    if (!rt && doc->js_has_dom_realm && context && context->runtime) {
         // A synchronous JS bridge may execute before the loader retains the
         // document realm. The current evaluator can load the package for this
-        // call; the document must not borrow that stack-owned host pointer.
+        // call. A script-less parent must claim its own runtime rather than
+        // borrowing the runtime of an iframe that will later be destroyed.
         rt = context->runtime;
     }
     if (!rt) {
@@ -11456,10 +11457,6 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target) {
     target->stack_limit = lambda_stack_recoverable_limit();
     return true;
 }
-
-// Depth of active event scopes on this thread. A switch is only taken at the
-// outermost one; a nested dispatch runs on whatever is already bound.
-static __thread int s_event_scope_depth = 0;
 
 struct EventDocumentScope {
     bool active;
