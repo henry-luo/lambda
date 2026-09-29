@@ -5,6 +5,8 @@
 // only when opened so the prototype remains useful for large worktrees.
 //
 // Run:
+//   ./lambda.exe view test/ui/doc_editor.html
+// Direct view without the startup splash:
 //   ./lambda.exe view test/ui/doc_editor.ls
 // Headless smoke:
 //   ./lambda.exe view test/ui/doc_editor.ls --headless --no-log

@@ -82,10 +82,10 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     EvalContext* pump_ctx = runtime_get_eval_context(runtime);
     if (!pump_ctx || !runtime_heap(runtime) || !runtime_name_pool(runtime)) return false;
     Context* saved_input_ctx = input_context;
-    // Promise and timer callbacks allocate during the host pump just like event
-    // listeners do. The pump may initialize a fresh host thread, but it cannot
-    // replace a different evaluator already assigned to that thread.
-    if (!runtime_context_bind_retained(runtime, pump_ctx)) return false;
+    // An iframe load can leave its evaluator bound after layout. The host-loop
+    // turn is quiescent, so return ownership to the page whose timers we pump.
+    if (!radiant_eval_context_switch(pump_ctx) ||
+        !runtime_context_bind_retained(runtime, pump_ctx)) return false;
     input_context = nullptr;
     if (js_runtime_state_for(pump_ctx) && !js_runtime_state_init(pump_ctx)) {
         input_context = saved_input_ctx;
@@ -1552,6 +1552,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             layout_html_doc(&ui_context, doc, false);
             phase_timing.layout_ms = view_phase_elapsed_ms(layout_start, time_now_ns());
             log_mem_stage("after-layout");
+            radiant_dispatch_lambda_body_load(&ui_context, doc);
         }
         log_notice("view: layout complete, rendering...");
         // Render document

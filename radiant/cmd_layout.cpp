@@ -3692,10 +3692,10 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         return nullptr;
     }
     g_lambda_document_load_diagnostic[0] = '\0';
-    if (context) {
-        // Starting a second document Runtime on an occupied eval thread would
-        // require the forbidden save/switch/restore lifetime pattern.
-        log_error("load_lambda_script_doc: eval thread already owns a Runtime");
+    if (context && context->execution_depth != 0) {
+        // A child document may take the thread only after its parent evaluator
+        // has returned; switching with live frames would violate D5.4.1.
+        log_error("load_lambda_script_doc: evaluator still executing");
         return nullptr;
     }
 
@@ -3717,8 +3717,8 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         mem_free(runtime);
         return nullptr;
     }
-    if (!eval_context_init(layout_context)) {
-        log_error("load_lambda_script_doc: failed to initialize eval thread");
+    if (!radiant_eval_context_switch(layout_context)) {
+        log_error("load_lambda_script_doc: failed to acquire eval thread");
         release_layout_runtime(runtime);
         return nullptr;
     }
@@ -3963,7 +3963,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
         time_elapsed_ms_f(total_start, total_end));
 
-    log_notice("[Lambda Script] Document loaded and styled");
+    log_debug("[Lambda Script] Document loaded and styled");
     return dom_doc;
 }
 

@@ -1,0 +1,7 @@
+{
+  "name": "Lambda body template receives page load",
+  "html": "test/ui/iframe_lambda_child.ls",
+  "events": [
+    {"type":"assert_text","target":{"selector":"#child-ready"},"contains":"Lambda child ready"}
+  ]
+}

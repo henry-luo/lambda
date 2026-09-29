@@ -1961,6 +1961,7 @@ static bool event_record_is_cancelable(const char* event_name) {
            strcmp(event_name, "compositionupdate") != 0 &&
            strcmp(event_name, "compositionend") != 0 &&
            strcmp(event_name, "scroll") != 0 &&
+           strcmp(event_name, "load") != 0 &&
            strcmp(event_name, "selectionchange") != 0;
 }
 
@@ -11146,6 +11147,21 @@ struct EventDocumentScope {
         // other document's dispatch switches it away (EO5v2).
     }
 };
+
+void radiant_dispatch_lambda_body_load(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc || doc->page_kind != DOM_PAGE_KIND_LAMBDA_SCRIPT ||
+        dom_document_has_js_realm(doc)) return;
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body) return;
+    EventDocumentScope scope(uicon, doc);
+    if (!scope.active) return;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    evcon.target = static_cast<View*>(body);
+    dispatch_lambda_handler(&evcon, static_cast<View*>(body), "load",
+                            nullptr, nullptr, false);
+}
 
 void rdt_event_set_mouse_position(RdtEvent* event, EventType type,
                                   float x, float y, double timestamp) {
