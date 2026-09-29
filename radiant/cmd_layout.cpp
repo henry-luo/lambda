@@ -223,7 +223,8 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
     int viewport_width, int viewport_height,
     const DocumentJsHostConfig* js_host_config, CookieJar* top_level_cookie_jar,
-    HtmlLoadPhaseTiming* timing, DocumentScriptPhaseTiming* script_timing);
+    HtmlLoadPhaseTiming* timing, DocumentScriptPhaseTiming* script_timing,
+    bool defer_html_scripts);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
@@ -2063,6 +2064,155 @@ static char* generate_error_page_html(const char* url, const char* error_title, 
     return mem_strdup(buf, MEM_CAT_LAYOUT);
 }
 
+DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
+                                                     const DomDocument* source) {
+    DocumentJsHostConfig config = {};
+    if (!source) return config;
+    // A child browsing context keeps the host loop and clock policy of its parent.
+    config.ui_context = uicon;
+    config.host_driven_loop = source->js.host_driven_loop;
+    config.auto_close_event_loop = source->js.auto_close_event_loop;
+    config.virtual_clock_enabled = source->js.virtual_clock_enabled;
+    config.virtual_clock_ms = source->js.virtual_clock_ms;
+    config.post_load_settle_ms = source->js.post_load_settle_ms;
+    config.redirect_stdout_to_stderr = source->js.redirect_stdout_to_stderr;
+    config.disable_css_animations = source->disable_css_animations;
+    return config;
+}
+
+void document_apply_js_host_config(DomDocument* doc,
+                                   const DocumentJsHostConfig* config) {
+    if (!doc || !config) return;
+    doc->js.host_ui_context = config->ui_context;
+    doc->js.host_driven_loop = config->host_driven_loop;
+    doc->js.auto_close_event_loop = config->auto_close_event_loop;
+    doc->js.virtual_clock_enabled = config->virtual_clock_enabled;
+    doc->js.virtual_clock_ms = config->virtual_clock_ms;
+    doc->js.post_load_settle_ms = config->post_load_settle_ms;
+    doc->js.redirect_stdout_to_stderr = config->redirect_stdout_to_stderr;
+    doc->disable_css_animations = config->disable_css_animations;
+}
+
+// Script realms stay on the host thread; async loaders transfer only the parsed DOM.
+static void run_html_document_scripts(DomDocument* dom_doc, Pool* pool,
+    HtmlLoadPhaseTiming* timing, DocumentScriptPhaseTiming* script_timing,
+    bool profile_recascade_completed, int script_prefetch_count,
+    uint64_t script_prefetch_start_ns, uint64_t initial_cascade_ns,
+    uint64_t* post_script_ns) {
+    DomElement* dom_root = dom_doc->root;
+    Element* html_root = dom_doc->html_root;
+    CssEngine* css_engine = (CssEngine*)dom_doc->services.cached_css_engine;
+    auto t_post_script = initial_cascade_ns;
+    // Step 2d: Execute <script> elements (inline + external) and body onload handlers
+    // P17: scripts run after the initial cascade so load-time CSSOM reads see
+    // resolved styles; if scripts mutate DOM/classes/stylesheets we recascade
+    // below while preserving JS inline style writes.
+    if (script_prefetch_count > 0) {
+        log_info("[PREFETCH] %d script requests overlapped CSS parsing for %.1fms wall",
+                 script_prefetch_count,
+                 time_elapsed_ms_f(script_prefetch_start_ns, time_now_ns()));
+    }
+    log_mem_stage("load_html: before_scripts");
+    execute_document_scripts_profiled(html_root, dom_doc, pool, dom_doc->url, script_timing);
+    log_mem_stage("load_html: after_scripts");
+    // The retained JS runtime is process-root-owned, so capture it before
+    // the post-script cascade can obscure script allocation attribution.
+    dump_post_script_memory_snapshot();
+    auto t_script_exec = timing ? time_now_ns() : initial_cascade_ns;
+    auto t_recascade_start = t_script_exec;
+
+    if (dom_doc->root != dom_root) {
+        // DOM scripts may replace documentElement; use the committed DOM
+        // roots for the post-script cascade instead of resurrecting HTML.
+        dom_root = dom_doc->root;
+        html_root = dom_doc->html_root;
+    }
+
+    if (!dom_doc->pending_navigation_url) {
+        char* refresh_url = find_meta_refresh_url(html_root);
+        if (refresh_url && refresh_url[0]) {
+            dom_doc->pending_navigation_url = refresh_url;
+            log_info("meta_refresh_navigation: pending navigation to %s", refresh_url);
+        } else if (refresh_url) {
+            mem_free(refresh_url);
+        }
+    }
+
+    bool full_recascade = load_script_mutations_need_full_recascade(dom_doc);
+    bool incremental_recascade = false;
+    bool cssom_synced = false;
+    const char* recascade_reason = nullptr;
+    if (full_recascade && dom_doc->js.mutation_count > 0) {
+        dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
+        cssom_synced = true;
+        incremental_recascade = radiant_apply_load_mutation_cascade(
+            dom_doc, &recascade_reason);
+        if (incremental_recascade) {
+            full_recascade = false;
+            log_info("load_html: used mutation-subtree post-script CSS recascade for %d mutations",
+                     dom_doc->js.mutation_count);
+        } else {
+            log_debug("load_html: post-script CSS recascade fallback=%s",
+                      recascade_reason ? recascade_reason : "unknown");
+        }
+    }
+    if (timing) {
+        timing->post_script_mutation_count = dom_doc->js.mutation_count;
+        timing->post_script_mutation_kind_mask = dom_doc->js.mutation_kind_mask;
+        timing->post_script_mutation_overflow = dom_doc->js.mutation_record_overflow;
+        timing->post_script_full_recascade = full_recascade;
+        timing->post_script_incremental_recascade = incremental_recascade;
+    }
+    if (full_recascade && dom_doc->js.mutation_count > 0) {
+        log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
+                 dom_doc->js.mutation_count);
+
+        if (!cssom_synced) {
+            dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
+        }
+        view_geometry_walk_dom_tree(static_cast<DomNode*>(dom_root),
+                                    clear_load_stylesheet_cascade_visitor, nullptr);
+        apply_load_css_cascade(dom_doc, dom_root, css_engine, pool,
+                               profile_recascade_completed ? "post-script" : "recascade");
+        log_mem_stage("load_html: post_script_cascade_done");
+    } else if (dom_doc->js.mutation_count > 0) {
+        if (!incremental_recascade) {
+            log_info("load_html: skipped post-script CSS recascade for %d inline/paint-only mutations",
+                     dom_doc->js.mutation_count);
+        }
+    }
+    auto t_recascade_end = timing ? time_now_ns() : t_recascade_start;
+
+    // Step 2e: Install inline event handler attributes into EventTarget slots.
+    // Must happen after execute_document_scripts so function definitions are available.
+    collect_and_compile_event_handlers(dom_doc);
+    t_post_script = timing ? time_now_ns() : t_script_exec;
+
+    if (timing) {
+        timing->script_exec_ms += time_elapsed_ms_f(initial_cascade_ns, t_script_exec);
+        timing->post_script_ms += time_elapsed_ms_f(t_script_exec, t_post_script);
+        timing->post_script_recascade_ms += time_elapsed_ms_f(
+            t_recascade_start, t_recascade_end);
+        timing->post_script_handler_install_ms += time_elapsed_ms_f(
+            t_recascade_end, t_post_script);
+    }
+
+    if (post_script_ns) *post_script_ns = t_post_script;
+}
+
+void complete_deferred_html_scripts(DomDocument* doc) {
+    if (!doc || !doc->html_scripts_deferred || !doc->html_root ||
+        !doc->document_pool || !doc->services.cached_css_engine) return;
+    doc->html_scripts_deferred = false;
+    uint64_t script_start_ns = time_now_ns();
+    run_html_document_scripts(doc, doc->document_pool, nullptr, nullptr,
+                              false, 0, 0, script_start_ns, nullptr);
+    populate_layout_document(doc, doc->root, doc->html_root,
+                             (HtmlVersion)doc->html_version, doc->url, nullptr);
+    extract_body_transform_scale(doc->root, doc);
+    dom_js_mutation_records_reset(doc);
+}
+
 static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css_filename,
     bool css_at_head_end,
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
@@ -2223,14 +2373,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     if (js_host_config) {
         // The document Runtime is not bound yet.  Keep these settings on the
         // document until script_runner binds its owner context.
-        dom_doc->js.host_ui_context = js_host_config->ui_context;
-        dom_doc->js.host_driven_loop = js_host_config->host_driven_loop;
-        dom_doc->js.auto_close_event_loop = js_host_config->auto_close_event_loop;
-        dom_doc->js.virtual_clock_enabled = js_host_config->virtual_clock_enabled;
-        dom_doc->js.virtual_clock_ms = js_host_config->virtual_clock_ms;
-        dom_doc->js.post_load_settle_ms = js_host_config->post_load_settle_ms;
-        dom_doc->js.redirect_stdout_to_stderr = js_host_config->redirect_stdout_to_stderr;
-        dom_doc->disable_css_animations = js_host_config->disable_css_animations;
+        document_apply_js_host_config(dom_doc, js_host_config);
     }
     dom_doc->document_charset = detected_charset;
     // HTML parsing always runs with scripting enabled in the layout loader;
@@ -2386,99 +2529,13 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
 
     if (execute_scripts) {
-        // Step 2d: Execute <script> elements (inline + external) and body onload handlers
-        // P17: scripts run after the initial cascade so load-time CSSOM reads see
-        // resolved styles; if scripts mutate DOM/classes/stylesheets we recascade
-        // below while preserving JS inline style writes.
-        if (script_prefetch_count > 0) {
-            log_info("[PREFETCH] %d script requests overlapped CSS parsing for %.1fms wall",
-                     script_prefetch_count,
-                     time_elapsed_ms_f(script_prefetch_start_ns, time_now_ns()));
-        }
-        log_mem_stage("load_html: before_scripts");
-        execute_document_scripts_profiled(html_root, dom_doc, pool, html_url, script_timing);
-        log_mem_stage("load_html: after_scripts");
-        // The retained JS runtime is process-root-owned, so capture it before
-        // the post-script cascade can obscure script allocation attribution.
-        dump_post_script_memory_snapshot();
-        auto t_script_exec = timing ? time_now_ns() : t_initial_cascade;
-        auto t_recascade_start = t_script_exec;
-
-        if (dom_doc->root != dom_root) {
-            // DOM scripts may replace documentElement; use the committed DOM
-            // roots for the post-script cascade instead of resurrecting HTML.
-            dom_root = dom_doc->root;
-            html_root = dom_doc->html_root;
-        }
-
-        if (!dom_doc->pending_navigation_url) {
-            char* refresh_url = find_meta_refresh_url(html_root);
-            if (refresh_url && refresh_url[0]) {
-                dom_doc->pending_navigation_url = refresh_url;
-                log_info("meta_refresh_navigation: pending navigation to %s", refresh_url);
-            } else if (refresh_url) {
-                mem_free(refresh_url);
-            }
-        }
-
-        bool full_recascade = load_script_mutations_need_full_recascade(dom_doc);
-        bool incremental_recascade = false;
-        bool cssom_synced = false;
-        const char* recascade_reason = nullptr;
-        if (full_recascade && dom_doc->js.mutation_count > 0) {
-            dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
-            cssom_synced = true;
-            incremental_recascade = radiant_apply_load_mutation_cascade(
-                dom_doc, &recascade_reason);
-            if (incremental_recascade) {
-                full_recascade = false;
-                log_info("load_html: used mutation-subtree post-script CSS recascade for %d mutations",
-                         dom_doc->js.mutation_count);
-            } else {
-                log_debug("load_html: post-script CSS recascade fallback=%s",
-                          recascade_reason ? recascade_reason : "unknown");
-            }
-        }
-        if (timing) {
-            timing->post_script_mutation_count = dom_doc->js.mutation_count;
-            timing->post_script_mutation_kind_mask = dom_doc->js.mutation_kind_mask;
-            timing->post_script_mutation_overflow = dom_doc->js.mutation_record_overflow;
-            timing->post_script_full_recascade = full_recascade;
-            timing->post_script_incremental_recascade = incremental_recascade;
-        }
-        if (full_recascade && dom_doc->js.mutation_count > 0) {
-            log_info("execute_document_scripts: %d DOM mutations from JS, CSS cascade will re-resolve after scripts",
-                     dom_doc->js.mutation_count);
-
-            if (!cssom_synced) {
-                dom_cssom_sync_mutated_inline_stylesheets(dom_doc);
-            }
-            view_geometry_walk_dom_tree(static_cast<DomNode*>(dom_root),
-                                        clear_load_stylesheet_cascade_visitor, nullptr);
-            apply_load_css_cascade(dom_doc, dom_root, css_engine, pool,
-                                   profile_recascade_completed ? "post-script" : "recascade");
-            log_mem_stage("load_html: post_script_cascade_done");
-        } else if (dom_doc->js.mutation_count > 0) {
-            if (!incremental_recascade) {
-                log_info("load_html: skipped post-script CSS recascade for %d inline/paint-only mutations",
-                         dom_doc->js.mutation_count);
-            }
-        }
-        auto t_recascade_end = timing ? time_now_ns() : t_recascade_start;
-
-        // Step 2e: Install inline event handler attributes into EventTarget slots.
-        // Must happen after execute_document_scripts so function definitions are available.
-        collect_and_compile_event_handlers(dom_doc);
-        t_post_script = timing ? time_now_ns() : t_script_exec;
-
-        if (timing) {
-            timing->script_exec_ms += time_elapsed_ms_f(t_initial_cascade, t_script_exec);
-            timing->post_script_ms += time_elapsed_ms_f(t_script_exec, t_post_script);
-            timing->post_script_recascade_ms += time_elapsed_ms_f(
-                t_recascade_start, t_recascade_end);
-            timing->post_script_handler_install_ms += time_elapsed_ms_f(
-                t_recascade_end, t_post_script);
-        }
+        dom_doc->html_root = html_root;
+        run_html_document_scripts(dom_doc, pool, timing, script_timing,
+                                  profile_recascade_completed, script_prefetch_count,
+                                  script_prefetch_start_ns, t_initial_cascade,
+                                  &t_post_script);
+        dom_root = dom_doc->root;
+        html_root = dom_doc->html_root;
     }
 
     log_mem_stage("load_html: cascade_done");
@@ -2549,10 +2606,10 @@ static DomDocument* load_lambda_html_doc_with_host_config(
     Url* html_url, const char* css_filename, int viewport_width, int viewport_height,
     Pool* pool, const DocumentJsHostConfig* js_host_config,
     CookieJar* top_level_cookie_jar, HtmlLoadPhaseTiming* timing,
-    DocumentScriptPhaseTiming* script_timing) {
+    DocumentScriptPhaseTiming* script_timing, bool execute_scripts) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
-                                         pool, nullptr, false, true, timing, script_timing,
+                                         pool, nullptr, false, execute_scripts, timing, script_timing,
                                          js_host_config, top_level_cookie_jar);
 }
 
@@ -2676,7 +2733,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
                                               const DocumentJsHostConfig* js_host_config,
                                               CookieJar* top_level_cookie_jar,
                                               HtmlLoadPhaseTiming* timing,
-                                              DocumentScriptPhaseTiming* script_timing) {
+                                              DocumentScriptPhaseTiming* script_timing,
+                                              bool defer_html_scripts) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -2693,7 +2751,9 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if (full_url->scheme == URL_SCHEME_HTTP || full_url->scheme == URL_SCHEME_HTTPS) {
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-            viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing);
+            viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,
+            !defer_html_scripts);
+        if (doc && defer_html_scripts) doc->html_scripts_deferred = true;
     } else {
     bool handled = false;
     // Use the parsed pathname so a query does not hide the file extension.
@@ -2701,7 +2761,9 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
                                    viewport_width, viewport_height, pool, true, &handled);
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
-            viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing);
+            viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,
+            !defer_html_scripts);
+        if (doc && defer_html_scripts) doc->html_scripts_deferred = true;
     }
     }
 
@@ -2731,7 +2793,7 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_url, int viewport_width
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
             viewport_width, viewport_height, js_host_config, top_level_cookie_jar,
-            timing, script_timing);
+            timing, script_timing, false);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;
@@ -2770,7 +2832,12 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_url, int viewport_width
 
 DomDocument* load_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config,
-                           CookieJar* top_level_cookie_jar) {
+                           CookieJar* top_level_cookie_jar, bool defer_html_scripts) {
+    if (defer_html_scripts) {
+        return load_html_doc_no_redirect(base, doc_url, viewport_width, viewport_height,
+                                         js_host_config, top_level_cookie_jar,
+                                         nullptr, nullptr, true);
+    }
     return load_html_doc_profiled(base, doc_url, viewport_width, viewport_height,
                                   js_host_config, top_level_cookie_jar, nullptr, nullptr);
 }
@@ -3319,8 +3386,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
                 return nullptr;
             }
             runtime_init(math_runtime);
-            math_runtime->ui_mode = true;
-            math_runtime->result_arena = input->arena;
+            runtime_set_ui_result_arena(math_runtime, input->arena);
             const LambdaDocumentTransformConfig* transform =
                 lambda_document_transform_for_input_type("math");
             Script* math_package = nullptr;
@@ -3727,8 +3793,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     Pool* result_pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     Input* result_input = Input::create(result_pool, script_url);
     result_input->ui_mode = true;
-    runtime->ui_mode = true;
-    runtime->result_arena = result_input->arena;
+    runtime_set_ui_result_arena(runtime, result_input->arena);
 
     source_pos_bridge_reset();
     render_map_init();

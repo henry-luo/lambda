@@ -46305,7 +46305,10 @@ static bool interp_script_needs_large_stack(const Script* script) {
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
         bool run_main, Script** out_script) {
     if (out_script) *out_script = NULL;
-    log_notice("Running script with MIR JIT compilation (direct)");
+    LambdaTier tier = lambda_tier_selected();
+    log_notice("lambda-script: starting tier=%s backend=mir-direct",
+        tier == LAMBDA_TIER_JIT ? "jit" :
+        tier == LAMBDA_TIER_INTERP ? "interp" : "auto");
 
     // Initialize runner
     Runner runner;
