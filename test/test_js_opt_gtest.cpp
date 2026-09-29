@@ -774,6 +774,8 @@ TEST(JsOpt, BuiltinRegexBulkPathsKeepProtocolOverrides) {
     const char* source =
         "var words = 'one 22 two'.match(new RegExp('[a-z]+', 'g'));\n"
         "var replaced = 'one 22 two'.replace(new RegExp('[a-z]+', 'g'), '[$&]');\n"
+        "var literal = 'aba'.replace(new RegExp('a', 'g'), 'xy');\n"
+        "var legacy = [RegExp.input, RegExp.lastMatch, RegExp.leftContext, RegExp.rightContext];\n"
         "function customExec(value) { return null; }\n"
         "var custom = new RegExp('a', 'g'); custom.exec = customExec;\n"
         "var customResult = 'a'.match(custom);\n"
@@ -781,6 +783,7 @@ TEST(JsOpt, BuiltinRegexBulkPathsKeepProtocolOverrides) {
         "Object.defineProperty(frozen, 'lastIndex', { writable: false });\n"
         "var caught = false; try { 'a'.match(frozen); } catch (error) { caught = error.name === 'TypeError'; }\n"
         "if (words.join(',') !== 'one,two' || replaced !== '[one] 22 [two]' ||\n"
+        "    literal !== 'xybxy' || legacy.join('|') !== 'aba|a|ab|' ||\n"
         "    customResult !== null || !caught) throw new Error('bulk regexp changed protocol');\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
@@ -807,6 +810,29 @@ TEST(JsOpt, DenseArrayStoreTakesFastPath) {
     expect_ok_output(output);
     EXPECT_GT(trace.events[JS_OPT_ARRAY_SET_FAST_HIT][1], 0u);
     expect_trace_off_same("array_dense_store", source, output);
+}
+
+TEST(JsOpt, NumberIndexOwnReadKeepsDescriptorAndHoleFallback) {
+    const char* source =
+        "function read(array) { return array[1]; }\n"
+        "var own = ['a', 'own'];\n"
+        "var hole = new Array(2);\n"
+        "Array.prototype[1] = 'inherited';\n"
+        "var first = read(own), second = read(hole);\n"
+        "Object.defineProperty(own, '1', { get: function() { return 'getter'; } });\n"
+        "var third = read(own);\n"
+        "delete Array.prototype[1];\n"
+        "if (first !== 'own' || second !== 'inherited' || third !== 'getter')\n"
+        "  throw new Error('Number index read changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("number_index_own_read", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT][1], 0u);
+    expect_trace_off_same("number_index_own_read", source, output);
 }
 
 TEST(JsOpt, RuntimeNumberHeadKeepsCoercingCasesOnSlowPath) {
@@ -940,6 +966,129 @@ TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
     EXPECT_NE(strstr(mir, "call\tjs_add"), nullptr);
     free(mir);
     expect_trace_off_same("mir_number_plan", source, output);
+}
+
+TEST(JsOpt, GuardedNumericPeerCarriesNumberThroughLoopState) {
+    const char* source =
+        "function blend(r, x, step) { return r + x * step; }\n"
+        "function orbit(r, i, step, x, y) {\n"
+        "  const cr = r + x * step, ci = i + y * step;\n"
+        "  let zr = cr, zi = ci, count = 0;\n"
+        "  while (count < 64) {\n"
+        "    const zr2 = zr * zr, zi2 = zi * zi;\n"
+        "    if (zr2 + zi2 > 16) return count;\n"
+        "    const next = zr2 - zi2 + cr;\n"
+        "    zi = 2 * zr * zi + ci; zr = next; count++;\n"
+        "  }\n"
+        "  return count;\n"
+        "}\n"
+        "function rewritten(r, x, step) { r += 'x'; return r + x * step; }\n"
+        "function captured(r, x, step) {\n"
+        "  function change() { r = '2'; }\n"
+        "  change(); return r + x * step;\n"
+        "}\n"
+        "let coercions = 0;\n"
+        "const values = ['2', 1n, { valueOf() { coercions++; return 3; } }];\n"
+        "if (blend(2, 3, 0.5) !== 3.5 || blend(values[0], 2, 0.5) !== '21' ||\n"
+        "    blend(values[2], 2, 0.5) !== 4 || coercions !== 1 ||\n"
+        "    orbit(-1, -0.5, 0.005, 0, 0) !== 5 ||\n"
+        "    rewritten(2, 2, 0.5) !== '2x1' ||\n"
+        "    captured(2, 2, 0.5) !== '21')\n"
+        "  throw new Error('guarded numeric peer changed semantics');\n"
+        "let threw = false;\n"
+        "try { blend(values[1], 2, 0.5); } catch (error) { threw = error instanceof TypeError; }\n"
+        "if (!threw) throw new Error('BigInt addition did not retain the boxed path');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("guarded_numeric_peer", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("guarded_numeric_peer");
+    ASSERT_NE(mir, nullptr);
+    const char* end = NULL;
+    const char* native = find_mir_function(mir, "_js_orbit_", &end);
+    ASSERT_NE(native, nullptr);
+    ASSERT_NE(end, nullptr);
+    EXPECT_NE(strstr(native, "d:%p0, d:%p1, d:%p2, d:%p3, d:%p4"), nullptr);
+    EXPECT_NE(strstr(native, "\n\tdadd\t"), nullptr);
+    const char* helpers[] = {"js_add", "js_subtract", "js_multiply",
+        "js_cmp_raw"};
+    for (const char* helper : helpers) {
+        char marker[64];
+        snprintf(marker, sizeof(marker), "\n\tcall\t%s", helper);
+        const char* boxed_call = strstr(native, marker);
+        EXPECT_FALSE(boxed_call && boxed_call < end) << helper;
+    }
+    free(mir);
+    expect_trace_off_same("guarded_numeric_peer", source, output);
+}
+
+TEST(JsOpt, NumericBindingProofSeparatesInitializersFromLoopWrites) {
+    const char* source =
+        "function rotate(size) {\n"
+        "  let a = 0, b = 0, c = 0, index = 0;\n"
+        "  while (index < size) {\n"
+        "    const next = a - b + size;\n"
+        "    b = 2 * next * b + size;\n"
+        "    a = next * next; c = b * b; index++;\n"
+        "  }\n"
+        "  return a + c;\n"
+        "}\n"
+        "function mutableSource(size) {\n"
+        "  let seed = 0; seed = '2';\n"
+        "  let carried = seed; const doubled = size * 2;\n"
+        "  return carried + doubled;\n"
+        "}\n"
+        "function cycleWiden(size) {\n"
+        "  let a = 0, b = 0, index = 0;\n"
+        "  while (index < size) { a = b; b = a + 'x'; index++; }\n"
+        "  return a;\n"
+        "}\n"
+        "function initializerCycle(size) {\n"
+        "  let first = second, second = first; return first + size;\n"
+        "}\n"
+        "const dynamic = ['2'];\n"
+        "if (rotate(1) !== 2 || rotate(2) !== 340 ||\n"
+        "    rotate(dynamic[0]) !== 778408 || mutableSource(2) !== '24' ||\n"
+        "    cycleWiden(2) !== '0x')\n"
+        "  throw new Error('numeric binding cycle changed semantics');\n"
+        "let rejected = false;\n"
+        "try { initializerCycle(1); }\n"
+        "catch (error) { rejected = error instanceof ReferenceError; }\n"
+        "if (!rejected) throw new Error('initializer cycle lost its TDZ error');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("numeric_binding_cycle", source, &trace,
+        output, sizeof(output)));
+    expect_ok_output(output);
+
+    char* mir = read_fixture_mir("numeric_binding_cycle");
+    ASSERT_NE(mir, nullptr);
+    const char* rotate_end = NULL;
+    const char* rotate = find_mir_function(mir, "_js_rotate_", &rotate_end);
+    ASSERT_NE(rotate, nullptr);
+    ASSERT_NE(rotate_end, nullptr);
+    EXPECT_NE(strstr(rotate, "\n\tdmul\t"), nullptr);
+    const char* helpers[] = {"js_add", "js_subtract", "js_multiply",
+        "js_cmp_raw"};
+    for (const char* helper : helpers) {
+        char marker[64];
+        snprintf(marker, sizeof(marker), "\n\tcall\t%s", helper);
+        const char* boxed_call = strstr(rotate, marker);
+        EXPECT_FALSE(boxed_call && boxed_call < rotate_end) << helper;
+    }
+    const char* mutable_end = NULL;
+    const char* mutable_body = find_mir_function(mir, "_js_mutableSource_",
+        &mutable_end, "_body:\tfunc");
+    ASSERT_NE(mutable_body, nullptr);
+    ASSERT_NE(mutable_end, nullptr);
+    const char* generic_add = strstr(mutable_body, "\n\tcall\tjs_add");
+    EXPECT_TRUE(generic_add && generic_add < mutable_end);
+    free(mir);
+    expect_trace_off_same("numeric_binding_cycle", source, output);
 }
 
 TEST(JsOpt, NativeNumberUpdatesKeepPostfixAndGenericSemantics) {
@@ -1156,6 +1305,7 @@ TEST(JsOpt, RuntimeHelperCensusKeepsGenericCoercionAndIndexSemantics) {
     EXPECT_GT(trace.events[JS_OPT_RUNTIME_BOXED_COMPARE_CALL][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL][1], 0u);
     uint64_t classified_number_reads =
+        trace.events[JS_OPT_ARRAY_OWN_ELEMENT_GET_HIT][1] +
         trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_NUMERIC_ARRAY][1] +
         trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_TAGGED_ARRAY][1] +
         trace.events[JS_OPT_RUNTIME_NUMBER_INDEX_TYPED_ARRAY][1] +
@@ -1753,7 +1903,7 @@ TEST(JsOpt, PlainFunctionEntryFieldsUseGuardedLayout) {
     char* mir = read_fixture_mir("plain_function_entry_fields");
     ASSERT_NE(mir, nullptr);
     EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
     EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
     free(mir);
     expect_trace_off_same("plain_function_entry_fields", source, output);
@@ -1800,7 +1950,7 @@ TEST(JsOpt, PlainFunctionHashMapPrefixUsesGuardedLayout) {
     char* mir = read_fixture_mir("plain_function_hashmap_prefix");
     ASSERT_NE(mir, nullptr);
     EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
     EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
     free(mir);
     expect_trace_off_same("plain_function_hashmap_prefix", source, output);
@@ -1834,7 +1984,7 @@ TEST(JsOpt, PlainFunctionFieldsFollowLocalAliases) {
     char* mir = read_fixture_mir("plain_function_local_alias_fields");
     ASSERT_NE(mir, nullptr);
     EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
     free(mir);
     expect_trace_off_same("plain_function_local_alias_fields", source, output);
 }
@@ -1869,7 +2019,7 @@ TEST(JsOpt, PlainFunctionFieldsUseSeparatelyAssignedPrototypeMethods) {
     char* mir = read_fixture_mir("plain_function_separate_prototype_fields");
     ASSERT_NE(mir, nullptr);
     EXPECT_NE(strstr(mir, "js_set_function_instance_shape"), nullptr);
-    EXPECT_NE(strstr(mir, "js_constructor_shape_field_is_initialized"), nullptr);
+    EXPECT_EQ(strstr(mir, "call\tjs_constructor_shape_field_is_initialized"), nullptr);
     free(mir);
     expect_trace_off_same("plain_function_separate_prototype_fields", source,
         output);
@@ -2212,6 +2362,119 @@ TEST(JsOpt, PackedNumericStrictEqualityKeepsDirectNumberLoads) {
     EXPECT_NE(strstr(mir, "js_strict_equal"), nullptr);
     free(mir);
     expect_trace_off_same("packed_numeric_strict_equality", source, output);
+}
+
+TEST(JsOpt, PackedStrictEqualityGuardsDynamicNumberKeys) {
+    const char* source =
+        "function equalCount(left, right, keys) {\n"
+        "  let hits = 0;\n"
+        "  for (let index = 0; index < keys.length; index += 1) {\n"
+        "    if (left[keys[index]] === right[keys[index]]) hits += 1;\n"
+        "  }\n"
+        "  return hits;\n"
+        "}\n"
+        "let conversions = 0;\n"
+        "const objectKey = { [Symbol.toPrimitive]: function() { conversions += 1; return '0'; } };\n"
+        "const left = [7, 8, 9]; const right = [7, 8, 9];\n"
+        "if (equalCount(left, right, [0, 1, '2', objectKey, 3]) !== 5 ||\n"
+        "    conversions !== 2) throw new Error('dynamic key semantics changed');\n"
+        "let getterCalls = 0;\n"
+        "Object.defineProperty(left, '1', { get: function() { getterCalls += 1; return 8; } });\n"
+        "if (equalCount(left, right, [1]) !== 1 || getterCalls !== 1)\n"
+        "  throw new Error('descriptor miss semantics changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("packed_dynamic_number_keys", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_PACKED_STRICT_EQUAL][1], 0u);
+    expect_trace_off_same("packed_dynamic_number_keys", source, output);
+}
+
+TEST(JsOpt, ArrayLengthSubtractionGuardsBothReceivers) {
+    const char* source =
+        "function difference(left, right) {\n"
+        "  let total = 0;\n"
+        "  for (let index = 0; index < 3; index += 1)\n"
+        "    total += left.length - right.length;\n"
+        "  return total;\n"
+        "}\n"
+        "if (difference([1, 2, 3], [4]) !== 6)\n"
+        "  throw new Error('array length subtraction changed');\n"
+        "let order = '';\n"
+        "const left = { get length() { order += 'L'; return 10; } };\n"
+        "const right = { get length() { order += 'R'; return 3; } };\n"
+        "const indirect = difference;\n"
+        "if (indirect(left, right) !== 21 || order !== 'LRLRLR')\n"
+        "  throw new Error('generic length Get order changed: ' + order);\n"
+        "let reads = 0;\n"
+        "const bad = { get length() { reads += 1; throw new Error('left'); } };\n"
+        "try { indirect(bad, right); throw new Error('missing throw'); }\n"
+        "catch (error) { if (error.message !== 'left' || reads !== 1 ||\n"
+        "      order !== 'LRLRLR') throw error; }\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("array_length_subtract", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    char* mir = read_fixture_mir("array_length_subtract");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\tdsub\t"), nullptr);
+    EXPECT_NE(strstr(mir, "js_subtract"), nullptr);
+    free(mir);
+    expect_trace_off_same("array_length_subtract", source, output);
+}
+
+TEST(JsOpt, NumberArrayLengthComparisonKeepsGenericGet) {
+    const char* source =
+        "function countBelowLength(receiver) {\n"
+        "  let hits = 0;\n"
+        "  for (let index = 0; index < 4; index += 1)\n"
+        "    if (index < receiver.length) hits += 1;\n"
+        "  return hits;\n"
+        "}\n"
+        "if (countBelowLength([1, 2]) !== 2)\n"
+        "  throw new Error('array length comparison changed');\n"
+        "let reads = 0;\n"
+        "const ordinary = { get length() { reads += 1; return '2'; } };\n"
+        "const indirect = countBelowLength;\n"
+        "if (indirect(ordinary) !== 2 || reads !== 4)\n"
+        "  throw new Error('generic comparison changed');\n"
+        "const bad = { get length() { throw new Error('length'); } };\n"
+        "try { indirect(bad); throw new Error('missing throw'); }\n"
+        "catch (error) { if (error.message !== 'length') throw error; }\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("number_array_length_compare", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    char* mir = read_fixture_mir("number_array_length_compare");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "\tdlt\t"), nullptr);
+    EXPECT_NE(strstr(mir, "js_cmp_raw"), nullptr);
+    free(mir);
+    expect_trace_off_same("number_array_length_compare", source, output);
+}
+
+TEST(JsOpt, AsciiDecimalNumberUsesExactShortParse) {
+    const char* source =
+        "if (Number('00042') !== 42 || Number('999999999999999') !== 999999999999999)\n"
+        "  throw new Error('short decimal changed');\n"
+        "if (Number('-0') !== 0 || 1 / Number('-0') !== -Infinity ||\n"
+        "    Number(' 42 ') !== 42 || Number('0x2a') !== 42 ||\n"
+        "    Number('1000000000000000') !== 1000000000000000)\n"
+        "  throw new Error('generic numeric grammar changed');\n"
+        "if (!Number.isNaN(Number('12x'))) throw new Error('invalid digit accepted');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("ascii_decimal_number", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    expect_trace_off_same("ascii_decimal_number", source, output);
 }
 
 static char* make_large_static_numeric_array_source() {
@@ -2980,4 +3243,3 @@ TEST(JsOpt, UriErrorCacheRegistersRootAndHits) {
     EXPECT_GE(trace.events[JS_OPT_URI_ERROR_CACHE_HIT][1], 255u);
     expect_trace_off_same("uri_error_cache", source, output);
 }
-

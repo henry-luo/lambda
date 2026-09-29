@@ -1083,6 +1083,94 @@ static void jm_infer_indexed(JsMirTranspiler* mt, JsFunctionNode* fn,
     }
 }
 
+// A binary numeric peer can strengthen a `+` formal only when every leaf is
+// an exact-Number entry candidate. The boxed entry handles all other shapes.
+static bool jm_infer_guarded_numeric_peer(JsAstNode* node,
+        const JmParamInferenceBinding bindings[], const FnParamEvidence evidence[],
+        int param_count, int depth) {
+    if (!node || depth > 16) return false;
+    if (jm_infer_is_int_literal(node) || jm_infer_is_float_literal(node)) return true;
+    if (node->node_type == AST_NODE_IDENT) {
+        int index = jm_infer_find_param(node, bindings, param_count);
+        return index >= 0 && !evidence[index].used_as_container &&
+            !evidence[index].compared_with_non_numeric &&
+            !evidence[index].param_reassigned && !evidence[index].string_evidence &&
+            (evidence[index].int_evidence || evidence[index].float_evidence);
+    }
+    if (node->node_type == AST_NODE_BINARY) {
+        JsBinaryNode* binary = (JsBinaryNode*)node;
+        if (binary->op != OPERATOR_SUB && binary->op != OPERATOR_MUL &&
+                binary->op != OPERATOR_DIV && binary->op != OPERATOR_MOD &&
+                binary->op != OPERATOR_JS_EXP) return false;
+        return jm_infer_guarded_numeric_peer(binary->left, bindings, evidence,
+                param_count, depth + 1) &&
+            jm_infer_guarded_numeric_peer(binary->right, bindings, evidence,
+                param_count, depth + 1);
+    }
+    return false;
+}
+
+static bool jm_infer_writes_formal(JsAstNode* node,
+        const JmParamInferenceBinding bindings[], int param_count) {
+    if (!node) return false;
+    JsAstNode* target = NULL;
+    if (node->node_type == AST_NODE_ASSIGN) {
+        target = ((JsAssignmentNode*)node)->left;
+    } else if (node->node_type == AST_NODE_UNARY) {
+        JsUnaryNode* unary = (JsUnaryNode*)node;
+        if (unary->op == OPERATOR_JS_INCREMENT ||
+                unary->op == OPERATOR_JS_DECREMENT) target = unary->operand;
+    } else if (node->node_type == AST_NODE_FOR_OF_STAM ||
+            node->node_type == AST_NODE_FOR_IN_STAM) {
+        target = ((JsForOfNode*)node)->left;
+    } else if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        JsVariableDeclaratorNode* declaration =
+            (JsVariableDeclaratorNode*)node;
+        if (declaration->init) target = declaration->id;
+    }
+    for (int index = 0; target && index < param_count; index++) {
+        if (bindings[index].entry && jm_assignment_targets_binding(target,
+                bindings[index].entry)) return true;
+    }
+    return false;
+}
+
+static void jm_infer_guarded_add_candidates(JsMirTranspiler* mt,
+        JsFuncCollected* fc, const JmParamInferenceBinding bindings[],
+        FnParamEvidence evidence[], int param_count) {
+    // A Number entry guard says nothing about a later formal write or a
+    // captured cell changed by a nested function.
+    if (fc->has_scope_env) return;
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId fn_id = ast_index_find(index, (AstNode*)fc->node);
+    if (fn_id == AST_NODE_ID_INVALID) return;
+    AstFunctionId owner = index->owner_functions[fn_id];
+    AstNodeId end = ast_index_subtree_end(index, fn_id);
+    if (owner == AST_FUNCTION_ID_INVALID || end == AST_NODE_ID_INVALID) return;
+    for (AstNodeId node_id = fn_id; node_id < end; node_id++) {
+        if (index->owner_functions[node_id] == owner &&
+                jm_infer_writes_formal((JsAstNode*)index->nodes[node_id],
+                    bindings, param_count)) return;
+    }
+    for (AstNodeId node_id = fn_id; node_id < end; node_id++) {
+        if (index->owner_functions[node_id] != owner ||
+                !index->nodes[node_id] ||
+                index->nodes[node_id]->node_type != AST_NODE_BINARY) continue;
+        JsBinaryNode* binary = (JsBinaryNode*)index->nodes[node_id];
+        if (binary->op != OPERATOR_ADD) continue;
+        int left = jm_infer_find_param(binary->left, bindings, param_count);
+        int right = jm_infer_find_param(binary->right, bindings, param_count);
+        if (left >= 0 && binary->right &&
+                binary->right->node_type == AST_NODE_BINARY &&
+                jm_infer_guarded_numeric_peer(binary->right, bindings, evidence,
+                    param_count, 0)) evidence[left].int_evidence++;
+        if (right >= 0 && binary->left &&
+                binary->left->node_type == AST_NODE_BINARY &&
+                jm_infer_guarded_numeric_peer(binary->left, bindings, evidence,
+                    param_count, 0)) evidence[right].int_evidence++;
+    }
+}
+
 static bool jm_collected_function_range(const JsMirTranspiler* mt,
         const JsFuncCollected* function, AstNodeId* first, AstNodeId* end) {
     if (first) *first = AST_NODE_ID_INVALID;
@@ -1242,6 +1330,7 @@ void jm_infer_param_types(JsMirTranspiler* mt, JsFuncCollected* fc) {
     // Accumulate formal and alias evidence once through the sealed index.
     jm_infer_indexed(mt, fn, inference_bindings, evidence,
         inference_binding_count, pc, self_name && self_name[0] ? self_name : NULL);
+    jm_infer_guarded_add_candidates(mt, fc, inference_bindings, evidence, pc);
 
     // Resolve numeric evidence to FLOAT because JS Number uses binary64 even
     // when every observed argument is integer-looking.
@@ -1445,6 +1534,7 @@ struct JmNumericReturnContext {
     NameEntry* active_bindings[JM_NUMERIC_RETURN_MAX_BINDINGS];
     JmNumericReturnFact active_facts[JM_NUMERIC_RETURN_MAX_BINDINGS];
     int active_count;
+    bool initial_only;
 };
 
 static bool jm_numeric_return_is_number(JmNumericReturnFact fact) {
@@ -1576,6 +1666,22 @@ static JmNumericReturnFact jm_numeric_return_binding_fact(
     int active_index = context->active_count++;
     context->active_bindings[active_index] = binding;
     context->active_facts[active_index] = JM_NUMERIC_RETURN_INVALID;
+    bool initial_only = context->initial_only;
+    context->initial_only = true;
+    JmNumericReturnFact initial_fact = jm_numeric_return_expression(context,
+        declarator->init);
+    context->initial_only = initial_only;
+    if (!jm_numeric_return_is_number(initial_fact)) {
+        context->active_count--;
+        return JM_NUMERIC_RETURN_INVALID;
+    }
+    context->active_facts[active_index] = initial_fact;
+    // Initializer cycles fail without using loop writes as evidence. A full
+    // second check still rejects a mutable initializer source with bad writes.
+    if (initial_only) {
+        context->active_count--;
+        return initial_fact;
+    }
     JmNumericReturnFact fact = jm_numeric_return_expression(context,
         declarator->init);
     context->active_facts[active_index] = fact;

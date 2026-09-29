@@ -4042,12 +4042,6 @@ static bool js_constructor_instance_shape_is_admissible(TypeMap* shape) {
     return count == shape->length && offset == shape->byte_size;
 }
 
-extern "C" int64_t js_constructor_shape_field_is_initialized(Item object,
-        int64_t byte_offset) {
-    if (get_type_id(object) != LMD_TYPE_MAP || !object.map) return 0;
-    return map_ctor_offset_is_reserved(object.map, byte_offset) ? 0 : 1;
-}
-
 // Forward declaration for prototype chain support
 extern "C" Item js_prototype_lookup_ex(Item object, Item property, bool* out_found);
 extern "C" Item js_prototype_lookup_ex_with_receiver(
@@ -9448,13 +9442,24 @@ extern "C" Item js_elements_get(Item array, Item index) {
 extern "C" Item js_elements_get_number(Item array, double index) {
     js_opt_trace_record(JS_OPT_RUNTIME_NUMBER_INDEX_GET_CALL, JS_OPT_REASON_NONE,
         JS_OPT_OUTCOME_TAKEN);
+    bool array_index = isfinite(index) && index >= 0.0 &&
+        floor(index) == index && index <= (double)0xFFFFFFFE;
+    if (array_index) {
+        // A present own tagged element is already an Item. Use the shared
+        // no-GC admission before creating a root frame; wide scalar elements
+        // still need the normal Get to establish a transient home (D5.3.4).
+        Item own = ItemNull;
+        if (js_array_try_get_existing_own_dense_no_gc(array, (int64_t)index,
+                &own) && !lambda_item_uses_scalar_home(own)) {
+            return own;
+        }
+    }
     RootFrame roots(2);
     Rooted<Item> array_root(roots, array);
     Rooted<Item> key_root(roots, ItemNull);
     // ES ToPropertyKey(-0) is "0". A bounded integral Number can therefore
     // retain its F64 carrier until the element kernel consumes its index.
-    if (isfinite(index) && index >= 0.0 && floor(index) == index &&
-            index <= (double)0xFFFFFFFE) {
+    if (array_index) {
         return js_elements_get_int(array_root.get(), (int64_t)index);
     }
     // Fractional, non-finite, and non-index Number keys remain observable
@@ -14873,9 +14878,8 @@ static Item js_call_mir_this_direct(Item func_item, Item this_val, Item* args,
     if (lambda_stack_pointer() < context->stack_limit) {
         return js_throw_range_error(JS_CALL_STACK_EXCEEDED_MESSAGE);
     }
-    RootFrame call_roots(4);
+    RootFrame call_roots(3);
     Rooted<Item> callee_root(call_roots, func_item);
-    Rooted<Item> this_root(call_roots, this_val);
     Rooted<Item> previous_this_root(call_roots, js_current_this);
     Rooted<Item> previous_home_root(call_roots, js_current_private_home_class);
     RootSpan call_arg_roots((!args_prerooted && arg_count > 0)
@@ -14883,14 +14887,16 @@ static Item js_call_mir_this_direct(Item func_item, Item this_val, Item* args,
     if (!js_prepare_owned_argument_span(args, arg_count, args_prerooted,
             call_arg_roots, "js-call-mir-this")) return ItemError;
     JsFunction* fn = (JsFunction*)callee_root.get().function;
-    js_current_this = this_root.get();
+    // The active call-activation slot is already an exact GC root. Install
+    // the receiver there before invoking the compiled body (D5.3.2).
+    js_current_this = this_val;
     Item method_home = js_fn_home_class(fn);
     if (method_home.item != ItemNull.item && method_home.item != 0 &&
             get_type_id(method_home) != LMD_TYPE_UNDEFINED) {
         js_current_private_home_class = method_home;
     }
     Item result = lambda_item_resolve_pending_slot(fn->body(callee_root.get(),
-        this_root.get(), args, arg_count, result_home));
+        js_current_this, args, arg_count, result_home));
     js_current_this = previous_this_root.get();
     js_current_private_home_class = previous_home_root.get();
     if (result_home && lambda_item_uses_scalar_home(result)) {
@@ -15370,6 +15376,13 @@ static void js_regexp_update_last_match(String* input_s,
             return;
         }
     }
+}
+
+static void js_regexp_update_last_match_span(String* input, int start,
+        int length) {
+    if (!input || start < 0) return;
+    re2::StringPiece match(input->chars + start, length);
+    js_regexp_update_last_match(input, &match, 1);
 }
 
 typedef enum JsRegexSimpleClassKind {
@@ -19611,6 +19624,8 @@ static Item js_try_builtin_regexp_match_bulk(Item regex, Item str,
     if (matches_buf.count != 1 || !matches_buf.slots) return ItemError;
     int position = 0;
     int match_count = 0;
+    int last_start = -1;
+    int last_length = 0;
     for (int safety = 0; safety < 1000000 && position <= (int)input->len;
             safety++) {
         re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START :
@@ -19618,20 +19633,31 @@ static Item js_try_builtin_regexp_match_bulk(Item regex, Item str,
         JsRegexMatchResult match = js_regex_match_internal(rd, input->chars,
             (int)input->len, position, anchor, matches_buf.slots, 1);
         if (match == JS_REGEX_MATCH_RESOURCE_ERROR) {
+            js_regexp_update_last_match_span(input, last_start, last_length);
             return js_throw_range_error("RegExp match exceeded engine resources");
         }
         if (match != JS_REGEX_MATCH_FOUND) break;
         int start = (int)(matches_buf.slots[0].data() - input->chars);
         int match_len = (int)matches_buf.slots[0].size();
         int end = start + match_len;
-        js_regexp_update_last_match(input, matches_buf.slots, 1);
+        // The guarded bulk loop invokes no guest code; only its final legacy
+        // match state is observable unless an operation below fails (S1.11).
+        last_start = start;
+        last_length = match_len;
         Item matched = js_str_substring_utf16(str_root.get(), start, end);
-        if (item_is_error(matched)) return matched;
+        if (item_is_error(matched)) {
+            js_regexp_update_last_match_span(input, last_start, last_length);
+            return matched;
+        }
         Item pushed = js_array_push(results_root.get(), matched);
-        if (item_is_error(pushed)) return pushed;
+        if (item_is_error(pushed)) {
+            js_regexp_update_last_match_span(input, last_start, last_length);
+            return pushed;
+        }
         match_count++;
         position = end + (match_len == 0 ? 1 : 0);
     }
+    js_regexp_update_last_match_span(input, last_start, last_length);
     set_status = js_regex_set_lastindex_strict(regex_root.get(), last_index_key,
         0);
     if (item_is_error(set_status)) return set_status;
@@ -19656,6 +19682,9 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
     String* repl = it2s(replacement_root.get());
     if (!input || !input->is_ascii || !repl) return ItemNull;
     if (out_admitted) *out_admitted = true;
+    // A replacement with no '$' has no capture/template substitutions. Test
+    // once for the whole guarded builtin loop rather than parsing each match.
+    bool literal_replacement = memchr(repl->chars, '$', repl->len) == NULL;
 
     Item last_index_key = js_name_item("lastIndex", 9);
     Item set_status = js_regex_set_lastindex_strict(regex_root.get(),
@@ -19668,6 +19697,8 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
     int position = 0;
     int copy_position = 0;
     bool found_match = false;
+    int last_start = -1;
+    int last_length = 0;
     for (int safety = 0; safety < 1000000 && position <= (int)input->len;
             safety++) {
         re2::RE2::Anchor anchor = rd->sticky ? re2::RE2::ANCHOR_START :
@@ -19676,6 +19707,7 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
             (int)input->len, position, anchor, matches_buf.slots, 1);
         if (match == JS_REGEX_MATCH_RESOURCE_ERROR) {
             strbuf_free(output);
+            js_regexp_update_last_match_span(input, last_start, last_length);
             return js_throw_range_error("RegExp match exceeded engine resources");
         }
         if (match != JS_REGEX_MATCH_FOUND) break;
@@ -19685,15 +19717,22 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
             strbuf_append_str_n(output, input->chars + copy_position,
                 start - copy_position);
         }
-        Item replacement_status = js_apply_replacement_from_items(output,
-            repl->chars, (int)repl->len, input->chars, (int)input->len, start,
-            matches_buf.slots[0].data(), match_len, NULL, 0,
-            make_js_undefined());
+        Item replacement_status = ItemNull;
+        if (literal_replacement) {
+            strbuf_append_str_n(output, repl->chars, (int)repl->len);
+        } else {
+            replacement_status = js_apply_replacement_from_items(output,
+                repl->chars, (int)repl->len, input->chars, (int)input->len, start,
+                matches_buf.slots[0].data(), match_len, NULL, 0,
+                make_js_undefined());
+        }
         if (item_is_error(replacement_status)) {
             strbuf_free(output);
+            js_regexp_update_last_match_span(input, last_start, last_length);
             return replacement_status;
         }
-        js_regexp_update_last_match(input, matches_buf.slots, 1);
+        last_start = start;
+        last_length = match_len;
         found_match = true;
         copy_position = start + match_len;
         position = start + match_len + (match_len == 0 ? 1 : 0);
@@ -19708,6 +19747,7 @@ static Item js_try_builtin_regexp_replace_bulk(Item regex, Item str,
         strbuf_append_str_n(output, input->chars + copy_position,
             (int)input->len - copy_position);
     }
+    js_regexp_update_last_match_span(input, last_start, last_length);
     set_status = js_regex_set_lastindex_strict(regex_root.get(), last_index_key,
         0);
     if (item_is_error(set_status)) {

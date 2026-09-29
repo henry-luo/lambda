@@ -15,5 +15,7 @@ the TikZ/PGF document transform.
 | `serie_coordinate.pgf` | [`serie_coordinate.pgf`](https://github.com/walmes/Tikz/blob/3b873c32dc19938136c8215909d165a25622d0d7/src/serie_coordinate.pgf) | measured time series, fixed bounds, viewport-relative dimensions |
 | `diagrama_venn1.pgf` | [`diagrama_venn1.pgf`](https://github.com/walmes/Tikz/blob/3b873c32dc19938136c8215909d165a25622d0d7/src/diagrama_venn1.pgf) | filled ellipse, rectangle, cubic curve, math labels |
 | `diagrama_venn2.pgf` | [`diagrama_venn2.pgf`](https://github.com/walmes/Tikz/blob/3b873c32dc19938136c8215909d165a25622d0d7/src/diagrama_venn2.pgf) | multiple cubic curves and text color |
+| `plot_parametric.pgf` | [`plot_parametric.pgf`](https://github.com/walmes/Tikz/blob/3b873c32dc19938136c8215909d165a25622d0d7/src/plot_parametric.pgf) | parametric curve, inherited axis style, middle axes, clipping |
+| `reg_components.pgf` | [`reg_components.pgf`](https://github.com/walmes/Tikz/blob/3b873c32dc19938136c8215909d165a25622d0d7/src/reg_components.pgf) | regression fit, measured points, named axis coordinates, styled annotations |
 
 Use `./lambda.exe render test/input/tikz/<name>.pgf -o ./temp/<name>.png`.

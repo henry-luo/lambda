@@ -2471,19 +2471,20 @@ static bool jm_is_array_literal_candidate(JsMirTranspiler* mt,
     return static_accesses >= 2;
 }
 
-static MIR_reg_t jm_emit_array_length_read(JsMirTranspiler* mt,
+static bool jm_array_length_candidate(JsMirTranspiler* mt,
         const JsMirReference* ref) {
-    if (!mt || !ref || !ref->member || ref->computed_key ||
-            ref->named_key_id != LAMBDA_NAME_LENGTH ||
-            !jm_is_array_literal_candidate(mt, ref->member)) {
-        return 0;
-    }
+    return mt && ref && ref->member && !ref->computed_key &&
+        ref->named_key_id == LAMBDA_NAME_LENGTH &&
+        jm_is_array_literal_candidate(mt, ref->member);
+}
 
-    // This mirrors js_try_get_array_length_no_gc's two ordinary physical
-    // representations. Each read rechecks the observable companion/layout
-    // state and uses the existing NameId operation on a miss (S1.11, D8.2.3).
-    MIR_reg_t result = jm_new_reg(mt, "array_length", MIR_T_I64);
-    MIR_label_t miss = jm_new_label(mt);
+static MIR_reg_t jm_emit_array_length_native(JsMirTranspiler* mt,
+        const JsMirReference* ref, MIR_label_t miss) {
+    if (!jm_array_length_candidate(mt, ref) || !miss) return 0;
+
+    // Each physical read rechecks the array kind and observable companion
+    // state. A miss must resume Get on the already-evaluated Reference.
+    MIR_reg_t result = jm_new_reg(mt, "array_length_native", MIR_T_I64);
     MIR_label_t done = jm_new_label(mt);
     MirEmitter* emitter = &mt->func_em->em;
     MIR_reg_t array = em_guard_container(emitter, ref->base_reg,
@@ -2515,7 +2516,7 @@ static MIR_reg_t jm_emit_array_length_read(JsMirTranspiler* mt,
     jm_emit_label(mt, tagged_length);
     MIR_reg_t tagged_length_value = em_load_at(emitter, array,
         LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "array_length_tagged_value");
-    jm_emit_mov(mt, result, jm_box_native(mt, tagged_length_value, LMD_TYPE_INT));
+    jm_emit_mov(mt, result, tagged_length_value);
     jm_emit_jmp(mt, done);
 
     jm_emit_label(mt, numeric);
@@ -2550,7 +2551,23 @@ static MIR_reg_t jm_emit_array_length_read(JsMirTranspiler* mt,
     jm_emit_label(mt, numeric_length);
     MIR_reg_t numeric_length_value = em_load_at(emitter, array,
         LAMBDA_GC_OFF_LIST_LENGTH, MIR_T_I64, "array_length_numeric_value");
-    jm_emit_mov(mt, result, jm_box_native(mt, numeric_length_value, LMD_TYPE_INT));
+    jm_emit_mov(mt, result, numeric_length_value);
+    jm_emit_label(mt, done);
+    return result;
+}
+
+static MIR_reg_t jm_emit_array_length_read(JsMirTranspiler* mt,
+        const JsMirReference* ref) {
+    if (!jm_array_length_candidate(mt, ref)) return 0;
+
+    // This mirrors js_try_get_array_length_no_gc's two ordinary physical
+    // representations. Each read rechecks the observable companion/layout
+    // state and uses the existing NameId operation on a miss (S1.11, D8.2.3).
+    MIR_reg_t result = jm_new_reg(mt, "array_length", MIR_T_I64);
+    MIR_label_t miss = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+    MIR_reg_t length = jm_emit_array_length_native(mt, ref, miss);
+    jm_emit_mov(mt, result, jm_box_native(mt, length, LMD_TYPE_INT));
     jm_emit_jmp(mt, done);
 
     jm_emit_label(mt, miss);
@@ -4302,15 +4319,25 @@ static MIR_reg_t jm_emit_predicted_literal_field_data_guard(JsMirTranspiler* mt,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BLT,
         MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, capacity),
         MIR_new_int_op(mt->ctx, field_end)));
-    MIR_reg_t field_offset = jm_new_reg(mt, "literal_offset", MIR_T_I64);
-    jm_emit_reg_op(mt, MIR_MOV, field_offset,
-        MIR_new_int_op(mt->ctx, plan->byte_offset));
-    MIR_reg_t initialized = jm_callr_2(mt,
-        "js_constructor_shape_field_is_initialized", MIR_T_I64, receiver,
-        field_offset);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-        MIR_new_label_op(mt->ctx, miss), MIR_new_reg_op(mt->ctx, initialized),
-        MIR_new_int_op(mt->ctx, 0)));
+    // The shape is exact, but constructor slots are published per instance.
+    // Read its two-byte reservation mask directly at this no-GC guard instead
+    // of calling back into the successful property kernel (D8.4.1v2).
+    int64_t slot = plan->byte_offset / (int64_t)sizeof(void*);
+    if (plan->byte_offset % (int64_t)sizeof(void*) == 0 && slot < 16) {
+        MIR_reg_t flags = em_load_at(emitter, map,
+            LAMBDA_GC_OFF_CONTAINER_FLAGS, MIR_T_U8, "literal_ctor_flags");
+        jm_emit_reg_binary_op(mt, MIR_AND, flags, flags,
+            MIR_new_int_op(mt->ctx, CONTAINER_FLAG_CTOR_RESERVED));
+        MIR_label_t published = jm_new_label(mt);
+        jm_emit_branch(mt, MIR_BF, published, flags);
+        MIR_reg_t reserved = em_load_at(emitter, map,
+            (int64_t)offsetof(Container, ctor_reserved_mask_lo) + slot / 8,
+            MIR_T_U8, "literal_ctor_reserved");
+        jm_emit_reg_binary_op(mt, MIR_AND, reserved, reserved,
+            MIR_new_int_op(mt->ctx, 1 << (slot % 8)));
+        jm_emit_branch(mt, MIR_BT, miss, reserved);
+        jm_emit_label(mt, published);
+    }
     return data;
 }
 
@@ -4821,26 +4848,13 @@ static MIR_reg_t jm_emit_packed_array_read(JsMirTranspiler* mt,
     return jm_emit_packed_array_read_impl(mt, member, receiver, key, false, 0);
 }
 
-// A computed key may be the boxed Number result of an inner array read. Keep
-// its normal ToPropertyKey path on every non-Number value, but reuse the
-// existing guarded dense reader when the Item already has an exact Number
-// representation. This composes two physical leaves without assuming that an
-// arbitrary property expression is numeric (S1.11, D8.2.3).
-static MIR_reg_t jm_emit_packed_array_read_boxed_number_key(
-        JsMirTranspiler* mt, JsMemberNode* member, MIR_reg_t receiver,
-        MIR_reg_t key) {
-    if (!mt || !member || !member->computed ||
-            !jm_is_array_literal_candidate(mt, member)) {
-        return 0;
-    }
-
-    MIR_reg_t result = jm_new_reg(mt, "dense_boxed_key_read", MIR_T_I64);
+// An Item key can enter a numeric array lane only after an exact Number
+// witness. Other keys retain their original ToPropertyKey continuation.
+static MIR_reg_t jm_emit_guard_boxed_array_number_key(JsMirTranspiler* mt,
+        MIR_reg_t key, MIR_label_t miss) {
     MIR_reg_t number = jm_new_reg(mt, "dense_boxed_key_number", MIR_T_D);
     MIR_label_t numeric = jm_new_label(mt);
     MIR_label_t integer = jm_new_label(mt);
-    MIR_label_t miss = jm_new_label(mt);
-    MIR_label_t done = jm_new_label(mt);
-
     MIR_reg_t inline_bits = jm_new_reg(mt, "dense_boxed_key_bits", MIR_T_I64);
     jm_emit_reg_binary_op(mt, MIR_AND, inline_bits, key,
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
@@ -4864,8 +4878,27 @@ static MIR_reg_t jm_emit_packed_array_read_boxed_number_key(
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
         MIR_new_reg_op(mt->ctx, number),
         MIR_new_reg_op(mt->ctx, integer_value)));
-
     jm_emit_label(mt, numeric);
+    return number;
+}
+
+// A computed key may be the boxed Number result of an inner array read. Keep
+// its normal ToPropertyKey path on every non-Number value, but reuse the
+// existing guarded dense reader when the Item already has an exact Number
+// representation. This composes two physical leaves without assuming that an
+// arbitrary property expression is numeric (S1.11, D8.2.3).
+static MIR_reg_t jm_emit_packed_array_read_boxed_number_key(
+        JsMirTranspiler* mt, JsMemberNode* member, MIR_reg_t receiver,
+        MIR_reg_t key) {
+    if (!mt || !member || !member->computed ||
+            !jm_is_array_literal_candidate(mt, member)) {
+        return 0;
+    }
+
+    MIR_reg_t result = jm_new_reg(mt, "dense_boxed_key_read", MIR_T_I64);
+    MIR_label_t miss = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+    MIR_reg_t number = jm_emit_guard_boxed_array_number_key(mt, key, miss);
     MIR_reg_t dense = jm_emit_packed_array_read_impl(mt, member, receiver,
         number, false, miss);
     jm_emit_mov(mt, result, dense);
@@ -4892,6 +4925,17 @@ static MIR_reg_t jm_emit_packed_array_load_number(JsMirTranspiler* mt,
         MIR_label_t miss) {
     if (!miss) return 0;
     return jm_emit_packed_array_read_impl(mt, member, receiver, key, true,
+        miss);
+}
+
+static MIR_reg_t jm_emit_packed_array_reference_number(JsMirTranspiler* mt,
+        JsMemberNode* member, const JsMirReference* ref, MIR_label_t miss) {
+    if (!ref || !miss) return 0;
+    MIR_reg_t key = ref->native_key_reg
+        ? jm_emit_native_key_as_number(mt, ref->native_key_reg,
+            ref->native_key_type, "packed_strict_key")
+        : jm_emit_guard_boxed_array_number_key(mt, ref->key_reg, miss);
+    return jm_emit_packed_array_load_number(mt, member, ref->base_reg, key,
         miss);
 }
 
@@ -4922,6 +4966,76 @@ static const char* jm_numeric_binary_fallback_fn(JsOperator op) {
     }
 }
 
+static bool jm_array_length_member_candidate(JsMirTranspiler* mt,
+        JsAstNode* node) {
+    node = node ? (JsAstNode*)ast_unwrap_primary((AstNode*)node) : NULL;
+    if (!node || node->node_type != AST_NODE_MEMBER_EXPR) return false;
+    JsMemberNode* member = (JsMemberNode*)node;
+    if (member->computed || member->optional || !member->property ||
+            member->property->node_type != AST_NODE_IDENT) return false;
+    JsIdentifierNode* property = (JsIdentifierNode*)member->property;
+    return jm_identifier_matches(property->name, "length", 6) &&
+        jm_is_array_literal_candidate(mt, member);
+}
+
+static bool jm_try_emit_array_length_subtract(JsMirTranspiler* mt,
+        JsBinaryNode* bin, MIR_reg_t* out_result) {
+    if (!mt || !bin || !out_result || bin->op != OPERATOR_SUB ||
+            !jm_array_length_member_candidate(mt, bin->left) ||
+            !jm_array_length_member_candidate(mt, bin->right)) return false;
+
+    MIR_reg_t result = jm_new_reg(mt, "array_length_subtract", MIR_T_I64);
+    MIR_label_t left_miss = jm_new_label(mt);
+    MIR_label_t right_miss = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+
+    // Get the left length before evaluating the right receiver. Either guard
+    // miss resumes the original Get/ToNumeric sequence (S1.11, D8.2.3).
+    JsMirReference left_ref = jm_emit_reference(mt, bin->left);
+    jm_emit_error_lane_propagate_check(mt);
+    MIR_reg_t left_length = jm_emit_array_length_native(mt, &left_ref,
+        left_miss);
+    JsMirReference right_ref = jm_emit_reference(mt, bin->right);
+    jm_emit_error_lane_propagate_check(mt);
+    MIR_reg_t right_length = jm_emit_array_length_native(mt, &right_ref,
+        right_miss);
+    MIR_reg_t left_number = jm_new_reg(mt, "array_length_left_number", MIR_T_D);
+    MIR_reg_t right_number = jm_new_reg(mt, "array_length_right_number", MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, left_number),
+        MIR_new_reg_op(mt->ctx, left_length)));
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, right_number),
+        MIR_new_reg_op(mt->ctx, right_length)));
+    MIR_reg_t difference = jm_new_reg(mt, "array_length_difference", MIR_T_D);
+    jm_emit_reg_binary(mt, MIR_DSUB, difference, left_number, right_number);
+    jm_emit_mov(mt, result, jm_box_native(mt, difference, LMD_TYPE_FLOAT));
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, left_miss);
+    MIR_reg_t left_value = jm_emit_get_value(mt, &left_ref);
+    jm_emit_error_lane_propagate_check(mt);
+    int left_spill = jm_preserve_before_expression(mt, left_value, bin->right);
+    JsMirReference slow_right_ref = jm_emit_reference(mt, bin->right);
+    jm_emit_error_lane_propagate_check(mt);
+    MIR_reg_t right_value = jm_emit_get_value(mt, &slow_right_ref);
+    jm_emit_error_lane_propagate_check(mt);
+    if (left_spill >= 0) jm_gen_spill_load(mt, left_value, left_spill);
+    jm_emit_mov(mt, result, jm_callr_2(mt, "js_subtract", MIR_T_I64,
+        left_value, right_value));
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, right_miss);
+    MIR_reg_t fast_left_value = jm_box_native(mt, left_length, LMD_TYPE_INT);
+    MIR_reg_t slow_right_value = jm_emit_get_value(mt, &right_ref);
+    jm_emit_error_lane_propagate_check(mt);
+    jm_emit_mov(mt, result, jm_callr_2(mt, "js_subtract", MIR_T_I64,
+        fast_left_value, slow_right_value));
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
+    *out_result = result;
+    return true;
+}
+
 static TypeId jm_numeric_binary_operand_type(JsMirTranspiler* mt,
         JsAstNode* node) {
     TypeId type = jm_get_effective_type(mt, node);
@@ -4932,6 +5046,57 @@ static TypeId jm_numeric_binary_operand_type(JsMirTranspiler* mt,
         if (type == LMD_TYPE_INT || type == LMD_TYPE_FLOAT) return type;
     }
     return LMD_TYPE_ANY;
+}
+
+static bool jm_try_emit_number_array_length_compare(JsMirTranspiler* mt,
+        JsBinaryNode* bin, MIR_reg_t* out_raw) {
+    if (!mt || !bin || !out_raw ||
+            !jm_array_length_member_candidate(mt, bin->right)) return false;
+    int comparison_op = -1;
+    switch (bin->op) {
+    case OPERATOR_LT: comparison_op = 0; break;
+    case OPERATOR_GT: comparison_op = 1; break;
+    case OPERATOR_LE: comparison_op = 2; break;
+    case OPERATOR_GE: comparison_op = 3; break;
+    default: return false;
+    }
+    TypeId left_type = jm_numeric_binary_operand_type(mt, bin->left);
+    if (left_type != LMD_TYPE_INT && left_type != LMD_TYPE_FLOAT) return false;
+    MirNumericOpPlan plan;
+    if (!em_numeric_op_plan(bin->op, &plan) || !plan.is_comparison) {
+        return false;
+    }
+
+    // The left Number expression is evaluated once. A right length miss
+    // resumes its ordinary Get and comparison with that same value (S1.11).
+    MIR_reg_t left_number = jm_transpile_as_native(mt, bin->left,
+        LMD_TYPE_FLOAT);
+    JsMirReference right_ref = jm_emit_reference(mt, bin->right);
+    jm_emit_error_lane_propagate_check(mt);
+    MIR_reg_t result = jm_new_reg(mt, "array_length_compare", MIR_T_I64);
+    MIR_label_t miss = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+    MIR_reg_t right_length = jm_emit_array_length_native(mt, &right_ref,
+        miss);
+    MIR_reg_t right_number = jm_new_reg(mt, "array_length_compare_number",
+        MIR_T_D);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
+        MIR_new_reg_op(mt->ctx, right_number),
+        MIR_new_reg_op(mt->ctx, right_length)));
+    jm_emit_reg_binary(mt, plan.f64_opcode, result, left_number, right_number);
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, miss);
+    MIR_reg_t right_value = jm_emit_get_value(mt, &right_ref);
+    jm_emit_error_lane_propagate_check(mt);
+    MIR_reg_t left_value = jm_box_native(mt, left_number, LMD_TYPE_FLOAT);
+    jm_emit_mov(mt, result, jm_call_3(mt, "js_cmp_raw", MIR_T_I64,
+        MIR_T_I64, MIR_new_int_op(mt->ctx, comparison_op),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, left_value),
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, right_value)));
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
+    *out_raw = result;
+    return true;
 }
 
 static MIR_reg_t jm_emit_typed_array_number_binary_slow(
@@ -5050,13 +5215,8 @@ static bool jm_try_emit_packed_array_strict_equal(JsMirTranspiler* mt,
             right_node->node_type != AST_NODE_MEMBER_EXPR) return false;
     JsMemberNode* left_member = (JsMemberNode*)left_node;
     JsMemberNode* right_member = (JsMemberNode*)right_node;
-    TypeId left_key_type = left_member->computed
-        ? jm_get_effective_type(mt, left_member->property) : LMD_TYPE_ANY;
-    TypeId right_key_type = right_member->computed
-        ? jm_get_effective_type(mt, right_member->property) : LMD_TYPE_ANY;
     if (!left_member->computed || !right_member->computed ||
-            (left_key_type != LMD_TYPE_INT && left_key_type != LMD_TYPE_FLOAT) ||
-            (right_key_type != LMD_TYPE_INT && right_key_type != LMD_TYPE_FLOAT) ||
+            left_member->optional || right_member->optional ||
             !jm_is_array_literal_candidate(mt, left_member) ||
             !jm_is_array_literal_candidate(mt, right_member)) {
         return false;
@@ -5072,30 +5232,16 @@ static bool jm_try_emit_packed_array_strict_equal(JsMirTranspiler* mt,
     // sequence from the already-evaluated Reference (S1.11, D8.2.3).
     JsMirReference left_ref = jm_emit_reference(mt, left_node);
     jm_emit_error_lane_propagate_check(mt);
-    MIR_reg_t left_key = left_ref.native_key_reg;
-    if (left_ref.native_key_type == LMD_TYPE_INT) {
-        left_key = jm_new_reg(mt, "packed_left_key", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-            MIR_new_reg_op(mt->ctx, left_key),
-            MIR_new_reg_op(mt->ctx, left_ref.native_key_reg)));
-    }
-    MIR_reg_t left_number = jm_emit_packed_array_load_number(mt, left_member,
-        left_ref.base_reg, left_key, left_miss);
+    MIR_reg_t left_number = jm_emit_packed_array_reference_number(mt,
+        left_member, &left_ref, left_miss);
 
     // The right Reference starts only after the left Get's guarded fast path.
     // If that path misses, the left_miss block below first performs the left
     // Get and then builds the right Reference in source order (S1.11).
     JsMirReference right_ref = jm_emit_reference(mt, right_node);
     jm_emit_error_lane_propagate_check(mt);
-    MIR_reg_t right_key = right_ref.native_key_reg;
-    if (right_ref.native_key_type == LMD_TYPE_INT) {
-        right_key = jm_new_reg(mt, "packed_right_key", MIR_T_D);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
-            MIR_new_reg_op(mt->ctx, right_key),
-            MIR_new_reg_op(mt->ctx, right_ref.native_key_reg)));
-    }
-    MIR_reg_t right_number = jm_emit_packed_array_load_number(mt, right_member,
-        right_ref.base_reg, right_key, right_miss);
+    MIR_reg_t right_number = jm_emit_packed_array_reference_number(mt,
+        right_member, &right_ref, right_miss);
 
     MIR_reg_t equal = jm_new_reg(mt, "packed_numbers_equal", MIR_T_I64);
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_DEQ,
@@ -5193,6 +5339,16 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     TypeId right_type = jm_get_effective_type(mt, bin->right);
     bool left_numeric = left_type == LMD_TYPE_INT || left_type == LMD_TYPE_FLOAT;
     bool right_numeric = right_type == LMD_TYPE_INT || right_type == LMD_TYPE_FLOAT;
+
+    MIR_reg_t length_subtract = 0;
+    if (jm_try_emit_array_length_subtract(mt, bin, &length_subtract)) {
+        return publish(length_subtract, VALUE_REP_ITEM);
+    }
+
+    MIR_reg_t length_compare = 0;
+    if (jm_try_emit_number_array_length_compare(mt, bin, &length_compare)) {
+        return publish(length_compare, VALUE_REP_I64);
+    }
 
     MIR_reg_t typed_binary = 0;
     if (jm_try_emit_typed_array_number_binary(mt, bin, &typed_binary)) {
@@ -10547,6 +10703,9 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
         }
 
         if (is_comparison) {
+            MIR_reg_t length_compare = 0;
+            if (jm_try_emit_number_array_length_compare(mt, bin,
+                    &length_compare)) return length_compare;
             TypeId lt = jm_get_effective_type(mt, bin->left);
             TypeId rt = jm_get_effective_type(mt, bin->right);
             bool left_num = (lt == LMD_TYPE_INT || lt == LMD_TYPE_FLOAT);

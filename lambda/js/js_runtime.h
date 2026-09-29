@@ -253,8 +253,6 @@ struct TypeMap;
 Item js_new_object(void);
 Item js_new_object_with_typemap(struct TypeMap* tm);
 Item js_new_literal_object_with_typemap(struct TypeMap* tm);
-int64_t js_constructor_shape_field_is_initialized(Item object,
-                                                   int64_t byte_offset);
 // A compiler-owned primitive object-literal recipe.  The recipe outlives the
 // MIR code that references it; every invocation still creates fresh strings
 // and a fresh ordinary object.

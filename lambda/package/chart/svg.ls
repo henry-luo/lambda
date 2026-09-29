@@ -92,6 +92,20 @@ pub fn line_path(points) string {
     }
 }
 
+pub fn arrow_head(x1, y1, x2, y2, color) {
+    let dx = x2 - x1
+    let dy = y2 - y1
+    let distance = math.sqrt(dx * dx + dy * dy)
+    let ux = dx / distance
+    let uy = dy / distance
+    let base_x = x2 - ux * 8.0
+    let base_y = y2 - uy * 8.0
+    let wing_x = uy * 3.0
+    let wing_y = 0.0 - ux * 3.0;
+    <path d: M(x2, y2) ++ " " ++ L(base_x + wing_x, base_y + wing_y) ++
+        " " ++ L(base_x - wing_x, base_y - wing_y) ++ " Z", fill: color>
+}
+
 // build a closed area path: line along top, then line back along bottom
 pub fn area_path(top_points, bottom_points) string {
     if len(top_points) == 0 { "" }

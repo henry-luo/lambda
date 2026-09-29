@@ -1,7 +1,11 @@
 # JS MVP release-profile comparison and further LambdaJS tuning
 
-**Date:** 2026-09-28. **Status:** build integration and measurement complete;
-optimization proposals below are not implemented or claimed as speedups.
+**Date:** 2026-09-28. **Status:** build integration and MVP comparison complete.
+The numeric-entry and loop-state work, guarded array consumer/length slices,
+predicted-field and call-root reductions, guarded RegExp bulk-loop change, and
+bounded ASCII decimal parsing have ordinary-release A/B evidence in the
+follow-up reports. Mixed array arithmetic/stores, broader call capability
+elimination, and split/slice allocation remain coverage targets.
 
 Authority: [Formal Semantics](../../doc/Lambda_Formal_Semantics.md) **S1.11**
 (hosted JS follows ECMAScript); [Formal Design](../../doc/Lambda_Formal_Design.md)
@@ -213,4 +217,8 @@ Test262 **40,261/40,261** with zero regressions and no retries. The release-prof
 build, isolation/manifest audits and CLI/harness checks pass. The Premake
 self-test stops at an existing Linux multiarch probe on macOS, reproduced with
 the unmodified generator; that does not prevent the actual profile build.
-The production optimizer has not been changed by this task.
+The numeric-path implementation and its validation are recorded in the
+[numeric follow-up report](../../test/benchmark/js_mvp/tune_20260928/README.md).
+The subsequent guarded array, property/call, and RegExp work, including its
+63-row output screen and control replay, is in the
+[remaining-items follow-up report](../../test/benchmark/js_mvp/tune_remaining_20260929/README.md).
