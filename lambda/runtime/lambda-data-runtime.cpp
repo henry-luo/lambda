@@ -3507,6 +3507,24 @@ static bool string_char_span(String* str, int64_t index, const char** chars,
     return true;
 }
 
+// Decode the indexed character directly: materializing its String first made
+// ord(s[i]) cross two helpers and a possible allocation per character.
+extern "C" Item fn_string_ord_at(Item str_item, int64_t index) {
+    String* str = str_item.get_safe_string();
+    if (!str || index < 0) return ItemNull;
+    if (str->is_ascii) {
+        return (uint64_t)index < str->len
+            ? (Item){.item = lambda_int_box_lane((unsigned char)str->chars[index])}
+            : ItemNull;
+    }
+    const char* chars = NULL;
+    size_t length = 0;
+    if (!string_char_span(str, index, &chars, &length)) return ItemNull;
+    uint32_t codepoint = 0;
+    return str_utf8_decode(chars, length, &codepoint) > 0
+        ? (Item){.item = lambda_int_box_lane(codepoint)} : ItemNull;
+}
+
 // The MIR caller has certified both operands as strings. This leaf has no
 // allocation or re-entry, so it can compare their indexed character spans
 // directly while preserving absence and UTF-8 equality (D3.3.3v3, S7.1.1v3).

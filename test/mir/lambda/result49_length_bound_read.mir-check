@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "S7.1.1v3, D2.5.3: the short-circuit length relation removes the repeated index bounds branch; counter-domain checks stay for very large arrays and a negative start stays checked.",
+  "checks": [
+    {
+      "in_func": "_prefix_count_#",
+      "forbid": ["ubge"]
+    },
+    {
+      "in_func": "_pair_prefix_count_#",
+      "count": {"ubge": 1}
+    }
+  ]
+}

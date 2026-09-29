@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3, S9.3.1: an admitted pointer-array binding guards its live carrier and directly constructs the named record; a dynamic value retains field admission.",
+  "checks": [
+    {
+      "in_func": "_from_global_#",
+      "expect": ["call\theap_calloc_class_p, heap_calloc_class", "call\tlambda_type_check_p, lambda_type_check"],
+      "forbid": ["call\tmap_fill_vp", "call\tmap_with_type_tl_p, map_with_type_tl"]
+    },
+    {
+      "in_func": "_from_param_#",
+      "expect": ["call\theap_calloc_class_p, heap_calloc_class"],
+      "forbid": ["call\tmap_fill_vp", "call\tmap_with_type_tl_p, map_with_type_tl"]
+    },
+    {
+      "in_func": "_from_dynamic_#",
+      "expect": ["call\tlambda_type_check_p, lambda_type_check", "call\tmap_fill_vp"]
+    }
+  ]
+}
