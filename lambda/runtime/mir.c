@@ -380,7 +380,7 @@ void* jit_gen_func(MIR_context_t ctx, const char *func_name) {
         return NULL;
     }
 
-    log_notice("Generating native code...");
+    log_debug("Generating native code...");
     // link MIR code with external functions
     MIR_link(ctx, lambda_mir_lazy_enabled()
         ? MIR_set_lazy_gen_interface : MIR_set_gen_interface, import_resolver);

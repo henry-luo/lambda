@@ -14,6 +14,9 @@
 #include "../lib/time_util.h"
 #include "../lambda/input/input.hpp"
 #include "../lambda/runtime/runtime-state.h"
+#include "../lambda/runtime/transpiler.hpp"
+#include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/dom/dom.h"
 
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/input/css/dom_element.hpp"
@@ -4987,6 +4990,7 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
     lycon->ui_context->viewport_height = iframe_height;
     process_document_font_faces(lycon->ui_context, doc);
     layout_html_doc(lycon->ui_context, doc, false);
+    radiant_dispatch_lambda_body_load(lycon->ui_context, doc);
     lycon->ui_context->document = parent_doc;
     lycon->ui_context->viewport_width = saved_viewport_width;
     lycon->ui_context->viewport_height = saved_viewport_height;
@@ -5035,6 +5039,18 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
                                            (DomElement*)block);
                 layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
                 lycon->ui_context->iframe_depth--;
+                DomDocument* parent_doc = lycon->ui_context->document;
+                if (doc->page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT &&
+                    dom_document_has_js_realm(parent_doc)) {
+                    // Navigation finished on the child's evaluator. Queue load
+                    // in the parent's realm at this quiescent layout boundary.
+                    EvalContext* parent_owner = runtime_get_eval_context(parent_doc->js.runtime);
+                    if (parent_owner && radiant_eval_context_switch(parent_owner) &&
+                        js_runtime_state_init(parent_owner)) {
+                        dom_set_document(parent_doc);
+                        dom_iframe_navigation_complete(block);
+                    }
+                }
             }
         }
     } else if (evaluation_active && !(block->embed && block->embedp()->doc)) {
@@ -10721,6 +10737,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_leave();
     double block_ms = layout_block_record_elapsed(t_block_start);
     if (block_ms > 50.0) {
-        log_warn("SLOW BLOCK: %s took %.0fms (count=%d)", elmt->source_loc(), block_ms, layout_block_count);
+        log_debug("SLOW BLOCK: %s took %.0fms (count=%d)", elmt->source_loc(), block_ms, layout_block_count);
     }
 }

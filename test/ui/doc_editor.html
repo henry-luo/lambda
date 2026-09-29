@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lambda Document Editor</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           background: #1f2430; color: #f4f6fa; }
+    #splash { position: absolute; inset: 0; display: flex; align-items: center;
+              justify-content: center; flex-direction: column; gap: 12px; }
+    #splash h1 { margin: 0; font-size: 24px; font-weight: 650; }
+    #splash p { margin: 0; color: #aeb9ca; font-size: 14px; }
+    #editor-frame { width: 100%; height: 100%; border: 0; visibility: hidden; }
+  </style>
+</head>
+<body>
+  <div id="splash" role="status" aria-live="polite">
+    <h1>lambda</h1>
+    <p>Opening document editor…</p>
+  </div>
+  <iframe id="editor-frame" title="Document editor"></iframe>
+  <script>
+    var editorFrame = document.getElementById('editor-frame');
+    var editorLoadCount = 0;
+    editorFrame.onload = function () {
+      editorLoadCount += 1;
+      editorFrame.style.visibility = 'visible';
+      document.getElementById('splash').style.visibility = 'hidden';
+      document.body.setAttribute('data-editor-loads', String(editorLoadCount));
+    };
+    // Host-driven timers run after the splash's first paint.
+    window.addEventListener('load', function () {
+      setTimeout(function () { editorFrame.src = 'doc_editor.ls'; }, 0);
+    });
+  </script>
+</body>
+</html>

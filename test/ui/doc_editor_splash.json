@@ -1,0 +1,14 @@
+{
+  "name": "Document editor splash waits for the Lambda iframe",
+  "html": "test/ui/doc_editor.html",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "assert_visible", "target": {"selector": "#splash"}, "visible": true},
+    {"type": "assert_style", "target": {"selector": "#splash"}, "property": "visibility", "equals": "hidden", "assert_timeout": 1000},
+    {"type": "assert_style", "target": {"selector": "#editor-frame"}, "property": "visibility", "equals": "visible"},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_attribute", "target": {"selector": "body"}, "attribute": "data-editor-loads", "equals": "1"},
+    {"type": "switch_frame", "selector": "#editor-frame"},
+    {"type": "assert_count", "target": {"selector": ".doc-editor"}, "count": 1}
+  ]
+}

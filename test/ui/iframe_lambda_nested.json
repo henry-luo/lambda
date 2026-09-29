@@ -1,0 +1,8 @@
+{
+  "name": "Lambda document loads Lambda iframe",
+  "html": "test/ui/iframe_lambda_parent.ls",
+  "events": [
+    {"type":"switch_frame","selector":"#frame"},
+    {"type":"assert_text","target":{"selector":"#child-ready"},"contains":"Lambda child ready"}
+  ]
+}
