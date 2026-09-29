@@ -15,39 +15,12 @@ cd "$PROJECT_ROOT"
 rm -rf ./release
 mkdir -p ./release
 
-# Runtime assets are copied to ./release/lmd/ (not ./release/lambda/) to avoid a name clash
-# between the lambda executable and a directory of the same name on macOS/Linux.
+# Runtime assets live in ./lmd/ in the source checkout and ship unchanged as
+# ./release/lmd/, so dev and release share one layout. The name "lmd" (not
+# "lambda") avoids a clash with the lambda executable on macOS/Linux.
 
-# Step 1: Create release/lmd/input directory recursively
-mkdir -p ./release/lmd/input
-
-# Step 2: Copy Lambda input files (*.ls and *.css)
-if ls ./lambda/input/*.ls >/dev/null 2>&1; then
-    cp ./lambda/input/*.ls ./release/lmd/input/
-fi
-
-if ls ./lambda/input/*.css >/dev/null 2>&1; then
-    cp ./lambda/input/*.css ./release/lmd/input/
-fi
-
-# Step 2b: Copy LaTeX CSS files
-mkdir -p ./release/lmd/input/latex/css
-
-if ls ./lambda/input/latex/css/*.css >/dev/null 2>&1; then
-    cp ./lambda/input/latex/css/*.css ./release/lmd/input/latex/css/
-fi
-
-# Step 2b2: Copy LaTeX fonts (Computer Modern + KaTeX)
-# Fonts used by latex package: Computer Modern Serif, Typewriter, Sans (CMU woff files in subdirs)
-# Fonts used by math package: KaTeX_* woff2 files (KaTeX_AMS, Caligraphic, Fraktur, Main, Math,
-#   SansSerif, Script, Size1-4, Typewriter)
-# Copy the entire fonts directory to ensure all referenced assets are present.
-rm -rf ./release/lmd/input/latex/fonts
-cp -r ./lambda/input/latex/fonts ./release/lmd/input/latex/fonts
-
-# Step 2d: Copy the canonical package tree used by the lambda.* resolver.
-rm -rf ./release/lmd/package
-cp -r ./lambda/package ./release/lmd/package
+# Step 1: Copy the runtime asset tree (packages, schemas, stylesheets, fonts).
+cp -r ./lmd ./release/lmd
 
 # Step 2c: Copy live-demo.html and referenced files
 # Copy live-demo.html

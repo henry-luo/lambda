@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 14.0.2 (2026-09-27)
+**Spec version:** 14.1.0 (2026-09-29)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1321,7 +1321,7 @@ loosely across the corpus — context disambiguates, and we live with it.
   recognition,
   events, Selection/Range, clipboard/composition transport, observation,
   geometry, and checked generic DOM mutation primitives. The behavior package
-  (currently sourced under `lambda/package/dom`) owns uncanceled
+  (currently sourced under `lmd/package/dom`) owns uncanceled
   `contenteditable` default actions, structural normalization, editing
   history, `designMode`, and the complete
   `execCommand`/`queryCommand*` compatibility surface. User input and legacy
@@ -1330,6 +1330,18 @@ loosely across the corpus — context disambiguates, and we live with it.
   points. Its conformance gates are the applicable automated WPT
   contenteditable/editing suites and the pinned Chromium editing corpus.
   [D7.2.1–D7.2.3, D7.3.5, D7.5.3; Radiant_Design_Editable §20]
+- **D7.2.6** **Import resolution follows the S16.9.8 roots, one resolver for
+  every caller.** A package path is looked up by name only: the built-in
+  modules (`math`, `io`), the runtime-registered host modules, then
+  `lambda.<package>` beneath `<lambda-home>/package/` (D7.2.4). Any other
+  root yields no path and the import fails E216; it is reserved for the
+  package registry and is never retried against the working directory or the
+  Lambda home. A relative path resolves against the importing script's
+  directory (the working directory when the script has no file): `.a.b` →
+  `a/b`, and each leading `~~` step adds one `../`, trying `.ls` and then
+  `.js`. Because a relative import binds to its file's location, a checked-in
+  script with relative imports runs in place; a harness that copies its text
+  elsewhere breaks it. [S16.9.8, D7.2.4]
 
 ### D7.3 Jube modules: the module system
 
@@ -2249,8 +2261,9 @@ slice; no formal semantic ruling or document semver changes.
 | D6.3.1 | JS async activations as `LambdaTask`s (JSCU25, ratified 2026-09-07) are not implemented: readiness stays with the microtask queue (the reaction job resumes the task; the FIFO run queue never resumes a JS frame), the Promise is the handle, the mailbox is lazy, and the scheduler holds JS activation tasks weakly so an unreachable pending activation is collected. `lambda_task_create` today allocates a mailbox and registers four roots per task (`concurrency.cpp:737–774`). |
 | D6.3.2 | Worker tier pending entirely: process isolation first, thread isolation gated on the isolate-state audit and DO20. |
 | D7.1.3 | Static modules implemented (rev 29, P0–P6) except Class F: the rt→radiant boundary is a ratcheted 165-import baseline; P1c constructor consolidation deferred. |
-| D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,edit,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths; regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
-| D7.2.5 | Implemented 2026-09-07. The shipped `lambda/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
+| D7.2.4 | **Implemented 2026-09-08.** The direct AST resolver exposes `lambda.sys.*` through the existing sys-function registry, aliases `lambda.math`/`lambda.io` to the built-in module rows, reserves the `lambda` root, and resolves shipped source from `<lambda-home>/package/` while exposing `lambda/{chart,dom,edit,editor,graph,latex,openapi,pdf}` and typesetting under `lambda/doc/math`. Live imports, bridges, tests, and release preparation use the canonical paths. Since 2026-09-29 the source checkout and the release share one home, `./lmd/`: the package tree moved from `lambda/package/` to `lmd/package/`, and the formerly separate `input/` assets moved into their packages (validator default schemas and view stylesheets under `package/doc/`, math/KaTeX CSS and fonts under `package/math/`, LaTeX CSS and CMU fonts under `package/latex/`); regressions are `test/lambda/lambda_namespace.ls` and the reserved-root negative fixture. |
+| D7.2.5 | Implemented 2026-09-07. The shipped `lmd/package/dom` behavior package owns the shared descriptor/context/plan/result pipeline, text and structural editing, formatting, objects, clipboard, history, `designMode`, `execCommand`, and all five `queryCommand*` surfaces. Native Radiant retains only platform transport and generic, checked DOM/Selection/Range/clipboard transaction mechanisms. Applicable WPT and pinned Chromium contenteditable manifests, package-disabled behavior, editor integration, form regressions, Lambda/Radiant baselines, and lint pass; the release/lifecycle record is `vibe/radiant/Radiant_Editable_UA6_Report.md`. The separate `Radiant_Design_Edit_History.md` expansion (including form-history migration and its different retention contract) remains a proposal and does not alter this ruling. |
+| D7.2.6 | **Implemented 2026-09-29.** `lambda_resolve_import_module_path` is the one resolver (AST import, dependency prebuild, document-transform package loader); it returns NULL for a bare root other than `lambda`, and `resolve_import` reports E216 after the built-in and registered-module checks. `run_source_fixture` in `test/test_lambda_opt_gtest.cpp` runs checked-in scripts in place for the same reason the ruling states. |
 | D7.4.1v2 | Native-module POC 1 remains unstarted; the engine-owned Promise VMap is designed by JR7/Tune7 but not yet implemented. |
 | D7.4.3 | Hosted-language layering: `lang-python` is the landed DSO reference chain, but Python is currently statically linked and its ten follow-up ADRs (Lang_Hosting §17) are unwritten. |
 | D7.4.4 | Implemented in DOM4 (2026-08-14): `host_ops`, `legacy_ops`, `JubeHostObjectOps`, and the vmap `string_key_item` re-materialization shim were removed; record-owned hooks are the only host-object protocol. The protocol remains unchanged; the D7.4.5v2 TypeId-order revision advances the current Jube ABI to version 6. |

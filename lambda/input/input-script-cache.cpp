@@ -227,15 +227,8 @@ static void cache_unlink_input_dependencies(ScriptInput* input) {
 static void cache_destroy_input(ScriptInput* input) {
     if (!input) return;
     cache_unlink_input_dependencies(input);
-    if (input->ast_artifacts) {
-        for (int i = 0; i < input->ast_artifacts->length; i++) {
-            InputScriptArtifact* artifact =
-                (InputScriptArtifact*)input->ast_artifacts->data[i];
-            cache_destroy_artifact(artifact);
-            mem_free(artifact);
-        }
-        arraylist_free(input->ast_artifacts);
-    }
+    // A MIR image promoted from an AST template borrows that template's pool.
+    // Release the MIR image first so its JIT can no longer reference the AST.
     if (input->mir_artifacts) {
         for (int i = 0; i < input->mir_artifacts->length; i++) {
             InputScriptArtifact* artifact =
@@ -244,6 +237,15 @@ static void cache_destroy_input(ScriptInput* input) {
             mem_free(artifact);
         }
         arraylist_free(input->mir_artifacts);
+    }
+    if (input->ast_artifacts) {
+        for (int i = 0; i < input->ast_artifacts->length; i++) {
+            InputScriptArtifact* artifact =
+                (InputScriptArtifact*)input->ast_artifacts->data[i];
+            cache_destroy_artifact(artifact);
+            mem_free(artifact);
+        }
+        arraylist_free(input->ast_artifacts);
     }
     if (input->build_states) {
         for (int i = 0; i < input->build_states->length; i++) {

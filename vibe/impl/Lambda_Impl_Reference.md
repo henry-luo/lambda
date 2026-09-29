@@ -177,14 +177,14 @@ the two test scripts it predicted, and two collisions it did not.
 
 | Site | Was | Now |
 |---|---|---|
-| `lambda/package/dom/editing.ls` | `pub pn commit(elem)` | `commit_change` |
-| `lambda/package/dom/form.ls` | `editing.commit(~)` | `editing.commit_change(~)` |
-| `lambda/package/dom/form.ls` | `on commit(evt)` hook | `on edit_commit(evt)` (native dispatch `radiant_dispatch_behavior_edit_commit`) |
+| `lmd/package/dom/editing.ls` | `pub pn commit(elem)` | `commit_change` |
+| `lmd/package/dom/form.ls` | `editing.commit(~)` | `editing.commit_change(~)` |
+| `lmd/package/dom/form.ls` | `on commit(evt)` hook | `on edit_commit(evt)` (native dispatch `radiant_dispatch_behavior_edit_commit`) |
 | `test/lambda/proc/var_array_param_borrow.ls` | `pn put(…)` | `put_slot` |
 | `test/lambda/proc/cow_rmw_sibling_borrow.ls` | `pn put(…)` | `put_slot` |
 | `test/lambda/proc/tune26_split_string_lane.ls` | `var open` | `parts` |
-| `lambda/package/math/render.ls` | `let open` | `open_brace` |
-| `lambda/package/graph/graphviz/markers.ls` | `open` parameter | `is_open` |
+| `lmd/package/math/render.ls` | `let open` | `open_brace` |
+| `lmd/package/graph/graphviz/markers.ls` | `open` parameter | `is_open` |
 | `test/lambda/editor/multi_node_selection.ls` | `let del` | `deleted` |
 
 **`commit` already shipped as a sys function.** `SYSFUNC_EDIT_COMMIT` /

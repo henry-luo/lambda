@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "D4.4.4v4, D5.3.3: rooted read handles survive a direct pure call through owner or key; a mutating call reloads the place.",
+  "checks": [
+    {"in_func": "_read_across_#", "expect": ["call\t_observe"], "count": {"call\titem_at_p, item_at": 1}},
+    {"in_func": "_key_across_#", "expect": ["call\t_observe_key"], "count": {"call\titem_at_p, item_at": 1}},
+    {"in_func": "_read_across_gc_#", "expect": ["call\t_observe_alloc"], "count": {"call\titem_at_p, item_at": 1}},
+    {"in_func": "_read_after_change_#", "expect": ["call\t_change"], "count": {"call\titem_at_p, item_at": 2}},
+    {"in_func": "_read_after_alias_#", "expect": ["call\t_retain_box"]}
+  ]
+}

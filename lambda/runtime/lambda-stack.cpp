@@ -351,19 +351,8 @@ void lambda_stack_init(void) {
     install_signal_handler();
 }
 
-void lambda_stack_cleanup(void) {
+void lambda_stack_detach_thread(void) {
 #if defined(__APPLE__) || defined(__linux__)
-    if (!_signal_handler_installed && !_lambda_alt_stack_mem) return;
-
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = SIG_DFL;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGSEGV, &sa, NULL);
-#if defined(__linux__)
-    sigaction(SIGBUS, &sa, NULL);
-#endif
-
     if (_lambda_alt_stack_mem) {
         bool restore_disabled_stack = _lambda_alt_stack_previous_valid &&
             (_lambda_alt_stack_previous.ss_flags & SS_DISABLE) != 0;
@@ -380,6 +369,22 @@ void lambda_stack_cleanup(void) {
         _lambda_alt_stack_mem = NULL;
         _lambda_alt_stack_previous_valid = false;
     }
+#endif
+}
+
+void lambda_stack_cleanup(void) {
+#if defined(__APPLE__) || defined(__linux__)
+    if (!_signal_handler_installed && !_lambda_alt_stack_mem) return;
+    lambda_stack_detach_thread();
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+#if defined(__linux__)
+    sigaction(SIGBUS, &sa, NULL);
+#endif
     _signal_handler_installed = false;
     log_debug("stack cleanup: signal-based overflow handler released");
 #elif defined(_WIN32)

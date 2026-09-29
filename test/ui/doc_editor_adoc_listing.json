@@ -1,0 +1,16 @@
+{
+  "name": "Doc editor keeps AsciiDoc listing blocks verbatim",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "comprehensive_test.adoc"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_comprehensive_test_adoc .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "comprehensive_test.adoc"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview pre code"}, "count": 3},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview pre code"}, "contains": "# This is a comment"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "# Application Configuration"}
+  ]
+}

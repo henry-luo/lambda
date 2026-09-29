@@ -181,7 +181,7 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/Lambda_Func.md` — Functions (`fn`, `pn`, closures, higher-order functions)
 - `doc/Lambda_Error_Handling.md` — Error handling (`raise`, `T^E` return types, postfix `^` propagation, `expr ^ { ... }` handlers)
 - `doc/Lambda_Sys_Func.md` — System functions (type, math, string, collection, I/O, date/time)
-- `doc/Lambda_Modules.md`, `doc/Lambda_Concurrency.md`, `doc/Lambda_Document_Updates.md` — Modules and imports; tasks, mailboxes and cancellation; references, `put`/`del` and transactions
+- `doc/Lambda_Modules.md`, `doc/Lambda_Concurrency.md`, `doc/dev/Lambda_Document_Updates.md` — Modules and imports; tasks, mailboxes and cancellation; references, `put`/`del` and transactions
 - `doc/Lambda_Packages.md`, `doc/HTML_CSS_SVG_Support.md` — Bundled Lambda packages; Radiant's HTML/CSS/SVG support matrix
 - `doc/tutorial/README.md` — Ten-chapter tutorial; `make check-tutorial` replays its examples and checks their output
 - `doc/Lambda_Validator.md` — Schema-based data validation

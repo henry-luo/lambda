@@ -65,7 +65,6 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Lambda_String_Pattern.md](Lambda_String_Pattern.md)** | **String Patterns** — The pattern language inside `\(…)`: character classes, ranges, quantifiers, negation, and pattern-aware `find`/`replace`/`split` |
 | **[Lambda_Modules.md](Lambda_Modules.md)** | **Modules and Imports** — Import forms and resolution, `pub` exports, built-in and package modules, JavaScript modules |
 | **[Lambda_Concurrency.md](Lambda_Concurrency.md)** | **Concurrency** — Tasks with `start`/`wait`, mailboxes, `select`, timeouts, cancellation, structured scope, JavaScript Promises |
-| **[Lambda_Document_Updates.md](Lambda_Document_Updates.md)** | **Document Updates** — References and the force step `#`, node identity, `put`/`del`, transactions with `open`/`commit`/`rollback`, `temp.` documents |
 | **[Lambda_Cheatsheet.md](Lambda_Cheatsheet.md)** | **Cheatsheet** — One-page syntax summary |
 
 ### Library and Tools
@@ -289,7 +288,7 @@ import tex: lambda.doc.math.math   // a shipped package
 area(1.0)                  // 3.14159
 ```
 
-A relative import `.a.b` resolves beside the importing file; a bare `a` resolves in the current working directory; `lambda.*` paths resolve under `LAMBDA_HOME`. Import forms, resolution, instantiation, JavaScript modules and known issues are described in [Lambda_Modules.md](Lambda_Modules.md).
+A relative import `.a.b` resolves beside the importing file and `~~.a` one directory up; a bare name is a package, so `lambda.*` paths resolve under `LAMBDA_HOME` and any other bare name is an error (E216). Import forms, resolution, instantiation, JavaScript modules and known issues are described in [Lambda_Modules.md](Lambda_Modules.md).
 
 ---
 

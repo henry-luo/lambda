@@ -390,6 +390,7 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
 
 void free_document(DomDocument* doc) {
     if (!doc) return;
+    radiant_cancel_async_document_loads(doc);
 
     Input* document_input = dom_document_take_owned_input_resources(doc);
     Pool* owned_loader_pool = doc->owned_loader_pool;

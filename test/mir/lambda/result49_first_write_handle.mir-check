@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "D4.4.4v4: a first packed-bool write binds one unique record handle for adjacent fields; a changed index ends that proof. Packed leaves use byte stores.",
+  "checks": [
+    {
+      "in_func": "_set_flags_#",
+      "count": {
+        "1535": 1,
+        "call\tcow_place_leaf_fixed": 1,
+        "mov\tu8:": 3
+      }
+    },
+    {
+      "in_func": "_move_flags_#",
+      "count": {
+        "1535": 2
+      },
+      "forbid": [
+        "call\tcow_place_leaf_fixed"
+      ]
+    }
+  ]
+}

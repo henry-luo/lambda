@@ -567,19 +567,19 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
             schema_file = nullptr;
             printf("Using AST-based validation for Lambda file\n");
         } else if (input_format && strcmp(input_format, "html") == 0) {
-            schema_file = lambda_home_path("input/html5_schema.ls");
+            schema_file = lambda_home_path("package/doc/html5_schema.ls");
             schema_file_allocated = true;
             printf("Using HTML5 schema for HTML input\n");
         } else if (input_format && strcmp(input_format, "eml") == 0) {
-            schema_file = lambda_home_path("input/eml_schema.ls");
+            schema_file = lambda_home_path("package/doc/eml_schema.ls");
             schema_file_allocated = true;
             printf("Using EML schema for email input\n");
         } else if (input_format && strcmp(input_format, "ics") == 0) {
-            schema_file = lambda_home_path("input/ics_schema.ls");
+            schema_file = lambda_home_path("package/doc/ics_schema.ls");
             schema_file_allocated = true;
             printf("Using ICS schema for calendar input\n");
         } else if (input_format && strcmp(input_format, "vcf") == 0) {
-            schema_file = lambda_home_path("input/vcf_schema.ls");
+            schema_file = lambda_home_path("package/doc/vcf_schema.ls");
             schema_file_allocated = true;
             printf("Using VCF schema for vCard input\n");
         } else if (input_format && (strcmp(input_format, "asciidoc") == 0 ||
@@ -588,7 +588,7 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
                                  strcmp(input_format, "rst") == 0 ||
                                  strcmp(input_format, "textile") == 0 ||
                                  strcmp(input_format, "wiki") == 0)) {
-            schema_file = lambda_home_path("input/doc_schema.ls");
+            schema_file = lambda_home_path("package/doc/doc_schema.ls");
             schema_file_allocated = true;
             printf("Using document schema for %s input\n", input_format);
         } else if (!input_format || strcmp(input_format, "lambda") == 0) {

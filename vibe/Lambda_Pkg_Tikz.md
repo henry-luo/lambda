@@ -48,12 +48,12 @@ PGF is the underlying graphics macro system; TikZ is its drawing syntax, and PGF
 | Area | Current source evidence | Consequence for this proposal |
 |---|---|---|
 | LaTeX input | [`input-latex-c.cpp`](../lambda/input/input-latex-c.cpp), `DirectLatexParser::parse_environment`, parses ordinary environments into children; math environments separately retain source and a math AST. | Preserve graphics source before generic child parsing. Do not reconstruct TikZ from flattened text. |
-| LaTeX package | [`latex.ls`](../lambda/package/latex/latex.ls), `render`, collects macros and analysis before dispatch; [`render.ls`](../lambda/package/latex/render.ls) dispatches `picture` and falls back to generic command rendering. | Add an explicit graphics bridge and scoped graphics context; generic fallback is not a renderer. |
-| Existing graphics | [`elements/picture.ls`](../lambda/package/latex/elements/picture.ls), `render_picture`, already emits SVG for the LaTeX `picture` environment. | Preserve that surface and its tests. Share suitable geometry helpers instead of adding a third independent implementation. |
-| Charts | [`chart.ls`](../lambda/package/chart/chart.ls), `render_spec`, and [`scale.ls`](../lambda/package/chart/scale.ls), `scale_apply`/`scale_ticks`, implement a chart pipeline. [`svg.ls`](../lambda/package/chart/svg.ls) supplies SVG constructors and paths. | Reuse mechanics after checking their contracts; PGFPlots owns its compatibility rules and defaults. |
-| Math | [`math.ls`](../lambda/package/math/math.ls), `render_math`, emits HTML; [`box.ls`](../lambda/package/math/box.ls) already represents width, height, depth, and elements. | Reuse typesetting and metrics. There is no demonstrated general math-to-SVG exporter to assume. |
-| Graphs | [`graph/layout.ls`](../lambda/package/graph/layout.ls), `layout_custom`/`from_velmts`, uses measured children; [`graph/scene.ls`](../lambda/package/graph/scene.ls) provides semantic scene comparisons. | Reuse the measurement pattern and comparison approach. A coordinate drawing is not a graph-layout problem. |
-| Serialization | [`latex/to_html.ls`](../lambda/package/latex/to_html.ls), `to_html`, serializes element trees; [`format-latex.cpp`](../lambda/format/format-latex.cpp), `format_latex_element`, has a generic command fallback. | Verify SVG names/attributes in HTML, and add explicit graphics-source round trips if emitting LaTeX. |
+| LaTeX package | [`latex.ls`](../lmd/package/latex/latex.ls), `render`, collects macros and analysis before dispatch; [`render.ls`](../lmd/package/latex/render.ls) dispatches `picture` and falls back to generic command rendering. | Add an explicit graphics bridge and scoped graphics context; generic fallback is not a renderer. |
+| Existing graphics | [`elements/picture.ls`](../lmd/package/latex/elements/picture.ls), `render_picture`, already emits SVG for the LaTeX `picture` environment. | Preserve that surface and its tests. Share suitable geometry helpers instead of adding a third independent implementation. |
+| Charts | [`chart.ls`](../lmd/package/chart/chart.ls), `render_spec`, and [`scale.ls`](../lmd/package/chart/scale.ls), `scale_apply`/`scale_ticks`, implement a chart pipeline. [`svg.ls`](../lmd/package/chart/svg.ls) supplies SVG constructors and paths. | Reuse mechanics after checking their contracts; PGFPlots owns its compatibility rules and defaults. |
+| Math | [`math.ls`](../lmd/package/math/math.ls), `render_math`, emits HTML; [`box.ls`](../lmd/package/math/box.ls) already represents width, height, depth, and elements. | Reuse typesetting and metrics. There is no demonstrated general math-to-SVG exporter to assume. |
+| Graphs | [`graph/layout.ls`](../lmd/package/graph/layout.ls), `layout_custom`/`from_velmts`, uses measured children; [`graph/scene.ls`](../lmd/package/graph/scene.ls) provides semantic scene comparisons. | Reuse the measurement pattern and comparison approach. A coordinate drawing is not a graph-layout problem. |
+| Serialization | [`latex/to_html.ls`](../lmd/package/latex/to_html.ls), `to_html`, serializes element trees; [`format-latex.cpp`](../lambda/format/format-latex.cpp), `format_latex_element`, has a generic command fallback. | Verify SVG names/attributes in HTML, and add explicit graphics-source round trips if emitting LaTeX. |
 | Packaging | [`build_ast.cpp`](../lambda/runtime/build_ast.cpp), `append_shipped_package_module_path`, maps `lambda.*` to the package tree; [`prepare_release.sh`](../utils/prepare_release.sh) copies that tree. | Ship ordinary `.ls` sources; no new loader, registry, or package manager is needed. |
 
 The repository contains [`test/latex/fixtures/tikz/`](../test/latex/fixtures/tikz/) and an earlier [LaTeX graphics proposal](latex/Latex_Typeset_Design5_Graphics.md). Some older tracking text names a `tex_pgf_driver.cpp` and partial TikZ support. This review found no corresponding active implementation under `lambda/` or `radiant/`. Treat those documents as historical design context and the fixtures as candidate inputs, not evidence of current conformance. Several fixtures use advanced libraries such as `spy`; they should initially exercise unsupported-feature reporting.
@@ -69,7 +69,7 @@ lambda.doc.tikz.tikz        TikZ source and drawing entry points
 lambda.doc.tikz.pgfplots    PGFPlots source and structured plot entry points
 ```
 
-Place them under `lambda/package/doc/tikz/`. With the current generic resolver, `lambda.doc.tikz.tikz` maps directly to `package/doc/tikz/tikz.ls`. This follows **D7.2.4** without adding another exceptional mapping like the existing `lambda.doc.math.* → package/math/` mapping. Keep PGFPlots in the same package so paths, options, labels, and rendering have one owner.
+Place them under `lmd/package/doc/tikz/`. With the current generic resolver, `lambda.doc.tikz.tikz` maps directly to `package/doc/tikz/tikz.ls`. This follows **D7.2.4** without adding another exceptional mapping like the existing `lambda.doc.math.* → package/math/` mapping. Keep PGFPlots in the same package so paths, options, labels, and rendering have one owner.
 
 The existing LaTeX entry point currently uses `lambda.latex.latex`; changing its namespace is outside this proposal. It can import the new package through its canonical name. Native parsing belongs to `lambda-io`; package logic must not make IO depend on runtime evaluation or Radiant (**D7.1.2v2, D7.1.5**).
 
@@ -350,7 +350,7 @@ lambda/input/input-latex-scanner.*       shared balanced scanning improvements
 lambda/input/input.cpp                  register explicit tikz input format
 lambda/format/format-latex.cpp           preserved graphics-source emission
 
-lambda/package/doc/tikz/
+lmd/package/doc/tikz/
     tikz.ls                             public API
     named.ls                            measured named-node layout and edges
     pgfplots.ls                         plotting API and axis normalization
@@ -362,9 +362,9 @@ lambda/package/doc/tikz/
     labels.ls                           shared math/text box adapter
     render.ls                           SVG + HTML composition
 
-lambda/package/latex/tikz_bridge.ls      proposed document adapter
-lambda/package/latex/{analyze,render}.ls graphics context and dispatch
-lambda/package/math/math.ls             factor a reusable measured-box entry
+lmd/package/latex/tikz_bridge.ls      proposed document adapter
+lmd/package/latex/{analyze,render}.ls graphics context and dispatch
+lmd/package/math/math.ls             factor a reusable measured-box entry
 test/lambda/tikz/                       proposed tests + expected .txt files
 test/latex/fixtures/pgfplots/            proposed reference inputs
 ```

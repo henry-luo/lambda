@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "description": "S4.1.2, S7.1.1v3, D2.6.2: certified int[] pair equality handles poison in the direct non-null lane and retains the generic absent-index path.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": ["ubge", "lambda_int_lane_to_double_c"]
+    }
+  ]
+}

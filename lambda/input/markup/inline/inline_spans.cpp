@@ -417,6 +417,9 @@ Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
         }
 
+        if (*pos == '<' && format == Format::WIKI &&
+            try_parse_inline_item(parser, span, sb, &pos, parse_wiki_nowiki)) continue;
+
         // Check for raw HTML (<) - Markdown only
         if (*pos == '<' && format == Format::MARKDOWN) {
             // Try autolink first (<http://...> or <email@...>)

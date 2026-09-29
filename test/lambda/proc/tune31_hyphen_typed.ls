@@ -1,7 +1,7 @@
 // table admission and string spans preserve the shared oracle and UTF-8 text.
-import test.benchmark.hyphen_tables
-import test.benchmark.hyphen_common
-import test.benchmark.hyphen_typed
+import ~~.~~.benchmark.hyphen_tables
+import ~~.~~.benchmark.hyphen_common
+import ~~.~~.benchmark.hyphen_typed
 
 pn main() {
     let tables: HyphenTables = load_hyphen_tables()

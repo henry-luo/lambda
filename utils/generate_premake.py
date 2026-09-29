@@ -38,8 +38,11 @@ def glob_premake_paths(pattern: str) -> List[str]:
     return [Path(match).as_posix() for match in glob.glob(pattern, recursive=False)]
 
 class PremakeGenerator:
-    def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None,
-                 variant: str = None, target_multiarch_triplet: str = None):
+    def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None,
+                 linux_multiarch_triplet: Optional[str] = None,
+                 linux_pkg_config_includes: Optional[List[str]] = None):
+        """Linux toolchain facts default to probing the host gcc/pkg-config;
+        passing them in lets a non-Linux host generate the Linux config for validation."""
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
         configurable_defines = self.config.get('configurable_defines', {})
@@ -51,7 +54,7 @@ class PremakeGenerator:
                 value = os.environ.get(name, str(default_value))
                 resolved_defines.append(f"{name}={value}")
         self.premake_content = []
-        self._linux_pkg_config_includes: Optional[List[str]] = None
+        self._linux_pkg_config_includes: Optional[List[str]] = linux_pkg_config_includes
         self.variant = variant
         self.coverage_bin_dir = os.environ.get('LAMBDA_COVERAGE_BIN_DIR', 'test/coverage/bin')
 
@@ -101,16 +104,15 @@ class PremakeGenerator:
         self._expand_node_module_targets()
         self._expand_validation_source_targets()
 
-        self.linux_multiarch_triplet = target_multiarch_triplet
+        self.linux_multiarch_triplet = None
         self.linux_multiarch_libdir = None
         if self.use_linux_config:
-            self._resolve_linux_multiarch_paths()
+            self._resolve_linux_multiarch_paths(linux_multiarch_triplet)
         self.external_libraries = self._parse_external_libraries()
 
-    def _resolve_linux_multiarch_paths(self) -> None:
-        """Resolve Debian archive paths for the native compiler target."""
-        triplet = self.linux_multiarch_triplet
-        if not triplet:
+    def _resolve_linux_multiarch_paths(self, triplet: Optional[str] = None) -> None:
+        """Resolve Debian archive paths for the given triplet, else the native compiler target."""
+        if triplet is None:
             result = subprocess.run(
                 ['gcc', '-print-multiarch'], capture_output=True, text=True,
             )
@@ -962,9 +964,8 @@ class PremakeGenerator:
             host_machine in ('aarch64', 'arm64') else '"-march=native"'
         self.premake_content.extend([
             '    filter "configurations:release"',
-            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE"' +
+            '        defines { "NDEBUG"' +
             ''.join(f', "{define}"' for define in self.config.get('release_defines', [])) + ' }',
-            '        -- LAMBDA_HOME_RELEASE: release binary loads assets from ./lmd/ instead of ./lambda/',
             '        symbols "Off"',
             '        optimize "Speed"   -- -O3 (honors build_lambda_config.json release intent)',
             f'        -- Dead code elimination, LTO, and native-ISA auto-vectorization',
@@ -984,12 +985,11 @@ class PremakeGenerator:
         self.premake_content.extend([
             '    ',
             '    filter "configurations:release_profile"',
-            '        defines { "NDEBUG", "LAMBDA_HOME_RELEASE", "LAMBDA_JS_EXEC_PROFILE"' +
+            '        defines { "NDEBUG", "LAMBDA_JS_EXEC_PROFILE"' +
             ''.join(f', "{define}"' for define in (
                 self.config.get('release_defines', []) +
                 self.config.get('release_profile_defines', []))) + ' }',
             '        -- LAMBDA_JS_EXEC_PROFILE: keep JS execution instrumentation in an optimized build',
-            '        -- LAMBDA_HOME_RELEASE: release binary loads assets from ./lmd/ instead of ./lambda/',
             '        symbols "Off"',
             '        optimize "Speed"   -- -O3 (honors build_lambda_config.json release intent)',
             f'        -- Dead code elimination, LTO, and native-ISA auto-vectorization',

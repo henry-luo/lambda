@@ -535,7 +535,7 @@ TEST_F(SourcePosBridgeRoundTrip, MissingPathHasNoMatch) {
 
 // ---------------------------------------------------------------------------
 // MarkBuilder helpers — produce the Lambda `pos` / `selection` shapes used
-// by lambda/package/editor/mod_source_pos.ls.
+// by lmd/package/editor/mod_source_pos.ls.
 // ---------------------------------------------------------------------------
 
 #include "../lambda/lambda.h"

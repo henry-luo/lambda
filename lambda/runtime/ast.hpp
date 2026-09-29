@@ -815,6 +815,8 @@ typedef struct AstViewNode : AstNode {
     struct AstStateEntry* state; // optional state declarations (linked list)
     struct AstEventHandler* handler; // optional event handlers (linked list)
     NameScope* vars;            // scope for params and state
+    FnFramePlan interp_plan;    // T0 activation shape for view-local bindings
+    bool interp_planned;
 } AstViewNode;
 
 // State entry: name: initial_value
@@ -956,6 +958,12 @@ static inline bool is_declaration_node(int node_type) {
     }
 }
 
+// A handler rebinds the view body's value declarations for its own model.
+static inline bool is_view_handler_body_binding(int node_type) {
+    return node_type == AST_NODE_LET_STAM || node_type == AST_NODE_PUB_STAM ||
+        node_type == AST_NODE_VAR_STAM;
+}
+
 // Procedural side-effect statements: they execute but contribute no output
 // value. IF_EXPR / WHILE_STAM / FOR_STAM can appear in functional code and do
 // produce values, so they are deliberately absent.
@@ -1090,6 +1098,7 @@ struct Script : Input {
     struct InputCacheScope* cache_scope;
     bool cache_owned_template;
     bool cache_mir_artifact; // otherwise retained image is AST-only
+    bool cache_source_inline; // preserve the source-key kind when promoting an AST image
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)
     bool is_retired;            // removed from the current Runtime load registry

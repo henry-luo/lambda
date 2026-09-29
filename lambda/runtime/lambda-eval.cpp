@@ -541,9 +541,90 @@ static Item array_concat_inherit_cert(Item result, Item left, Item right) {
     return rooted_result.get();
 }
 
+// A certified native Array already stores its elements in the destination
+// layout. Build the joined lane directly instead of boxing its prefix into a
+// generic Array and re-admitting that whole prefix at the next typed boundary.
+static bool array_concat_native_lane(Item left, Item right, Item* joined) {
+    Array* la = left.array;
+    Array* ra = right.array;
+    ArrayRepCert* cert = la ? la->rep_cert : NULL;
+    if (!joined || !la || !ra || !cert || !cert->immediate_element ||
+            cert->rank != 1 || !array_has_native_lane(la) ||
+            la->is_view || la->is_ndim || ra->is_view || ra->is_ndim ||
+            la->length < 0 || ra->length < 0 ||
+            la->length > INT64_MAX - ra->length ||
+            !lambda_array_rep_proves_cert(left, cert, true)) return false;
+    LaneStorageDesc lane = {};
+    if (!lambda_type_array_lane_storage_desc(cert->immediate_element, &lane) ||
+            !array_native_lane_supported(&lane) ||
+            lane.kind != LANE_STORAGE_POINTER ||
+            !array_native_lane_matches_desc(la, &lane)) return false;
+
+    RootFrame roots(4);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
+    Rooted<Array*> rooted_result(roots, array_plain());
+    Rooted<Item> rooted_element(roots, ItemNull);
+    if (!rooted_result.get()) {
+        *joined = ItemError;
+        return true;
+    }
+    array_native_lane_configure(rooted_result.get(), &lane);
+    la = rooted_left.get().array;
+    ra = rooted_right.get().array;
+    int64_t total = la->length + ra->length;
+    if (!array_reserve_append_slots(rooted_result.get(), total)) {
+        *joined = ItemError;
+        return true;
+    }
+    la = rooted_left.get().array;
+    ra = rooted_right.get().array;
+    Array* result = rooted_result.get();
+    size_t slot_size = array_native_lane_slot_size(result);
+    if (la->length) {
+        memcpy(result->items, la->items, (size_t)la->length * slot_size);
+    }
+    result->length = la->length;
+    bool right_lane = ra->rep_cert == cert &&
+        lambda_array_rep_proves_cert(rooted_right.get(), cert, true) &&
+        array_native_lane_matches_desc(ra, &lane);
+    if (right_lane) {
+        if (ra->length) {
+            memcpy(array_native_lane_slot(result, result->length), ra->items,
+                (size_t)ra->length * slot_size);
+        }
+        result->length = total;
+    } else {
+        for (int64_t i = 0; i < rooted_right.get().array->length; i++) {
+            rooted_element.set(item_at(rooted_right.get(), i));
+            if (!runtime_value_rep_proves_contract(rooted_element.get(),
+                    cert->immediate_element) ||
+                    !array_native_lane_store(rooted_result.get(),
+                        rooted_result.get()->length,
+                        rooted_element.get())) {
+                return false;
+            }
+            result = rooted_result.get();
+            result->length++;
+        }
+    }
+    result = rooted_result.get();
+    lambda_array_install_rep_cert({.array = result}, cert);
+    if (!lambda_array_rep_proves_cert({.array = result}, cert, true)) {
+        lambda_array_clear_rep_cert({.array = result});
+    }
+    *joined = {.array = result};
+    return true;
+}
+
 // The two-sequence arm of `++` (S10.6.1): concatenate the items, keeping a
 // packed lane when both sides share it. The caller decides the result's kind.
 static Item fn_join_sequences(Item left, Item right, TypeId left_type, TypeId right_type) {
+    if (left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY &&
+            !item_is_list(left) && !item_is_list(right)) {
+        Item native_result = ItemNull;
+        if (array_concat_native_lane(left, right, &native_result)) return native_result;
+    }
     // same-type optimization: direct memcpy of native items (not for Range)
     bool same_lane = left_type != LMD_TYPE_ARRAY_NUM || right_type != LMD_TYPE_ARRAY_NUM ||
         left.array_num->get_elem_type() == right.array_num->get_elem_type();
@@ -641,6 +722,214 @@ static void join_push_operand(Array* out, Item value, bool is_sequence) {
     for (int64_t i = 0; i < count; i++) {
         array_push_verbatim(rooted_out.get(), item_at(rooted_value.get(), i));
     }
+}
+
+// A local `x = x ++ rhs` can consume its old open Array after the assignment
+// has evaluated rhs. Detach shared snapshots first; a reserve failure falls
+// back before changing the visible length (S9.1.2, S10.6.1).
+Item fn_join_consume_open_array(Item left, Item right) {
+    if (get_type_id(left) != LMD_TYPE_ARRAY ||
+            get_type_id(right) != LMD_TYPE_ARRAY) return fn_join(left, right);
+    Array* left_array = left.array;
+    Array* right_array = right.array;
+    if (!left_array || !right_array || item_is_list(left) ||
+            left_array->type || left_array->data ||
+            left_array->is_view || left_array->is_ndim ||
+            right_array->is_view || right_array->is_ndim ||
+            array_has_native_lane(left_array) || array_has_native_lane(right_array) ||
+            left_array->rep_cert || right_array->rep_cert ||
+            right_array->length < 0 || right_array->extra < 0 ||
+            right_array->length > INT64_MAX - right_array->extra) {
+        return fn_join(left, right);
+    }
+    RootFrame roots(2);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
+    // The RHS may be the old LHS itself or share its buffer through a view.
+    // Force a snapshot before any append can overwrite its source positions.
+    if (left_array == right_array || left_array->items == right_array->items) {
+        cow_mark_shared(rooted_left.get());
+    }
+    rooted_left.set(cow_prepare_write(rooted_left.get()));
+    if (get_type_id(rooted_left.get()) == LMD_TYPE_ERROR) return ItemError;
+    left_array = rooted_left.get().array;
+    right_array = rooted_right.get().array;
+    int64_t right_length = right_array->length;
+    if (!array_reserve_append_slots(left_array,
+            right_length + right_array->extra)) {
+        return fn_join(rooted_left.get(), rooted_right.get());
+    }
+    left_array = rooted_left.get().array;
+    right_array = rooted_right.get().array;
+    array_copy_owned_items(left_array, left_array->length,
+        right_array->items, right_length);
+    left_array->length += right_length;
+    return rooted_left.get();
+}
+
+// A direct small-literal append constructs its literal only on a failed proof.
+// Sequence append keeps the original RHS unchanged on that same fallback.
+static Item join_consume_cert_array_fallback(Item left, Item right,
+        Item second, int literal_count) {
+    if (!literal_count) return fn_join(left, right);
+    RootFrame roots(5);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
+    Rooted<Item> rooted_second(roots, second);
+    Rooted<Array*> literal(roots, array_plain());
+    if (!literal.get()) return ItemError;
+    array_push(literal.get(), rooted_right.get());
+    if (literal_count == 2) array_push(literal.get(), rooted_second.get());
+    Rooted<Item> finished(roots, array_end(literal.get()));
+    return fn_join(rooted_left.get(), finished.get());
+}
+
+// `left ++ [item]` still returns a fresh Array. Its literal is disposable
+// when the left carrier is plain and one item cannot splice or promote an N-D
+// numeric RHS; copy into the final owner directly (S9.1.2, S10.6.1).
+Item fn_join_fresh_array_item(Item left, Item element) {
+    TypeId element_type = get_type_id(element);
+    if (get_type_id(left) != LMD_TYPE_ARRAY || item_is_list(left) ||
+            element.item == ITEM_NULL_SPREADABLE || item_is_list(element) ||
+            element_type == LMD_TYPE_ARRAY_NUM || element_type == LMD_TYPE_ERROR) {
+        return join_consume_cert_array_fallback(left, element, ItemNull, 1);
+    }
+    Array* la = left.array;
+    if (!la || la->type || la->data || la->is_view || la->is_ndim ||
+            array_has_native_lane(la) || la->rep_cert ||
+            la->length < 0 || la->extra < 0 ||
+            la->length > INT64_MAX - la->extra - 3 ||
+            (la->length && !la->items)) {
+        return join_consume_cert_array_fallback(left, element, ItemNull, 1);
+    }
+    RootFrame roots(3);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_element(roots, element);
+    Rooted<Array*> result(roots, array_plain());
+    if (!result.get()) return ItemError;
+    la = rooted_left.get().array;
+    // Reserve scalar tail homes before copying so array_set cannot relocate
+    // the source buffer midway through its owned-item walk.
+    if (!array_reserve_append_slots(result.get(), la->length + la->extra + 2)) {
+        return join_consume_cert_array_fallback(rooted_left.get(),
+            rooted_element.get(), ItemNull, 1);
+    }
+    la = rooted_left.get().array;
+    array_copy_owned_items(result.get(), 0, la->items, la->length);
+    result.get()->length = la->length;
+    array_push(result.get(), rooted_element.get());
+    return {.array = result.get()};
+}
+
+// A proved tail accumulator owns its post-entry versions. Both sequence and
+// small-literal appends validate all source items before unsharing the left lane;
+// the latter avoids allocating a temporary Array (S9.1.2,
+// S10.6.1, D4.4.4v4).
+static Item join_consume_cert_array(Item left, Item right, Item second,
+        int literal_count) {
+    if (get_type_id(left) != LMD_TYPE_ARRAY || item_is_list(left) ||
+            (!literal_count && (get_type_id(right) != LMD_TYPE_ARRAY ||
+                item_is_list(right)))) {
+        return join_consume_cert_array_fallback(left, right, second, literal_count);
+    }
+    Array* la = left.array;
+    Array* ra = literal_count ? NULL : right.array;
+    ArrayRepCert* cert = la ? la->rep_cert : NULL;
+    int64_t right_length = literal_count ? literal_count : ra ? ra->length : -1;
+    if (!la || (!literal_count && !ra) || !cert || cert->rank != 1 ||
+            !cert->immediate_element || la->type || la->data ||
+            la->is_view || la->is_ndim ||
+            (!literal_count && (ra->is_view || ra->is_ndim)) ||
+            la->length < 0 || right_length < 0 ||
+            la->length > INT64_MAX - right_length ||
+            !lambda_array_rep_proves_cert(left, cert, true)) {
+        return join_consume_cert_array_fallback(left, right, second, literal_count);
+    }
+    LaneStorageDesc lane = {};
+    if (!lambda_type_array_lane_storage_desc(cert->immediate_element, &lane) ||
+            lane.kind != LANE_STORAGE_POINTER ||
+            !array_native_lane_matches_desc(la, &lane)) {
+        return join_consume_cert_array_fallback(left, right, second, literal_count);
+    }
+
+    RootFrame roots(4);
+    Rooted<Item> rooted_left(roots, left);
+    Rooted<Item> rooted_right(roots, right);
+    Rooted<Item> rooted_second(roots, second);
+    Rooted<Item> rooted_element(roots, ItemNull);
+    bool right_lane = !literal_count && ra->rep_cert == cert &&
+        lambda_array_rep_proves_cert(right, cert, true) &&
+        array_native_lane_matches_desc(ra, &lane);
+    if (!right_lane) {
+        // A bad RHS must fall back before the old accumulator is touched.
+        for (int64_t i = 0; i < right_length; i++) {
+            rooted_element.set(literal_count
+                ? (i == 0 ? rooted_right.get() : rooted_second.get())
+                : item_at(rooted_right.get(), i));
+            if ((literal_count && item_is_list(rooted_element.get())) ||
+                    !runtime_value_rep_proves_contract(rooted_element.get(),
+                    cert->immediate_element)) {
+                return join_consume_cert_array_fallback(rooted_left.get(),
+                    rooted_right.get(), rooted_second.get(), literal_count);
+            }
+        }
+    }
+    la = rooted_left.get().array;
+    ra = literal_count ? NULL : rooted_right.get().array;
+    bool aliases_left = !literal_count &&
+        (la == ra || la->items == ra->items);
+    for (int i = 0; i < literal_count && !aliases_left; i++) {
+        Item element = i == 0 ? rooted_right.get() : rooted_second.get();
+        aliases_left = get_type_id(element) == LMD_TYPE_ARRAY &&
+            (element.array == la || element.array->items == la->items);
+    }
+    if (aliases_left) cow_mark_shared(rooted_left.get());
+    rooted_left.set(cow_prepare_write(rooted_left.get()));
+    if (get_type_id(rooted_left.get()) == LMD_TYPE_ERROR) return ItemError;
+    la = rooted_left.get().array;
+    ra = literal_count ? NULL : rooted_right.get().array;
+    if (!array_reserve_append_slots(la, right_length)) {
+        return join_consume_cert_array_fallback(rooted_left.get(),
+            rooted_right.get(), rooted_second.get(), literal_count);
+    }
+    la = rooted_left.get().array;
+    ra = literal_count ? NULL : rooted_right.get().array;
+    int64_t old_length = la->length;
+    if (right_lane) {
+        if (right_length) {
+            memcpy(array_native_lane_slot(la, old_length), ra->items,
+                (size_t)right_length * array_native_lane_slot_size(la));
+        }
+    } else {
+        for (int64_t i = 0; i < right_length; i++) {
+            rooted_element.set(literal_count
+                ? (i == 0 ? rooted_right.get() : rooted_second.get())
+                : item_at(rooted_right.get(), i));
+            if (!array_native_lane_store(rooted_left.get().array,
+                    old_length + i, rooted_element.get())) {
+                return join_consume_cert_array_fallback(rooted_left.get(),
+                    rooted_right.get(), rooted_second.get(), literal_count);
+            }
+        }
+    }
+    la = rooted_left.get().array;
+    la->length = old_length + right_length;
+    if (!lambda_array_rep_proves_cert(rooted_left.get(), cert, true)) {
+        lambda_array_clear_rep_cert(rooted_left.get());
+    }
+    return rooted_left.get();
+}
+
+Item fn_join_consume_cert_array(Item left, Item right) {
+    return join_consume_cert_array(left, right, ItemNull, 0);
+}
+
+Item fn_join_consume_cert_array_item(Item left, Item element) {
+    return join_consume_cert_array(left, element, ItemNull, 1);
+}
+
+Item fn_join_consume_cert_array_pair(Item left, Item first, Item second) {
+    return join_consume_cert_array(left, first, second, 2);
 }
 
 Item fn_join(Item left, Item right) {
@@ -10151,7 +10440,9 @@ static Item cow_clone_map_like_one_level(Item source_item) {
     }
     int data_cap = source_cap > 0 ? source_cap : (type ? type->byte_size : 0);
     if (source_data && data_cap > 0) {
-        *copy_data = heap_data_calloc((size_t)data_cap);
+        // memcpy fills the entire packed buffer before its first safepoint;
+        // zeroing it first doubles the bytes written by shared-map copies.
+        *copy_data = heap_data_alloc_uninit((size_t)data_cap);
         if (!*copy_data) return ItemError;
         if (type_id == LMD_TYPE_MAP) {
             source_data = rooted_source.get().map->data;

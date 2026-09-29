@@ -42,6 +42,15 @@ bool radiant_queue_navigation_request(DomElement* source, const char* url,
                                       const char* target_name,
                                       DomElement* fragment_target);
 bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source);
+bool radiant_execute_location_navigation(UiContext* uicon, DomDocument* source,
+                                         const char* url);
+bool radiant_schedule_async_iframe_load(UiContext* uicon, DomElement* iframe,
+                                        const char* url, int viewport_width,
+                                        int viewport_height);
+void radiant_cancel_async_document_loads(DomDocument* doc);
+bool radiant_commit_async_document_loads(UiContext* uicon);
+bool radiant_async_document_loads_pending(UiContext* uicon);
+void radiant_drain_async_document_loads(UiContext* uicon);
 bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);

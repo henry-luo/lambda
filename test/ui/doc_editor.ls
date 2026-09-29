@@ -16,6 +16,7 @@ import dom
 import pdf_html: lambda.pdf.html
 import latex: lambda.latex.latex
 import latex_css: lambda.latex.css
+import math_renderer: lambda.doc.math.math
 import math_css: lambda.doc.math.css
 import graph_doc: lambda.graph.document
 
@@ -131,6 +132,7 @@ fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
   else if (ext == "dot") { "dot" }
+  else if (ext == "d2") { "d2" }
   else { null }
 }
 
@@ -221,6 +223,18 @@ view <u> { <u *[rendered_children(~)]> }
 view <code> {
   if (~.type == "block") { <pre <code *[rendered_children(~)]>> }
   else { <code *[rendered_children(~)]> }
+}
+view <math> {
+  // Markup readers keep TeX source in math nodes; parse it for the shared typesetter.
+  let source = if (len(content(~)) > 0) content(~)[0] else ""
+  let parsed = if (~.flavor == "ascii") { null }
+    else { parse(source, {type: "math", flavor: "latex"}) ^ { null } }
+  let display = ~.type == "block"
+  let rendered = if (parsed == null) { null }
+    else { math_renderer.render_math(parsed, {display: display}) ^ { null } }
+  let body = if (rendered == null) { <code class:"math-error", source> } else { rendered }
+  if (display) { <div class:"math-display-container", body> }
+  else { body }
 }
 view <pre> { <pre *[rendered_children(~)]> }
 view <ul> { <ul *[rendered_children(~)]> }
@@ -333,7 +347,8 @@ view <document_pane> {
         >
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
-      if (~.preview_mode == "view") {
+      <div class:"document-content"
+      , if (~.preview_mode == "view") {
         if (is_image_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
@@ -356,6 +371,7 @@ view <document_pane> {
         , <pre id:"source-preview", class:"source-preview", source>
         >
       }
+      >
       <nav class:"document-tabs"
       , <button class:(if (~.preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
         if (not is_raster_document(~.file["extension"])) {
@@ -539,6 +555,11 @@ on preview_tab(tab) {
                            font-size: 11px; }
 
       .document-panel { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; background: #fff; }
+      /* A definite pane keeps long documents out of the column flex container's
+         intrinsic-size pass while preserving the preview's own scrolling. */
+      .document-content { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+      .document-content > .rendered-preview, .document-content > .source-tab-panel,
+      .document-content > .document-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
       .document-header { min-height: 77px; display: flex; align-items: center; justify-content: space-between;
                          gap: 18px; padding: 15px 28px; border-bottom: 1px solid #e2e6ec; background: #fbfcfe; }
       .document-path { margin-bottom: 3px; color: #7b8798; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
@@ -554,7 +575,7 @@ on preview_tab(tab) {
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
       .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: #fcfcfd; }
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
-                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
+                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }

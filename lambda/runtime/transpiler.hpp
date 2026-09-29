@@ -170,8 +170,8 @@ void mir_guest_finish_context(Runtime* runtime, bool reusing_context);
 // global dry-run flag (set from Runtime, accessible from C code via lambda.h)
 #include "runtime-state.h"
 
-// Lambda home: directory containing runtime assets (package trees, input/).
-// Dev default: "./lambda"  Release: "./lmd"  Override: LAMBDA_HOME env var.
+// Lambda home: directory containing runtime assets (the package tree).
+// Default "./lmd" in both dev and release; override with LAMBDA_HOME env var.
 extern const char* g_lambda_home;
 void lambda_home_init(void);    // call once at startup (reads LAMBDA_HOME env var)
 char* lambda_home_path(const char* rel); // returns malloc'd "<g_lambda_home>/<rel>"; caller frees
@@ -206,6 +206,7 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
 // storage coercion runs.
 AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
 bool has_fixed_shape(TypeMap* map_type);
+bool has_named_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
 void decimal_payload_release(Decimal* dec);
@@ -362,6 +363,9 @@ void transpiler_clear_direct_imports(Transpiler* tp, const Script* script);
 // Transfers the Script-sized prefix of a finished Transpiler onto its Script.
 // Shared by the MIR Direct handoff and the T0 plan-only load path.
 void script_adopt_transpiler(Script* script, Transpiler* tp);
+
+// Restore compiled view/edit dispatch when a cached MIR graph enters a new Runtime.
+void lambda_register_mir_view_templates(Script* script);
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,

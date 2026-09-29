@@ -10758,41 +10758,6 @@ static bool rmw_key_is_stable(AstNode* key, RmwBorrowCtx* c) {
     return false;
 }
 
-// structural equality of two stable keys (an identifier by binding, an
-// integer literal by value)
-static bool rmw_key_equal(AstNode* a, AstNode* b) {
-    a = unwrap_primary_node(a);
-    b = unwrap_primary_node(b);
-    if (!a || !b || a->node_type != b->node_type) return false;
-    if (a->node_type == AST_NODE_IDENT) {
-        NameEntry* ea = ((AstIdentNode*)a)->entry;
-        return ea && ea == ((AstIdentNode*)b)->entry;
-    }
-    if (a->node_type == AST_NODE_LITERAL) {
-        AstLiteralNode* la = (AstLiteralNode*)a;
-        AstLiteralNode* lb = (AstLiteralNode*)b;
-        return la->literal_type == AST_LITERAL_NUMBER &&
-            lb->literal_type == AST_LITERAL_NUMBER && !la->has_decimal &&
-            !lb->has_decimal && !la->is_bigint && !lb->is_bigint &&
-            la->value.number_value == lb->value.number_value;
-    }
-    return false;
-}
-
-static bool rmw_segment_equal(AstNode* a, bool a_member, AstNode* b, bool b_member) {
-    if (a_member != b_member) return false;
-    if (!a_member) return rmw_key_equal(a, b);
-    a = unwrap_primary_node(a);
-    b = unwrap_primary_node(b);
-    if (!a || !b || a->node_type != AST_NODE_IDENT || b->node_type != AST_NODE_IDENT) {
-        return false;
-    }
-    String* na = ((AstIdentNode*)a)->name;
-    String* nb = ((AstIdentNode*)b)->name;
-    return na && nb && (na == nb ||
-        (na->len == nb->len && memcmp(na->chars, nb->chars, na->len) == 0));
-}
-
 // `root.path = handle`: the compound target spells the candidate's path
 static bool rmw_is_storeback(AstNode* stmt, const RmwBorrowCtx* c) {
     stmt = unwrap_primary_node(stmt);
@@ -10814,13 +10779,13 @@ static bool rmw_is_storeback(AstNode* stmt, const RmwBorrowCtx* c) {
     if (!root || root->entry != c->root) return false;
     if (target.count != c->path->count - 1) return false;
     for (int i = 0; i < target.count; i++) {
-        if (!rmw_segment_equal(target.segment[i], target.is_member[i],
+        if (!ast_cow_path_segment_equal(target.segment[i], target.is_member[i],
                 c->path->segment[i], c->path->is_member[i])) {
             return false;
         }
     }
     int last = c->path->count - 1;
-    return rmw_segment_equal(as->key, stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM,
+    return ast_cow_path_segment_equal(as->key, stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM,
         c->path->segment[last], c->path->is_member[last]);
 }
 
@@ -10884,7 +10849,7 @@ static bool rmw_sibling_place(AstNode* object, AstNode* key, bool key_member,
     }
     AstNode* member = unwrap_primary_node(place.segment[0]);
     if (!member || member->node_type != AST_NODE_IDENT ||
-            rmw_segment_equal(place.segment[0], true, c->path->segment[0], true)) {
+            ast_cow_path_segment_equal(place.segment[0], true, c->path->segment[0], true)) {
         return false;
     }
     for (int i = 1; i < place.count && !c->bad; i++) {
@@ -11112,11 +11077,11 @@ static bool rmw_moves_out(AstNode* stmt_node, RmwBorrowCtx* c) {
             bool same_place = target_root->entry == c->root && as->key &&
                 !as->key->next && target.count == c->path->count - 1;
             for (int i = 0; same_place && i < target.count; i++) {
-                same_place = rmw_segment_equal(target.segment[i], target.is_member[i],
+                same_place = ast_cow_path_segment_equal(target.segment[i], target.is_member[i],
                     c->path->segment[i], c->path->is_member[i]);
             }
             int last = c->path->count - 1;
-            if (same_place && rmw_segment_equal(as->key,
+            if (same_place && ast_cow_path_segment_equal(as->key,
                     stmt->node_type == AST_NODE_MEMBER_ASSIGN_STAM,
                     c->path->segment[last], c->path->is_member[last])) {
                 // the overwrite: its value may not keep h in the place
@@ -11618,6 +11583,7 @@ typedef struct PlaceHandle {
     uint16_t slot;
     int uses;
     bool writing;
+    bool read_call_crossed;
     struct PlaceHandle* next;
 } PlaceHandle;
 
@@ -11655,7 +11621,7 @@ typedef struct PlaceHandleScan {
 static bool ph_path_prefix(const AstCowPath* path, const AstCowPath* prefix) {
     if (path->count < prefix->count || !path->root || !prefix->root) return false;
     for (int i = 0; i < prefix->count; i++) {
-        if (!rmw_segment_equal(path->segment[i], path->is_member[i],
+        if (!ast_cow_path_segment_equal(path->segment[i], path->is_member[i],
                 prefix->segment[i], prefix->is_member[i])) {
             return false;
         }
@@ -11729,7 +11695,7 @@ static bool ph_path_eligible(PlaceHandleCtx* ctx, AstNode* node, PlaceHandle* ou
 }
 
 static void ph_record_use(PlaceHandleScan* scan, AstFieldNode* node, bool write) {
-    if (!node) {
+    if (!node || (write && scan->h->read_call_crossed)) {
         scan->kill = true;
         return;
     }
@@ -11754,6 +11720,49 @@ static void ph_scan_cb(AstNode* child, AstNode* parent, void* opaque) {
 
 static void ph_scan_children(AstNode* node, PlaceHandleScan* scan) {
     ast_visit_core_children(node, ph_scan_cb, scan);
+}
+
+// A direct pure callee with a plain, unwritten parameter cannot replace its
+// caller's root or key. Retention may share the value, so only reads survive
+// this edge (D4.4.4v4, S9.1.2).
+static bool ph_call_preserves_read(PlaceHandleScan* scan, AstCallNode* call) {
+    AstNode* function = unwrap_primary_node(call->function);
+    NameEntry* function_entry = function && function->node_type == AST_NODE_IDENT
+        ? ((AstIdentNode*)function)->entry : NULL;
+    AstFuncNode* callee = function && function->node_type == AST_NODE_IDENT
+        ? ast_direct_call_function(call) : NULL;
+    if (!function_entry || function_entry->is_mutable ||
+            function_entry->type_widened || !callee ||
+            ((AstNode*)callee)->node_type != AST_NODE_FUNC ||
+            callee->captures || !callee->body || callee->is_async ||
+            callee->is_generator) return false;
+    AstNamedNode* param = callee->param;
+    bool affected = false;
+    for (AstNode* arg = call->argument; arg; arg = arg->next) {
+        AstNode* bare = unwrap_primary_node(arg);
+        if (!param || !bare || bare->node_type == AST_NODE_NAMED_ARG ||
+                bare->node_type == AST_NODE_SPREAD) return false;
+        NameEntry* binding = bare->node_type == AST_NODE_IDENT
+            ? ((AstIdentNode*)bare)->entry : NULL;
+        bool names_key = binding && rmw_is_key_ident(&scan->h->keys, binding);
+        if (binding == scan->h->root || names_key) {
+            TypeParam* type = lambda_type_param(param->type);
+            if (!type || type->is_var_param || !param->entry ||
+                    ast_body_may_write_entry(callee->body, param->entry, true))
+                return false;
+            affected = true;
+        } else {
+            // Other arguments must be effect-free leaves; a compound
+            // expression could run a procedure before the pure call begins.
+            if (bare->node_type != AST_NODE_IDENT &&
+                    bare->node_type != AST_NODE_LITERAL &&
+                    bare->node_type != AST_NODE_PRIMARY) return false;
+        }
+        param = (AstNamedNode*)param->next;
+    }
+    if (!affected || param) return false;
+    scan->h->read_call_crossed = true;
+    return true;
 }
 
 // index keys of the segments after `from` are ordinary expressions
@@ -11786,7 +11795,7 @@ static void ph_scan_place(AstNode* chain, const AstCowPath* path, bool write,
     }
     // a sibling slot of the root is a different place (D4.4.4v2)
     if (path->count >= 1 && path->is_member[0] && h->path.is_member[0] &&
-            !rmw_segment_equal(path->segment[0], true, h->path.segment[0], true)) {
+            !ast_cow_path_segment_equal(path->segment[0], true, h->path.segment[0], true)) {
         ph_scan_keys(path, 0, scan);
         return;
     }
@@ -11845,7 +11854,7 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
                 return;
             }
             if (path.is_member[0] && h->path.is_member[0] &&
-                    !rmw_segment_equal(path.segment[0], true, h->path.segment[0], true)) {
+                    !ast_cow_path_segment_equal(path.segment[0], true, h->path.segment[0], true)) {
                 ph_scan_keys(&path, 0, scan);
                 return;
             }
@@ -11863,6 +11872,7 @@ static void ph_scan_node(AstNode* node, PlaceHandleScan* scan) {
         break;
     }
     case AST_NODE_CALL_EXPR: {
+        if (ph_call_preserves_read(scan, (AstCallNode*)node)) return;
         // a key may be written through `var`; a place under the root may be
         // borrowed by the callee (CW25) -- both end the handle
         for (AstNode* arg = ((AstCallNode*)node)->argument; arg; arg = arg->next) {
@@ -12441,6 +12451,7 @@ static void ph_clear_annotations_cb(AstNode* child, AstNode* parent, void* opaqu
     if (child->node_type == AST_NODE_MEMBER_EXPR || child->node_type == AST_NODE_INDEX_EXPR) {
         ((AstFieldNode*)child)->handle_role = AST_PLACE_HANDLE_NONE;
         ((AstFieldNode*)child)->handle_slot = 0;
+        ((AstFieldNode*)child)->handle_rooted = false;
     }
     ast_visit_core_children(child, ph_clear_annotations_cb, opaque);
 }
@@ -12461,6 +12472,8 @@ static void lambda_ast_plan_place_handles(Transpiler* tp, AstFuncNode* fn) {
         } else if (h->writing) {
             h->bind->handle_role = AST_PLACE_HANDLE_BIND_WRITE;
         }
+        if (!ctx.overflow && h->uses > 0 && h->read_call_crossed)
+            h->bind->handle_rooted = true;
     }
     if (ctx.overflow) {
         // an unfinished plan may have annotated uses of dropped binds
@@ -13020,40 +13033,37 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
     return true;
 }
 
+bool lambda_import_is_relative(StrView module) {
+    return module.length > 0 &&
+        (module.str[0] == '.' || strview_starts_with(&module, "~~"));
+}
+
+// S16.9.8: `.a.b` resolves beside the importer, and each leading `~~` is one
+// parent step (S2.4.1v2), so `~~.~~.a` is `../../a`. A bare root names a
+// package: only `lambda.*` resolves to source today (D7.2.4); every other root
+// is reserved for the package registry and yields NULL, never a cwd file.
 char* lambda_resolve_import_module_path(const char* base_directory,
         StrView module) {
     if (!module.str || module.length == 0) return NULL;
     StrBuf* path = strbuf_new();
     if (!path) return NULL;
-    bool relative = module.str[0] == '.';
-    bool shipped_package = !relative &&
-        append_shipped_package_module_path(path, module);
-    if (relative) {
-        const char* base = base_directory ? base_directory : "./";
-        size_t base_len = strlen(base);
-        strbuf_append_format(path, "%s%.*s", base,
-            (int)module.length - 1, module.str + 1);
+    if (lambda_import_is_relative(module)) {
+        strbuf_append_str(path, base_directory ? base_directory : "./");
+        StrView rest = module;
+        while (strview_starts_with(&rest, "~~.")) {
+            strbuf_append_str(path, "../");
+            rest = strview_sub(&rest, 3, rest.length);
+        }
+        if (rest.length && rest.str[0] == '.') rest = strview_sub(&rest, 1, rest.length);
         // only the module spec's dots are package separators. The base
         // directory may legitimately contain a dot component (a checkout under
         // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
-        for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
-    } else if (!shipped_package) {
-        strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
-        for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
-        char* slash = strchr(path->str + 2, '/');
-        if (slash) {
-            StrBuf* fixed = strbuf_new();
-            const char* home = g_lambda_home;
-            if (!fixed) {
-                strbuf_free(path);
-                return NULL;
-            }
-            if (home[0] == '.' && home[1] == '/') home += 2;
-            strbuf_append_all(fixed, 2, "./", home);
-            strbuf_append_str(fixed, slash);
-            strbuf_free(path);
-            path = fixed;
-        }
+        size_t spec_start = path->length;
+        strbuf_append_str_n(path, rest.str, rest.length);
+        for (char* ch = path->str + spec_start; *ch; ch++) if (*ch == '.') *ch = '/';
+    } else if (!append_shipped_package_module_path(path, module)) {
+        strbuf_free(path);
+        return NULL;
     }
     strbuf_append_str(path, ".ls");
     char* resolved = mem_strdup(path->str, MEM_CAT_SYSTEM);
@@ -13113,12 +13123,16 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     }
     char* path = lambda_resolve_import_module_path(tp->directory, module);
     if (!path) {
-        record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
-            "failed to resolve Lambda module '%.*s'", (int)module.length,
-            module.str);
+        // S16.9.8: a bare root is a package name, never a working-directory
+        // file; `import test.x` names no package.
+        const char* dot = (const char*)memchr(module.str, '.', module.length);
+        int root_length = dot ? (int)(dot - module.str) : (int)module.length;
+        record_semantic_error_span(tp, span, ERR_IMPORT_NOT_FOUND,
+            "no package '%.*s' for import '%.*s'; a relative module starts with '.' or '~~'",
+            root_length, module.str, (int)module.length, module.str);
         return;
     }
-    node->is_relative = module.str[0] == '.';
+    node->is_relative = lambda_import_is_relative(module);
     bool lambda_source_exists = file_exists(path);
     if (!lambda_source_exists && tp->runtime && tp->runtime->ast_prebuild_only) {
         // A worker may retain parser facts only. The JS adapter owns module

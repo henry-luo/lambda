@@ -32,14 +32,18 @@ def load_generator_module():
     return module
 
 
+def linux_validation_generator(module):
+    # Supply the Linux toolchain facts instead of probing the host gcc/pkg-config,
+    # so the Linux config validates on any host; these checks don't depend on their values.
+    return module.PremakeGenerator(str(ROOT / "build_lambda_config.json"), "linux",
+                                   linux_multiarch_triplet=TEST_MULTIARCH_TRIPLET,
+                                   linux_pkg_config_includes=[])
+
+
 def generate_validation_host(module, platform_name: str) -> str:
     # Construct under Linux first so this pure generation test never refreshes
     # macOS archive artifacts, then select the requested output policy.
-    # This is a generation test; its Linux target must not depend on the host
-    # compiler reporting a Debian triplet (for example on macOS).
-    generator = module.PremakeGenerator(str(ROOT / "build_lambda_config.json"),
-                                        "linux", target_multiarch_triplet=TEST_MULTIARCH_TRIPLET)
-    generator._linux_pkg_config_includes = []
+    generator = linux_validation_generator(module)
     generator.use_linux_config = platform_name == "linux"
     generator.use_macos_config = platform_name == "macos"
     generator.use_windows_config = False
@@ -72,8 +76,7 @@ def expect_archive_link_deps(module) -> None:
     premake = os.environ.get("PREMAKE5_BIN") or shutil.which("premake5")
     if not premake:
         fail("premake5 not found")
-    generator = module.PremakeGenerator(str(ROOT / "build_lambda_config.json"),
-                                        "linux", target_multiarch_triplet=TEST_MULTIARCH_TRIPLET)
+    generator = linux_validation_generator(module)
     generator.generate_archive_link_deps()
     (ROOT / "temp").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=ROOT / "temp") as work:

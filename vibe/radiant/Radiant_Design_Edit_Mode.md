@@ -141,7 +141,7 @@ D7.2.4 maps shipped `lambda.*` packages to `<lambda-home>/package/`. The
 proposed source organization is therefore:
 
 ```text
-lambda/package/edit/
+lmd/package/edit/
     edit.ls          package entry and format descriptor registry
     shell.ls         shared edit template and document-session UI
     toolbar.ls       shared toolbar rendering and command presentation
@@ -152,7 +152,7 @@ lambda/package/edit/
     drawing.ls       drawing tools, selection overlay, and gesture control
 ```
 
-For example, `lambda.edit.markdown` names `lambda/package/edit/markdown.ls`.
+For example, `lambda.edit.markdown` names `lmd/package/edit/markdown.ls`.
 These names describe the proposed package surface; the directory does not
 exist yet. Generic editor behavior belongs in `lambda.editor` or the shared
 DOM protocol, even when first needed by one of these templates.
@@ -438,9 +438,9 @@ The following observations were checked against the working tree on
 | `radiant/cmd_layout.cpp`, `load_lambda_document_doc`, `load_lambda_document_transform_doc` | Retained script/transform loading and generated DOM lifecycle |
 | `lambda/runtime/transpiler.hpp`, `LambdaDocumentTransformConfig`; `lambda/runtime/transpile-mir.cpp`, `run_lambda_document_transform_with_options` | File-backed public-export invocation with typed options; extend the existing contract rather than generate an import script |
 | `test/ui/rte_prototype.ls` | Existing edit template, toolbar, model action, and selection wiring; its Save handler currently assigns `doc_text(editor.doc)` to test UI state, so it is not a file-save or formatted-round-trip implementation |
-| `lambda/package/editor/mod_editor.ls`, `mod_dom_adapter.ls`, `mod_edit_registry.ls` | Shared model requests, commands, state queries, selection, and completion |
-| `lambda/package/editor/mod_step.ls`, `mod_transaction.ls`, `mod_history.ls` | Model mutation and undo/redo foundations |
-| `lambda/package/editor/mod_drawing_commands.ls`, `mod_geom.ls`, `mod_drawing_schema.ls` | Drawing logic to reuse selectively; the drawing-block schema is distinct from arbitrary SVG source |
+| `lmd/package/editor/mod_editor.ls`, `mod_dom_adapter.ls`, `mod_edit_registry.ls` | Shared model requests, commands, state queries, selection, and completion |
+| `lmd/package/editor/mod_step.ls`, `mod_transaction.ls`, `mod_history.ls` | Model mutation and undo/redo foundations |
+| `lmd/package/editor/mod_drawing_commands.ls`, `mod_geom.ls`, `mod_drawing_schema.ls` | Drawing logic to reuse selectively; the drawing-block schema is distinct from arbitrary SVG source |
 | `lambda/format/format-md.cpp`, `format-html.cpp`, `format-xml.cpp` | Existing serializers; adapter and preservation coverage still require verification |
 | `test/ui/svg-dom-contract.json` and `test/ui/hit-test/` | Existing SVG geometry, serialization, and hit-testing regression coverage |
 

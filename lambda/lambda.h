@@ -1443,6 +1443,7 @@ extern "C" {
 void array_set(Array* arr, int64_t index, Item item);
 void array_copy_owned_items(Array* destination, int64_t destination_index,
                             const Item* source, int64_t count);
+bool array_reserve_append_slots(Array* array, int64_t append_count);
 bool js_array_has_props(const Array* arr);
 Map* js_array_props(const Array* arr);
 int64_t container_dense_capacity(const Array* arr);
@@ -2683,6 +2684,7 @@ extern "C" {
     double array_float_get_value(ArrayNum *arr, int64_t index);
     Item list_get(List *list, int64_t index);
     Item fn_string_ascii_at(Item str, int64_t index);
+    Item fn_string_ord_at(Item str, int64_t index);
     uint8_t fn_string_char_eq_ascii(Item str, int64_t index, uint8_t expected);
     uint8_t fn_string_char_eq(Item left, int64_t left_index,
                               Item right, int64_t right_index);
@@ -3187,6 +3189,11 @@ extern "C" {
     Item fn_substring(Item str, Item start, Item end);
     Bool fn_contains(Item str, Item substr);
     Item fn_join(Item a, Item b);
+    Item fn_join_consume_open_array(Item left, Item right);
+    Item fn_join_consume_cert_array(Item left, Item right);
+    Item fn_join_consume_cert_array_item(Item left, Item element);
+    Item fn_join_consume_cert_array_pair(Item left, Item first, Item second);
+    Item fn_join_fresh_array_item(Item left, Item element);
     // string functions
     Bool fn_starts_with(Item str, Item prefix);
     Bool fn_starts_with_str(String* str, String* prefix);   // native String* variant

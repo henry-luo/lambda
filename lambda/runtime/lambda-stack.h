@@ -74,6 +74,9 @@ void lambda_stack_init(void);
  * Intended for orderly process shutdown after all script execution is done.
  */
 void lambda_stack_cleanup(void);
+// Release this thread's alternate signal stack without uninstalling the
+// process-wide handler used by other active execution threads.
+void lambda_stack_detach_thread(void);
 
 /**
  * Report stack overflow error and set runtime error state.

@@ -1,0 +1,21 @@
+{
+  "name": "Doc editor loads and scrolls the Lambda cheatsheet",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__doc .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__doc_Lambda_Cheatsheet_md .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "contains": "Lambda_Cheatsheet.md"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "CLI Commands"},
+    {"type": "assert_position", "element_a": {"selector": "#rendered-preview"},
+      "element_b": {"selector": ".document-content"}, "relation": "inside"},
+    {"type": "assert_position", "element_a": {"selector": ".document-tabs"},
+      "element_b": {"selector": "#rendered-preview"}, "relation": "below"},
+    {"type": "scroll", "x": 700, "y": 450, "dx": 0, "dy": -5},
+    {"type": "assert_state_store", "target": {"selector": "#rendered-preview"}, "view_scroll_y": 250, "tolerance": 20},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "## CLI Commands"},
+    {"type": "click", "target": {"selector": ".tab-view"}},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "CLI Commands"}
+  ]
+}

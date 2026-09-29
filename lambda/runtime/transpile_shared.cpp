@@ -167,11 +167,18 @@ AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal) {
     return NULL;
 }
 
-bool has_fixed_shape(TypeMap* map_type) {
+bool has_named_shape(TypeMap* map_type) {
     if (!map_type->struct_name) return false;
     if (!map_type->shape || map_type->length == 0) return false;
     FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) return false;
+    }
+    return true;
+}
+
+bool has_fixed_shape(TypeMap* map_type) {
+    if (!has_named_shape(map_type)) return false;
+    FOR_EACH_MAP_FIELD(map_type, field) {
         if (field->byte_offset % sizeof(void*) != 0) return false;
     }
     return true;

@@ -1538,7 +1538,13 @@ module.exports = grammar({
     // names a module file, not a binding, so a keyword spells one, as C's
     // `token_is_key` reads it.
     _module_segment: $ => choice($.identifier, alias($._keyword_name, $.identifier)),
-    relative_name: $ => repeat1(seq('.', $._module_segment)),
+    // S16.9.8: a relative import starts from `.` (beside the importer) or a
+    // leading run of `~~` parent steps (`~~.~~.a`); `~~` never follows a name.
+    relative_name: $ => choice(
+      repeat1(seq('.', $._module_segment)),
+      seq(repeat1(seq($.path_parent, '.')), $._module_segment,
+        repeat(seq('.', $._module_segment))),
+    ),
     absolute_name: $ => seq($._module_segment, repeat(seq('.', $._module_segment))),
     import_module: $ => choice(
       field('module', choice($.absolute_name, $.relative_name, $.symbol)),

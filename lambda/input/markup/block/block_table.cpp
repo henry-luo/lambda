@@ -527,17 +527,185 @@ static bool is_asciidoc_table_delimiter(const char* line) {
     return strncmp(p, "|===", 4) == 0;
 }
 
+static bool is_wiki_attr_name_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || c == '_' || c == '-' || c == ':';
+}
+
+// validate before applying cell attributes, so a literal pipe in cell text stays text.
+static bool parse_wiki_attributes(MarkupParser* parser, Element* elem,
+                                  const char* begin, const char* end) {
+    const char* pos = begin;
+    bool found = false;
+    while (pos < end) {
+        while (pos < end && (*pos == ' ' || *pos == '\t')) pos++;
+        if (pos == end) break;
+
+        const char* name = pos;
+        while (pos < end && is_wiki_attr_name_char(*pos)) pos++;
+        if (pos == name || !((*name >= 'a' && *name <= 'z') ||
+                             (*name >= 'A' && *name <= 'Z') || *name == '_')) return false;
+        const char* name_end = pos;
+        while (pos < end && (*pos == ' ' || *pos == '\t')) pos++;
+        if (pos == end || *pos++ != '=') return false;
+        while (pos < end && (*pos == ' ' || *pos == '\t')) pos++;
+        if (pos == end) return false;
+
+        char quote = (*pos == '\'' || *pos == '"') ? *pos++ : '\0';
+        const char* value = pos;
+        if (quote) {
+            while (pos < end && *pos != quote) pos++;
+            if (pos == end) return false;
+        } else {
+            while (pos < end && *pos != ' ' && *pos != '\t') pos++;
+        }
+        const char* value_end = pos;
+        if (quote) pos++;
+        if (pos < end && *pos != ' ' && *pos != '\t') return false;
+
+        if (elem) {
+            char* key = mem_dup_n(name, name_end - name, MEM_CAT_INPUT_MARKUP);
+            char* val = mem_dup_n(value, value_end - value, MEM_CAT_INPUT_MARKUP);
+            if (!key || !val) {
+                mem_free(key);
+                mem_free(val);
+                return false;
+            }
+            add_attribute_to_element(parser, elem, key, val);
+            mem_free(key);
+            mem_free(val);
+        }
+        found = true;
+    }
+    return found;
+}
+
+static Element* append_wiki_cell(MarkupParser* parser, Element* row, const char* tag,
+                                 const char* begin, const char* end) {
+    Element* cell = create_element(parser, tag);
+    if (!cell) return nullptr;
+
+    const char* content = begin;
+    for (const char* pos = begin; pos < end; pos++) {
+        if (*pos == '|' && (pos == begin || pos[-1] != '\\') &&
+            (pos + 1 == end || pos[1] != '|') &&
+            parse_wiki_attributes(parser, nullptr, begin, pos)) {
+            parse_wiki_attributes(parser, cell, begin, pos);
+            content = pos + 1;
+            break;
+        }
+    }
+
+    char* text = mem_dup_n(content, end - content, MEM_CAT_INPUT_MARKUP);
+    if (text) {
+        Item parsed = parse_table_cell_content(parser, text);
+        if (parsed.item != ITEM_ERROR && parsed.item != ITEM_UNDEFINED)
+            list_push((List*)cell, parsed);
+        mem_free(text);
+    }
+    list_push((List*)row, Item{.item = (uint64_t)cell});
+    return cell;
+}
+
+static Element* parse_wiki_cell_line(MarkupParser* parser, Element* row, const char* line) {
+    const char* cell_start = line + 1;
+    const char* tag = (*line == '!') ? "th" : "td";
+    Element* last_cell = nullptr;
+    int link_depth = 0;
+    int template_depth = 0;
+    for (const char* pos = cell_start; ; pos++) {
+        if (!*pos) {
+            last_cell = append_wiki_cell(parser, row, tag, cell_start, pos);
+            break;
+        }
+        if (pos[0] == '[' && pos[1] == '[') { link_depth++; pos++; continue; }
+        if (pos[0] == ']' && pos[1] == ']' && link_depth) { link_depth--; pos++; continue; }
+        if (pos[0] == '{' && pos[1] == '{') { template_depth++; pos++; continue; }
+        if (pos[0] == '}' && pos[1] == '}' && template_depth) { template_depth--; pos++; continue; }
+        if (!link_depth && !template_depth &&
+            ((pos[0] == '|' && pos[1] == '|') || (pos[0] == '!' && pos[1] == '!')) &&
+            (pos == cell_start || pos[-1] != '\\')) {
+            last_cell = append_wiki_cell(parser, row, tag, cell_start, pos);
+            tag = (*pos == '!') ? "th" : "td";
+            pos++;
+            cell_start = pos + 1;
+        }
+    }
+    return last_cell;
+}
+
+static void append_wiki_row(Element* table, Element* row) {
+    if (row && ((List*)row)->length > 0)
+        list_push((List*)table, Item{.item = (uint64_t)row});
+}
+
+static Item parse_wiki_table(MarkupParser* parser, const char* line) {
+    Element* table = create_element(parser, "table");
+    if (!table) return Item{.item = ITEM_ERROR};
+    const char* opening = str_skip_line_space(line);
+    parse_wiki_attributes(parser, table, opening + 2, opening + strlen(opening));
+    parser->current_line++;
+
+    Element* row = nullptr;
+    Element* last_cell = nullptr;
+    while (parser->current_line < parser->line_count) {
+        const char* current = str_skip_line_space(parser->lines[parser->current_line]);
+        if (strncmp(current, "|}", 2) == 0) {
+            parser->current_line++;
+            break;
+        }
+        if (strncmp(current, "|-", 2) == 0) {
+            append_wiki_row(table, row);
+            row = create_element(parser, "tr");
+            if (row) parse_wiki_attributes(parser, row, current + 2, current + strlen(current));
+            last_cell = nullptr;
+        } else if (strncmp(current, "|+", 2) == 0) {
+            Element* caption = create_element(parser, "caption");
+            if (caption) {
+                const char* content = current + 2;
+                for (const char* pos = content; *pos; pos++) {
+                    if (*pos == '|' && parse_wiki_attributes(parser, nullptr, content, pos)) {
+                        parse_wiki_attributes(parser, caption, content, pos);
+                        content = pos + 1;
+                        break;
+                    }
+                }
+                Item parsed = parse_table_cell_content(parser, content);
+                if (parsed.item != ITEM_ERROR && parsed.item != ITEM_UNDEFINED)
+                    list_push((List*)caption, parsed);
+                list_push((List*)table, Item{.item = (uint64_t)caption});
+            }
+        } else if (*current == '!' || *current == '|') {
+            if (!row) row = create_element(parser, "tr");
+            if (row) last_cell = parse_wiki_cell_line(parser, row, current);
+        } else if (*current && last_cell) {
+            // a plain line continues the preceding cell in MediaWiki tables.
+            String* space = parser->builder.createString(" ");
+            list_push((List*)last_cell, Item{.item = s2it(space)});
+            Item parsed = parse_table_cell_content(parser, current);
+            if (parsed.item != ITEM_ERROR && parsed.item != ITEM_UNDEFINED)
+                list_push((List*)last_cell, parsed);
+        }
+        parser->current_line++;
+    }
+    append_wiki_row(table, row);
+    return Item{.item = (uint64_t)table};
+}
+
 /**
  * parse_table - Parse a complete table structure
  *
  * Collects all consecutive table rows into a <table> element with proper
  * <thead> and <tbody> structure for GFM-style tables.
- * Also handles AsciiDoc |=== delimited tables.
+ * Also handles MediaWiki {| |} and AsciiDoc |=== delimited tables.
  */
 Item parse_table(MarkupParser* parser, const char* line) {
     if (!parser || !line) {
         return Item{.item = ITEM_ERROR};
     }
+
+    if (parser->config.format == Format::WIKI)
+        return parse_wiki_table(parser, line);
 
     if (parser->config.format == Format::RST && is_rst_grid_table_border(line)) {
         return parse_rst_grid_table(parser, line);

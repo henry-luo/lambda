@@ -423,6 +423,64 @@ TEST(LambdaScriptCache, ReusesMirImageAcrossFreshRuntimes) {
     EXPECT_GE(after.module_hits, before.module_hits + 1);
 }
 
+TEST(LambdaScriptCache, AutoFallbackCachesMirImportConeAndViews) {
+    const char* identity = "test/lambda/auto_cache_root.ls";
+    const char* source =
+        "import .script_cache_auto_child\n"
+        "view int { ~ }\n"
+        "edit <cache_auto_widget> state count: 0 { <div \"ok\"> }\n"
+        "on click(evt) { count = count + 1 }\n"
+        "apply(cache_auto_value + 41)\n";
+    InputScriptCache* cache = input_manager_global_script_cache();
+    ASSERT_NE(cache, nullptr);
+    InputScriptCacheStats before = {};
+    input_script_cache_get_stats(cache, &before);
+
+    LambdaTier saved_tier = lambda_tier_selected();
+    // A prior eager image must not occupy AUTO's fallback image key.
+    lambda_tier_set(LAMBDA_TIER_JIT);
+    Runtime eager = {};
+    runtime_init(&eager);
+    Input* eager_output = run_script_mir(&eager, source, (char*)identity, true);
+    ASSERT_NE(eager_output, nullptr);
+    EXPECT_EQ(it2i(eager_output->root), 42);
+    runtime_cleanup(&eager);
+
+    lambda_tier_set(LAMBDA_TIER_AUTO);
+    Runtime first = {};
+    runtime_init(&first);
+    Input* first_output = run_script_mir(&first, source, (char*)identity, true);
+    ASSERT_NE(first_output, nullptr);
+    EXPECT_EQ(it2i(first_output->root), 42);
+    ASSERT_NE(first.scripts, nullptr);
+    Script* first_root = (Script*)first.scripts->data[0];
+    ASSERT_TRUE(first_root->cache_owned_template);
+    ASSERT_NE(first_root->direct_imports, nullptr);
+    Script* first_dependency = (Script*)first_root->direct_imports->data[0];
+    ASSERT_NE(first_dependency->cache_template, nullptr);
+    const Script* first_dependency_image = first_dependency->cache_template;
+    EXPECT_TRUE(first_dependency_image->cache_mir_artifact);
+    runtime_cleanup(&first);
+
+    Runtime second = {};
+    runtime_init(&second);
+    Input* second_output = run_script_mir(&second, source, (char*)identity, true);
+    ASSERT_NE(second_output, nullptr);
+    EXPECT_EQ(it2i(second_output->root), 42);
+    Script* second_root = (Script*)second.scripts->data[0];
+    EXPECT_EQ(second_root->cache_template, first_root);
+    ASSERT_NE(second_root->direct_imports, nullptr);
+    Script* second_dependency = (Script*)second_root->direct_imports->data[0];
+    EXPECT_EQ(second_dependency->cache_template, first_dependency_image);
+    runtime_cleanup(&second);
+    lambda_tier_set(saved_tier);
+
+    InputScriptCacheStats after = {};
+    input_script_cache_get_stats(cache, &after);
+    EXPECT_GE(after.mir_builds, before.mir_builds + 2);
+    EXPECT_GE(after.mir_hits, before.mir_hits + 1);
+}
+
 TEST(LambdaScriptCache, MapsLogicalUnitsToDenseModuleSlabs) {
     Runtime runtime = {};
     runtime_init(&runtime);
@@ -517,7 +575,10 @@ TEST(LambdaScriptCache, ReusesInterpreterAstImportConeAcrossFreshRuntimes) {
     ASSERT_NE(first_root->direct_imports, nullptr);
     ASSERT_EQ(first_root->direct_imports->length, 1);
     Script* first_dependency = (Script*)first_root->direct_imports->data[0];
-    ASSERT_TRUE(first_dependency->cache_owned_template);
+    // Static prebuild may hand the importer an execution shell around the AST owner.
+    const Script* first_dependency_image = first_dependency->cache_template
+        ? first_dependency->cache_template : first_dependency;
+    ASSERT_TRUE(first_dependency_image->cache_owned_template);
     runtime_cleanup(&first);
 
     Runtime second = {};
@@ -532,7 +593,7 @@ TEST(LambdaScriptCache, ReusesInterpreterAstImportConeAcrossFreshRuntimes) {
     ASSERT_EQ(second_root->direct_imports->length, 1);
     Script* second_dependency = (Script*)second_root->direct_imports->data[0];
     EXPECT_NE(second_dependency, first_dependency);
-    EXPECT_EQ(second_dependency->cache_template, first_dependency);
+    EXPECT_EQ(second_dependency->cache_template, first_dependency_image);
     uint32_t dependency_slab = UINT32_MAX;
     EXPECT_TRUE(runtime_module_state_id_for_unit(&second,
         second_dependency->cache_compilation_unit_id, &dependency_slab));
@@ -1537,9 +1598,9 @@ protected:
         // load_script from a worker would test per-thread compilation instead
         // of shared immutable module execution.
         Script* chart_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/package/chart/chart.ls", NULL, true);
+        "lmd/package/chart/chart.ls", NULL, true);
         Script* pdf_package = load_script_mir_direct(&shared_module_stress_runtime,
-        "lambda/package/pdf/pdf.ls", NULL, true);
+        "lmd/package/pdf/pdf.ls", NULL, true);
         ASSERT_NE(chart_package, nullptr);
         ASSERT_NE(pdf_package, nullptr);
         for (int i = 0; i < shared_module_stress_case_count; i++) {

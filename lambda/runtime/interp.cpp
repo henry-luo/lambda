@@ -24,6 +24,7 @@
 #include "module_registry.h"
 #include "template_registry.h"
 #include "template_state.h"
+#include "edit_bridge.h"
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
@@ -7443,7 +7444,8 @@ static Item interp_eval_view_activation(Context* host, Script* module,
         log_error("interp: view invocation has no EvalContext");
         return ItemError;
     }
-    const FnFramePlan* activation_plan = &module->interp_plan;
+    const FnFramePlan* activation_plan = view->interp_planned
+        ? &view->interp_plan : &module->interp_plan;
     if (handler && handler->interp_planned) {
         activation_plan = &handler->interp_plan;
     }
@@ -7474,7 +7476,8 @@ static Item interp_eval_view_activation(Context* host, Script* module,
             sizeof(InterpViewBinding), MEM_CAT_EVAL) : NULL;
     InterpViewBinding* saved_bindings = st->view_bindings;
     st->view_bindings = saved_bindings;
-    Item result = ItemError;
+    RootFrame return_roots(1);
+    Rooted<Item> result(return_roots, ItemError);
     int binding_index = 0;
     bool setup_ok = binding_count == 0 || (value_roots.valid() && bindings);
     if (setup_ok) {
@@ -7487,15 +7490,23 @@ static Item interp_eval_view_activation(Context* host, Script* module,
                 setup_ok = false;
                 break;
             }
-            Item default_value = state->value ? eval_expr(frame, state->value) : ItemNull;
-            if (interp_frame_pending(frame)) {
-                setup_ok = false;
-                break;
+            Item initial = ItemNull;
+            if (handler) {
+                // MIR handlers read the state established by the view body.
+                initial = tmpl_state_get(model_slot.get(), template_ref,
+                    state->name->chars);
+            } else {
+                Item default_value = state->value
+                    ? eval_expr(frame, state->value) : ItemNull;
+                if (interp_frame_pending(frame)) {
+                    setup_ok = false;
+                    break;
+                }
+                value_roots.words()[binding_index] = default_value.item;
+                initial = tmpl_state_get_or_init(model_slot.get(), template_ref,
+                    state->name->chars,
+                    (Item){.item = value_roots.words()[binding_index]});
             }
-            value_roots.words()[binding_index] = default_value.item;
-            Item initial = tmpl_state_get_or_init(model_slot.get(), template_ref,
-                state->name->chars,
-                (Item){.item = value_roots.words()[binding_index]});
             value_roots.words()[binding_index] = initial.item;
             bindings[binding_index] = {entry, &value_roots.words()[binding_index],
                 model_slot.home(), template_ref, state->name->chars, true,
@@ -7518,13 +7529,27 @@ static Item interp_eval_view_activation(Context* host, Script* module,
             }
         }
     }
-    if (setup_ok) result = eval_expr(frame, body);
+    if (setup_ok && handler && view->body &&
+            view->body->node_type == AST_NODE_CONTENT) {
+        // Handler scope inherits body lets; recompute them for this model as
+        // MIR does, without rerendering the body or its markup.
+        for (AstNode* item = ((AstListNode*)view->body)->item;
+                item; item = item->next) {
+            if (!is_view_handler_body_binding(item->node_type)) continue;
+            exec_declaration(frame, item);
+            if (interp_frame_pending(frame)) { setup_ok = false; break; }
+        }
+    }
+    if (setup_ok) result.set(eval_expr(frame, body));
+    if (setup_ok && !interp_frame_pending(frame) && handler && view->is_edit) {
+        edit_commit(NULL);
+    }
     st->view_bindings = saved_bindings;
     if (bindings) mem_free(bindings);
     st->ctx->consts = saved_consts;
     st->ctx->type_list = saved_type_list;
     if (interp_frame_pending(frame)) return interp_signal_payload(frame);
-    return result;
+    return result.get();
 }
 
 extern "C" Item interp_eval_view_template(Context* host, Script* module,

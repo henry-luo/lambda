@@ -295,45 +295,17 @@ extern "C" void lambda_compiler_timing_get(LambdaCompilerTiming* out) {
 // ============================================================================
 // Lambda Home Path
 // ============================================================================
-// g_lambda_home is the directory containing Lambda's runtime assets
-// (package trees, input/).
-//
-//   Dev default  : "./lambda"   (assets live next to source)
-//   Release      : "./lmd"      (set via -DLAMBDA_HOME_RELEASE compile flag,
-//                                or override at runtime with LAMBDA_HOME env var)
+// g_lambda_home is the directory containing Lambda's runtime assets (the
+// package tree). Dev and release share one layout: assets live in ./lmd/ in
+// both the source checkout and the release folder; LAMBDA_HOME overrides it.
 //
 // The name "lmd" avoids a name clash between the lambda executable and a
 // directory of the same name on macOS/Linux.
-
-#ifdef LAMBDA_HOME_RELEASE
 const char* g_lambda_home = "./lmd";
-#else
-const char* g_lambda_home = "./lambda";
-#endif
-
-// check if a directory exists
-static bool dir_exists(const char* path) {
-    return file_is_dir(path);
-}
 
 void lambda_home_init(void) {
-    // 1. environment variable always wins
     const char* env = shell_getenv("LAMBDA_HOME");
-    if (env && env[0]) {
-        g_lambda_home = env;
-        return;
-    }
-
-    // 2. auto-detect: try the compiled-in default first, then the other
-    if (dir_exists(g_lambda_home)) return;
-
-#ifdef LAMBDA_HOME_RELEASE
-    // release binary but ./lmd/ missing — fall back to ./lambda/ (dev tree)
-    if (dir_exists("./lambda")) { g_lambda_home = "./lambda"; }
-#else
-    // dev binary but ./lambda/ missing — try ./lmd/ (release layout)
-    if (dir_exists("./lmd"))    { g_lambda_home = "./lmd"; }
-#endif
+    if (env && env[0]) g_lambda_home = env;
 }
 
 // Build a malloc'd path "<g_lambda_home>/<rel>".  Caller must free().
@@ -936,6 +908,31 @@ static bool lambda_ast_template_is_reusable(Script* script) {
     return reusable;
 }
 
+static bool lambda_mir_template_dependencies_reusable(const Script* script,
+        ArrayList* seen) {
+    if (!script || !seen || script->cache_cross_lang_tainted) return false;
+    if (script_ptr_list_contains(seen, (Script*)script)) return true;
+    if (!arraylist_append(seen, (void*)script)) return false;
+    const ArrayList* dependencies = lambda_cache_direct_imports(script);
+    if (!dependencies) return true;
+    for (int i = 0; i < dependencies->length; i++) {
+        const Script* owner = lambda_cache_template_owner(
+            (const Script*)dependencies->data[i]);
+        if (!owner || !owner->cache_mir_artifact || !owner->jit_context ||
+                !owner->main_func ||
+                !lambda_mir_template_dependencies_reusable(owner, seen)) return false;
+    }
+    return true;
+}
+
+static bool lambda_mir_template_graph_reusable(const Script* script) {
+    ArrayList* seen = arraylist_new(4);
+    if (!seen) return false;
+    bool reusable = lambda_mir_template_dependencies_reusable(script, seen);
+    arraylist_free(seen);
+    return reusable;
+}
+
 static bool lambda_cache_record_direct_dependencies(InputScriptCache* cache,
         const Script* importer) {
     const ArrayList* dependencies = lambda_cache_direct_imports(importer);
@@ -1086,21 +1083,23 @@ static Script* lambda_ast_template_clone_graph(Runtime* runtime,
         return NULL;
     }
     const ArrayList* dependencies = lambda_cache_direct_imports(cached);
-    if (!dependencies || dependencies->length == 0) {
-        return instance;
-    }
-    instance->direct_imports = arraylist_new(dependencies->length);
-    if (!instance->direct_imports) return NULL;
-    for (int i = 0; i < dependencies->length; i++) {
-        const Script* dependency = lambda_cache_template_owner(
-            (const Script*)dependencies->data[i]);
-        Script* dependency_instance = lambda_ast_template_clone_graph(runtime,
-            dependency, graph);
-        if (!dependency_instance || !arraylist_append(instance->direct_imports,
-                dependency_instance)) {
-            return NULL;
+    if (dependencies && dependencies->length > 0) {
+        instance->direct_imports = arraylist_new(dependencies->length);
+        if (!instance->direct_imports) return NULL;
+        for (int i = 0; i < dependencies->length; i++) {
+            const Script* dependency = lambda_cache_template_owner(
+                (const Script*)dependencies->data[i]);
+            Script* dependency_instance = lambda_ast_template_clone_graph(runtime,
+                dependency, graph);
+            if (!dependency_instance || !arraylist_append(instance->direct_imports,
+                    dependency_instance)) {
+                return NULL;
+            }
         }
     }
+    // The MIR code is shared, but apply() resolves through a fresh
+    // EvalContext-owned template registry (D8.5.1v7).
+    if (instance->cache_mir_artifact) lambda_register_mir_view_templates(instance);
     return instance;
 }
 
@@ -1120,6 +1119,12 @@ static void lambda_ast_clone_graph_discard(Runtime* runtime,
 
 static Script* lambda_ast_template_clone_for_runtime(Runtime* runtime,
         const Script* cached, InputCacheScope* scope) {
+    // Compilation binds the canonical context before registering templates.
+    // A MIR cache hit skips compilation and must establish that same owner.
+    if (cached && cached->cache_mir_artifact) {
+        EvalContext* owner = runtime_get_eval_context(runtime);
+        if (!owner || !eval_context_init(owner)) return NULL;
+    }
     LambdaAstCloneGraph graph = {arraylist_new(4), arraylist_new(4)};
     if (!graph.templates || !graph.instances) {
         if (graph.templates) arraylist_free(graph.templates);
@@ -1253,6 +1258,110 @@ void script_adopt_transpiler(Script* script, Transpiler* tp) {
     }
 }
 
+static InputScriptRequest lambda_script_cache_request(Runtime* runtime,
+        const char* path, const char* source, bool inline_source,
+        bool is_import) {
+    InputScriptRequest request = {};
+    request.identity = path;
+    request.source = source;
+    request.source_length = source ? strlen(source) : 0;
+    request.source_kind = inline_source ? INPUT_SCRIPT_SOURCE_INLINE
+        : INPUT_SCRIPT_SOURCE_FILE;
+    request.language = "lambda";
+    request.profile = "lambda";
+    request.parser_abi = "lambda-direct-parser-v1";
+    request.parse_flags = runtime->static_warning ? "static-warning" : "default";
+    request.resolution_base = runtime->import_base_dir
+        ? runtime->import_base_dir : path;
+    request.backend = "mir-direct";
+    // MIR artifacts built by explicit JIT do not carry AUTO's unsupported-AST
+    // decision. Keep those code images separate under the existing MIR key.
+    LambdaTier tier = lambda_tier_selected();
+    request.execution_mode = tier == LAMBDA_TIER_AUTO
+        ? (is_import ? "auto-module" : "auto-script")
+        : tier == LAMBDA_TIER_INTERP
+            ? (is_import ? "interp-module" : "interp-script")
+            : (is_import ? "module" : "script");
+    request.ast_abi = 1;
+    request.compiler_abi = 1;
+    request.optimize_level = runtime->optimize_level;
+    request.module_mode = is_import;
+    return request;
+}
+
+// A T0 shell can be demoted after its AST owner was cached. Keep the AST pool
+// with that source entry and publish the new code as a separate MIR owner.
+static bool lambda_cache_promote_ast_shell_mir(Runtime* runtime, Script* script) {
+    if (!runtime || !script || !script->cache_template ||
+            script->cache_mir_artifact || !script->jit_context ||
+            !script->main_func || script->cache_cross_lang_tainted ||
+            runtime->mir_cache_disabled ||
+            !lambda_mir_template_graph_reusable(script)) return false;
+    InputScriptCache* cache = input_manager_global_script_cache();
+    InputCacheScope* scope = input_script_cache_open_scope(cache);
+    if (!scope) return false;
+    InputScriptRequest request = lambda_script_cache_request(runtime,
+        script->reference, script->source, script->cache_source_inline,
+        !script->is_main);
+    InputScriptLease* lease = input_script_cache_acquire(scope, &request);
+    if (!lease || input_script_compilation_unit_id(input_script_lease_input(lease)) !=
+            script->cache_compilation_unit_id) {
+        input_script_cache_close_scope(scope);
+        return false;
+    }
+
+    Script* image = (Script*)mem_calloc(1, sizeof(Script), MEM_CAT_SYSTEM);
+    if (!image) {
+        input_script_cache_close_scope(scope);
+        return false;
+    }
+    memcpy(image, script, sizeof(Script));
+    image->reference = mem_strdup(script->reference, MEM_CAT_SYSTEM);
+    image->directory = script->directory
+        ? mem_strdup(script->directory, MEM_CAT_SYSTEM) : NULL;
+    image->cache_scope = NULL;
+    image->cache_owned_template = true;
+    image->cache_mir_artifact = true;
+    image->cache_direct_imports = NULL;
+    image->ast_overlay_strings = NULL;
+    image->ast_promotion_overlay = NULL;
+    image->interp_satellite_queue = NULL;
+    image->interp_satellite_images = NULL;
+    image->interp_slab = NULL;
+    image->destroy_extension = NULL;
+    bool prepared = image->reference &&
+        (!script->directory || image->directory) &&
+        lambda_cache_prepare_template_direct_imports(image);
+    // Only the immutable dependency-owner list belongs to this image.
+    image->direct_imports = NULL;
+    InputScriptArtifactOps ops = {
+        lambda_script_cache_destroy_artifact,
+        lambda_script_cache_artifact_bytes,
+    };
+    bool published = prepared && input_script_cache_publish_mir(lease, image, &ops);
+    bool reusable = published;
+    if (published) {
+        script->cache_template = image;
+        script->cache_mir_artifact = true;
+        log_info("script-cache: promoted Lambda MIR path=%s unit=%u",
+            script->reference, script->cache_compilation_unit_id);
+    } else {
+        // A concurrent publisher can win the same key. The current execution
+        // keeps its private code while future clones use that sealed owner.
+        void* existing = NULL;
+        if (input_script_cache_get_mir(lease, &existing) && existing &&
+                ((Script*)existing)->cache_mir_artifact &&
+                lambda_mir_template_graph_reusable((Script*)existing)) {
+            script->cache_template = (Script*)existing;
+            reusable = true;
+        }
+        image->jit_context = NULL;
+        runtime_destroy_cached_script_template(image);
+    }
+    input_script_cache_close_scope(scope);
+    return reusable;
+}
+
 // a parent that falls back to MIR cannot link a dependency that was already
 // admitted to T0: MIR imports require the child's generated symbols. Demote
 // the complete loaded cone in post-order before compiling that parent.
@@ -1291,6 +1400,7 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime) {
             script->reference ? script->reference : "<unknown>");
         return false;
     }
+    (void)lambda_cache_promote_ast_shell_mir(runtime, script);
     interp_run_stats()->scripts_fallback++;
     log_debug("interp: demoted dependency file=%s to MIR fallback",
         script->reference ? script->reference : "<unknown>");
@@ -1360,6 +1470,7 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
     if (!interp_force_jit_import_cone(&transpiler)) return false;
     compile_script_as_mir_direct(&transpiler, script, script->reference,
         NULL, NULL, NULL, NULL, NULL, NULL);
+    if (script->jit_context) (void)lambda_cache_promote_ast_shell_mir(runtime, script);
     return script->jit_context != NULL;
 }
 
@@ -1715,24 +1826,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
 
-    InputScriptRequest cache_request = {};
-    cache_request.identity = lookup_path;
-    cache_request.source = source;
-    cache_request.source_length = source ? strlen(source) : 0;
-    cache_request.source_kind = source ? INPUT_SCRIPT_SOURCE_INLINE
-        : INPUT_SCRIPT_SOURCE_FILE;
-    cache_request.language = "lambda";
-    cache_request.profile = "lambda";
-    cache_request.parser_abi = "lambda-direct-parser-v1";
-    cache_request.parse_flags = runtime->static_warning ? "static-warning" : "default";
-    cache_request.resolution_base = runtime->import_base_dir
-        ? runtime->import_base_dir : lookup_path;
-    cache_request.backend = "mir-direct";
-    cache_request.execution_mode = is_import ? "module" : "script";
-    cache_request.ast_abi = 1;
-    cache_request.compiler_abi = 1;
-    cache_request.optimize_level = runtime->optimize_level;
-    cache_request.module_mode = is_import;
+    InputScriptRequest cache_request = lambda_script_cache_request(runtime,
+        lookup_path, source, source != NULL, is_import);
     InputScriptCache* script_cache = input_manager_global_script_cache();
     InputCacheScope* cache_scope = input_script_cache_open_scope(script_cache);
     if (!cache_scope) {
@@ -1805,12 +1900,18 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // a finished cache artifact.
     void* cached_image = NULL;
     bool cache_artifact_rejected = false;
+    LambdaTier selected_tier = lambda_tier_selected();
     if (cache_artifact_enabled && runtime->use_mir_direct && !runtime->mir_cache_disabled &&
-            lambda_tier_selected() == LAMBDA_TIER_JIT &&
+            (selected_tier == LAMBDA_TIER_JIT || selected_tier == LAMBDA_TIER_AUTO) &&
             input_script_cache_get_mir(raw_lease, &cached_image)) {
         Script* cached_template = (Script*)cached_image;
-        if (cached_template && cached_template->cache_owned_template &&
-                cached_template->jit_context && cached_template->main_func) {
+        // AUTO may reuse only a prior whole-module fallback. A MIR image
+        // produced by an explicit JIT run must not change AUTO's T0 choice.
+        bool tier_matches = selected_tier == LAMBDA_TIER_JIT ||
+            (cached_template && cached_template->interp_reject_kind != AST_NODE_NULL);
+        if (tier_matches && cached_template && cached_template->cache_owned_template &&
+                cached_template->jit_context && cached_template->main_func &&
+                lambda_mir_template_graph_reusable(cached_template)) {
             if (lambda_cache_dependencies_changed(cached_template, script_cache)) {
                 // A dependency changed or lost its tracked identity. Retire
                 // this root before retrying so recursion cannot rediscover
@@ -1848,7 +1949,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
             log_error("script-cache: failed to instantiate Lambda MIR image %s",
                 lookup_path);
         }
-        cache_artifact_rejected = true;
+        if (tier_matches) cache_artifact_rejected = true;
     }
     // T0 AST templates retain only parser/validation/frame-plan facts. A hit
     // always receives a new Script and dense module slab, never an old
@@ -1944,6 +2045,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     // physical module-state ID is assigned only when registered in this
     // Runtime, keeping the EvalContext table compact across cache reuse.
     new_script->cache_compilation_unit_id = compilation_unit_id;
+    new_script->cache_source_inline = source != NULL;
     runtime_register_script(runtime, new_script);
 #ifndef _WIN32
     pthread_mutex_unlock(&scripts_mutex);
@@ -2052,7 +2154,8 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     if (cache_artifact_enabled && cache_dependencies_valid &&
             lambda_cache_prepare_template_direct_imports(new_script) &&
             new_script->jit_context && runtime->use_mir_direct &&
-            !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted) {
+            !runtime->mir_cache_disabled && !new_script->cache_cross_lang_tainted &&
+            lambda_mir_template_graph_reusable(new_script)) {
         InputScriptArtifactOps ops = {
             lambda_script_cache_destroy_artifact,
             lambda_script_cache_artifact_bytes,
@@ -2818,6 +2921,9 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
                 script->mir_gen_initialized ? 1 : 0);
             script->jit_context = NULL;
         }
+        // Clone graphs allocate their own edge list even though the AST and
+        // sealed code remain with the cache owner.
+        if (script->direct_imports) arraylist_free(script->direct_imports);
         if (script->reference) mem_free((void*)script->reference);
         if (script->directory) mem_free((void*)script->directory);
         mem_free(script);
@@ -2872,6 +2978,18 @@ void runtime_free_script(Runtime* runtime, Script* script, bool remove_index) {
 
 void runtime_destroy_cached_script_template(Script* script) {
     if (!script) return;
+    if (script->cache_template && script->cache_mir_artifact) {
+        // A promoted MIR owner borrows AST storage from the sibling AST image.
+        if (script->jit_context) {
+            jit_cleanup_mode(script->jit_context,
+                script->mir_gen_initialized ? 1 : 0);
+            script->jit_context = NULL;
+        }
+        if (script->cache_direct_imports) {
+            arraylist_free(script->cache_direct_imports);
+            script->cache_direct_imports = NULL;
+        }
+    }
     // Artifact destruction runs only after InputScriptCache observed no active
     // lease. Clear the ownership marker so common Script teardown releases the
     // retained AST pool and sealed MIR context exactly once.

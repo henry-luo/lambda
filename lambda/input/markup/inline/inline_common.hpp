@@ -238,6 +238,7 @@ Item parse_wiki_bold_italic(MarkupParser* parser, const char** text);
  * Handles: {{template}}, {{template|arg}}
  */
 Item parse_wiki_template(MarkupParser* parser, const char** text);
+Item parse_wiki_nowiki(MarkupParser* parser, const char** text);
 
 /**
  * parse_asciidoc_inline - Parse AsciiDoc inline elements
