@@ -66,6 +66,10 @@ extern "C" bool radiant_dispatch_event_sim_mouse(UiContext* uicon, View* target,
 struct DocState;
 struct DomNode;
 
+struct EvalContext;
+// Transfer the eval thread at a document boundary with no active evaluator frame.
+extern "C" bool radiant_eval_context_switch(EvalContext* target);
+
 #ifndef RADIANT_EVENT_CORE_ONLY
 // Re-apply selector-dependent style and schedule layout after a live pseudo
 // state changes outside the native pointer dispatcher (for example JS .checked).
@@ -89,6 +93,8 @@ typedef struct BehaviorInitPhaseTiming {
 void radiant_run_behavior_init(struct DomDocument* doc,
                                BehaviorInitPhaseTiming* timing = nullptr);
 void radiant_queue_behavior_init_control(struct DomDocument* doc, View* view);
+// Deliver the page load event to a Lambda-authored body template after layout.
+void radiant_dispatch_lambda_body_load(UiContext* uicon, DomDocument* doc);
 #endif
 
 typedef enum  {
@@ -3312,6 +3318,11 @@ void editing_interaction_end_composition(DocState* state,
  */
 void doc_state_mark_dirty(DocState* state);
 void doc_state_request_repaint(DocState* state);
+// Advance the visible document and its embedded documents on the UI thread.
+// Returns whether any scheduler still needs another frame.
+bool radiant_tick_document_animations(DomDocument* document, double now,
+                                      bool tick_root = true,
+                                      bool anchor_host_time = false);
 void doc_state_mark_video_frame_pending(DocState* state);
 void doc_state_clear_video_frame_pending(DocState* state);
 void doc_state_request_reflow(DocState* state);

@@ -420,14 +420,15 @@ let person: {name: string, age: int} = {name: "Bob", age: 25}
 |------|---------|
 | `<tag>` | Element with tag |
 | `<tag attr: type>` | With attribute types |
-| `<tag attr: type; content_type>` | With content type — element *types* keep `;` (S16.9.3) |
+| `<tag content_type>` | With content type |
+| `<tag attr: type, content_type>` | With attribute and content types — `,` marks the boundary (S16.9.3) |
 
 Examples:
 
 ```lambda
-type Paragraph = <p; string>
-type Link = <a href: string; string>
-type Article = <article title: string, author: string;
+type Paragraph = <p string>
+type Link = <a href: string, string>
+type Article = <article title: string, author: string,
     string,           // Text content
     Section*          // Zero or more sections
 >

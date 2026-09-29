@@ -1292,7 +1292,7 @@ static bool interp_force_jit_script(Script* script, Runtime* runtime) {
         return false;
     }
     interp_run_stats()->scripts_fallback++;
-    log_notice("interp: demoted dependency file=%s to MIR fallback",
+    log_debug("interp: demoted dependency file=%s to MIR fallback",
         script->reference ? script->reference : "<unknown>");
     return true;
 }
@@ -2549,7 +2549,7 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
         return output;
     }
 
-    log_notice("Executing JIT compiled code...");
+    log_debug("Executing JIT compiled code...");
     runner_setup_context(runner);
     EvalContext* ctx = runner->context;
     if (!ctx) return nullptr;

@@ -6,10 +6,6 @@
 >
 > — Alan Perlis, *Epigrams on Programming*, 1982
 
-Lambda Script and its Radiant engine form a complete document-processing pipeline in a single executable of about 20 MB, built from scratch in C/C++. It parses some thirty document and data formats into one structured value, validates or transforms that value with a typed functional language, and then either writes it back out in any of two dozen formats, lays it out with browser-compatible CSS and renders it to SVG, PDF or a bitmap, or opens it in an interactive viewer and editor. This article introduces the ideas behind the pipeline: the data model everything shares, how each input format maps onto it, the workflows the command line and the language expose, and how the whole compares with other document toolchains. It stays at the level of concepts and architecture; the reference documents linked throughout carry the details.
-
-> **Related documentation**: [Lambda Reference](Lambda_Reference.md) · [Lambda Data](Lambda_Data.md) · [Markup & Data Format Support](Markup_Formats_Support.md) · [Mark Doc Schema](Doc_Schema.md) · [Validator Guide](Lambda_Validator_Guide.md) · [CLI Reference](Lambda_CLI.md) · [Reactive UI](Reactive_UI.md) · [Radiant Design Overview](dev/radiant/RAD_00_Overview.md) · [Lambda Core Runtime Overview](dev/lambda/LR_00_Overview.md) · [LambdaJS Overview](dev/js/JS_00_Overview.md)
-
 ![Lambda and Radiant document pipeline](img/lambda-radiant-pipeline.svg)
 
 ---
@@ -17,31 +13,31 @@ Lambda Script and its Radiant engine form a complete document-processing pipelin
 ## Contents
 
 - [Introduction: The Shape of the Pipeline](#introduction-the-shape-of-the-pipeline)
-- [Section 1: The Lambda / Mark Data Model](#section-1-the-lambda--mark-data-model)
-- [Section 2: From Input Formats to the Mark Tree](#section-2-from-input-formats-to-the-mark-tree)
-- [Section 3: Workflow Pipelines](#section-3-workflow-pipelines)
-- [Section 4: Comparison with Other Document Pipelines](#section-4-comparison-with-other-document-pipelines)
+- [1. The Lambda / Mark Data Model](#section-1-the-lambda--mark-data-model)
+- [2. From Input Formats to the Mark Tree](#section-2-from-input-formats-to-the-mark-tree)
+- [3. Workflow Pipelines](#section-3-workflow-pipelines)
+- [4. Comparison with Other Document Pipelines](#section-4-comparison-with-other-document-pipelines)
 - [Further Reading](#further-reading)
 
 ---
 
 ## Introduction: The Shape of the Pipeline
 
-Most document toolchains are built around a *format*: a Markdown processor, an XML stack, a TeX engine, a web browser. Lambda is built around a *value*. Every source, whether prose markup, a data file, a PDF, a diagram description or a script, is parsed into the same in-memory structure, the **Mark tree**. Every command operates on that tree, and every output, pixels included, is derived from it. The diagram above is the whole architecture in one picture: sources converge on the left, outputs fan out on the right, and everything in between acts on one shared model.
+Most document toolchains are built around a single *format*: a Markdown processor, an XML stack, a TeX engine, a html browser. Lambda is built around a *value tree*. Every source, whether prose markup, a data file, a PDF, a diagram description or a script, is parsed into the same in-memory structure, the **Mark tree**. Every command operates on that tree, and every output, pixels included, is derived from it. The diagram above is the whole architecture in one picture: sources converge on the left, outputs fan out on the right, and everything in between acts on one shared data model.
 
 The pipeline is organized in four layers, each a directory of the source tree:
 
 | Layer | Where | Role |
 |---|---|---|
-| **Input parsers** | `lambda/input/` | One parser per format. All of them build the Mark tree through the same construction API, and a MIME sniffer selects the parser when the format is not stated. |
-| **Lambda runtime** | `lambda/` | The Mark data model, the Lambda Script language (JIT-compiled to native code through MIR), the type system and schema validator, and the embedded LambdaJS JavaScript engine. |
-| **Output formatters** | `lambda/format/` | The mirror image of the parsers: serialize a Mark tree as Mark, JSON, YAML, HTML, Markdown, LaTeX and so on. |
-| **Radiant** | `radiant/` | The HTML/CSS layout, rendering and interaction engine: CSS resolution, block, inline, flex, grid and table layout, painting to a window or to SVG, PDF, PNG and JPEG, plus events, animation, forms and editing. |
+| **Input parsers** | `lambda/input/` | One parser per format. All of them build the Mark tree through the same construction API. |
+| **Lambda runtime** | `lambda/` | The Mark data model, the Lambda Script language (JIT-compiled to native code through MIR), the type system and schema validator, and the hosted Lambda JS engine. |
+| **Output formatters** | `lambda/format/` | The mirror image of the parsers: serialize a Mark tree as Mark, JSON, XML, YAML, HTML, Markdown, LaTeX and so on. |
+| **Radiant** | `radiant/` | The HTML/CSS/SVG layout, rendering and interaction engine, in a window or to SVG, PDF, PNG/JPEG files, plus DOM events, animation, and editing. |
 
 Two architectural decisions make these layers compose rather than merely coexist.
 
-- **One value representation.** Every value in the system is a single 64-bit tagged word, the `Item` (D2.1.1). The word a parser produces is the word a script manipulates, a schema validates, a formatter serializes, JavaScript reads through the DOM API and Radiant lays out. Nothing is marshalled between subsystems, because there is no second representation to marshal into.
-- **The document tree is the DOM.** Radiant does not build a separate layout tree. It tags the parsed nodes in place with geometry, so CSS, layout, painting, events, scripting and editing all interoperate on one structure. The memory model reflects the split of duties: Lambda values are garbage collected, while a loaded document lives in an arena that is released as a whole (D4.5.1v3).
+- **One value representation through out.** The value a parser produces is the value a script manipulates, a schema validates, a formatter serializes, JavaScript reads through the DOM API and Radiant lays out. Nothing is marshalled between subsystems, because there is no second representation to marshal into.
+- **The document tree is the DOM.** Radiant does not build a separate view tree. It tags the parsed nodes in place with geometry, so CSS, layout, painting, events, scripting and editing all interoperate on one structure.
 
 The command surface is small and maps directly onto the diagram:
 
@@ -49,20 +45,19 @@ The command surface is small and maps directly onto the diagram:
 |---|---|
 | `lambda convert` | Parse one format, emit another. |
 | `lambda validate` | Check a data file or document tree against a schema. |
-| `lambda script.ls`, `lambda run` | Query, transform or generate documents with Lambda Script. |
+| `lambda script.ls`, `lambda run procedural.ls` | Query, transform or generate documents with Lambda Script. |
 | `lambda layout`, `lambda render` | Lay out with CSS; render to SVG, PDF, PNG or JPEG. |
 | `lambda view` | Open a document, a diagram, a script or a URL in the Radiant viewer, JavaScript included. |
 | `lambda edit` | Edit Markdown, HTML and SVG in a Radiant window and save without loss. |
 
-The rest of this article follows the picture from the middle outward: first the model, then the inputs, then the workflows, then the neighbours.
+
 
 ---
-
-## Section 1: The Lambda / Mark Data Model
+## 1: The Lambda / Mark Data Model
 
 ### 1.1 Mark: JSON and HTML, unified
 
-The Mark tree is the runtime form of **Mark Notation**, a notation designed to hold *both* object data and markup in one grammar. JSON gives it maps and arrays; HTML and XML give it elements. A stable subset of the literal syntax is formalized and released separately as [Mark Notation](https://github.com/henry-luo/mark); Lambda Script uses the same literals as its native data syntax, so a document and a program are written in one language.
+The Mark tree is the runtime form of **Mark Notation**, a notation designed to hold *both* object data and markup in one data model. JSON gives it maps and arrays; HTML and XML give it elements. A stable subset of the literal syntax is formalized and released separately as [Mark Notation](https://github.com/henry-luo/mark); Lambda Script uses the same literals as its native data syntax, so a document and a program are written in one language.
 
 ```lambda
 let report = <doc
@@ -82,11 +77,12 @@ report[1][0]         // "Summary" — the text inside the heading
 
 Three container kinds carry all structure:
 
-| Kind | Literal | Nature |
-|---|---|---|
-| **map** | `{name: "Alice", age: 30}` | Keyed fields. Keys keep their source order, so documents round-trip faithfully (S2.3.1). |
-| **array** | `[1, 2, 3]` | Ordered items, with transparently unboxed numeric storage for vector arithmetic. |
-| **element** | `<p class: "lead", "text">` | A tag, a map of attributes **and** an ordered list of children, in one value (S2.1.1v4). |
+| Building block | Literals | What it represents | Typical document use |
+|---|---|---|---|
+| Scalars | `"string"`, `123`, `true` | Text, numbers, booleans, null, dates, and other individual values | A title, measurement, publication date, or flag |
+| **Maps** | `{name: "Alice", age: 30}` | Named fields and their values | Metadata, a configuration record, or a table row |
+| **Arrays** | `[1, 2, 3]` | Ordered collections of values | Records, measurements, or a collection of documents |
+| **Elements** | `<p class: "lead", "text">` | A name, named attributes, and ordered child content | Paragraphs, headings, links, tables, or application-specific markup |
 
 The element is the load-bearing kind. Because it is simultaneously a map (its attributes) and a list (its children), one type can represent an HTML `<div>`, an XML record, a Pandoc-style document block, a diagram node or a Lambda object without any of them having to be encoded as a convention on top of JSON. Element content follows a small normalization rule set (S2.6): absent and empty items vanish, adjacent strings merge, and lists splice in place. This is what lets a parser and a script build the same tree and get the same shape.
 
@@ -94,7 +90,7 @@ The scalar vocabulary is richer than JSON's, which matters for documents and dat
 
 ### 1.2 Documents are values
 
-A Mark tree is a value with value semantics. `let` bindings are final, construction and assignment copy observably, and no two bindings ever alias the same mutable storage (S9.1). The implementation shares structure copy-on-write, so this costs nothing until something changes. The consequence for a pipeline is that a transformation is an ordinary pure function from one tree to another: it can be re-run, cached, or executed in parallel without coordination.
+Lambda strictly separates functions from procedures. A transformation is an ordinary pure function from one tree to another: it can be re-run, cached, or executed in parallel without coordination.
 
 Effects are governed by a single declared bit. `fn` functions are pure; `pn` procedures may perform I/O and mutation; a pure function can never call a procedure (S12.1.1v2). A document transformation written as `fn` is therefore *known* to be repeatable, and the parts of a pipeline that read files, fetch URLs or write output are visibly marked. Reactive templates apply the same doctrine: the template body is a pure transformation and mutation happens only in event handlers (S12.1.3).
 
@@ -103,15 +99,15 @@ Effects are governed by a single declared bit. `fn` functions are pure; `pn` pro
 Lambda's type language describes shapes rather than classes. The same notation annotates program values, validates parsed input and matches templates:
 
 ```lambda
-type Report = <doc;
-    <meta title: string, date: string;>,
+type Report = <doc
+    <meta title: string, date: string>,
     <h1>,
     <p>*,
     <table>?
 >
 ```
 
-Element patterns state attributes before the `;` and content after it, with the familiar occurrence markers `*`, `+` and `?`. Maps, arrays, unions (`int | string`), optionals (`string?`) and literal types (`"GET" | "POST"`) compose freely (S11.1). A type declaration in a Lambda file *is* a schema; there is no separate schema language to learn (S11.4).
+Element patterns state attributes, and content after it, with the familiar occurrence markers `*`, `+` and `?`. Maps, arrays, unions (`int | string`), optionals (`string?`) and literal types (`"GET" | "POST"`) compose freely (S11.1). A type declaration in a Lambda script *is* a schema; there is no separate schema language to learn (S11.4).
 
 ### 1.4 Querying and transforming the tree
 
@@ -137,17 +133,19 @@ The same expressions work unchanged on a parsed HTML page, an XML feed, a Markdo
 
 ### 1.5 One representation from parser to pixel
 
-The unifying property of the pipeline is that the Mark tree is never translated. The input parser builds it; the script sees it; the validator checks it; the formatter writes it; Radiant resolves CSS onto its elements, lays them out and paints them; and JavaScript on the page manipulates the same nodes through standard DOM and CSSOM APIs. Even the embedded JavaScript engine, LambdaJS, represents its values as the same tagged `Item` and runs on the same garbage collector and JIT, so a page script and a Lambda transformation are operating on literally the same objects.
+The unifying property of the pipeline is that the Mark tree is never translated. The input parser builds it; the script sees it; the validator checks it; the formatter writes it; Radiant resolves CSS onto its elements, lays them out and paints them; and JavaScript on the page manipulates the same nodes through standard DOM and CSSOM APIs. Even the embedded JavaScript engine, Lambda JS, represents its values as the same tagged `Item` and runs on the same garbage collector and JIT, so a page script and a Lambda transformation are operating on literally the same objects.
 
 ---
 
-## Section 2: From Input Formats to the Mark Tree
+## 2. From Input Formats to the Mark Tree
 
-Every parser in `lambda/input/` follows one rule: **preserve structure, not presentation, and name things the way HTML does wherever HTML has a name for them.** Where a format has a concept HTML lacks, the parser introduces a small custom element rather than flattening the concept into text. The payoff is that a document parsed from any prose format can be handed straight to Radiant for layout, straight to a schema for validation, or straight to a formatter for a different syntax, with no per-format translation step in between.
+
 
 ### 2.1 Prose markup: the Mark Doc schema
 
-Markdown, HTML5, reStructuredText, AsciiDoc, MediaWiki and DokuWiki markup, Org-mode, Textile, troff man pages, MDX and LaTeX all parse into the same element tree, the [Mark Doc schema](Doc_Schema.md). The schema is rooted at `<doc>`, carries metadata in a `<meta>` element, uses HTML element names for everything HTML can express (`<h1>`…`<h6>`, `<p>`, `<ul>`, `<table>`, `<a>`, `<img>`, `<pre><code>`), and adds custom elements for what HTML cannot: `<math>`, `<cite>`, `<footnote>` and a `<raw>` pass-through. Its block and inline vocabulary is modelled on Pandoc's abstract syntax tree, so anyone who knows Pandoc's model already knows the shape of a Lambda document.
+For this family of inputs, parser in `lambda/input/` follows one rule: **preserve structure, not presentation, and emit HTML wherever applicable.** Where a format has a concept HTML lacks, the parser introduces a small custom element rather than flattening the concept into text. The payoff is that a document parsed from any prose format can be handed straight to Radiant for layout, straight to a schema for validation, or straight to a formatter for a different syntax, with no per-format translation step in between.
+
+Markdown, HTML5, reStructuredText, AsciiDoc, MediaWiki and DokuWiki markup, Org-mode, Textile, troff man pages, MDX and LaTeX all parse into the same element tree, the [Mark Doc schema](Doc_Schema.md). The schema is rooted at `<doc>`, carries metadata in a `<meta>` element, uses HTML element names for everything HTML can express (`<h1>`…`<h6>`, `<p>`, `<ul>`, `<table>`, `<a>`, `<img>`, `<pre><code>`), and adds custom elements for what HTML cannot: `<math>`, `<cite>`, `<footnote>` and a `<raw>` pass-through. Its block and inline vocabulary is modelled on Pandoc's abstract syntax tree, so anyone who knows Pandoc's model already knows the shape of a Lambda document. Because a Markdown file, a wiki page and an HTML page all produce the same unified element tree, `lambda view` treats them as the same.
 
 ```markdown
 # Hello
@@ -167,8 +165,7 @@ Some **bold** text with a [link](https://example.com).
 >
 ```
 
-The parsers are held to the official conformance suites: the Markdown parser passes the full CommonMark test suite and the HTML5 parser passes the html5lib suite. HTML itself is preserved verbatim as a `<#document>` tree with its `<html>`, `<head>` and `<body>` as parsed; because a Markdown file, a wiki page and an HTML page are all element trees, `lambda view` treats them as the same kind of thing.
-
+The parsers are held to the official conformance suites: the Markdown parser passes the full CommonMark test suite and the HTML5 parser passes the html5lib suite.
 ### 2.2 Data formats: maps, arrays and elements
 
 Structured data maps onto the three container kinds without ceremony:
@@ -187,27 +184,28 @@ Once parsed, a configuration file and a spreadsheet export are just values: they
 
 ### 2.3 Other sources
 
-The remaining parsers cover the sources a document pipeline meets in practice. PDF is parsed into an element tree with best-effort text-flow reconstruction, and a PDF package written in Lambda interprets page content streams for viewing. RTF and LaTeX produce Mark Doc trees, with LaTeX-specific constructs kept as `<cmd>` and `<env>` elements that a Lambda-side LaTeX package renders to HTML. Mathematics in LaTeX, Typst or AsciiMath syntax becomes a `<math>` tree that the math package typesets with CSS. Email (EML), vCard and iCalendar files become maps with typed dates. Graphviz DOT, D2, Mermaid and Structurizr diagram descriptions become a `<graph>` of `<node>` and `<edge>` elements that the graph package lays out and Radiant renders. JSX and MDX interleave components with expressions; a directory listing is an array of file-info maps; an HTTP URL is fetched and dispatched on its content type; and a Lambda script is itself an input, since evaluating it yields a Mark tree.
+The remaining parsers cover the sources a document pipeline meets in practice. PDF is parsed into an element tree with best-effort text-flow reconstruction, and a PDF package written in Lambda interprets page content streams for viewing. RTF and LaTeX produce Mark Doc trees, with LaTeX-specific constructs kept as `<cmd>` and `<env>` elements that a Lambda-side LaTeX package renders to HTML. Mathematics in LaTeX, Typst or AsciiMath syntax becomes a `<math>` tree that the math package typesets with CSS. Email (EML), vCard and iCalendar files become maps with typed dates. Graphviz DOT, D2, Mermaid and Structurizr diagram descriptions become a `<graph>` of `<node>` and `<edge>` elements that the graph package lays out and Radiant renders. JSX and MDX interleave components with expressions. A file directory listing is an array of file-info maps; an HTTP URL is fetched and dispatched on its content type.  
 
-### 2.4 Detection and the reverse direction
 
-When no format is stated, a Tika-style detector inspects the file's leading bytes and its extension and picks the parser. The same dispatcher serves the `input()` function in scripts and every CLI command, so `lambda view report` and `input("report")` agree on what a file is.
+And a Lambda script can be seen as a functional mapping from its input sources, to the result, which is just another Mark tree.
+
+### 2.4 Formatting Output
 
 Formatters run the pipeline backwards. Mark itself is the lossless serialization of the tree; JSON, YAML, TOML, INI, XML, HTML, Markdown, reStructuredText, Org-mode, wiki, Textile, JSX/MDX, LaTeX and plain text each write the parts of the tree they can express, and math trees can be emitted as LaTeX, Typst, AsciiMath or MathML. Where a target lacks a concept the conversion is deliberately predictable rather than silently lossy: a `binary` value, for instance, becomes a standard base64 string in JSON and YAML. Because every parser and every formatter meets in the middle, adding one parser adds a route to every existing output, and adding one formatter adds a route from every existing input.
 
 ---
 
-## Section 3: Workflow Pipelines
+## 3. Workflow Pipelines
 
 Every workflow is the same spine with different ends attached:
 
 ```text
-source ─▶ parse ─▶ Mark tree ─▶ [validate] ─▶ [transform] ─▶ format ─▶ text
-                                                       └─▶ layout ─▶ paint ─▶ window · SVG · PDF · PNG
-                                                       └─▶ edit ─▶ save
+source ─▶ parse ─▶ Mark tree ─▶ [validate] ─▶ format ─▶ text
+                            └─▶ [transform] ─▶ layout ─▶ render ─▶ window · SVG · PDF · PNG
+                                                           └─▶ edit ─▶ save
 ```
 
-The command line packages the common shapes; Lambda Script composes any of them.
+
 
 ### 3.1 Convert
 
@@ -233,11 +231,11 @@ lambda validate data.json -s report_schema.ls      # against your own types
 lambda validate --strict config.yaml -s config_schema.ls --max-errors 50
 ```
 
-Validation reports the path to each offending value and suggests corrections for near-miss field names. Validation is a command-line step today: calling the validator from inside a script is not yet available, so a pipeline validates its inputs and outputs with `lambda validate` around the script that transforms them.
+
 
 ### 3.3 Transform and generate
 
-Scripts are where the pipeline becomes programmable. A script loads sources with `input()`, shapes them with queries, pipes and comprehensions, builds new elements with the literal syntax, and emits the result with `format()` or hands it to Radiant:
+Scripts are where the pipeline becomes programmable. A script loads sources with `input()`, shapes them with queries, pipes and comprehensions, builds new elements with the literal syntax, and emits the result with `format()` or hands it to Radiant to layout and render:
 
 ```lambda
 // load any supported format into the Mark tree
@@ -250,11 +248,11 @@ let toc = <nav <ul for (h in doc?<h2>) <li h[0]>>>
 format(<div toc doc>, 'html')
 ```
 
-Two properties of the language shape how such scripts read. Data work looks like a query: `for (r in rows where int(r.amount) > 1000 order by r.region) r` is a complete filter-and-sort over a CSV, and vector arithmetic broadcasts over whole columns. And a script can *be* a document: `lambda view page.ls` evaluates the script and renders the element tree it returns, in the way a PHP page evaluates to HTML. Procedural work, such as walking a directory and writing many files, lives in `pn` procedures under a `main()` entry point run with `lambda run`, and guest languages such as Python can be hosted on the same runtime through Jube modules.
+Two properties of the language shape how such scripts read. Data work looks like a query: `for (r in rows where int(r.amount) > 1000 order by r.region) r` is a complete filter-and-sort over a CSV, and vector arithmetic broadcasts over whole columns. And a script can *be* a document: `lambda view page.ls` evaluates the script and renders the element tree it returns, in the way a PHP page evaluates to HTML. Procedural work, such as walking a directory and writing many files, lives in `pn` procedures under a `main()` entry point run with `lambda run`.
 
 ### 3.4 Lay out and render
 
-`lambda layout` and `lambda render` hand the tree to Radiant. Radiant resolves the CSS cascade onto the elements, lays them out with browser-compatible algorithms for block and inline flow, flexbox, grid, tables, positioning, floats, multi-column and lists, records the result as a backend-neutral paint IR, and replays that IR to a window through a vector backend or exports it as SVG or PDF. PNG and JPEG are rasterized from the same IR. Fonts come from Lambda's own font engine, with web font formats and color fonts supported.
+`lambda layout` and `lambda render` hand the tree to Radiant. Radiant resolves the CSS cascade onto the elements, lays them out with browser-compatible algorithms, and then render to a window through a vector backend or exports it as SVG or PDF, or rasterized as PNG and JPEG.
 
 ```bash
 lambda render page.html -o page.svg
@@ -263,11 +261,11 @@ lambda render page.html -o shot.png -vw 1920 -vh 1080 --pixel-ratio 2.0
 lambda render architecture.mmd -o architecture.svg -t github-dark
 ```
 
-Layout fidelity is measured, not assumed: the layout test suite compares Radiant's view tree against reference layouts captured from a real browser, and the CSS, DOM and editing behaviours are exercised against subsets of the Web Platform Tests. `lambda layout` exposes the computed view tree directly, which is also how those comparisons are made. [HTML_CSS_SVG_Support.md](HTML_CSS_SVG_Support.md) lists which HTML elements, CSS features and SVG features are supported, with the conformance figures and the differences between the output formats.
+Radiant's CSS, DOM and editing behaviours are checked against subsets of the Web Platform Tests for conformance. [HTML_CSS_SVG_Support.md](HTML_CSS_SVG_Support.md) lists which HTML elements, CSS features and SVG features are supported, with the conformance figures and the differences between the output formats.
 
 ### 3.5 View, interact, script
 
-`lambda view` opens the tree in Radiant's browsing shell, which accepts local files in every supported format as well as HTTP URLs. Pages run their JavaScript on LambdaJS, an engine that compiles JavaScript and TypeScript to the same MIR back end and represents values as the same `Item`, so scripts manipulate the live document through standard DOM and CSSOM APIs, with ES modules, promises and an event loop behind them. The engine is validated against the TC39 test262 conformance suite and carries a Node.js compatibility layer for file, network and crypto APIs.
+`lambda view` opens the tree in Radiant's browsing shell, which accepts local files in every supported format as well as HTTP URLs. Pages run their JavaScript on LambdaJS, an engine that compiles JavaScript and TypeScript to the same MIR back end and represents values as the same `Item`, so scripts manipulate the live document through standard DOM and CSSOM APIs, with ES modules, promises and an event loop behind them. The engine is validated against the TC39 test262 conformance suite.
 
 Interactivity in Lambda itself comes from **reactive templates**. A `view` or `edit` template declares the shape of data it presents, `apply()` dispatches each data item to the most specific matching template, and `on` handlers hold per-instance state and mutate the model. It combines XSLT's pattern-matched dispatch with React's component state while keeping the template body pure (S12.1.3); [Reactive UI](Reactive_UI.md) describes the model. The DOM behaviours themselves, such as focus, forms, ARIA and editing commands, are written as Lambda templates in the `dom` package rather than hard-coded in C++, so the engine's behaviour is inspectable and extensible in the same language users write.
 
@@ -290,9 +288,9 @@ lambda edit draft.md                                      # fix a paragraph, sav
 
 ---
 
-## Section 4: Comparison with Other Document Pipelines
+## 4. Comparison with Other Document Pipelines
 
-Lambda overlaps with several established toolchains, each excellent at the part of the pipeline it was built for. The comparison below is about *shape*: where each tool's data model sits, how far its pipeline reaches, and what a user has to add to get from source to page.
+Lambda overlaps with several established toolchains, each excellent at the part of the pipeline it was built for.
 
 ### 4.1 Pandoc
 
@@ -302,15 +300,20 @@ Pandoc is the reference universal document converter: dozens of readers and writ
 
 XML with XML Schema or RELAX NG for validation, XPath and XQuery for query, XSLT for transformation and XSL-FO for print layout is the most complete precedent for what Lambda attempts, and Lambda borrows from it openly: `?` and `[T]` echo XPath's `//` and `/`, the for-comprehension is FLWOR in a modern coat, the reactive templates are `apply-templates` with state, and elements are the XML infoset generalized. What Lambda changes is the number of languages and processors. The XML stack is five specifications with separate engines, its data model is text-centric (maps and arrays arrived late, in XPath 3.1), and JSON, YAML and Markdown sources have to be lifted into XML before any of it applies. Lambda has one data model that already contains maps, arrays and typed scalars, one language for query, schema, transformation and templates, and CSS in place of XSL-FO for layout. The XML stack's advantages are its standardization, its enterprise-grade processors, and XSL-FO or CSS Paged Media engines whose print output is more mature than Radiant's today.
 
-### 4.3 Typst and TeX
+### 4.3 Typst: programmable typesetting
 
-Typst is a modern typesetting system: a markup language with an embedded scripting language, its own layout engine, incremental compilation and PDF, SVG and PNG output. It is the closest thing to Lambda's render path, and it is better at print typesetting than Radiant is: pagination, footnotes, bibliographies and mathematical layout are its core competence. The difference is direction. Typst is a language you write documents *in*; data enters through loader functions and other markup formats must first be converted to Typst. Lambda is a pipeline documents *pass through*: Markdown, HTML, LaTeX, XML and data files are first-class inputs, the layout model is the web's CSS rather than a bespoke one, and the same engine that produces the PDF also runs the interactive viewer and editor. TeX and LaTeX sit further along the same axis: unmatched print output from a macro language that is not a data-processing tool at all. Lambda treats LaTeX as an input format and renders it through HTML and CSS rather than as a competing engine.
+Typst is a modern typesetting system: a markup language with an embedded scripting language, its own layout engine, incremental compilation and PDF, SVG and PNG output. It is the closest thing to Lambda's render path, and it is better at print typesetting than Radiant is: pagination, footnotes, bibliographies and mathematical layout are its core competence. The difference is direction. Typst is a language you write documents *in*; data enters through loader functions and other markup formats must first be converted to Typst. Lambda is a pipeline documents *pass through*: Markdown, HTML, LaTeX, XML and data files are first-class inputs, the layout model is the web's CSS rather than a bespoke one, and the same engine that produces the PDF also runs the interactive viewer and editor. 
 
-### 4.4 unified.js, and format-centric generators
+### 4.4 TeX and LaTeX: a publishing ecosystem
+
+
+LaTeX builds document preparation on TeX and provides document structures, mathematical typesetting, references, and a large package ecosystem. That ecosystem is a major consideration for scientific publishing and existing publisher workflows. Lambda treats LaTeX as an readable input format and renders it through HTML and CSS rather than as a competing engine.
+
+### 4.5 unified.js: format-centric generators under JS
 
 The unified ecosystem (remark for Markdown, rehype for HTML, retext for prose) is the JavaScript world's document pipeline: a syntax tree per format, a large plugin catalogue, and the browser for rendering. Lambda differs in having one tree rather than one per format, so there is no mdast-to-hast bridge to cross, and in running natively rather than on Node with a browser attached. Documentation generators such as Sphinx and Docutils, Asciidoctor and Quarto are format-centric by design, each built around one source syntax and its extensions; Quarto notably layers computation on Pandoc. They are mature products with large user bases, where Lambda is a general engine that such a generator could be built on.
 
-### 4.5 Browser engines and HTML-to-PDF renderers
+### 4.6 Browser for HTML and CSS paginated output
 
 For turning HTML and CSS into pixels or PDF, the established options are a headless browser (Chromium through Puppeteer or Playwright) or a dedicated CSS Paged Media renderer such as Prince, WeasyPrint or Paged.js. Radiant belongs to this family and is measured against a browser's output, but it is packaged differently: a browser-grade layout engine embedded in a 20 MB executable alongside the parsers and the language, rather than a separate 200 MB process driven over a protocol. Chromium's web compatibility is, and will remain, broader; Prince's paged output is more polished. Radiant's proposition is that layout is one stage of a pipeline, sharing its tree with everything before and after it, rather than the whole product.
 
@@ -320,7 +323,7 @@ For turning HTML and CSS into pixels or PDF, the established options are a headl
 |---|---|---|---|---|---|---|
 | **Data model** | Haskell AST | XML infoset, XDM | Typst content | one tree per syntax | HTML DOM | one Mark tree: maps, arrays, elements, typed scalars |
 | **Inputs** | dozens of formats | XML | Typst markup, data loaders | Markdown, HTML | HTML | ~30 markup, data, document and diagram formats |
-| **Transformation** | Lua / JSON filters | XSLT, XQuery | Typst scripting | JS plugins | JavaScript | Lambda Script, JavaScript, hosted Python |
+| **Transformation** | Lua / JSON filters | XSLT, XQuery | Typst scripting | JS plugins | JavaScript | Lambda Script, hoisted JavaScript |
 | **Schema validation** | none | XSD, RELAX NG | none | none | none | built-in `type` schemas |
 | **Layout and rendering** | delegated | XSL-FO engines | own engine | browser | full browser | own CSS engine: window, SVG, PDF, PNG, JPEG |
 | **Interactive view and edit** | no | no | separate web app | browser | yes | built-in viewer, editor, reactive templates |
@@ -328,7 +331,7 @@ For turning HTML and CSS into pixels or PDF, the established options are a headl
 
 ### 4.7 Where Lambda sits
 
-Lambda's position is the intersection the table leaves empty: a converter's breadth of formats, a query language's grip on the data, a schema language's guarantees, and a rendering engine's output, all operating on one tree inside one small executable. That position also fixes its trade-offs honestly. The project is young and its syntax is still evolving. Print typesetting is not yet at the level of TeX or Typst, and text shaping for right-to-left and complex scripts is incomplete. Web compatibility is narrower than Chromium's, and the ecosystem of ready-made filters and plugins is smaller than Pandoc's or unified's. What Lambda offers in exchange is coherence: the same value from parser to pixel, and one language to work on it at every stage.
+Lambda's position is the intersection the table leaves empty: a converter's breadth of formats, a query language's grip on the data, a schema language's guarantees, and a rendering engine's output, all operating on one tree inside one small executable. That position also fixes its trade-offs honestly. The project is young and its syntax is still evolving. Print typesetting is not yet at the level of TeX or Typst, and text shaping for right-to-left and complex scripts is missing. Web compatibility is narrower than Chromium's, and the ecosystem of ready-made filters and plugins is smaller than Pandoc's or unified's. What Lambda offers in exchange is coherence: the same value model from parser to pixel, and one language to work on it at every stage.
 
 ---
 
@@ -337,7 +340,7 @@ Lambda's position is the intersection the table leaves empty: a converter's brea
 - [Markup & Data Format Support](Markup_Formats_Support.md): every input format, with side-by-side source and Mark examples.
 - [Mark Doc Schema](Doc_Schema.md): the unified document element vocabulary.
 - [Lambda Data](Lambda_Data.md), [Lambda Type](Lambda_Type.md), [Lambda Expressions](Lambda_Expr_Stam.md): the data model, the type language and the query operators in full.
-- [Lambda Validator Guide](Lambda_Validator_Guide.md): writing and applying schemas.
+- [Lambda Validator Guide](Lambda_Validator.md): writing and applying schemas.
 - [Lambda CLI Reference](Lambda_CLI.md): every command and flag.
 - [Reactive UI](Reactive_UI.md): `view` and `edit` templates, `apply()` dispatch and event handlers.
 - [Radiant Design Overview](dev/radiant/RAD_00_Overview.md), [Lambda Core Runtime Overview](dev/lambda/LR_00_Overview.md), [LambdaJS Overview](dev/js/JS_00_Overview.md): the engines in depth.

@@ -134,7 +134,7 @@ Two kinds of state exist in a running program but are not Lambda values, so the 
 
 **External resources** — file handles, sockets, and similar OS objects. These hold state in the operating system, not in the Lambda heap. The resource model (S12.4) makes them scoped rather than immutable: a handle is bound in a block and closed automatically when that block exits, so its lifetime is bounded by an activation just as a `var` is. *Not yet implemented:* the current build has no `open()` for resources; file I/O goes through `input`, `output` and the `io` module, and task handles are the one scoped resource that exists today.
 
-**Guest runtime state — an explicit exemption.** When a Lambda program imports a module written in another language, that language keeps its own rules. LambdaJS has a genuinely mutable `globalThis` and mutable module-level bindings; the Python, Bash, and Ruby guests carry their own module state. Importing such a module gives Lambda a handle on state Lambda itself could not have declared:
+**Guest runtime state — an explicit exemption.** When a Lambda program imports a module written in another language, that language keeps its own rules. LambdaJS has a genuinely mutable `globalThis` and mutable module-level bindings; Importing such a module gives Lambda a handle on state Lambda itself could not have declared:
 
 ```javascript
 // guest_counter.js

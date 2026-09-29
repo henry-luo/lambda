@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 50.1.0 (2026-09-28)
+**Spec version:** 50.1.2 (2026-09-29)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -184,7 +184,7 @@ harnesses.
 - **S2.1.1v4** Scalars: `null`, `bool`, `int`, `integer`, `i64`, `u64`,
   sized ints `i8 i16 i32 u8 u16 u32`, `f16 f32`, `float`/`f64`,
   `decimal`, `string`, `symbol` (with `path` as a special symbol), `binary`,
-  `datetime` (with `date`/`time` sub-kinds); `string`, `symbol`, and
+  `datetime` (with `date`/`time` sub-kinds; its textual notation follows a subset of ISO 8601); `string`, `symbol`, and
   `binary` are the text scalars, placed as one value and walked as sequences
   (S2.5.8). Containers: `array` (transparently unboxed numeric variants) with
   its two specialized kinds `range` and `list` — `list <: array`,
@@ -1574,7 +1574,7 @@ Not a ruling; see [C4.2e](../vibe/Lambda_Semantics_Formal.md) and
   `T[n, m]` are retired, and so is regex's open count `T{n,}` — the open bound
   is `T{n+}`, echoing the bare `+` that means one or more. Each retired
   spelling is rejected with a diagnostic naming its replacement rather than
-  reading as a different type. **Element content is a sequence-pattern slot** (ruled 2026-09-25): an element pattern's content section, `<tag attrs; c, d>`, matches the element's normalized content (S2.6) as `[c, d]` matches an array — item by item, runs included, and the whole content — so `<ul; <li>*>` admits any number of `li` children and nothing else, and open content is spelled with a trailing `any*`. A pattern without a content section (`<div>`, `<div a: int>`) leaves content unconstrained; the spelling of *must be empty* is SO46. [Type_Pattern §1.3, Design_Syntax §7.28, Shape_Transitions §7]
+  reading as a different type. **Element content is a sequence-pattern slot** (ruled 2026-09-25): an element pattern's content section — `<tag c, d>`, or `<tag attrs, c, d>` after the S16.9.3 boundary comma — matches the element's normalized content (S2.6) as `[c, d]` matches an array — item by item, runs included, and the whole content — so `<ul <li>*>` admits any number of `li` children and nothing else, and open content is spelled with a trailing `any*`. A pattern without a content section (`<div>`, `<div a: int>`) leaves content unconstrained; the spelling of *must be empty* is SO46. [Type_Pattern §1.3, Design_Syntax §7.28, Shape_Transitions §7]
 - **S11.1.7*** **`none` is the empty type** — the bottom of the type lattice, as `any` is its top. It admits no value, `null` and errors included (the null type admits `null`; `none` admits nothing), so `none <: T` holds for every `T` and `T <: none` only when `T` is `none` (S11.1.4v2). A type operation (S10.1.1v3) **reduces** to `none` when its literal operands decide that nothing is admitted — scalar literals, and containers as the pattern their literal spells: `1 & 2`, `(1 | 2) ! (1 | 2)`, `int & "a"`, `null & int`, `[1] & [2]`, `{a: 1} & {a: 2}` — and `none` is the identity of `|` and `!` and absorbs `&`: `T | none` and `T ! none` are `T`, while `T & none` and `none ! T` are `none`. The reduction holds in value and type context alike (`type E = 1 & 2` names `none`), and a reduced form *is* its result: it prints as it, and under S5.5.2 `(3 & 4) == (1 & 2)` and `(int | none) == int`. *Informative:* the implementation reduces only what literal operands decide, so an operation that admits nothing for another reason, such as `int & string`, is left as written (Appendix A); a good implementation should detect one and warn, or reject it. As a declared type `none` is a contract no value passes (S11.4.1v3), with no rule of its own: a known source is a compile error (`let x: none = 5`, `fn f() none => 5`), and an unknown one fails the way its position fails for any type — a failed return is the call's error value, a failed declaration or argument stops. A function that only raises declares `none^E`. `none` is a base-type word (S16.10.1v2). *Why: the empty type needed a spelling distinct from the null type. `none` pairs with `any`, names what it admits, and implies no exception — a failed Lambda contract is an error value, not a throw.* [C6.5]
 
 ### S11.2 Match
@@ -2719,7 +2719,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   `fn ()` then `{2}`, a silent misparse tracked as LR02-25. `function?` is
   unaffected, since `function` is a base type name. [S11.1.5v2,
   S11.1.6v2]
-- **SO46** How an element pattern spells *content must be empty*. S11.1.6v3 leaves content unconstrained when a pattern has no content section, and today an empty section, `<div;>`, parses to the same thing; a present-but-empty content pattern would mean *no children*, but no spelling is ruled — `<div;>`, `<div; ()>` and `<div; null>` are candidates. Until ruled, an empty section stays unconstrained. [Shape_Transitions §7]
+- **SO46** How an element pattern spells *content must be empty*. S11.1.6v3 leaves content unconstrained when a pattern has no content section; a present-but-empty content pattern would mean *no children*, but no spelling is ruled — `<div ()>` and `<div null>` are candidates. The former `<div;>` is not one: S16.9.3 leaves `;` no role inside `<…>`, so it is a syntax error. [Shape_Transitions §7]
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |

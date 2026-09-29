@@ -35,6 +35,9 @@ void dom_set_document(void* dom_doc);
  */
 void* dom_get_document(void);
 
+// Queue the iframe's load event after its navigated document is ready.
+void dom_iframe_navigation_complete(void* iframe);
+
 /**
  * Set the current Radiant UiContext for JS DOM layout/geometry queries.
  * The pointer is borrowed from the active JS document session.

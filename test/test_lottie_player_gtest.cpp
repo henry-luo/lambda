@@ -8,12 +8,14 @@
 
 #include <gtest/gtest.h>
 #include <cstring>
+#include <thorvg_capi.h>
 
 #include "../radiant/render.hpp"
 #include "../radiant/view.hpp"
 
 extern "C" {
 #include "../lib/mempool.h"
+#include "../lib/file.h"
 }
 
 // Stubs for unresolved symbols in standalone test builds
@@ -116,11 +118,13 @@ protected:
         memset(&surface, 0, sizeof(surface));
         surface.width = 100;
         surface.height = 100;
+        ASSERT_EQ(tvg_engine_init(0), TVG_RESULT_SUCCESS);
     }
 
     void TearDown() override {
         animation_scheduler_destroy(scheduler);
         pool_destroy(pool);
+        tvg_engine_term();
     }
 };
 
@@ -150,6 +154,38 @@ TEST_F(LottiePlayerTest, CreateFromDataInvalidJson) {
     AnimationInstance* inst = lottie_player_create_from_data(
         scheduler, &surface, bad, strlen(bad), 100, 100, 0.0, pool);
     EXPECT_EQ(inst, nullptr);
+}
+
+TEST_F(LottiePlayerTest, RasterFramesHaveStrideAndChangeOnTick) {
+    AnimationInstance* inst = lottie_player_create_from_file(
+        scheduler, &surface, "test/html/animation_lottie_fixture.json", 20, 20, 0.0, pool);
+    ASSERT_NE(inst, nullptr);
+    ASSERT_NE(surface.pixels, nullptr);
+    EXPECT_EQ(surface.format, IMAGE_FORMAT_UNKNOWN);
+    EXPECT_EQ(surface.pitch, 20 * 4);
+    EXPECT_EQ(surface.decoded_width, 20);
+    EXPECT_EQ(surface.decoded_height, 20);
+
+    uint32_t first_frame[20 * 20];
+    memcpy(first_frame, surface.pixels, sizeof(first_frame));
+    lottie_animation_tick(inst, 0.5f);
+    EXPECT_NE(memcmp(first_frame, surface.pixels, sizeof(first_frame)), 0);
+}
+
+TEST_F(LottiePlayerTest, DataPlayerOwnsSourceAfterCallerReleasesIt) {
+    char* json = nullptr;
+    size_t length = 0;
+    ASSERT_TRUE(file_read_all("test/html/animation_lottie_fixture.json",
+                              MEM_CAT_RENDER, &json, &length));
+    AnimationInstance* inst = lottie_player_create_from_data(
+        scheduler, &surface, json, length, 20, 20, 0.0, pool);
+    mem_free(json);
+    ASSERT_NE(inst, nullptr);
+
+    uint32_t first_frame[20 * 20];
+    memcpy(first_frame, surface.pixels, sizeof(first_frame));
+    lottie_animation_tick(inst, 0.5f);
+    EXPECT_NE(memcmp(first_frame, surface.pixels, sizeof(first_frame)), 0);
 }
 
 TEST_F(LottiePlayerTest, TickWithNullState) {

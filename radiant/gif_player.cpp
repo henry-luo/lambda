@@ -12,7 +12,9 @@
 void GifAnimation::tick(AnimationInstance* anim, float t) {
     if (!frames || !surface) return;
 
-    double now = anim->start_time + anim->duration * t;
+    // Scheduler progress wraps at each iteration, so use elapsed GIF time to
+    // keep frame deadlines moving across loops and host-clock anchoring.
+    double now = (anim->current_iteration + (double)t) * anim->duration;
     int n = frames->frame_count;
 
     // Check if it's time to advance the frame
@@ -37,7 +39,7 @@ void GifAnimation::tick(AnimationInstance* anim, float t) {
         image_surface_bump_generation(surface);
 
         // Set next frame end time
-        frame_end_time = now + frame->delay_ms / 1000.0;
+        frame_end_time += frame->delay_ms / 1000.0;
 
         log_debug("gif tick: frame %d/%d, delay %dms", next, n, frame->delay_ms);
     }
@@ -93,9 +95,13 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
     ga->surface = surface;
     ga->loop_count = gif_frames->loop_count;
     ga->loops_completed = 0;
-    ga->frame_end_time = start_time + gif_frames->frames[0].delay_ms / 1000.0;
+    ga->frame_end_time = gif_frames->frames[0].delay_ms / 1000.0;
 
-    // Set the initial frame pixels on the surface
+    // Decoded GIF frames are tightly packed; the raster painter needs their
+    // stride as well as the pointer when it samples each row.
+    surface->pitch = gif_frames->width * 4;
+    surface->decoded_width = gif_frames->width;
+    surface->decoded_height = gif_frames->height;
     surface->pixels = gif_frames->frames[0].pixels;
     image_surface_bump_generation(surface);
 

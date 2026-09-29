@@ -43,7 +43,7 @@ type HigherOrderFunc = fn(fn(int) int) fn(int) int
 type ElementManyAttrs = <div id: string, class: string, style: string, title: string?>
 
 // Element with mixed content
-type ElementMixedContent = <section; string | <p; string> | <span; string>>
+type ElementMixedContent = <section string | <p string> | <span string>>
 
 // Map with many fields
 type BigMap = {
@@ -83,9 +83,9 @@ type NumericArray = [number*]
 type NumericMap = {score: number}
 
 // Complex element nesting
-type ComplexDocument = <doc version: string;
-    <head; <title; string>, <meta name: string, content: string;>*>?,
-    <body; <p; string>*>
+type ComplexDocument = <doc version: string,
+    <head <title string>, <meta name: string, content: string>*>?,
+    <body <p string>*>
 >
 
 // Testing type expressions

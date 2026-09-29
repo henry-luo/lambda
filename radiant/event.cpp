@@ -645,6 +645,68 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
     uicon->viewport_height = saved_viewport_height;
 }
 
+struct DocumentAnimationTick {
+    double now;
+    int depth;
+    bool tick_root;
+    bool anchor_host_time;
+    bool ticked;
+    bool active;
+};
+
+static void tick_document_animation_tree(DomDocument* document,
+                                         DocumentAnimationTick* tick);
+
+static bool tick_embedded_document_animation(View* view, void* context) {
+    DocumentAnimationTick* tick = (DocumentAnimationTick*)context;
+    if (!view || !view->is_block() || !tick) return true;
+    ViewBlock* block = lam::view_require_block(view);
+    DomDocument* embedded = block->embed ? block->embedp()->doc : nullptr;
+    if (embedded) {
+        DocumentAnimationTick child = {
+            tick->now, tick->depth + 1, true, tick->anchor_host_time, false, false
+        };
+        tick_document_animation_tree(embedded, &child);
+        tick->ticked = tick->ticked || child.ticked;
+        tick->active = tick->active || child.active;
+    }
+    return true;
+}
+
+static void tick_document_animation_tree(DomDocument* document,
+                                         DocumentAnimationTick* tick) {
+    if (!document || !tick || tick->depth > MAX_IFRAME_DEPTH) return;
+    DocState* state = document->state;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    if (scheduler && tick->anchor_host_time) {
+        animation_scheduler_anchor_host_time(scheduler, tick->now);
+    }
+    if (scheduler && scheduler->has_active_animations &&
+        (tick->depth > 0 || tick->tick_root)) {
+        // Embedded bounds are local to their own viewport; the host repaints
+        // the complete frame after any child tick.
+        DirtyTracker* dirty = tick->depth == 0 ? &state->dirty_tracker : nullptr;
+        tick->active = animation_scheduler_tick(scheduler, tick->now, dirty) || tick->active;
+        tick->ticked = true;
+    }
+    if (document->view_tree && document->view_tree->root) {
+        view_geometry_walk_elements(document->view_tree->root,
+                                    tick_embedded_document_animation, tick);
+    }
+}
+
+bool radiant_tick_document_animations(DomDocument* document, double now,
+                                      bool tick_root, bool anchor_host_time) {
+    DocumentAnimationTick tick = {
+        now, 0, tick_root, anchor_host_time, false, false
+    };
+    tick_document_animation_tree(document, &tick);
+    if (tick.ticked && document && document->state) {
+        doc_state_request_repaint(document->state);
+    }
+    return tick.active;
+}
+
 static bool process_event_target_document_reflow(EventContext* evcon) {
     if (!evcon || !evcon->ui_context || !evcon->target_document ||
         evcon->target_document == evcon->ui_context->document) {
@@ -1899,6 +1961,7 @@ static bool event_record_is_cancelable(const char* event_name) {
            strcmp(event_name, "compositionupdate") != 0 &&
            strcmp(event_name, "compositionend") != 0 &&
            strcmp(event_name, "scroll") != 0 &&
+           strcmp(event_name, "load") != 0 &&
            strcmp(event_name, "selectionchange") != 0;
 }
 
@@ -11084,6 +11147,21 @@ struct EventDocumentScope {
         // other document's dispatch switches it away (EO5v2).
     }
 };
+
+void radiant_dispatch_lambda_body_load(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc || doc->page_kind != DOM_PAGE_KIND_LAMBDA_SCRIPT ||
+        dom_document_has_js_realm(doc)) return;
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body) return;
+    EventDocumentScope scope(uicon, doc);
+    if (!scope.active) return;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    evcon.target = static_cast<View*>(body);
+    dispatch_lambda_handler(&evcon, static_cast<View*>(body), "load",
+                            nullptr, nullptr, false);
+}
 
 void rdt_event_set_mouse_position(RdtEvent* event, EventType type,
                                   float x, float y, double timestamp) {

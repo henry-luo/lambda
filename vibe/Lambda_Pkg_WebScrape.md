@@ -86,7 +86,7 @@ machinery to close them already exists in-tree.** Evidence, capability-by-capabi
 | **Concurrency** | **Real, tested, colorless**: `start(worker, args)` → handle under S13.1.1v2, bounded-FIFO mailboxes, `wait`/`select(timeout:)`, `sleep(ms)`, `cancel`, shared libuv loop. Ideal for a crawler worker pool + rate-limit + frontier-as-mailbox. | `lambda/concurrency.cpp`, `test/lambda/conc/` (25 tests) |
 | **Regex** | RE2-backed string patterns: `\d+`, `[n,m]`, char classes, alternation, anchoring; `find`/`replace`/`split` accept patterns. | `lambda/re2_wrapper.cpp`, `test/lambda/string_pattern.ls` |
 | **Error handling** | `T^E` return types, `raise`, `^` propagation, `let a^err` destructure, errors are falsy (`f() or default`). Fetch/parse/io all raise and enforce handling. | `doc/Lambda_Error_Handling.md` |
-| **Schema validation** | Define record shape in Lambda type syntax, `validate(schema, data)` → `{valid, errors[]}`; element/document schemas too. | `lambda/validator/`, `doc/Lambda_Validator_Guide.md` |
+| **Schema validation** | Define record shape in Lambda type syntax, `validate(schema, data)` → `{valid, errors[]}`; element/document schemas too. | `lambda/validator/`, `doc/Lambda_Validator.md` |
 | **Module/package system** | `import alias: lambda.<name>.<name>`, `pub` exports, script-relative resolution, seven existing package precedents (chart/graph/latex/math/pdf/openapi/editor). | `lambda/`, `vibe/Lambda_Package2.md` |
 | **Output formats** | `format(data, 'json'|'yaml'|'xml'|'html'|'markdown'|...)`, `output(data, path)`. | `doc/Lambda_Sys_Func.md` |
 | **Content extraction** | A **1,701-line Mozilla Readability port already exists in Lambda** — main-content/title/byline extraction works today. | `utils/readability2.ls` |
@@ -538,6 +538,6 @@ CPU/mem probe sysfunc), resumable frontier (KeyValueStore persistence), and a ro
 | `radiant/script_runner.cpp`, `radiant/cmd_layout.cpp` (:6569), `radiant/event_sim.cpp` | E6 — headless JS execution + settle + interaction |
 | `lambda/js/js_event_loop.cpp` (`EVENT_LOOP_DRAIN_TIMEOUT_MS` :1611) | E6 — settle watchdog to make configurable |
 | `lambda/concurrency.cpp`, `test/lambda/conc/` | crawler worker pool / frontier |
-| `lambda/validator/`, `doc/Lambda_Validator_Guide.md` | item schema validation |
+| `lambda/validator/`, `doc/Lambda_Validator.md` | item schema validation |
 | `utils/readability2.ls` | main-content extraction (existing Lambda port) |
 | `lambda/{chart,graph,latex}/` | package layout precedent |

@@ -682,8 +682,12 @@ AstNode* parse_paren_type(Lexer* lx) {
     return (AstNode*)ast_node;
 }
 
-// `<tag attr: T, attr2: U; content, content2>` — attribute defaults are
-// literal-only inside a pattern (CT8v2).
+// `<tag attr: T, attr2: U, content, content2>` — attribute defaults are
+// literal-only inside a pattern (CT8v2). S16.9.3: `,` is the only delimiter;
+// the attribute/content boundary comma is present exactly when both exist.
+static const char* const error_element_pattern_semicolon =
+    "';' only separates statements; an element pattern takes ',' between "
+    "attributes and content, and nothing between a bare tag and its content";
 AstNode* parse_element_type(Lexer* lx) {
     AstElementNode* ast_node = (AstElementNode*)new_node(lx, AST_NODE_ELMT_TYPE,
         sizeof(AstElementNode), LSF_TP_ELEMENT);
@@ -698,7 +702,8 @@ AstNode* parse_element_type(Lexer* lx) {
     ast_node->type = (Type*)type;
 
     AstNode* prev_item = NULL;
-    bool saw_content_sep = false;
+    bool had_attributes = false;
+    bool after_comma = false;  // the last attribute was followed by ','
 
     // attributes: only while the next item is `name :`
     while (!at(lx, '>') && lx->p < lx->end) {
@@ -729,15 +734,33 @@ AstNode* parse_element_type(Lexer* lx) {
         if (!prev_item) { ast_node->item = (AstNode*)named; }
         else { prev_item->next = (AstNode*)named; }
         prev_item = (AstNode*)named;
-        if (eat(lx, ',')) { continue; }
-        if (eat(lx, ';')) { saw_content_sep = true; }
-        break;
+        had_attributes = true;
+        after_comma = eat(lx, ',');
+        if (!after_comma) { break; }
+    }
+
+    if (at(lx, ';')) {
+        fail_code(lx, ERR_INVALID_LITERAL, error_element_pattern_semicolon);
+        return NULL;
+    }
+    bool has_content = !at(lx, '>') && lx->p < lx->end;
+    if (!had_attributes && at(lx, ',')) {
+        fail_code(lx, ERR_INVALID_LITERAL,
+            "an element pattern with no attributes takes no ',' before its content");
+        return NULL;
+    }
+    if (had_attributes && has_content && !after_comma) {
+        fail_code(lx, ERR_INVALID_LITERAL, "expected ',' between element attributes and content");
+        return NULL;
+    }
+    if (after_comma && !has_content) {
+        fail_code(lx, ERR_INVALID_LITERAL, "a trailing ',' is not a separator");
+        return NULL;
     }
 
     // content schema: a comma-separated pattern list held as a content node
     // whose TypeList is carried raw, not registered
-    if (!at(lx, '>') && lx->p < lx->end) {
-        if (!saw_content_sep) { eat(lx, ';'); }
+    if (has_content) {
         AstListNode* content = (AstListNode*)new_node(lx, AST_NODE_CONTENT_TYPE,
             sizeof(AstListNode), LSF_TP_CONTENT);
         AstNode* prev = NULL;
@@ -750,6 +773,10 @@ AstNode* parse_element_type(Lexer* lx) {
             prev = item;
         } while (eat(lx, ','));
         ast_node->content = (AstNode*)content;
+        if (at(lx, ';')) {
+            fail_code(lx, ERR_INVALID_LITERAL, error_element_pattern_semicolon);
+            return NULL;
+        }
     }
 
     if (!eat(lx, '>')) { fail(lx, "expected '>'"); return NULL; }

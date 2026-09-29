@@ -512,7 +512,7 @@ Readable **without loading the library** (P12) — discovery, listing, and versi
 
 - `kind`: `"native"` (Jube C module) or `"source"` (script package — future; reserved so one manifest schema serves both).
 - `interface` mirrors the descriptor signatures. The **C descriptor table remains ground truth**; at load the runtime verifies manifest ⊆ descriptors and warns on drift. The manifest copy exists for no-load tooling and future registry indexing.
-- The manifest schema is itself validated with Lambda's own schema validator — dogfooding `doc/Lambda_Validator_Guide.md`.
+- The manifest schema is itself validated with Lambda's own schema validator — dogfooding `doc/Lambda_Validator.md`.
 - `checksum`/`dependencies` are registry-readiness slots; local loading ignores absent fields.
 - Loading is **lazy**: manifests are scanned eagerly (cheap), `dlopen` happens on first import.
 

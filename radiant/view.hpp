@@ -237,6 +237,7 @@ typedef struct AnimationScheduler {
 
     double current_time;
     bool has_active_animations;
+    bool host_time_anchored;
 
     Pool* pool;
 } AnimationScheduler;
@@ -245,6 +246,7 @@ AnimationScheduler* animation_scheduler_create(Pool* pool);
 void animation_scheduler_destroy(AnimationScheduler* scheduler);
 bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
                               DirtyTracker* dirty_tracker);
+void animation_scheduler_anchor_host_time(AnimationScheduler* scheduler, double now);
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim);

@@ -2,13 +2,13 @@
 // The children match as `[c, d]` matches an array -- runs, literal items, and
 // the whole content. D2.6.6v3: the pattern lives on the declared type only.
 
-type UL = <ul; <li>*>
-type NonEmpty = <ul; <li>+>
-type Opt = <ul; <li>?>
-type Pair = <p; string, int>
-type Open = <div; <h1>, any*>
+type UL = <ul <li>*>
+type NonEmpty = <ul <li>+>
+type Opt = <ul <li>?>
+type Pair = <p string, int>
+type Open = <div <h1>, any*>
 type Bare = <div>
-type Lit = <b; "bold">
+type Lit = <b "bold">
 type Note { label: string, string* }
 type Memo : Note { extra: int }
 
@@ -42,7 +42,7 @@ let m = <Memo label: "a", extra: 1, "x">;
 // e: content is normalized before it is matched (S2.6.4): adjacent strings
 // merge into one item
 '=normalized=';
-[<p "a" "b"> is <p; string, string>, <p "a" "b"> is <p; string>];
+[<p "a" "b"> is <p string, string>, <p "a" "b"> is <p string>];
 
 // f: a structural slot validates in full; only a bare kind reduces to a TypeId
 '=slots=';
