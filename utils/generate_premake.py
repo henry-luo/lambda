@@ -38,7 +38,8 @@ def glob_premake_paths(pattern: str) -> List[str]:
     return [Path(match).as_posix() for match in glob.glob(pattern, recursive=False)]
 
 class PremakeGenerator:
-    def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None, variant: str = None):
+    def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None,
+                 variant: str = None, target_multiarch_triplet: str = None):
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
         configurable_defines = self.config.get('configurable_defines', {})
@@ -100,7 +101,7 @@ class PremakeGenerator:
         self._expand_node_module_targets()
         self._expand_validation_source_targets()
 
-        self.linux_multiarch_triplet = None
+        self.linux_multiarch_triplet = target_multiarch_triplet
         self.linux_multiarch_libdir = None
         if self.use_linux_config:
             self._resolve_linux_multiarch_paths()
@@ -108,12 +109,14 @@ class PremakeGenerator:
 
     def _resolve_linux_multiarch_paths(self) -> None:
         """Resolve Debian archive paths for the native compiler target."""
-        result = subprocess.run(
-            ['gcc', '-print-multiarch'], capture_output=True, text=True,
-        )
-        triplet = result.stdout.strip()
-        if result.returncode != 0 or not triplet:
-            raise RuntimeError('could not determine Linux multiarch triplet from gcc')
+        triplet = self.linux_multiarch_triplet
+        if not triplet:
+            result = subprocess.run(
+                ['gcc', '-print-multiarch'], capture_output=True, text=True,
+            )
+            triplet = result.stdout.strip()
+            if result.returncode != 0 or not triplet:
+                raise RuntimeError('could not determine Linux multiarch triplet from gcc')
         self.linux_multiarch_triplet = triplet
         self.linux_multiarch_libdir = f'/usr/lib/{triplet}'
         for key in ('libraries', 'dev_libraries'):

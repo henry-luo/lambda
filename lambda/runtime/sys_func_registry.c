@@ -2277,9 +2277,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
     {"js_typeof", FPTR(js_typeof), JIT_IMPORT_STABLE_ITEM},
     {"js_typeof_is", FPTR(js_typeof_is), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_cmp_raw", FPTR(js_cmp_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_loose_eq_raw", FPTR(js_loose_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_new_object", FPTR(js_new_object)},
     {"js_new_object_with_typemap", FPTR(js_new_object_with_typemap),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
@@ -2530,6 +2528,14 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_EFFECT(1, JIT_ARG_BORROWED) |
       JIT_ARG_EFFECT(2, JIT_ARG_BORROWED) |
       JIT_ARG_EFFECT(3, JIT_ARG_BORROWED)}},
+    {"js_builtin_callable_is_id", FPTR(js_builtin_callable_is_id),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
+      JIT_EXCEPTION_PRESERVES,
+      JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) |
+      JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
     {"js_elements_set_int", FPTR(js_elements_set_int)},
     {"js_elements_set_int_completion", FPTR(js_elements_set_int_completion)},
     {"js_array_set_existing_number_no_gc", FPTR(js_array_set_existing_number_no_gc),
@@ -3802,6 +3808,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // The string leaf reads immutable ASCII payloads and catalog metadata;
         // ItemNull is a non-observable miss that routes to the normal call.
         "js_try_ascii_string_builtin_no_gc",
+        "js_builtin_callable_is_id",
         "js_async_iterator_close_needs_await",
         JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
         "fn_min2_u",

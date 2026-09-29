@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D2.4.1-D2.4.3/D8.4.1v2: binding-proven accumulator and recursive-component returns use the existing Number-native entry; mixed Number/string returns remain boxed.",
+  "description": "D2.4.1-D2.4.3/D8.4.1v2/D8.4.3v2: binding-proven accumulator and recursive-component returns use the existing Number-native entry; mixed Number/string comparisons retain a throwing Item completion.",
   "checks": [
     {
       "in_func": "_js_returnedAccumulator_#_n",
@@ -28,7 +28,7 @@
     {
       "in_func": "_js_mixedNumberOrString_#_body",
       "expect": [
-        "call\tjs_cmp_raw"
+        "call\tjs_compare"
       ],
       "forbid": [
         "dadd"
