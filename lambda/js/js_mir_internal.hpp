@@ -626,6 +626,9 @@ void jm_emit_end_lexical_this_rebind(JsMirTranspiler* mt,
     const JsMirLexicalThisRebind* state);
 MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item);
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item);
+MIR_reg_t jm_emit_unbox_noninline_float(JsMirTranspiler* mt, MIR_reg_t item);
+MIR_reg_t jm_emit_guard_boxed_inline_number(JsMirTranspiler* mt,
+    MIR_reg_t item, MIR_label_t miss, bool allow_float_home = false);
 MIR_reg_t jm_emit_double_to_int(JsMirTranspiler* mt, MIR_reg_t d_reg);
 MIR_reg_t jm_box_native(JsMirTranspiler* mt, MIR_reg_t reg, TypeId type_id);
 TypeId jm_get_effective_type(JsMirTranspiler* mt, JsAstNode* node);
@@ -723,6 +726,8 @@ void jm_emit_apply_function_analysis_flags(JsMirTranspiler* mt,
 void jm_prescan_float_widening(JsMirTranspiler* mt, JsAstNode* body);
 bool jm_should_widen_to_float(JsMirTranspiler* mt, const char* vname);
 MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg_count);
+MIR_reg_t jm_build_args_array_from_regs(JsMirTranspiler* mt,
+    const MIR_reg_t* arguments, int arg_count);
 MIR_reg_t jm_build_spread_args_array(JsMirTranspiler* mt, JsAstNode* first_arg);
 MIR_reg_t jm_create_method_function(JsMirTranspiler* mt, JsFuncCollected* fc, int param_count);
 void jm_bind_destructure_var(JsMirTranspiler* mt, JsIdentifierNode* id,

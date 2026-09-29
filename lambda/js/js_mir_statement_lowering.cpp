@@ -1227,7 +1227,133 @@ void jm_emit_error_lane_propagate_check(JsMirTranspiler* mt) {
 
 void jm_transpile_statement_list_with_using(JsMirTranspiler* mt, JsAstNode* first);
 
-void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
+struct JmGuardedWhileScan {
+    NameEntry* binding;
+    AstFunctionId owner;
+    int update_count;
+    int indexed_uses;
+    bool blocked;
+};
+
+static bool jm_scan_guarded_numeric_while(const AstIndex* index,
+        AstNodeId node_id, void* opaque) {
+    JmGuardedWhileScan* scan = (JmGuardedWhileScan*)opaque;
+    JsAstNode* node = (JsAstNode*)index->nodes[node_id];
+    if (!node || scan->blocked) return false;
+    if (index->owner_functions[node_id] != scan->owner ||
+            node->node_type == AST_NODE_LOOP ||
+            node->node_type == AST_NODE_FOR_OF_STAM ||
+            node->node_type == AST_NODE_FOR_IN_STAM ||
+            node->node_type == AST_NODE_FUNC ||
+            node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_ARROW_FUNC ||
+            node->node_type == AST_NODE_TRY_STAM ||
+            node->node_type == AST_NODE_CATCH_CLAUSE ||
+            node->node_type == AST_NODE_RETURN_STAM ||
+            node->node_type == AST_NODE_RAISE_STAM ||
+            node->node_type == AST_NODE_RAISE_EXPR ||
+            node->node_type == AST_NODE_YIELD ||
+            node->node_type == AST_NODE_AWAIT ||
+            node->node_type == AST_NODE_CALL_EXPR ||
+            node->node_type == AST_NODE_MATCH_EXPR ||
+            node->node_type == JS_AST_NODE_WITH_STATEMENT ||
+            node->node_type == JS_AST_NODE_LABELED_STATEMENT) {
+        scan->blocked = true;
+        return false;
+    }
+    if (node->node_type == AST_NODE_BREAK_STAM ||
+            node->node_type == AST_NODE_CONTINUE_STAM) {
+        JsBreakContinueNode* jump = (JsBreakContinueNode*)node;
+        scan->blocked = jump->label_len != 0;
+    } else if (node->node_type == AST_NODE_ASSIGN) {
+        scan->blocked = jm_assignment_targets_binding(
+            ((JsAssignmentNode*)node)->left, scan->binding);
+    } else if (node->node_type == AST_NODE_ASSIGN_STAM) {
+        scan->blocked = ((AstAssignStamNode*)node)->target_entry ==
+            scan->binding;
+    } else if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        JsVariableDeclaratorNode* declaration =
+            (JsVariableDeclaratorNode*)node;
+        scan->blocked = declaration->entry == scan->binding ||
+            (declaration->id && declaration->id->node_type == AST_NODE_IDENT &&
+             ((JsIdentifierNode*)declaration->id)->entry == scan->binding);
+    } else if (node->node_type == AST_NODE_UNARY) {
+        JsUnaryNode* update = (JsUnaryNode*)node;
+        if (update->operand && update->operand->node_type == AST_NODE_IDENT &&
+                ((JsIdentifierNode*)update->operand)->entry == scan->binding) {
+            if (update->op == OPERATOR_JS_INCREMENT ||
+                    update->op == OPERATOR_JS_DECREMENT) scan->update_count++;
+        }
+    } else if (node->node_type == AST_NODE_MEMBER_EXPR) {
+        JsMemberNode* member = (JsMemberNode*)node;
+        if (member->computed && member->property &&
+                member->property->node_type == AST_NODE_IDENT &&
+                ((JsIdentifierNode*)member->property)->entry == scan->binding) {
+            scan->indexed_uses++;
+        }
+    }
+    return !scan->blocked;
+}
+
+static NameEntry* jm_guarded_numeric_while_binding(JsMirTranspiler* mt,
+        JsWhileNode* wh) {
+    if (!mt || !mt->tp || !mt->current_fc || mt->in_main || mt->in_async ||
+            mt->in_generator || mt->in_native_func || mt->with_depth ||
+            mt->pending_label_name || !wh || !wh->body || !wh->test ||
+            wh->test->node_type != AST_NODE_BINARY) return NULL;
+    JsBinaryNode* test = (JsBinaryNode*)wh->test;
+    if (test->op != OPERATOR_LT || !test->left ||
+            test->left->node_type != AST_NODE_IDENT || !test->right) return NULL;
+    JsIdentifierNode* counter = (JsIdentifierNode*)test->left;
+    NameEntry* binding = counter->entry;
+    JsMirVarEntry* variable = jm_find_var_by_binding(mt, binding);
+    TypeId observed_type = jm_get_effective_type(mt, test->left);
+    if (!binding || binding->is_parameter || !variable ||
+            !variable->is_let_const || variable->mir_type != MIR_T_I64 ||
+            (observed_type != LMD_TYPE_ANY && observed_type != LMD_TYPE_INT &&
+             observed_type != LMD_TYPE_FLOAT) ||
+            variable->type_id != LMD_TYPE_ANY || variable->is_const ||
+            variable->tdz_active || variable->in_scope_env ||
+            variable->from_env || variable->from_shared_env ||
+            variable->is_state_var || variable->is_iife_module_var_binding) {
+        return NULL;
+    }
+    if (test->right->node_type == AST_NODE_IDENT) {
+        JsIdentifierNode* limit = (JsIdentifierNode*)test->right;
+        JsMirVarEntry* limit_var = jm_find_var_by_binding(mt, limit->entry);
+        if (!limit_var || !limit_var->is_const ||
+                (limit_var->type_id != LMD_TYPE_FLOAT &&
+                 limit_var->type_id != LMD_TYPE_INT)) return NULL;
+    } else if (test->right->node_type != AST_NODE_LITERAL ||
+            jm_get_effective_type(mt, test->right) != LMD_TYPE_FLOAT) {
+        return NULL;
+    }
+
+    AstIndex* index = &mt->tp->ast_index;
+    AstNodeId loop_id = ast_index_find(index, (AstNode*)wh);
+    AstNodeId body_id = ast_index_find(index, (AstNode*)wh->body);
+    AstNodeId body_end = ast_index_subtree_end(index, body_id);
+    if (loop_id == AST_NODE_ID_INVALID || body_id == AST_NODE_ID_INVALID ||
+            body_end == AST_NODE_ID_INVALID || body_end - body_id > 128) {
+        return NULL;
+    }
+    for (AstNodeId parent = ast_index_parent_id(index, loop_id);
+            parent != AST_NODE_ID_INVALID;
+            parent = ast_index_parent_id(index, parent)) {
+        JsAstNode* enclosing = (JsAstNode*)index->nodes[parent];
+        if (enclosing && (enclosing->node_type == AST_NODE_TRY_STAM ||
+                enclosing->node_type == AST_NODE_CATCH_CLAUSE ||
+                enclosing->node_type == JS_AST_NODE_WITH_STATEMENT)) return NULL;
+    }
+    JmGuardedWhileScan scan = {binding, index->owner_functions[loop_id],
+        0, 0, false};
+    ast_index_visit_subtree(index, body_id, jm_scan_guarded_numeric_while,
+        &scan);
+    return !scan.blocked && scan.update_count > 0 &&
+        scan.indexed_uses >= 2 ? binding : NULL;
+}
+
+static void jm_transpile_while_copy(JsMirTranspiler* mt, JsWhileNode* wh) {
     MIR_label_t l_test = jm_new_label(mt);
     MIR_label_t l_end = jm_new_label(mt);
 
@@ -1273,6 +1399,42 @@ void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
 
     if (mt->iteration_depth > 0) mt->iteration_depth--;
     if (mt->loop_depth > 0) mt->loop_depth--;
+}
+
+void jm_transpile_while(JsMirTranspiler* mt, JsWhileNode* wh) {
+    NameEntry* binding = jm_guarded_numeric_while_binding(mt, wh);
+    if (!binding) {
+        jm_transpile_while_copy(mt, wh);
+        return;
+    }
+    JsMirVarEntry* variable = jm_find_var_by_binding(mt, binding);
+    MIR_reg_t boxed = variable->reg;
+    MIR_type_t saved_mir_type = variable->mir_type;
+    TypeId saved_type = variable->type_id;
+    NameEntry* saved_guarded = mt->guarded_loop_numeric_binding;
+    MIR_label_t generic = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+
+    // The guard is before the first test. A Number never widens under the
+    // scanned local-only updates; any non-Number starts the original loop.
+    MIR_reg_t native = jm_emit_guard_boxed_inline_number(mt, boxed, generic,
+        true);
+    variable->reg = native;
+    variable->mir_type = MIR_T_D;
+    variable->type_id = LMD_TYPE_FLOAT;
+    mt->guarded_loop_numeric_binding = binding;
+    jm_transpile_while_copy(mt, wh);
+    variable = jm_find_var_by_binding(mt, binding);
+    variable->reg = boxed;
+    variable->mir_type = saved_mir_type;
+    variable->type_id = saved_type;
+    mt->guarded_loop_numeric_binding = saved_guarded;
+    jm_emit_mov(mt, boxed, jm_box_native(mt, native, LMD_TYPE_FLOAT));
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label_with_state(mt, generic, JS_ERROR_LANE_CLEAN);
+    jm_transpile_while_copy(mt, wh);
+    jm_emit_label_with_state(mt, done, JS_ERROR_LANE_CLEAN);
 }
 
 void jm_transpile_for(JsMirTranspiler* mt, JsForNode* for_node) {

@@ -5263,10 +5263,6 @@ static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg) {
     return em_emit_double_bits(&mt->em, d_reg);
 }
 
-static MIR_reg_t emit_bits_double(MirTranspiler* mt, MIR_reg_t bits_reg) {
-    return em_emit_bits_double(&mt->em, bits_reg);
-}
-
 // Is this float-lane value the null sentinel? One straight-line bits compare.
 // A register-only `x != x` prefilter was measured (Tune27 §10.15): the extra
 // branch splits the block at every test and MIR's allocator paid more than
@@ -5805,6 +5801,12 @@ static MIR_reg_t emit_unbox_container(MirTranspiler* mt, MIR_reg_t item_reg) {
     return ptr;
 }
 
+static MIR_reg_t mir_unbox_f64_cold(void* owner, MIR_reg_t item) {
+    MirTranspiler* mt = (MirTranspiler*)owner;
+    return emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, item));
+}
+
 // Unbox Item -> native type
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id) {
     item_reg = mir_materialize_pending_reg(mt, item_reg,
@@ -5817,32 +5819,7 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
         // machine-integer question, and a sentinel is not a machine integer.
         return emit_unbox_int_lane(mt, BoxedReg(item_reg)).r;
     case LMD_TYPE_FLOAT:
-        {
-            MIR_reg_t in_band = new_reg(mt, "fumask", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-                MIR_new_reg_op(mt->ctx, in_band),
-                MIR_new_reg_op(mt->ctx, item_reg),
-                MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
-            MIR_reg_t result = new_reg(mt, "unboxf", MIR_T_D);
-            MIR_label_t l_inline = new_label(mt);
-            MIR_label_t l_end = new_label(mt);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, l_inline),
-                MIR_new_reg_op(mt->ctx, in_band)));
-            MIR_reg_t cold = emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64,
-                MIR_new_reg_op(mt->ctx, item_reg));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, cold)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-            emit_label(mt, l_inline);
-            MIR_reg_t inline_d = emit_bits_double(mt, item_reg);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, inline_d)));
-            emit_label(mt, l_end);
-            return result;
-        }
+        return em_unbox_f64_item(&mt->em, mt, mir_unbox_f64_cold, item_reg);
     case LMD_TYPE_BOOL:
         return emit_uext8(mt, emit_call_1(mt, "it2b", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg)));
     case LMD_TYPE_STRING:

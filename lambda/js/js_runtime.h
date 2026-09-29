@@ -51,6 +51,7 @@ bool js_is_vm_context_error(Item value);
 // MIR caller can preserve the ordinary capability call on that edge.
 Item js_try_ascii_string_builtin_no_gc(Item callee, Item receiver, Item* args,
                                        int argc);
+int64_t js_builtin_callable_is_id(Item callee, int64_t catalog_id);
 
 const char* js_item_to_cstr(Item value, char* buf, int buf_size);
 
@@ -1444,9 +1445,7 @@ Item js_check_class_static_field_key(Item key_item);
 int64_t js_typeof_is(Item value, uint32_t type_name_id);
 Item js_arguments_mapped_get(Item arguments, int64_t index, Item current_value);
 Item js_arguments_mapped_param_writeback(Item arguments, int64_t index, Item value);
-int64_t js_cmp_raw(int64_t op, Item left, Item right);
 int64_t js_eq_raw(Item left, Item right);
-int64_t js_loose_eq_raw(Item left, Item right);
 Item js_assert_same_value(Item actual, Item expected, Item message);
 Item js_assert_not_same_value(Item actual, Item unexpected, Item message);
 Item js_assert_compare_array(Item actual, Item expected, Item message);

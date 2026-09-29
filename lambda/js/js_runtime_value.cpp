@@ -1010,18 +1010,6 @@ static Item js_compare_boxed(int64_t op, Item left, Item right) {
     return invert ? (Item){.item = b2it(!it2b(result))} : result;
 }
 
-extern "C" int64_t js_cmp_raw(int64_t op, Item left, Item right) {
-    Item number_result = ItemNull;
-    if (js_relational_number_pair(op, left, right, &number_result)) {
-        return (int64_t)it2b(number_result);
-    }
-    // Boxed fallback uses the same operation kernel as the boxed facade.
-    Item result = js_compare_boxed(op, left, right);
-    if (item_is_error(result)) return op == 0 ? (int64_t)it2b(result) : 0;
-    if (result.item == ITEM_JS_UNDEFINED) return 0;
-    return (int64_t)it2b(result);
-}
-
 extern "C" int64_t js_eq_raw(Item left, Item right) {
     if (left.item == right.item) {
         TypeId type = get_type_id(left);
@@ -1037,9 +1025,8 @@ extern "C" int64_t js_eq_raw(Item left, Item right) {
     return (int64_t)it2b(js_strict_equal(left, right));
 }
 
-// Tune8 §2.1: js_ne_raw and js_loose_ne_raw removed. The transpiler now emits
-// js_eq_raw / js_loose_eq_raw followed by an inline MIR XOR-with-1 to invert.
-JS_FORWARD_EXPRESSION(int64_t, js_loose_eq_raw, (Item left, Item right), ((int64_t)it2b(js_equal(left, right))))
+// Strict equality cannot call guest code, so its raw branch facade remains
+// valid; coercing equality and relational comparisons carry Item completions.
 
 bool js_ta_key_canonical_numeric(Item key, double* numeric_index, bool* is_negative_zero) {
     if (is_negative_zero) *is_negative_zero = false;

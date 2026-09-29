@@ -15,6 +15,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 GENERATOR_PATH = ROOT / "utils" / "generate_premake.py"
+TEST_MULTIARCH_TRIPLET = "x86_64-linux-gnu"
 
 
 def fail(message: str) -> None:
@@ -35,7 +36,7 @@ def linux_validation_generator(module):
     # Supply the Linux toolchain facts instead of probing the host gcc/pkg-config,
     # so the Linux config validates on any host; these checks don't depend on their values.
     return module.PremakeGenerator(str(ROOT / "build_lambda_config.json"), "linux",
-                                   linux_multiarch_triplet="x86_64-linux-gnu",
+                                   linux_multiarch_triplet=TEST_MULTIARCH_TRIPLET,
                                    linux_pkg_config_includes=[])
 
 

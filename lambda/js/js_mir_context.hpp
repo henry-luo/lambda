@@ -548,6 +548,8 @@ struct JsMirTranspiler {
     int loop_depth;
     int iteration_depth;
     int loop_scope_depth;
+    // This fact belongs only to the guarded copy, not its generic sibling.
+    NameEntry* guarded_loop_numeric_binding;
 
     // Active for-of iterator stack for return cleanup. Entries are
     // JsMirIteratorFrame* owned by the ArrayList.
