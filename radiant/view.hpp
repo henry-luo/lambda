@@ -3878,6 +3878,7 @@ typedef struct UiContext {
     bool headless;          // true if running headless (no visible window). When true, clipboard
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
+    bool async_script_navigation; // host event loop can present frames while .ls loads
     UiAppMode app_mode;     // viewer or edit application (set after init)
     // Edit-application close decision. The document arms the guard while it
     // has unsaved changes; an armed guard turns a platform close into a

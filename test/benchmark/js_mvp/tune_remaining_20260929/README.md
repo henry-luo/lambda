@@ -49,3 +49,5 @@ Bounce's roughly 0.03 ms difference is far smaller than the earlier parser-free 
 The changed optimizer cases pass with forced GC and freed-memory poisoning. The [Navier–Stokes post-timing density oracle](remaining-navier-oracle-paired.json) passes on both binaries (**S1.11**). The final aggregate Lambda and Test262 results, exact build provenance, and any known build-tool limitation are in [validation.json](validation.json).
 
 This implements the measured guarded array read/equality/length slice, predicted-field and call-root cost reductions, guarded RegExp bulk-loop reduction, and bounded numeric parsing. Mixed array arithmetic and stores, broader call capability elimination, and `log_pipeline` split/slice allocation remain coverage targets; the current evidence does not justify a cache or a broader representation change. Runtime roots and returned completions remain governed by **D5.3.2** and **D8.4.3v2**.
+
+The [subsequent split-result follow-up](../tune_more_20260929/README.md) records a measured tagged ASCII split path and the mixed-array arithmetic experiment that did not pass the paired-performance gate.

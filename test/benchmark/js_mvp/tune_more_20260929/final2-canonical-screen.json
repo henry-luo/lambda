@@ -1,0 +1,4892 @@
+{
+  "_metadata": {
+    "schema_version": 3,
+    "started_at": "2026-09-29T12:13:58",
+    "platform": "Darwin arm64",
+    "control": {
+      "path": "/Users/henryluo/Projects/Lambda/temp/js-tune-20260929/final-release.exe",
+      "sha256": "d1153d796b0cab80395d8a8e2f866d1c66df96fd1612a3928888fcbfc2325666"
+    },
+    "candidate": {
+      "path": "/Users/henryluo/Projects/Lambda/temp/js-tune-20260929/final2-release.exe",
+      "sha256": "ad5397cdc5b19146375ddb5d20feb783a1d7e0e430878b07027d67d6a71bc577"
+    },
+    "git_commit": "ebd7ef64ed706d21bd7a29c06d7198e95dbec5c7",
+    "power_state": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=22544483)\t80%; AC attached; not charging present: true",
+    "suite_filters": [],
+    "bench_filters": [],
+    "variants": [
+      "js"
+    ],
+    "language": "js",
+    "control_js_runtime": "legacy",
+    "candidate_js_runtime": "legacy",
+    "js_execution_backend": "mir",
+    "tier": "jit",
+    "pairs": 1,
+    "paired_uncertainty": {
+      "method": "paired_bootstrap_ratio_of_medians",
+      "confidence": 0.95,
+      "tail": "one_sided_upper",
+      "resamples": 10000,
+      "seed": 260026
+    },
+    "timeout_s": 180,
+    "jetstream_post_timing_oracle": null,
+    "command": "test/benchmark/run_paired_benchmarks.py --control temp/js-tune-20260929/final-release.exe --candidate temp/js-tune-20260929/final2-release.exe --language js --pairs 1 --timeout 180 --output test/benchmark/js_mvp/tune_more_20260929/final2-canonical-screen.json",
+    "finished_at": "2026-09-29T12:21:36"
+  },
+  "rows": [
+    {
+      "suite": "r7rs",
+      "name": "fib",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/fib2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/fib2.js",
+        "sha256": "6e681b5f5db08d124b8b4503375b0b880e1f557c27c031d383e73a18db315380",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/fib2.js",
+        "sha256": "6e681b5f5db08d124b8b4503375b0b880e1f557c27c031d383e73a18db315380",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/fib2.js",
+      "candidate_script": "test/benchmark/r7rs/fib2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 2.056749999523163,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 2.4570416808128357,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.1946234016688837,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.1946234016688837
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 36.8945,
+            "exec_ms": 2.056749999523163,
+            "returncode": 0,
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr_sha256": "b5d79d92e4c14e506fbdc05c3d51ccef207dc77583030ae1830d80ae1ebb48ac",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 586.887875,
+            "exec_ms": 2.4570416808128357,
+            "returncode": 0,
+            "stdout_sha256": "65c14eb5c84db6b5d719495bc5a188a3175b3aeb286f0d3612285dcca6a500a0",
+            "stderr_sha256": "3417f4340d038c334cf0b10e720845792b355b3892a59edb02af885d5259e8be",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "fibfp",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/fibfp2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/fibfp2.js",
+        "sha256": "2e10fe27110881ef0fe9d5f875a39ba415c5534d422b913810a903e98aeb660c",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/fibfp2.js",
+        "sha256": "2e10fe27110881ef0fe9d5f875a39ba415c5534d422b913810a903e98aeb660c",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/fibfp2.js",
+      "candidate_script": "test/benchmark/r7rs/fibfp2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 1.9796665906906128,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 2.165416717529297,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0938289951005762,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0938289951005762
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 24.924833,
+            "exec_ms": 1.9796665906906128,
+            "returncode": 0,
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr_sha256": "e4f09c18a93211b2f10ab9dd0c03a3e57fe1639c2c8d7d86358648c87c09b9d4",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 24.687375,
+            "exec_ms": 2.165416717529297,
+            "returncode": 0,
+            "stdout_sha256": "24b069719a1f2938e38ce99156e64acc3badbf2f00cccebed9cdb593042a5174",
+            "stderr_sha256": "e4f09c18a93211b2f10ab9dd0c03a3e57fe1639c2c8d7d86358648c87c09b9d4",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "tak",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/tak2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/tak2.js",
+        "sha256": "0ac38fc0eb3df05ccb7c57269fcadbfa5f0e0e37d0b419971e59d8539c1d07a9",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/tak2.js",
+        "sha256": "0ac38fc0eb3df05ccb7c57269fcadbfa5f0e0e37d0b419971e59d8539c1d07a9",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/tak2.js",
+      "candidate_script": "test/benchmark/r7rs/tak2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 0.36412501335144043,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 0.3542500138282776,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9728801945456248,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9728801945456248
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 23.259125,
+            "exec_ms": 0.36412501335144043,
+            "returncode": 0,
+            "stdout_sha256": "900b99357c06621255f67ea88f037fbf07bc0bea0f5ae3f92f44a6d1ad8c931f",
+            "stderr_sha256": "c637c9e85f72b4e59cca83872ffca0ec61e09e46c69b66e9d9d79fa6f8200f82",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 22.602959,
+            "exec_ms": 0.3542500138282776,
+            "returncode": 0,
+            "stdout_sha256": "900b99357c06621255f67ea88f037fbf07bc0bea0f5ae3f92f44a6d1ad8c931f",
+            "stderr_sha256": "c637c9e85f72b4e59cca83872ffca0ec61e09e46c69b66e9d9d79fa6f8200f82",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "cpstak",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/cpstak2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/cpstak2.js",
+        "sha256": "369a27186b1cf86e268fc870749994e9b1791252c630868f54864cec7022e837",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/cpstak2.js",
+        "sha256": "369a27186b1cf86e268fc870749994e9b1791252c630868f54864cec7022e837",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/cpstak2.js",
+      "candidate_script": "test/benchmark/r7rs/cpstak2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 0.6980417370796204,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 0.6878750324249268,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9854353914463226,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9854353914463226
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 22.682,
+            "exec_ms": 0.6980417370796204,
+            "returncode": 0,
+            "stdout_sha256": "87275a087585f0680e5eec958de2b07560c82e1b25352c04c64a2f9ed77a3d79",
+            "stderr_sha256": "9af1c391cc883076bbf5be83939d28e07587e5200fe27354751062463fc5f135",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 22.734125,
+            "exec_ms": 0.6878750324249268,
+            "returncode": 0,
+            "stdout_sha256": "87275a087585f0680e5eec958de2b07560c82e1b25352c04c64a2f9ed77a3d79",
+            "stderr_sha256": "9af1c391cc883076bbf5be83939d28e07587e5200fe27354751062463fc5f135",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "sum",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/sum2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/sum2.js",
+        "sha256": "eababc2f0ff053df9c232ff1af8a16f05bcec46c928ef8bb2709538087f862a3",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/sum2.js",
+        "sha256": "eababc2f0ff053df9c232ff1af8a16f05bcec46c928ef8bb2709538087f862a3",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/sum2.js",
+      "candidate_script": "test/benchmark/r7rs/sum2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 0.668583333492279,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 0.6677916049957275,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.99881581179654,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.99881581179654
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 22.090417,
+            "exec_ms": 0.668583333492279,
+            "returncode": 0,
+            "stdout_sha256": "fd4b8ba22f6b9677f82e1b67b32071988530a272eb1d92f595c6c65b3e8daa09",
+            "stderr_sha256": "81cfbf61cd2a488a23046aa7f49a41becc8e8bac95752dbac7d83be7d8eb2c17",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 21.648875,
+            "exec_ms": 0.6677916049957275,
+            "returncode": 0,
+            "stdout_sha256": "fd4b8ba22f6b9677f82e1b67b32071988530a272eb1d92f595c6c65b3e8daa09",
+            "stderr_sha256": "81cfbf61cd2a488a23046aa7f49a41becc8e8bac95752dbac7d83be7d8eb2c17",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "sumfp",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/sumfp2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/sumfp2.js",
+        "sha256": "30b0437e0a551841468b51abf8ceb1c8b920812103b2f1dd083868b6fc70ec14",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/sumfp2.js",
+        "sha256": "30b0437e0a551841468b51abf8ceb1c8b920812103b2f1dd083868b6fc70ec14",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/sumfp2.js",
+      "candidate_script": "test/benchmark/r7rs/sumfp2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 0.06741666793823242,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 0.06749999523162842,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0012360043286674,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0012360043286674
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 21.643625,
+            "exec_ms": 0.06741666793823242,
+            "returncode": 0,
+            "stdout_sha256": "0f965ec66a7bbaff477c70867bd6f2d844f54f1fc5e30fd28c9cf6d07ff4595b",
+            "stderr_sha256": "68bb1a1351bb0606ae8f036aabe30a39910b12004db73acdeb139ddda5113fce",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 22.605542,
+            "exec_ms": 0.06749999523162842,
+            "returncode": 0,
+            "stdout_sha256": "0f965ec66a7bbaff477c70867bd6f2d844f54f1fc5e30fd28c9cf6d07ff4595b",
+            "stderr_sha256": "68bb1a1351bb0606ae8f036aabe30a39910b12004db73acdeb139ddda5113fce",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "nqueens",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/nqueens2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/nqueens2.js",
+        "sha256": "c6b433248cb7ad718502080c5c9512caec312225b2d10fbaac808b98f3021e0b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/nqueens2.js",
+        "sha256": "c6b433248cb7ad718502080c5c9512caec312225b2d10fbaac808b98f3021e0b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/nqueens2.js",
+      "candidate_script": "test/benchmark/r7rs/nqueens2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 30.35520839691162,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 30.03333330154419,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9893963799833382,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9893963799833382
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 103.154833,
+            "exec_ms": 30.35520839691162,
+            "returncode": 0,
+            "stdout_sha256": "78d339a1b7b37b5afe02233619d9b690141ff814f4cc253e30c6d396bf9689d6",
+            "stderr_sha256": "5a60955e91ea48cbe65901094b100e0efed3661c4e3fb5c337c77b803f582a72",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 102.897584,
+            "exec_ms": 30.03333330154419,
+            "returncode": 0,
+            "stdout_sha256": "78d339a1b7b37b5afe02233619d9b690141ff814f4cc253e30c6d396bf9689d6",
+            "stderr_sha256": "5a60955e91ea48cbe65901094b100e0efed3661c4e3fb5c337c77b803f582a72",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "fft",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/fft2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/fft2.js",
+        "sha256": "a886ca3a6c204efc32a779acc30b27abebccc6682e9922897eb0757ef86cc896",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/fft2.js",
+        "sha256": "a886ca3a6c204efc32a779acc30b27abebccc6682e9922897eb0757ef86cc896",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/fft2.js",
+      "candidate_script": "test/benchmark/r7rs/fft2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 3.8450000286102295,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 3.909791648387909,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0168508762797326,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0168508762797326
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 49.671334,
+            "exec_ms": 3.8450000286102295,
+            "returncode": 0,
+            "stdout_sha256": "0f992142950e5d18d6f38580763a16b39efbe3c1fbb0a82a9b8f8d3262cf5cc6",
+            "stderr_sha256": "5c62a69f191ab40faa2ec9bc2cc8ddd5203e0b9935b3680484f32bf261a503e5",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 49.969208,
+            "exec_ms": 3.909791648387909,
+            "returncode": 0,
+            "stdout_sha256": "0f992142950e5d18d6f38580763a16b39efbe3c1fbb0a82a9b8f8d3262cf5cc6",
+            "stderr_sha256": "4ca0b1e139926b9126289831eb71c0cd13c2cd0c542645520f78bbab15bc002c",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "mbrot",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/mbrot2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/mbrot2.js",
+        "sha256": "2d0f087451321e56b00dbfe4d2a4bc24ef66df6fede703dd261d89b92d53bdcd",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/mbrot2.js",
+        "sha256": "2d0f087451321e56b00dbfe4d2a4bc24ef66df6fede703dd261d89b92d53bdcd",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/mbrot2.js",
+      "candidate_script": "test/benchmark/r7rs/mbrot2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 2.234624981880188,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 2.2571250200271606,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0100688206430242,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0100688206430242
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 30.508083,
+            "exec_ms": 2.234624981880188,
+            "returncode": 0,
+            "stdout_sha256": "c851deed02e10ee29e881869e251fff8b94507c77ff2453cb745a549ccbc05a7",
+            "stderr_sha256": "a77ac977548697cab35f1aa27ca14f4ae04979f8dd4d1ecc5fde721620d9a972",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 31.387333,
+            "exec_ms": 2.2571250200271606,
+            "returncode": 0,
+            "stdout_sha256": "c851deed02e10ee29e881869e251fff8b94507c77ff2453cb745a549ccbc05a7",
+            "stderr_sha256": "a77ac977548697cab35f1aa27ca14f4ae04979f8dd4d1ecc5fde721620d9a972",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "r7rs",
+      "name": "ack",
+      "variant": "js",
+      "script": "test/benchmark/r7rs/ack2.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/ack2.js",
+        "sha256": "61088542b483aa31c34bf57efba08c16bec5682788489c839eb99c0f52c5ed53",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs/ack2.js",
+        "sha256": "61088542b483aa31c34bf57efba08c16bec5682788489c839eb99c0f52c5ed53",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/r7rs",
+        "source_tree_sha256": "2cae4048dc6778c4bbbb035105423285b9b680284fea474a434bdb87e8acabc1"
+      },
+      "control_script": "test/benchmark/r7rs/ack2.js",
+      "candidate_script": "test/benchmark/r7rs/ack2.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 15.810083329677582,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 12.851125001907349,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.8128435969584118,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.8128435969584118
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 37.324208,
+            "exec_ms": 15.810083329677582,
+            "returncode": 0,
+            "stdout_sha256": "904f8a733f6d1fa5e165f7fd51b1ac46dad2862ef649e6daf294f1f068a782ec",
+            "stderr_sha256": "14bc1f49d1f861fca7db242bdc5de30c80b202c33e83cc6492c978f9aea8da92",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 34.269625,
+            "exec_ms": 12.851125001907349,
+            "returncode": 0,
+            "stdout_sha256": "904f8a733f6d1fa5e165f7fd51b1ac46dad2862ef649e6daf294f1f068a782ec",
+            "stderr_sha256": "14bc1f49d1f861fca7db242bdc5de30c80b202c33e83cc6492c978f9aea8da92",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "sieve",
+      "variant": "js",
+      "script": "test/benchmark/awfy/sieve2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/sieve2_bundle.js",
+        "sha256": "9b987c97a01e8a6f2eacb968455e93e4ef84ca0eef56144adbb9d8107c9eea42",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/sieve2_bundle.js",
+        "sha256": "9b987c97a01e8a6f2eacb968455e93e4ef84ca0eef56144adbb9d8107c9eea42",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/sieve2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/sieve2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 0.25345826148986816,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 0.234291672706604,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9243797038983859,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9243797038983859
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 30.922875,
+            "exec_ms": 0.25345826148986816,
+            "returncode": 0,
+            "stdout_sha256": "f7343d514ca550f16897efe8f3afb4a7390bde07c125fafe176e43eeb238a91b",
+            "stderr_sha256": "23e87849d7e88db701dfebae8b0f762dd28c6bccd90d54c9abb0b2f180f96eb2",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 30.346667,
+            "exec_ms": 0.234291672706604,
+            "returncode": 0,
+            "stdout_sha256": "f7343d514ca550f16897efe8f3afb4a7390bde07c125fafe176e43eeb238a91b",
+            "stderr_sha256": "23e87849d7e88db701dfebae8b0f762dd28c6bccd90d54c9abb0b2f180f96eb2",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "permute",
+      "variant": "js",
+      "script": "test/benchmark/awfy/permute2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/permute2_bundle.js",
+        "sha256": "eaaceb3fed1a9c999c3f97dd46080d117f545048de66a5a76ddbd0124fe4b150",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/permute2_bundle.js",
+        "sha256": "eaaceb3fed1a9c999c3f97dd46080d117f545048de66a5a76ddbd0124fe4b150",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/permute2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/permute2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 6.009791612625122,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 5.892083287239075,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9804139090049694,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9804139090049694
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 39.321041,
+            "exec_ms": 6.009791612625122,
+            "returncode": 0,
+            "stdout_sha256": "448225415e123eb76181dc9b4116ec52590892e3661f3d4f298e6ec67fd58a91",
+            "stderr_sha256": "8312f41b491340e482402a4cd8bbfd19964c1dfba9d292ce5059401e52eb0e94",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 117.347291,
+            "exec_ms": 5.892083287239075,
+            "returncode": 0,
+            "stdout_sha256": "448225415e123eb76181dc9b4116ec52590892e3661f3d4f298e6ec67fd58a91",
+            "stderr_sha256": "8312f41b491340e482402a4cd8bbfd19964c1dfba9d292ce5059401e52eb0e94",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "queens",
+      "variant": "js",
+      "script": "test/benchmark/awfy/queens2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/queens2_bundle.js",
+        "sha256": "c4865556e7cac99e7b0a9be9024c8e6692572a646128ee4c955d09fbca8f584b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/queens2_bundle.js",
+        "sha256": "c4865556e7cac99e7b0a9be9024c8e6692572a646128ee4c955d09fbca8f584b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/queens2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/queens2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 3.3918749690055847,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 3.389708399772644,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9993612473181533,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9993612473181533
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 43.021167,
+            "exec_ms": 3.3918749690055847,
+            "returncode": 0,
+            "stdout_sha256": "ae99e1f07d887092f382873e575f9cf74936c62593fa8d1db8df8da7d46d3a26",
+            "stderr_sha256": "ca2c6ba5165303c7c9dc14677a55c420baf6bef7ccf9c7476e924170d0ae7ea0",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 42.573834,
+            "exec_ms": 3.389708399772644,
+            "returncode": 0,
+            "stdout_sha256": "ae99e1f07d887092f382873e575f9cf74936c62593fa8d1db8df8da7d46d3a26",
+            "stderr_sha256": "ca2c6ba5165303c7c9dc14677a55c420baf6bef7ccf9c7476e924170d0ae7ea0",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "towers",
+      "variant": "js",
+      "script": "test/benchmark/awfy/towers2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/towers2_bundle.js",
+        "sha256": "86b6499a0f57e5f8c97fbec1cd1ae0b388c7d2d82bafebcd2d56b2a839a1d68b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/towers2_bundle.js",
+        "sha256": "86b6499a0f57e5f8c97fbec1cd1ae0b388c7d2d82bafebcd2d56b2a839a1d68b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/towers2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/towers2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 9.418624997138977,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 9.47487497329712,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0059722067897627,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0059722067897627
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 46.7785,
+            "exec_ms": 9.418624997138977,
+            "returncode": 0,
+            "stdout_sha256": "d3e26c61f976ff022bc8749a89c37ecaa76b4ebb6713431d14a9d5d70ee88c63",
+            "stderr_sha256": "9fe0846ad45837a0bfa620a577d77c2b53662688e4936ffe64e732b79608202e",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 47.008292,
+            "exec_ms": 9.47487497329712,
+            "returncode": 0,
+            "stdout_sha256": "d3e26c61f976ff022bc8749a89c37ecaa76b4ebb6713431d14a9d5d70ee88c63",
+            "stderr_sha256": "9fe0846ad45837a0bfa620a577d77c2b53662688e4936ffe64e732b79608202e",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "bounce",
+      "variant": "js",
+      "script": "test/benchmark/awfy/bounce2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/bounce2_bundle.js",
+        "sha256": "d89e5664b1b3d6689b193ff386665d6f584fab5b4cfab14b421d857999bc6449",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/bounce2_bundle.js",
+        "sha256": "d89e5664b1b3d6689b193ff386665d6f584fab5b4cfab14b421d857999bc6449",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/bounce2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/bounce2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 11.650708317756653,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 4.241124987602234,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.36402293078940146,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.36402293078940146
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 185.93325,
+            "exec_ms": 11.650708317756653,
+            "returncode": 0,
+            "stdout_sha256": "7a2a2230e9d76c2b92069c0b31269f6aad870ae5e14d6cf5f5c24af83b3b1c12",
+            "stderr_sha256": "72adbeb1a819e0d730059a3dd9d5d4a90eed9ca4c81d21d0760227edf695ba44",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 168.64125,
+            "exec_ms": 4.241124987602234,
+            "returncode": 0,
+            "stdout_sha256": "7a2a2230e9d76c2b92069c0b31269f6aad870ae5e14d6cf5f5c24af83b3b1c12",
+            "stderr_sha256": "eb1aacc8b81e81bfbeeb6f6ba1c3f41080c7f14aaac73ed70963158513da019f",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "list",
+      "variant": "js",
+      "script": "test/benchmark/awfy/list2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/list2_bundle.js",
+        "sha256": "22be0178575feb5ede8f25d9a3f8db3af927ce4a94e55c0cef6c96857e76485b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/list2_bundle.js",
+        "sha256": "22be0178575feb5ede8f25d9a3f8db3af927ce4a94e55c0cef6c96857e76485b",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/list2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/list2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 2.3322083353996277,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 2.2059166431427,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9458488805052284,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9458488805052284
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 37.948083,
+            "exec_ms": 2.3322083353996277,
+            "returncode": 0,
+            "stdout_sha256": "b7956a58f75116e8038844f2a47d3b6597c2792604cbb99cf7acbbd39bc9fd99",
+            "stderr_sha256": "6ec175b578edfefa70fa58d9f7a3a8272d77dbbc83e0372e010d10f7e7afd9aa",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 37.185834,
+            "exec_ms": 2.2059166431427,
+            "returncode": 0,
+            "stdout_sha256": "b7956a58f75116e8038844f2a47d3b6597c2792604cbb99cf7acbbd39bc9fd99",
+            "stderr_sha256": "6ec175b578edfefa70fa58d9f7a3a8272d77dbbc83e0372e010d10f7e7afd9aa",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "storage",
+      "variant": "js",
+      "script": "test/benchmark/awfy/storage2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/storage2_bundle.js",
+        "sha256": "01c8cfca01ccaf611de0ce1c2dbabf708e1a92e0c07394ada25710bec1fe5819",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/storage2_bundle.js",
+        "sha256": "01c8cfca01ccaf611de0ce1c2dbabf708e1a92e0c07394ada25710bec1fe5819",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/storage2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/storage2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 4.2633750438690186,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 4.213041663169861,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9881940058800269,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9881940058800269
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 162.964292,
+            "exec_ms": 4.2633750438690186,
+            "returncode": 0,
+            "stdout_sha256": "4eb82e001f4905695c5780909f305a41d9754f7a444f40b98e62303c757be1f5",
+            "stderr_sha256": "567b3190442806d0abc2f3107fb569c00a87bfd2c53670392e516a7d8e476636",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 162.605084,
+            "exec_ms": 4.213041663169861,
+            "returncode": 0,
+            "stdout_sha256": "4eb82e001f4905695c5780909f305a41d9754f7a444f40b98e62303c757be1f5",
+            "stderr_sha256": "567b3190442806d0abc2f3107fb569c00a87bfd2c53670392e516a7d8e476636",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "mandelbrot",
+      "variant": "js",
+      "script": "test/benchmark/awfy/mandelbrot2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/mandelbrot2_bundle.js",
+        "sha256": "eca057a1c601409224cfe32175c0d1f540206a55f43b8bb8f4a67f99ccc6b379",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/mandelbrot2_bundle.js",
+        "sha256": "eca057a1c601409224cfe32175c0d1f540206a55f43b8bb8f4a67f99ccc6b379",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/mandelbrot2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/mandelbrot2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 47.517374992370605,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 47.87858331203461,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0076016050912324,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0076016050912324
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 82.183834,
+            "exec_ms": 47.517374992370605,
+            "returncode": 0,
+            "stdout_sha256": "04525f03a8989b45bee93f00fc223730490fb2c898ae23ffb9fef443cf12bc3e",
+            "stderr_sha256": "48c596d2a28168a6cf6f37df23337afb013c045028171765569f4b35124d326b",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 82.17775,
+            "exec_ms": 47.87858331203461,
+            "returncode": 0,
+            "stdout_sha256": "04525f03a8989b45bee93f00fc223730490fb2c898ae23ffb9fef443cf12bc3e",
+            "stderr_sha256": "48c596d2a28168a6cf6f37df23337afb013c045028171765569f4b35124d326b",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "nbody",
+      "variant": "js",
+      "script": "test/benchmark/awfy/nbody2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/nbody2_bundle.js",
+        "sha256": "a7f3c1ce55d9b68c3fb0d204d2910f7dd9d1cf386f3b8c00106db7d0c8fc2ab1",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/nbody2_bundle.js",
+        "sha256": "a7f3c1ce55d9b68c3fb0d204d2910f7dd9d1cf386f3b8c00106db7d0c8fc2ab1",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/nbody2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/nbody2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 641.0732082724571,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 660.8521250486374,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0308528207402081,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0308528207402081
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 723.707542,
+            "exec_ms": 641.0732082724571,
+            "returncode": 0,
+            "stdout_sha256": "85f26bd11c1470a00ad5c6e369f45d6751bb7b2b5cf347d1fbad278c46cb0e78",
+            "stderr_sha256": "5da16fbaa6844f4f850883d0b8142e093ad26b3d4c01752f0d6513cd45c08f81",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 742.644291,
+            "exec_ms": 660.8521250486374,
+            "returncode": 0,
+            "stdout_sha256": "85f26bd11c1470a00ad5c6e369f45d6751bb7b2b5cf347d1fbad278c46cb0e78",
+            "stderr_sha256": "81d439a3c3fa77acfcea7d4c9d038f715691ba6b054acba74539121c49a75886",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "richards",
+      "variant": "js",
+      "script": "test/benchmark/awfy/richards2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/richards2_bundle.js",
+        "sha256": "c418c9af499ea24ec6730850acd598ae1589b64eb5a905aaffb16110606b1e14",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/richards2_bundle.js",
+        "sha256": "c418c9af499ea24ec6730850acd598ae1589b64eb5a905aaffb16110606b1e14",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/richards2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/richards2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 909.8234167098999,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 948.8638750314713,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0429099291187176,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0429099291187176
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 1058.942458,
+            "exec_ms": 909.8234167098999,
+            "returncode": 0,
+            "stdout_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+            "stderr_sha256": "569f9efb566aa7f51e8a5e5b1456f52cdf99d7d881c0003dc7e23d081fafa88d",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 1076.592375,
+            "exec_ms": 948.8638750314713,
+            "returncode": 0,
+            "stdout_sha256": "814250487733a15dadbe65226bd547db0e95598cf821ac547b8d93aec044dffb",
+            "stderr_sha256": "0214dbbf8bd54b53d1b063d13d3b8d179a8399141862edb8623bab013e7ba3bc",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "json",
+      "variant": "js",
+      "script": "test/benchmark/awfy/json2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/json2_bundle.js",
+        "sha256": "14793cb158b112e5717759333722e6dbd4e55b94a879b89d277aba7cb1fe8d82",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/json2_bundle.js",
+        "sha256": "14793cb158b112e5717759333722e6dbd4e55b94a879b89d277aba7cb1fe8d82",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/json2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/json2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 44.89537501335144,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 44.08458334207535,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9819404187840068,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9819404187840068
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 477.97925,
+            "exec_ms": 44.89537501335144,
+            "returncode": 0,
+            "stdout_sha256": "4035b67d1fa65d1ed5e44c7dc903ab276a1887231ee02ca9fe350bbad56b7c47",
+            "stderr_sha256": "254c678324408fa6a2469a696ec9f457796fa7a50bd9117bd52b62500fc25f22",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 366.927709,
+            "exec_ms": 44.08458334207535,
+            "returncode": 0,
+            "stdout_sha256": "4035b67d1fa65d1ed5e44c7dc903ab276a1887231ee02ca9fe350bbad56b7c47",
+            "stderr_sha256": "cd2b2d88bba499b80c77b25847ae568541879fde8fd87fc6aa4e6406d02cbddc",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "deltablue",
+      "variant": "js",
+      "script": "test/benchmark/awfy/deltablue2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/deltablue2_bundle.js",
+        "sha256": "7ba866da10b2f67faa9b45cd0d27f41a013413aae7ebf5d300016a57ece8b512",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/deltablue2_bundle.js",
+        "sha256": "7ba866da10b2f67faa9b45cd0d27f41a013413aae7ebf5d300016a57ece8b512",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/deltablue2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/deltablue2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 392.4513750076294,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 391.5999999642372,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9978306228551865,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9978306228551865
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 759.307208,
+            "exec_ms": 392.4513750076294,
+            "returncode": 0,
+            "stdout_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+            "stderr_sha256": "03a0ba5e892bd681bc3a48e3932951c7d5104d569ac314bf779a0dd7154a33fb",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 756.0185,
+            "exec_ms": 391.5999999642372,
+            "returncode": 0,
+            "stdout_sha256": "73cfe24d5cfd82bbe57021933510c0d7065f06486b729a8cb5b937e45b724886",
+            "stderr_sha256": "2c586e7bcc3bcf28d1c657a4ed7c94b10a49760f4d947f1462fc3b4869a70f36",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "havlak",
+      "variant": "js",
+      "script": "test/benchmark/awfy/havlak2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/havlak2_bundle.js",
+        "sha256": "32e7e09c936c2a7d131e24aeb2558ce7b775130f35aa8eededd7fabdc9b35f72",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/havlak2_bundle.js",
+        "sha256": "32e7e09c936c2a7d131e24aeb2558ce7b775130f35aa8eededd7fabdc9b35f72",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/havlak2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/havlak2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 13459.938708305359,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 13543.142666697502,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0061816000945683,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0061816000945683
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 13827.497166,
+            "exec_ms": 13459.938708305359,
+            "returncode": 0,
+            "stdout_sha256": "f31ee3341ea4e9e37e54f31332fb8256bff463fb660a5108a3655723a4d9d040",
+            "stderr_sha256": "628238d2bbe81ad9a3666cf794045d00d50c0f8fada3666caedd926166e25a30",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 13906.547709,
+            "exec_ms": 13543.142666697502,
+            "returncode": 0,
+            "stdout_sha256": "f31ee3341ea4e9e37e54f31332fb8256bff463fb660a5108a3655723a4d9d040",
+            "stderr_sha256": "aa934276929cac76bff793ab040919c0bcbfda78fbdbe86213852accc566be74",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "awfy",
+      "name": "cd",
+      "variant": "js",
+      "script": "test/benchmark/awfy/cd2_bundle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/cd2_bundle.js",
+        "sha256": "a01c7bb7d34b9e8ba30431744603df5f9d70c1793a80dec8f7c03bfffc9a9dc1",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/cd2_bundle.js",
+        "sha256": "a01c7bb7d34b9e8ba30431744603df5f9d70c1793a80dec8f7c03bfffc9a9dc1",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "control_script": "test/benchmark/awfy/cd2_bundle.js",
+      "candidate_script": "test/benchmark/awfy/cd2_bundle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 4044.1198750138283,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 4255.668916642666,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0523102796571069,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0523102796571069
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 4476.01525,
+            "exec_ms": 4044.1198750138283,
+            "returncode": 0,
+            "stdout_sha256": "7f9aa9271c1c1da7e00a254598b17ff21fdc79acd57c94b7ff5f4688c7668a9a",
+            "stderr_sha256": "b186ab116587415802a752c68197c6a754bfb36c44b30ad998c5ff2cd5b26bb9",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 4660.202833,
+            "exec_ms": 4255.668916642666,
+            "returncode": 0,
+            "stdout_sha256": "7f9aa9271c1c1da7e00a254598b17ff21fdc79acd57c94b7ff5f4688c7668a9a",
+            "stderr_sha256": "cba4a8488a771876cc4e70567b08d3a58b1669ebc36c31f250a33d70ce051f51",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "binarytrees",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/binarytrees.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/binarytrees.js",
+        "sha256": "d3c9ab48525f99aa03da84e3fa8e61095ed45d0670892653fc47bed3cf120cbe",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/binarytrees.js",
+        "sha256": "d3c9ab48525f99aa03da84e3fa8e61095ed45d0670892653fc47bed3cf120cbe",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/binarytrees.js",
+      "candidate_script": "test/benchmark/beng/js/binarytrees.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 20.691250026226044,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 21.137750029563904,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.02157917007295,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.02157917007295
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 51.103833,
+            "exec_ms": 20.691250026226044,
+            "returncode": 0,
+            "stdout_sha256": "3e7751a1e64cf4d792135712df0c94ea332adb3b3afa15cd49c2a465eeec40e9",
+            "stderr_sha256": "81e4452b6b854ac96cfe7098a4a87ab83d87bbd336c598ef3543030f698d85be",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 50.921375,
+            "exec_ms": 21.137750029563904,
+            "returncode": 0,
+            "stdout_sha256": "3e7751a1e64cf4d792135712df0c94ea332adb3b3afa15cd49c2a465eeec40e9",
+            "stderr_sha256": "81e4452b6b854ac96cfe7098a4a87ab83d87bbd336c598ef3543030f698d85be",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "fannkuch",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/fannkuch.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/fannkuch.js",
+        "sha256": "f090bc1ae21ad43bf0318fc70af04010e0dff1f3598b9fe94692f07138eec757",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/fannkuch.js",
+        "sha256": "f090bc1ae21ad43bf0318fc70af04010e0dff1f3598b9fe94692f07138eec757",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/fannkuch.js",
+      "candidate_script": "test/benchmark/beng/js/fannkuch.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 21.358541667461395,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 21.319374978542328,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9981662283161057,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9981662283161057
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 65.441291,
+            "exec_ms": 21.358541667461395,
+            "returncode": 0,
+            "stdout_sha256": "9e7ecb2c495fef6e1bffb0675857346b16b2f592532c07814c30853f001d3dd9",
+            "stderr_sha256": "cbede5636258637d78ca6562daebc345fc862fdd0d399a7744b290d251f1e8bc",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 66.51625,
+            "exec_ms": 21.319374978542328,
+            "returncode": 0,
+            "stdout_sha256": "9e7ecb2c495fef6e1bffb0675857346b16b2f592532c07814c30853f001d3dd9",
+            "stderr_sha256": "cbede5636258637d78ca6562daebc345fc862fdd0d399a7744b290d251f1e8bc",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "fasta",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/fasta.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/fasta.js",
+        "sha256": "d2e03674e3cc0cc022c36524df696777973c824afe84e062ecd58c7063c29477",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/fasta.js",
+        "sha256": "d2e03674e3cc0cc022c36524df696777973c824afe84e062ecd58c7063c29477",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/fasta.js",
+      "candidate_script": "test/benchmark/beng/js/fasta.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 25.132916688919067,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 25.520541667938232,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0154230001959965,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0154230001959965
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 67.58225,
+            "exec_ms": 25.132916688919067,
+            "returncode": 0,
+            "stdout_sha256": "1d8ec75954eca2b7d13df904bc52a2a7041032dc7e56ccd57af116398c314385",
+            "stderr_sha256": "a164bf90b5a164ea735e26d5d1adf3c7a0194724380e2e607595ef94af7aab2f",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 67.203875,
+            "exec_ms": 25.520541667938232,
+            "returncode": 0,
+            "stdout_sha256": "1d8ec75954eca2b7d13df904bc52a2a7041032dc7e56ccd57af116398c314385",
+            "stderr_sha256": "a164bf90b5a164ea735e26d5d1adf3c7a0194724380e2e607595ef94af7aab2f",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "knucleotide",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/knucleotide.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/knucleotide.js",
+        "sha256": "59d8c8d53609d3a97e21ea0c2d93e01d717b78a4417bfb28727c1150262560bb",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/knucleotide.js",
+        "sha256": "59d8c8d53609d3a97e21ea0c2d93e01d717b78a4417bfb28727c1150262560bb",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/knucleotide.js",
+      "candidate_script": "test/benchmark/beng/js/knucleotide.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 32.01458328962326,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 21.48220831155777,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.6710132103615636,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.6710132103615636
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 505.223166,
+            "exec_ms": 32.01458328962326,
+            "returncode": 0,
+            "stdout_sha256": "44b3673111321ec9554c7ba0829ff1bba14a4764584379cdb8ff08682b9c772c",
+            "stderr_sha256": "85565f6fc99ff0607575f21c49d39f425abbfe8db71e30c81d89ee4f3d11592f",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 66.9745,
+            "exec_ms": 21.48220831155777,
+            "returncode": 0,
+            "stdout_sha256": "44b3673111321ec9554c7ba0829ff1bba14a4764584379cdb8ff08682b9c772c",
+            "stderr_sha256": "03c495d30d0b99e0db16d1dcc0672dabdcf9d2fd9d9fdf6b7483293c9ce02ade",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "pidigits",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/pidigits.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/pidigits.js",
+        "sha256": "8d971aa758c6f1c958da10ef7a2219de7c77b2911211cc819e78d1b23eb4dacc",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/pidigits.js",
+        "sha256": "8d971aa758c6f1c958da10ef7a2219de7c77b2911211cc819e78d1b23eb4dacc",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/pidigits.js",
+      "candidate_script": "test/benchmark/beng/js/pidigits.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 0.5833333134651184,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 0.6357083916664124,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0897858514031633,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0897858514031633
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 56.088125,
+            "exec_ms": 0.5833333134651184,
+            "returncode": 0,
+            "stdout_sha256": "503043fc19392e99c7187680ebcb84c9b4fda4aad9d369e2f64bd4e85b275f9c",
+            "stderr_sha256": "af9931d7ae855b7294b7b859a7a10f8ddfcc2dadeafccd3105c4797e31461532",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 57.265208,
+            "exec_ms": 0.6357083916664124,
+            "returncode": 0,
+            "stdout_sha256": "503043fc19392e99c7187680ebcb84c9b4fda4aad9d369e2f64bd4e85b275f9c",
+            "stderr_sha256": "af9931d7ae855b7294b7b859a7a10f8ddfcc2dadeafccd3105c4797e31461532",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "regexredux",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/regexredux.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/regexredux.js",
+        "sha256": "8dd0b79ac2655798d4f8eb42718f9c50996f0fabec52e03de1bd1ec64ba6bd19",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/regexredux.js",
+        "sha256": "8dd0b79ac2655798d4f8eb42718f9c50996f0fabec52e03de1bd1ec64ba6bd19",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/regexredux.js",
+      "candidate_script": "test/benchmark/beng/js/regexredux.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 9.15262496471405,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 9.773166716098785,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0677993202799305,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0677993202799305
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 51.69975,
+            "exec_ms": 9.15262496471405,
+            "returncode": 0,
+            "stdout_sha256": "bf30de15ef9c7b81fa985930326df1448c709737e796b4e2360a67d0cf81bbc1",
+            "stderr_sha256": "f34e7876e6ebf63ded87fff146c3e66277ac3edc9d24a76047c35301b7164143",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 49.07025,
+            "exec_ms": 9.773166716098785,
+            "returncode": 0,
+            "stdout_sha256": "bf30de15ef9c7b81fa985930326df1448c709737e796b4e2360a67d0cf81bbc1",
+            "stderr_sha256": "f34e7876e6ebf63ded87fff146c3e66277ac3edc9d24a76047c35301b7164143",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "revcomp",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/revcomp.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/revcomp.js",
+        "sha256": "8e16e9b3b1631cc53fe9f938e4072f939b3397eaeccdc1c031b20e7173e352ef",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/revcomp.js",
+        "sha256": "8e16e9b3b1631cc53fe9f938e4072f939b3397eaeccdc1c031b20e7173e352ef",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/revcomp.js",
+      "candidate_script": "test/benchmark/beng/js/revcomp.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 23.204500019550323,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 22.369541704654694,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.964017396875944,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.964017396875944
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 59.679,
+            "exec_ms": 23.204500019550323,
+            "returncode": 0,
+            "stdout_sha256": "ee27454a5aba6e305ffe489c297720de6441c112a2bc8c8e7b0434e78352c8c4",
+            "stderr_sha256": "2d2e87439ee7a9e5d6da3b3e25da7267e24dfcae79f037177324a3678416f019",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 58.53275,
+            "exec_ms": 22.369541704654694,
+            "returncode": 0,
+            "stdout_sha256": "ee27454a5aba6e305ffe489c297720de6441c112a2bc8c8e7b0434e78352c8c4",
+            "stderr_sha256": "2d2e87439ee7a9e5d6da3b3e25da7267e24dfcae79f037177324a3678416f019",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "beng",
+      "name": "spectralnorm",
+      "variant": "js",
+      "script": "test/benchmark/beng/js/spectralnorm.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/spectralnorm.js",
+        "sha256": "8a48f6b6a0c468050f86a919797d0d8665a3fcbbdf34ecf10013fae532779077",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js/spectralnorm.js",
+        "sha256": "8a48f6b6a0c468050f86a919797d0d8665a3fcbbdf34ecf10013fae532779077",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/beng/js",
+        "source_tree_sha256": "a3848eadbb53f27ba26ac877351146b937bf8a3b9ad854c7aa477843c27c33d5"
+      },
+      "control_script": "test/benchmark/beng/js/spectralnorm.js",
+      "candidate_script": "test/benchmark/beng/js/spectralnorm.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 84.29412496089935,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 83.98249995708466,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9963031230947679,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9963031230947679
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 125.386667,
+            "exec_ms": 84.29412496089935,
+            "returncode": 0,
+            "stdout_sha256": "74d5d52a4aa3b77c0c03553b476829a894351be580ecb6919c74c6fbb0827f00",
+            "stderr_sha256": "5411a0f1d487694188d799dd28b4bd98ea039a3e9d20e47fd96b2b4d33bef14a",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 126.339666,
+            "exec_ms": 83.98249995708466,
+            "returncode": 0,
+            "stdout_sha256": "74d5d52a4aa3b77c0c03553b476829a894351be580ecb6919c74c6fbb0827f00",
+            "stderr_sha256": "8841399d25458bf2b3db2a5a625153b2622eb582ff56e616a5def7419e358bd6",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "kostya",
+      "name": "brainfuck",
+      "variant": "js",
+      "script": "test/benchmark/kostya/brainfuck.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/brainfuck.js",
+        "sha256": "aff69c49f3b071b1289bd10e03926e31f8698bb531b97973af59ba5ea9735827",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/brainfuck.js",
+        "sha256": "aff69c49f3b071b1289bd10e03926e31f8698bb531b97973af59ba5ea9735827",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "control_script": "test/benchmark/kostya/brainfuck.js",
+      "candidate_script": "test/benchmark/kostya/brainfuck.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 1816.7589582800865,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 1830.6539583206177,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0076482353243412,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0076482353243412
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 1845.74925,
+            "exec_ms": 1816.7589582800865,
+            "returncode": 0,
+            "stdout_sha256": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+            "stderr_sha256": "7c816955162bb3f121d40b7f66067c40252dc357de5d5d4c174e814e6d07932c",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 1859.662834,
+            "exec_ms": 1830.6539583206177,
+            "returncode": 0,
+            "stdout_sha256": "7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069",
+            "stderr_sha256": "99ccf7bb2b15575861da2bbefa5c4b6d0d3a76e6024af58249c7997acd663570",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "kostya",
+      "name": "matmul",
+      "variant": "js",
+      "script": "test/benchmark/kostya/matmul.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/matmul.js",
+        "sha256": "2e0b91da3cb9516477a9ef0fc87045c93caf2cea50107d8ed0668008342c7bd6",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/matmul.js",
+        "sha256": "2e0b91da3cb9516477a9ef0fc87045c93caf2cea50107d8ed0668008342c7bd6",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "control_script": "test/benchmark/kostya/matmul.js",
+      "candidate_script": "test/benchmark/kostya/matmul.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 257.3519582748413,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 256.3763749599457,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9962091474980977,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9962091474980977
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 289.639375,
+            "exec_ms": 257.3519582748413,
+            "returncode": 0,
+            "stdout_sha256": "b1d2f3f843c8b4bac273eb1d275eec234414479cf0c7d96962ea0aad8323f410",
+            "stderr_sha256": "3757fccce9c35f0e29fb17586dc53040cc9142a72e92b99831e72fcde348e5cd",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 289.04825,
+            "exec_ms": 256.3763749599457,
+            "returncode": 0,
+            "stdout_sha256": "b1d2f3f843c8b4bac273eb1d275eec234414479cf0c7d96962ea0aad8323f410",
+            "stderr_sha256": "1d93fab5442e4de715a5865d3b6854547c20e2df186e6610e7c78da7de703811",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "kostya",
+      "name": "primes",
+      "variant": "js",
+      "script": "test/benchmark/kostya/primes.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/primes.js",
+        "sha256": "0df2aed8a87fa0d266f24ccd85f5cd2e6e1bd1787ab05f30b71ef832a0330450",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/primes.js",
+        "sha256": "0df2aed8a87fa0d266f24ccd85f5cd2e6e1bd1787ab05f30b71ef832a0330450",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "control_script": "test/benchmark/kostya/primes.js",
+      "candidate_script": "test/benchmark/kostya/primes.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 57.46754169464111,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 57.62374997138977,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0027182000855142,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0027182000855142
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 84.048542,
+            "exec_ms": 57.46754169464111,
+            "returncode": 0,
+            "stdout_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+            "stderr_sha256": "4cedb3440063a44a7fca68dd2378e534512dd30b0f488fcb35359129f1fa3af4",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 83.371375,
+            "exec_ms": 57.62374997138977,
+            "returncode": 0,
+            "stdout_sha256": "404f06095ed23da41a4573ed0fca421e49ba1b24307ec010610b45f15eb1d921",
+            "stderr_sha256": "4cedb3440063a44a7fca68dd2378e534512dd30b0f488fcb35359129f1fa3af4",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "kostya",
+      "name": "base64",
+      "variant": "js",
+      "script": "test/benchmark/kostya/base64.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/base64.js",
+        "sha256": "5a88cafed700d281940634e82caab6dbc8d9dfe399b525317f8d6d1586dba1d7",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/base64.js",
+        "sha256": "5a88cafed700d281940634e82caab6dbc8d9dfe399b525317f8d6d1586dba1d7",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "control_script": "test/benchmark/kostya/base64.js",
+      "candidate_script": "test/benchmark/kostya/base64.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 474.25216668844223,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 509.0843333005905,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0734465102297173,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0734465102297173
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 512.688667,
+            "exec_ms": 474.25216668844223,
+            "returncode": 0,
+            "stdout_sha256": "54b922cb4a5ad398117ae92f1b833823fee6574bcac49467f7b117498af7fed1",
+            "stderr_sha256": "5291fd1b719851c1fde707c826e5dcf9c0836a99b556af6e6cc6c4382c6bfdab",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 547.751458,
+            "exec_ms": 509.0843333005905,
+            "returncode": 0,
+            "stdout_sha256": "54b922cb4a5ad398117ae92f1b833823fee6574bcac49467f7b117498af7fed1",
+            "stderr_sha256": "5353dc5f3195005d91d77bdd544dfdb173787230389f01dbc59438f79c9bf3c0",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "kostya",
+      "name": "levenshtein",
+      "variant": "js",
+      "script": "test/benchmark/kostya/levenshtein.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/levenshtein.js",
+        "sha256": "de0be10e431a30dede2faea645edb3927ed2d88d38b6f831d91662fbc8c78759",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/levenshtein.js",
+        "sha256": "de0be10e431a30dede2faea645edb3927ed2d88d38b6f831d91662fbc8c78759",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "control_script": "test/benchmark/kostya/levenshtein.js",
+      "candidate_script": "test/benchmark/kostya/levenshtein.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 82.2233749628067,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 128.33525002002716,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.5608122395617903,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.5608122395617903
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 114.844542,
+            "exec_ms": 82.2233749628067,
+            "returncode": 0,
+            "stdout_sha256": "214f239166eec8c4518538b2c4279d1298b39f315a3866a67bb3cf06e64123a6",
+            "stderr_sha256": "4904284e80462177f78c0b1d08156ac445fd0f2ff277e23ed13d0520f77b1046",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 161.586958,
+            "exec_ms": 128.33525002002716,
+            "returncode": 0,
+            "stdout_sha256": "214f239166eec8c4518538b2c4279d1298b39f315a3866a67bb3cf06e64123a6",
+            "stderr_sha256": "0e68677f26c0df6501def65f8b7800bbfc608539bd30a62c8735306e4b162d44",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "kostya",
+      "name": "json_gen",
+      "variant": "js",
+      "script": "test/benchmark/kostya/json_gen.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/json_gen.js",
+        "sha256": "bae5d919c6971d319248dd53be32030b81953b18c06e4d0e5c754b191ec6e987",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/json_gen.js",
+        "sha256": "bae5d919c6971d319248dd53be32030b81953b18c06e4d0e5c754b191ec6e987",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "control_script": "test/benchmark/kostya/json_gen.js",
+      "candidate_script": "test/benchmark/kostya/json_gen.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 29.853375017642975,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 28.164333283901215,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9434220843457881,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9434220843457881
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 62.0235,
+            "exec_ms": 29.853375017642975,
+            "returncode": 0,
+            "stdout_sha256": "687b9e8b980c25b839f9bd1d01229d20bdb3a3c6219527d9009013850c58501e",
+            "stderr_sha256": "6e92bfea5c8c65f6a292ae2ae237e86da81dce9f48ba494976a898cf92729604",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 59.422958,
+            "exec_ms": 28.164333283901215,
+            "returncode": 0,
+            "stdout_sha256": "687b9e8b980c25b839f9bd1d01229d20bdb3a3c6219527d9009013850c58501e",
+            "stderr_sha256": "6e92bfea5c8c65f6a292ae2ae237e86da81dce9f48ba494976a898cf92729604",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "kostya",
+      "name": "collatz",
+      "variant": "js",
+      "script": "test/benchmark/kostya/collatz.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/collatz.js",
+        "sha256": "2fe151d0458aeca7d6f9a06a1d718dadf8606173e280dc92c1f2c1fdff6fa19e",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya/collatz.js",
+        "sha256": "2fe151d0458aeca7d6f9a06a1d718dadf8606173e280dc92c1f2c1fdff6fa19e",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/kostya",
+        "source_tree_sha256": "71a48f38e5b0ae5d206d6f587d8fb1a80da0263444c32dfe610d73238ec309e8"
+      },
+      "control_script": "test/benchmark/kostya/collatz.js",
+      "candidate_script": "test/benchmark/kostya/collatz.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 1593.7824167013168,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 1606.845666706562,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.008196382309376,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.008196382309376
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 1616.464334,
+            "exec_ms": 1593.7824167013168,
+            "returncode": 0,
+            "stdout_sha256": "9d2cc4307d1a69be97030ae4ce82889b251f08facebb8ce41df9cb9a7d1a9c99",
+            "stderr_sha256": "0c9aa4adbc3f9cd140d3a62f0138f733d1af367f4b8284df15d84750aa12b250",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 1629.252666,
+            "exec_ms": 1606.845666706562,
+            "returncode": 0,
+            "stdout_sha256": "9d2cc4307d1a69be97030ae4ce82889b251f08facebb8ce41df9cb9a7d1a9c99",
+            "stderr_sha256": "508e11407e6d811172814e66401934627bfd879254c19f56f655f0ad3c245cab",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "triangl",
+      "variant": "js",
+      "script": "test/benchmark/larceny/triangl.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/triangl.js",
+        "sha256": "7f28f785f625f6fc9f5363b38834e143315baebb6b1946bf944517f824ffe748",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/triangl.js",
+        "sha256": "7f28f785f625f6fc9f5363b38834e143315baebb6b1946bf944517f824ffe748",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/triangl.js",
+      "candidate_script": "test/benchmark/larceny/triangl.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 6116.743499994278,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 6499.62524998188,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0625956851040035,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0625956851040035
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 6164.962209,
+            "exec_ms": 6116.743499994278,
+            "returncode": 0,
+            "stdout_sha256": "8405e9dc3171913d5937afa0705a586c0ae9aa5254d4ac13d23dad91ee64f582",
+            "stderr_sha256": "75ed8c710341c4b4826a9d7b26f25704eefcdfda6f9a2d86c863c4c3e052d6c1",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 6548.106666,
+            "exec_ms": 6499.62524998188,
+            "returncode": 0,
+            "stdout_sha256": "8405e9dc3171913d5937afa0705a586c0ae9aa5254d4ac13d23dad91ee64f582",
+            "stderr_sha256": "af3b79cc0f1963e28e3ad02120be141c39c3075733d7d8117b08c2be11cdcb65",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "array1",
+      "variant": "js",
+      "script": "test/benchmark/larceny/array1.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/array1.js",
+        "sha256": "9f2d835d2bda29f8084bc2407f661d3c00a7a6d92ee51c782998cb7f48c25fab",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/array1.js",
+        "sha256": "9f2d835d2bda29f8084bc2407f661d3c00a7a6d92ee51c782998cb7f48c25fab",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/array1.js",
+      "candidate_script": "test/benchmark/larceny/array1.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 17.485666692256927,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 17.743541657924652,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.014747791445774,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.014747791445774
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 39.879833,
+            "exec_ms": 17.485666692256927,
+            "returncode": 0,
+            "stdout_sha256": "45bd875e73e911840de5273c659afeddc917674f7307504ce4843292c7a146cd",
+            "stderr_sha256": "0e7a2a81df70b8e80ddde44e58edb140d6362bbcc72aebe95747056da29db511",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 39.512417,
+            "exec_ms": 17.743541657924652,
+            "returncode": 0,
+            "stdout_sha256": "45bd875e73e911840de5273c659afeddc917674f7307504ce4843292c7a146cd",
+            "stderr_sha256": "0e7a2a81df70b8e80ddde44e58edb140d6362bbcc72aebe95747056da29db511",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "deriv",
+      "variant": "js",
+      "script": "test/benchmark/larceny/deriv.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/deriv.js",
+        "sha256": "572ad4d53c3f35f204c1b8a53f226746fc1f14430c011e14031657c9bbc61d7e",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/deriv.js",
+        "sha256": "572ad4d53c3f35f204c1b8a53f226746fc1f14430c011e14031657c9bbc61d7e",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/deriv.js",
+      "candidate_script": "test/benchmark/larceny/deriv.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 86.4881666302681,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 87.15762501955032,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0077404622547281,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0077404622547281
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 113.520292,
+            "exec_ms": 86.4881666302681,
+            "returncode": 0,
+            "stdout_sha256": "e40a681387342569aadfa99fb20ed9d2fad5feed845b8b8bbebecf38bbe5ce2f",
+            "stderr_sha256": "d77174985cd2de696ba7763efd7dbeefe010f8370b0abc18f441411271414754",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 114.511042,
+            "exec_ms": 87.15762501955032,
+            "returncode": 0,
+            "stdout_sha256": "e40a681387342569aadfa99fb20ed9d2fad5feed845b8b8bbebecf38bbe5ce2f",
+            "stderr_sha256": "d77174985cd2de696ba7763efd7dbeefe010f8370b0abc18f441411271414754",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "diviter",
+      "variant": "js",
+      "script": "test/benchmark/larceny/diviter.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/diviter.js",
+        "sha256": "d3445de07b40f4ca9e453a3035218e1a90108d64db34dc12740e8f208e7f1d01",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/diviter.js",
+        "sha256": "d3445de07b40f4ca9e453a3035218e1a90108d64db34dc12740e8f208e7f1d01",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/diviter.js",
+      "candidate_script": "test/benchmark/larceny/diviter.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 614.3625832796097,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 614.7441666126251,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.000621104447765,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.000621104447765
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 637.939125,
+            "exec_ms": 614.3625832796097,
+            "returncode": 0,
+            "stdout_sha256": "0a485a1d844dac412f71e3233d99e938854060fd7a2bdb675d6b43c638c1d432",
+            "stderr_sha256": "7a597c242571fb7b378e996ee64b50ab875b399f8e6ca4405ab0e6beffd8004a",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 637.639208,
+            "exec_ms": 614.7441666126251,
+            "returncode": 0,
+            "stdout_sha256": "0a485a1d844dac412f71e3233d99e938854060fd7a2bdb675d6b43c638c1d432",
+            "stderr_sha256": "3e834bf2f12a8004806a9daaab21958579a12a444c2d802f3c86332dce5c4644",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "divrec",
+      "variant": "js",
+      "script": "test/benchmark/larceny/divrec.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/divrec.js",
+        "sha256": "0ee5bcdb4738d22e4f9fa9efd719d70d0ca206725ff5e74555b5c37474a6ae90",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/divrec.js",
+        "sha256": "0ee5bcdb4738d22e4f9fa9efd719d70d0ca206725ff5e74555b5c37474a6ae90",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/divrec.js",
+      "candidate_script": "test/benchmark/larceny/divrec.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 16.10462498664856,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 15.990583300590515,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9929186996808315,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9929186996808315
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 38.788042,
+            "exec_ms": 16.10462498664856,
+            "returncode": 0,
+            "stdout_sha256": "94947a923f50ee5b2f7f990b7bd52b86be316ef0c63096a20e31aa1bc7535078",
+            "stderr_sha256": "556bbfaf6f12a13144acadcae91e570188a11c596679d45d4fee3de47dfc06a8",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 38.823833,
+            "exec_ms": 15.990583300590515,
+            "returncode": 0,
+            "stdout_sha256": "94947a923f50ee5b2f7f990b7bd52b86be316ef0c63096a20e31aa1bc7535078",
+            "stderr_sha256": "556bbfaf6f12a13144acadcae91e570188a11c596679d45d4fee3de47dfc06a8",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "gcbench",
+      "variant": "js",
+      "script": "test/benchmark/larceny/gcbench.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/gcbench.js",
+        "sha256": "a4ce81ae58b27d4be34281f236227038d0a2f412f67e69fb7713a7b813015e28",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/gcbench.js",
+        "sha256": "a4ce81ae58b27d4be34281f236227038d0a2f412f67e69fb7713a7b813015e28",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/gcbench.js",
+      "candidate_script": "test/benchmark/larceny/gcbench.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 524.4573333263397,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 501.85054165124893,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9568948887954173,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9568948887954173
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 557.906792,
+            "exec_ms": 524.4573333263397,
+            "returncode": 0,
+            "stdout_sha256": "87965fa4e4c17c89f50d187c950b4a4d7a7bd969ee9f5ab73a6ad5798f303f9f",
+            "stderr_sha256": "785097db7ed1c30be7ec70c158305c0fa1124f4066b088b4b7b17e580622cc9a",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 535.6055,
+            "exec_ms": 501.85054165124893,
+            "returncode": 0,
+            "stdout_sha256": "87965fa4e4c17c89f50d187c950b4a4d7a7bd969ee9f5ab73a6ad5798f303f9f",
+            "stderr_sha256": "3a035f47b1064d4ad6b9359a1e1fe7e06233acd8690f92da265e7935230063ef",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "paraffins",
+      "variant": "js",
+      "script": "test/benchmark/larceny/paraffins.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/paraffins.js",
+        "sha256": "b20b3b843c6891b8fae195ac06e35e2fe0e5e679b965c2a90a1b4a26564ccc28",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/paraffins.js",
+        "sha256": "b20b3b843c6891b8fae195ac06e35e2fe0e5e679b965c2a90a1b4a26564ccc28",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/paraffins.js",
+      "candidate_script": "test/benchmark/larceny/paraffins.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 2.2410417199134827,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 2.330749988555908,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0400297182534777,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0400297182534777
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 62.140875,
+            "exec_ms": 2.2410417199134827,
+            "returncode": 0,
+            "stdout_sha256": "0c3e29e89019d3974749c18d39a8f299b141a4318eff8fa119179995ffdf3e68",
+            "stderr_sha256": "1e1efb06c08d54392d512cd171e2b6f497f101bc7c60944fa0096c8c66da7fa9",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 61.489542,
+            "exec_ms": 2.330749988555908,
+            "returncode": 0,
+            "stdout_sha256": "0c3e29e89019d3974749c18d39a8f299b141a4318eff8fa119179995ffdf3e68",
+            "stderr_sha256": "943057c62e64ed1ad286d3d98614783a023ff4d1c9a9180c7df5f1c963e1c6e7",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "pnpoly",
+      "variant": "js",
+      "script": "test/benchmark/larceny/pnpoly.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/pnpoly.js",
+        "sha256": "2b5482fb81257154bc62c4271d6ec8753408e518e3b8e332dc6c8b85669903d6",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/pnpoly.js",
+        "sha256": "2b5482fb81257154bc62c4271d6ec8753408e518e3b8e332dc6c8b85669903d6",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/pnpoly.js",
+      "candidate_script": "test/benchmark/larceny/pnpoly.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 76.09754168987274,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 74.57779163122177,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9800289204499595,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9800289204499595
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 108.753,
+            "exec_ms": 76.09754168987274,
+            "returncode": 0,
+            "stdout_sha256": "48b9e7c29ba4baa6444d0f91a71c26af203f4cd7f5022152da3019b526fb5a3f",
+            "stderr_sha256": "4e3f90a8589ef40d565698c3d3d578aec93e3eb2196f4e7c978930c1bb582d5a",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 108.336834,
+            "exec_ms": 74.57779163122177,
+            "returncode": 0,
+            "stdout_sha256": "48b9e7c29ba4baa6444d0f91a71c26af203f4cd7f5022152da3019b526fb5a3f",
+            "stderr_sha256": "4e3f90a8589ef40d565698c3d3d578aec93e3eb2196f4e7c978930c1bb582d5a",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "puzzle",
+      "variant": "js",
+      "script": "test/benchmark/larceny/puzzle.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/puzzle.js",
+        "sha256": "07e1a4172c2867862e487275f94b3c1465ab56d6e4ce2232debd79156908b3ec",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/puzzle.js",
+        "sha256": "07e1a4172c2867862e487275f94b3c1465ab56d6e4ce2232debd79156908b3ec",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/puzzle.js",
+      "candidate_script": "test/benchmark/larceny/puzzle.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 30.01766663789749,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 29.497291684150696,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9826643769476133,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9826643769476133
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 65.842791,
+            "exec_ms": 30.01766663789749,
+            "returncode": 0,
+            "stdout_sha256": "d73d157fe7f7e4ebec4df769edfd421e64fd2826ef1221b31b2fce743dfb70f9",
+            "stderr_sha256": "6f1a869c925e030a9657ffc338c8730c10539a2be51c075462b7c59976a936d4",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 65.355667,
+            "exec_ms": 29.497291684150696,
+            "returncode": 0,
+            "stdout_sha256": "d73d157fe7f7e4ebec4df769edfd421e64fd2826ef1221b31b2fce743dfb70f9",
+            "stderr_sha256": "6f1a869c925e030a9657ffc338c8730c10539a2be51c075462b7c59976a936d4",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "quicksort",
+      "variant": "js",
+      "script": "test/benchmark/larceny/quicksort.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/quicksort.js",
+        "sha256": "02fc9074f65071e7dc81951402e597f7d27949d5f84b4d042e8efc5fb8030a98",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/quicksort.js",
+        "sha256": "02fc9074f65071e7dc81951402e597f7d27949d5f84b4d042e8efc5fb8030a98",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/quicksort.js",
+      "candidate_script": "test/benchmark/larceny/quicksort.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 19.05066668987274,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 18.950124979019165,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9947224046018808,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9947224046018808
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 49.058417,
+            "exec_ms": 19.05066668987274,
+            "returncode": 0,
+            "stdout_sha256": "4f7340b8a6461ec80222f46282289e87c483cb1bb408754b897258ce0c9b7c01",
+            "stderr_sha256": "f15bb4c47fdbcf1c3a5481a90bd4d033bedcd92f44013bf5ea68a267e491bc7d",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 48.283292,
+            "exec_ms": 18.950124979019165,
+            "returncode": 0,
+            "stdout_sha256": "4f7340b8a6461ec80222f46282289e87c483cb1bb408754b897258ce0c9b7c01",
+            "stderr_sha256": "f15bb4c47fdbcf1c3a5481a90bd4d033bedcd92f44013bf5ea68a267e491bc7d",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "larceny",
+      "name": "ray",
+      "variant": "js",
+      "script": "test/benchmark/larceny/ray.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/ray.js",
+        "sha256": "e19331e46ad88d2caaffc6e432c7ac9b863a4cd7a17f940b53595a811112552f",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny/ray.js",
+        "sha256": "e19331e46ad88d2caaffc6e432c7ac9b863a4cd7a17f940b53595a811112552f",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/larceny",
+        "source_tree_sha256": "e38dc7e2aae14aae324a211737cf31c6e87cf6c639a741da33ba091196461435"
+      },
+      "control_script": "test/benchmark/larceny/ray.js",
+      "candidate_script": "test/benchmark/larceny/ray.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 5.2673749923706055,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 5.273166716098785,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0010995464983163,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0010995464983163
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 40.909875,
+            "exec_ms": 5.2673749923706055,
+            "returncode": 0,
+            "stdout_sha256": "a99a4a8b836e790842612b0089d08a84affd1124969ece2a412093ea2cf4672d",
+            "stderr_sha256": "6f24d1f733c481749f663a67464ee6a1f3d3720b4196a79fc28c6b3d9cd6839c",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 41.019458,
+            "exec_ms": 5.273166716098785,
+            "returncode": 0,
+            "stdout_sha256": "a99a4a8b836e790842612b0089d08a84affd1124969ece2a412093ea2cf4672d",
+            "stderr_sha256": "6f24d1f733c481749f663a67464ee6a1f3d3720b4196a79fc28c6b3d9cd6839c",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "text",
+      "name": "fast_diff",
+      "variant": "js",
+      "script": "test/benchmark/text/fast_diff.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/fast_diff.js",
+        "sha256": "aaa9ba17140a375aafa94ee1cb655a4cd81b934c538cb27814f58ca331a6902a",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/fast_diff.js",
+        "sha256": "aaa9ba17140a375aafa94ee1cb655a4cd81b934c538cb27814f58ca331a6902a",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "control_script": "test/benchmark/text/fast_diff.js",
+      "candidate_script": "test/benchmark/text/fast_diff.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 1953.536,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 1972.79,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0098559739876818,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0098559739876818
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 2479.941,
+            "exec_ms": 1953.536,
+            "returncode": 0,
+            "stdout_sha256": "f9e4a7219f99aeb81220207a57690fb4c9211a0117288e6f8152d06e57414072",
+            "stderr_sha256": "223430ecd81e204742d0d1153675bc10d3d0ae509da244481c963f1f51cbc57b",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 2529.842875,
+            "exec_ms": 1972.79,
+            "returncode": 0,
+            "stdout_sha256": "f9e4a7219f99aeb81220207a57690fb4c9211a0117288e6f8152d06e57414072",
+            "stderr_sha256": "844039b66d112e64f76a673e5d14b8486274a3693aa8c6663d71dae5f586484e",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "text",
+      "name": "microdiff",
+      "variant": "js",
+      "script": "test/benchmark/text/microdiff.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/microdiff.js",
+        "sha256": "010083ba2b26117e656015605ff95f21ec0117e5a69746fb693df00b46713656",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/microdiff.js",
+        "sha256": "010083ba2b26117e656015605ff95f21ec0117e5a69746fb693df00b46713656",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "control_script": "test/benchmark/text/microdiff.js",
+      "candidate_script": "test/benchmark/text/microdiff.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 944.798,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 816.309,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.8640037341315286,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.8640037341315286
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 1020.608209,
+            "exec_ms": 944.798,
+            "returncode": 0,
+            "stdout_sha256": "981cf4f5ceb402f72df4f7130b6e95c0fddb92ce30a1efc7fe3c365d38aa3299",
+            "stderr_sha256": "7f38286343e5b38347d921fd44633ccf9c0655c010ea2c27e280c7ddd0f586d2",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 892.404208,
+            "exec_ms": 816.309,
+            "returncode": 0,
+            "stdout_sha256": "981cf4f5ceb402f72df4f7130b6e95c0fddb92ce30a1efc7fe3c365d38aa3299",
+            "stderr_sha256": "167d11811a23e3aeeafa41a444fc48eddb35e90c1435709d150bd7bb7c004e0b",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "text",
+      "name": "hyphen",
+      "variant": "js",
+      "script": "test/benchmark/text/hyphen.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/hyphen.js",
+        "sha256": "cbe9668ee61cb04f1505fb5d7d80fa8c103a0f435da1d63cc3bee6dbdbe48c9a",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/hyphen.js",
+        "sha256": "cbe9668ee61cb04f1505fb5d7d80fa8c103a0f435da1d63cc3bee6dbdbe48c9a",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "control_script": "test/benchmark/text/hyphen.js",
+      "candidate_script": "test/benchmark/text/hyphen.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 97.183,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 96.865,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9967278227673563,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9967278227673563
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 332.127208,
+            "exec_ms": 97.183,
+            "returncode": 0,
+            "stdout_sha256": "e228ab6b12cb86ab751e492c889b9707be7f0751b15347db394486d1dfc7c815",
+            "stderr_sha256": "7e868269fd84fe74d252bc25043bb383f6c3b3c02c8e8075f9c6a89216ce6179",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 334.089667,
+            "exec_ms": 96.865,
+            "returncode": 0,
+            "stdout_sha256": "e228ab6b12cb86ab751e492c889b9707be7f0751b15347db394486d1dfc7c815",
+            "stderr_sha256": "43aa07ab603ff7e41e26ee978091d95cfe66f5cd6c7c8292fe37f695c4ec7575",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "text",
+      "name": "prettier_ast",
+      "variant": "js",
+      "script": "test/benchmark/text/prettier_ast.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/prettier_ast.js",
+        "sha256": "911df9164354f6c97e7bc5ad56c8afac64aec502bafdd951c95f3aea7268a309",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/prettier_ast.js",
+        "sha256": "911df9164354f6c97e7bc5ad56c8afac64aec502bafdd951c95f3aea7268a309",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "control_script": "test/benchmark/text/prettier_ast.js",
+      "candidate_script": "test/benchmark/text/prettier_ast.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 2503.4462916851044,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 2534.2429583072662,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.012301708538525,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.012301708538525
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 2659.336792,
+            "exec_ms": 2503.4462916851044,
+            "returncode": 0,
+            "stdout_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+            "stderr_sha256": "215d9cbd72dfa22da811b9908183f6308a08a1b1478999534055b1dcd9afff50",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 2691.127084,
+            "exec_ms": 2534.2429583072662,
+            "returncode": 0,
+            "stdout_sha256": "d069c16c1571b23ee745a32f57303ab2ae58f6cae99ba230b17cddb6178b2427",
+            "stderr_sha256": "913445c4be5bda12c8dbaca98943f3efbd56adadcd3ad544646e9363500ce4e9",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "text",
+      "name": "text_search",
+      "variant": "js",
+      "script": "test/benchmark/text/text_search.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/text_search.js",
+        "sha256": "3778d1fc127bb2ea6105d78affd906f15f957bd5c31ff933b427fe3cd2b0a4af",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/text_search.js",
+        "sha256": "3778d1fc127bb2ea6105d78affd906f15f957bd5c31ff933b427fe3cd2b0a4af",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "control_script": "test/benchmark/text/text_search.js",
+      "candidate_script": "test/benchmark/text/text_search.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 43681.06833332777,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 69808.45754170418,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.5981398854304518,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.5981398854304518
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 43801.636584,
+            "exec_ms": 43681.06833332777,
+            "returncode": 0,
+            "stdout_sha256": "3abf84e641fb35487a74b785672a04d4879de3c23f9ad809fa88395fdbd86e48",
+            "stderr_sha256": "0675713bb8e372187fc6fb62bf2b810eb049180438c8879ee99bb33b560a25ac",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 70030.812208,
+            "exec_ms": 69808.45754170418,
+            "returncode": 0,
+            "stdout_sha256": "3abf84e641fb35487a74b785672a04d4879de3c23f9ad809fa88395fdbd86e48",
+            "stderr_sha256": "4b96c90a9e0bc92e3f793d3c01a897d02b9ab93fef52aec8ff195e5a2ea3ffca",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "text",
+      "name": "three_way_merge",
+      "variant": "js",
+      "script": "test/benchmark/text/three_way_merge.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/three_way_merge.js",
+        "sha256": "68d15f68c376a722e50ad598990d33ad4cb0376625fb98480d441d3b333960c8",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/three_way_merge.js",
+        "sha256": "68d15f68c376a722e50ad598990d33ad4cb0376625fb98480d441d3b333960c8",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "control_script": "test/benchmark/text/three_way_merge.js",
+      "candidate_script": "test/benchmark/text/three_way_merge.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 10216.609833300114,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 9995.983583331108,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9784051408863736,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9784051408863736
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 10290.664125,
+            "exec_ms": 10216.609833300114,
+            "returncode": 0,
+            "stdout_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+            "stderr_sha256": "39056747cdf4a81b6e4e2cf5e6a27b330edd6038e015b2f9200b2822cb226370",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 10040.550125,
+            "exec_ms": 9995.983583331108,
+            "returncode": 0,
+            "stdout_sha256": "1224d06a3790e8b7ae598a15b8ef5d9f82c9f75c0f0159b6da5bcbd3b157a3eb",
+            "stderr_sha256": "0a1f31ff8d3554338d236a63b5ebfcbb1fdfa4a96ce55a8ad76d2b6240b92687",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "text",
+      "name": "log_pipeline",
+      "variant": "js",
+      "script": "test/benchmark/text/log_pipeline.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/log_pipeline.js",
+        "sha256": "798df1c71411f12080859b8789392b9be759b211f01ea8e2106ae9e76d392a41",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/log_pipeline.js",
+        "sha256": "798df1c71411f12080859b8789392b9be759b211f01ea8e2106ae9e76d392a41",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "control_script": "test/benchmark/text/log_pipeline.js",
+      "candidate_script": "test/benchmark/text/log_pipeline.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 16893.5747500062,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 40079.57383334637,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 2.3724744126953747,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 2.3724744126953747
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 16983.961958,
+            "exec_ms": 16893.5747500062,
+            "returncode": 0,
+            "stdout_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+            "stderr_sha256": "2effd8bc8eb8d4c62ee2909af5e2ae82908f0e7861ffab279d0a07db0cac9401",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 40192.577041,
+            "exec_ms": 40079.57383334637,
+            "returncode": 0,
+            "stdout_sha256": "395ff6bbd84ccecae8acca8c818c7aa468df5e9ac68502fed4f23610bc2ab387",
+            "stderr_sha256": "3751778a438e9696e982fc9403009c9ef3f54c0154c4dec653b05d86191b68e9",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "jetstream",
+      "name": "cube3d",
+      "variant": "js",
+      "script": "temp/_ljs_jetstream_cube3d.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_cube3d.js",
+        "sha256": "eb8f40cda4b5d34b3e5f7aff892a1d4cf169bc02ba4eaa2abb18a6c78e323682",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_cube3d.js",
+        "sha256": "eb8f40cda4b5d34b3e5f7aff892a1d4cf169bc02ba4eaa2abb18a6c78e323682",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "control_script": "temp/_ljs_jetstream_cube3d.js",
+      "candidate_script": "temp/_ljs_jetstream_cube3d.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 423.597,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 396.074,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9350255077349463,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9350255077349463
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 721.465292,
+            "exec_ms": 423.597,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "004f97bed9c9d9c624c4de8ac61ec55c83f9539ae72b946f33c202c2f1c8b74f",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 693.742959,
+            "exec_ms": 396.074,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "0d853b1aa0bc1b9a225524123553e72d4c8d1bf4993b85050ce5a426ccea7cbf",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "jetstream",
+      "name": "navier_stokes",
+      "variant": "js",
+      "script": "temp/_ljs_jetstream_navier_stokes.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_navier_stokes.js",
+        "sha256": "c4a7f1a40211632a1f446ad7ee471a9bb85e5f2f91d529eb39d9cd6aa878e159",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_navier_stokes.js",
+        "sha256": "c4a7f1a40211632a1f446ad7ee471a9bb85e5f2f91d529eb39d9cd6aa878e159",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "control_script": "temp/_ljs_jetstream_navier_stokes.js",
+      "candidate_script": "temp/_ljs_jetstream_navier_stokes.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 246.959,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 235.257,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.952615616357371,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.952615616357371
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 538.965292,
+            "exec_ms": 246.959,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "f7b1f1e0ea0dc7f8a385a7fa2ac603c80a1540a5708df6d7be002f8ac2176d2b",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 533.088083,
+            "exec_ms": 235.257,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "750a85a9921f3a9b84b663c0311e39c5de9b0df0b641ef1072626b2651a031bc",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "jetstream",
+      "name": "splay",
+      "variant": "js",
+      "script": "temp/_ljs_jetstream_splay.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_splay.js",
+        "sha256": "97e6d95220aa8c7822480e81bcdf8dbfa5ee7329dd8d723e94afadb150f5d1e0",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_splay.js",
+        "sha256": "97e6d95220aa8c7822480e81bcdf8dbfa5ee7329dd8d723e94afadb150f5d1e0",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "control_script": "temp/_ljs_jetstream_splay.js",
+      "candidate_script": "temp/_ljs_jetstream_splay.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 351.851,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 350.026,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9948131453370888,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9948131453370888
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 878.385166,
+            "exec_ms": 351.851,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "d714901c663eb048dc3029d8377f5576bd3e987cb3647d1515abad04febaa86a",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 899.367875,
+            "exec_ms": 350.026,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "88ab7d62d1bb1383036b0de31005fa357159c493fa57f5f189d1f02c79941f70",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "jetstream",
+      "name": "hashmap",
+      "variant": "js",
+      "script": "temp/_ljs_jetstream_hashmap.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_hashmap.js",
+        "sha256": "8f60fd0c47951f3a0cacc53e81327f68f5c657ee0eba4b73e3eb7f874c0f0b77",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_hashmap.js",
+        "sha256": "8f60fd0c47951f3a0cacc53e81327f68f5c657ee0eba4b73e3eb7f874c0f0b77",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "control_script": "temp/_ljs_jetstream_hashmap.js",
+      "candidate_script": "temp/_ljs_jetstream_hashmap.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 1227.207,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 1247.532,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0165619980981202,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0165619980981202
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 1328.61875,
+            "exec_ms": 1227.207,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "711de173650dbc2bc890531d9bd8658338307726de3defcfc2382ff2c88a4f16",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 1345.052292,
+            "exec_ms": 1247.532,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "bbade751867ca17834be1c298caf6bd3e72cebaeab0a67bf85257beb76b8aee8",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "jetstream",
+      "name": "crypto_sha1",
+      "variant": "js",
+      "script": "temp/_ljs_jetstream_crypto_sha1.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_crypto_sha1.js",
+        "sha256": "44b15bc1f7b5ff630540a8fed0b340e538b2db7fcdaeb44c8d9059329c1f56f0",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_crypto_sha1.js",
+        "sha256": "44b15bc1f7b5ff630540a8fed0b340e538b2db7fcdaeb44c8d9059329c1f56f0",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "control_script": "temp/_ljs_jetstream_crypto_sha1.js",
+      "candidate_script": "temp/_ljs_jetstream_crypto_sha1.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 311.546,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 306.903,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 0.9850969038280062,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 0.9850969038280062
+      },
+      "candidate_wins": 1,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 398.423667,
+            "exec_ms": 311.546,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "8f274f880b90196bef9da891dff9106683469cd88410263f3df86feb4619d43a",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 390.230542,
+            "exec_ms": 306.903,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "8f274f880b90196bef9da891dff9106683469cd88410263f3df86feb4619d43a",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    },
+    {
+      "suite": "jetstream",
+      "name": "raytrace3d",
+      "variant": "js",
+      "script": "temp/_ljs_jetstream_raytrace3d.js",
+      "control_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_raytrace3d.js",
+        "sha256": "8edaed34374b38d23290c0d75e56ae2a1594bf298a05424dd435145be8d61729",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "candidate_source": {
+        "path": "/Users/henryluo/Projects/Lambda/temp/_ljs_jetstream_raytrace3d.js",
+        "sha256": "8edaed34374b38d23290c0d75e56ae2a1594bf298a05424dd435145be8d61729",
+        "source_root": "/Users/henryluo/Projects/Lambda/temp",
+        "source_tree_sha256": "b912308e7f8a4c8ef7c324fcd3fca71b252b99226324266c3de250613bf77430"
+      },
+      "control_script": "temp/_ljs_jetstream_raytrace3d.js",
+      "candidate_script": "temp/_ljs_jetstream_raytrace3d.js",
+      "pairs_requested": 1,
+      "pairs_valid": 1,
+      "timeout_s": 180,
+      "control": {
+        "median_exec_ms": 530.071,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate": {
+        "median_exec_ms": 557.327,
+        "status_counts": {
+          "ok": 1
+        },
+        "successful_samples": 1
+      },
+      "candidate_over_control_median_ratio": 1.0514195268181055,
+      "candidate_over_control_paired_uncertainty": {
+        "method": "paired_bootstrap_ratio_of_medians",
+        "confidence": 0.95,
+        "tail": "one_sided_upper",
+        "seed": 260026,
+        "resamples_requested": 10000,
+        "resamples_valid": 10000,
+        "upper_bound": 1.0514195268181055
+      },
+      "candidate_wins": 0,
+      "stdout_equal_all": true,
+      "expected_stdout_matches_all": null,
+      "pairs": [
+        {
+          "pair_index": 1,
+          "order": "control,candidate",
+          "control": {
+            "status": "ok",
+            "wall_ms": 729.27725,
+            "exec_ms": 530.071,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "8873f8d2cfa56e530fa2587cfd39e430adc589538adcb735c7b7f50602117f6f",
+            "stdout_contains_expected": null
+          },
+          "candidate": {
+            "status": "ok",
+            "wall_ms": 781.765708,
+            "exec_ms": 557.327,
+            "returncode": 0,
+            "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "stderr_sha256": "e0a71e4ef10b082149585add30f2ffd313cd93ab944abfffa704fc47915c55e6",
+            "stdout_contains_expected": null
+          },
+          "stdout_equal": true,
+          "expected_stdout_matches": true
+        }
+      ],
+      "status": "ok"
+    }
+  ]
+}

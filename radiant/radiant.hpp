@@ -94,6 +94,8 @@ BrowsingSession* session_create_for_profile(struct NetworkThreadPool* pool,
 void session_destroy(BrowsingSession* session);
 DomDocument* session_navigate(BrowsingSession* session, struct UiContext* uicon,
                               const char* url, int vw, int vh);
+DomDocument* session_navigate_loaded(BrowsingSession* session, struct UiContext* uicon,
+                                    Url* resolved, DomDocument* loaded);
 DomDocument* session_go_back(BrowsingSession* session, struct UiContext* uicon,
                              int vw, int vh);
 DomDocument* session_go_forward(BrowsingSession* session, struct UiContext* uicon,
@@ -312,6 +314,7 @@ inline void radiant_retain_webview_srcdoc(WebViewProp* webview, lam::PoolPtr<con
 
 void render(struct GLFWwindow* window);
 DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height);
+DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url);
 void reflow_html_doc(DomDocument* doc);
 void update_window_title(const char* title);
 void repaint_window(void);
