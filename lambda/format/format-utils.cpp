@@ -839,7 +839,7 @@ const MarkupOutputRules WIKI_RULES = {
     // escaping
     .escape_config = &WIKI_ESCAPE_CONFIG,
     // custom handler
-    .custom_element_handler = NULL,
+    .custom_element_handler = wiki_custom_handler,
     // container tags
     .container_tags = {"doc", "document", "body", "span", NULL, NULL, NULL, NULL},
     .skip_tags      = {"meta", NULL, NULL, NULL},

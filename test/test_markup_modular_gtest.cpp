@@ -48,9 +48,9 @@ static String* make_string(const char* text) {
     return result;
 }
 
-// Helper to parse markup and return JSON
+// Helper to parse markup and return a requested format
 // Uses "auto" type to trigger MIME detection from filename extension
-static String* parse_to_json(const char* content, const char* filename) {
+static String* parse_to_format(const char* content, const char* filename, const char* output_format) {
     String* type_str = make_string("auto");
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, filename);
@@ -62,10 +62,14 @@ static String* parse_to_json(const char* content, const char* filename) {
         return NULL;
     }
 
-    String* json_type = make_string("json");
-    String* formatted = format_data(input->root, json_type, NULL, input->pool);
+    String* format_type = make_string(output_format);
+    String* formatted = format_data(input->root, format_type, NULL, input->pool);
     free(content_copy);
     return formatted;
+}
+
+static String* parse_to_json(const char* content, const char* filename) {
+    return parse_to_format(content, filename, "json");
 }
 
 // Test fixture
@@ -563,6 +567,141 @@ TEST_F(FormatAdapterTest, WikiDetection) {
 
     // Should parse successfully
     EXPECT_GT(json->len, 0);
+}
+
+TEST_F(FormatAdapterTest, WikiTablesUseRowsAndCells) {
+    const char* content =
+        "{|\n"
+        "|-\n"
+        "| Cell 1 || Cell 2 || Cell 3\n"
+        "|-\n"
+        "| Row 2 Cell 1 || Row 2 Cell 2 || Row 2 Cell 3\n"
+        "|}\n"
+        "\n"
+        "After table.\n";
+    String* json = parse_to_json(content, "test.wiki");
+    ASSERT_NE(json, nullptr);
+
+    int rows = 0;
+    int cells = 0;
+    for (const char* p = json->chars; (p = strstr(p, "\"$\": \"tr\"")); p++) rows++;
+    for (const char* p = json->chars; (p = strstr(p, "\"$\": \"td\"")); p++) cells++;
+    EXPECT_EQ(rows, 2);
+    EXPECT_EQ(cells, 6);
+    EXPECT_TRUE(json_contains(json->chars, "Row 2 Cell 3"));
+    EXPECT_TRUE(json_contains(json->chars, "After table."));
+    EXPECT_FALSE(json_contains(json->chars, "\"{\""));
+    EXPECT_FALSE(json_contains(json->chars, "\"}\""));
+}
+
+TEST_F(FormatAdapterTest, WikiTableAttributesHeadersAndInlineMarkup) {
+    const char* content =
+        "{| class=\"wikitable\" border=\"1\"\n"
+        "|+ People\n"
+        "|-\n"
+        "! colspan=\"3\" | Name !! Age !! City\n"
+        "|-\n"
+        "| '''John''' || 25 || [[New York|NYC]]\n"
+        "|}\n";
+    String* json = parse_to_json(content, "test.wiki");
+    ASSERT_NE(json, nullptr);
+
+    EXPECT_TRUE(json_contains(json->chars, "\"class\": \"wikitable\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"border\": \"1\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"colspan\": \"3\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"caption\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"th\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"td\""));
+    EXPECT_TRUE(json_contains(json->chars, "NYC"));
+    EXPECT_FALSE(json_contains(json->chars, "\"class=\\\"wikitable\\\"\""));
+}
+
+TEST_F(FormatAdapterTest, WikiMultilineTemplateArgumentsAreNotATable) {
+    const char* content =
+        "== Templates ==\n\n"
+        "{{nested{{template}}example}}\n\n"
+        "{{#switch: value\n"
+        "| case1 = result1\n"
+        "| case2 = result2\n"
+        "| default result\n"
+        "}}\n\n"
+        "== Comments ==\n\n"
+        "Visible text.\n\n"
+        "{|\n|-\n| Real || Table\n|}\n\n"
+        "== After ==\n";
+    String* json = parse_to_json(content, "test.wiki");
+    ASSERT_NE(json, nullptr);
+
+    int tables = 0;
+    for (const char* p = json->chars; (p = strstr(p, "\"$\": \"table\"")); p++) tables++;
+    EXPECT_EQ(tables, 1);
+    EXPECT_TRUE(json_contains(json->chars, "\"name\": \"nested{{template}}example\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"name\": \"#switch\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"args\": \" value\\n| case1 = result1\\n| case2 = result2"));
+    EXPECT_TRUE(json_contains(json->chars, "data-wiki-parser-function"));
+    EXPECT_TRUE(json_contains(json->chars, "\"$\": \"h2\""));
+    EXPECT_TRUE(json_contains(json->chars, "Comments"));
+    EXPECT_TRUE(json_contains(json->chars, "Visible text."));
+    EXPECT_TRUE(json_contains(json->chars, "After"));
+}
+
+TEST_F(FormatAdapterTest, WikiTemplateRoundtripKeepsSource) {
+    const char* content =
+        "{{main|Main article}}\n\n"
+        "{{nested{{template}}example}}\n\n"
+        "{{#switch: value\n| case1 = result1\n| default result\n}}\n\n"
+        "{{outer|{{inner|x}}|[[Page|label]]}}\n\n"
+        "{{{1|fallback}}}\n";
+    String* wiki = parse_to_format(content, "test.wiki", "wiki");
+    ASSERT_NE(wiki, nullptr);
+    EXPECT_TRUE(json_contains(wiki->chars, "{{main|Main article}}"));
+    EXPECT_TRUE(json_contains(wiki->chars, "{{nested{{template}}example}}"));
+    EXPECT_TRUE(json_contains(wiki->chars,
+        "{{#switch: value\n| case1 = result1\n| default result\n}}"));
+    EXPECT_TRUE(json_contains(wiki->chars, "{{outer|{{inner|x}}|[[Page|label]]}}"));
+    EXPECT_TRUE(json_contains(wiki->chars, "{{{1|fallback}}}"));
+
+    String* json = parse_to_json(content, "test.wiki");
+    ASSERT_NE(json, nullptr);
+    int vars = 0;
+    for (const char* p = json->chars; (p = strstr(p, "\"$\": \"var\"")); p++) vars++;
+    EXPECT_EQ(vars, 5);
+    EXPECT_TRUE(json_contains(json->chars, "\"name\": \"main\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"args\": \"Main article\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"source\": \"{{main|Main article}}\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"name\": \"outer\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"args\": \"{{inner|x}}|[[Page|label]]\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"data-wiki-parameter\": \"true\""));
+    EXPECT_TRUE(json_contains(json->chars, "\"default\": \"fallback\""));
+
+    String* html = parse_to_format(content, "test.wiki", "html");
+    ASSERT_NE(html, nullptr);
+    EXPECT_TRUE(json_contains(html->chars, ">{{main|Main article}}</var>"));
+    EXPECT_TRUE(json_contains(html->chars, ">{{{1|fallback}}}</var>"));
+}
+
+TEST_F(FormatAdapterTest, WikiUnclosedTemplateStaysLiteral) {
+    String* json = parse_to_json("Before {{unclosed after.\n", "test.wiki");
+    ASSERT_NE(json, nullptr);
+    EXPECT_TRUE(json_contains(json->chars, "Before {{unclosed after."));
+    EXPECT_FALSE(json_contains(json->chars, "\"$\": \"var\""));
+}
+
+TEST_F(FormatAdapterTest, WikiNowikiDoesNotLoadTemplates) {
+    const char* content =
+        "<nowiki>{{not a template}}</nowiki>\n\n"
+        "<nowiki>\n'''not bold'''\n{{not loaded}}\n</nowiki>\n";
+    String* json = parse_to_json(content, "test.wiki");
+    ASSERT_NE(json, nullptr);
+    EXPECT_FALSE(json_contains(json->chars, "\"$\": \"var\""));
+    EXPECT_TRUE(json_contains(json->chars, "data-wiki-nowiki"));
+    EXPECT_TRUE(json_contains(json->chars, "{{not loaded}}"));
+    EXPECT_FALSE(json_contains(json->chars, "\"$\": \"strong\""));
+
+    String* wiki = parse_to_format(content, "test.wiki", "wiki");
+    ASSERT_NE(wiki, nullptr);
+    EXPECT_TRUE(json_contains(wiki->chars, "<nowiki>{{not a template}}</nowiki>"));
+    EXPECT_TRUE(json_contains(wiki->chars, "{{not loaded}}\n</nowiki>"));
 }
 
 // Test Org-mode format detection

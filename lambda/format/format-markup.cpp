@@ -677,6 +677,54 @@ void MarkupEmitter::format_element(const ElementReader& elem) {
 // Format-Specific Custom Element Handlers
 // ==============================================================================
 
+bool wiki_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem) {
+    (void)sb;
+    const char* tag = elem.tagName();
+    if (!tag) return false;
+    if (strcmp(tag, "span") == 0) {
+        ItemReader nowiki = elem.get_attr("data-wiki-nowiki");
+        if (nowiki.isString()) {
+            ItemReader source = elem.get_attr("source");
+            MarkupEmitter* em = (MarkupEmitter*)ctx;
+            if (source.isString()) {
+                em->write_text(source.cstring());
+            } else {
+                em->write_text("<nowiki>");
+                em->format_children_raw(elem);
+                em->write_text("</nowiki>");
+            }
+            return true;
+        }
+    }
+    if (strcmp(tag, "var") == 0) {
+        ItemReader marker = elem.get_attr("data-wiki-template");
+        if (!marker.isString()) marker = elem.get_attr("data-wiki-parameter");
+        if (!marker.isString()) return false;
+    } else if (strcmp(tag, "wiki-template") != 0) {
+        return false;
+    }
+
+    MarkupEmitter* em = (MarkupEmitter*)ctx;
+    ItemReader source = elem.get_attr("source");
+    if (source.isString()) {
+        em->write_text(source.cstring());
+    } else {
+        // older trees retain only the name and unsplit argument text.
+        ItemReader name = elem.get_attr("name");
+        ItemReader parameter = elem.get_attr("data-wiki-parameter");
+        ItemReader function = elem.get_attr("data-wiki-parser-function");
+        ItemReader args = elem.get_attr(parameter.isString() ? "default" : "args");
+        em->write_text(parameter.isString() ? "{{{" : "{{");
+        if (name.isString()) em->write_text(name.cstring());
+        if (args.isString()) {
+            em->write_char(function.isString() ? ':' : '|');
+            em->write_text(args.cstring());
+        }
+        em->write_text(parameter.isString() ? "}}}" : "}}");
+    }
+    return true;
+}
+
 // Utility: get text content of a named child element
 static const char* get_child_text(const ElementReader& elem, const char* tag) {
     ElementReader child = elem.findChildElement(tag);
