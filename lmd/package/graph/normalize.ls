@@ -155,9 +155,10 @@ fn canonical_graph(graph) {
   >
 }
 
-fn is_mermaid_source_graph(graph) =>
+fn is_redeclaration_source_graph(graph) =>
   graph is element and model.tag(graph) == "graph" and
-    graph.flavor == "mermaid" and graph["ir-stage"] == "source"
+    (graph.flavor == "mermaid" or graph.flavor == "d2") and
+    graph["ir-stage"] == "source"
 
 fn is_dot_source_graph(graph) =>
   graph is element and model.tag(graph) == "graph" and
@@ -206,8 +207,8 @@ fn merged_source_node(groups, node) {
   let final_declaration = values[len(values) - 1];
   let attrs = merge_node_attrs_at(values, 0, {});
   <node *:attrs,
-    // mermaid redeclarations replace authored node content, while ports remain
-    // cumulative metadata attached to the graph-global node identity.
+    // Later declarations replace authored content; ports remain cumulative
+    // metadata attached to the graph-global node identity.
     for (child in model.child_items(final_declaration)
       where not (child is element and model.tag(child) == "port")) child
     for (declaration in values, port in node_ports(declaration)) port
@@ -230,7 +231,7 @@ fn merged_source_subgraph(groups, subgraph) {
   >
 }
 
-fn merge_mermaid_source_graph(graph) {
+fn merge_source_redeclarations(graph) {
   let attrs = {*:map(graph), 'ir-stage': "canonical"};
   let groups = node_declaration_groups(graph);
   <graph *:attrs,
@@ -427,15 +428,15 @@ pub fn validate(graph) {
 }
 
 pub fn normalize(graph) {
-  // mermaid parser output retains redeclarations; merge that source stage before
+  // Source graph readers retain node redeclarations; merge them before
   // canonical uniqueness checks while authored canonical Mark keeps strict IDs.
   let dot_result = if (is_dot_source_graph(graph)) graphviz_normalize.normalize(graph)
     else {graph: graph, diagnostics: []};
-  let resolved = if (is_mermaid_source_graph(dot_result.graph)) {
-    let merged = merge_mermaid_source_graph(dot_result.graph);
-    if (merged["diagram-type"] == "class") mermaid_class.adapt(merged)
-    else if (merged["diagram-type"] == "er") mermaid_er.adapt(merged)
-    else if (merged["diagram-type"] == "state") mermaid_state.adapt(merged)
+  let resolved = if (is_redeclaration_source_graph(dot_result.graph)) {
+    let merged = merge_source_redeclarations(dot_result.graph);
+    if (merged.flavor == "mermaid" and merged["diagram-type"] == "class") mermaid_class.adapt(merged)
+    else if (merged.flavor == "mermaid" and merged["diagram-type"] == "er") mermaid_er.adapt(merged)
+    else if (merged.flavor == "mermaid" and merged["diagram-type"] == "state") mermaid_state.adapt(merged)
     else merged
   } else dot_result.graph;
   let canonical = if (resolved is element and string(name(resolved)) == "graph")

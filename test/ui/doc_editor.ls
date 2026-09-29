@@ -16,8 +16,10 @@ import dom
 import pdf_html: lambda.pdf.html
 import latex: lambda.latex.latex
 import latex_css: lambda.latex.css
+import math_renderer: lambda.doc.math.math
 import math_css: lambda.doc.math.css
 import graph_doc: lambda.graph.document
+import tikz: lambda.doc.tikz.tikz
 
 let PROJECT_ROOT = "."
 
@@ -125,18 +127,20 @@ fn is_latex_document(extension) {
 }
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
+fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
 fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
   else if (ext == "dot") { "dot" }
+  else if (ext == "d2") { "d2" }
   else { null }
 }
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_image_document(extension) or
+    is_pdf_document(extension) or is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null
 
 fn selected_source(file) {
@@ -167,6 +171,12 @@ fn selected_preview(file) {
       let parsed = input(selected_path, 'latex') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
       else { latex.render(parsed, null) ^ { <p class:"preview-error", "Unable to render selected LaTeX"> } }
+    }
+    else if (is_pgf_document(file["extension"])) {
+      // Reuse the parsed TikZ document so PGF fragments render inside the editor runtime.
+      let parsed = input(selected_path, {type:"tikz"}) ^ { null }
+      if (parsed == null) { <p class:"preview-error", "Unable to read selected PGF"> }
+      else { tikz.render_document(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PGF"> } }
     }
     else if (flavor != null) {
       // The graph document adapter installs Radiant's layout for this inline preview.
@@ -208,12 +218,13 @@ view <h4> { <h4 id:~.id, *[rendered_children(~)]> }
 view <h5> { <h5 id:~.id, *[rendered_children(~)]> }
 view <h6> { <h6 id:~.id, *[rendered_children(~)]> }
 view <p> { <p *[rendered_children(~)]> }
-view <div> { <div class:~.class, *[rendered_children(~)]> }
+view <div> { <div class:~.class, style:~.style, *[rendered_children(~)]> }
 view <nav> { <nav class:~.class, *[rendered_children(~)]> }
 view <dl> { <dl *[rendered_children(~)]> }
 view <dt> { <dt *[rendered_children(~)]> }
 view <dd> { <dd *[rendered_children(~)]> }
-view <span> { <span *[rendered_children(~)]> }
+// TikZ uses positioned spans for the drawing frame and math labels.
+view <span> { <span class:~.class, style:~.style, *[rendered_children(~)]> }
 view <strong> { <strong *[rendered_children(~)]> }
 view <em> { <em *[rendered_children(~)]> }
 view <del> { <del *[rendered_children(~)]> }
@@ -221,6 +232,18 @@ view <u> { <u *[rendered_children(~)]> }
 view <code> {
   if (~.type == "block") { <pre <code *[rendered_children(~)]>> }
   else { <code *[rendered_children(~)]> }
+}
+view <math> {
+  // Markup readers keep TeX source in math nodes; parse it for the shared typesetter.
+  let source = if (len(content(~)) > 0) content(~)[0] else ""
+  let parsed = if (~.flavor == "ascii") { null }
+    else { parse(source, {type: "math", flavor: "latex"}) ^ { null } }
+  let display = ~.type == "block"
+  let rendered = if (parsed == null) { null }
+    else { math_renderer.render_math(parsed, {display: display}) ^ { null } }
+  let body = if (rendered == null) { <code class:"math-error", source> } else { rendered }
+  if (display) { <div class:"math-display-container", body> }
+  else { body }
 }
 view <pre> { <pre *[rendered_children(~)]> }
 view <ul> { <ul *[rendered_children(~)]> }
@@ -321,7 +344,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PDF, Mermaid, DOT, and image files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PGF, PDF, Mermaid, DOT, D2, and image files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -561,7 +584,7 @@ on preview_tab(tab) {
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
       .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: #fcfcfd; }
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
-                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
+                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }

@@ -224,6 +224,7 @@ static void layout_table_cell_content(
 static bool table_cell_allows_percentage_resolution(LayoutContext* lycon,
                                                      ViewTable* table,
                                                      ViewTableCell* cell);
+static bool table_cell_has_percentage_height_child(ViewTableCell* cell);
 static float table_inter_spacing(ViewTable* table, bool horizontal);
 static int table_effective_column_count(ViewTable* table, TableMetadata* meta,
                                         const float* col_widths, int columns);
@@ -2695,7 +2696,10 @@ static float process_table_cell(LayoutContext* lycon, ViewTableCell* tcell, View
         }
     }
     layout_table_cell_content(lycon, cell, table);
-    if (!table_cell_allows_percentage_resolution(lycon, table, tcell)) {
+    // a second auto-height pass only changes cyclic percentage children;
+    // ordinary cells already used an auto height in the first pass.
+    if (!table_cell_allows_percentage_resolution(lycon, table, tcell) &&
+        table_cell_has_percentage_height_child(tcell)) {
         // A cyclic table-cell percentage computes to auto, so its final
         // intrinsic content must establish the row minimum rather than overflow it.
         layout_table_cell_content(

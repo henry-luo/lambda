@@ -1,0 +1,17 @@
+{
+  "name": "Doc editor typesets inline and display Markdown math",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1800},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "comprehensive_test.md"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_comprehensive_test_md .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "comprehensive_test.md"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lm_latex"}, "count": 56},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .math-display-container .lm_latex"}, "count": 34},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "π"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .math-error"}, "count": 0}
+  ]
+}

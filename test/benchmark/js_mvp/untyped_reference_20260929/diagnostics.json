@@ -1,0 +1,260 @@
+{
+  "binary_sha256": "e3b6effce178cf2568bdf7b4fff7e036763f487f06e56c8048bd33bfbc597545",
+  "runner_sha256": "2fc1c00fdd7e0fecfd5645d4a3b8e4b7bd988ea3301405c53d3cf6b2c114b47f",
+  "reference_sha256": "ec704810b832e50be782dddd71363a2b3731c45d648f53fdb47f3133d214eeed",
+  "work_matched": [
+    {
+      "id": "awfy/havlak",
+      "before": "lta_main(1, 1, 10, 10, 5)",
+      "after": "lta_main(1, 50, 10, 10, 5)",
+      "original_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy/havlak.ls",
+        "sha256": "67862404c496812639723e233c7581a73559b1b9b8e03dd87c37bda8ea114715",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/awfy",
+        "source_tree_sha256": "209827e6f32f748ff47d8bec094219c923de9740a1a54c058d3864497a0bf597"
+      },
+      "probe": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/awfy-havlak-matched.ls",
+      "probe_sha256": "c86e7ea3ddd3357cd06d37c961a519c4236af96032d300604fa1fbc57fd0f8fe",
+      "samples": [
+        {
+          "status": "ok",
+          "wall_ms": 2190.328792,
+          "exec_ms": 2037.36,
+          "returncode": 0,
+          "stdout_sha256": "91b734eea3a163fc45fdd663335d67516ae094d8aa375f520793eec660e8f90b",
+          "stderr_sha256": "26afd01ee8e471251fef0ba4eef4bd427958d919bdd5f28998d25a8f8e836b26",
+          "stdout_contains_expected": null,
+          "oracle_equal": true
+        },
+        {
+          "status": "ok",
+          "wall_ms": 2067.987416,
+          "exec_ms": 1922.31,
+          "returncode": 0,
+          "stdout_sha256": "91b734eea3a163fc45fdd663335d67516ae094d8aa375f520793eec660e8f90b",
+          "stderr_sha256": "0024255d8fb7a27eb328605f9ee6a22b9b73df434e70c745f3ae9cc939778010",
+          "stdout_contains_expected": null,
+          "oracle_equal": true
+        },
+        {
+          "status": "ok",
+          "wall_ms": 2041.458417,
+          "exec_ms": 1898.32,
+          "returncode": 0,
+          "stdout_sha256": "91b734eea3a163fc45fdd663335d67516ae094d8aa375f520793eec660e8f90b",
+          "stderr_sha256": "1389825a7221dae15124db7cc5461481aa109f93a988ec1b2cb6e8eebb662794",
+          "stdout_contains_expected": null,
+          "oracle_equal": true
+        }
+      ],
+      "valid": true,
+      "median_ms": 1922.31
+    },
+    {
+      "id": "text/text_search",
+      "before": "while (index < len(pattern) - 1)",
+      "after": "while (index < len(pattern))",
+      "original_source": {
+        "path": "/Users/henryluo/Projects/Lambda/test/benchmark/text/text_search.ls",
+        "sha256": "2aebfe07a7c11e441082a5ded8ce25013a8102968d5a4ef0d22b2dcc926cc837",
+        "source_root": "/Users/henryluo/Projects/Lambda/test/benchmark/text",
+        "source_tree_sha256": "0b3283a231f43d83b241e86d99269808dc599fb1476795fa514486cd7bb95232"
+      },
+      "probe": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/text-text_search-matched.ls",
+      "probe_sha256": "d0c2046586082d762cedcae9597f2c5b76e42c48792c30c7a3d70d2f3b4c0d21",
+      "samples": [
+        {
+          "status": "ok",
+          "wall_ms": 2002.812125,
+          "exec_ms": 1975.02,
+          "returncode": 0,
+          "stdout_sha256": "3abf84e641fb35487a74b785672a04d4879de3c23f9ad809fa88395fdbd86e48",
+          "stderr_sha256": "a1198e2f39f9d42d67c24566eddfe89867a2cbdc1c7f5c0d95497632cf4e8412",
+          "stdout_contains_expected": null,
+          "oracle_equal": true
+        },
+        {
+          "status": "ok",
+          "wall_ms": 1952.626625,
+          "exec_ms": 1924.71,
+          "returncode": 0,
+          "stdout_sha256": "3abf84e641fb35487a74b785672a04d4879de3c23f9ad809fa88395fdbd86e48",
+          "stderr_sha256": "ba7d7ba26fb207126a414cdae32f1163893dfdb6c3bedf5f02cf3ffee8981cc2",
+          "stdout_contains_expected": null,
+          "oracle_equal": true
+        },
+        {
+          "status": "ok",
+          "wall_ms": 1993.80575,
+          "exec_ms": 1965.77,
+          "returncode": 0,
+          "stdout_sha256": "3abf84e641fb35487a74b785672a04d4879de3c23f9ad809fa88395fdbd86e48",
+          "stderr_sha256": "67b00231c06dfc4c2e92c1f9a4bdf451a02c5c3db30af97a4d4af0e3bd0dab75",
+          "stdout_contains_expected": null,
+          "oracle_equal": true
+        }
+      ],
+      "valid": true,
+      "median_ms": 1965.77
+    }
+  ],
+  "instrumented": [
+    {
+      "id": "text/text_search",
+      "language": "js",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 34721.401625,
+        "exec_ms": 34606.346749961376,
+        "returncode": 0,
+        "stdout_sha256": "3abf84e641fb35487a74b785672a04d4879de3c23f9ad809fa88395fdbd86e48",
+        "stderr_sha256": "bf1f7389d2374bdea95eaf35292f1f7c58951222b14442117a8b549875fc0e59",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/text-text_search-js.mir",
+      "mir_exists": true,
+      "mir_sha256": "258de2b26bbf9b68b87039174a56004a3a56b1a869c1d1b30ef3bca2eebb516f",
+      "mir_bytes": 415160,
+      "trace": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/text-text_search-js.trace.tsv",
+      "trace_text": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=4:prototype\nJS_OPT_TRACE schema=1 events=scope_lookup_cache_hit=0/0/0/0,scope_lookup_cache_miss=0/0/0/0,regex_compile_cache_hit=0/0/0/0,regex_compile_cache_miss=0/0/0/0,regex_permanent_cache_hit=0/0/0/0,regex_fresh_wrapper=0/0/0/0,regex_keyless_reject=0/0/0/0,regex_cache_invalidate=0/0/0/0,regex_bulk_match_hit=0/0/0/0,regex_bulk_match_fallback=0/0/0/0,regex_bulk_replace_hit=0/0/0/0,regex_bulk_replace_fallback=0/0/0/0,array_set_fast_hit=254976/254976/0/0,array_set_guard_fail=0/0/0/0,array_own_element_get_hit=195248794/195248794/0/0,array_own_element_get_fallback=0/0/0/0,array_reduce_dense_element=0/0/0/0,array_reduce_prerooted_args=0/0/0/0,array_runtime_items_install=0/0/0/0,array_runtime_items_release=0/0/0/0,array_gc_items_alloc=2/2/0/0,mir_direct_destination=0/0/0/0,mir_discard_elision=0/0/0/0,mir_branch_direct=0/0/0/0,mir_generic_fallback=0/0/0/0,mir_box_value=0/0/0/0,mir_unbox_value=0/0/0/0,mir_root_store=0/0/0/0,module_cache_hit=0/0/0/0,module_cache_miss=0/0/0/0,tla_deferred_body=0/0/0/0,tla_drain=0/0/0/0,uri_error_cache_hit=0/0/0/0,uri_error_cache_miss=0/0/0/0,named_fast_probe=70517/70517/0/0,named_fast_hit=70513/70513/0/0,named_fast_miss=4/0/4/0,named_fast_no_entry_own=0/0/0/0,named_fast_no_entry_absent=4/4/0/0,named_fast_array_length=36864/36864/0/0,named_fast_string_length=33647/33647/0/0,named_fast_data_descriptor=0/0/0/0,named_fast_no_receiver_string=0/0/0/0,named_fast_no_receiver_function=0/0/0/0,named_fast_no_receiver_other=0/0/0/0,named_fast_function_data=0/0/0/0,runtime_number_head_hit=191105633/191105633/0/0,runtime_number_head_fallback=1538/0/1538/0,runtime_number_compare_head=633232666/633232666/0/0,runtime_string_concat_head=0/0/0/0,mir_number_admitted=25/25/0/0,mir_number_fallback=14/0/14/0,mir_boxed_loop_pair=3/3/0/0,mir_native_index_admitted=0/0/0/0,mir_native_index_fallback=0/0/0/0,mir_dense_index_admitted=62/62/0/0,mir_array_length_admitted=25/25/0/0,mir_packed_strict_equal=6/6/0/0,mir_loop_stable_name_id=14/14/0/0,mir_light_call=8/8/0/0,mir_light_direct_activation=8/8/0/0,mir_this_call=0/0/0/0,mir_this_direct_activation=0/0/0/0,bound_call_forward_args=0/0/0/0,mir_deferred_function_finalize=6/6/0/0,mir_lazy_function_metadata=6/6/0/0,ordinary_number_store=0/0/0/0,typed_number_store=0/0/0/0,typed_number_read=0/0/0/0,own_enumerability_inspect=0/0/0/0,mir_literal_field_admitted=0/0/0/0,reserved_constructor_store=0/0/0/0,reserved_constructor_direct_store=0/0/0/0,ordinary_data_store=0/0/0/0,dynamic_item_store=0/0/0/0,static_numeric_array_initializer=0/0/0/0,static_object_initializer=0/0/0/0,string_search_ascii=0/0/0/0,string_search_unicode=0/0/0/0,string_split_ascii=0/0/0/0,string_split_unicode=0/0/0/0,string_slice_ascii=0/0/0/0,string_slice_unicode=0/0/0/0,string_char_access_ascii=33638/33638/0/0,string_char_access_unicode=0/0/0/0,string_concat_ascii=2564/2564/0/0,string_concat_unicode=0/0/0/0,ascii_substring_cache_hit=0/0/0/0,ascii_substring_cache_miss=0/0/0/0,runtime_to_numeric_call=0/0/0/0,runtime_increment_call=0/0/0/0,runtime_decrement_call=0/0/0/0,runtime_boxed_compare_call=0/0/0/0,runtime_number_index_get_call=36864/36864/0/0,runtime_number_index_numeric_array=0/0/0/0,runtime_number_index_tagged_array=0/0/0/0,runtime_number_index_tagged_packed_plain=0/0/0/0,runtime_number_index_tagged_holey_plain=0/0/0/0,runtime_number_index_tagged_with_props=0/0/0/0,runtime_number_index_tagged_other=0/0/0/0,runtime_number_index_typed_array=0/0/0/0,runtime_number_index_other=0/0/0/0 reasons=none=1020128397,hole_or_sparse=0,prototype_accessor=0,not_extensible=0,length_not_writable=0,capture_bearing_short_regex=0,keyless_cache_entry=0,shape_changed=0,named_fast_no_key=0,named_fast_host_dynamic=0,named_fast_no_receiver=0,named_fast_no_entry=4,named_fast_attributes=0,named_fast_bounds=0,named_fast_reserved=0,named_fast_deleted=0,named_fast_value_type=0\n",
+      "trace_sha256": "c60452361b3e807c8d074b99db0a0f51d0d9eb767e02eafaacee051e1275213e"
+    },
+    {
+      "id": "text/text_search",
+      "language": "lambda",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 1531.870125,
+        "exec_ms": 1502.34,
+        "returncode": 0,
+        "stdout_sha256": "3abf84e641fb35487a74b785672a04d4879de3c23f9ad809fa88395fdbd86e48",
+        "stderr_sha256": "fc23922351ef97dbf7bbd64e532547a0b1a00917174fd0c18e2abaf842e46a0a",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/text-text_search-lambda.mir",
+      "mir_exists": true,
+      "mir_sha256": "ef95d1fe1fc2486cf16cd302c99ca72cc6ba8650d8ec61707591d20bb4997216",
+      "mir_bytes": 102607
+    },
+    {
+      "id": "larceny/triangl",
+      "language": "js",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 6279.757791,
+        "exec_ms": 6208.1812916994095,
+        "returncode": 0,
+        "stdout_sha256": "8405e9dc3171913d5937afa0705a586c0ae9aa5254d4ac13d23dad91ee64f582",
+        "stderr_sha256": "3c05d947e2c4f5b3ef57cdcacb0ffbf9a0f83db3453b2713a786925f02744126",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/larceny-triangl-js.mir",
+      "mir_exists": true,
+      "mir_sha256": "c828ee87e3fb9dbe3bb6a8d989cd2ebe5164415c91966489357118a2888f323a",
+      "mir_bytes": 143675,
+      "trace": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/larceny-triangl-js.trace.tsv",
+      "trace_text": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=3:prototype\nJS_OPT_TRACE schema=1 events=scope_lookup_cache_hit=0/0/0/0,scope_lookup_cache_miss=0/0/0/0,regex_compile_cache_hit=0/0/0/0,regex_compile_cache_miss=0/0/0/0,regex_permanent_cache_hit=0/0/0/0,regex_fresh_wrapper=0/0/0/0,regex_keyless_reject=0/0/0/0,regex_cache_invalidate=0/0/0/0,regex_bulk_match_hit=0/0/0/0,regex_bulk_match_fallback=0/0/0/0,regex_bulk_replace_hit=0/0/0/0,regex_bulk_replace_fallback=0/0/0/0,array_set_fast_hit=0/0/0/0,array_set_guard_fail=0/0/0/0,array_own_element_get_hit=2194165/2194165/0/0,array_own_element_get_fallback=0/0/0/0,array_reduce_dense_element=0/0/0/0,array_reduce_prerooted_args=0/0/0/0,array_runtime_items_install=0/0/0/0,array_runtime_items_release=0/0/0/0,array_gc_items_alloc=3/3/0/0,mir_direct_destination=0/0/0/0,mir_discard_elision=0/0/0/0,mir_branch_direct=0/0/0/0,mir_generic_fallback=0/0/0/0,mir_box_value=0/0/0/0,mir_unbox_value=0/0/0/0,mir_root_store=0/0/0/0,module_cache_hit=0/0/0/0,module_cache_miss=0/0/0/0,tla_deferred_body=0/0/0/0,tla_drain=0/0/0/0,uri_error_cache_hit=0/0/0/0,uri_error_cache_miss=0/0/0/0,named_fast_probe=6/6/0/0,named_fast_hit=3/3/0/0,named_fast_miss=3/0/3/0,named_fast_no_entry_own=0/0/0/0,named_fast_no_entry_absent=3/3/0/0,named_fast_array_length=0/0/0/0,named_fast_string_length=0/0/0/0,named_fast_data_descriptor=0/0/0/0,named_fast_no_receiver_string=0/0/0/0,named_fast_no_receiver_function=0/0/0/0,named_fast_no_receiver_other=0/0/0/0,named_fast_function_data=0/0/0/0,runtime_number_head_hit=1293179/1293179/0/0,runtime_number_head_fallback=2/0/2/0,runtime_number_compare_head=46746503/46746503/0/0,runtime_string_concat_head=0/0/0/0,mir_number_admitted=6/6/0/0,mir_number_fallback=3/0/3/0,mir_boxed_loop_pair=0/0/0/0,mir_native_index_admitted=0/0/0/0,mir_native_index_fallback=0/0/0/0,mir_dense_index_admitted=34/34/0/0,mir_array_length_admitted=0/0/0/0,mir_packed_strict_equal=0/0/0/0,mir_loop_stable_name_id=0/0/0/0,mir_light_call=0/0/0/0,mir_light_direct_activation=0/0/0/0,mir_this_call=0/0/0/0,mir_this_direct_activation=0/0/0/0,bound_call_forward_args=0/0/0/0,mir_deferred_function_finalize=1/1/0/0,mir_lazy_function_metadata=1/1/0/0,ordinary_number_store=0/0/0/0,typed_number_store=1293178/1293178/0/0,typed_number_read=3849775/3849775/0/0,own_enumerability_inspect=0/0/0/0,mir_literal_field_admitted=0/0/0/0,reserved_constructor_store=0/0/0/0,reserved_constructor_direct_store=0/0/0/0,ordinary_data_store=0/0/0/0,dynamic_item_store=0/0/0/0,static_numeric_array_initializer=3/3/0/0,static_object_initializer=0/0/0/0,string_search_ascii=0/0/0/0,string_search_unicode=0/0/0/0,string_split_ascii=0/0/0/0,string_split_unicode=0/0/0/0,string_slice_ascii=0/0/0/0,string_slice_unicode=0/0/0/0,string_char_access_ascii=0/0/0/0,string_char_access_unicode=0/0/0/0,string_concat_ascii=4/4/0/0,string_concat_unicode=0/0/0/0,ascii_substring_cache_hit=0/0/0/0,ascii_substring_cache_miss=0/0/0/0,runtime_to_numeric_call=44189906/44189906/0/0,runtime_increment_call=44189906/44189906/0/0,runtime_decrement_call=0/0/0/0,runtime_boxed_compare_call=0/0/0/0,runtime_number_index_get_call=0/0/0/0,runtime_number_index_numeric_array=0/0/0/0,runtime_number_index_tagged_array=0/0/0/0,runtime_number_index_tagged_packed_plain=0/0/0/0,runtime_number_index_tagged_holey_plain=0/0/0/0,runtime_number_index_tagged_with_props=0/0/0/0,runtime_number_index_tagged_other=0/0/0/0,runtime_number_index_typed_array=0/0/0/0,runtime_number_index_other=0/0/0/0 reasons=none=143756681,hole_or_sparse=0,prototype_accessor=0,not_extensible=0,length_not_writable=0,capture_bearing_short_regex=0,keyless_cache_entry=0,shape_changed=0,named_fast_no_key=0,named_fast_host_dynamic=0,named_fast_no_receiver=0,named_fast_no_entry=3,named_fast_attributes=0,named_fast_bounds=0,named_fast_reserved=0,named_fast_deleted=0,named_fast_value_type=0\n",
+      "trace_sha256": "40e95fba07163eeb44c4ec7d8ed47b1f2bec84b1b41b3b0dea41f68e6defb90b"
+    },
+    {
+      "id": "larceny/triangl",
+      "language": "lambda",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 258.920209,
+        "exec_ms": 234.787,
+        "returncode": 0,
+        "stdout_sha256": "8405e9dc3171913d5937afa0705a586c0ae9aa5254d4ac13d23dad91ee64f582",
+        "stderr_sha256": "50b514224ee1d3e11d62b65b14680bd86df681e4f1ed0049c861d0314f0266a2",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/larceny-triangl-lambda.mir",
+      "mir_exists": true,
+      "mir_sha256": "61e4c16e20eefbefaa62a4c5ec40ec5c98909eefb678cf12d0742f568b90d35b",
+      "mir_bytes": 55644
+    },
+    {
+      "id": "awfy/nbody",
+      "language": "js",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 746.779334,
+        "exec_ms": 662.164958357811,
+        "returncode": 0,
+        "stdout_sha256": "85f26bd11c1470a00ad5c6e369f45d6751bb7b2b5cf347d1fbad278c46cb0e78",
+        "stderr_sha256": "01abe210111c1503da01fa6113ba3a53b1088eb3639f0287d2b79d4c1b61ec3e",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/awfy-nbody-js.mir",
+      "mir_exists": true,
+      "mir_sha256": "3cdf73f531bd77afdf3eaebe7710799c701b7a28dab966db7438ef6c2b0c45ff",
+      "mir_bytes": 427938,
+      "trace": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/awfy-nbody-js.trace.tsv",
+      "trace_text": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=2 top=3:prototype,1:bodies\nJS_OPT_TRACE schema=1 events=scope_lookup_cache_hit=0/0/0/0,scope_lookup_cache_miss=0/0/0/0,regex_compile_cache_hit=0/0/0/0,regex_compile_cache_miss=0/0/0/0,regex_permanent_cache_hit=0/0/0/0,regex_fresh_wrapper=0/0/0/0,regex_keyless_reject=0/0/0/0,regex_cache_invalidate=0/0/0/0,regex_bulk_match_hit=0/0/0/0,regex_bulk_match_fallback=0/0/0/0,regex_bulk_replace_hit=0/0/0/0,regex_bulk_replace_fallback=0/0/0/0,array_set_fast_hit=0/0/0/0,array_set_guard_fail=0/0/0/0,array_own_element_get_hit=540016/540016/0/0,array_own_element_get_fallback=0/0/0/0,array_reduce_dense_element=0/0/0/0,array_reduce_prerooted_args=0/0/0/0,array_runtime_items_install=0/0/0/0,array_runtime_items_release=0/0/0/0,array_gc_items_alloc=1/1/0/0,mir_direct_destination=0/0/0/0,mir_discard_elision=0/0/0/0,mir_branch_direct=0/0/0/0,mir_generic_fallback=0/0/0/0,mir_box_value=0/0/0/0,mir_unbox_value=0/0/0/0,mir_root_store=0/0/0/0,module_cache_hit=0/0/0/0,module_cache_miss=0/0/0/0,tla_deferred_body=0/0/0/0,tla_drain=0/0/0/0,uri_error_cache_hit=0/0/0/0,uri_error_cache_miss=0/0/0/0,named_fast_probe=12348246/12348246/0/0,named_fast_hit=12348242/12348242/0/0,named_fast_miss=4/0/4/0,named_fast_no_entry_own=0/0/0/0,named_fast_no_entry_absent=3/3/0/0,named_fast_array_length=756021/756021/0/0,named_fast_string_length=0/0/0/0,named_fast_data_descriptor=0/0/0/0,named_fast_no_receiver_string=0/0/0/0,named_fast_no_receiver_function=0/0/0/0,named_fast_no_receiver_other=0/0/0/0,named_fast_function_data=0/0/0/0,runtime_number_head_hit=11700207/11700207/0/0,runtime_number_head_fallback=1/0/1/0,runtime_number_compare_head=756021/756021/0/0,runtime_string_concat_head=0/0/0/0,mir_number_admitted=12/12/0/0,mir_number_fallback=13/0/13/0,mir_boxed_loop_pair=0/0/0/0,mir_native_index_admitted=5/5/0/0,mir_native_index_fallback=0/0/0/0,mir_dense_index_admitted=0/0/0/0,mir_array_length_admitted=0/0/0/0,mir_packed_strict_equal=0/0/0/0,mir_loop_stable_name_id=87/87/0/0,mir_light_call=0/0/0/0,mir_light_direct_activation=0/0/0/0,mir_this_call=36003/36003/0/0,mir_this_direct_activation=36003/36003/0/0,bound_call_forward_args=0/0/0/0,mir_deferred_function_finalize=36001/36001/0/0,mir_lazy_function_metadata=72002/72002/0/0,ordinary_number_store=0/0/0/0,typed_number_store=0/0/0/0,typed_number_read=0/0/0/0,own_enumerability_inspect=0/0/0/0,mir_literal_field_admitted=0/0/0/0,reserved_constructor_store=0/0/0/0,reserved_constructor_direct_store=35/35/0/0,ordinary_data_store=0/0/0/0,dynamic_item_store=2700038/2700038/0/0,static_numeric_array_initializer=0/0/0/0,static_object_initializer=0/0/0/0,string_search_ascii=0/0/0/0,string_search_unicode=0/0/0/0,string_split_ascii=0/0/0/0,string_split_unicode=0/0/0/0,string_slice_ascii=0/0/0/0,string_slice_unicode=0/0/0/0,string_char_access_ascii=0/0/0/0,string_char_access_unicode=0/0/0/0,string_concat_ascii=4/4/0/0,string_concat_unicode=0/0/0/0,ascii_substring_cache_hit=0/0/0/0,ascii_substring_cache_miss=0/0/0/0,runtime_to_numeric_call=0/0/0/0,runtime_increment_call=0/0/0/0,runtime_decrement_call=0/0/0/0,runtime_boxed_compare_call=0/0/0/0,runtime_number_index_get_call=540016/540016/0/0,runtime_number_index_numeric_array=0/0/0/0,runtime_number_index_tagged_array=0/0/0/0,runtime_number_index_tagged_packed_plain=0/0/0/0,runtime_number_index_tagged_holey_plain=0/0/0/0,runtime_number_index_tagged_with_props=0/0/0/0,runtime_number_index_tagged_other=0/0/0/0,runtime_number_index_typed_array=0/0/0/0,runtime_number_index_other=0/0/0/0 reasons=none=41868977,hole_or_sparse=0,prototype_accessor=0,not_extensible=0,length_not_writable=0,capture_bearing_short_regex=0,keyless_cache_entry=0,shape_changed=0,named_fast_no_key=0,named_fast_host_dynamic=0,named_fast_no_receiver=0,named_fast_no_entry=4,named_fast_attributes=0,named_fast_bounds=0,named_fast_reserved=0,named_fast_deleted=0,named_fast_value_type=0\n",
+      "trace_sha256": "9f51838d5448ee7b98fda0e7b84a30c320379bf716fbe7d50faaeab300521048"
+    },
+    {
+      "id": "awfy/nbody",
+      "language": "lambda",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 53.125125,
+        "exec_ms": 6.933,
+        "returncode": 0,
+        "stdout_sha256": "85f26bd11c1470a00ad5c6e369f45d6751bb7b2b5cf347d1fbad278c46cb0e78",
+        "stderr_sha256": "ae302a492c0abccbed6d2b17f5486efdbced2ad3f079c6cc3fff7bc1ce04bd3b",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/awfy-nbody-lambda.mir",
+      "mir_exists": true,
+      "mir_sha256": "c36590a76112e11b708d015c4267bd6cd1dcd929fb55bf99d3d3dab9ab632d43",
+      "mir_bytes": 132623
+    },
+    {
+      "id": "awfy/bounce",
+      "language": "js",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 176.747167,
+        "exec_ms": 4.207541644573212,
+        "returncode": 0,
+        "stdout_sha256": "7a2a2230e9d76c2b92069c0b31269f6aad870ae5e14d6cf5f5c24af83b3b1c12",
+        "stderr_sha256": "923b5a6037561dd89de9c49098bdacaa325cae205f661c9c9c99fc48e6b1c9ed",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/awfy-bounce-js.mir",
+      "mir_exists": true,
+      "mir_sha256": "7362ebe2b8355815394914525c180f647788a8901fadd42d219badf7920dd81c",
+      "mir_bytes": 1028279,
+      "trace": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/awfy-bounce-js.trace.tsv",
+      "trace_text": "JS_OPT_TRACE_DETAILS schema=1 named_fast_no_entry_distinct=1 top=3:prototype\nJS_OPT_TRACE schema=1 events=scope_lookup_cache_hit=0/0/0/0,scope_lookup_cache_miss=0/0/0/0,regex_compile_cache_hit=0/0/0/0,regex_compile_cache_miss=0/0/0/0,regex_permanent_cache_hit=0/0/0/0,regex_fresh_wrapper=0/0/0/0,regex_keyless_reject=0/0/0/0,regex_cache_invalidate=0/0/0/0,regex_bulk_match_hit=0/0/0/0,regex_bulk_match_fallback=0/0/0/0,regex_bulk_replace_hit=0/0/0/0,regex_bulk_replace_fallback=0/0/0/0,array_set_fast_hit=100/100/0/0,array_set_guard_fail=0/0/0/0,array_own_element_get_hit=5000/5000/0/0,array_own_element_get_fallback=0/0/0/0,array_reduce_dense_element=0/0/0/0,array_reduce_prerooted_args=0/0/0/0,array_runtime_items_install=0/0/0/0,array_runtime_items_release=0/0/0/0,array_gc_items_alloc=1/1/0/0,mir_direct_destination=0/0/0/0,mir_discard_elision=0/0/0/0,mir_branch_direct=0/0/0/0,mir_generic_fallback=0/0/0/0,mir_box_value=0/0/0/0,mir_unbox_value=0/0/0/0,mir_root_store=0/0/0/0,module_cache_hit=0/0/0/0,module_cache_miss=0/0/0/0,tla_deferred_body=0/0/0/0,tla_drain=0/0/0/0,uri_error_cache_hit=0/0/0/0,uri_error_cache_miss=0/0/0/0,named_fast_probe=54686/54686/0/0,named_fast_hit=54683/54683/0/0,named_fast_miss=3/0/3/0,named_fast_no_entry_own=0/0/0/0,named_fast_no_entry_absent=3/3/0/0,named_fast_array_length=0/0/0/0,named_fast_string_length=0/0/0/0,named_fast_data_descriptor=0/0/0/0,named_fast_no_receiver_string=0/0/0/0,named_fast_no_receiver_function=0/0/0/0,named_fast_no_receiver_other=0/0/0/0,named_fast_function_data=0/0/0/0,runtime_number_head_hit=12514/12514/0/0,runtime_number_head_fallback=1/0/1/0,runtime_number_compare_head=20000/20000/0/0,runtime_string_concat_head=0/0/0/0,mir_number_admitted=25/25/0/0,mir_number_fallback=25/0/25/0,mir_boxed_loop_pair=0/0/0/0,mir_native_index_admitted=7/7/0/0,mir_native_index_fallback=12/0/12/0,mir_dense_index_admitted=3/3/0/0,mir_array_length_admitted=2/2/0/0,mir_packed_strict_equal=0/0/0/0,mir_loop_stable_name_id=46/46/0/0,mir_light_call=0/0/0/0,mir_light_direct_activation=0/0/0/0,mir_this_call=5401/5401/0/0,mir_this_direct_activation=5401/5401/0/0,bound_call_forward_args=0/0/0/0,mir_deferred_function_finalize=1/1/0/0,mir_lazy_function_metadata=1/1/0/0,ordinary_number_store=0/0/0/0,typed_number_store=0/0/0/0,typed_number_read=0/0/0/0,own_enumerability_inspect=0/0/0/0,mir_literal_field_admitted=38/38/0/0,reserved_constructor_store=0/0/0/0,reserved_constructor_direct_store=401/401/0/0,ordinary_data_store=0/0/0/0,dynamic_item_store=13252/13252/0/0,static_numeric_array_initializer=0/0/0/0,static_object_initializer=0/0/0/0,string_search_ascii=0/0/0/0,string_search_unicode=0/0/0/0,string_split_ascii=0/0/0/0,string_split_unicode=0/0/0/0,string_slice_ascii=0/0/0/0,string_slice_unicode=0/0/0/0,string_char_access_ascii=0/0/0/0,string_char_access_unicode=0/0/0/0,string_concat_ascii=4/4/0/0,string_concat_unicode=0/0/0/0,ascii_substring_cache_hit=0/0/0/0,ascii_substring_cache_miss=0/0/0/0,runtime_to_numeric_call=0/0/0/0,runtime_increment_call=0/0/0/0,runtime_decrement_call=0/0/0/0,runtime_boxed_compare_call=0/0/0/0,runtime_number_index_get_call=0/0/0/0,runtime_number_index_numeric_array=0/0/0/0,runtime_number_index_tagged_array=0/0/0/0,runtime_number_index_tagged_packed_plain=0/0/0/0,runtime_number_index_tagged_holey_plain=0/0/0/0,runtime_number_index_tagged_with_props=0/0/0/0,runtime_number_index_tagged_other=0/0/0/0,runtime_number_index_typed_array=0/0/0/0,runtime_number_index_other=0/0/0/0 reasons=none=171507,hole_or_sparse=100,prototype_accessor=0,not_extensible=0,length_not_writable=0,capture_bearing_short_regex=0,keyless_cache_entry=0,shape_changed=0,named_fast_no_key=0,named_fast_host_dynamic=0,named_fast_no_receiver=0,named_fast_no_entry=3,named_fast_attributes=0,named_fast_bounds=0,named_fast_reserved=0,named_fast_deleted=0,named_fast_value_type=0\n",
+      "trace_sha256": "94a7647180d686c3e9f71e500cfdea432603da3213be77afd9723a1dee23492c"
+    },
+    {
+      "id": "awfy/bounce",
+      "language": "lambda",
+      "sample": {
+        "status": "ok",
+        "wall_ms": 42.748291,
+        "exec_ms": 0.071,
+        "returncode": 0,
+        "stdout_sha256": "7a2a2230e9d76c2b92069c0b31269f6aad870ae5e14d6cf5f5c24af83b3b1c12",
+        "stderr_sha256": "f386d8a0cd7d33532adc6418c9e15c475342f447a6872f830382ded8ebafe4b3",
+        "stdout_contains_expected": null,
+        "oracle_equal": true
+      },
+      "mir": "/Users/henryluo/Projects/Lambda/temp/js-untyped-reference-20260929/awfy-bounce-lambda.mir",
+      "mir_exists": true,
+      "mir_sha256": "a84fa9f001b843b57b6c03cf629dc0ba0c5a5468af79285dcead3139230f8cea",
+      "mir_bytes": 47473
+    }
+  ],
+  "binary_unchanged": true
+}

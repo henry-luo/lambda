@@ -492,7 +492,11 @@ static void format_graph_element_with_syn(StringBuf* sb, const ElementReader& el
     if (strcmp(flavor, "dot") == 0) {
         const char* stage = get_element_attribute(element, "ir-stage");
         if (stage && (strcmp(stage, "source") == 0 || strcmp(stage, "canonical") == 0)) {
-            format_dot_document(sb, element, strcmp(stage, "canonical") == 0);
+            const char* source_flavor = get_element_attribute(element, "flavor");
+            // Only DOT source graphs contain dot-endpoint children; other readers emit from/to edges.
+            bool dot_source = strcmp(stage, "source") == 0 && source_flavor &&
+                strcmp(source_flavor, "dot") == 0;
+            format_dot_document(sb, element, !dot_source);
             return;
         }
         bool directed = graph_type && strcmp(graph_type, "directed") == 0;

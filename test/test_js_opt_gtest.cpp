@@ -1497,11 +1497,16 @@ TEST(JsOpt, BoxedNumericArrayKeyKeepsDenseReadAndPropertyFallback) {
         "  return total;\n"
         "}\n"
         "const table = [11, 22]; table.true = 7; table['1.5'] = 9; table['01'] = 5;\n"
-        "const numeric = [1]; const zero = [0]; const truthy = [true]; const fractional = [1.5]; const text = ['01'];\n"
+        "const numeric = [1]; const zero = [0]; const negativeZero = [-0];\n"
+        "const truthy = [true]; const fractional = [1.5]; const text = ['01'];\n"
+        "const tiny = [Number.MIN_VALUE]; table[Number.MIN_VALUE] = 17;\n"
         "const hole = new Array(1); Object.prototype[0] = 33;\n"
         "const result = repeatedRead(table, numeric) === 2816 &&\n"
         "  repeatedRead(table, truthy) === 896 && repeatedRead(table, fractional) === 1152 &&\n"
         "  repeatedRead(table, text) === 640 &&\n"
+        "  repeatedRead(table, zero) === 1408 &&\n"
+        "  repeatedRead(table, negativeZero) === 1408 &&\n"
+        "  repeatedRead(table, tiny) === 2176 &&\n"
         "  repeatedRead(hole, zero) === 4224 && hole[0] === 33;\n"
         "delete Object.prototype[0];\n"
         "if (!result) throw new Error('boxed numeric key changed property semantics');\n"
@@ -1527,6 +1532,30 @@ TEST(JsOpt, BoxedNumericArrayKeyKeepsDenseReadAndPropertyFallback) {
     EXPECT_TRUE(fallback && fallback < repeated_end);
     free(mir);
     expect_trace_off_same("boxed_numeric_array_key", source, output);
+}
+
+TEST(JsOpt, ArrayLengthExpansionInvalidatesPackedIndexedRead) {
+    const char* source =
+        "function twice(array) { let sum = 0;\n"
+        "  for (let i = 0; i < 2; i++) sum += array[1]; return sum; }\n"
+        "let calls = 0; const dense = [1];\n"
+        "dense.length = { valueOf() { const temporary = [calls];\n"
+        "  calls += 1; return temporary[0] + 3 - temporary[0]; } };\n"
+        "const sparse = [1]; sparse.length = 500000;\n"
+        "Object.prototype[1] = 99;\n"
+        "const result = calls === 2 && twice(dense) === 198 &&\n"
+        "  twice(sparse) === 198 &&\n"
+        "  (1 in dense) && (1 in sparse);\n"
+        "delete Object.prototype[1];\n"
+        "if (!result) throw new Error('length-created hole bypassed prototype Get');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("array_length_packed_hole", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_MIR_DENSE_INDEX_ADMITTED][1], 0u);
+    expect_trace_off_same("array_length_packed_hole", source, output);
 }
 
 TEST(JsOpt, MirLiteralFieldPlanUsesExactShape) {
@@ -1592,6 +1621,129 @@ TEST(JsOpt, MirLiteralFieldPlanUsesExactShape) {
     EXPECT_NE(strstr(mir, "call\tjs_get_name_id"), nullptr);
     free(mir);
     expect_trace_off_same("mir_literal_field", source, output);
+}
+
+TEST(JsOpt, GenericBinaryCoercionRoutesCaughtErrors) {
+    const char* source =
+        "function symbolMultiply() {\n"
+        "  try { return Symbol('bad') * 2; }\n"
+        "  catch (error) { return error instanceof TypeError; }\n"
+        "}\n"
+        "function valueOfAdd() {\n"
+        "  const value = { valueOf() { throw new Error('coercion'); } };\n"
+        "  try { return 1 + value; }\n"
+        "  catch (error) { return error.message; }\n"
+        "}\n"
+        "function getterMultiply() {\n"
+        "  const point = { x: 1.5 };\n"
+        "  Object.defineProperty(point, 'x', { get() { return Symbol('bad'); } });\n"
+        "  try { return point.x * 2; }\n"
+        "  catch (error) { return error instanceof TypeError; }\n"
+        "}\n"
+        "if (!symbolMultiply() || valueOfAdd() !== 'coercion' ||\n"
+        "    !getterMultiply()) throw new Error('binary coercion escaped catch');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("generic_binary_catch", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    expect_trace_off_same("generic_binary_catch", source, output);
+}
+
+TEST(JsOpt, ExactMathMaxCallKeepsGetArgumentsAndFallback) {
+    const char* source =
+        "const original = Math.max; let order = '';\n"
+        "function first() { order += 'a'; return -0; }\n"
+        "function second() { order += 'b'; return 0; }\n"
+        "function maxPair(a, b) { return Math.max(a, b); }\n"
+        "for (let i = 0; i < 16; i++) {\n"
+        "  if (!Object.is(maxPair(first(), second()), 0)) throw new Error('zero');\n"
+        "}\n"
+        "if (order !== 'ab'.repeat(16) || !Object.is(maxPair(-0, -0), -0) ||\n"
+        "    !Number.isNaN(maxPair(NaN, 1)) ||\n"
+        "    maxPair(1e308, 2e307) !== 1e308) throw new Error('numeric max');\n"
+        "let calls = 0; const coercing = { valueOf() { calls++; return 4; } };\n"
+        "if (maxPair(1, coercing) !== 4 || calls !== 1) throw new Error('coercion');\n"
+        "function replace() { Math.max = (a, b) => 77; return 5; }\n"
+        "if (Math.max(2, replace()) !== 5 || Math.max(2, 3) !== 77)\n"
+        "  throw new Error('retrieved callable');\n"
+        "Math.max = original;\n"
+        "function shadow(Math) { return Math.max(2, 3); }\n"
+        "if (shadow({ max(a, b) { return a + b + 1; } }) !== 6)\n"
+        "  throw new Error('shadowed Math');\n"
+        "Object.defineProperty(Math, 'max', { configurable: true, get() {\n"
+        "  throw new Error('get failed'); } });\n"
+        "let caught = false; try { Math.max(1, 2); } catch (error) {\n"
+        "  caught = error.message === 'get failed'; }\n"
+        "Object.defineProperty(Math, 'max', { configurable: true, writable: true,\n"
+        "  value: original });\n"
+        "if (!caught) throw new Error('Get escaped catch');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("exact_math_max_call", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    char* mir = read_fixture_mir("exact_math_max_call");
+    ASSERT_NE(mir, nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_builtin_callable_is_id"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tfn_max2_u"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_call"), nullptr);
+    free(mir);
+    expect_trace_off_same("exact_math_max_call", source, output);
+}
+
+TEST(JsOpt, GuardedNumericWhileKeepsIndexedReadsAndGenericEntry) {
+    const char* source =
+        "function probe(start, hole) {\n"
+        "  const items = [1, 2, 3];\n"
+        "  if (hole) delete items[1];\n"
+        "  let index = start[0]; let total = 0;\n"
+        "  while (index < 3) {\n"
+        "    if (items[index] === 2) break;\n"
+        "    total += items[index]; index++;\n"
+        "  }\n"
+        "  return [index, total];\n"
+        "}\n"
+        "let getterCalls = 0;\n"
+        "Object.defineProperty(Object.prototype, '1', { configurable: true,\n"
+        "  get() { getterCalls++; return 2; } });\n"
+        "const number = probe([0], false); const text = probe(['0'], false);\n"
+        "const missing = probe([0], true); const zero = probe([-0], false);\n"
+        "const nan = probe([NaN], false); const wide = probe([1e308], false);\n"
+        "let coercionThrows = false; const bad = { valueOf() {\n"
+        "  throw new Error('index coercion'); } };\n"
+        "try { probe([bad], false); } catch (error) {\n"
+        "  coercionThrows = error.message === 'index coercion'; }\n"
+        "let symbolThrows = false; try { probe([Symbol('index')], false); }\n"
+        "catch (error) { symbolThrows = error instanceof TypeError; }\n"
+        "delete Object.prototype[1];\n"
+        "if (number[0] !== 1 || number[1] !== 1 || text[0] !== 1 ||\n"
+        "    text[1] !== 1 || missing[0] !== 1 || missing[1] !== 1 ||\n"
+        "    getterCalls !== 1 || zero[0] !== 1 || zero[1] !== 1 ||\n"
+        "    !Number.isNaN(nan[0]) || nan[1] !== 0 ||\n"
+        "    wide[0] !== 1e308 || wide[1] !== 0 ||\n"
+        "    !coercionThrows || !symbolThrows)\n"
+        "  throw new Error('guarded while changed Number or Get');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("guarded_numeric_while", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    char* mir = read_fixture_mir("guarded_numeric_while");
+    ASSERT_NE(mir, nullptr);
+    const char* probe_end = NULL;
+    const char* probe = find_mir_function(mir, "_js_probe_", &probe_end,
+        "_body:\tfunc");
+    ASSERT_NE(probe, nullptr);
+    ASSERT_NE(probe_end, nullptr);
+    const char* fallback = strstr(probe, "call\tjs_increment");
+    const char* native = strstr(probe, "\tdadd\t");
+    EXPECT_TRUE(native && fallback && native < fallback && fallback < probe_end);
+    free(mir);
+    expect_trace_off_same("guarded_numeric_while", source, output);
 }
 
 TEST(JsOpt, RecursiveLiteralReturnShapeUsesGuardedMapSlots) {
@@ -2517,6 +2669,13 @@ TEST(JsOpt, NumberArrayLengthComparisonKeepsGenericGet) {
         "const bad = { get length() { throw new Error('length'); } };\n"
         "try { indirect(bad); throw new Error('missing throw'); }\n"
         "catch (error) { if (error.message !== 'length') throw error; }\n"
+        "const coercion = { valueOf() { throw new Error('coercion'); } };\n"
+        "for (const compare of [() => 1 < coercion, () => coercion == 1,\n"
+        "                       () => Symbol('x') < 1]) {\n"
+        "  try { if (compare()) throw new Error('missing comparison throw'); }\n"
+        "  catch (error) { if (error.message !== 'coercion' &&\n"
+        "      !(error instanceof TypeError)) throw error; }\n"
+        "}\n"
         "console.log('OPT_OK');\n";
     TraceResult trace;
     char output[4096];
@@ -2526,7 +2685,7 @@ TEST(JsOpt, NumberArrayLengthComparisonKeepsGenericGet) {
     char* mir = read_fixture_mir("number_array_length_compare");
     ASSERT_NE(mir, nullptr);
     EXPECT_NE(strstr(mir, "\tdlt\t"), nullptr);
-    EXPECT_NE(strstr(mir, "js_cmp_raw"), nullptr);
+    EXPECT_NE(strstr(mir, "call\tjs_compare"), nullptr);
     free(mir);
     expect_trace_off_same("number_array_length_compare", source, output);
 }

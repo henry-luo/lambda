@@ -4847,10 +4847,11 @@ static MIR_reg_t jm_emit_packed_array_read(JsMirTranspiler* mt,
     return jm_emit_packed_array_read_impl(mt, member, receiver, key, false, 0);
 }
 
-// Only immediate integer and inline double Items can enter a no-coercion
-// Number lane. Scalar-home and other values keep the caller's semantic path.
-static MIR_reg_t jm_emit_guard_boxed_inline_number(JsMirTranspiler* mt,
-        MIR_reg_t value, MIR_label_t miss) {
+// A computed array Reference roots its evaluated key. A boxed Float home can
+// therefore be decoded before any safepoint, while other boxed operations
+// retain the immediate-only admission (S1.11, D5.3).
+MIR_reg_t jm_emit_guard_boxed_inline_number(JsMirTranspiler* mt,
+        MIR_reg_t value, MIR_label_t miss, bool allow_float_home) {
     MIR_reg_t number = jm_new_reg(mt, "boxed_inline_number", MIR_T_D);
     MIR_label_t numeric = jm_new_label(mt);
     MIR_label_t integer = jm_new_label(mt);
@@ -4866,6 +4867,12 @@ static MIR_reg_t jm_emit_guard_boxed_inline_number(JsMirTranspiler* mt,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
         MIR_new_label_op(mt->ctx, integer), MIR_new_reg_op(mt->ctx, tag),
         MIR_new_int_op(mt->ctx, LMD_TYPE_INT)));
+    MIR_label_t float_home = allow_float_home ? jm_new_label(mt) : NULL;
+    if (float_home) {
+        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
+            MIR_new_label_op(mt->ctx, float_home), MIR_new_reg_op(mt->ctx, tag),
+            MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT)));
+    }
     jm_emit_jmp(mt, miss);
 
     jm_emit_label(mt, floating);
@@ -4877,6 +4884,11 @@ static MIR_reg_t jm_emit_guard_boxed_inline_number(JsMirTranspiler* mt,
     jm_emit(mt, MIR_new_insn(mt->ctx, MIR_I2D,
         MIR_new_reg_op(mt->ctx, number),
         MIR_new_reg_op(mt->ctx, integer_value)));
+    if (float_home) {
+        jm_emit_jmp(mt, numeric);
+        jm_emit_label(mt, float_home);
+        jm_emit_dmov(mt, number, jm_emit_unbox_noninline_float(mt, value));
+    }
     jm_emit_label(mt, numeric);
     return number;
 }
@@ -4897,7 +4909,7 @@ static MIR_reg_t jm_emit_packed_array_read_boxed_number_key(
     MIR_reg_t result = jm_new_reg(mt, "dense_boxed_key_read", MIR_T_I64);
     MIR_label_t miss = jm_new_label(mt);
     MIR_label_t done = jm_new_label(mt);
-    MIR_reg_t number = jm_emit_guard_boxed_inline_number(mt, key, miss);
+    MIR_reg_t number = jm_emit_guard_boxed_inline_number(mt, key, miss, true);
     MIR_reg_t dense = jm_emit_packed_array_read_impl(mt, member, receiver,
         number, false, miss);
     jm_emit_mov(mt, result, dense);
@@ -4933,7 +4945,7 @@ static MIR_reg_t jm_emit_packed_array_reference_number(JsMirTranspiler* mt,
     MIR_reg_t key = ref->native_key_reg
         ? jm_emit_native_key_as_number(mt, ref->native_key_reg,
             ref->native_key_type, "packed_strict_key")
-        : jm_emit_guard_boxed_inline_number(mt, ref->key_reg, miss);
+        : jm_emit_guard_boxed_inline_number(mt, ref->key_reg, miss, true);
     return jm_emit_packed_array_load_number(mt, member, ref->base_reg, key,
         miss);
 }
@@ -5089,10 +5101,13 @@ static bool jm_try_emit_number_array_length_compare(JsMirTranspiler* mt,
     MIR_reg_t right_value = jm_emit_get_value(mt, &right_ref);
     jm_emit_error_lane_propagate_check(mt);
     MIR_reg_t left_value = jm_box_native(mt, left_number, LMD_TYPE_FLOAT);
-    jm_emit_mov(mt, result, jm_call_3(mt, "js_cmp_raw", MIR_T_I64,
+    MIR_reg_t boxed = jm_call_3(mt, "js_compare", MIR_T_I64,
         MIR_T_I64, MIR_new_int_op(mt->ctx, comparison_op),
         MIR_T_I64, MIR_new_reg_op(mt->ctx, left_value),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, right_value)));
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, right_value));
+    jm_emit_error_lane_propagate_check(mt);
+    jm_emit_mov(mt, result, jm_emit_is_truthy(mt,
+        jm_item_value(boxed, LMD_TYPE_BOOL)));
     jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
     *out_raw = result;
     return true;
@@ -5104,8 +5119,10 @@ static MIR_reg_t jm_emit_typed_array_number_binary_slow(
     MIR_reg_t member_value = jm_emit_get_value(mt, ref);
     jm_emit_error_lane_propagate_check(mt);
     if (!member_is_left) {
-        return jm_callr_2(mt, fallback_fn, MIR_T_I64,
+        MIR_reg_t result = jm_callr_2(mt, fallback_fn, MIR_T_I64,
             jm_box_native(mt, peer_native, LMD_TYPE_FLOAT), member_value);
+        jm_emit_error_lane_propagate_check(mt);
+        return result;
     }
 
     // The right expression follows the completed left Get. Preserve an Item
@@ -5113,8 +5130,10 @@ static MIR_reg_t jm_emit_typed_array_number_binary_slow(
     int member_spill = jm_preserve_before_expression(mt, member_value, peer);
     peer_native = jm_transpile_as_native(mt, peer, LMD_TYPE_FLOAT);
     if (member_spill >= 0) jm_gen_spill_load(mt, member_value, member_spill);
-    return jm_callr_2(mt, fallback_fn, MIR_T_I64, member_value,
+    MIR_reg_t result = jm_callr_2(mt, fallback_fn, MIR_T_I64, member_value,
         jm_box_native(mt, peer_native, LMD_TYPE_FLOAT));
+    jm_emit_error_lane_propagate_check(mt);
+    return result;
 }
 
 static bool jm_try_emit_typed_array_number_binary(JsMirTranspiler* mt,
@@ -5644,6 +5663,13 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
     } else {
         result = jm_callr_2(mt, fn_name, MIR_T_I64, left, right);
     }
+    // Coercing operators can return an ERROR Item. Strict equality cannot
+    // invoke guest code; keep its compact path while routing the other
+    // completions before touching result bits (S1.11, D8.4.3v2).
+    if (bin->op != OPERATOR_JS_STRICT_EQ &&
+            bin->op != OPERATOR_JS_STRICT_NE) {
+        jm_emit_error_lane_propagate_check(mt);
+    }
     if (invert_box) {
         // Tune8 §2.1 inverse-pair fold: flip the bool stored in bit 0 of the
         // boxed result. b2it packs `(LMD_TYPE_BOOL << 56) | bool_val`, so XOR
@@ -5651,10 +5677,6 @@ static MirValue jm_emit_binary_expression(JsMirTranspiler* mt,
         MIR_reg_t inv = jm_new_reg(mt, "neboxinv", MIR_T_I64);
         jm_emit_reg_binary_op(mt, MIR_XOR, inv, result, MIR_new_int_op(mt->ctx, 1));
         result = inv;
-    }
-    // instanceof and in can throw TypeError — propagate exception to enclosing try/catch
-    if (bin->op == OPERATOR_JS_INSTANCEOF || bin->op == OPERATOR_IN) {
-        jm_emit_error_lane_propagate_check(mt);
     }
     if (guarded_done) {
         jm_emit_mov(mt, guarded_result, result);
@@ -7975,9 +7997,75 @@ static bool jm_is_ascii_string_builtin_candidate(JsCallNode* call) {
             memcmp(name->name->chars, "charCodeAt", 10) == 0);
 }
 
+static bool jm_is_math_max_builtin_candidate(JsCallNode* call) {
+    if (!call || !call->callee ||
+            call->callee->node_type != AST_NODE_MEMBER_EXPR) return false;
+    JsMemberNode* member = (JsMemberNode*)call->callee;
+    if (member->computed || member->optional || call->optional ||
+            !member->object || member->object->node_type != AST_NODE_IDENT ||
+            !member->property || member->property->node_type != AST_NODE_IDENT) {
+        return false;
+    }
+    JsIdentifierNode* object = (JsIdentifierNode*)member->object;
+    JsIdentifierNode* property = (JsIdentifierNode*)member->property;
+    return object->name && object->name->len == 4 &&
+        memcmp(object->name->chars, "Math", 4) == 0 &&
+        property->name && property->name->len == 3 &&
+        memcmp(property->name->chars, "max", 3) == 0;
+}
+
+static MIR_reg_t jm_emit_math_max_member_call(JsMirTranspiler* mt,
+        JsCallNode* call, MIR_reg_t recv, MIR_reg_t fn) {
+    JsAstNode* first_node = call->arguments;
+    JsAstNode* second_node = first_node->next;
+    jm_create_gc_root_slot(mt, recv);
+    jm_create_gc_root_slot(mt, fn);
+    MIR_reg_t first = jm_transpile_box_item(mt, first_node);
+    jm_emit_error_lane_propagate_check(mt);
+    int first_spill = jm_preserve_before_expression(mt, first, second_node);
+    MIR_reg_t second = jm_transpile_box_item(mt, second_node);
+    jm_emit_error_lane_propagate_check(mt);
+    if (first_spill >= 0) jm_gen_spill_load(mt, first, first_spill);
+    jm_create_gc_root_slot(mt, second);
+
+    // Get and both arguments have completed in source order. Only the exact
+    // retrieved catalog callable with two existing Numbers may use the shared
+    // scalar max; every other case calls that same value with those same args.
+    MIR_reg_t result = jm_new_reg(mt, "math_max_call", MIR_T_I64);
+    MIR_label_t miss = jm_new_label(mt);
+    MIR_label_t done = jm_new_label(mt);
+    MIR_reg_t exact = jm_call_2(mt, "js_builtin_callable_is_id", MIR_T_I64,
+        MIR_T_I64, MIR_new_reg_op(mt->ctx, fn),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, JS_BUILTIN_MATH_MAX));
+    jm_emit_branch(mt, MIR_BF, miss, exact);
+    MIR_reg_t left = jm_emit_guard_boxed_inline_number(mt, first, miss, true);
+    MIR_reg_t right = jm_emit_guard_boxed_inline_number(mt, second, miss, true);
+    MIR_reg_t max_value = jm_call_2(mt, "fn_max2_u", MIR_T_D,
+        MIR_T_D, MIR_new_reg_op(mt->ctx, left),
+        MIR_T_D, MIR_new_reg_op(mt->ctx, right));
+    jm_emit_mov(mt, result, jm_box_native(mt, max_value, LMD_TYPE_FLOAT));
+    jm_emit_jmp(mt, done);
+
+    jm_emit_label(mt, miss);
+    MIR_reg_t arguments[2] = {first, second};
+    MIR_reg_t args_ptr = jm_build_args_array_from_regs(mt, arguments, 2);
+    bool emitted_call_source = jm_emit_assert_pending_call_source(mt, call);
+    jm_emit_mov(mt, result, jm_call_function_into(mt,
+        MIR_new_reg_op(mt->ctx, fn), MIR_new_reg_op(mt->ctx, recv),
+        MIR_new_reg_op(mt->ctx, args_ptr), MIR_new_int_op(mt->ctx, 2)));
+    jm_emit_clear_assert_pending_call_source(mt, emitted_call_source);
+    jm_emit_value_join(mt, done, result, JS_ERROR_LANE_UNKNOWN);
+    return result;
+}
+
 static MIR_reg_t jm_emit_member_call_from_function(JsMirTranspiler* mt,
         JsCallNode* call, MIR_reg_t recv, MIR_reg_t fn, int arg_count,
         bool args_have_yield, bool args_have_spread) {
+    if (!args_have_yield && !args_have_spread && arg_count == 2 &&
+            !mt->in_generator && !mt->in_async &&
+            jm_is_math_max_builtin_candidate(call)) {
+        return jm_emit_math_max_member_call(mt, call, recv, fn);
+    }
     int recv_arg_spill = -1, fn_arg_spill = -1;
     if (args_have_yield) {
         recv_arg_spill = jm_gen_spill_save(mt, recv);
@@ -10727,7 +10815,7 @@ static void jm_lower_sequence_item(void* owner, AstNode* node, bool is_last) {
 }
 
 // v23b: Transpile condition expression → raw int64 0/1 for MIR_BF/BT.
-// For untyped binary comparisons, calls _raw facade directly (saves 2 calls).
+// Coercing binary comparisons keep their Item completion until catch routing.
 // For native numeric comparisons, the value boundary already returns 0/1.
 // For everything else, falls back to box + is_truthy.
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
@@ -10782,37 +10870,46 @@ MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr) {
                 return jm_emit_is_truthy(mt, jm_transpile_expression_value(mt, expr));
             }
 
-            // Untyped comparison → use _raw facade returning int64 directly.
-            // Tune8 §2.1:
-            //   - js_ne_raw / js_loose_ne_raw collapse to (eq ^ 1) inline.
-            //   - js_lt/gt/le/ge_raw collapse to js_cmp_raw(op, l, r); op is a
-            //     compile-time constant operand so the runtime-side branch is
-            //     well-predicted after the first call at a given site.
-            const char* raw_fn = NULL;
+            // A coercing comparison may throw from ToPrimitive. Its Item
+            // completion must reach catch before branch truthiness; the raw
+            // facade has no channel for that Error Item (D8.4.3v2).
             bool invert = false;
             int cmp_op = -1;   // 0=LT, 1=GT, 2=LE, 3=GE; -1 = use eq path
             switch (bin->op) {
-            case OPERATOR_LT:        raw_fn = "js_cmp_raw"; cmp_op = 0; break;
-            case OPERATOR_GT:        raw_fn = "js_cmp_raw"; cmp_op = 1; break;
-            case OPERATOR_LE:        raw_fn = "js_cmp_raw"; cmp_op = 2; break;
-            case OPERATOR_GE:        raw_fn = "js_cmp_raw"; cmp_op = 3; break;
-            case OPERATOR_JS_STRICT_EQ: raw_fn = "js_eq_raw"; break;
-            case OPERATOR_JS_STRICT_NE: raw_fn = "js_eq_raw"; invert = true; break;
-            case OPERATOR_EQ:        raw_fn = "js_loose_eq_raw"; break;
-            case OPERATOR_NE:        raw_fn = "js_loose_eq_raw"; invert = true; break;
+            case OPERATOR_LT:        cmp_op = 0; break;
+            case OPERATOR_GT:        cmp_op = 1; break;
+            case OPERATOR_LE:        cmp_op = 2; break;
+            case OPERATOR_GE:        cmp_op = 3; break;
+            case OPERATOR_JS_STRICT_NE: case OPERATOR_NE: invert = true; break;
             default: break;
             }
-            if (raw_fn) {
+            if (cmp_op >= 0 || bin->op == OPERATOR_EQ || bin->op == OPERATOR_NE ||
+                    bin->op == OPERATOR_JS_STRICT_EQ ||
+                    bin->op == OPERATOR_JS_STRICT_NE) {
                 MIR_reg_t left_val = jm_transpile_box_item(mt, bin->left);
+                jm_emit_error_lane_propagate_check(mt);
                 MIR_reg_t right_val = jm_transpile_box_item(mt, bin->right);
+                jm_emit_error_lane_propagate_check(mt);
                 MIR_reg_t raw;
                 if (cmp_op >= 0) {
-                    raw = jm_call_3(mt, raw_fn, MIR_T_I64,
+                    MIR_reg_t boxed = jm_call_3(mt, "js_compare", MIR_T_I64,
                         MIR_T_I64, MIR_new_int_op(mt->ctx, cmp_op),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, left_val),
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, right_val));
+                    jm_emit_error_lane_propagate_check(mt);
+                    raw = jm_emit_is_truthy(mt, jm_item_value(boxed,
+                        LMD_TYPE_BOOL));
+                } else if (bin->op == OPERATOR_EQ || bin->op == OPERATOR_NE) {
+                    MIR_reg_t boxed = jm_callr_2(mt, "js_equal", MIR_T_I64,
+                        left_val, right_val);
+                    jm_emit_error_lane_propagate_check(mt);
+                    raw = jm_emit_is_truthy(mt, jm_item_value(boxed,
+                        LMD_TYPE_BOOL));
                 } else {
-                    raw = jm_callr_2(mt, raw_fn, MIR_T_I64, left_val, right_val);
+                    // Strict equality cannot execute guest code and retains
+                    // the compact raw result lane.
+                    raw = jm_callr_2(mt, "js_eq_raw", MIR_T_I64, left_val,
+                        right_val);
                 }
                 if (invert) {
                     MIR_reg_t inv = jm_new_reg(mt, "nerawinv", MIR_T_I64);

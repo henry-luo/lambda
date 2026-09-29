@@ -380,10 +380,6 @@ MIR_reg_t jm_box_int_reg(JsMirTranspiler* mt, MIR_reg_t val) {
     return jm_box_int_double(mt, as_double);
 }
 
-static MIR_reg_t jm_emit_bits_double(JsMirTranspiler* mt, MIR_reg_t bits_reg) {
-    return em_emit_bits_double(&mt->func_em->em, bits_reg);
-}
-
 static MIR_reg_t jm_box_float_cold(void* owner, MIR_reg_t value) {
     JsMirTranspiler* mt = (JsMirTranspiler*)owner;
     return jm_call_1(mt, "push_d", MIR_T_I64, MIR_T_D,
@@ -886,7 +882,17 @@ MIR_reg_t jm_emit_unbox_int(JsMirTranspiler* mt, MIR_reg_t item) {
     return result;
 }
 
-// Unbox Item → native double; inline the raw-bit arm for self-tagged floats.
+static MIR_reg_t jm_unbox_f64_cold(void* owner, MIR_reg_t item) {
+    JsMirTranspiler* mt = (JsMirTranspiler*)owner;
+    return jm_callr_1(mt, "it2d", MIR_T_D, item);
+}
+
+MIR_reg_t jm_emit_unbox_noninline_float(JsMirTranspiler* mt, MIR_reg_t item) {
+    return em_unbox_f64_noninline_item(&mt->func_em->em, mt,
+        jm_unbox_f64_cold, item);
+}
+
+// Unbox Item → native double through the shared physical decoder.
 MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
     // Safety: if item is already a native double, return it directly
     MIR_type_t rt = MIR_reg_type(mt->ctx, item, mt->func_em->em.func);
@@ -897,20 +903,7 @@ MIR_reg_t jm_emit_unbox_float(JsMirTranspiler* mt, MIR_reg_t item) {
             MIR_new_reg_op(mt->ctx, d), MIR_new_reg_op(mt->ctx, item)));
         return d;
     }
-    MIR_reg_t in_band = jm_new_reg(mt, "jfumask", MIR_T_I64);
-    jm_emit_reg_binary_op(mt, MIR_AND, in_band, item, MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
-    MIR_reg_t result = jm_new_reg(mt, "junboxf", MIR_T_D);
-    MIR_label_t l_inline = jm_new_label(mt);
-    MIR_label_t l_end = jm_new_label(mt);
-    jm_emit_branch(mt, MIR_BT, l_inline, in_band);
-    MIR_reg_t cold = jm_callr_1(mt, "it2d", MIR_T_D, item);
-    jm_emit_dmov(mt, result, cold);
-    jm_emit_jmp(mt, l_end);
-    jm_emit_label(mt, l_inline);
-    MIR_reg_t inline_d = jm_emit_bits_double(mt, item);
-    jm_emit_dmov(mt, result, inline_d);
-    jm_emit_label(mt, l_end);
-    return result;
+    return em_unbox_f64_item(&mt->func_em->em, mt, jm_unbox_f64_cold, item);
 }
 
 // Convert native double → native int64_t (truncate)
@@ -1349,7 +1342,7 @@ MIR_reg_t jm_emit_is_truthy(JsMirTranspiler* mt, MirValue value) {
 
 // v23b: transpile an expression for use as a branch condition (if/while/for/ternary).
 // Returns raw int64 0/1 directly usable in MIR_BF/BT.
-// For untyped binary comparisons, calls _raw facades to avoid box→unbox cycle.
+// Coercing comparisons keep their Item completion before the branch bit.
 // For everything else, falls back to jm_transpile_box_item + jm_emit_is_truthy.
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 

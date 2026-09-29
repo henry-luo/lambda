@@ -1,0 +1,41 @@
+{
+  "source": "test/benchmark/larceny/triangl.js",
+  "source_sha256": "7f28f785f625f6fc9f5363b38834e143315baebb6b1946bf944517f824ffe748",
+  "backend": "mir",
+  "runs": {
+    "before": {
+      "binary": "temp/js-tune-20260929/overall-after-profile.exe",
+      "binary_sha256": "e3b6effce178cf2568bdf7b4fff7e036763f487f06e56c8048bd33bfbc597545",
+      "mir_path": "temp/js-untyped-tune-20260929/final-triangl-before.mir",
+      "mir_sha256": "ee902da14d3a696d7274afb51595f98309484682b07ffda990545b4048b3b67f",
+      "module_lines": 5444,
+      "dadd_sites": [
+        610,
+        1415,
+        3571,
+        4521
+      ],
+      "js_increment_call_sites": [
+        3718
+      ]
+    },
+    "after": {
+      "binary": "temp/js-untyped-tune-20260929/final-guarded-profile.exe",
+      "binary_sha256": "b1f79a45f35d28309d320f1d36d827446b4e5bf63dbfba5ef3b9708f05cfcdc9",
+      "mir_path": "temp/js-untyped-tune-20260929/final-triangl-after.mir",
+      "mir_sha256": "10e85c1a31fae1e6705001d4dc354af13727e23f5fad54e44483e27671c63398",
+      "module_lines": 7926,
+      "dadd_sites": [
+        701,
+        1551,
+        3680,
+        3835,
+        5965,
+        6979
+      ],
+      "js_increment_call_sites": [
+        6112
+      ]
+    }
+  }
+}
