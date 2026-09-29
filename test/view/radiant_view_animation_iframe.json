@@ -1,0 +1,17 @@
+{
+  "name": "Animation opacity ownership and iframe frame scheduling",
+  "html": "test/html/animation_iframe_parent.html",
+  "viewport": { "width": 300, "height": 240 },
+  "events": [
+    { "type": "assert_pixel", "x": 10, "y": 10, "max_r": 40, "max_g": 40, "max_b": 40 },
+    { "type": "click", "target": { "selector": "a[target=\"probe\"]" } },
+    { "type": "assert_pixel", "x": 40, "y": 140, "min_r": 220, "max_b": 35 },
+    { "type": "advance_time", "ms": 500, "steps": 1 },
+    { "type": "assert_pixel", "x": 10, "y": 10, "max_r": 40, "max_g": 40, "max_b": 40 },
+    { "type": "advance_time", "ms": 500, "steps": 1 },
+    { "type": "assert_pixel", "x": 10, "y": 10, "max_r": 40, "max_g": 40, "max_b": 40 },
+    { "type": "assert_pixel", "x": 40, "y": 140, "min_r": 100, "max_r": 155,
+      "max_g": 35, "min_b": 100, "max_b": 155 },
+    { "type": "assert_pixel", "x": 45, "y": 55, "max_r": 35, "min_g": 105, "min_b": 220 }
+  ]
+}

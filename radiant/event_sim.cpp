@@ -5149,10 +5149,13 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             }
             for (int i = 1; i <= steps; i++) {
                 double now = base_time + (step_ms * i) / 1000.0;
-                if (!virtual_clock) {
-                    animation_scheduler_tick(sched, now, &state->dirty_tracker);
-                }
+                if (!virtual_clock) radiant_tick_document_animations(doc, now);
                 radiant_editing_animation_tick(uicon, now);
+            }
+            if (virtual_clock) {
+                // Virtual time has already sampled the top document's CSS
+                // animations; embedded schedulers need the same final time.
+                radiant_tick_document_animations(doc, base_time + ms / 1000.0, false);
             }
             // Re-render after advancing animation
             force_render_surface(uicon);

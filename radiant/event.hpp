@@ -3312,6 +3312,11 @@ void editing_interaction_end_composition(DocState* state,
  */
 void doc_state_mark_dirty(DocState* state);
 void doc_state_request_repaint(DocState* state);
+// Advance the visible document and its embedded documents on the UI thread.
+// Returns whether any scheduler still needs another frame.
+bool radiant_tick_document_animations(DomDocument* document, double now,
+                                      bool tick_root = true,
+                                      bool anchor_host_time = false);
 void doc_state_mark_video_frame_pending(DocState* state);
 void doc_state_clear_video_frame_pending(DocState* state);
 void doc_state_request_reflow(DocState* state);

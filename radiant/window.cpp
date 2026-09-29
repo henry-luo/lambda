@@ -1719,8 +1719,8 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             editing_animation_active = radiant_editing_animation_active(state);
         }
 
-        // Tick active animations
-        if (state && state->animation_scheduler && state->animation_scheduler->has_active_animations) {
+        // Tick the visible browsing-context tree, including iframe schedulers.
+        if (state) {
             // set viewport bounds so off-screen animations don't inflate dirty region
             float scroll_y = 0;
             if (ui_context.document && ui_context.document->view_tree && ui_context.document->view_tree->root) {
@@ -1733,11 +1733,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             state->dirty_tracker.viewport_y = scroll_y;
             state->dirty_tracker.viewport_height = (float)ui_context.viewport_height;
 
-            bool still_active = animation_scheduler_tick(state->animation_scheduler,
-                                                         currentTime, &state->dirty_tracker);
-            doc_state_request_repaint(state);
+            bool still_active = radiant_tick_document_animations(ui_context.document,
+                                                                  currentTime, true, true);
             frame_driven = frame_driven || still_active;
-            do_redraw = 1;
+            if (state->needs_repaint) do_redraw = 1;
         }
 
         // Video playback wakes through RdtVideoCallbacks::on_frame_ready.

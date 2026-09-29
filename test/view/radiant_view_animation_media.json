@@ -1,0 +1,14 @@
+{
+  "name": "GIF and Lottie pixel frames render and advance",
+  "html": "test/html/animation_media_test.html",
+  "viewport": { "width": 80, "height": 70 },
+  "events": [
+    { "type": "assert_pixel", "x": 10, "y": 10, "min_r": 220, "max_g": 35, "max_b": 35 },
+    { "type": "assert_pixel", "x": 5, "y": 40, "min_r": 220, "max_g": 35, "max_b": 35 },
+    { "type": "advance_time", "ms": 150, "steps": 1 },
+    { "type": "assert_pixel", "x": 10, "y": 10, "min_r": 170, "min_g": 45, "max_b": 35 },
+    { "type": "advance_time", "ms": 900, "steps": 1 },
+    { "type": "assert_pixel", "x": 10, "y": 10, "min_r": 220, "max_g": 35, "max_b": 35 },
+    { "type": "assert_pixel", "x": 10, "y": 40, "min_r": 220, "max_g": 35, "max_b": 35 }
+  ]
+}
