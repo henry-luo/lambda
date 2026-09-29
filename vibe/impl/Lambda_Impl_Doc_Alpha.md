@@ -208,7 +208,7 @@ The user approved four items: add `Lambda_Packages.md` and an HTML/CSS/SVG suppo
 | `doc/Lambda_String_Pattern.md` | The `\(…)` pattern language and pattern-aware `find`/`replace`/`split`, moved out of `Lambda_Type.md`, which keeps a short summary |
 | `doc/Lambda_Modules.md` | `pub`, direct and aliased imports, the resolution table (D7.2), built-in modules, qualified system names, packages, JavaScript modules, known issues |
 | `doc/Lambda_Concurrency.md` | Tasks, mailboxes, `select`, timeouts, cancellation and errors across tasks (S13); every example was run |
-| `doc/Lambda_Document_Updates.md` | References and `#`, identity, the three tiers, `put`/`del`, transactions, `temp.` documents (PTH30–PTH80; S9.4 ratification pending); persisting to disk marked not yet implemented |
+| `doc/dev/Lambda_Document_Updates.md` | References and `#`, identity, the three tiers, `put`/`del`, transactions, `temp.` documents (PTH30–PTH80; S9.4 ratification pending); persisting to disk marked not yet implemented; moved out of the public set 2026-09-29 (not ready for alpha) |
 | `doc/Lambda_Packages.md` | The bundled Lambda packages and how to import them |
 | `doc/HTML_CSS_SVG_Support.md` | Radiant's support matrix: conformance figures, HTML elements, selectors, at-rules, cascade, values, properties, layout modes, box model, backgrounds, text and fonts, effects, animation, interaction, SVG, image formats, output targets, known limitations |
 | `doc/tutorial/` | `README.md`, chapters 01–10 and `data/` (`books.json`, `sales.csv`, `notes.md`) |

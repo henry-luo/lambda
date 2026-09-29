@@ -1284,10 +1284,6 @@ pn main() {                      // print is a pn: only a pn may call it
 
 `var`, `while`, `break`, `continue`, `return`, and assignment (`=`) are only available in `pn` (procedural) functions. See [Lambda Procedural Programming](Lambda_Procedural.md) for full documentation.
 
-### Document Update Statements
-
-`put`, `del`, `commit`, `rollback` and the block form of `open` write documents. They are statements, never expressions: `=` has no external effect, so a document write has exactly one spelling. The statements, transactions and their rules are described in [Lambda_Document_Updates.md](Lambda_Document_Updates.md).
-
 ---
 
 ## Operators

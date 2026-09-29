@@ -16,7 +16,6 @@ lambda layout page.html                         # Print the CSS layout tree
 lambda render page.html -o page.pdf             # Render to svg | pdf | png | jpg
 lambda view page.html                           # Open the interactive viewer
 lambda edit notes.md                            # Edit Markdown, HTML or SVG
-lambda fetch https://example.com -o page.html   # Download a URL
 ```
 
 ## Type System
@@ -427,38 +426,6 @@ Data type determines output format:
 - String: raw text (no formatting)
 - Binary: raw binary data
 - Other types: Lambda/Mark format
-
-## References & Document Updates
-
-Full reference: [Lambda_Document_Updates.md](Lambda_Document_Updates.md).
-
-A `path` is a reference: it reads nothing until the postfix `#` forces it.
-
-| Form | Meaning |
-|---|---|
-| `p.a.b` | still a path — steps append, nothing is read |
-| `p#` | the document at `p` (exactly `input(p)`) |
-| `p#name` | force, then member `name` (fragment sugar for `p#.name`) |
-| `p.a.b#` | extend the path, then force — the same value |
-| `&x` | the reference `x` carries as its identity, else `null` |
-| `a === b` | reference equality: `&a != null and &a == &b` |
-| `x is reference` | `reference` is the type `symbol \| path` |
-
-Every document write is a statement; `=` never writes a document.
-
-| Statement | Meaning |
-|---|---|
-| `put t = v` | upsert at a location (a position replaces, a key upserts) |
-| `put v before t` / `put v after t` | insert at a head node |
-| `put v into t` | add a member: append, upsert keys, or add a child |
-| `del t` | remove a location |
-| `put a = 1, b = 2` | comma-joined: one statement, written order |
-| `commit` / `rollback` | end the write set, or discard it |
-| `open v = target { … }` | one bounded transaction; `#` implied on `v` |
-| `temp(name, content)` | create an in-memory document; `temp.'name'` addresses it |
-
-Edits build a write-only next version: nothing changes until `commit`, and every
-value operand reads the head. Outside `open`, each statement commits at once.
 
 ## Control Flow
 

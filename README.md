@@ -289,7 +289,6 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [String Patterns](doc/Lambda_String_Pattern.md)     | The pattern language inside `\(…)` and pattern-aware string functions |
 | [Modules](doc/Lambda_Modules.md)                    | Imports, `pub` exports, built-in, package and JavaScript modules |
 | [Concurrency](doc/Lambda_Concurrency.md)            | Tasks, mailboxes, `select`, timeouts and cancellation |
-| [Document Updates](doc/Lambda_Document_Updates.md)  | References, node identity, `put`/`del` and transactions |
 | [System Functions](doc/Lambda_Sys_Func.md)          | Built-in functions (math, string, collection, I/O, concurrency) |
 | [Packages](doc/Lambda_Packages.md)                  | Libraries written in Lambda that ship with the runtime (math, chart, graph, LaTeX, PDF, …) |
 | [CLI Reference](doc/Lambda_CLI.md)                  | Commands, flags, and usage for the Lambda CLI       |

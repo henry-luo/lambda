@@ -182,7 +182,7 @@ done
 true
 ```
 
-A `.txt` file reads back as one string, and the classics survive the round trip through JSON unchanged. Documents you load can also be changed in place, with `put` and `del` statements grouped into transactions; [Lambda_Document_Updates.md](../Lambda_Document_Updates.md) describes them.
+A `.txt` file reads back as one string, and the classics survive the round trip through JSON unchanged.
 
 ## Files and Folders
 
