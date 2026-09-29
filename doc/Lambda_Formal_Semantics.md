@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 50.1.1 (2026-09-29)
+**Spec version:** 50.1.2 (2026-09-29)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -184,7 +184,7 @@ harnesses.
 - **S2.1.1v4** Scalars: `null`, `bool`, `int`, `integer`, `i64`, `u64`,
   sized ints `i8 i16 i32 u8 u16 u32`, `f16 f32`, `float`/`f64`,
   `decimal`, `string`, `symbol` (with `path` as a special symbol), `binary`,
-  `datetime` (with `date`/`time` sub-kinds); `string`, `symbol`, and
+  `datetime` (with `date`/`time` sub-kinds; its textual notation follows a subset of ISO 8601); `string`, `symbol`, and
   `binary` are the text scalars, placed as one value and walked as sequences
   (S2.5.8). Containers: `array` (transparently unboxed numeric variants) with
   its two specialized kinds `range` and `list` — `list <: array`,

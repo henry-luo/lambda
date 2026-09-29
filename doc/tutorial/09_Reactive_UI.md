@@ -156,7 +156,7 @@ lambda todo.ls
 Open it with `lambda view todo.ls`, then click a task to strike it through or its × to remove it. A click travels like this:
 
 1. The item's `on click` handler reads `evt.target_class` to see which part was clicked, and calls `emit("toggle_item", ~)` or `emit("remove_item", ~)`.
-2. `emit(name, payload)` raises a custom event that travels up the page to the nearest template with an `on name` handler, here the list. The payload arrives as that handler's `evt`, so `evt.index` is the `index` attribute the list gave the item.
+2. `emit(event_name, payload)` raises a custom event that travels up the page to the nearest template with an `on event_name` handler, here the list. The payload arrives as that handler's `evt`, so `evt.index` is the `index` attribute the list gave the item.
 3. The list's handler builds a new array and assigns it to `~.items`. Lambda marks the list as changed, re-runs its body, and the page updates.
 
 `for (i, item in ~.items)` binds each item's position to `i` as well as the item to `item`. The item template keeps no state of its own, and that is deliberate: a template's state belongs to the item it was applied to, and each time the list's body runs it applies fresh `<todo_item>` elements, whose state would start over. Keep anything that must survive a re-render in the model.

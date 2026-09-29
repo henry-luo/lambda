@@ -75,7 +75,7 @@ false
 
 ## Dates and Times
 
-`t'…'` writes a date, a time or both, and the parts are members. The notation follows a subset of ISO 8601 (extended format, e.g. `2025-04-26T10:30:00Z`), so `2025`, `2025-06`, `10:30` and `+08` offsets are all accepted:
+`t'…'` writes a date, a time or both, and the parts are members:
 
 ```text repl
 λ> t'2025-04-26'.weekday

@@ -6,17 +6,6 @@ In this chapter you install Lambda, evaluate expressions in the REPL, and run yo
 
 **Download a release.** The [Releases](https://github.com/henry-luo/lambda/releases) page has a zip per platform. Unzip it anywhere: the folder holds the `lambda` executable and an `lmd/` directory with the runtime's packages, schemas and fonts. Keep the two together. Lambda looks for `lmd/` in the **current** folder, so if you add the executable to your `PATH` and run it from elsewhere, also set the environment variable `LAMBDA_HOME` to the absolute path of `lmd/` — otherwise commands that need the bundled packages or schemas fail.
 
-**Or build from source.** On macOS or Linux (on Windows, use MSYS2 and `setup-windows-deps.sh`):
-
-```bash
-git clone https://github.com/henry-luo/lambda.git
-cd lambda
-./setup-mac-deps.sh
-make build
-```
-
-The build leaves `lambda.exe` in the repository root. This tutorial writes the command as `lambda`; in a source checkout type `./lambda.exe` instead. When you work in another folder, set `LAMBDA_HOME` to the absolute path of the checkout's `lambda/` directory, which holds the runtime assets. A development build prints a `Running DEBUG build` banner on every run; `make release` builds the optimized executable.
-
 ## Check the Installation
 
 ```bash
@@ -150,8 +139,6 @@ oops.ls:2:1: error[E201]: cannot initialize 'total' of type int with string
 ```
 
 A diagnostic names the file, line and column, an error code and a message, and the terminal output also shows the offending source line. Codes in the 100s are syntax errors, the 200s type and compile errors, the 300s run-time errors and the 400s I/O errors; [Lambda_Error_Handling.md](../Lambda_Error_Handling.md#error-code-categories) lists them.
-
-Lambda also writes a detailed execution log to `log.txt` in the current folder. You rarely need it, but it is the first place to look when something behaves unexpectedly.
 
 ## Commands at a Glance
 
