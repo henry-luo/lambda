@@ -13038,22 +13038,11 @@ char* lambda_resolve_import_module_path(const char* base_directory,
         // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
         for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
     } else if (!shipped_package) {
+        // a bare import resolves in the working directory; only lambda.* reaches
+        // the home (above). The old first-segment-to-home rewrite predated D7.2.4
+        // and misrouted every dotted bare import (`test.benchmark.x`).
         strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
         for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
-        char* slash = strchr(path->str + 2, '/');
-        if (slash) {
-            StrBuf* fixed = strbuf_new();
-            const char* home = g_lambda_home;
-            if (!fixed) {
-                strbuf_free(path);
-                return NULL;
-            }
-            if (home[0] == '.' && home[1] == '/') home += 2;
-            strbuf_append_all(fixed, 2, "./", home);
-            strbuf_append_str(fixed, slash);
-            strbuf_free(path);
-            path = fixed;
-        }
     }
     strbuf_append_str(path, ".ls");
     char* resolved = mem_strdup(path->str, MEM_CAT_SYSTEM);

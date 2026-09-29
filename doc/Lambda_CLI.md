@@ -525,7 +525,7 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 
 | Variable | Values | Description |
 |----------|--------|-------------|
-| `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lambda` (source checkout) or `./lmd` (release bundle), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
+| `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lmd` (source checkout and release bundle alike), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
 | `LAMBDA_TIER` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL keeps a persistent interpreter session unless `jit` |
 | `JUBE_MODULE_PATH` | path | Where Node modules are discovered (default: `./modules` beside the executable) |
 | `LAMBDA_LOG_LEVEL` | level name | Minimum log level written to `log.txt` |

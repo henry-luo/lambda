@@ -107,7 +107,7 @@ let c = <s.Circle r: 2.0>;
 | `import p: 'uri'` | A namespace prefix for markup, not a module ([Namespaces](Lambda_Syntax.md#namespaces)) |
 
 - Only `.ls` and `.js` files are tried, in that order; `.mjs` and `.ts` files are not modules, and a directory is not a module.
-- `LAMBDA_HOME` is the runtime's asset directory. Without the environment variable it is `./lambda` (a source checkout) or `./lmd` (a release bundle), **relative to the current working directory**. When you run `lambda` from another folder, set `LAMBDA_HOME` to the absolute path of that directory, or package imports fail with E217.
+- `LAMBDA_HOME` is the runtime's asset directory. Without the environment variable it is `./lmd` (in a source checkout and a release bundle alike), **relative to the current working directory**. When you run `lambda` from another folder, set `LAMBDA_HOME` to the absolute path of that directory, or package imports fail with E217.
 - Prefer the relative form `.a` for your own modules: it does not depend on where you run the script from.
 
 ## Built-in Modules
@@ -230,4 +230,3 @@ pn main() {
 | `export async function` is rejected by LambdaJS | Declare the function, then `export { f }` |
 | JavaScript calling a Lambda `pub fn` or `pub pn` that returns a string literal or calls `print` crashes the process | Return numbers or structured values across the boundary |
 | `import 'uri'` without an alias is silently ignored | Always give a namespace a prefix |
-| Any dotted bare import other than `lambda.*` (e.g. `import tools.util`) drops its first segment when resolving | Use the relative form `import .tools.util` |

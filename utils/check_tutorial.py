@@ -71,7 +71,7 @@ def blocks(path: Path):
 
 def env():
     e = dict(os.environ)
-    e["LAMBDA_HOME"] = str(ROOT / "lambda")  # packages and schemas, wherever the sandbox is
+    e["LAMBDA_HOME"] = str(ROOT / "lmd")  # packages and schemas, wherever the sandbox is
     return e
 
 

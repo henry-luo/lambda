@@ -22,8 +22,8 @@ autosave), and an authoring stylesheet for HTML with inactive source scripts.
 | DOM geometry | client bounds of elements drawn by an `<svg>` | `lambda/dom/dom.cpp`, `radiant/view_pool.cpp` |
 | Shell host | edit app mode: Escape routing, guarded close, title | `radiant/window.cpp`, `radiant/event.cpp` |
 | DOM waist | `set_close_guard`, `request_window_close`, `set_window_title` | `lambda/dom/dom_api.def`, `lambda/module/radiant/radiant_module.cpp` |
-| `lambda.edit` | format registry (`edit`), session, shell, toolbar, rich-text surface, drawing surface, adapters (`markdown`, `html`, `svg`), shared adapter helpers (`model`) | `lambda/package/edit/*.ls` |
-| `lambda.editor` | model, commands, history, selection bridge (reused) | `lambda/package/editor/*.ls` |
+| `lambda.edit` | format registry (`edit`), session, shell, toolbar, rich-text surface, drawing surface, adapters (`markdown`, `html`, `svg`), shared adapter helpers (`model`) | `lmd/package/edit/*.ls` |
+| `lambda.editor` | model, commands, history, selection bridge (reused) | `lmd/package/editor/*.ls` |
 | Readers and writers | Markdown, HTML, XML readers and formatters (fixed where lossy, §2.4) | `lambda/input/*`, `lambda/format/*` |
 
 Format dispatch has one owner (proposal §4): native code selects edit mode

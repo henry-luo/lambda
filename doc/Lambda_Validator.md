@@ -185,7 +185,7 @@ Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.ym
 
 ### Built-in Schemas
 
-Some formats have a schema shipped with the runtime (under `LAMBDA_HOME`, `lambda/input/*_schema.ls` in a source tree), so `-s` may be omitted:
+Some formats have a schema shipped with the runtime (under `LAMBDA_HOME`, at `package/doc/*_schema.ls`), so `-s` may be omitted:
 
 | Format | Schema | Root type |
 |--------|--------|-----------|

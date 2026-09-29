@@ -299,7 +299,7 @@ the complete namespace migration:
 2. `lambda` is barred from binding declarations by the direct lexer’s
    reservation check, yielding E201 while member/data-name positions remain
    available.
-3. Shipped packages moved from `lambda/package/` to their `lambda/` roots,
+3. Shipped packages moved from `lmd/package/` to their `lambda/` roots,
    with typesetting moved specifically to `lambda/doc/math/`; all live imports,
    bridge scripts, tests, and release packaging now use the canonical paths.
 4. Regression coverage is in `test/lambda/lambda_namespace.ls` and
@@ -1643,7 +1643,7 @@ object methods were checked. The dynamic half (a `pn` reached through a value)
 was closed 2026-09-18 with S12.1.4v3(6), and the static rule now holds inside
 `function` bodies (C20-3) via the colour walk in `lambda_ast_finalize_script`
 (`colour_walk_call`, `build_ast.cpp`). Extending that one check to every `fn`
-context breaks three reliance sites: `lambda/package/dom/edit_history.ls`
+context breaks three reliance sites: `lmd/package/dom/edit_history.ls`
 (`fn clear_history`/`fn replay_retained` call `pn session.set_history*`),
 `test/lambda/proc/type_binder_proc_raw.ls` (module-level calls to `pn`s), and
 `test/mir/lambda/tune26_nested_tco_native_result`. Blocked on a ruling for the

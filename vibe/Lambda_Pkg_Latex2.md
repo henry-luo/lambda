@@ -847,7 +847,7 @@ fn get_number(state, def) = {
 
 ### B.1 Overview
 
-The LaTeX rendering pipeline uses two distinct font families that coexist in `lambda/input/latex/fonts/`:
+The LaTeX rendering pipeline uses two distinct font families that coexist in `lmd/package/latex/fonts/`:
 
 | Family | Files | Purpose |
 |--------|-------|---------|
@@ -856,7 +856,7 @@ The LaTeX rendering pipeline uses two distinct font families that coexist in `la
 
 ### B.2 Why Both Font Families Are Needed
 
-**CMU fonts** cover the full document text. The Lambda LaTeX package converts `.tex` source to HTML and uses CMU to faithfully reproduce TeX's Computer Modern typeface for body paragraphs, section headings, and other document text. CMU is the Unicode-extended version of Knuth's original Computer Modern, with broad Unicode coverage. Declared via `lambda/input/latex/css/cmu.css`.
+**CMU fonts** cover the full document text. The Lambda LaTeX package converts `.tex` source to HTML and uses CMU to faithfully reproduce TeX's Computer Modern typeface for body paragraphs, section headings, and other document text. CMU is the Unicode-extended version of Knuth's original Computer Modern, with broad Unicode coverage. Declared via `lmd/package/latex/css/cmu.css`.
 
 **KaTeX fonts** cover math-specific Unicode ranges that CMU either omits or does not render correctly in web contexts:
 
@@ -866,7 +866,7 @@ The LaTeX rendering pipeline uses two distinct font families that coexist in `la
 - `KaTeX_AMS` — AMS mathematical symbols (`∀`, `∃`, `ℝ`, `ℤ`, etc.)
 - `KaTeX_Caligraphic`, `KaTeX_Fraktur`, `KaTeX_Script`, `KaTeX_SansSerif`, `KaTeX_Typewriter` — math alphabets (`𝒜`, `𝔄`, etc.)
 
-The math package (`lambda/doc/math/`) emits HTML elements with CSS classes like `.ML__delim-size2` (→ `font-family:KaTeX_Size2`) and `.ML__mathit` (→ `font-family:KaTeX_Math`). These classes are defined in the embedded stylesheet returned by `math/css.ls:get_stylesheet()`. The KaTeX fonts must be registered with FreeType before layout and rendering, which is handled by `process_document_font_faces()` reading `@font-face` declarations from `lambda/input/latex/css/katex.css`.
+The math package (`lambda/doc/math/`) emits HTML elements with CSS classes like `.ML__delim-size2` (→ `font-family:KaTeX_Size2`) and `.ML__mathit` (→ `font-family:KaTeX_Math`). These classes are defined in the embedded stylesheet returned by `math/css.ls:get_stylesheet()`. The KaTeX fonts must be registered with FreeType before layout and rendering, which is handled by `process_document_font_faces()` reading `@font-face` declarations from `lmd/package/math/katex.css`.
 
 **Visual consistency:** Both families derive from Knuth's Computer Modern, so they blend seamlessly in a rendered document — body text (CMU) and math (KaTeX) share the same visual heritage despite coming from different font files.
 
@@ -874,10 +874,10 @@ The math package (`lambda/doc/math/`) emits HTML elements with CSS classes like 
 
 `load_latex_doc()` in `radiant/cmd_layout.cpp` loads both stylesheets and stores them in `dom_doc->stylesheets[]`:
 
-1. `lambda/input/latex/css/article.css` — declares CMU `@font-face` rules, referencing `cmu.css` which points to the `Serif/`, `Sans/`, etc. subdirectories
-2. `lambda/input/latex/css/katex.css` — declares KaTeX `@font-face` rules with paths like `url('../fonts/KaTeX_Size1-Regular.woff2')`
+1. `lmd/package/latex/css/article.css` — declares CMU `@font-face` rules, referencing `cmu.css` which points to the `Serif/`, `Sans/`, etc. subdirectories
+2. `lmd/package/math/katex.css` — declares KaTeX `@font-face` rules with paths like `url('../fonts/KaTeX_Size1-Regular.woff2')`
 
-`process_document_font_faces()` in `radiant/font_face.cpp` iterates the stored stylesheets and resolves each `@font-face` `src` URL relative to the stylesheet's `origin_url`. For `katex.css` (loaded with the relative path `lambda/input/latex/css/katex.css`), the path is resolved to an absolute path via `realpath()` before computing relative font URLs — ensuring `../fonts/KaTeX_Size1-Regular.woff2` correctly resolves to `lambda/input/latex/fonts/KaTeX_Size1-Regular.woff2`.
+`process_document_font_faces()` in `radiant/font_face.cpp` iterates the stored stylesheets and resolves each `@font-face` `src` URL relative to the stylesheet's `origin_url`. For `katex.css` (loaded with the relative path `lmd/package/math/katex.css`), the path is resolved to an absolute path via `realpath()` before computing relative font URLs — ensuring `../fonts/KaTeX_Size1-Regular.woff2` correctly resolves to `lmd/package/math/fonts/KaTeX_Size1-Regular.woff2`.
 
 ### B.4 Stretchy Delimiter Selection
 
@@ -903,4 +903,4 @@ Both font families are free to use, modify, and redistribute, including in comme
 | CMU (Computer Modern Unicode) | **SIL Open Font License 1.1** |
 | KaTeX fonts | **SIL Open Font License 1.1** |
 
-The OFL is one of the most permissive font licenses available. The full license text is included at `lambda/input/latex/fonts/OFL.txt`. No attribution requirement applies to rendered output (only to redistribution of the font files themselves).
+The OFL is one of the most permissive font licenses available. The full license text is included at `lmd/package/latex/fonts/OFL.txt`. No attribution requirement applies to rendered output (only to redistribution of the font files themselves).

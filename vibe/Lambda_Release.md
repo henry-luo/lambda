@@ -1,5 +1,7 @@
 # Lambda Release Packaging — Design & Implementation Proposal
 
+> **Superseded in part (2026-09-29).** The two-home scheme below (`./lambda` in dev, `./lmd` in release, `LAMBDA_HOME_RELEASE`) is retired. The source checkout now keeps runtime assets in `./lmd/` itself, and `g_lambda_home` is `"./lmd"` everywhere; `prepare_release.sh` copies `lmd/` unchanged. The former `input/` assets moved into their packages: validator schemas and view stylesheets to `lmd/package/doc/`, math/KaTeX CSS and fonts to `lmd/package/math/`, LaTeX CSS, CMU fonts and `base.js` to `lmd/package/latex/`. See D7.2.4's impl footnote.
+
 ## 1. Overview
 
 This proposal covers the changes needed to package Lambda for distribution. There are five
@@ -60,8 +62,8 @@ need to be shipped:
 | `lambda/doc/math/` | `lmd/doc/math/` | Document math typesetting package |
 | `lambda/input/*.ls` | `lmd/input/*.ls` | Built-in input format scripts |
 | `lambda/input/*.css` | `lmd/input/*.css` | Built-in input CSS |
-| `lambda/input/latex/css/` | `lmd/input/latex/css/` | KaTeX + article CSS |
-| `lambda/input/latex/fonts/` | `lmd/input/latex/fonts/` | KaTeX + CMU fonts |
+| `lmd/package/latex/css/` | `lmd/input/latex/css/` | KaTeX + article CSS |
+| `lmd/package/latex/fonts/` | `lmd/input/latex/fonts/` | KaTeX + CMU fonts |
 
 **Change to `prepare_release.sh` Step 2:**
 
@@ -76,10 +78,10 @@ cp ./lambda/input/*.ls  ./release/lmd/input/ 2>/dev/null || true
 cp ./lambda/input/*.css ./release/lmd/input/ 2>/dev/null || true
 
 mkdir -p ./release/lmd/input/latex/css
-cp ./lambda/input/latex/css/*.css ./release/lmd/input/latex/css/
+cp ./lmd/package/latex/css/*.css ./release/lmd/input/latex/css/
 
 rm -rf ./release/lmd/input/latex/fonts
-cp -r  ./lambda/input/latex/fonts ./release/lmd/input/latex/fonts
+cp -r  ./lmd/package/latex/fonts ./release/lmd/input/latex/fonts
 
 for package_dir in chart dom editor graph latex openapi pdf; do
     rm -rf "./release/lmd/$package_dir"
@@ -102,8 +104,8 @@ named `"lambda"`:
 | File | Hardcoded string |
 |------|-----------------|
 | `lambda/build_ast.cpp` (absolute import) | `./lambda/…` (implicit: dots → slashes from `./`) |
-| `lambda/validator/ast_validate.cpp` | `"lambda/input/html5_schema.ls"`, `"lambda/input/eml_schema.ls"`, etc. |
-| `radiant/cmd_layout.cpp` | `"lambda/input/markdown.css"`, `"lambda/input/wiki.css"`, `"lambda/input/latex/css/article.css"`, `"lambda/input/latex/css/katex.css"` |
+| `lambda/validator/ast_validate.cpp` | `"lmd/package/doc/html5_schema.ls"`, `"lmd/package/doc/eml_schema.ls"`, etc. |
+| `radiant/cmd_layout.cpp` | `"lmd/package/doc/markdown.css"`, `"lmd/package/doc/wiki.css"`, `"lmd/package/latex/css/article.css"`, `"lmd/package/math/katex.css"` |
 
 Lambda Script source files use the canonical notation `import lambda.chart.chart`,
 which the absolute-import resolver maps to `./lambda/chart/chart.ls`. In the release
@@ -170,7 +172,7 @@ Add a small helper (inline or in `lambda-env.cpp`) to build a full path into `g_
 ```c
 // Build a path relative to g_lambda_home.
 // Returns a malloc'd string; caller must free.
-// Example: lambda_home_path("input/html5_schema.ls") → "./lambda/input/html5_schema.ls"
+// Example: lambda_home_path("input/html5_schema.ls") → "./lmd/package/doc/html5_schema.ls"
 static inline char* lambda_home_path(const char* rel) {
     size_t home_len = strlen(g_lambda_home);
     size_t rel_len  = strlen(rel);
@@ -192,10 +194,10 @@ static inline char* lambda_home_path(const char* rel) {
 Three CSS paths are hardcoded and need to use `g_lambda_home`:
 
 ```
-"lambda/input/markdown.css"          → lambda_home_path("input/markdown.css")
-"lambda/input/wiki.css"              → lambda_home_path("input/wiki.css")
-"lambda/input/latex/css/article.css" → lambda_home_path("input/latex/css/article.css")
-"lambda/input/latex/css/katex.css"   → lambda_home_path("input/latex/css/katex.css")
+"lmd/package/doc/markdown.css"          → lambda_home_path("input/markdown.css")
+"lmd/package/doc/wiki.css"              → lambda_home_path("input/wiki.css")
+"lmd/package/latex/css/article.css" → lambda_home_path("input/latex/css/article.css")
+"lmd/package/math/katex.css"   → lambda_home_path("input/latex/css/katex.css")
 ```
 
 The `import_base_dir` assignments in `cmd_layout.cpp` and `main.cpp` set the root from which
@@ -207,7 +209,7 @@ relative package imports resolve. They must also be set to the **parent director
 
 ```cpp
 // Before:
-const char* css_filename = "lambda/input/markdown.css";
+const char* css_filename = "lmd/package/doc/markdown.css";
 char* css_content = read_text_file(css_filename);
 
 // After:
@@ -231,11 +233,11 @@ further changes — it already uses `stylesheet->origin_url` as the base for rel
 Five schema file paths are hardcoded:
 
 ```
-"lambda/input/html5_schema.ls"   → lambda_home_path("input/html5_schema.ls")
-"lambda/input/eml_schema.ls"     → lambda_home_path("input/eml_schema.ls")
-"lambda/input/ics_schema.ls"     → lambda_home_path("input/ics_schema.ls")
-"lambda/input/vcf_schema.ls"     → lambda_home_path("input/vcf_schema.ls")
-"lambda/input/doc_schema.ls"     → lambda_home_path("input/doc_schema.ls")
+"lmd/package/doc/html5_schema.ls"   → lambda_home_path("input/html5_schema.ls")
+"lmd/package/doc/eml_schema.ls"     → lambda_home_path("input/eml_schema.ls")
+"lmd/package/doc/ics_schema.ls"     → lambda_home_path("input/ics_schema.ls")
+"lmd/package/doc/vcf_schema.ls"     → lambda_home_path("input/vcf_schema.ls")
+"lmd/package/doc/doc_schema.ls"     → lambda_home_path("input/doc_schema.ls")
 ```
 
 Each is assigned to a `const char* schema_file` local variable and later passed to
@@ -243,7 +245,7 @@ Each is assigned to a `const char* schema_file` local variable and later passed 
 
 ```cpp
 // Before:
-schema_file = "lambda/input/html5_schema.ls";
+schema_file = "lmd/package/doc/html5_schema.ls";
 
 // After:
 schema_file = lambda_home_path("input/html5_schema.ls");

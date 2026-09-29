@@ -13,7 +13,7 @@ test-only switches are deliberately excluded from the main tables.
 |---|---|---|
 | debug | `debug_native` | `DEBUG`, symbols, `-O3`, frame pointers, `LAMBDA_JS_EXEC_PROFILE`, and other runtime profiling controls. |
 | debug_asan | `debug_asan_native` | `DEBUG`, symbols, `-Og`, frame pointers, and AddressSanitizer for the separate `lambda-debug-asan.exe` host; no `LAMBDA_JS_EXEC_PROFILE`. |
-| release | `release_native` | `NDEBUG`, `LAMBDA_HOME_RELEASE`, `-O3`, ThinLTO, section stripping, and native CPU tuning. |
+| release | `release_native` | `NDEBUG`, `-O3`, ThinLTO, section stripping, and native CPU tuning. |
 | release_profile | `release_profile_native` | The release profile plus `LAMBDA_JS_EXEC_PROFILE`. |
 
 The generator is authoritative: `utils/generate_premake.py`; `make debug`,
@@ -379,7 +379,7 @@ cannot leave profile-only code unbuilt.
 ```sh
 # Regenerate the derived Premake file, then inspect the resolved build flags.
 python3 utils/generate_premake.py --output premake5.mac.lua
-rg -n 'configurations:|LAMBDA_JS_EXEC_PROFILE|LAMBDA_HOME_RELEASE|sanitize' premake5.mac.lua
+rg -n 'configurations:|LAMBDA_JS_EXEC_PROFILE|sanitize' premake5.mac.lua
 
 # Rebuild each behaviorally distinct profile.
 make debug
