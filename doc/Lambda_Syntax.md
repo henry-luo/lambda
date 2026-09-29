@@ -119,8 +119,7 @@ This distinction enforces functional purity in `fn` functions while allowing con
 - Line breaks separate statements
 - Semicolons (`;`) also separate statements. They are needed to put two
   statements on one line, and to end a statement whose next line would
-  otherwise continue it (see below); an extra `;` at the end of a line is
-  harmless
+  otherwise continue it (see below).
 
 These two are equivalent:
 

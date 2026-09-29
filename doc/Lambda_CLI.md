@@ -8,14 +8,15 @@ The command-line interface of the Lambda runtime. In a development tree the bina
 lambda                                      # Start interactive REPL
 lambda <script.ls> [options]                # Run a functional script
 lambda <command> [options] [arguments]      # Run a subcommand
-lambda <source.js|.ts|.py>                  # Run a JavaScript, TypeScript or Python source
+lambda js [file.js] [options]               # Run JavaScript
+lambda ts <file.ts>                         # Run TypeScript
 ```
 
 ## Default Behavior
 
 When invoked with no arguments, Lambda starts the **REPL** (Read-Eval-Print Loop).
 
-When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script: it starts on the AST interpreter and compiles hot functions with the MIR JIT (`--tier` selects a tier explicitly). A `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` file runs on LambdaJS; a `.py` file runs on the hosted Python module when it is installed (see [Hosted Languages](#hosted-languages)).
+When invoked with a `.ls` script file (and no subcommand), Lambda compiles and executes the script: it starts on the AST interpreter and compiles hot functions with the MIR JIT (`--tier` selects a tier explicitly). Run JavaScript with `lambda js <file.js>` and TypeScript with `lambda ts <file.ts>`.
 
 ---
 
@@ -451,7 +452,7 @@ lambda fetch https://api.example.com/endpoint -t 5000 -v
 
 ### `js` — JavaScript
 
-Run a JavaScript program on LambdaJS (see [JS_DOM_Support.md](JS_DOM_Support.md)). A `.js`, `.mjs`, `.cjs`, `.ts` or `.tsx` file given as the first argument runs the same way without the subcommand.
+Run a JavaScript program on LambdaJS (see [JS_DOM_Support.md](JS_DOM_Support.md)). Pass the JavaScript file after the `js` subcommand.
 
 ```
 lambda js [file.js] [options]
@@ -591,10 +592,9 @@ lambda edit notes.md
 # Fetch a URL
 lambda fetch https://example.com -o page.html
 
-# Run JavaScript, TypeScript or hosted Python
+# Run JavaScript, TypeScript
 lambda js app.js
 lambda ts app.ts
-lambda py app.py
 
 # Dump the memory context as JSON at exit (+ leak report in log.txt)
 lambda --mem-dump script.ls

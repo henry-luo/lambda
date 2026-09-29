@@ -1,7 +1,7 @@
 type Article = <article
     title: string,
-    author: string;
-    <content;
+    author: string,
+    <content
         <paragraph>+
     >
 >

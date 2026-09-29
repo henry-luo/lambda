@@ -71,7 +71,7 @@ Types combine much as expressions do. These are the forms you will use most:
 | `int?` | an int or `null` — short for `int \| null` |
 | `string[]` | an array whose items are all strings |
 | `{title: string, year: int}` | a map with at least these two fields |
-| `<a href: string; string>` | an `<a>` element with a string `href` and one string child |
+| `<a href: string, string>` | an `<a>` element with a string `href` and one string child |
 | `"GET" \| "POST"` | exactly one of these two strings |
 
 ```text repl
@@ -85,7 +85,7 @@ false
 true
 λ> {title: "SICP"} is {title: string, year: int}
 false
-λ> <a href: "/home", "Home"> is <a href: string; string>
+λ> <a href: "/home", "Home"> is <a href: string, string>
 true
 λ> "PUT" is "GET" | "POST"
 false

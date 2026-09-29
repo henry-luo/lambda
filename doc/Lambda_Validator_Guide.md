@@ -122,21 +122,21 @@ type Article = <article
     title: string,
     author: string,
     date: string?,
-    tags: [string*];
+    tags: [string*],
     <content>,
-    <metadata id: string, status: string;>?
+    <metadata id: string, status: string>?
 >
 
 // HTML page schema
-type Page = <html;
-    <head;
+type Page = <html
+    <head
         <title>,
-        <meta name: string, content: string;>*
+        <meta name: string, content: string>*
     >,
-    <body;
+    <body
         <h1>+,
         <p>*,
-        <div class: string?;>*
+        <div class: string?>*
     >
 >
 ```

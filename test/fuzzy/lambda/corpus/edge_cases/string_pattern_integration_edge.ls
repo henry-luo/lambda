@@ -62,18 +62,18 @@ type DeepSchema = {
 
 // ==== PATTERN IN ELEMENT TYPES ====
 
-type EmailElement = <email; email>
-type LinkElement = <a href: url; string>
+type EmailElement = <email email>
+type LinkElement = <a href: url, string>
 type MetaElement = <meta name: identifier, content: string>
 
 // Document with patterns
-type Document = <doc version: semver;
-    <head;
-        <title; string>,
-        <meta name: identifier, content: string;>*
+type Document = <doc version: semver,
+    <head
+        <title string>,
+        <meta name: identifier, content: string>*
     >,
-    <body;
-        <p; string | <a href: url; string>>*
+    <body
+        <p string | <a href: url, string>>*
     >
 >
 
