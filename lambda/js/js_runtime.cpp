@@ -4188,10 +4188,29 @@ static bool js_property_ops_get_own(Item object, Item key, Item receiver,
     return false;
 }
 
+static bool js_property_key_needs_object_to_key(Item key);
+
 static bool js_property_ops_property_get(Item object, Item key, Item receiver,
                                        Item* out_result) {
     JsClass object_class = js_class_id(object);
     if (object_class == JS_CLASS_TYPED_ARRAY) {
+        if (js_property_key_needs_object_to_key(key)) {
+            // This exotic needs a PropertyKey before its integer-index test.
+            // Re-enter the shared Get with the converted key so Symbols,
+            // prototype reads and conversion effects retain their order.
+            RootFrame roots(3);
+            Rooted<Item> object_root(roots, object);
+            Rooted<Item> receiver_root(roots, receiver);
+            Rooted<Item> key_root(roots, key);
+            key_root.set(js_to_property_key(key_root.get()));
+            if (item_is_error(key_root.get())) {
+                *out_result = key_root.get();
+                return true;
+            }
+            *out_result = js_get_key_core(object_root.get(), key_root.get(),
+                receiver_root.get());
+            return true;
+        }
         if (!js_get_typed_array_ptr(object.map)) return false;
         if (get_type_id(key) == LMD_TYPE_STRING) {
             String* str_key = it2s(key);
@@ -23310,17 +23329,18 @@ static Item js_string_intrinsic_algorithm(Item str,
             }
             return units_result;
         }
-        Item result = fn_split(str, sep);
+        // The shared ASCII literal scanner can construct tagged JS slots
+        // directly; otherwise retain the Lambda split and its lane boundary.
+        bool tagged_literal_split = sstr->is_ascii && sep_str &&
+            sep_str->is_ascii && sep_str->len > 0;
+        Item result = tagged_literal_split
+            ? fn_split_literal_items(str, sep) : fn_split(str, sep);
         if (get_type_id(result) == LMD_TYPE_ARRAY && result.array) {
-            // fn_split builds an array (S2.5.7) on an inferred pointer lane, whose
-            // `items[]` words are raw `String*` rather than tagged Items. Every
-            // JS array read goes straight to `items[]`, so an un-widened lane
-            // reaches get_type_id() as a raw pointer -- which then reads the
-            // String's `len` as a TypeId (len 9 == LMD_TYPE_DECIMAL, and the
-            // decimal path dereferences the chars as an mpd_t). Widening at the
-            // boundary keeps the lane a Lambda-side representation choice
-            // (D3.3.1v2, D3.3.3v3).
-            array_widen_inferred_pointer_lane(result.array);
+            if (!tagged_literal_split) {
+                // fn_split's inferred pointer slots hold raw String*, not JS
+                // Items. Widen before the JS read boundary (D3.3.1v2).
+                array_widen_inferred_pointer_lane(result.array);
+            }
             // apply limit (compare as unsigned to avoid (int)0xFFFFFFFF = -1 bug)
             if (lim < 0xFFFFFFFF && result.array->length > (int)lim)
                 result.array->length = (int)lim;

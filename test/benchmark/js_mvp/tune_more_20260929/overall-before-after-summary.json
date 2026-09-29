@@ -1,0 +1,94 @@
+{
+  "population": "62 common validated Tune14 JS workloads; jetstream/navier_stokes excluded because MVP fails the post-timing semantic oracle",
+  "method": "Five alternating pairs per row; source-defined execution-time medians; Full JS MIR and MVP share one O3/LTO/NDEBUG profile host per snapshot. Direct old/new replay uses JS_EXECUTION_BACKEND=mir.",
+  "before": {
+    "artifact": "test/benchmark/js_mvp/profile_20260928/comparison.json",
+    "binary_sha256": "dffd67fc5439f64b42fcc530b66ce8cc998d4df111c7bd097f78e0474d5702de",
+    "rows": 62,
+    "full_over_mvp_geomean": 1.6916170975029214,
+    "full_over_mvp_sum_ratio": 1.5797791068802098,
+    "full_sum_ms": 109332.37612517619,
+    "mvp_sum_ms": 69207.38199980927,
+    "full_wins": 14,
+    "mvp_wins": 48,
+    "full_over_mvp_wall_geomean": 1.920662951598421
+  },
+  "after": {
+    "artifact": "test/benchmark/js_mvp/tune_more_20260929/overall-after-profile-comparison.json",
+    "binary_sha256": "e3b6effce178cf2568bdf7b4fff7e036763f487f06e56c8048bd33bfbc597545",
+    "rows": 62,
+    "full_over_mvp_geomean": 1.5442256866173971,
+    "full_over_mvp_sum_ratio": 1.4257300099656918,
+    "full_sum_ms": 96707.11687467193,
+    "mvp_sum_ms": 67829.89500024557,
+    "full_wins": 17,
+    "mvp_wins": 45,
+    "full_over_mvp_wall_geomean": 1.8268216291346993
+  },
+  "direct_old_vs_tuned": {
+    "artifact": "test/benchmark/js_mvp/tune_more_20260929/overall-before-after-paired.json",
+    "old_binary_sha256": "dffd67fc5439f64b42fcc530b66ce8cc998d4df111c7bd097f78e0474d5702de",
+    "tuned_binary_sha256": "e3b6effce178cf2568bdf7b4fff7e036763f487f06e56c8048bd33bfbc597545",
+    "rows": 62,
+    "pairs_per_row": 5,
+    "output_equal_rows": 62,
+    "tuned_over_old_geomean": 0.9239212278832131,
+    "old_over_tuned_geomean": 1.0823433533301212,
+    "tuned_over_old_sum_ratio": 0.9081264336942279,
+    "old_sum_ms": 106996.38712517881,
+    "tuned_sum_ms": 97166.24745815563,
+    "tuned_wins": 38,
+    "old_wins": 24
+  },
+  "checks": {
+    "same_script_hashes_on_62_common_rows": true,
+    "before_after_binary_and_sources_unchanged": true,
+    "direct_all_63_rows_status_ok": true,
+    "direct_all_63_rows_output_equal": true,
+    "direct_navier_source_differs_by_post_timing_oracle": true
+  },
+  "highlights": {
+    "text/text_search": {
+      "old_ms": 43024.92687499523,
+      "tuned_ms": 34339.06550002098,
+      "tuned_over_old": 0.7981202524710808,
+      "tuned_pair_wins": 5
+    },
+    "text/log_pipeline": {
+      "old_ms": 13719.61370831728,
+      "tuned_ms": 13331.105583310127,
+      "tuned_over_old": 0.9716822839719149,
+      "tuned_pair_wins": 5
+    },
+    "text/three_way_merge": {
+      "old_ms": 9815.562916576862,
+      "tuned_ms": 9666.292791724205,
+      "tuned_over_old": 0.9847925049106898,
+      "tuned_pair_wins": 5
+    },
+    "awfy/mandelbrot": {
+      "old_ms": 552.6432917118073,
+      "tuned_ms": 47.894541680812836,
+      "tuned_over_old": 0.08666447670514547,
+      "tuned_pair_wins": 5
+    },
+    "r7rs/mbrot": {
+      "old_ms": 12.52804160118103,
+      "tuned_ms": 2.1769166588783264,
+      "tuned_over_old": 0.17376352411482307,
+      "tuned_pair_wins": 5
+    },
+    "awfy/havlak": {
+      "old_ms": 13386.446791648865,
+      "tuned_ms": 13304.096791684628,
+      "tuned_over_old": 0.9938482555344252,
+      "tuned_pair_wins": 5
+    },
+    "larceny/triangl": {
+      "old_ms": 6089.097083330154,
+      "tuned_ms": 6142.858708322048,
+      "tuned_over_old": 1.0088291620672423,
+      "tuned_pair_wins": 0
+    }
+  }
+}

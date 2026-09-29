@@ -3203,6 +3203,8 @@ extern "C" {
     Item fn_upper(Item str);
     Item fn_url_resolve(Item base, Item relative);
     Item fn_split(Item str, Item sep);
+    // A literal ASCII split whose result stores tagged Items for guest arrays.
+    Item fn_split_literal_items(Item str, Item sep);
     Item fn_split3(Item str, Item sep, Item keep_delim);
     Item fn_array_split(Item arr, int64_t n, int64_t axis);  // split typed array into n parts along axis
     // axis-aware reductions (2-arg): collapse `axis` of a typed N-D array

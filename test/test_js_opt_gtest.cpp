@@ -86,6 +86,7 @@ static const char* kEventNames[JS_OPT_EVENT_COUNT] = {
     "runtime_string_concat_head",
     "mir_number_admitted",
     "mir_number_fallback",
+    "mir_boxed_loop_pair",
     "mir_native_index_admitted",
     "mir_native_index_fallback",
     "mir_dense_index_admitted",
@@ -968,6 +969,51 @@ TEST(JsOpt, MirNumberPlanUsesF64AndKeepsPartialFactsBoxed) {
     expect_trace_off_same("mir_number_plan", source, output);
 }
 
+TEST(JsOpt, BoxedLoopNumberPairKeepsCoercingFallback) {
+    const char* source =
+        "function pair(left, right, stringify) {\n"
+        "  if (stringify) left = String(left);\n"
+        "  let result;\n"
+        "  for (let index = 0; index < 1; index++)\n"
+        "    result = [left + right, left - right];\n"
+        "  return result;\n"
+        "}\n"
+        "let numbers = pair(4, 3);\n"
+        "if (numbers[0] !== 7 || numbers[1] !== 1) throw new Error('Number pair');\n"
+        "let strings = pair('4', 3);\n"
+        "if (strings[0] !== '43' || strings[1] !== 1) throw new Error('string pair');\n"
+        "let changed = pair(4, 3, true);\n"
+        "if (changed[0] !== '43' || changed[1] !== 1) throw new Error('widened pair');\n"
+        "let calls = 0; let object = { valueOf() { calls++; return 4; } };\n"
+        "let coerced = pair(object, 3);\n"
+        "if (coerced[0] !== 7 || coerced[1] !== 1 || calls !== 2)\n"
+        "  throw new Error('coercing pair');\n"
+        "let big = pair(4n, 3n);\n"
+        "if (big[0] !== 7n || big[1] !== 1n) throw new Error('BigInt pair');\n"
+        "let zero = pair(-0, 0);\n"
+        "if (!Object.is(zero[1], -0)) throw new Error('negative zero pair');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("boxed_loop_number_pair", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    char* mir = read_fixture_mir("boxed_loop_number_pair");
+    ASSERT_NE(mir, nullptr);
+    const char* end = NULL;
+    const char* body = find_mir_function(mir, "_js_pair_", &end,
+        "_body:\tfunc");
+    ASSERT_NE(body, nullptr);
+    ASSERT_NE(end, nullptr);
+    EXPECT_GT(trace.events[JS_OPT_MIR_BOXED_LOOP_PAIR][1], 0u);
+    const char* number = strstr(body, "\n\tdadd\t");
+    EXPECT_TRUE(number && number < end);
+    const char* fallback = strstr(body, "\n\tcall\tjs_add");
+    EXPECT_TRUE(fallback && fallback < end);
+    free(mir);
+    expect_trace_off_same("boxed_loop_number_pair", source, output);
+}
+
 TEST(JsOpt, GuardedNumericPeerCarriesNumberThroughLoopState) {
     const char* source =
         "function blend(r, x, step) { return r + x * step; }\n"
@@ -1609,6 +1655,32 @@ TEST(JsOpt, StringLeavesProfileAsciiAndUnicode) {
     EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_ASCII][1], 0u);
     EXPECT_GT(trace.events[JS_OPT_STRING_CONCAT_UNICODE][1], 0u);
     expect_trace_off_same("string_leaves", source, output);
+}
+
+TEST(JsOpt, TaggedAsciiSplitKeepsElementAndLimitSemantics) {
+    const char* source =
+        "let parts = 'a,,b,'.split(',');\n"
+        "if (parts.length !== 4 || parts[0] !== 'a' || parts[1] !== '' ||\n"
+        "    parts[2] !== 'b' || parts[3] !== '')\n"
+        "  throw new Error('literal split elements changed');\n"
+        "parts[1] = 'x'; parts.push('z');\n"
+        "if (parts[1] !== 'x' || parts[4] !== 'z')\n"
+        "  throw new Error('split result mutation changed');\n"
+        "let limited = 'a,b,c'.split(',', 2);\n"
+        "if (limited.length !== 2 || limited[0] !== 'a' || limited[1] !== 'b')\n"
+        "  throw new Error('split limit changed');\n"
+        "let unicode = 'A😀,B'.split(',');\n"
+        "if (unicode.length !== 2 || unicode[0] !== 'A😀' || unicode[1] !== 'B')\n"
+        "  throw new Error('unicode split fallback changed');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("tagged_ascii_split", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_ASCII][1], 0u);
+    EXPECT_GT(trace.events[JS_OPT_STRING_SPLIT_UNICODE][1], 0u);
+    expect_trace_off_same("tagged_ascii_split", source, output);
 }
 
 TEST(JsOpt, MirAsciiStringCallsKeepCapabilityFallback) {
@@ -2970,6 +3042,38 @@ TEST(JsOpt, TypedArrayStoresUseGuardedNumericKeyLeaf) {
     EXPECT_NE(strstr(mir, "i32:("), nullptr);
     free(mir);
     expect_trace_off_same("typed_array_store_leaf", source, output);
+}
+
+TEST(JsOpt, TypedArrayObjectKeyGetCoercesAfterSet) {
+    const char* source =
+        "function nested(keys, key, asArray) {\n"
+        "  let bytes = new Uint8Array(2);\n"
+        "  if (asArray) bytes = [0, 0];\n"
+        "  bytes[keys[key]] = 7;\n"
+        "  return bytes[keys[key]];\n"
+        "}\n"
+        "if (nested([0], 0, false) !== 7 || nested(['0'], 0, false) !== 7 ||\n"
+        "    nested([0], 0, true) !== 7)\n"
+        "  throw new Error('nested typed key changed value');\n"
+        "let conversions = 0;\n"
+        "const objectKey = { [Symbol.toPrimitive]() { conversions++; return '0'; } };\n"
+        "if (nested([objectKey], 0, false) !== 7 || conversions !== 2)\n"
+        "  throw new Error('coercing key changed order');\n"
+        "const symbol = Symbol('typed-key');\n"
+        "const typed = new Uint8Array(1); typed[symbol] = 9;\n"
+        "const symbolKey = { [Symbol.toPrimitive]() { return symbol; } };\n"
+        "if (typed[symbolKey] !== 9) throw new Error('symbol key lost');\n"
+        "let caught = false;\n"
+        "try { typed[{ [Symbol.toPrimitive]() { throw new Error('key'); } }]; }\n"
+        "catch (error) { caught = error.message === 'key'; }\n"
+        "if (!caught) throw new Error('key conversion did not throw');\n"
+        "console.log('OPT_OK');\n";
+    TraceResult trace;
+    char output[4096];
+    ASSERT_TRUE(run_fixture("nested_typed_array_key", source, &trace,
+                            output, sizeof(output)));
+    expect_ok_output(output);
+    expect_trace_off_same("nested_typed_array_key", source, output);
 }
 
 TEST(JsOpt, TypedArrayParameterUsesGuardedPhysicalAccess) {
