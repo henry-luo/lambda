@@ -1,0 +1,22 @@
+{
+  "name": "Doc editor opens directories from the full row",
+  "html": "test/ui/doc_editor.html",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".doc-editor"}, "count": 1,
+      "assert_timeout": 45000, "assert_interval": 1000},
+    {"type": "click", "target": {"selector": ".project-root", "offset_x": 250, "offset_y": 14}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test"}, "count": 0},
+    {"type": "click", "target": {"selector": ".project-root", "offset_x": 250, "offset_y": 14}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test", "offset_x": 250, "offset_y": 14}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_html"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_html", "offset_x": 250, "offset_y": 14}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_html_box_html"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test", "offset_x": 250, "offset_y": 14}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_html"}, "count": 0},
+    {"type": "click", "target": {"selector": ".tree-hit-__test", "offset_x": 250, "offset_y": 14}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_html"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_html_box_html"}, "count": 0}
+  ]
+}
