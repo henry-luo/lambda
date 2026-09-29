@@ -115,7 +115,7 @@ users |: ~.age >= 18 |> ~.name |> len   // 2 — count adult names
 
 #### For-Expressions with SQL-like Clauses
 
-Powerful comprehensions with `let`, `where`, `order by`, `limit`, `offset`:
+Powerful comprehensions with `let`, `where`, `order by`,`group by`, `limit`, `offset`:
 
 ```lambda
 // Filter and transform
@@ -156,7 +156,7 @@ fn describe(x) => match x {
     case null:             "nothing"
     case 0:                "zero"              // literal value
     case 1 to 9:           "small number"      // range
-    case int that (~ > 9): "big number"        // type + constraint
+    case int that ~ > 9:   "big number"        // type + constraint
     case string:           "text: " ++ ~       // type
     case int[]:            "int array"         // collection type
     default:               "something else"
@@ -212,7 +212,7 @@ lambda validate <file> [-s <schema.ls>]         # validate against a schema
 lambda convert <input> -t <to> -o <output>      # format conversion
 lambda layout <file.html>                       # print the CSS layout tree
 lambda render <input> -o <output.svg|pdf|png>   # render to image
-lambda view [file.html|file.md|file.ls|...]     # open in interactive viewer
+lambda view <file.html|file.md|file.ls|...>     # open in interactive viewer
 lambda edit <file.md|file.html|file.svg>        # edit a document and save it back
 lambda fetch <url> [-o file]                    # download a URL
 lambda js <script.js>                           # run JavaScript on LambdaJS
