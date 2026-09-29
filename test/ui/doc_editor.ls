@@ -19,6 +19,7 @@ import latex_css: lambda.latex.css
 import math_renderer: lambda.doc.math.math
 import math_css: lambda.doc.math.css
 import graph_doc: lambda.graph.document
+import tikz: lambda.doc.tikz.tikz
 
 let PROJECT_ROOT = "."
 
@@ -126,6 +127,7 @@ fn is_latex_document(extension) {
 }
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
+fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
 fn graph_flavor(extension) {
@@ -138,7 +140,7 @@ fn graph_flavor(extension) {
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_image_document(extension) or
+    is_pdf_document(extension) or is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null
 
 fn selected_source(file) {
@@ -169,6 +171,12 @@ fn selected_preview(file) {
       let parsed = input(selected_path, 'latex') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
       else { latex.render(parsed, null) ^ { <p class:"preview-error", "Unable to render selected LaTeX"> } }
+    }
+    else if (is_pgf_document(file["extension"])) {
+      // Reuse the parsed TikZ document so PGF fragments render inside the editor runtime.
+      let parsed = input(selected_path, {type:"tikz"}) ^ { null }
+      if (parsed == null) { <p class:"preview-error", "Unable to read selected PGF"> }
+      else { tikz.render_document(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PGF"> } }
     }
     else if (flavor != null) {
       // The graph document adapter installs Radiant's layout for this inline preview.
@@ -210,12 +218,13 @@ view <h4> { <h4 id:~.id, *[rendered_children(~)]> }
 view <h5> { <h5 id:~.id, *[rendered_children(~)]> }
 view <h6> { <h6 id:~.id, *[rendered_children(~)]> }
 view <p> { <p *[rendered_children(~)]> }
-view <div> { <div class:~.class, *[rendered_children(~)]> }
+view <div> { <div class:~.class, style:~.style, *[rendered_children(~)]> }
 view <nav> { <nav class:~.class, *[rendered_children(~)]> }
 view <dl> { <dl *[rendered_children(~)]> }
 view <dt> { <dt *[rendered_children(~)]> }
 view <dd> { <dd *[rendered_children(~)]> }
-view <span> { <span *[rendered_children(~)]> }
+// TikZ uses positioned spans for the drawing frame and math labels.
+view <span> { <span class:~.class, style:~.style, *[rendered_children(~)]> }
 view <strong> { <strong *[rendered_children(~)]> }
 view <em> { <em *[rendered_children(~)]> }
 view <del> { <del *[rendered_children(~)]> }
@@ -335,7 +344,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PDF, Mermaid, DOT, and image files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PGF, PDF, Mermaid, DOT, D2, and image files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
