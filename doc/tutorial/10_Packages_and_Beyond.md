@@ -186,7 +186,7 @@ The tutorial showed each feature once. The reference documentation covers everyt
 | The whole language at a glance | [Lambda_Reference.md](../Lambda_Reference.md), [Lambda_Cheatsheet.md](../Lambda_Cheatsheet.md) |
 | Syntax, data and types | [Lambda_Syntax.md](../Lambda_Syntax.md), [Lambda_Data.md](../Lambda_Data.md), [Lambda_Type.md](../Lambda_Type.md), [Lambda_String_Pattern.md](../Lambda_String_Pattern.md) |
 | Expressions, functions and procedures | [Lambda_Expr_Stam.md](../Lambda_Expr_Stam.md), [Lambda_Func.md](../Lambda_Func.md), [Lambda_Procedural.md](../Lambda_Procedural.md) |
-| Errors, concurrency and document updates | [Lambda_Error_Handling.md](../Lambda_Error_Handling.md), [Lambda_Concurrency.md](../Lambda_Concurrency.md), [Lambda_Document_Updates.md](../Lambda_Document_Updates.md) |
+| Errors and concurrency | [Lambda_Error_Handling.md](../Lambda_Error_Handling.md), [Lambda_Concurrency.md](../Lambda_Concurrency.md) |
 | Built-in functions and the command line | [Lambda_Sys_Func.md](../Lambda_Sys_Func.md), [Lambda_CLI.md](../Lambda_CLI.md) |
 | Modules and packages | [Lambda_Modules.md](../Lambda_Modules.md), [Lambda_Packages.md](../Lambda_Packages.md) |
 | Documents, formats and schemas | [Lambda_Doc_Pipeline.md](../Lambda_Doc_Pipeline.md), [Markup_Formats_Support.md](../Markup_Formats_Support.md), [Doc_Schema.md](../Doc_Schema.md), [Lambda_Validator.md](../Lambda_Validator.md) |

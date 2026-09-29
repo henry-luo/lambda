@@ -65,7 +65,6 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Lambda_String_Pattern.md](Lambda_String_Pattern.md)** | **String Patterns** — The pattern language inside `\(…)`: character classes, ranges, quantifiers, negation, and pattern-aware `find`/`replace`/`split` |
 | **[Lambda_Modules.md](Lambda_Modules.md)** | **Modules and Imports** — Import forms and resolution, `pub` exports, built-in and package modules, JavaScript modules |
 | **[Lambda_Concurrency.md](Lambda_Concurrency.md)** | **Concurrency** — Tasks with `start`/`wait`, mailboxes, `select`, timeouts, cancellation, structured scope, JavaScript Promises |
-| **[Lambda_Document_Updates.md](Lambda_Document_Updates.md)** | **Document Updates** — References and the force step `#`, node identity, `put`/`del`, transactions with `open`/`commit`/`rollback`, `temp.` documents |
 | **[Lambda_Cheatsheet.md](Lambda_Cheatsheet.md)** | **Cheatsheet** — One-page syntax summary |
 
 ### Library and Tools

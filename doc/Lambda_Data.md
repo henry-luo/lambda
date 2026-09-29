@@ -24,7 +24,6 @@ This document covers Lambda's literal values, collection types, and expressions 
      - [DateTime Constructors](#datetime-constructors)
    - [Boolean and Null Literals](#boolean-and-null-literals)
 3. [Path Literals](#path-literals)
-   - [References and Updates](#references-and-updates)
 4. [Collections](#collections)
    - [Arrays](#arrays)
    - [Maps](#maps)
@@ -583,15 +582,6 @@ exists(\.'config.json')       // true or false
 // Load content
 let content = input(/.etc.hosts, 'text')^   // Load file content
 let data = input(https.api.example.com.data, 'json')^  // Fetch URL
-```
-
-### References and Updates
-
-A path is also a **reference**: `p#` forces it and reads the document it names (exactly `input(p)`), `&node` reads the path of a node inside a document, and `===` compares two such identities. Documents change only through the update statements `put`, `del` and `output`, grouped into transactions with `open`, `commit` and `rollback`. All of this is described in [Lambda_Document_Updates.md](Lambda_Document_Updates.md).
-
-```lambda
-let p = \.data.'page.json'   // a reference; nothing is read yet
-p#title                      // force it, then read the member `title`
 ```
 
 ### System Info Paths (`sys.*`)
