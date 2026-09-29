@@ -13,7 +13,7 @@ This tutorial takes you from installing Lambda to transforming data, processing 
 | [7. Procedures, I/O and Tasks](07_Procedures_IO_and_Tasks.md) | Use `pn` procedures, `var`, loops, files, and concurrent tasks |
 | [8. Rendering and Viewing](08_Rendering_and_Viewing.md) | Lay out HTML with CSS and render it to SVG, PDF and PNG |
 | [9. Reactive UI](09_Reactive_UI.md) | Build an interactive page with `view` templates and event handlers |
-| [10. Packages and Beyond](10_Packages_and_Beyond.md) | Use the bundled packages, the editor, JavaScript and Python |
+| [10. Packages and Beyond](10_Packages_and_Beyond.md) | Use the bundled packages, the editor and JavaScript |
 
 ## How to Follow Along
 

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lambda Document Editor</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+           color: #edf4ff; background: #07162a; }
+    #splash { position: absolute; inset: 0; overflow: hidden;
+              background: linear-gradient(145deg, #071427, #102d50); }
+    #flow-art { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .brand { position: absolute; top: 9%; left: 0; width: 100%;
+             color: #edf4ff; font-size: 54px; font-weight: 500;
+             letter-spacing: .14em; text-align: center; }
+    .brand-mark { color: #8bb8ff; font-size: 70px; font-weight: 300;
+                  vertical-align: middle; }
+    .message { position: absolute; top: 77%; left: 0; width: 100%;
+               padding: 0 20px; text-align: center; }
+    h1 { margin: 0; color: #dce8fb; font-size: 29px;
+         line-height: 1.35; font-weight: 400; }
+    h1 span { color: #9dc2ff; font-weight: 400; }
+    .loader { display: flex; justify-content: center; gap: 9px;
+              margin-top: 28px; }
+    .loader span { width: 8px; height: 8px; border-radius: 50%;
+                   background: #85b5ff; animation-name: pulse;
+                   animation-duration: 1.2s; animation-timing-function: ease-in-out;
+                   animation-iteration-count: infinite; }
+    .loader span:nth-child(2) { animation-delay: -.8s; }
+    .loader span:nth-child(3) { animation-delay: -.4s; }
+    #editor-frame { position: absolute; left: 0; top: 0; width: 1px; height: 1px;
+                    border: 0; visibility: hidden; pointer-events: none; }
+    @keyframes pulse { from { opacity: .25; }
+                       50% { opacity: 1; }
+                       to { opacity: .25; } }
+    @media (max-width: 620px) {
+      .brand { top: 13%; font-size: 34px; }
+      .brand-mark { font-size: 46px; }
+      .message { top: 72%; }
+      h1 { font-size: 23px; }
+    }
+  </style>
+</head>
+<body>
+  <main id="splash" role="status" aria-live="polite">
+    <svg id="flow-art" viewBox="0 0 1280 850" preserveAspectRatio="xMidYMid meet"
+         aria-hidden="true">
+      <circle cx="640" cy="415" r="225" fill="#3c6bad" opacity=".07"/>
+      <circle cx="640" cy="415" r="168" fill="#447cc8" opacity=".07"/>
+      <path d="M328 285 C438 285 460 390 554 405
+               M296 415 C422 415 466 415 548 415
+               M328 545 C438 545 460 440 554 425
+               M726 405 C820 390 842 285 952 285
+               M732 415 C814 415 858 415 984 415
+               M726 425 C820 440 842 545 952 545"
+            fill="none" stroke="#5687ca" stroke-width="1.5" opacity=".55"/>
+      <circle cx="640" cy="415" r="112" fill="#122f55" stroke="#547eb8" stroke-width="1"/>
+      <circle cx="640" cy="415" r="90" fill="#183c68" stroke="#8bb7f3" stroke-width="1.5"/>
+      <circle cx="640" cy="415" r="69" fill="#204675" stroke="#aecbff" stroke-width="1"/>
+      <text x="640" y="438" text-anchor="middle" fill="#f0f6ff" font-size="70" font-weight="300">λ</text>
+      <g fill="#132e4f" stroke="#5d88bd" stroke-width="1.5">
+        <circle cx="300" cy="285" r="35"/><circle cx="268" cy="415" r="35"/>
+        <circle cx="300" cy="545" r="35"/><circle cx="980" cy="285" r="35"/>
+        <circle cx="1012" cy="415" r="35"/><circle cx="980" cy="545" r="35"/>
+      </g>
+      <g fill="none" stroke="#a7c9fa" stroke-width="2.5" stroke-linecap="round">
+        <path d="M284 277 H316 M284 285 H309 M284 293 H313"/>
+        <path d="M257 406 L248 415 L257 424 M279 406 L288 415 L279 424"/>
+        <path d="M286 533 H314 V557 H286 Z M300 533 V557 M286 545 H314"/>
+        <path d="M966 278 H994 M966 286 H988 M966 294 H992"/>
+        <path d="M996 429 L1006 416 L1015 422 L1027 402"/>
+        <path d="M964 555 V543 M974 555 V532 M984 555 V538 M994 555 V526"/>
+      </g>
+      <g fill="#9fc4ff">
+        <circle cx="550" cy="415" r="3"/><circle cx="730" cy="415" r="3"/>
+        <circle cx="441" cy="355" r="2"/><circle cx="839" cy="475" r="2"/>
+      </g>
+    </svg>
+    <div class="brand"><span class="brand-mark">λ</span> LAMBDA</div>
+    <div class="message">
+      <h1>One data model, <span>Many doc workflows</span></h1>
+      <div class="loader" aria-label="Loading editor">
+        <span aria-hidden="true"></span><span aria-hidden="true"></span>
+        <span aria-hidden="true"></span>
+      </div>
+    </div>
+  </main>
+  <iframe id="editor-frame" title="Editor preload" aria-hidden="true" tabindex="-1"></iframe>
+  <script>
+    var editorFrame = document.getElementById('editor-frame');
+    var editorLoadStarted = false;
+    var editorNavigationStarted = false;
+    editorFrame.onload = function () {
+      if (!editorLoadStarted || editorNavigationStarted) return;
+      editorNavigationStarted = true;
+      window.location.assign('doc_editor.ls');
+    };
+    // Start after the splash gets its first paint; the iframe is only a preload.
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        editorLoadStarted = true;
+        editorFrame.src = 'doc_editor.ls';
+      }, 0);
+    });
+  </script>
+</body>
+</html>

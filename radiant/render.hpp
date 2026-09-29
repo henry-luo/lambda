@@ -2436,7 +2436,7 @@ struct DirtyTracker;
 typedef struct GifAnimation {
     GifFrames* frames;           // decoded frame data (owned, freed on destroy)
     int current_frame;           // index of currently displayed frame
-    double frame_end_time;       // when to advance to next frame (absolute seconds)
+    double frame_end_time;       // next frame deadline in elapsed GIF seconds
     int loop_count;              // 0 = infinite (from GIF NETSCAPE extension)
     int loops_completed;         // number of loops finished so far
 

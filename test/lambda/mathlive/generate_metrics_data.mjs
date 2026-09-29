@@ -13,8 +13,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../../..');
 const SRC = path.join(PROJECT_ROOT, 'ref/mathlive/src/core/font-metrics-data.ts');
-const OUT_SCRIPT = path.join(PROJECT_ROOT, 'lambda/package/math/metrics_data.ls');
-const OUT_DATA = path.join(PROJECT_ROOT, 'lambda/package/math/metrics_data.mark');
+const OUT_SCRIPT = path.join(PROJECT_ROOT, 'lmd/package/math/metrics_data.ls');
+const OUT_DATA = path.join(PROJECT_ROOT, 'lmd/package/math/metrics_data.mark');
 
 const text = fs.readFileSync(SRC, 'utf8');
 

@@ -44541,7 +44541,7 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
                                     bool satellite_snapshot,
                                     bool whole_script_poc,
                                     const AstIndex* ast_index) {
-    log_notice("transpile AST to MIR (direct)");
+    log_debug("transpile AST to MIR (direct)");
 
     build->names = module_names ? module_names :
         &MIR_DEFAULT_MODULE_NAMES;
@@ -45782,7 +45782,7 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
                                    uint64_t* out_mir_module_count,
                                    uint64_t* out_mir_function_count,
                                    uint64_t* out_mir_instruction_count) {
-    log_notice("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
+    log_debug("MIR Direct: compiling module '%s'", script_path ? script_path : "<unknown>");
 
     EvalContext* template_context = tp && tp->runtime
         ? runtime_get_eval_context(tp->runtime) : context;
@@ -46495,7 +46495,7 @@ Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
                 runner.context->consts = runner.script->const_list
                     ? runner.script->const_list->data : nullptr;
                 runner.context->type_list = runner.script->type_list;
-                log_notice("Executing JIT compiled code...");
+                log_debug("Executing JIT compiled code...");
                 runner.context->run_main = run_main;
                 if (!module_init_failed) {
                     result = runtime_publish_result(runner.context,

@@ -7773,6 +7773,56 @@ static void split_adopt_string_lane(List* result) {
     }
 }
 
+static void split_literal_string_into(Rooted<Item>& rooted_str,
+        Rooted<Item>& rooted_sep, Rooted<List*>& rooted_result,
+        uint32_t str_len, uint32_t sep_len, bool source_is_ascii) {
+    const char* source_chars = rooted_str.get().get_chars();
+    const char* separator_chars = rooted_sep.get().get_chars();
+    int64_t part_count = count_literal_matches(source_chars, str_len,
+        separator_chars, sep_len) + 1;
+    (void)array_reserve_append_slots((Array*)rooted_result.get(), part_count);
+    size_t start = 0;
+    size_t p = 0;
+
+    for (;;) {
+        // Slice and append may collect, so retain indices and reload bytes.
+        const char* str_chars = rooted_str.get().get_chars();
+        const char* sep_chars = rooted_sep.get().get_chars();
+        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len);
+        if (at == SIZE_MAX) break;
+        String* part = split_heap_string_slice(rooted_str, start, at - start,
+            source_is_ascii);
+        array_push((Array*)rooted_result.get(), {.item = s2it(part)});
+        p = at + sep_len;
+        start = p;
+    }
+
+    String* part = split_heap_string_slice(rooted_str, start, str_len - start,
+        source_is_ascii);
+    array_push((Array*)rooted_result.get(), {.item = s2it(part)});
+}
+
+Item fn_split_literal_items(Item str_item, Item sep_item) {
+    GUARD_ERROR2(str_item, sep_item);
+    String* source = get_type_id(str_item) == LMD_TYPE_STRING ? it2s(str_item) : NULL;
+    String* separator = get_type_id(sep_item) == LMD_TYPE_STRING ? it2s(sep_item) : NULL;
+    if (!source || !separator || !source->is_ascii || !separator->is_ascii ||
+            source->len == 0 || separator->len == 0) {
+        log_error("split-literal-items: expected nonempty ASCII strings");
+        return ItemError;
+    }
+    uint32_t str_len = source->len;
+    uint32_t sep_len = separator->len;
+    RootFrame roots(3);
+    Rooted<Item> rooted_str(roots, str_item);
+    Rooted<Item> rooted_sep(roots, sep_item);
+    Rooted<List*> rooted_result(roots, list());
+    if (!rooted_result.get()) return ItemError;
+    split_literal_string_into(rooted_str, rooted_sep, rooted_result,
+        str_len, sep_len, true);
+    return {.array = rooted_result.get()};
+}
+
 Item fn_split(Item str_item, Item sep_item) {
     // every split operand participates in dispatch, so no error may fall through to null or whitespace handling
     GUARD_ERROR2(str_item, sep_item);
@@ -7900,34 +7950,9 @@ Item fn_split(Item str_item, Item sep_item) {
         return {.array = rooted_result.get()};
     }
 
-    // split by separator
-    const char* source_chars = rooted_str.get().get_chars();
-    const char* separator_chars = rooted_sep.get().get_chars();
-    int64_t part_count = count_literal_matches(source_chars, str_len,
-        separator_chars, sep_len) + 1;
-    (void)array_reserve_append_slots((Array*)rooted_result.get(), part_count);
-    size_t start = 0;
-    size_t p = 0;
-
-    for (;;) {
-        // The slice and the push below allocate and may relocate the backing
-        // bytes, so the pointers are re-read every round and the scan is kept
-        // in indices.
-        const char* str_chars = rooted_str.get().get_chars();
-        const char* sep_chars = rooted_sep.get().get_chars();
-        size_t at = literal_find(str_chars, str_len, p, sep_chars, sep_len);
-        if (at == SIZE_MAX) break;
-        String* part = split_heap_string_slice(rooted_str, start, at - start,
-            source_is_ascii);
-        array_push((Array*)rooted_result.get(), {.item = s2it(part)});
-        p = at + sep_len;
-        start = p;
-    }
-
-    // add the last part
-    String* part = split_heap_string_slice(rooted_str, start, str_len - start,
-        source_is_ascii);
-    array_push((Array*)rooted_result.get(), {.item = s2it(part)});
+    // Both Lambda's inferred lane and JS's tagged lane use one literal scan.
+    split_literal_string_into(rooted_str, rooted_sep, rooted_result, str_len,
+        sep_len, source_is_ascii);
 
     return {.array = rooted_result.get()};
 }

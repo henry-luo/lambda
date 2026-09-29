@@ -282,6 +282,9 @@ TEST_F(GifAnimationTest, CreateAndTickFrames) {
 
     // Initial frame should be frame 0 (red)
     EXPECT_EQ(surface.pixels, pixels0);
+    EXPECT_EQ(surface.pitch, W * 4);
+    EXPECT_EQ(surface.decoded_width, W);
+    EXPECT_EQ(surface.decoded_height, H);
 
     // Total duration = 100+200+100 = 400ms = 0.4s
     EXPECT_NEAR(inst->duration, 0.4, 0.001);
@@ -319,6 +322,25 @@ TEST_F(GifAnimationTest, CreateAndTickFrames) {
     gif->frames[2].pixels = nullptr;
     gif_animation_finish(inst);
     EXPECT_EQ(inst->state, nullptr);
+}
+
+TEST_F(GifAnimationTest, FrameClockContinuesAcrossSchedulerLoops) {
+    GifFrames* gif = image_gif_load_from_memory(ANIM_GIF_2FRAME, ANIM_GIF_2FRAME_LEN);
+    ASSERT_NE(gif, nullptr);
+    surface.width = gif->width;
+    surface.height = gif->height;
+
+    AnimationInstance* inst = gif_animation_create(scheduler, &surface, gif, 12.0, pool);
+    ASSERT_NE(inst, nullptr);
+    EXPECT_EQ(surface.pitch, gif->width * 4);
+    EXPECT_EQ(surface.pixels, gif->frames[0].pixels);
+
+    animation_scheduler_tick(scheduler, 12.11, nullptr);
+    EXPECT_EQ(surface.pixels, gif->frames[1].pixels);
+    animation_scheduler_tick(scheduler, 12.31, nullptr);
+    EXPECT_EQ(surface.pixels, gif->frames[0].pixels);
+    animation_scheduler_tick(scheduler, 12.41, nullptr);
+    EXPECT_EQ(surface.pixels, gif->frames[1].pixels);
 }
 
 TEST_F(GifAnimationTest, InfiniteLoopDoesNotFinish) {

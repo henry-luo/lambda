@@ -45,7 +45,7 @@ The full surface is described in [doc/dev/js/JS_13_Web_DOM.md](dev/js/JS_13_Web_
 
 ## Node.js Compatibility
 
-A Node.js compatibility layer provides CommonJS `require()` and ES `import` with Node resolution (`node_modules`, `package.json` exports), 25+ core modules implemented natively (`fs`, `path`, `os`, `crypto`, `zlib`, `net`, `http`, `events`, `stream`, `buffer`, `url`, `util`, `child_process`, …), and the `process` object. The `node-core`, `node-fs`, `node-net`, `node-crypto` and `node-zlib` modules ship as Jube modules beside the executable. `node:vm` is not provided. Design: [doc/dev/js/JS_14_Node_Compat.md](dev/js/JS_14_Node_Compat.md); tests: `test/node/` (231 scripts) and the official baseline above.
+A Node.js compatibility layer provides CommonJS `require()` and ES `import` with Node resolution (`node_modules`, `package.json` exports), 25+ core modules implemented natively (`fs`, `path`, `os`, `crypto`, `zlib`, `net`, `http`, `events`, `stream`, `buffer`, `url`, `util`, `child_process`, …), and the `process` object. The `node-core`, `node-fs`, `node-net`, `node-crypto` and `node-zlib` modules ship as native modules beside the executable. `node:vm` is not provided. Design: [doc/dev/js/JS_14_Node_Compat.md](dev/js/JS_14_Node_Compat.md); tests: `test/node/` (231 scripts) and the official baseline above.
 
 ## Performance
 

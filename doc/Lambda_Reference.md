@@ -25,8 +25,6 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 - **Cross-platform**: macOS, Linux and Windows with consistent behavior
 - **Rich type system**: static checking with inference; union, occurrence and element types, string patterns, constrained types, nominal object types — and every type doubles as a schema
 - **Document processing**: some 30 input formats and 20 output formats through one Mark data model, plus the Radiant layout and rendering engine (see [Lambda_Doc_Pipeline.md](Lambda_Doc_Pipeline.md))
-- **Unicode**: UTF-8 strings indexed by code point; case mapping, case folding and normalization via utf8proc
-- **Memory**: a non-moving mark-and-sweep garbage collector with precise rooting; copy-on-write value semantics
 
 ---
 
@@ -65,7 +63,7 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Lambda_Procedural.md](Lambda_Procedural.md)** | **Procedural Programming** — `var`, assignment, value semantics, `while`, `return`, file output, the `io` module, `main()`, concurrency |
 | **[Lambda_Error_Handling.md](Lambda_Error_Handling.md)** | **Error Handling** — Error values, `raise`, `T^E` return types, postfix `^` propagation, the `^ { }` handler, compile-time enforcement, error codes |
 | **[Lambda_String_Pattern.md](Lambda_String_Pattern.md)** | **String Patterns** — The pattern language inside `\(…)`: character classes, ranges, quantifiers, negation, and pattern-aware `find`/`replace`/`split` |
-| **[Lambda_Modules.md](Lambda_Modules.md)** | **Modules and Imports** — Import forms and resolution, `pub` exports, built-in and package modules, JavaScript and Python modules |
+| **[Lambda_Modules.md](Lambda_Modules.md)** | **Modules and Imports** — Import forms and resolution, `pub` exports, built-in and package modules, JavaScript modules |
 | **[Lambda_Concurrency.md](Lambda_Concurrency.md)** | **Concurrency** — Tasks with `start`/`wait`, mailboxes, `select`, timeouts, cancellation, structured scope, JavaScript Promises |
 | **[Lambda_Document_Updates.md](Lambda_Document_Updates.md)** | **Document Updates** — References and the force step `#`, node identity, `put`/`del`, transactions with `open`/`commit`/`rollback`, `temp.` documents |
 | **[Lambda_Cheatsheet.md](Lambda_Cheatsheet.md)** | **Cheatsheet** — One-page syntax summary |
@@ -77,7 +75,7 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Lambda_Sys_Func.md](Lambda_Sys_Func.md)** | **System Functions** — Every built-in function: type, math, string, collection, date/time, I/O, concurrency |
 | **[Lambda_CLI.md](Lambda_CLI.md)** | **CLI Reference** — Commands, flags, environment variables and usage of `lambda.exe` |
 | **[Lambda_Packages.md](Lambda_Packages.md)** | **Packages** — The libraries written in Lambda that ship with the runtime: math, chart, graph, LaTeX, PDF, OpenAPI and the engine packages |
-| **[Lambda_Validator_Guide.md](Lambda_Validator_Guide.md)** | **Validation** — Writing schemas with `type` declarations and validating files with `lambda validate` |
+| **[Lambda_Validator.md](Lambda_Validator.md)** | **Validation** — Writing schemas with `type` declarations and validating files with `lambda validate` |
 
 ### Documents, Rendering and UI
 
@@ -90,12 +88,6 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Math_Support.md](Math_Support.md)** | **Math** — LaTeX and ASCII math input, the `math` rendering package, supported commands |
 | **[Reactive_UI.md](Reactive_UI.md)** | **Reactive UI** — `view` and `edit` templates, `apply()` dispatch, template state and `on` event handlers |
 | **[JS_DOM_Support.md](JS_DOM_Support.md)** | **LambdaJS** — The embedded JavaScript engine and browser DOM: conformance status, Node compatibility, benchmarks |
-
-### Hosted Languages
-
-| Document | Description |
-|----------|-------------|
-| **[Python_Support.md](Python_Support.md)** | **Python** — Running Python on the Lambda runtime through the `lang-python` Jube module |
 
 ### Normative Specifications
 
@@ -112,8 +104,6 @@ The Lambda documentation is organized into focused documents. New to Lambda? Sta
 | **[Developer_Guide.md](dev/Developer_Guide.md)** | **Developer Guide** — Build from source, dependencies, testing, grammar, MIR JIT |
 | **[lambda/LR_00_Overview.md](dev/lambda/LR_00_Overview.md)** | **Lambda Core Runtime** — Compilation pipeline, value & type model, MIR-Direct transpiler and JIT, memory & GC, builtins |
 | **[radiant/RAD_00_Overview.md](dev/radiant/RAD_00_Overview.md)** | **Radiant Engine** — CSS resolution, layout, rendering, events, editing, the application shell |
-| **[Lambda_Jube_Runtime.md](dev/Lambda_Jube_Runtime.md)** | **Jube Runtime** — How hosted-language modules are built, packaged and discovered |
-| **[Bash_Support.md](dev/Bash_Support.md)** | **Bash front end** — Feature status of the Bash front end, which is not compiled into current builds |
 | **[js/JS_00_Overview.md](dev/js/JS_00_Overview.md)** | **LambdaJS Runtime** — The JavaScript engine's pipeline, value model, runtime, DOM and Node compatibility |
 
 ### Quick Reference

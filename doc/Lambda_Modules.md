@@ -106,8 +106,8 @@ let c = <s.Circle r: 2.0>;
 | `import math`, `import io` | The built-in modules; `import lambda.math` and `import lambda.io` are the same modules |
 | `import p: 'uri'` | A namespace prefix for markup, not a module ([Namespaces](Lambda_Syntax.md#namespaces)) |
 
-- Only `.ls` and `.js` files are tried, in that order; `.mjs`, `.ts` and `.py` files are not modules, and a directory is not a module.
-- `LAMBDA_HOME` is the runtime's asset directory. Without the environment variable it is `./lambda` (a source checkout) or `./lmd` (a release bundle), **relative to the current working directory**. When you run `lambda` from another folder, set `LAMBDA_HOME` to the absolute path of that directory, or package imports fail with E217.
+- Only `.ls` and `.js` files are tried, in that order; `.mjs` and `.ts` files are not modules, and a directory is not a module.
+- `LAMBDA_HOME` is the runtime's asset directory. Without the environment variable it is `./lmd` (in a source checkout and a release bundle alike), **relative to the current working directory**. When you run `lambda` from another folder, set `LAMBDA_HOME` to the absolute path of that directory, or package imports fail with E217.
 - Prefer the relative form `.a` for your own modules: it does not depend on where you run the script from.
 
 ## Built-in Modules
@@ -218,10 +218,6 @@ pn main() {
 - An `export default` is reachable only through an alias: `import j: .mod` then `j.default()`.
 - In the other direction, JavaScript can import a Lambda module: `import * as m from './lib.ls'` gives each `pub fn` as a function and each `pub pn` as a Promise-returning function; `pub let` values are not exported to JavaScript.
 
-## Other Languages
-
-Python files are not modules: `import .helper` never loads `helper.py`. Python programs run as scripts through the hosted `lang-python` module ([Python_Support.md](Python_Support.md)).
-
 ## Known Issues
 
 | Issue | Workaround |
@@ -234,4 +230,3 @@ Python files are not modules: `import .helper` never loads `helper.py`. Python p
 | `export async function` is rejected by LambdaJS | Declare the function, then `export { f }` |
 | JavaScript calling a Lambda `pub fn` or `pub pn` that returns a string literal or calls `print` crashes the process | Return numbers or structured values across the boundary |
 | `import 'uri'` without an alias is silently ignored | Always give a namespace a prefix |
-| Any dotted bare import other than `lambda.*` (e.g. `import tools.util`) drops its first segment when resolving | Use the relative form `import .tools.util` |

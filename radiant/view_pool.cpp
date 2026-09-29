@@ -176,6 +176,7 @@ typedef struct ViewPropTeardownEntry {
     const void* reset_default;
     size_t reset_size;
     ViewPropCustomFn custom_reset;
+    ViewPropReleaseFn release_external_reset = nullptr;
 } ViewPropTeardownEntry;
 
 static void view_teardown_visit_node(ViewTree* tree, DomNode* node, int flags, bool include_siblings);
@@ -437,10 +438,27 @@ static void release_embed_prop_entry(DomElement* elem, ViewTree*) {
     release_embed_prop(elem);
 }
 
+static void release_embed_prop_for_reset(DomElement* elem, ViewTree*) {
+    if (!elem || !elem->embed) return;
+    // A retained layout reset invalidates media and sizing data, not the
+    // browsing context owned by the still-connected iframe element.
+    release_dom_owned_embed_images(elem);
+    release_media_prop(elem->embed);
+    release_grid_prop(elem->embedp()->grid);
+}
+
 static void free_embed_payload(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
     view_pool_free_ptr(tree, elem->embedp()->flex);
     view_pool_free_ptr(tree, elem->embedp()->grid);
+}
+
+static void reset_embed_prop(DomElement* elem, ViewTree* tree) {
+    if (!elem || !elem->embed) return;
+    DomDocument* embedded_doc = elem->embedp()->doc;
+    free_embed_payload(elem, tree);
+    memcpy(elem->embed, &EMBED_PROP_DEFAULT, sizeof(EmbedProp));
+    elem->embed->doc = embedded_doc;
 }
 
 static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
@@ -565,7 +583,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr,       &BOUNDARY_PROP_DEFAULT,      sizeof(BoundaryProp),      nullptr },
     { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       nullptr,                      sizeof(BlockProp),         reset_block_or_marker_prop },
     { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr,       &SCROLL_PROP_DEFAULT,        sizeof(ScrollProp),        nullptr },
-    { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr,       &EMBED_PROP_DEFAULT,         sizeof(EmbedProp),         nullptr },
+    { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr,       &EMBED_PROP_DEFAULT,         sizeof(EmbedProp),         reset_embed_prop, release_embed_prop_for_reset },
     { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr,       &POSITION_PROP_DEFAULT,      sizeof(PositionProp),      nullptr },
     { "transform",       nullptr,                   free_transform_payload,    view_prop_get_transform,       view_prop_clear_transform,       nullptr,         nullptr,       &TRANSFORM_PROP_DEFAULT,     sizeof(TransformProp),     nullptr },
     { "filter",          nullptr,                   free_filter_payload,       view_prop_get_filter,          view_prop_clear_filter,          nullptr,         nullptr,       &FILTER_PROP_DEFAULT,        sizeof(FilterProp),        nullptr },
@@ -634,7 +652,10 @@ static void view_teardown_apply_table(ViewTree* tree,
     for (int i = 0; i < count; i++) {
         const ViewPropTeardownEntry* entry = &VIEW_PROP_TEARDOWN[i];
         if ((flags & VIEW_TEARDOWN_RELEASE_EXTERNAL) && entry->release_external) {
-            entry->release_external(elem, tree);
+            ViewPropReleaseFn release = (flags & VIEW_TEARDOWN_RESET_IN_PLACE) &&
+                entry->release_external_reset ? entry->release_external_reset :
+                entry->release_external;
+            release(elem, tree);
         }
         if ((flags & VIEW_TEARDOWN_FREE_POOL)) {
             if (entry->custom_free) {

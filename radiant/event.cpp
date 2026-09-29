@@ -52,6 +52,9 @@ extern Item js_make_number(double value);
 #include "../lib/hashmap.h"           // hashmap utilities used by DocState maps
 #include "../lib/memtrack.h"          // mem_free
 #include "../lib/time_util.h"
+#include "../lib/uv_loop.h"
+#include "../lambda/runtime/lambda-stack.h"
+#include <pthread.h>
 #include <string.h>
 
 // thread-local eval context used by heap allocation functions
@@ -643,6 +646,68 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
     uicon->document = saved_doc;
     uicon->viewport_width = saved_viewport_width;
     uicon->viewport_height = saved_viewport_height;
+}
+
+struct DocumentAnimationTick {
+    double now;
+    int depth;
+    bool tick_root;
+    bool anchor_host_time;
+    bool ticked;
+    bool active;
+};
+
+static void tick_document_animation_tree(DomDocument* document,
+                                         DocumentAnimationTick* tick);
+
+static bool tick_embedded_document_animation(View* view, void* context) {
+    DocumentAnimationTick* tick = (DocumentAnimationTick*)context;
+    if (!view || !view->is_block() || !tick) return true;
+    ViewBlock* block = lam::view_require_block(view);
+    DomDocument* embedded = block->embed ? block->embedp()->doc : nullptr;
+    if (embedded) {
+        DocumentAnimationTick child = {
+            tick->now, tick->depth + 1, true, tick->anchor_host_time, false, false
+        };
+        tick_document_animation_tree(embedded, &child);
+        tick->ticked = tick->ticked || child.ticked;
+        tick->active = tick->active || child.active;
+    }
+    return true;
+}
+
+static void tick_document_animation_tree(DomDocument* document,
+                                         DocumentAnimationTick* tick) {
+    if (!document || !tick || tick->depth > MAX_IFRAME_DEPTH) return;
+    DocState* state = document->state;
+    AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
+    if (scheduler && tick->anchor_host_time) {
+        animation_scheduler_anchor_host_time(scheduler, tick->now);
+    }
+    if (scheduler && scheduler->has_active_animations &&
+        (tick->depth > 0 || tick->tick_root)) {
+        // Embedded bounds are local to their own viewport; the host repaints
+        // the complete frame after any child tick.
+        DirtyTracker* dirty = tick->depth == 0 ? &state->dirty_tracker : nullptr;
+        tick->active = animation_scheduler_tick(scheduler, tick->now, dirty) || tick->active;
+        tick->ticked = true;
+    }
+    if (document->view_tree && document->view_tree->root) {
+        view_geometry_walk_elements(document->view_tree->root,
+                                    tick_embedded_document_animation, tick);
+    }
+}
+
+bool radiant_tick_document_animations(DomDocument* document, double now,
+                                      bool tick_root, bool anchor_host_time) {
+    DocumentAnimationTick tick = {
+        now, 0, tick_root, anchor_host_time, false, false
+    };
+    tick_document_animation_tree(document, &tick);
+    if (tick.ticked && document && document->state) {
+        doc_state_request_repaint(document->state);
+    }
+    return tick.active;
 }
 
 static bool process_event_target_document_reflow(EventContext* evcon) {
@@ -1899,6 +1964,7 @@ static bool event_record_is_cancelable(const char* event_name) {
            strcmp(event_name, "compositionupdate") != 0 &&
            strcmp(event_name, "compositionend") != 0 &&
            strcmp(event_name, "scroll") != 0 &&
+           strcmp(event_name, "load") != 0 &&
            strcmp(event_name, "selectionchange") != 0;
 }
 
@@ -10431,11 +10497,11 @@ static bool navigation_release_evaluator_for_document_load(void) {
     return true;
 }
 
-static bool navigation_execute_iframe_target(UiContext* uicon,
-                                             DomElement* iframe,
-                                             const char* url) {
+static bool navigation_commit_iframe_document(UiContext* uicon,
+                                              DomElement* iframe,
+                                              DomDocument* new_doc) {
     if (!uicon || !iframe || iframe->tag() != MARKUP_NAME_IFRAME ||
-        !iframe->doc || !iframe->doc->view_tree || !url || !url[0]) {
+        !iframe->doc || !iframe->doc->view_tree || !new_doc) {
         return false;
     }
     DomDocument* owner = iframe->doc;
@@ -10445,9 +10511,8 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
         return false;
     }
     ViewBlock* block = lam::view_require_block(iframe_view);
-    if (!block || !block->embed) return false;
-    if (!navigation_release_evaluator_for_document_load()) return false;
-    if (!iframe->set_attribute("src", url)) return false;
+    if (!block) return false;
+    if (!block->embed && !block->ensure_embed(owner->view_tree)) return false;
     if (block->scroller && block->scroll_mut()->pane) {
         block->scroll()->pane->reset();
         block->content_width = 0.0f;
@@ -10462,8 +10527,6 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
         // them before iframe navigation can free and reuse those addresses.
         font_context_reset_glyph_caches(uicon->font_ctx);
     }
-    DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh);
-    if (!new_doc) return false;
     block->embed->doc = new_doc;
     dom_document_set_embedding(new_doc, owner, iframe);
     radiant_document_ensure_state(new_doc, "navigation_iframe_target");
@@ -10479,6 +10542,7 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
         uicon->viewport_height = (float)css_vh;
         process_document_font_faces(uicon, new_doc);
         layout_html_doc(uicon, new_doc, false);
+        radiant_dispatch_lambda_body_load(uicon, new_doc);
         uicon->document = saved_doc;
         uicon->viewport_width = saved_viewport_width;
         uicon->viewport_height = saved_viewport_height;
@@ -10493,11 +10557,87 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
         block->content_height = root->content_height > 0.0f ? root->content_height : root->height;
         update_scroller(block, block->content_width, block->content_height);
     }
-    clear_document_interaction_state_before_detach(old_doc);
-    dom_document_clear_embedding(old_doc);
-    free_document(old_doc);
+    if (old_doc) {
+        clear_document_interaction_state_before_detach(old_doc);
+        dom_document_clear_embedding(old_doc);
+        free_document(old_doc);
+    }
     if (owner->state) doc_state_mark_dirty(owner->state);
     return true;
+}
+
+static bool navigation_execute_iframe_target(UiContext* uicon,
+                                             DomElement* iframe,
+                                             const char* url) {
+    if (!uicon || !iframe || iframe->tag() != MARKUP_NAME_IFRAME ||
+        !iframe->doc || !url || !url[0] ||
+        !navigation_release_evaluator_for_document_load() ||
+        !iframe->set_attribute("src", url)) return false;
+    DomDocument* owner = iframe->doc;
+    View* iframe_view = owner->view_tree
+        ? find_view(owner->view_tree->root, (DomNode*)iframe) : nullptr;
+    if (!iframe_view || (iframe_view->view_type != RDT_VIEW_BLOCK &&
+                         iframe_view->view_type != RDT_VIEW_INLINE_BLOCK)) return false;
+    ViewBlock* block = lam::view_require_block(iframe_view);
+    if (!block) return false;
+    int css_vw = (int)block->width; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    int css_vh = (int)block->height; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh);
+    if (!new_doc) return false;
+    if (!navigation_commit_iframe_document(uicon, iframe, new_doc)) {
+        free_document(new_doc);
+        return false;
+    }
+    return true;
+}
+
+struct AsyncScriptNavigation {
+    uv_work_t work;
+    AsyncScriptNavigation* next;
+    UiContext* uicon;
+    DomDocument* source;
+    DomNodeRef iframe_ref;
+    Url* target;
+    DomDocument* loaded;
+    int viewport_width;
+    int viewport_height;
+    bool iframe;
+    bool superseded;
+    bool completed;
+    int status;
+};
+
+static AsyncScriptNavigation* s_async_script_navigations = nullptr;
+static pthread_t s_async_script_host_thread;
+static bool s_async_script_host_thread_set = false;
+
+static bool navigation_schedule_async_script(UiContext* uicon, DomDocument* source,
+        DomElement* iframe, const char* url, int viewport_width,
+        int viewport_height);
+
+static void navigation_save_session_scroll(BrowsingSession* session,
+                                           DomDocument* document) {
+    if (!session || !document) return;
+    ViewBlock* root_block = document->view_tree
+        ? lam::view_require_block(document->view_tree->root) : nullptr;
+    DocState* state = (DocState*)document->state;
+    if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
+        float scroll_y = 0.0f;
+        scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
+                                           root_block->scroll()->pane,
+                                           nullptr, &scroll_y, nullptr, nullptr);
+        session_save_scroll_position(session, scroll_y);
+    }
+}
+
+static void navigation_update_window_title(BrowsingSession* session,
+                                           DomDocument* document) {
+    const char* page_title = session ? session_current_title(session) : nullptr;
+    if (!page_title) page_title = session_extract_title(document);
+    if (!page_title) return;
+    char title_buf[512];
+    snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
+    update_window_title(title_buf);
 }
 
 static bool navigation_execute_top_target(UiContext* uicon, DomDocument* document,
@@ -10507,20 +10647,13 @@ static bool navigation_execute_top_target(UiContext* uicon, DomDocument* documen
     }
     int css_vw = (int)uicon->viewport_width; // INT_CAST_OK: loader viewport is integer CSS pixels.
     int css_vh = (int)uicon->viewport_height; // INT_CAST_OK: loader viewport is integer CSS pixels.
+    if (navigation_schedule_async_script(uicon, document, nullptr, url,
+                                         css_vw, css_vh)) return true;
     if (!navigation_release_evaluator_for_document_load()) return false;
     BrowsingSession* session = uicon->browsing_session;
     DomDocument* new_doc = nullptr;
     if (session) {
-        ViewBlock* root_block = document->view_tree
-            ? lam::view_require_block(document->view_tree->root) : nullptr;
-        DocState* state = (DocState*)document->state;
-        if (root_block && root_block->scroller && root_block->scroll_mut()->pane) {
-            float scroll_y = 0.0f;
-            scroll_state_get_position_for_view(state, static_cast<View*>(root_block),
-                                               root_block->scroll()->pane,
-                                               nullptr, &scroll_y, nullptr, nullptr);
-            session_save_scroll_position(session, scroll_y);
-        }
+        navigation_save_session_scroll(session, document);
         log_info("navigation-exec: navigating via session to %s", url);
         new_doc = session_navigate(session, uicon, url, css_vw, css_vh);
     } else {
@@ -10529,14 +10662,250 @@ static bool navigation_execute_top_target(UiContext* uicon, DomDocument* documen
         free_document(document);
     }
     if (!new_doc) return false;
-    const char* page_title = session ? session_current_title(session) : nullptr;
-    if (!page_title) page_title = session_extract_title(new_doc);
-    if (page_title) {
-        char title_buf[512];
-        snprintf(title_buf, sizeof(title_buf), "Lambda - %s", page_title);
-        update_window_title(title_buf);
-    }
+    navigation_update_window_title(session, new_doc);
     return true;
+}
+
+static bool navigation_async_is_lambda_file(const Url* target) {
+    if (!target || target->scheme != URL_SCHEME_FILE || !target->pathname) return false;
+    const char* path = target->pathname->chars;
+    size_t length = target->pathname->len;
+    return length >= 3 && strcmp(path + length - 3, ".ls") == 0;
+}
+
+static void navigation_async_unlink(AsyncScriptNavigation* job) {
+    AsyncScriptNavigation** link = &s_async_script_navigations;
+    while (*link && *link != job) link = &(*link)->next;
+    if (*link) *link = job->next;
+}
+
+static void navigation_async_work(uv_work_t* request) {
+    AsyncScriptNavigation* job = (AsyncScriptNavigation*)request->data;
+    const char* href = url_get_href(job->target);
+    job->loaded = load_html_doc(nullptr, (char*)href,
+                                job->viewport_width, job->viewport_height);
+    // The document and its retained evaluator may cross threads only after
+    // the worker releases its quiescent TLS binding (D5.4.1).
+    if (context && !eval_context_shutdown(context)) {
+        log_error("navigation-async: worker could not release document evaluator");
+    }
+    input_context = nullptr;
+    lambda_stack_detach_thread();
+}
+
+static void navigation_async_complete(uv_work_t* request, int status) {
+    AsyncScriptNavigation* job = (AsyncScriptNavigation*)request->data;
+    // A libuv completion can run inside the source document's JS batch.
+    // Publish the result; the host commits it after that batch closes.
+    job->status = status;
+    job->completed = true;
+}
+
+static bool navigation_async_commit(AsyncScriptNavigation* job) {
+    navigation_async_unlink(job);
+    UiContext* uicon = job->uicon;
+    DomDocument* source = job->source;
+    DomDocument* loaded = job->loaded;
+    bool live = job->status == 0 && loaded && source && uicon &&
+        !job->superseded &&
+        uicon->async_script_navigation && uicon->document == source;
+    bool navigated = false;
+    log_debug("navigation-async: completed target=%s iframe=%d status=%d loaded=%p live=%d",
+              url_get_href(job->target), job->iframe, job->status,
+              (void*)loaded, live);
+    if (live && job->iframe) {
+        DomNode* node = dom_node_ref_validate(source, job->iframe_ref);
+        DomElement* iframe = node && node->is_element() ? node->as_element() : nullptr;
+        const char* src = iframe ? iframe->get_attribute("src") : nullptr;
+        Url* current = src ? url_parse_with_base(src, source->url) : nullptr;
+        bool same_target = current && url_equals(current, job->target);
+        if (current) url_destroy(current);
+        Runtime* runtime = dom_document_script_runtime(loaded);
+        EvalContext* owner = runtime ? runtime_get_eval_context(runtime) : nullptr;
+        if (same_target && owner && radiant_eval_context_switch(owner) &&
+            navigation_commit_iframe_document(uicon, iframe, loaded)) {
+            loaded = nullptr;
+            navigated = true;
+            if (dom_document_has_js_realm(source)) {
+                EvalContext* parent_owner = runtime_get_eval_context(source->js.runtime);
+                if (parent_owner && radiant_eval_context_switch(parent_owner) &&
+                    js_runtime_state_init(parent_owner)) {
+                    dom_set_document(source);
+                    dom_iframe_navigation_complete(iframe);
+                }
+            }
+            to_repaint();
+        }
+    } else if (live) {
+        BrowsingSession* session = uicon->browsing_session;
+        navigation_save_session_scroll(session, source);
+        if (session) {
+            DomDocument* presented = session_navigate_loaded(
+                session, uicon, job->target, loaded);
+            if (presented) {
+                loaded = nullptr;
+                job->target = nullptr; // history now owns the resolved URL
+                navigated = true;
+                navigation_update_window_title(session, presented);
+                to_repaint();
+            }
+        } else {
+            DomDocument* presented = show_loaded_html_doc(
+                loaded, url_get_href(job->target));
+            if (presented) {
+                loaded = nullptr;
+                navigated = true;
+                free_document(source);
+                navigation_update_window_title(nullptr, presented);
+                to_repaint();
+            }
+        }
+    }
+    if (loaded) free_document(loaded);
+    if (live && !navigated) {
+        log_error("navigation-async: could not present %s",
+                  url_get_href(job->target));
+    }
+    if (job->target) url_destroy(job->target);
+    mem_free(job);
+    return navigated;
+}
+
+bool radiant_commit_async_document_loads(UiContext* uicon) {
+    bool navigated = false;
+    AsyncScriptNavigation* job = s_async_script_navigations;
+    while (job) {
+        AsyncScriptNavigation* next = job->next;
+        if (job->uicon == uicon && job->completed) {
+            navigated = navigation_async_commit(job) || navigated;
+        }
+        job = next;
+    }
+    return navigated;
+}
+
+bool radiant_async_document_loads_pending(UiContext* uicon) {
+    for (AsyncScriptNavigation* job = s_async_script_navigations;
+         job; job = job->next) {
+        if (job->uicon == uicon && job->source && !job->completed) return true;
+    }
+    return false;
+}
+
+static bool navigation_schedule_async_script(UiContext* uicon, DomDocument* source,
+        DomElement* iframe, const char* url, int viewport_width,
+        int viewport_height) {
+    if (!uicon || !uicon->async_script_navigation || !source || !source->url ||
+        !url || !url[0]) return false;
+    Url* target = url_parse_with_base(url, source->url);
+    if (!navigation_async_is_lambda_file(target)) {
+        if (target) url_destroy(target);
+        return false;
+    }
+    DomNodeRef iframe_ref = iframe ? dom_node_ref((DomNode*)iframe) : DomNodeRef{};
+    if (iframe && !dom_node_ref_validate(source, iframe_ref)) {
+        url_destroy(target);
+        return false;
+    }
+    for (AsyncScriptNavigation* pending = s_async_script_navigations;
+         pending; pending = pending->next) {
+        if (!pending->superseded && pending->source == source &&
+            pending->uicon == uicon &&
+            pending->iframe == (iframe != nullptr) &&
+            (!iframe || (pending->iframe_ref.address == iframe_ref.address &&
+                         pending->iframe_ref.expected_id == iframe_ref.expected_id)) &&
+            url_equals(pending->target, target)) {
+            url_destroy(target);
+            return true;
+        }
+    }
+    uv_loop_t* loop = lambda_uv_loop();
+    AsyncScriptNavigation* job = loop ? (AsyncScriptNavigation*)mem_calloc(
+        1, sizeof(AsyncScriptNavigation), MEM_CAT_LAYOUT) : nullptr;
+    if (!job) {
+        url_destroy(target);
+        return false;
+    }
+    job->work.data = job;
+    job->uicon = uicon;
+    job->source = source;
+    job->iframe_ref = iframe_ref;
+    job->target = target;
+    job->viewport_width = viewport_width;
+    job->viewport_height = viewport_height;
+    job->iframe = iframe != nullptr;
+    if (!s_async_script_navigations) {
+        s_async_script_host_thread = pthread_self();
+        s_async_script_host_thread_set = true;
+    }
+    job->next = s_async_script_navigations;
+    s_async_script_navigations = job;
+    int queued = uv_queue_work(loop, &job->work, navigation_async_work,
+                               navigation_async_complete);
+    if (queued != 0) {
+        navigation_async_unlink(job);
+        url_destroy(target);
+        mem_free(job);
+        log_error("navigation-async: could not queue Lambda document: %s",
+                  uv_strerror(queued));
+        return false;
+    }
+    if (!iframe) {
+        // A later top-level navigation supersedes earlier loads from the
+        // same page, regardless of which worker finishes first.
+        for (AsyncScriptNavigation* prior = job->next; prior; prior = prior->next) {
+            if (prior->source == source && !prior->iframe) prior->superseded = true;
+        }
+    }
+    log_debug("navigation-async: queued Lambda document %s", url_get_href(target));
+    return true;
+}
+
+bool radiant_schedule_async_iframe_load(UiContext* uicon, DomElement* iframe,
+                                        const char* url, int viewport_width,
+                                        int viewport_height) {
+    return iframe && iframe->doc && navigation_schedule_async_script(
+        uicon, iframe->doc, iframe, url, viewport_width, viewport_height);
+}
+
+void radiant_cancel_async_document_loads(DomDocument* document) {
+    // Loader workers can destroy their own unpresented documents. Only the
+    // host thread owns source documents and the pending-job list.
+    if (!s_async_script_host_thread_set ||
+        !pthread_equal(pthread_self(), s_async_script_host_thread)) return;
+    for (AsyncScriptNavigation* job = s_async_script_navigations;
+         job; job = job->next) {
+        if (job->source == document) job->source = nullptr;
+    }
+}
+
+void radiant_drain_async_document_loads(UiContext* uicon) {
+    if (!uicon) return;
+    uicon->async_script_navigation = false;
+    uv_loop_t* loop = lambda_uv_loop();
+    if (!loop) return;
+    bool pending = true;
+    while (pending) {
+        pending = false;
+        for (AsyncScriptNavigation* job = s_async_script_navigations;
+             job; job = job->next) {
+            if (job->uicon == uicon) {
+                pending = true;
+                break;
+            }
+        }
+        if (pending) {
+            uv_run(loop, UV_RUN_ONCE);
+            radiant_commit_async_document_loads(uicon);
+        }
+    }
+}
+
+bool radiant_execute_location_navigation(UiContext* uicon, DomDocument* source,
+                                         const char* url) {
+    bool navigated = navigation_execute_top_target(uicon, source, url);
+    if (navigated) to_repaint();
+    return navigated;
 }
 
 bool radiant_execute_pending_navigation(UiContext* uicon, DomDocument* source) {
@@ -11013,6 +11382,10 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target) {
         log_error("eval-switch: incoming context refused binding");
         return false;
     }
+    // A document preloaded on a worker carries that worker's native stack
+    // limit until its evaluator is bound to this thread (D5.4.1).
+    lambda_stack_init();
+    target->stack_limit = lambda_stack_recoverable_limit();
     return true;
 }
 
@@ -11084,6 +11457,21 @@ struct EventDocumentScope {
         // other document's dispatch switches it away (EO5v2).
     }
 };
+
+void radiant_dispatch_lambda_body_load(UiContext* uicon, DomDocument* doc) {
+    if (!uicon || !doc || doc->page_kind != DOM_PAGE_KIND_LAMBDA_SCRIPT ||
+        dom_document_has_js_realm(doc)) return;
+    DomElement* body = radiant_document_body_element(doc);
+    if (!body) return;
+    EventDocumentScope scope(uicon, doc);
+    if (!scope.active) return;
+    EventContext evcon = {};
+    evcon.ui_context = uicon;
+    evcon.target_document = doc;
+    evcon.target = static_cast<View*>(body);
+    dispatch_lambda_handler(&evcon, static_cast<View*>(body), "load",
+                            nullptr, nullptr, false);
+}
 
 void rdt_event_set_mouse_position(RdtEvent* event, EventType type,
                                   float x, float y, double timestamp) {

@@ -277,7 +277,7 @@ binary/string join remains textual and uses the canonical binary literal form.
 
 ### DateTime Literals
 
-DateTime literals use the `t'...'` syntax:
+DateTime literals use the `t'...'` syntax. Lambda's datetime notation follows a subset of ISO 8601 (extended format): reduced-precision dates (`2025`, `2025-06`), times with optional fraction and UTC offset, and combined date-time values, with a space also accepted in place of `T`.
 
 ```lambda
 // Dates

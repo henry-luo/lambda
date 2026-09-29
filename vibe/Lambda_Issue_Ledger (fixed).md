@@ -299,7 +299,7 @@ the complete namespace migration:
 2. `lambda` is barred from binding declarations by the direct lexer’s
    reservation check, yielding E201 while member/data-name positions remain
    available.
-3. Shipped packages moved from `lambda/package/` to their `lambda/` roots,
+3. Shipped packages moved from `lmd/package/` to their `lambda/` roots,
    with typesetting moved specifically to `lambda/doc/math/`; all live imports,
    bridge scripts, tests, and release packaging now use the canonical paths.
 4. Regression coverage is in `test/lambda/lambda_namespace.ls` and
@@ -1643,7 +1643,7 @@ object methods were checked. The dynamic half (a `pn` reached through a value)
 was closed 2026-09-18 with S12.1.4v3(6), and the static rule now holds inside
 `function` bodies (C20-3) via the colour walk in `lambda_ast_finalize_script`
 (`colour_walk_call`, `build_ast.cpp`). Extending that one check to every `fn`
-context breaks three reliance sites: `lambda/package/dom/edit_history.ls`
+context breaks three reliance sites: `lmd/package/dom/edit_history.ls`
 (`fn clear_history`/`fn replay_retained` call `pn session.set_history*`),
 `test/lambda/proc/type_binder_proc_raw.ls` (module-level calls to `pn`s), and
 `test/mir/lambda/tune26_nested_tco_native_result`. Blocked on a ruling for the
@@ -1733,7 +1733,7 @@ hint appears and that disabling the option omits it.
 - With `a = <ul <li "a"> <li "b"> <li "c">>`, `a is <ul; <li>*>` is `false`, but `a is <ul; <p>, <p>, <p>>` is `true`.
 - `<ul> is <ul; <li>?>` is `false`: an empty run still needs one child.
 - `validate` of an XML file holding three `<li>` fails against `<document; <li>*>` and `<document; <li>+>` ("Element content length mismatch: expected 1, got 3"), while a file holding three `<p>` passes `<document; <li>, <li>, <li>>`. XML input wraps its top-level elements in `document`.
-- The [Validator Guide](../doc/Lambda_Validator_Guide.md)'s own `Page` schema relies on runs (`<meta …>*`, `<h1>+`, `<p>*`). Under this check a run counts as one child, and the nested patterns are never reached.
+- The [Validator Guide](../doc/Lambda_Validator.md)'s own `Page` schema relies on runs (`<meta …>*`, `<h1>+`, `<p>*`). Under this check a run counts as one child, and the nested patterns are never reached.
 
 **Why it went unnoticed:** the validator GTests build `TypeElmt`s by hand with `content_length` set to the exact child count they want (`test_validator_features_gtest.cpp`, `test_ast_validator_gtest.cpp`); no Lambda test puts an occurrence inside element content; and the validator targets run outside the baseline (the validator's [LR13-9](Lambda_Issue_Ledger.md#lr13-9), filed as LR12-1). The S2.1.3 and D2.6.6 implementation footnotes (Appendix A of each formal spec) and that LR13-9 entry all record the count check as implemented, without this caveat.
 

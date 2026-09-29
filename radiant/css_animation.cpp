@@ -799,11 +799,13 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
 // Lazily ensure InlineProp exists on the span (needed for opacity/color animation
 // when the element has no static opacity/color declaration)
 static InlineProp* ensure_inline_prop(ViewSpan* span) {
-    if (!span->in_line) {
-        DomElement* el = lam::dom_require_element(span);
-        if (el->doc && el->doc->view_tree) span->ensure_inline(el->doc->view_tree);
+    DomElement* el = lam::dom_require_element(span);
+    if (el->doc && el->doc->view_tree) {
+        // A present InlineProp may still be shared; ensure_inline performs the
+        // copy before animation writes into the element's live style.
+        return span->ensure_inline(el->doc->view_tree);
     }
-    return span->in_line;
+    return span->inline_prop_shared() ? NULL : span->in_line;
 }
 
 // Lazily ensure BoundaryProp + BackgroundProp exist (needed for background-color

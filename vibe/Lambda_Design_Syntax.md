@@ -1714,7 +1714,7 @@ trailing-separator error, same as `return;`.
    composed symbol must be explicit (`'a' ++ 'b'`, or a constructor).
 
 **Content normalization is a different thing, and stays.** In content
-position, adjacent string items — `<p; "Hello " name "!">` — are **merged
+position, adjacent string items — `<p "Hello " name "!">` — are **merged
 into one text node**. This is a *content-model normalization rule* (the
 document normalizes adjacent text), not expression-level concatenation:
 the merge happens when content is constructed, and `let s = "a" "b"` in
@@ -1905,7 +1905,10 @@ still use it, as everywhere — `<div let x = 1; x + 1>` — that is the one
 role it has language-wide, not a residue of the divider.
 
 **Migration and spec touchpoints.** `<div; content>` → drop the `;` (or
-`,` in the ambiguous cases); `type { fields; methods }` → comma;
+`,` in the ambiguous cases) — in element literals and element *types*
+alike; the type-pattern parser kept accepting the divider until
+2026-09-29, when it was brought in line (`<div; int>`, `<div a: int; int>`
+and `<div;>` are now errors); `type { fields; methods }` → comma;
 S2.4.3v2's "explicit `;` before a relative-path element child" took its
 amendment as **S2.4.3v3** (spec 18.0.2, 2026-08-28). Note the amendment is
 to *no* delimiter rather than to a comma: by rule 1 above the element has no

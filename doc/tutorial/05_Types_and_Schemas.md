@@ -71,7 +71,7 @@ Types combine much as expressions do. These are the forms you will use most:
 | `int?` | an int or `null` — short for `int \| null` |
 | `string[]` | an array whose items are all strings |
 | `{title: string, year: int}` | a map with at least these two fields |
-| `<a href: string; string>` | an `<a>` element with a string `href` and one string child |
+| `<a href: string, string>` | an `<a>` element with a string `href` and one string child |
 | `"GET" \| "POST"` | exactly one of these two strings |
 
 ```text repl
@@ -85,7 +85,7 @@ false
 true
 λ> {title: "SICP"} is {title: string, year: int}
 false
-λ> <a href: "/home", "Home"> is <a href: string; string>
+λ> <a href: "/home", "Home"> is <a href: string, string>
 true
 λ> "PUT" is "GET" | "POST"
 false
@@ -296,7 +296,7 @@ Errors: 3, Warnings: 0
   3. [TYPE_MISMATCH] Expected type 'string', but got 'int' at [1].tags[1]
 ```
 
-Each error carries a path into the document — `[1].tags[1]` is the second tag of the second book — and some add a suggestion, such as removing the quotes around `"2008"`. The command exits with a non-zero status when validation fails, so it can guard each end of a pipeline: validate the input, transform it, validate the output. [Lambda_Validator_Guide.md](../Lambda_Validator_Guide.md) covers the options, such as `--max-errors`, and the built-in schemas for HTML, Markdown and other formats.
+Each error carries a path into the document — `[1].tags[1]` is the second tag of the second book — and some add a suggestion, such as removing the quotes around `"2008"`. The command exits with a non-zero status when validation fails, so it can guard each end of a pipeline: validate the input, transform it, validate the output. [Lambda_Validator.md](../Lambda_Validator.md) covers the options, such as `--max-errors`, and the built-in schemas for HTML, Markdown and other formats.
 
 ## What You Learned
 

@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><style>
+html, body { margin: 0; background: white; }
+#steady { width: 220px; height: 20px; background: #202020; }
+#fade { position: absolute; left: 20px; top: 30px; width: 50px; height: 50px;
+        background: #0080ff; animation-name: fade; animation-duration: 2s;
+        animation-timing-function: linear; animation-iteration-count: infinite; }
+@keyframes fade { from { opacity: 0; } 50% { opacity: 1; } to { opacity: 0; } }
+iframe { position: absolute; left: 0; top: 100px; width: 200px; height: 100px; border: 0; }
+</style></head><body>
+<div id="steady"></div><div id="fade"></div>
+<a href="animation_iframe_child.html" target="probe">Load animated frame</a>
+<iframe name="probe" srcdoc="<p>start</p>"></iframe>
+</body></html>

@@ -3406,7 +3406,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     // Step 3: Load the document stylesheet.
     auto step3_start = time_now_ns();
     CssStylesheet* markdown_stylesheet = load_home_stylesheet(
-        css_engine, pool, "input/markdown.css", "Lambda Markdown", "markdown stylesheet", true);
+        css_engine, pool, "package/doc/markdown.css", "Lambda Markdown", "markdown stylesheet", true);
     if (!markdown_stylesheet) {
         log_warn("Continuing without stylesheet - markdown will use browser defaults");
     }
@@ -3420,9 +3420,9 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
     CssStylesheet* katex_stylesheet = nullptr;
     {
         math_stylesheet = load_home_stylesheet(
-            css_engine, pool, "input/math.css", "Lambda Markdown", "math stylesheet", false);
+            css_engine, pool, "package/math/math.css", "Lambda Markdown", "math stylesheet", false);
         katex_stylesheet = load_home_stylesheet(
-            css_engine, pool, "input/latex/css/katex.css", "Lambda Markdown", "KaTeX font stylesheet", false);
+            css_engine, pool, "package/math/katex.css", "Lambda Markdown", "KaTeX font stylesheet", false);
     }
 
     // Step 5: Apply CSS cascade to DOM tree
@@ -3454,7 +3454,7 @@ DomDocument* load_markdown_doc(Url* markdown_url, int viewport_width, int viewpo
 DomDocument* load_wiki_doc(Url* wiki_url, int viewport_width, int viewport_height, Pool* pool) {
     return load_home_styled_source_doc(
         wiki_url, viewport_width, viewport_height, pool,
-        "wiki", "Lambda Wiki", "input/wiki.css", "wiki stylesheet");
+        "wiki", "Lambda Wiki", "package/doc/wiki.css", "wiki stylesheet");
 }
 
 DomDocument* load_latex_doc(Url* latex_url, int viewport_width, int viewport_height, Pool* pool) {
@@ -3664,7 +3664,7 @@ static DomDocument* load_html_string_doc(const char* html_source, int viewport_w
 
 // One-shot CLI diagnostic: the loader copies the message out of the error
 // value before the document Runtime that owns it is released.
-static char g_lambda_document_load_diagnostic[512];
+static thread_local char g_lambda_document_load_diagnostic[512];
 
 static void lambda_document_set_load_diagnostic(Item result) {
     LambdaError* error = get_type_id(result) == LMD_TYPE_ERROR ? it2err(result) : nullptr;
@@ -3692,10 +3692,10 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         return nullptr;
     }
     g_lambda_document_load_diagnostic[0] = '\0';
-    if (context) {
-        // Starting a second document Runtime on an occupied eval thread would
-        // require the forbidden save/switch/restore lifetime pattern.
-        log_error("load_lambda_script_doc: eval thread already owns a Runtime");
+    if (context && context->execution_depth != 0) {
+        // A child document may take the thread only after its parent evaluator
+        // has returned; switching with live frames would violate D5.4.1.
+        log_error("load_lambda_script_doc: evaluator still executing");
         return nullptr;
     }
 
@@ -3717,8 +3717,8 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         mem_free(runtime);
         return nullptr;
     }
-    if (!eval_context_init(layout_context)) {
-        log_error("load_lambda_script_doc: failed to initialize eval thread");
+    if (!radiant_eval_context_switch(layout_context)) {
+        log_error("load_lambda_script_doc: failed to acquire eval thread");
         release_layout_runtime(runtime);
         return nullptr;
     }
@@ -3913,7 +3913,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     CssStylesheet** inline_stylesheets = nullptr;
 
     if (!is_html_document) {
-        char* css_filename = lambda_home_path("input/script.css");
+        char* css_filename = lambda_home_path("package/doc/script.css");
         script_stylesheet = load_pool_backed_stylesheet(
             css_engine, pool, css_filename, "Lambda Script", "script.css", true);
         mem_free(css_filename);
@@ -3963,7 +3963,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
     log_info("[TIMING] load_lambda_script_doc total: %.1fms",
         time_elapsed_ms_f(total_start, total_end));
 
-    log_notice("[Lambda Script] Document loaded and styled");
+    log_debug("[Lambda Script] Document loaded and styled");
     return dom_doc;
 }
 

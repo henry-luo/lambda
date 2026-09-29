@@ -726,7 +726,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         // For now, use a default render size; the layout will resize as needed
         surface->width = 300;   // default Lottie render width
         surface->height = 300;  // default Lottie render height
-        surface->format = IMAGE_FORMAT_SVG;  // treat as vector-like for rendering
+        surface->format = IMAGE_FORMAT_UNKNOWN;  // Lottie player supplies raster pixels
 
         // Register with animation scheduler if available
         if (uicon->document && uicon->document->state) {

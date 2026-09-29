@@ -664,7 +664,7 @@ type EventProperties = CommonProperties & {
 - **Constrained Types:** `lambda/build_ast.cpp` - AST building for `that` constraints
 - **JIT Evaluation:** `lambda/transpile-mir.cpp` - Constraint evaluation in `is` and `match`
 - **Test Cases:** `test/lambda/validator/` - Occurrence and type tests, `test/lambda/constrained_type.ls` - Constraint tests
-- **Example Schemas:** `lambda/input/doc_schema.ls`, `eml_schema.ls`, `ics_schema.ls`
+- **Example Schemas:** `lmd/package/doc/doc_schema.ls`, `eml_schema.ls`, `ics_schema.ls`
 
 ---
 

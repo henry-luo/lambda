@@ -174,6 +174,11 @@ static LottiePlayer* lottie_player_init(ImageSurface* surface,
 
     // Point the surface at our pixels
     if (surface) {
+        // ThorVG renders Lottie into a raster buffer, not an SVG picture.
+        surface->format = IMAGE_FORMAT_UNKNOWN;
+        surface->pitch = render_width * 4;
+        surface->decoded_width = render_width;
+        surface->decoded_height = render_height;
         surface->pixels = pixels;
         image_surface_bump_generation(surface);
     }
@@ -230,7 +235,9 @@ AnimationInstance* lottie_player_create_from_data(AnimationScheduler* scheduler,
     }
 
     Tvg_Paint pic = tvg_animation_get_picture(tvg_anim);
-    if (tvg_picture_load_data(pic, data, (uint32_t)length, "lottie", NULL, false) != TVG_RESULT_SUCCESS) {
+    // The network loader releases its download buffer after registration;
+    // ThorVG must own a copy for later animation frames.
+    if (tvg_picture_load_data(pic, data, (uint32_t)length, "lottie", NULL, true) != TVG_RESULT_SUCCESS) {
         log_debug("lottie create: failed to load from memory (%zu bytes)", length);
         tvg_animation_del(tvg_anim);
         return NULL;

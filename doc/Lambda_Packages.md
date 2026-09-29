@@ -55,7 +55,7 @@ import chart: lambda.chart.chart
 import structurizr: lambda.graph.structurizr.structurizr
 import tex: lambda.doc.math.math
 
-sys.lambda.home          // "./lambda" in a source checkout
+sys.lambda.home          // "./lmd" by default
 ```
 
 Without an alias, the module's `pub` names come into scope unqualified:
@@ -94,16 +94,16 @@ import edit: lambda.edit.edit
 The Lambda home directory is chosen at startup:
 
 1. The `LAMBDA_HOME` environment variable, when set.
-2. Otherwise `./lambda` for a development build and `./lmd` for a release build. Both are relative to the **current working directory**, not to the executable; when a build's own default is missing, it tries the other name.
+2. Otherwise `./lmd`, relative to the **current working directory**, not to the executable. A source checkout and a release bundle share this layout.
 
-`sys.lambda.home` reports the directory in use. A release (`make release`) copies the whole `lambda/package/` tree to `release/lmd/package/`, next to the `lambda` executable. Run release scripts from that directory, or point `LAMBDA_HOME` at `lmd` with an absolute path:
+`sys.lambda.home` reports the directory in use. A release (`make release`) copies the whole `lmd/` tree to `release/lmd/`, next to the `lambda` executable. Run release scripts from that directory, or point `LAMBDA_HOME` at `lmd` with an absolute path:
 
 ```bash
 cd release && ./lambda report.ls                          # finds ./lmd/package
 LAMBDA_HOME=/opt/lambda/lmd /opt/lambda/lambda report.ls  # from any directory
 ```
 
-Run from a directory that has neither `lambda/` nor `lmd/`, without `LAMBDA_HOME`, and every `lambda.*` package import fails with E217.
+Run from a directory that has no `lmd/`, without `LAMBDA_HOME`, and every `lambda.*` package import fails with E217.
 
 ---
 

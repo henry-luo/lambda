@@ -96,7 +96,7 @@ open count respelled `T{n+}` the same day (§16 there). `grammar.js`,
 `apply_occurrence` and the island parser read the brace counts; `T[n+]`,
 `T[n, m]` and regex's `T{n,}` are rejected by name; `null is int*` is true and
 `[] is int?` false. The corpus, the user docs (`Lambda_Type.md`,
-`Lambda_Reference.md`, `Lambda_Cheatsheet.md`, `Lambda_Validator_Guide.md`)
+`Lambda_Reference.md`, `Lambda_Cheatsheet.md`, `Lambda_Validator.md`)
 and §2's island examples below are migrated. Closed
 [LR03-12](<Lambda_Issue_Ledger (fixed).md#lr03-12>).
 

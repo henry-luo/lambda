@@ -167,6 +167,7 @@ AnimationScheduler* animation_scheduler_create(Pool* pool) {
     scheduler->count = 0;
     scheduler->current_time = 0.0;
     scheduler->has_active_animations = false;
+    scheduler->host_time_anchored = false;
     return scheduler;
 }
 
@@ -190,6 +191,21 @@ void animation_scheduler_destroy(AnimationScheduler* scheduler) {
     scheduler->count = 0;
     scheduler->has_active_animations = false;
     // scheduler itself was pool-allocated, freed when pool is destroyed
+}
+
+void animation_scheduler_anchor_host_time(AnimationScheduler* scheduler, double now) {
+    if (!scheduler) return;
+    if (!scheduler->host_time_anchored) {
+        // Layout uses time zero before the host clock exists; preserve each
+        // animation's elapsed time when its document first joins that clock.
+        double offset = now - scheduler->current_time;
+        for (AnimationInstance* anim = scheduler->first; anim; anim = anim->next) {
+            anim->start_time += offset;
+            anim->pause_time += offset;
+        }
+        scheduler->host_time_anchored = true;
+    }
+    scheduler->current_time = now;
 }
 
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler) {

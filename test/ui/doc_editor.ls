@@ -5,6 +5,8 @@
 // only when opened so the prototype remains useful for large worktrees.
 //
 // Run:
+//   ./lambda.exe view test/ui/doc_editor.html
+// Direct view without the startup splash:
 //   ./lambda.exe view test/ui/doc_editor.ls
 // Headless smoke:
 //   ./lambda.exe view test/ui/doc_editor.ls --headless --no-log
@@ -15,6 +17,7 @@ import pdf_html: lambda.pdf.html
 import latex: lambda.latex.latex
 import latex_css: lambda.latex.css
 import math_css: lambda.doc.math.css
+import graph_doc: lambda.graph.document
 
 let PROJECT_ROOT = "."
 
@@ -124,10 +127,17 @@ fn is_latex_document(extension) {
 fn is_pdf_document(extension) => lower(extension) == "pdf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
+fn graph_flavor(extension) {
+  let ext = lower(extension)
+  if (ext == "mmd") { "mermaid" }
+  else if (ext == "dot") { "dot" }
+  else { null }
+}
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_image_document(extension)
+    is_pdf_document(extension) or is_image_document(extension) or
+    graph_flavor(extension) != null
 
 fn selected_source(file) {
   if (file == null) { "" }
@@ -142,6 +152,7 @@ fn selected_preview(file) {
   else {
     let selected_path = file["file_path"]
     let format = document_format(file["extension"])
+    let flavor = graph_flavor(file["extension"])
     if (is_image_document(file["extension"])) {
       <img src:absolute_file_path(selected_path), alt:file["name"]>
     }
@@ -156,6 +167,12 @@ fn selected_preview(file) {
       let parsed = input(selected_path, 'latex') ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
       else { latex.render(parsed, null) ^ { <p class:"preview-error", "Unable to render selected LaTeX"> } }
+    }
+    else if (flavor != null) {
+      // The graph document adapter installs Radiant's layout for this inline preview.
+      let parsed = input(selected_path, {type:"graph", flavor:flavor}) ^ { null }
+      if (parsed == null) { <p class:"preview-error", "Unable to read selected graph"> }
+      else { graph_doc.to_html(parsed, null) ^ { <p class:"preview-error", "Unable to render selected graph"> } }
     }
     else if (format == null) { null }
     else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
@@ -304,7 +321,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PDF, and image files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PDF, Mermaid, DOT, and image files open as rendered documents; all other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {

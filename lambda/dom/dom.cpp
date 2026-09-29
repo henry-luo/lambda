@@ -3771,6 +3771,10 @@ static void _schedule_iframe_load(DomElement* iframe) {
     }
 }
 
+extern "C" void dom_iframe_navigation_complete(void* iframe) {
+    _schedule_iframe_load((DomElement*)iframe);
+}
+
 static void _schedule_image_load(DomElement* image) {
     if (!image || !dom_foreign_document_state_ensure()) return;
     for (int i = 0; i < s_pending_image_load_count; i++) {

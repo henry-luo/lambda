@@ -709,7 +709,7 @@ not a measured Phase II ratio.
 
 The old [hyphen2.ls](../../test/benchmark/text/hyphen2.ls) only called the
 dynamic core. The typed entry now calls
-[hyphen_typed.ls](../../lambda/benchmark/hyphen_typed.ls), with these choices:
+[hyphen_typed.ls](../../test/benchmark/hyphen_typed.ls), with these choices:
 
 1. **Flat typed trie tables.** Node first/count/level, edge code/child,
    level offset/count/value and exception marker arrays are `int[]`, held
@@ -719,7 +719,7 @@ dynamic core. The typed entry now calls
    No patterns, cases or expected results are substituted for computation.
 2. **Admission once at setup.** Generated `hyphen_tables.json` is loaded
    into the declared record before verification/timing. Its generated
-   [table module](../../lambda/benchmark/hyphen_tables.ls) defines the
+   [table module](../../test/benchmark/hyphen_tables.ls) defines the
    explicit contract and loader. This uses **D3.3.3v3**'s declared
    representation boundary; it does not attach a certificate to an inferred
    open array. An initial static-Lambda-literal prototype added about two
@@ -740,7 +740,7 @@ dynamic core. The typed entry now calls
    allocating padded word strings. Preserve **S7.1.1v3–S7.1.2** indexing
    and slice semantics and all ordinary alias/snapshot behavior.
 5. **Shared oracle and lexical helpers.**
-   [hyphen_common.ls](../../lambda/benchmark/hyphen_common.ls) owns the
+   [hyphen_common.ls](../../test/benchmark/hyphen_common.ls) owns the
    unchanged 13 input/expected pairs and shared character/tag predicates.
    Both cores import it; the untyped core retains dynamic trie traversal.
    Both retain 32 rounds, fresh caches each round, exact output verification,

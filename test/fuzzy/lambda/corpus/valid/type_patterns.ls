@@ -43,9 +43,9 @@ type OptionalTuple = (int, string?)?
 // Element types
 type SimpleElement = <div>
 type ElementWithAttr = <a href: string>
-type ElementWithContent = <p; string>
-type ElementWithBoth = <div class: string; string>
-type NestedElement = <article; <header; string>, <section; string>*>
+type ElementWithContent = <p string>
+type ElementWithBoth = <div class: string, string>
+type NestedElement = <article <header string>, <section string>*>
 
 // Union types
 type StringOrInt = string | int

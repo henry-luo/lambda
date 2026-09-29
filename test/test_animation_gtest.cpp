@@ -149,6 +149,25 @@ TEST_F(AnimationSchedulerTest, CreateDestroy) {
     EXPECT_FALSE(scheduler->has_active_animations);
 }
 
+TEST_F(AnimationSchedulerTest, FirstHostFrameAnchorsFiniteAnimationOnce) {
+    AnimationInstance* anim = animation_instance_create(scheduler);
+    ASSERT_NE(anim, nullptr);
+    anim->start_time = 0.0;
+    anim->duration = 2.0;
+    anim->iteration_count = 1;
+    animation_scheduler_add(scheduler, anim);
+
+    animation_scheduler_anchor_host_time(scheduler, 100.0);
+    EXPECT_DOUBLE_EQ(anim->start_time, 100.0);
+    EXPECT_TRUE(animation_scheduler_tick(scheduler, 100.5, nullptr));
+    EXPECT_EQ(anim->play_state, ANIM_PLAY_RUNNING);
+
+    animation_scheduler_anchor_host_time(scheduler, 101.0);
+    EXPECT_DOUBLE_EQ(anim->start_time, 100.0);
+    EXPECT_TRUE(animation_scheduler_tick(scheduler, 101.0, nullptr));
+    EXPECT_EQ(anim->play_state, ANIM_PLAY_RUNNING);
+}
+
 TEST_F(AnimationSchedulerTest, AddRemove) {
     AnimationInstance* anim = animation_instance_create(scheduler);
     ASSERT_NE(anim, nullptr);
