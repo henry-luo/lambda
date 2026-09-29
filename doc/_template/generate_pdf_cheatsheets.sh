@@ -90,6 +90,12 @@ trap 'rm -f "$WORK_MD"' EXIT
 perl -pe 'if (/^\|/) { s{(`[^`]*`)}{ my $x = $1; $x =~ s/\\\|/|/g; $x }ge }' \
     ../Lambda_Cheatsheet.md \
   | perl -pe '
+      # GFM accepts this extra info word, but the pandoc markdown reader treats
+      # the opener as text and lets its closing fence swallow the next section.
+      # Keep the language tag and remove only the PDF-irrelevant no-run marker.
+      s/^```lambda no-run$/```lambda/;
+    ' \
+  | perl -pe '
       # Nearly every table on this sheet is the same two columns, so 42 repeated
       # "Form | Meaning" headers cost a page of vertical space and tell the
       # reader nothing.  Emptying the header cells makes pandoc emit a headerless
