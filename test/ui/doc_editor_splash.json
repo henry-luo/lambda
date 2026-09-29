@@ -15,6 +15,10 @@
     {"type": "assert_count", "target": {"selector": ".doc-editor"}, "count": 1},
     {"type": "click", "target": {"selector": "#file-filter"}},
     {"type": "type", "target": {"selector": "#file-filter"}, "text": "doc_editor.ls"},
-    {"type": "assert_value", "target": {"selector": "#file-filter"}, "equals": "doc_editor.ls"}
+    {"type": "assert_value", "target": {"selector": "#file-filter"}, "equals": "doc_editor.ls"},
+    {"type": "assert_count", "target": {"selector": ".tree-filter-clear"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-filter-clear"}},
+    {"type": "assert_value", "target": {"selector": "#file-filter"}, "equals": ""},
+    {"type": "assert_count", "target": {"selector": ".tree-filter-clear"}, "count": 0}
   ]
 }

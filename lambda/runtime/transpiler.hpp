@@ -363,6 +363,9 @@ void transpiler_clear_direct_imports(Transpiler* tp, const Script* script);
 // Shared by the MIR Direct handoff and the T0 plan-only load path.
 void script_adopt_transpiler(Script* script, Transpiler* tp);
 
+// Restore compiled view/edit dispatch when a cached MIR graph enters a new Runtime.
+void lambda_register_mir_view_templates(Script* script);
+
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import = false);

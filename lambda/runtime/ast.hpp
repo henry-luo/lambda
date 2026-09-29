@@ -1090,6 +1090,7 @@ struct Script : Input {
     struct InputCacheScope* cache_scope;
     bool cache_owned_template;
     bool cache_mir_artifact; // otherwise retained image is AST-only
+    bool cache_source_inline; // preserve the source-key kind when promoting an AST image
     bool is_main;               // true if this is the main entry-point script
     bool is_loading;            // true while script is being loaded (for circular import detection)
     bool is_retired;            // removed from the current Runtime load registry
