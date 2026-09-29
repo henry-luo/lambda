@@ -5,7 +5,7 @@ String patterns are Lambda's regular-expression replacement, built into the type
 > **Related Documentation**:
 > - [Lambda Type System](Lambda_Type.md) — types, unions, constrained types
 > - [Lambda System Functions](Lambda_Sys_Func.md#string-functions) — `find`, `replace`, `split` and the other string functions
-> - [Lambda Validator Guide](Lambda_Validator_Guide.md) — patterns in schemas
+> - [Lambda Validator Guide](Lambda_Validator.md) — patterns in schemas
 
 ---
 

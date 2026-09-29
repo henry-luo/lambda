@@ -340,7 +340,7 @@ Lambda's position is the intersection the table leaves empty: a converter's brea
 - [Markup & Data Format Support](Markup_Formats_Support.md): every input format, with side-by-side source and Mark examples.
 - [Mark Doc Schema](Doc_Schema.md): the unified document element vocabulary.
 - [Lambda Data](Lambda_Data.md), [Lambda Type](Lambda_Type.md), [Lambda Expressions](Lambda_Expr_Stam.md): the data model, the type language and the query operators in full.
-- [Lambda Validator Guide](Lambda_Validator_Guide.md): writing and applying schemas.
+- [Lambda Validator Guide](Lambda_Validator.md): writing and applying schemas.
 - [Lambda CLI Reference](Lambda_CLI.md): every command and flag.
 - [Reactive UI](Reactive_UI.md): `view` and `edit` templates, `apply()` dispatch and event handlers.
 - [Radiant Design Overview](dev/radiant/RAD_00_Overview.md), [Lambda Core Runtime Overview](dev/lambda/LR_00_Overview.md), [LambdaJS Overview](dev/js/JS_00_Overview.md): the engines in depth.

@@ -8,7 +8,7 @@
 > - [Lambda_Type.md](../doc/Lambda_Type.md) — type hierarchy & annotations
 > - [Lambda_Data.md](../doc/Lambda_Data.md) — element/map data model
 > - `lambda/lambda.hpp` — `VMap` virtual-map vtable (`Velmt` mirrors this pattern)
-> - [Lambda_Validator_Guide.md](../doc/Lambda_Validator_Guide.md) — schema/validator framework
+> - [Lambda_Validator.md](../doc/Lambda_Validator.md) — schema/validator framework
 
 ---
 

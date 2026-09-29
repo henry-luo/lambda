@@ -287,13 +287,13 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | [Procedural Programming](doc/Lambda_Procedural.md)  | `var`, assignment, value semantics, I/O, `main()`, concurrency |
 | [Error Handling](doc/Lambda_Error_Handling.md)      | `raise`, `T^E`, postfix `^`, the `^ { }` handler, error codes |
 | [String Patterns](doc/Lambda_String_Pattern.md)     | The pattern language inside `\(…)` and pattern-aware string functions |
-| [Modules](doc/Lambda_Modules.md)                    | Imports, `pub` exports, built-in, package, JavaScript and Python modules |
+| [Modules](doc/Lambda_Modules.md)                    | Imports, `pub` exports, built-in, package and JavaScript modules |
 | [Concurrency](doc/Lambda_Concurrency.md)            | Tasks, mailboxes, `select`, timeouts and cancellation |
 | [Document Updates](doc/Lambda_Document_Updates.md)  | References, node identity, `put`/`del` and transactions |
 | [System Functions](doc/Lambda_Sys_Func.md)          | Built-in functions (math, string, collection, I/O, concurrency) |
 | [Packages](doc/Lambda_Packages.md)                  | Libraries written in Lambda that ship with the runtime (math, chart, graph, LaTeX, PDF, …) |
 | [CLI Reference](doc/Lambda_CLI.md)                  | Commands, flags, and usage for the Lambda CLI       |
-| [Validator Guide](doc/Lambda_Validator_Guide.md)    | Schema-based validation with `lambda validate`      |
+| [Validator Guide](doc/Lambda_Validator.md)    | Schema-based validation with `lambda validate`      |
 | [Document Pipeline](doc/Lambda_Doc_Pipeline.md)     | The Mark data model and the convert/validate/render/view/edit workflows |
 | [Markup & Data Format Support](doc/Markup_Formats_Support.md) | Supported input and output formats and how they map to Lambda/Mark |
 | [Doc Schema](doc/Doc_Schema.md)                     | Schema for lightweight markup (Markdown, Wiki, RST) |
@@ -307,13 +307,11 @@ See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-bench
 | Document                                              | Description                                                                            |
 | ----------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | [Developer Guide](doc/dev/Developer_Guide.md)         | Build from source, dependencies, testing, Tree-sitter grammar, MIR JIT                 |
-| [Formal Design](doc/Lambda_Formal_Design.md)          | Normative design/implementation specification — D-numbered rulings for the core runtime and Jube hosting; the design authority when docs or implementation disagree |
+| [Formal Design](doc/Lambda_Formal_Design.md)          | Normative design/implementation specification — D-numbered rulings for the core runtime; the design authority when docs or implementation disagree |
 | [Documentation Convention](doc/Doc_Convention.md)     | How Lambda documentation is organized — document tiers, authority order, and style conventions |
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
 | [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
 | [Radiant Engine Design](doc/dev/radiant/RAD_00_Overview.md) | Detailed design of the HTML/CSS layout, rendering, and interaction engine — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table), rendering pipeline, SVG, events, editing, state, shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set) |
-| [Python Support](doc/Python_Support.md)               | Running Python on the Lambda runtime through the `lang-python` module |
-| [Lambda Jube Runtime](doc/dev/Lambda_Jube_Runtime.md)      | How hosted-language modules are built, packaged and discovered (Python ships; the Bash and Ruby front ends are not compiled into current builds) |
 | [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
 | [LambdaJS Runtime Design](doc/dev/js/JS_00_Overview.md) | Detailed design of the embedded JavaScript engine — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility |
 

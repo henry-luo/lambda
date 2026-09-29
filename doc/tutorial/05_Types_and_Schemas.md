@@ -296,7 +296,7 @@ Errors: 3, Warnings: 0
   3. [TYPE_MISMATCH] Expected type 'string', but got 'int' at [1].tags[1]
 ```
 
-Each error carries a path into the document — `[1].tags[1]` is the second tag of the second book — and some add a suggestion, such as removing the quotes around `"2008"`. The command exits with a non-zero status when validation fails, so it can guard each end of a pipeline: validate the input, transform it, validate the output. [Lambda_Validator_Guide.md](../Lambda_Validator_Guide.md) covers the options, such as `--max-errors`, and the built-in schemas for HTML, Markdown and other formats.
+Each error carries a path into the document — `[1].tags[1]` is the second tag of the second book — and some add a suggestion, such as removing the quotes around `"2008"`. The command exits with a non-zero status when validation fails, so it can guard each end of a pipeline: validate the input, transform it, validate the output. [Lambda_Validator.md](../Lambda_Validator.md) covers the options, such as `--max-errors`, and the built-in schemas for HTML, Markdown and other formats.
 
 ## What You Learned
 

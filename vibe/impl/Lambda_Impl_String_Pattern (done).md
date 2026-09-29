@@ -65,7 +65,7 @@ false positives inside string content):
 (+ audit `type_pattern.ls`, `phase7_pattern_sort.ls` for stragglers).
 Docs: `doc/Lambda_Type.md` (primary), `doc/Lambda_Reference.md`,
 `doc/Lambda_Cheatsheet.md`, `doc/Lambda_Sys_Func.md`,
-`doc/Lambda_Validator_Guide.md`, `doc/Doc_Schema.md` (audit for real usage).
+`doc/Lambda_Validator.md`, `doc/Doc_Schema.md` (audit for real usage).
 Note: the doc-shown `string X = ...` / `symbol X = ...` definition forms are
 **not implemented** (grammar has no such statement; `string`/`symbol` are
 base-type keywords only, grammar.js:1093) — their retirement (SP10) is a
@@ -208,7 +208,7 @@ docs-only change.
   `string X =`/`symbol X =` forms.
 - **P4.2** Sweep `doc/Lambda_Reference.md`, `doc/Lambda_Cheatsheet.md`,
   `doc/Lambda_Sys_Func.md` (find/replace/split examples),
-  `doc/Lambda_Validator_Guide.md`, `doc/Doc_Schema.md`.
+  `doc/Lambda_Validator.md`, `doc/Doc_Schema.md`.
 - **P4.3** Formal spec ruling (rule 17): add the surface-syntax S-point under
   §S11 (delimited island, tag-carries-domain, content-only composition,
   literal-union equivalence; `that (...)` parens reaffirmed) + semver bump;

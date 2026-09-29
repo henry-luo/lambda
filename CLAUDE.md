@@ -184,7 +184,7 @@ On macOS, GUI Chromium may quit during Puppeteer captures. Use Puppeteer’s bun
 - `doc/Lambda_Modules.md`, `doc/Lambda_Concurrency.md`, `doc/Lambda_Document_Updates.md` — Modules and imports; tasks, mailboxes and cancellation; references, `put`/`del` and transactions
 - `doc/Lambda_Packages.md`, `doc/HTML_CSS_SVG_Support.md` — Bundled Lambda packages; Radiant's HTML/CSS/SVG support matrix
 - `doc/tutorial/README.md` — Ten-chapter tutorial; `make check-tutorial` replays its examples and checks their output
-- `doc/Lambda_Validator_Guide.md` — Schema-based data validation
+- `doc/Lambda_Validator.md` — Schema-based data validation
 - `doc/Lambda_Cheatsheet.md` — Quick syntax cheatsheet
 - `doc/dev/Lambda_Jube_Runtime.md` — Hosted-language (Jube) module build and packaging (Python ships; the Bash and Ruby front ends are compiled out)
 - `doc/dev/radiant/RAD_00_Overview.md` — Radiant engine detailed design — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table/positioned), the rendering pipeline (paint IR, display list, painters, PDF/SVG), vector graphics, events, animation, editing, forms, interaction state, application shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set)

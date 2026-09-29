@@ -2,7 +2,7 @@
 
 > **Scope.** This is a build and packaging note for hosted-language modules,
 > written for developers. Users of hosted Python should start with
-> [Python_Support.md](../Python_Support.md).
+> [Python_Support.md](Python_Support.md).
 >
 > **Status (alpha).** Only the Python module ships. The Bash and Ruby front
 > ends exist in the source tree (`lambda/module/bash`, `lambda/module/rb`) but

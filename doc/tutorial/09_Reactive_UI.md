@@ -281,4 +281,4 @@ Each event has a `type` and, usually, a `target`, found by CSS selector or by it
 - `emit(name, payload)` sends a custom event up to the nearest template that handles it.
 - `lambda view app.ls` runs the page; `--headless --event-file` tests it without a window.
 
-[Reactive_UI.md](../Reactive_UI.md) describes the template model in full: patterns and specificity, named templates, state, events and the reactive loop. Next, [Chapter 10](10_Packages_and_Beyond.md) tours the bundled packages, the editor, JavaScript and Python.
+[Reactive_UI.md](../Reactive_UI.md) describes the template model in full: patterns and specificity, named templates, state, events and the reactive loop. Next, [Chapter 10](10_Packages_and_Beyond.md) tours the bundled packages, the editor and JavaScript.
