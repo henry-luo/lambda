@@ -2776,6 +2776,12 @@ void runtime_init(Runtime* runtime) {
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 
+void runtime_set_ui_result_arena(Runtime* runtime, Arena* arena) {
+    if (!runtime) return;
+    runtime->ui_mode = true;
+    runtime->result_arena = arena;
+}
+
 void runtime_register_script(Runtime* runtime, Script* script) {
     if (!runtime || !script) return;
     // Reserve the module-state identity first, and independently of the script

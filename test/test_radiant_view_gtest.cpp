@@ -1567,6 +1567,50 @@ TEST(RadiantViewTest, DefersCrossOriginIframeNavigationOutsideLayout) {
         output, "The parent document must render before a remote frame navigates."));
 }
 
+TEST(RadiantViewTest, RapidLocalIframeNavigationCommitsLatestScriptPage) {
+    const char* page = "test/html/async_navigation_parent.html";
+    const char* events = "test/html/async_navigation_events.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+    test_radiant_view_ensure_temp_dir();
+
+    const ShellEnvEntry env[] = {
+        {"VIEW_MEM_STAGES", "1"},
+        {NULL, NULL},
+    };
+    ShellResult result = test_radiant_view_run_logged_headless(page, events, env);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(0, result.exit_code) << output;
+    EXPECT_NE(nullptr, strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"));
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, LatexIframeNavigationAcceptsParentClickWithoutScroll) {
+    const char* page = "test/html/index.html";
+    const char* events = "test/html/latex_navigation_events.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+    test_radiant_view_ensure_temp_dir();
+
+    ShellResult result = test_radiant_view_run_logged_headless(page, events, nullptr);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(0, result.exit_code) << output;
+    shell_result_free(&result);
+}
+
+TEST(RadiantViewTest, ParentLinksKeepTheirEvaluatorAfterIframeReplacement) {
+    const char* page = "test/html/index.html";
+    const char* events = "test/html/iframe_evaluator_owner_events.json";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+    test_radiant_view_ensure_temp_dir();
+
+    ShellResult result = test_radiant_view_run_logged_headless(page, events, nullptr);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_EQ(0, result.exit_code) << output;
+    shell_result_free(&result);
+}
+
 TEST(RadiantViewTest, KeepsModuleCodeAliveAcrossBrowserTaskSync) {
     const char* page = "test/html/js_module_task_lifetime.html";
     const char* output = "./temp/test_radiant_module_task_lifetime.svg";

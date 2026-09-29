@@ -491,8 +491,10 @@ DomDocument* show_html_doc(Url* base, char* doc_url, int viewport_width, int vie
     log_debug("Showing HTML document %s", doc_url);
     CookieJar* cookie_jar = ui_context.browsing_session
         ? session_cookie_jar(ui_context.browsing_session) : nullptr;
+    DomDocument* source = ui_context.document;
+    DocumentJsHostConfig host_config = document_js_host_config_inherit(&ui_context, source);
     DomDocument* doc = load_html_doc(base, doc_url, viewport_width, viewport_height,
-                                     nullptr, cookie_jar);
+                                     source ? &host_config : nullptr, cookie_jar);
     if (!doc) return nullptr;
 
     return show_loaded_html_doc(doc, doc_url);
@@ -1653,14 +1655,13 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                 // so a self-rescheduling callback can't spin to the watchdog.
                 if (event_sim_assertion_retry_pending(sim_ctx)) {
                     int retry_wait_ms = event_sim_assertion_retry_wait_ms(sim_ctx);
+                    // Native document workers use wall time even when the JS
+                    // clock is virtual or the page has no JS runtime.
+                    if (radiant_async_document_loads_pending(&ui_context)) {
+                        if (retry_wait_ms > 50) retry_wait_ms = 50;
+                        uv_sleep((unsigned int)retry_wait_ms);
+                    }
                     if (js_event_loop_virtual_clock_enabled()) {
-                        // Native document workers use wall time. Pace virtual
-                        // retries in frame slices while they run so the host
-                        // can still tick the splash animation and JS timers.
-                        if (radiant_async_document_loads_pending(&ui_context)) {
-                            if (retry_wait_ms > 50) retry_wait_ms = 50;
-                            uv_sleep((unsigned int)retry_wait_ms);
-                        }
                         radiant_advance_js_event_loop(&ui_context,
                                                       (double)retry_wait_ms, 0);
                     } else {

@@ -334,7 +334,7 @@ static bool sim_text_matches(const char* assertion, const char* actual,
 }
 
 static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
-                                      int index = 0);
+                                      int index = 0, bool flush_reflow = true);
 
 static bool sim_element_matches_assertions(const char* assertion, DomDocument* doc,
                                            View* found, const SimEvent* ev,
@@ -598,7 +598,7 @@ static View* find_text_view(DomDocument* doc, const char* target_text) {
 }
 
 static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
-                                      int index);
+                                      int index, bool flush_reflow);
 
 static View* first_text_descendant(View* view) {
     return sim_find_text_descendant(view, nullptr);
@@ -707,9 +707,10 @@ static bool sim_parse_selector(DomDocument* doc, const char* selector_text,
 }
 
 // Find nth element matching a CSS selector in the document (0-based index)
-static View* find_element_by_selector(DomDocument* doc, const char* selector_text, int index) {
+static View* find_element_by_selector(DomDocument* doc, const char* selector_text,
+                                      int index, bool flush_reflow) {
     if (!doc || !doc->view_tree || !doc->view_tree->root || !selector_text) return NULL;
-    sim_flush_pending_reflow(doc);
+    if (flush_reflow) sim_flush_pending_reflow(doc);
 
     CssSelector* selector = nullptr;
     SelectorMatcher* matcher = nullptr;
@@ -1681,6 +1682,16 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
         parse_element_at_fields(reader, ev);
         if (!ev->expected_at_selector && !ev->expected_at_tag) {
             log_error("event_sim: assert_hit_test requires expected_selector or expected_tag");
+            return parse_sim_event_fail(ev);
+        }
+    }
+    else if (strcmp(type_str, "assert_frame_url") == 0) {
+        ev->type = SIM_EVENT_ASSERT_FRAME_URL;
+        const char* selector = reader.get("selector").cstring();
+        if (selector) ev->frame_selector = mem_strdup(selector, MEM_CAT_LAYOUT);
+        parse_assertion_strings(reader, ev, false);
+        if (!ev->frame_selector || (!ev->assert_equals && !ev->assert_contains)) {
+            log_error("event_sim: assert_frame_url requires selector and equals or contains");
             return parse_sim_event_fail(ev);
         }
     }
@@ -4794,6 +4805,24 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             if (passed) {
                 log_info("event_sim: assert_hit_test PASS at (%.2f, %.2f)", ev->at_x, ev->at_y);
             }
+            sim_record_assertion(ctx, passed);
+            break;
+        }
+
+        case SIM_EVENT_ASSERT_FRAME_URL: {
+            DomDocument* doc = sim_require_document(ctx, uicon, "assert_frame_url");
+            if (!doc) break;
+            // Observe the committed child directly; selector assertions reflow
+            // the parent and would conceal stale hit geometry after navigation.
+            View* frame_view = find_element_by_selector(doc, ev->frame_selector,
+                                                        0, false);
+            DomElement* frame = frame_view && frame_view->is_element()
+                ? frame_view->as_element() : nullptr;
+            DomDocument* child = frame && frame->tag() == MARKUP_NAME_IFRAME &&
+                frame->embed ? frame->embedp()->doc : nullptr;
+            const char* actual = child && child->url ? url_get_href(child->url) : "";
+            bool passed = sim_text_matches("assert_frame_url", actual, ev);
+            if (passed) log_info("event_sim: assert_frame_url PASS '%s'", actual);
             sim_record_assertion(ctx, passed);
             break;
         }
