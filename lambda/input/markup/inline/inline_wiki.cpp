@@ -11,6 +11,8 @@
  * Extracted from input-markup.cpp wiki parsing functions
  */
 #include "inline_common.hpp"
+#include "lib/str.h"
+#include "lib/arraylist.h"
 #include <cstring>
 
 namespace lambda {
@@ -305,82 +307,137 @@ Item parse_wiki_bold_italic(MarkupParser* parser, const char** text) {
     return Item{.item = (uint64_t)format_elem};
 }
 
+// find the matching braces and only treat a pipe at the outer level as an argument delimiter.
+static bool scan_wiki_braces(const char* start, int opening_width,
+                             const char** content_end, const char** source_end,
+                             const char** first_pipe) {
+    ArrayList* widths = arraylist_new(8);
+    if (!widths) return false;
+    if (!arraylist_append(widths, (ArrayListValue)(intptr_t)opening_width)) {
+        arraylist_free(widths);
+        return false;
+    }
+    const char* pos = start + opening_width;
+    int link_depth = 0;
+    *first_pipe = nullptr;
+    *content_end = nullptr;
+    *source_end = nullptr;
+
+    while (*pos && pos - start <= 10000) {
+        if (pos[0] == '[' && pos[1] == '[') { link_depth++; pos += 2; continue; }
+        if (pos[0] == ']' && pos[1] == ']' && link_depth) { link_depth--; pos += 2; continue; }
+        if (link_depth) { pos++; continue; }
+
+        if (pos[0] == '{' && pos[1] == '{') {
+            int width = pos[2] == '{' ? 3 : 2;
+            if (!arraylist_append(widths, (ArrayListValue)(intptr_t)width)) {
+                arraylist_free(widths);
+                return false;
+            }
+            pos += width;
+            continue;
+        }
+        int width = (int)(intptr_t)widths->data[widths->length - 1];
+        if (pos[0] == '}' && pos[1] == '}' && (width == 2 || pos[2] == '}')) {
+            arraylist_pop(widths);
+            if (widths->length == 0) {
+                *content_end = pos;
+                *source_end = pos + width;
+                break;
+            }
+            pos += width;
+            continue;
+        }
+        if (*pos == '|' && widths->length == 1 && !*first_pipe) *first_pipe = pos;
+        pos++;
+    }
+    arraylist_free(widths);
+    return *content_end != nullptr;
+}
+
 /**
- * parse_wiki_template - Parse MediaWiki templates
- *
- * Handles: {{template}}, {{template|arg1|arg2}}
+ * parse_wiki_template - Parse MediaWiki templates and template parameters
  */
 Item parse_wiki_template(MarkupParser* parser, const char** text) {
-    const char* pos = *text;
+    const char* start = *text;
+    if (start[0] != '{' || start[1] != '{') return Item{.item = ITEM_UNDEFINED};
 
-    // Check for {{
-    if (*pos != '{' || *(pos + 1) != '{') {
+    int opening_width = start[2] == '{' ? 3 : 2;
+    const char* content_end;
+    const char* source_end;
+    const char* first_pipe;
+    if (!scan_wiki_braces(start, opening_width, &content_end, &source_end, &first_pipe)) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    const char* start_pos = pos;
-    pos += 2; // Skip {{
-    const char* template_start = pos;
-
-    // Find closing }} by tracking double-brace depth
-    int double_brace_depth = 1;
-    const char* content_end = nullptr;
-
-    while (*pos && double_brace_depth > 0) {
-        if (*pos == '{' && *(pos + 1) == '{') {
-            double_brace_depth++;
-            pos += 2;
-        } else if (*pos == '}' && *(pos + 1) == '}') {
-            double_brace_depth--;
-            if (double_brace_depth == 0) {
-                content_end = pos;
-                pos += 2; // Skip closing }}
-                break;
-            } else {
-                pos += 2;
-            }
-        } else {
-            pos++;
-        }
-
-        // Safety check to prevent infinite loops
-        if (pos - start_pos > 10000) {
-            *text = start_pos + 2;
-            return Item{.item = ITEM_UNDEFINED};
-        }
-    }
-
-    if (!content_end || double_brace_depth != 0) {
-        *text = start_pos + 2;
-        return Item{.item = ITEM_UNDEFINED};
-    }
-
-    // Create template element
-    Element* template_elem = create_element(parser, "wiki-template");
-    if (!template_elem) {
-        *text = pos;
+    Element* value = create_element(parser, "var");
+    if (!value) {
+        *text = source_end;
         return Item{.item = ITEM_ERROR};
     }
+    add_attribute_to_element(parser, value,
+                             opening_width == 3 ? "data-wiki-parameter" : "data-wiki-template", "true");
 
-    // Extract template content
-    size_t content_len = content_end - template_start;
-    char* content = mem_strndup(template_start, content_len, MEM_CAT_INPUT_MARKUP);
-    if (content) {
-        // Parse template name and arguments
-        char* pipe_pos = strchr(content, '|');
-        if (pipe_pos) {
-            *pipe_pos = '\0';
-            add_attribute_to_element(parser, template_elem, "name", content);
-            add_attribute_to_element(parser, template_elem, "args", pipe_pos + 1);
-        } else {
-            add_attribute_to_element(parser, template_elem, "name", content);
-        }
-
-        mem_free(content);
+    // the source is visible when no expansion context is available.
+    char* source = mem_dup_n(start, source_end - start, MEM_CAT_INPUT_MARKUP);
+    if (source) {
+        add_attribute_to_element(parser, value, "source", source);
+        String* visible = parser->builder.createString(source);
+        if (visible) list_push((List*)value, Item{.item = s2it(visible)});
+        mem_free(source);
     }
 
-    *text = pos;
-    return Item{.item = (uint64_t)template_elem};
+    const char* name_start = start + opening_width;
+    const char* name_end = first_pipe ? first_pipe : content_end;
+    const char* arguments_start = first_pipe ? first_pipe + 1 : nullptr;
+    if (opening_width == 2 && *name_start == '#') {
+        // parser functions put their first argument after a colon in the title.
+        const char* colon = (const char*)memchr(name_start, ':', name_end - name_start);
+        if (colon) {
+            name_end = colon;
+            arguments_start = colon + 1;
+            add_attribute_to_element(parser, value, "data-wiki-parser-function", "true");
+        }
+    }
+    size_t name_len = name_end - name_start;
+    str_trim(&name_start, &name_len);
+    char* name = mem_dup_n(name_start, name_len, MEM_CAT_INPUT_MARKUP);
+    if (name) {
+        add_attribute_to_element(parser, value, "name", name);
+        mem_free(name);
+    }
+    if (arguments_start) {
+        const char* attr = opening_width == 3 ? "default" : "args";
+        char* arguments = mem_dup_n(arguments_start, content_end - arguments_start, MEM_CAT_INPUT_MARKUP);
+        if (arguments) {
+            add_attribute_to_element(parser, value, attr, arguments);
+            mem_free(arguments);
+        }
+    }
+
+    *text = source_end;
+    return Item{.item = (uint64_t)value};
+}
+
+Item parse_wiki_nowiki(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    if (strncmp(start, "<nowiki>", 8) != 0) return Item{.item = ITEM_UNDEFINED};
+    const char* content = start + 8;
+    const char* close = strstr(content, "</nowiki>");
+    if (!close) return Item{.item = ITEM_UNDEFINED};
+
+    Element* literal = create_element(parser, "span");
+    if (!literal) return Item{.item = ITEM_ERROR};
+    add_attribute_to_element(parser, literal, "data-wiki-nowiki", "true");
+    char* source = mem_dup_n(start, close + 9 - start, MEM_CAT_INPUT_MARKUP);
+    if (source) {
+        add_attribute_to_element(parser, literal, "source", source);
+        mem_free(source);
+    }
+    String* visible = parser->builder.createString(content, close - content);
+    if (visible) list_push((List*)literal, Item{.item = s2it(visible)});
+    *text = close + 9;
+    return Item{.item = (uint64_t)literal};
 }
 
 } // namespace markup
