@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
-  "description": "Result37 (cube3d 1.20x, T21-1b window): an index product with a literal factor below 2^26 is in range exactly when the other factor is below 2^27 in magnitude -- one add and one unsigned compare -- instead of the double-lane check (two i2d, dmul, two double compares) the branch-free path fell to when the loop counter had no counted-loop proof. 2026-09-17 (T28-7): `i` is a proven non-negative loop counter and the literal factor's interval is already inside [0, 2^26), so the product needs only one unsigned compare on `i` -- no add.",
+  "description": "Result37 (cube3d 1.20x, T21-1b window): an index product with a literal factor below 2^26 is in range exactly when the other factor is below 2^27 in magnitude -- one add and one unsigned compare -- instead of the double-lane check (two i2d, dmul, two double compares) the branch-free path fell to when the loop counter had no counted-loop proof. 2026-09-17 (T28-7): `i` is a proven non-negative loop counter and the literal factor's interval is already inside [0, 2^26), so the fast product needs only one unsigned compare. 2026-09-29 (S7.1.1v3, D3.3.3v3): the literal-stride dense guard emits a source-equivalent generic sibling, where the old add remains; the guarded copy retains the compact product.",
   "checks": [
     {
       "in_func": "_mul4_#",
       "forbid": [
         "dlt\t{{r}}, {{r}}, 9007199254740992",
-        "mulo\t",
-        "add\t{{r}}, {{r}}, 134217728"
+        "mulo\t"
       ],
       "expect_seq": [
         {

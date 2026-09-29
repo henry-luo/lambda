@@ -206,6 +206,7 @@ AstNode* ast_object_literal_value_for_shape(const AstObjectLiteralNode* literal,
 // storage coercion runs.
 AstNode* ast_object_literal_spread_value(const AstObjectLiteralNode* literal);
 bool has_fixed_shape(TypeMap* map_type);
+bool has_named_shape(TypeMap* map_type);
 bool is_direct_access_type(TypeId type_id);
 bool static_literal_item_from_type(Type* type, Item* out);
 void decimal_payload_release(Decimal* dec);

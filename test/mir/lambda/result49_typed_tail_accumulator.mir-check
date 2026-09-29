@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "S9.1.2, S10.6.1, D4.4.4v4: a proved pure tail accumulator detaches its incoming typed array and appends one or two items without allocating the RHS literal; an absent element keeps the checked fallback.",
+  "checks": [
+    {
+      "in_func": "_build_direct_#",
+      "expect": ["call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item"],
+      "count": {"call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item": 1},
+      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+    },
+    {
+      "in_func": "_build_conditional_#",
+      "expect": ["call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item"],
+      "count": {"call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item": 2},
+      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+    },
+    {
+      "in_func": "_build_pair_#",
+      "expect": ["call\tfn_join_consume_cert_array_pair_p, fn_join_consume_cert_array_pair"],
+      "count": {"call\tfn_join_consume_cert_array_pair_p, fn_join_consume_cert_array_pair": 1},
+      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+    },
+    {
+      "in_func": "_build_list_#",
+      "expect": ["call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item"],
+      "count": {"call\tfn_join_consume_cert_array_item_p, fn_join_consume_cert_array_item": 1},
+      "forbid": ["call\tarray_p, array", "call\tarray_end_p, array_end", "call\tfn_join_p, fn_join"]
+    }
+  ]
+}

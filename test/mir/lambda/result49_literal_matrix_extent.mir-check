@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "S7.1.1v3, S7.1.3v2, D3.3.3v3: literal-bounded row/column indexes use the guarded raw matrix copy; the short-input sibling retains the checked numeric store.",
+  "checks": [
+    {
+      "in_func": "_mul2_#",
+      "count": {
+        "call\tarray_num_set_cow_idx_p, array_num_set_cow_idx": 1
+      }
+    }
+  ]
+}

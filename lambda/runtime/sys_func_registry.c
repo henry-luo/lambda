@@ -1829,6 +1829,12 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"fn_string_ord_at", FPTR(fn_string_ord_at),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"fn_string_char_eq_ascii", FPTR(fn_string_char_eq_ascii),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
@@ -1996,6 +2002,11 @@ JitImport jit_runtime_imports[] = {
     {"fn_normalize", FPTR(fn_normalize)},
     {"fn_substring", FPTR(fn_substring)},
     {"fn_join", FPTR(fn_join)},
+    {"fn_join_consume_open_array", FPTR(fn_join_consume_open_array)},
+    {"fn_join_consume_cert_array", FPTR(fn_join_consume_cert_array)},
+    {"fn_join_consume_cert_array_item", FPTR(fn_join_consume_cert_array_item)},
+    {"fn_join_consume_cert_array_pair", FPTR(fn_join_consume_cert_array_pair)},
+    {"fn_join_fresh_array_item", FPTR(fn_join_fresh_array_item)},
     // native String* variants for string functions
     {"fn_starts_with_str", FPTR(fn_starts_with_str)},
     {"fn_ends_with_str", FPTR(fn_ends_with_str)},
@@ -3776,7 +3787,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         "lambda_async_frame_get_word",
         // Exact String-character equality reads only the already-rooted Item.
-        "fn_string_char_eq_ascii", "fn_string_char_eq",
+        "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",
