@@ -29,8 +29,6 @@
                    animation-iteration-count: infinite; }
     .loader span:nth-child(2) { animation-delay: -.8s; }
     .loader span:nth-child(3) { animation-delay: -.4s; }
-    #editor-frame { position: absolute; left: 0; top: 0; width: 1px; height: 1px;
-                    border: 0; visibility: hidden; pointer-events: none; }
     @keyframes pulse { from { opacity: .25; }
                        50% { opacity: 1; }
                        to { opacity: .25; } }
@@ -86,21 +84,11 @@
       </div>
     </div>
   </main>
-  <iframe id="editor-frame" title="Editor preload" aria-hidden="true" tabindex="-1"></iframe>
   <script>
-    var editorFrame = document.getElementById('editor-frame');
-    var editorLoadStarted = false;
-    var editorNavigationStarted = false;
-    editorFrame.onload = function () {
-      if (!editorLoadStarted || editorNavigationStarted) return;
-      editorNavigationStarted = true;
-      window.location.assign('doc_editor.ls');
-    };
-    // Start after the splash gets its first paint; the iframe is only a preload.
+    // Let the splash paint before starting the asynchronous editor navigation.
     window.addEventListener('load', function () {
       setTimeout(function () {
-        editorLoadStarted = true;
-        editorFrame.src = 'doc_editor.ls?lambda-preload=1';
+        window.location.assign('doc_editor.ls');
       }, 0);
     });
   </script>

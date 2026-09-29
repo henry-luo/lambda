@@ -3780,18 +3780,6 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
         return nullptr;
     }
 
-    // The hidden iframe warms the in-process code cache (D8.5.1v7). Keep its
-    // Runtime on the normal document lifetime while omitting the unused UI tree.
-    const char* query = url_get_search(script_url);
-    if (!transform && query && strcmp(query, "?lambda-preload=1") == 0) {
-        MarkBuilder builder(result_input);
-        Item body = builder.element("body").final();
-        ElementBuilder html = builder.element("html");
-        html.child(body);
-        script_output->root = html.final();
-        result_type = LMD_TYPE_ELEMENT;
-    }
-
     auto write_svg_wrapped_html = [&](const char* svg_content) -> DomDocument* {
         StrBuf* html_buf = strbuf_new_cap(strlen(svg_content) + 256);
         strbuf_append_format(html_buf,
