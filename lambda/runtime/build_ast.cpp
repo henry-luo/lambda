@@ -13020,29 +13020,37 @@ static bool append_shipped_package_module_path(StrBuf* path, StrView module) {
     return true;
 }
 
+bool lambda_import_is_relative(StrView module) {
+    return module.length > 0 &&
+        (module.str[0] == '.' || strview_starts_with(&module, "~~"));
+}
+
+// S16.9.8: `.a.b` resolves beside the importer, and each leading `~~` is one
+// parent step (S2.4.1v2), so `~~.~~.a` is `../../a`. A bare root names a
+// package: only `lambda.*` resolves to source today (D7.2.4); every other root
+// is reserved for the package registry and yields NULL, never a cwd file.
 char* lambda_resolve_import_module_path(const char* base_directory,
         StrView module) {
     if (!module.str || module.length == 0) return NULL;
     StrBuf* path = strbuf_new();
     if (!path) return NULL;
-    bool relative = module.str[0] == '.';
-    bool shipped_package = !relative &&
-        append_shipped_package_module_path(path, module);
-    if (relative) {
-        const char* base = base_directory ? base_directory : "./";
-        size_t base_len = strlen(base);
-        strbuf_append_format(path, "%s%.*s", base,
-            (int)module.length - 1, module.str + 1);
+    if (lambda_import_is_relative(module)) {
+        strbuf_append_str(path, base_directory ? base_directory : "./");
+        StrView rest = module;
+        while (strview_starts_with(&rest, "~~.")) {
+            strbuf_append_str(path, "../");
+            rest = strview_sub(&rest, 3, rest.length);
+        }
+        if (rest.length && rest.str[0] == '.') rest = strview_sub(&rest, 1, rest.length);
         // only the module spec's dots are package separators. The base
         // directory may legitimately contain a dot component (a checkout under
         // `.claude/`, `~/.local/...`), and rewriting those produced `//claude`.
-        for (char* ch = path->str + base_len; *ch; ch++) if (*ch == '.') *ch = '/';
-    } else if (!shipped_package) {
-        // a bare import resolves in the working directory; only lambda.* reaches
-        // the home (above). The old first-segment-to-home rewrite predated D7.2.4
-        // and misrouted every dotted bare import (`test.benchmark.x`).
-        strbuf_append_format(path, "./%.*s", (int)module.length, module.str);
-        for (char* ch = path->str + 2; *ch; ch++) if (*ch == '.') *ch = '/';
+        size_t spec_start = path->length;
+        strbuf_append_str_n(path, rest.str, rest.length);
+        for (char* ch = path->str + spec_start; *ch; ch++) if (*ch == '.') *ch = '/';
+    } else if (!append_shipped_package_module_path(path, module)) {
+        strbuf_free(path);
+        return NULL;
     }
     strbuf_append_str(path, ".ls");
     char* resolved = mem_strdup(path->str, MEM_CAT_SYSTEM);
@@ -13102,12 +13110,16 @@ static void resolve_import(Transpiler* tp, AstImportNode* node) {
     }
     char* path = lambda_resolve_import_module_path(tp->directory, module);
     if (!path) {
-        record_semantic_error_span(tp, span, ERR_IMPORT_ERROR,
-            "failed to resolve Lambda module '%.*s'", (int)module.length,
-            module.str);
+        // S16.9.8: a bare root is a package name, never a working-directory
+        // file; `import test.x` names no package.
+        const char* dot = (const char*)memchr(module.str, '.', module.length);
+        int root_length = dot ? (int)(dot - module.str) : (int)module.length;
+        record_semantic_error_span(tp, span, ERR_IMPORT_NOT_FOUND,
+            "no package '%.*s' for import '%.*s'; a relative module starts with '.' or '~~'",
+            root_length, module.str, (int)module.length, module.str);
         return;
     }
-    node->is_relative = module.str[0] == '.';
+    node->is_relative = lambda_import_is_relative(module);
     bool lambda_source_exists = file_exists(path);
     if (!lambda_source_exists && tp->runtime && tp->runtime->ast_prebuild_only) {
         // A worker may retain parser facts only. The JS adapter owns module

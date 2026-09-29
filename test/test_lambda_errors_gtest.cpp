@@ -1966,6 +1966,16 @@ TEST_F(NegativeScriptTest, OptionalParamArityReportsARange) {
         "function expects 1 to 2 arguments, got 3");
 }
 
+// S16.9.8: a bare root is a package name, never a file path. `test` names no
+// package, so the import is E216 even though test/benchmark/richards2_core.ls
+// exists relative to the working directory.
+TEST_F(NegativeScriptTest, BareImportRootMustNameAPackage) {
+    ExpectErrorMessage("test/lambda/negative/semantic/import_unknown_package.ls",
+        "error[E216]");
+    ExpectErrorMessage("test/lambda/negative/semantic/import_unknown_package.ls",
+        "no package 'test' for import 'test.benchmark.richards2_core'");
+}
+
 TEST_F(NegativeScriptTest, ImportParseErrorBlocksExecution) {
     ScriptResult result = run_lambda_script("test/lambda/negative/import_parse_error_driver.ls");
 
