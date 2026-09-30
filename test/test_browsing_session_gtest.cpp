@@ -25,6 +25,13 @@ DomDocument* show_html_doc(Url* base, char* doc_url,
     return doc;
 }
 
+DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
+    (void)doc_url;
+    // The session owns the document; presentation only publishes it.
+    if (g_session_test_uicon) g_session_test_uicon->document = doc;
+    return doc;
+}
+
 void free_document(DomDocument* doc) {
     if (!doc) return;
     g_session_test_live_documents--;

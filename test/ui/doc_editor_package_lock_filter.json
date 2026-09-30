@@ -5,7 +5,9 @@
   "events": [
     {"type": "click", "target": {"selector": "#file-filter"}},
     {"type": "type", "target": {"selector": "#file-filter"}, "text": "package-lock.json"},
-    {"type": "click", "target": {"selector": ".tree-hit-__package-lock_json .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__lambda .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__lambda_vsce .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__lambda_vsce_package-lock_json .tree-label"}},
     {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "package-lock.json"},
     {"type": "click", "target": {"selector": "#property-filter"}},
     {"type": "type", "target": {"selector": "#property-filter"}, "text": "t"},
