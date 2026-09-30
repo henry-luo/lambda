@@ -49,6 +49,13 @@ fn event_hits_tree_row(evt, hit_class) =>
   (contains(evt["target_class"], hit_class ++ " ") or
    contains(evt["target_parent_class"], hit_class ++ " ")) or false
 
+// A tree-wide redraw needs the expansion currently owned by individual rows.
+pn visible_open_paths(target) {
+  let rows = dom.query_selector_all(dom.root_node(target), ".tree-entry");
+  [for (row in rows where dom.get_attribute(row, "data-tree-open") == "true")
+    dom.get_attribute(row, "data-tree-path")]
+}
+
 pn reset_document_scroll(target) {
   let root = dom.root_node(target)
   let preview = dom.query_selector(root, ".rendered-preview")
@@ -692,8 +699,7 @@ view <eml_preview> {
 // Lazy file-tree rows
 // --------------------------------------------------------------------------
 
-view <tree_entry> state children: null {
-  let is_open = ~.initial_open
+view <tree_entry> state children: null, is_open: ~.initial_open {
   let icon_text = if (~.is_dir) "" else file_icon(~.extension)
   let icon_class = if (~.is_dir) "tree-icon folder-icon"
     else if (icon_text == "▤") "tree-icon file-icon default-icon"
@@ -713,7 +719,8 @@ view <tree_entry> state children: null {
     [for (child in current_children where entry_matches_filter(child, ~.filter_text)) child]
   } else { [] };
 
-  <div class:"tree-entry"
+  <div class:"tree-entry", 'data-tree-path':entry_path,
+    'data-tree-open':(if (~.is_dir and is_open) "true" else "false")
   , <div class:row_class, style:("padding-left:" ++ indent)
     , if (~.is_dir) {
         <button class:"tree-toggle",
@@ -751,12 +758,13 @@ on click(evt) {
   let hit_class = tree_hit_class(entry_path)
   let hits_this_row = event_hits_tree_row(evt, hit_class)
   if (~.is_dir and hits_this_row) {
-    // The parent's open-path state drives the render; avoid a second row update.
+    // A directory changes only its own subtree on a toggle.
     if (not is_open and children == null) { children = directory_entries(entry_path) }
-    emit("directory_toggle", {path:entry_path, is_open:not is_open})
+    is_open = not is_open
   } else if (not ~.is_dir) {
     if (~.selected_path != entry_path) { reset_document_scroll(evt.target) }
     emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
+      target:evt.target,
       text_width_px:(if (is_pgf_document(~.extension)) pgf_text_width_px(evt.target) else null)})
   }
 }
@@ -847,11 +855,10 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null {
+edit <project_tree> state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
-  <div class:"doc-editor"
-  , <aside class:"file-panel"
+  <aside class:"file-panel"
     , <div class:"file-panel-header"
       , <div class:"project-title"
         , <span class:"project-icon", "⌘">
@@ -884,7 +891,7 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
                 initial_open:path_is_open(open_paths,
                                           child_path(PROJECT_ROOT, entry.name)),
                 open_paths:open_paths,
-                selected_path:(if (selected_file == null) "" else selected_file["file_path"]),
+                selected_path:selected_path,
                 filter_text:filter_text
               >)
           >
@@ -892,6 +899,55 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
       >
     <div class:"file-panel-footer", if (filter_text == "") "Project root: ." else "Filtering file names">
   >
+}
+on click(evt) {
+  let target_class = evt["target_class"]
+  let parent_class = evt["target_parent_class"]
+  if (contains(target_class, "tree-row project-root") or
+      contains(parent_class, "tree-row project-root")) {
+    if (root_open) { open_paths = visible_open_paths(evt.target) }
+    root_open = not root_open
+  } else if (target_class == "tree-filter-clear") {
+    if (root_open) { open_paths = visible_open_paths(evt.target) }
+    filter_text = ""
+  }
+}
+on input(evt) {
+  let character = evt.char
+  if (evt.target_class == "tree-filter" and character != null and character != "") {
+    if (root_open) { open_paths = visible_open_paths(evt.target) }
+    let caret_pos = evt.caret_pos
+    filter_text = slice(filter_text, 0, caret_pos) ++ character ++
+      slice(filter_text, caret_pos, len(filter_text))
+  }
+}
+on keydown(evt) {
+  if (evt.target_class == "tree-filter") {
+    let next = if (evt.key == "Backspace") { erase_backwards(filter_text, evt) }
+      else if (evt.key == "Delete") { erase_forwards(filter_text, evt) }
+      else if (evt.key == "Escape") { "" }
+      else { null }
+    if (next == null) { return }
+    if (root_open) { open_paths = visible_open_paths(evt.target) }
+    filter_text = next
+    // The model owns this edit; a second native edit would desynchronize it.
+    return 'prevent-default'
+  }
+}
+on file_select(entry) {
+  // Row-local toggles do not rebuild the tree; snapshot open rows only when
+  // selection will rebuild it for the selected highlight.
+  open_paths = visible_open_paths(entry["target"])
+  selected_path = entry["file_path"]
+  emit("document_select", entry)
+}
+
+// The stable model keeps the tree's state when document controls update.
+let PROJECT_TREE_MODEL = <project_tree>
+
+edit <doc_editor_app> state selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null {
+  <div class:"doc-editor"
+  , apply(PROJECT_TREE_MODEL, {mode: "edit"})
   apply(<document_pane file:selected_file, preview_mode:preview_mode,
     property_filter:property_filter, property_data:property_data,
     property_open_paths:property_open_paths, property_closed_paths:property_closed_paths,
@@ -901,60 +957,37 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
 }
 on click(evt) {
   let target_class = evt["target_class"]
-  let parent_class = evt["target_parent_class"]
-  if (contains(target_class, "tree-row project-root") or
-      contains(parent_class, "tree-row project-root")) { root_open = not root_open }
-  else if (target_class == "tree-filter-clear") { filter_text = "" }
-  else if (target_class == "property-filter-clear") {
+  if (target_class == "property-filter-clear") {
     property_filter = ""
     property_more_paths = []
   }
 }
-on directory_toggle(entry) {
-  let path = entry["path"]
-  if (entry["is_open"]) {
-    if (not path_is_open(open_paths, path)) {
-      open_paths = [*open_paths, path]
-    }
-  } else {
-    // Closing a directory also forgets its descendants before any remount.
-    open_paths = [for (open_path in open_paths
-      where open_path != path and not starts_with(open_path, path ++ "/")) open_path]
-  }
-}
 on input(evt) {
-  let target_class = evt.target_class
   let character = evt.char
-  if ((target_class == "tree-filter" or target_class == "property-filter") and
+  if (evt.target_class == "property-filter" and
       character != null and character != "") {
     let caret_pos = evt.caret_pos
-    if (target_class == "tree-filter") {
-      filter_text = slice(filter_text, 0, caret_pos) ++ character ++ slice(filter_text, caret_pos, len(filter_text))
-    } else {
-      property_filter = slice(property_filter, 0, caret_pos) ++ character ++
-        slice(property_filter, caret_pos, len(property_filter))
-      property_closed_paths = []
-      property_more_paths = []
-    }
+    property_filter = slice(property_filter, 0, caret_pos) ++ character ++
+      slice(property_filter, caret_pos, len(property_filter))
+    property_closed_paths = []
+    property_more_paths = []
   }
 }
 on keydown(evt) {
-  let target_class = evt.target_class
-  let key = evt.key
-  if (target_class == "tree-filter" or target_class == "property-filter") {
-    let current = if (target_class == "tree-filter") filter_text else property_filter
-    let next = if (key == "Backspace") { erase_backwards(current, evt) }
-      else if (key == "Delete") { erase_forwards(current, evt) }
-      else if (key == "Escape") { "" }
+  if (evt.target_class == "property-filter") {
+    let next = if (evt.key == "Backspace") { erase_backwards(property_filter, evt) }
+      else if (evt.key == "Delete") { erase_forwards(property_filter, evt) }
+      else if (evt.key == "Escape") { "" }
       else { null }
     if (next == null) { return }
-    if (target_class == "tree-filter") { filter_text = next }
-    else { property_filter = next; property_closed_paths = []; property_more_paths = [] }
+    property_filter = next
+    property_closed_paths = []
+    property_more_paths = []
     // The model owns this edit; a second native edit would desynchronize it.
     return 'prevent-default'
   }
 }
-on file_select(entry) {
+on document_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"]}
   let format = property_format(entry["extension"])
