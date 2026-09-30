@@ -257,6 +257,30 @@ static bool test_radiant_view_profile_has_intrinsic_measurement(const char* path
     return found;
 }
 
+static bool test_radiant_view_profile_shifted_reuse_at(const char* path,
+                                                       size_t layout_index,
+                                                       unsigned long long* reuse_count) {
+    if (!reuse_count) return false;
+    char* buffer = test_radiant_view_read_file(path);
+    if (!buffer) return false;
+    const char* prefix = "[LAYOUT_PROFILE] shifted_reuse: ";
+    const char* cursor = buffer;
+    bool found = false;
+    for (size_t index = 0; index <= layout_index; index++) {
+        cursor = strstr(cursor, prefix);
+        if (!cursor) break;
+        cursor += strlen(prefix);
+        if (index == layout_index) {
+            char* end = nullptr;
+            unsigned long long value = strtoull(cursor, &end, 10);
+            found = end != cursor;
+            if (found) *reuse_count = value;
+        }
+    }
+    free(buffer);
+    return found;
+}
+
 static ShellResult test_radiant_view_run_logged_headless(const char* page,
                                                          const char* event_path,
                                                          const ShellEnvEntry* env,
@@ -1163,6 +1187,36 @@ TEST(RadiantViewTest, ReportsNestedFlexIntrinsicMeasurements) {
     shell_result_free(&shell_result);
 
     EXPECT_TRUE(test_radiant_view_profile_has_intrinsic_measurement(view_log));
+}
+
+TEST(RadiantViewTest, ReusesCleanRowsAfterDirectoryClose) {
+    const char* page = "test/ui/doc_viewer.ls";
+    const char* events = "test/ui/doc_viewer_layout_shift.json";
+    const char* view_log = "./temp/test_radiant_view_directory_close.log";
+    ASSERT_TRUE(test_radiant_view_file_readable(page));
+    ASSERT_TRUE(test_radiant_view_file_readable(events));
+    test_radiant_view_ensure_temp_dir();
+    remove(view_log);
+
+    const ShellEnvEntry env[] = {
+        {"LAYOUT_PROFILE", "1"},
+        {"LAMBDA_LOG_FILE", view_log},
+        {"LAMBDA_LOG_LEVEL", "NOTICE"},
+        {NULL, NULL},
+    };
+    ShellResult shell_result = test_radiant_view_run_logged_headless(page, events, env);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    unsigned long long initial_reuse = 0;
+    unsigned long long close_reuse = 0;
+    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 0, &initial_reuse));
+    // Two setup layouts and two opens precede the close relayout in this fixture.
+    ASSERT_TRUE(test_radiant_view_profile_shifted_reuse_at(view_log, 4, &close_reuse));
+    EXPECT_EQ(0ULL, initial_reuse);
+    EXPECT_GT(close_reuse, 0ULL);
+    remove(view_log);
 }
 
 TEST(RadiantViewTest, SkipsGlobalCascadeForLoadTimeInlineStyleWrites) {

@@ -1,0 +1,21 @@
+{
+  "name": "Doc viewer shifts clean tree rows after directory resize",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_validator_test_data"},
+     "y": 1871, "tolerance": 2},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui_doc_viewer_ls"}, "count": 1},
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__test_validator_test_data"},
+     "element_b": {"selector": ".tree-hit-__test_ui"}, "relation": "below", "gap": 10000},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui_doc_viewer_ls"}, "count": 0},
+    {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_validator_test_data"},
+     "y": 1871, "tolerance": 2},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+    {"type": "assert_position", "element_a": {"selector": ".tree-hit-__test_validator_test_data"},
+     "element_b": {"selector": ".tree-hit-__test_ui"}, "relation": "below", "gap": 10000}
+  ]
+}

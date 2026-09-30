@@ -728,6 +728,7 @@ static void reset_css_all_visual_style(LayoutContext* lycon, ViewSpan* view) {
 int64_t g_layout_cache_hits = 0;
 int64_t g_layout_cache_misses = 0;
 int64_t g_layout_cache_stores = 0;
+int64_t g_layout_shifted_reuse_count = 0;
 
 void reset_layout_timing() {
     g_style_resolve_time = 0;
@@ -746,6 +747,7 @@ void reset_layout_timing() {
     g_layout_cache_hits = 0;
     g_layout_cache_misses = 0;
     g_layout_cache_stores = 0;
+    g_layout_shifted_reuse_count = 0;
 }
 
 void log_layout_timing_summary() {
@@ -5265,6 +5267,9 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     }
     uint64_t t_layout = time_now_ns();
     double layout_ms = time_elapsed_ms_f(t_init, t_layout);
+    if (lycon.profiler.enabled) {
+        log_notice("[LAYOUT_PROFILE] root_total: %.3fms", layout_ms);
+    }
     log_info("[TIMING] layout_html_root: %.1fms", layout_ms);
     log_info("[LAYOUT_PROF] layout_html_root: %.1fms", layout_ms);
 

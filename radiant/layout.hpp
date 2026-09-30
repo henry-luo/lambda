@@ -571,6 +571,7 @@ enum class SizingMode : uint8_t {
 extern int64_t g_layout_cache_hits;
 extern int64_t g_layout_cache_misses;
 extern int64_t g_layout_cache_stores;
+extern int64_t g_layout_shifted_reuse_count;
 
 namespace radiant {
 

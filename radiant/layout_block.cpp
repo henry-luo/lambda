@@ -5863,6 +5863,121 @@ static void layout_set_bfc_float_edges(LayoutContext* lycon, ViewBlock* block,
     lycon->block.float_right_edge = bfc_inline_start + content_width;
 }
 
+static bool layout_shift_subtree_has_stable_flow(DomNode* node, int depth) {
+    if (!node || node->layout_dirty || depth >= MAX_LAYOUT_DEPTH) return false;
+    if (!node->is_element()) return true;
+    DomElement* element = node->as_element();
+    if (!element->styles_resolved() || element->needs_style_recompute() ||
+        element->has_animated_display() ||
+        element->web_animation_state() || element->shadow_root_element()) return false;
+    const char* custom_layout = custom_layout_name_for_element(element);
+    if (custom_layout && custom_layout[0]) return false;
+    if (element->position) {
+        const PositionProp* position = element->positionp();
+        if ((position->position != CSS_VALUE_STATIC && position->position != CSS_VALUE__UNDEF) ||
+            (position->float_prop != CSS_VALUE_NONE && position->float_prop != CSS_VALUE__UNDEF) ||
+            (position->clear != CSS_VALUE_NONE && position->clear != CSS_VALUE__UNDEF)) return false;
+    }
+    if (element->display.list_item ||
+        (element->blk && (element->block()->counter_reset ||
+                          element->block()->counter_increment ||
+                          element->block()->counter_set ||
+                          element->block()->line_clamp_inherited)) ||
+        (element->pseudo && (element->pseudo->before || element->pseudo->after ||
+                             element->pseudo->marker))) return false;
+    // A positioned or floated descendant can depend on the old Y even when
+    // the direct child is clean, so inspect the retained subtree before reuse.
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!layout_shift_subtree_has_stable_flow(child, depth + 1)) return false;
+    }
+    return true;
+}
+
+static float layout_block_child_width_contribution(const BlockContext* parent,
+                                                   const ViewBlock* child) {
+    float width = child->width;
+    if (parent->given_width < 0.0f &&
+        (!child->blk || (child->block()->given_width < 0.0f &&
+                         isnan(child->block()->given_width_percent)))) {
+        if (child->bound) {
+            width = child->content_width;
+            if (child->boundary()->border) {
+                width += child->boundary()->border->width.right;
+            }
+        } else if (child->content_width < child->width) {
+            width = child->content_width;
+        }
+    }
+    if (child->bound) {
+        width += child->boundary()->margin.left + child->boundary()->margin.right;
+    }
+    return width;
+}
+
+static bool layout_can_shift_clean_block(LayoutContext* lycon, ViewBlock* parent,
+                                         DomNode* child) {
+    if (!lycon || !parent || !child || !lycon->doc ||
+        !lycon->doc->incremental_layout ||
+        lycon->run_mode != radiant::RunMode::PerformLayout ||
+        !lycon->line.is_line_start ||
+        line_has_prior_flow_content(&lycon->line) ||
+        lycon->line.has_float_intrusion ||
+        lycon->block.line_clamp != 0 ||
+        lycon->block.saved_clear_y >= 0.0f ||
+        layout_block_inline_axis_is_vertical(parent) ||
+        (parent->blk &&
+         (parent->block()->text_box_trim ||
+          (parent->block()->align_content != CSS_VALUE_NORMAL &&
+           parent->block()->align_content != CSS_VALUE__UNDEF)))) return false;
+    BlockContext* bfc = block_context_find_bfc(&lycon->block);
+    if (!bfc || bfc->left_float_count || bfc->right_float_count) return false;
+    DocState* state = (DocState*)lycon->doc->state;
+    // Active animations can alter retained geometry outside the dirty path.
+    if (state && state->animation_scheduler &&
+        state->animation_scheduler->has_active_animations) return false;
+    ViewBlock* view = child->is_element()
+        ? lam::view_as_block(static_cast<View*>(child)) : nullptr;
+    if (!view || view->view_type != RDT_VIEW_BLOCK ||
+        view->display.outer != CSS_VALUE_BLOCK ||
+        (view->display.inner != CSS_VALUE_FLOW &&
+         view->display.inner != CSS_VALUE_FLOW_ROOT) ||
+        !isfinite(view->width) || !isfinite(view->height) ||
+        view->height <= 0.0f ||
+        fabsf(view->width - lycon->block.content_width) > 0.1f ||
+        fabsf(view->x - lycon->line.left) > 0.1f ||
+        fabsf(child->layout_height_contribution - view->height) > 0.1f) return false;
+    if (view->bound) {
+        const BoundaryProp* boundary = view->boundary();
+        if (boundary->margin.top != 0.0f || boundary->margin.right != 0.0f ||
+            boundary->margin.bottom != 0.0f || boundary->margin.left != 0.0f ||
+            boundary->margin_chain_positive != 0.0f ||
+            boundary->margin_chain_negative != 0.0f || boundary->has_clearance ||
+            boundary->clearance_in_margin_chain) return false;
+    }
+    return layout_shift_subtree_has_stable_flow(child, 0);
+}
+
+static void layout_shift_clean_block(LayoutContext* lycon, DomNode* child) {
+    ViewBlock* view = lam::view_require_block(static_cast<View*>(child));
+    // Child coordinates are relative to this block; descendants follow its Y.
+    view->y = lycon->block.advance_y;
+    lycon->block.advance_y += child->layout_height_contribution;
+    lycon->block.max_width = max(lycon->block.max_width,
+        lycon->line.left + layout_block_child_width_contribution(&lycon->block, view));
+    if (view->blk) {
+        if (lycon->block.first_line_ascender == 0.0f &&
+            view->block()->first_line_baseline > 0.0f) {
+            lycon->block.first_line_ascender = view->y +
+                view->block()->first_line_baseline;
+        }
+        if (view->block()->last_line_max_ascender > 0.0f) {
+            lycon->block.last_line_ascender = view->y +
+                view->block()->last_line_max_ascender;
+        }
+    }
+    g_layout_shifted_reuse_count++;
+}
+
 void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     if (block->position) {
         ViewBlock* abs_walker = block->positionp()->first_abs_child;
@@ -6032,12 +6147,27 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
                             }
                         }
                     }
+                    bool block_only_flow = !rendered_legend;
+                    if (block_only_flow && lycon->doc && lycon->doc->incremental_layout) {
+                        for (DomNode* flow_child = child; flow_child;
+                             flow_child = flow_child->next_sibling) {
+                            // Any inline-level or text sibling can leave line state
+                            // that a retained block's height cannot reconstruct.
+                            if (!flow_child->is_element() ||
+                                resolve_display_value(flow_child).outer != CSS_VALUE_BLOCK) {
+                                block_only_flow = false;
+                                break;
+                            }
+                        }
+                    }
                     do {
                         float pre_advance_y = lycon->block.advance_y;
-                        // A retained DOM subtree can still depend on the current
-                        // line and float context, so its prior advance is not a
-                        // valid layout result after a sibling mutation.
-                        layout_flow_node(lycon, child);
+                        if (block_only_flow &&
+                            layout_can_shift_clean_block(lycon, block, child)) {
+                            layout_shift_clean_block(lycon, child);
+                        } else {
+                            layout_flow_node(lycon, child);
+                        }
                         child->layout_height_contribution = lycon->block.advance_y - pre_advance_y;
                         ViewBlock* child_block = child->is_element()
                             ? lam::view_as_block(static_cast<View*>(child)) : nullptr;
@@ -10661,25 +10791,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 } else {
                     lycon->block.advance_y += block->height + block->boundary()->margin.top + block->boundary()->margin.bottom;
                 }
-                float child_w = block->width;
-                if (lycon->block.given_width < 0
-                    && (!block->blk || (block->block()->given_width < 0 && isnan(block->block()->given_width_percent)))) {
-                    child_w = block->content_width;
-                    if (block->boundary()->border) {
-                        child_w += block->boundary()->border->width.right;
-                    }
-                }
-                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + child_w
-                    + block->boundary()->margin.left + block->boundary()->margin.right);
+                lycon->block.max_width = max(lycon->block.max_width,
+                    lycon->line.left + layout_block_child_width_contribution(
+                        &lycon->block, block));
             } else {
                 lycon->block.advance_y = block->y + block->height;
-                float child_w_nb = block->width;
-                if (lycon->block.given_width < 0
-                    && (!block->blk || (block->block()->given_width < 0 && isnan(block->block()->given_width_percent)))
-                    && block->content_width < block->width) {
-                    child_w_nb = block->content_width;
-                }
-                lycon->block.max_width = max(lycon->block.max_width, lycon->line.left + child_w_nb);
+                lycon->block.max_width = max(lycon->block.max_width,
+                    lycon->line.left + layout_block_child_width_contribution(
+                        &lycon->block, block));
             }
             if (!is_float) {
                 assert(lycon->line.is_line_start);
