@@ -148,10 +148,19 @@ fn graph_flavor(extension) {
   else { null }
 }
 
+fn property_format(extension) {
+  let ext = lower(extension)
+  if (ext == "json") { "json" }
+  else if (contains(["yaml", "yml"], ext)) { "yaml" }
+  else if (ext == "toml") { "toml" }
+  else if (contains(["ics", "ical"], ext)) { "ics" }
+  else { null }
+}
+
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
     is_pdf_document(extension) or is_pgf_document(extension) or is_image_document(extension) or
-    graph_flavor(extension) != null
+    graph_flavor(extension) != null or property_format(extension) != null
 
 // seti private-use glyphs; keep codepoints readable alongside the bundled font.
 let SETI_CLOCK = chr(0xE012)
@@ -262,6 +271,53 @@ fn selected_preview(file) {
   }
 }
 
+fn property_children(value, format) {
+  if (format == "ics" and type(value) == map and type(value["entries"]) == array) {
+    // RFC content lines retain their order and repeated names in the parser's entry list.
+    [for (index, entry in value["entries"])
+      {name:entry["name"],
+       value:(if (entry["parameters"] != null)
+         {value:entry["value"], parameters:entry["parameters"]} else entry["value"]),
+       segment:string(index)}]
+  } else if (type(value) == map) {
+    // Numeric segments keep expand state distinct for keys containing punctuation.
+    let fields = [for (key, child in value) {name:string(key), value:child}];
+    [for (index, field in fields)
+      {name:field.name, value:field.value, segment:string(index)}]
+  } else if (type(value) == array) {
+    [for (index, child in value) {name:string(index), value:child, segment:string(index)}]
+  } else { [] }
+}
+
+fn property_is_container(value) => type(value) == map or type(value) == array
+fn property_hit_class(path) =>
+  "property-hit-" ++ replace(replace(replace(path, "/", "_"), ".", "_"), " ", "_")
+
+fn property_matches(value, name, filter_text, format) {
+  if (filter_text == "" or contains(lower(name), lower(filter_text))) { true }
+  else if (property_is_container(value)) {
+    any([for (child in property_children(value, format))
+      property_matches(child.value, child.name, filter_text, format)])
+  } else { false }
+}
+
+fn property_value_text(value) {
+  if (type(value) == string) { value }
+  else if (value == null) { "null" }
+  else { string(value) }
+}
+
+fn property_summary(value, format) {
+  if (format == "ics" and type(value) == map and type(value["entries"]) == array) {
+    let label = value["summary"]
+    if (label != null) { label }
+    else { string(len(value["entries"])) ++ " entries" }
+  }
+  else if (type(value) == map) { "Object · " ++ string(len(value)) ++ " properties" }
+  else if (type(value) == array) { "Array · " ++ string(len(value)) ++ " items" }
+  else { property_value_text(value) }
+}
+
 // --------------------------------------------------------------------------
 // Mark document preview templates
 //
@@ -335,6 +391,91 @@ view <tfoot> { <tfoot *[rendered_children(~)]> }
 view <tr> { <tr *[rendered_children(~)]> }
 view <th> { <th *[rendered_children(~)]> }
 view <td> { <td *[rendered_children(~)]> }
+
+// --------------------------------------------------------------------------
+// Structured property inspector
+// --------------------------------------------------------------------------
+
+view <property_node> {
+  let expandable = property_is_container(~.value)
+  let matching_children = if (expandable) {
+    [for (child in property_children(~.value, ~.format)
+      where property_matches(child.value, child.name, ~.filter_text, ~.format)) child]
+  } else { [] }
+  let is_open = expandable and
+    (if (~.filter_text == "") { path_is_open(~.open_paths, ~.path) }
+     else { not path_is_open(~.closed_paths, ~.path) })
+  let row_style = "padding-left:" ++ string(~.depth * 18 + 16) ++ "px";
+
+  <div class:"property-entry", 'data-property-name':~.name
+  , <div class:"property-row", style:row_style
+    , if (expandable) {
+        <button class:("property-toggle " ++ property_hit_class(~.path) ++ " property-control"),
+          'aria-label':((if (is_open) "Collapse " else "Expand ") ++ ~.name),
+          'aria-expanded':(if (is_open) "true" else "false"),
+          if (is_open) "▾" else "▸">
+      } else { <span class:"property-spacer", ""> }
+      <span class:"property-name", ~.name>
+      <span class:(if (expandable) "property-value property-summary" else "property-value"),
+        title:property_summary(~.value, ~.format), property_summary(~.value, ~.format)>
+    >
+    if (is_open and len(matching_children) > 0) {
+      <div class:"property-children"
+      , for (child in matching_children)
+          apply(<property_node name:child.name, value:child.value,
+            path:(~.path ++ "/" ++ child.segment), depth:(~.depth + 1),
+            filter_text:~.filter_text, open_paths:~.open_paths,
+            closed_paths:~.closed_paths, format:~.format>)
+      >
+    }
+  >
+}
+on click(evt) {
+  if (contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
+    emit("property_toggle", {path:~.path, is_open: is_open})
+  }
+}
+
+view <property_inspector> {
+  let format = property_format(~.file["extension"])
+  let parsed = input(~.file["file_path"], format) ^ { null };
+  <section id:"property-preview", class:"rendered-preview property-preview"
+  , <div class:"property-filter-bar"
+    , <span class:"property-filter-icon", 'aria-hidden':"true", "⌕">
+      <input id:"property-filter", type:"search", class:"property-filter",
+        value:~.filter_text, placeholder:"Filter property names",
+        'aria-label':"Filter property names">
+      if (~.filter_text != "") {
+        <button class:"property-filter-clear", title:"Clear property filter", "×">
+      }
+    >
+    if (parsed == null) {
+      <p class:"property-message preview-error", "Unable to parse selected file">
+    } else if (not property_is_container(parsed)) {
+      if (~.filter_text == "" or contains("value", lower(~.filter_text))) {
+        <div class:"property-row property-root-value"
+        , <span class:"property-name", "value">
+          <span class:"property-value", property_value_text(parsed)>
+        >
+      } else { <p class:"property-message", "No matching properties"> }
+    } else {
+      let roots = if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
+        else { property_children(parsed, format) }
+      let matches = [for (child in roots
+        where property_matches(child.value, child.name, ~.filter_text, format)) child]
+      if (len(matches) == 0) {
+        <p class:"property-message", "No matching properties">
+      } else {
+        <div class:"property-list"
+        , for (child in matches)
+            apply(<property_node name:child.name, value:child.value,
+              path:child.segment, depth:0, filter_text:~.filter_text,
+              open_paths:~.open_paths, closed_paths:~.closed_paths, format:format>)
+        >
+      }
+    }
+  >
+}
 
 // --------------------------------------------------------------------------
 // Lazy file-tree rows
@@ -416,7 +557,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PGF, PDF, Mermaid, DOT, D2, and image files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "JSON, YAML, TOML, and ICS open as property trees. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -430,7 +571,10 @@ view <document_pane> {
       >
       <div class:"document-content"
       , if (~.preview_mode == "view") {
-        if (is_image_document(~.file["extension"])) {
+        if (property_format(~.file["extension"]) != null) {
+          apply(<property_inspector file:~.file, filter_text:~.property_filter,
+            open_paths:~.property_open_paths, closed_paths:~.property_closed_paths>)
+        } else if (is_image_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
         } else if (is_pdf_document(~.file["extension"])) {
@@ -486,7 +630,7 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_open_paths: [], property_closed_paths: [] {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
@@ -531,7 +675,9 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
       >
     <div class:"file-panel-footer", if (filter_text == "") "Project root: ." else "Filtering file names">
   >
-  apply(<document_pane file:selected_file, preview_mode:preview_mode>)
+  apply(<document_pane file:selected_file, preview_mode:preview_mode,
+    property_filter:property_filter, property_open_paths:property_open_paths,
+    property_closed_paths:property_closed_paths>)
   >
 }
 on click(evt) {
@@ -540,6 +686,7 @@ on click(evt) {
   if (contains(target_class, "tree-row project-root") or
       contains(parent_class, "tree-row project-root")) { root_open = not root_open }
   else if (target_class == "tree-filter-clear") { filter_text = "" }
+  else if (target_class == "property-filter-clear") { property_filter = "" }
 }
 on directory_toggle(entry) {
   let path = entry["path"]
@@ -556,19 +703,30 @@ on directory_toggle(entry) {
 on input(evt) {
   let target_class = evt.target_class
   let character = evt.char
-  if (target_class == "tree-filter" and character != null and character != "") {
+  if ((target_class == "tree-filter" or target_class == "property-filter") and
+      character != null and character != "") {
     let caret_pos = evt.caret_pos
-    filter_text = slice(filter_text, 0, caret_pos) ++ character ++ slice(filter_text, caret_pos, len(filter_text))
+    if (target_class == "tree-filter") {
+      filter_text = slice(filter_text, 0, caret_pos) ++ character ++ slice(filter_text, caret_pos, len(filter_text))
+    } else {
+      property_filter = slice(property_filter, 0, caret_pos) ++ character ++
+        slice(property_filter, caret_pos, len(property_filter))
+      property_closed_paths = []
+    }
   }
 }
 on keydown(evt) {
   let target_class = evt.target_class
   let key = evt.key
-  if (target_class == "tree-filter") {
-    if (key == "Backspace") { filter_text = erase_backwards(filter_text, evt) }
-    else if (key == "Delete") { filter_text = erase_forwards(filter_text, evt) }
-    else if (key == "Escape") { filter_text = "" }
-    else { return }
+  if (target_class == "tree-filter" or target_class == "property-filter") {
+    let current = if (target_class == "tree-filter") filter_text else property_filter
+    let next = if (key == "Backspace") { erase_backwards(current, evt) }
+      else if (key == "Delete") { erase_forwards(current, evt) }
+      else if (key == "Escape") { "" }
+      else { null }
+    if (next == null) { return }
+    if (target_class == "tree-filter") { filter_text = next }
+    else { property_filter = next; property_closed_paths = [] }
     // The model owns this edit; a second native edit would desynchronize it.
     return 'prevent-default'
   }
@@ -577,9 +735,23 @@ on file_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"]}
   preview_mode = "view"
+  property_filter = ""
+  property_open_paths = []
+  property_closed_paths = []
 }
 on preview_tab(tab) {
   preview_mode = tab
+}
+on property_toggle(entry) {
+  let path = entry["path"]
+  if (property_filter == "") {
+    if (entry["is_open"]) {
+      property_open_paths = [for (open_path in property_open_paths where open_path != path) open_path]
+    } else { property_open_paths = [*property_open_paths, path] }
+  } else {
+    if (entry["is_open"]) { property_closed_paths = [*property_closed_paths, path] }
+    else { property_closed_paths = [for (closed_path in property_closed_paths where closed_path != path) closed_path] }
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -590,6 +762,8 @@ on preview_tab(tab) {
   <head
     <meta charset:"UTF-8">
     <title "Lambda Document Editor — Prototype">
+    // the math stylesheet selects KaTeX symbol fonts; register their bundled faces.
+    <link rel:"stylesheet", href:"../../lmd/package/math/katex.css">
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style math_css.get_stylesheet(null)>
@@ -666,6 +840,32 @@ on preview_tab(tab) {
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
                         color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .property-preview { padding: 0 0 40px; background: #fff; color: #263448;
+                          font: 13px/1.4 'SF Mono', Menlo, Consolas, monospace; }
+      .property-filter-bar { position: sticky; top: 0; z-index: 1; height: 44px; display: flex;
+                             align-items: center; gap: 7px; padding: 0 16px; border-bottom: 1px solid #dce2eb;
+                             background: #fbfcfe; }
+      .property-filter-icon { color: #8b98a8; font-size: 21px; line-height: 1; }
+      .property-filter { min-width: 0; flex: 1; height: 32px; border: 0; outline: none;
+                         background: transparent; color: #263448; font: inherit; }
+      .property-filter::placeholder { color: #8b98a8; }
+      .property-filter-clear { border: 0; background: transparent; color: #77869a;
+                               cursor: pointer; font-size: 20px; }
+      .property-row { display: flex; min-height: 30px; align-items: baseline; gap: 8px;
+                      padding: 5px 18px 5px 0; border-bottom: 1px solid #f0f2f5; }
+      .property-entry:nth-child(even) > .property-row { background: #f7f9fb; }
+      .property-row:hover { background: #edf4ff !important; }
+      .property-toggle, .property-spacer { flex: 0 0 16px; width: 16px; height: 18px;
+                                           padding: 0; border: 0; background: none; color: #7b8798;
+                                           font: 13px/18px sans-serif; text-align: center; }
+      .property-toggle { cursor: pointer; }
+      .property-toggle:hover { color: #185da8; }
+      .property-name { flex: 0 0 38%; min-width: 0; overflow-wrap: anywhere; color: #1268c0; }
+      .property-value { min-width: 0; flex: 1; overflow-wrap: anywhere; white-space: pre-wrap;
+                        color: #ab2778; }
+      .property-summary { color: #6b788b; font-style: italic; }
+      .property-message { padding: 18px 22px; color: #6b788b; }
+      .property-root-value { padding-left: 32px; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
       .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }

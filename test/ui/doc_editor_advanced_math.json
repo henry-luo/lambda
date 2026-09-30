@@ -1,0 +1,19 @@
+{
+  "name": "Doc editor loads math symbols and matrices from Markdown",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1800},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "advanced_math_test.md"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_advanced_math_test_md .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "advanced_math_test.md"},
+    {"type": "assert_count", "target": {"selector": "link[href='../../lmd/package/math/katex.css']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lm_latex"}, "count": 11},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview .lm_ams"}, "contains": "↞"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lm_delim-size3"}, "min": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .lm_mediumspace"}, "min": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .math-error"}, "count": 0}
+  ]
+}

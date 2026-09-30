@@ -6,6 +6,7 @@
 
 // line-oriented helpers from input-utils.h (included transitively via input-rfc-text.h)
 #include "input-rfc-text.h"
+#include "../../lib/arraylist.h"
 
 using namespace lambda;
 
@@ -211,6 +212,33 @@ static void store_calendar_special_property(InputContext& ctx, MarkBuilder& buil
     ctx.builder.putToMap(lam::gc_borrow(calendar), key, value);
 }
 
+struct IcsComponentFrame {
+    Map* component;
+    Map* properties;
+    List* entries;
+    String* type;
+};
+
+static List* ics_new_list(Input* input) {
+    List* list = (List*)pool_calloc(input->pool, sizeof(List));
+    if (list) list->type_id = LMD_TYPE_ARRAY;
+    return list;
+}
+
+static void ics_append_entry(InputContext& ctx, Input* input, List* entries,
+                             String* name, Item value, Map* parameters = NULL) {
+    Map* entry = map_pooled(input->pool);
+    if (!entry || !entries || !name) return;
+    MarkBuilder& builder = ctx.builder;
+    builder.putToMap(lam::gc_borrow(entry), builder.createName("name"), {.item = s2it(name)});
+    builder.putToMap(lam::gc_borrow(entry), builder.createName("value"), value);
+    if (parameters) {
+        builder.putToMap(lam::gc_borrow(entry), builder.createName("parameters"),
+                         {.item = (uint64_t)parameters});
+    }
+    array_append((Array*)entries, {.item = (uint64_t)entry}, input->pool);
+}
+
 // Main iCalendar parsing function
 void parse_ics(Input* input, const char* ics_string) {
     if (!ics_string || !input) {
@@ -231,13 +259,7 @@ void parse_ics(Input* input, const char* ics_string) {
     }
 
     // Initialize components list to store events, todos, etc.
-    List* components_list = (List*)pool_calloc(input->pool, sizeof(List));
-    if (components_list) {
-        components_list->type_id = LMD_TYPE_ARRAY;
-        components_list->length = 0;
-        components_list->capacity = 0;
-        components_list->items = NULL;
-    }
+    List* components_list = ics_new_list(input);
     if (!components_list) {
         ctx.addError(ctx.tracker.location(), "Failed to allocate memory for components list");
         return;
@@ -250,9 +272,14 @@ void parse_ics(Input* input, const char* ics_string) {
         return;
     }
 
-    Map* current_component = NULL;
-    Map* current_component_props = NULL;
-    String* current_component_type = NULL;
+    List* calendar_entries = ics_new_list(input);
+    ArrayList* parents = arraylist_new(8);
+    IcsComponentFrame* active = NULL;
+    if (!calendar_entries || !parents) {
+        ctx.addError(ctx.tracker.location(), "Failed to allocate calendar entry stack");
+        arraylist_free(parents);
+        return;
+    }
     bool in_calendar = false;
 
     // Parse iCalendar line by line
@@ -280,6 +307,7 @@ void parse_ics(Input* input, const char* ics_string) {
         normalize_property_name(property_name->chars);
 
         // Parse property parameters
+        bool has_parameters = *ics == ';';
         Map* params_map = map_pooled(input->pool);
         if (params_map) {
             parse_property_parameters(ctx, &ics, params_map);
@@ -296,24 +324,22 @@ void parse_ics(Input* input, const char* ics_string) {
             if (str_ieq_cstr(property_value->chars, "VCALENDAR")) {
                 in_calendar = true;
             } else if (in_calendar) {
-                // Start of a component (VEVENT, VTODO, etc.)
-                current_component = map_pooled(input->pool);
-                current_component_props = map_pooled(input->pool);
-                current_component_type = builder.createString(property_value->chars);
-
-                // Verify all components were created successfully
-                if (!current_component || !current_component_props || !current_component_type) {
-                    // Clean up partially created component
-                    current_component = NULL;
-                    current_component_props = NULL;
-                    current_component_type = NULL;
-                } else {
-                    // Store component type
-                    String* type_key = builder.createName("type");
-                    if (type_key) {
-                        ctx.builder.putToMap(lam::gc_borrow(current_component), type_key, {.item = s2it(current_component_type)});
-                    }
+                // Keep the parent frame while a nested VALARM or other component is parsed.
+                IcsComponentFrame* child = (IcsComponentFrame*)pool_calloc(input->pool, sizeof(IcsComponentFrame));
+                if (child) {
+                    child->component = map_pooled(input->pool);
+                    child->properties = map_pooled(input->pool);
+                    child->entries = ics_new_list(input);
+                    child->type = builder.createString(property_value->chars);
                 }
+                if (!child || !child->component || !child->properties || !child->entries || !child->type ||
+                    (active && !arraylist_append(parents, active))) {
+                    ctx.addError(ctx.tracker.location(), "Failed to allocate calendar component");
+                    break;
+                }
+                active = child;
+                builder.putToMap(lam::gc_borrow(active->component), builder.createName("type"),
+                                 {.item = s2it(active->type)});
             }
             continue;
         }
@@ -321,23 +347,24 @@ void parse_ics(Input* input, const char* ics_string) {
         if (strcmp(property_name->chars, "END") == 0) {
             if (str_ieq_cstr(property_value->chars, "VCALENDAR")) {
                 in_calendar = false;
-            } else if (current_component && current_component_type &&
-                      str_ieq(property_value->chars, strlen(property_value->chars), current_component_type->chars, strlen(current_component_type->chars))) {
-                // End of current component
-                if (current_component_props) {
-                    String* props_key = builder.createName("properties");
-                    Item props_value = {.item = (uint64_t)current_component_props};
-                    ctx.builder.putToMap(lam::gc_borrow(current_component), props_key, props_value);
+            } else if (active &&
+                      str_ieq(property_value->chars, strlen(property_value->chars), active->type->chars, strlen(active->type->chars))) {
+                builder.putToMap(lam::gc_borrow(active->component), builder.createName("properties"),
+                                 {.item = (uint64_t)active->properties});
+                builder.putToMap(lam::gc_borrow(active->component), builder.createName("entries"),
+                                 {.item = (uint64_t)active->entries});
+                Item component_item = {.item = (uint64_t)active->component};
+                String* component_type = active->type;
+                active = arraylist_size(parents) > 0
+                    ? (IcsComponentFrame*)arraylist_pop(parents) : NULL;
+                if (active) {
+                    // The ordered entry list retains nested components among their siblings.
+                    ics_append_entry(ctx, input, active->entries, component_type, component_item);
+                } else {
+                    // D2.6.5v3 keeps top-level components in their source sequence.
+                    array_append((Array*)components_list, component_item, input->pool);
+                    ics_append_entry(ctx, input, calendar_entries, component_type, component_item);
                 }
-
-                // Add the component; the components are a sequence, not
-                // element content, so the pool-owned verbatim append (D2.6.5v3)
-                Item component_item = {.item = (uint64_t)current_component};
-                array_append((Array*)components_list, component_item, input->pool);
-
-                current_component = NULL;
-                current_component_props = NULL;
-                current_component_type = NULL;
             }
             continue;
         }
@@ -347,18 +374,24 @@ void parse_ics(Input* input, const char* ics_string) {
         // Store property based on current context
         Item prop_value = {.item = s2it(property_value)};
 
-        if (current_component && current_component_props) {
+        if (active) {
             // We're inside a component, store in component properties
-            ctx.builder.putToMap(lam::gc_borrow(current_component_props), property_name, prop_value);
-            store_component_special_property(ctx, builder, current_component,
+            ctx.builder.putToMap(lam::gc_borrow(active->properties), property_name, prop_value);
+            ics_append_entry(ctx, input, active->entries, property_name, prop_value,
+                             has_parameters ? params_map : NULL);
+            store_component_special_property(ctx, builder, active->component,
                                              property_name->chars, property_value->chars, prop_value);
         } else {
             // Calendar-level property
             ctx.builder.putToMap(lam::gc_borrow(properties_map), property_name, prop_value);
+            ics_append_entry(ctx, input, calendar_entries, property_name, prop_value,
+                             has_parameters ? params_map : NULL);
             store_calendar_special_property(ctx, builder, calendar_map,
                                             property_name->chars, prop_value);
         }
     }
+
+    arraylist_free(parents);
 
     // Store components list in calendar
     String* components_key = builder.createName("components");
@@ -369,6 +402,8 @@ void parse_ics(Input* input, const char* ics_string) {
     String* properties_key = builder.createName("properties");
     Item properties_value = {.item = (uint64_t)properties_map};
     ctx.builder.putToMap(lam::gc_borrow(calendar_map), properties_key, properties_value);
+    ctx.builder.putToMap(lam::gc_borrow(calendar_map), builder.createName("entries"),
+                         {.item = (uint64_t)calendar_entries});
 
     // Set the calendar map as the root of the input
     input->root = {.item = (uint64_t)calendar_map};
