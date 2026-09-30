@@ -1003,6 +1003,20 @@ Symbol* heap_create_symbol(const char* symbol, size_t len) {
     return sym;
 }
 
+// All-zero bytes form a valid Symbol: len 0, SYMBOL_LAMBDA_NAME, no namespace,
+// "" spelling. The GC marks only its own object zone, so a static one is safe.
+alignas(Symbol) static uint8_t symbol_empty_storage[sizeof(Symbol) + 1] = {};
+
+Symbol* symbol_empty(void) {
+    return (Symbol*)symbol_empty_storage;
+}
+
+// S8.2.2v3: iteration must expose every name, including the empty one, which
+// heap_create_symbol refuses (S2.2.2v2 keeps other zero-length results null).
+Symbol* name_key_symbol(const char* name, size_t len) {
+    return len == 0 ? symbol_empty() : heap_create_symbol(name, len);
+}
+
 Symbol* heap_create_symbol(const char* symbol) {
     if (!symbol) return nullptr;
     return heap_create_symbol(symbol, strlen(symbol));

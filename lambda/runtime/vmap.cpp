@@ -55,7 +55,7 @@ static void append_host_key(SymbolKeyList* keys, Item key_item) {
     const char* chars = nullptr;
     uint32_t len = 0;
     if (!keys || !item_key_chars(key_item, &chars, &len)) return;
-    Symbol* sym = heap_create_symbol(chars, len);
+    Symbol* sym = name_key_symbol(chars, len);
     if (sym) symbol_key_list_append(keys, sym);
 }
 
@@ -256,14 +256,12 @@ static SymbolKeyList* hashmap_vmap_keys(void* data) {
         if (kt == LMD_TYPE_STRING) {
             String* s = key.get_safe_string();
             if (s) {
-                Symbol* sym = heap_create_symbol(s->chars, s->len);
-                symbol_key_list_append(keys, sym);
+                symbol_key_list_append(keys, name_key_symbol(s->chars, s->len));
             }
         } else if (kt == LMD_TYPE_SYMBOL) {
             Symbol* s = key.get_safe_symbol();
             if (s) {
-                Symbol* sym = heap_create_symbol(s->chars, s->len);
-                symbol_key_list_append(keys, sym);
+                symbol_key_list_append(keys, name_key_symbol(s->chars, s->len));
             }
         } else {
             // synthetic key: "__v<index>"

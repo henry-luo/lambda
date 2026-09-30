@@ -1,0 +1,17 @@
+{
+  "name": "Document editor HTML preview iframe fills the pane (replaced element needs explicit height)",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "border_gradient_showcase"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_html .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_html_border_gradient_showcase_html .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#html-preview"}, "count": 1},
+    {"type": "assert_rect", "target": {"selector": "#html-preview"}, "x": 300, "height": 784, "tolerance": 5},
+    {"type": "render_pending"},
+    {"type": "assert_pixel", "x": 312, "y": 800, "min_r": 240, "max_r": 250, "min_g": 240, "max_g": 250, "min_b": 240, "max_b": 250},
+    {"type": "assert_pixel", "x": 312, "y": 150, "min_r": 240, "max_r": 250, "min_g": 240, "max_g": 250, "min_b": 240, "max_b": 250}
+  ]
+}

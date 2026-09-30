@@ -3667,8 +3667,7 @@ static void map_collect_spread_keys(SymbolKeyList* keys, TypeMap* map_type,
         }
         StrView* sv = field->name;
         if (symbol_key_list_contains_name(keys, sv->str, sv->length)) continue;
-        Symbol* sym = heap_create_symbol(sv->str, sv->length);
-        symbol_key_list_append(keys, sym);
+        symbol_key_list_append(keys, name_key_symbol(sv->str, sv->length));
     }
 }
 
@@ -3679,7 +3678,7 @@ static void map_collect_flat_keys(SymbolKeyList* keys, TypeMap* map_type,
         FOR_EACH_MAP_FIELD(map_type, field) {
             if (!field->name) continue;
             StrView* sv = field->name;
-            symbol_key_list_append(keys, heap_create_symbol(sv->str, sv->length));
+            symbol_key_list_append(keys, name_key_symbol(sv->str, sv->length));
         }
         return;
     }
@@ -3750,8 +3749,7 @@ SymbolKeyList* item_keys(Item data) {
             Item key = ItemNull;
             if (element->vtable->element.attrs.key_at(element->data, i, &key) !=
                     VIRTUAL_OP_OK || !is_text_type_id(get_type_id(key))) continue;
-            symbol_key_list_append(keys,
-                heap_create_symbol(key.get_chars(), key.get_len()));
+            symbol_key_list_append(keys, name_key_symbol(key.get_chars(), key.get_len()));
         }
         return keys;
     }

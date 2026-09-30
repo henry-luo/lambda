@@ -1754,6 +1754,10 @@ Binary* heap_binary_copy(Binary* source);
 Binary* heap_binary_concat(Binary* left, Binary* right);
 // Symbol creation for runtime symbols
 Symbol* heap_create_symbol(const char* symbol, size_t len);
+// S2.2.2v2: `symbol.empty`, the one zero-length symbol; static, never GC-managed
+Symbol* symbol_empty(void);
+// a map/attribute name as an iteration key: the empty name is `symbol.empty`
+Symbol* name_key_symbol(const char* name, size_t len);
 #ifdef __cplusplus
 }
 #endif
