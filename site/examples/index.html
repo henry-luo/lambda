@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../favicon.ico" sizes="48x48">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="manifest" href="../site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Examples — Lambda Script</title>
   <meta name="description" content="Lambda Script examples: data transformation, document generation, format conversion, pattern matching, and more.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,7 +48,7 @@
 
     <!-- Example 1 -->
     <h2>Data Pipeline: Filter, Transform, Aggregate</h2>
-<pre><code>// pipeline.ls
+<pre><code>// revenue.ls
 let orders = [
   {product: "Widget",  qty: 5,  price: 9.99},
   {product: "Gadget",  qty: 2,  price: 24.99},
@@ -52,29 +57,34 @@ let orders = [
   {product: "Gadget",  qty: 4,  price: 24.99}
 ]
 
-// Total revenue per product, sorted
-for (o in orders order by o.product)
-  {product: o.product, total: o.qty * o.price}</code></pre>
+// Total revenue per product, sorted by product
+for (o in orders group by o.product into g order by g.product)
+  {product: g.product, total: sum(content(g) |&gt; ~.qty * ~.price)}</code></pre>
     <p class="text-muted" style="font-size: 0.9rem;">Output:</p>
-<pre><code>[
-  {product: "Gadget", total: 49.98},
-  {product: "Gadget", total: 99.96},
-  {product: "Gizmo",  total: 49.99},
-  {product: "Widget", total: 49.95},
-  {product: "Widget", total: 29.97}
-]</code></pre>
+<pre><code>{
+  product: "Gadget",
+  total: 149.94
+}
+{
+  product: "Gizmo",
+  total: 49.99
+}
+{
+  product: "Widget",
+  total: 79.92
+}</code></pre>
 
     <!-- Example 2 -->
     <h2>Vector Arithmetic</h2>
 <pre><code>// vectors.ls
 let prices  = [10, 20, 30, 40, 50]
-let taxRate = 0.08
+let taxRate = 0.08m            // decimal: exact money arithmetic
 
 // Apply tax to all prices at once
 let withTax = prices * (1 + taxRate)
 withTax</code></pre>
     <p class="text-muted" style="font-size: 0.9rem;">Output:</p>
-<pre><code>[10.8, 21.6, 32.4, 43.2, 54.0]</code></pre>
+<pre><code>[10.80, 21.60, 32.40, 43.20, 54.00]</code></pre>
 
     <!-- Example 3 -->
     <h2>HTML Document Generation</h2>
@@ -91,7 +101,7 @@ let page = &lt;html
   &gt;
   &lt;body
     &lt;h1 "Hello from Lambda Script"&gt;
-    &lt;ul (for (item in items) &lt;li item&gt;)&gt;
+    &lt;ul for (item in items) &lt;li item&gt;&gt;
   &gt;
 &gt;
 
@@ -100,25 +110,25 @@ format(page, 'html')</code></pre>
     <!-- Example 4 -->
     <h2>JSON Processing with Queries</h2>
 <pre><code>// query.ls — Process a JSON API response
-let data = input("users.json", 'json')
+let users = input("users.json", 'json')^
 
-// Find all admins
-let admins = data?{role: "admin"} | ~.name
+// Names of all admins
+let admins = [*users?{role: "admin"}] |&gt; ~.name
 
-// Count by role
-for (u in data, let role = u.role)
-  {role, count: len(data that ~.role == role)}</code></pre>
+// Count users by role
+for (u in users group by u.role into g)
+  {role: g.role, count: len(content(g))}</code></pre>
 
     <!-- Example 5 -->
     <h2>Pattern Matching Dispatch</h2>
 <pre><code>// dispatch.ls — Type-safe dispatch with pattern matching
-fn process(input) => match input {
-    case int:                 input * 2
-    case float:               math.floor(input)
-    case string:              len(input)
-    case [number]:            input | ~ * ~ | sum
-    case {name: string}:      "Hello, " ++ input.name
-    case &lt;img src: string&gt;:   "Image: " ++ input.src
+fn process(value) =&gt; match value {
+    case int:                 value * 2
+    case float:               floor(value)
+    case string:              len(value)
+    case number[]:            value |&gt; ~ * ~ |&gt; sum
+    case {name: string}:      "Hello, " ++ value.name
+    case &lt;img src: string&gt;:   "Image: " ++ value.src
     default:                  "Unknown input"
 }
 
@@ -133,12 +143,13 @@ process({name: "Alice"})          // "Hello, Alice"</code></pre>
 <pre><code>// config_schema.ls — Validate server configuration
 type Port = int that (1024 &lt;= ~ &lt;= 65535)
 type LogLevel = "debug" | "info" | "warn" | "error"
+type Positive = int that (~ &gt; 0)
 
 type ServerConfig = {
     host: string,
     port: Port,
     log_level: LogLevel,
-    max_connections: int that (~ &gt; 0),
+    max_connections: Positive,
     tls: {
         enabled: bool,
         cert_file: string?,
@@ -150,13 +161,13 @@ lambda validate config.yaml -s config_schema.ls</code></pre>
 
     <!-- Example 7 -->
     <h2>Markdown → HTML with Custom Layout</h2>
-<pre><code>// render_doc.ls — Read Markdown and wrap in styled HTML
-let doc = input("README.md", 'markdown')
+<pre><code>// render_doc.ls — Read Markdown and wrap it in styled HTML
+let doc = input("README.md", 'markdown')^
 
-// Extract title from first h1
-let title = (doc?&lt;h1&gt;)[0][string]
+// Use the text of the &lt;h1&gt; as the page title
+let title = doc?&lt;h1&gt;[0]
 
-&lt;html
+let page = &lt;html
   &lt;head
     &lt;title title&gt;
     &lt;style "
@@ -165,10 +176,11 @@ let title = (doc?&lt;h1&gt;)[0][string]
       code { font-size: 0.9em; }
     "&gt;
   &gt;
-  &lt;body doc&gt;
-&gt;</code></pre>
+  doc?&lt;body&gt;
+&gt;
+page</code></pre>
 <pre><code># Render to PDF
-lambda render_doc.ls | lambda render -o readme.pdf</code></pre>
+lambda render render_doc.ls -o readme.pdf</code></pre>
 
     <div class="text-center mt-3xl">
       <a href="https://github.com/henry-luo/lambda" class="btn btn-primary" target="_blank" rel="noopener">More on GitHub →</a>

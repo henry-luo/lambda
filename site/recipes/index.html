@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../favicon.ico" sizes="48x48">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="manifest" href="../site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Recipes — Lambda Script</title>
   <meta name="description" content="Task-oriented recipes for Lambda Script: convert formats, validate data, render documents, transform pipelines, and more.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -95,9 +100,11 @@
         <h3>Validate JSON with a schema</h3>
         <p>Define a schema and validate JSON files against it.</p>
 <pre><code>// schema.ls
+type Age = int that (0 &lt;= ~ &lt;= 150)
+
 type User = {
     name: string,
-    age: int that (0 &lt;= ~ &lt;= 150),
+    age: Age,
     email: string?
 }</code></pre>
 <pre><code>lambda validate users.json -s schema.ls</code></pre>
@@ -168,7 +175,7 @@ lambda view https://example.com</code></pre>
         <h3>Filter and sort JSON data</h3>
         <p>Use pipes and for-expressions to query JSON files.</p>
 <pre><code>// filter_users.ls
-let users = input("users.json", 'json')
+let users = input("users.json", 'json')^
 
 // Active users, sorted by age, top 10
 for (u in users
@@ -184,8 +191,9 @@ for (u in users
         <h3>Extract images from Markdown</h3>
         <p>Query the document tree for all image elements.</p>
 <pre><code>// images.ls
-let doc = input("readme.md", 'markdown')
-doc?&lt;img&gt; | ~.src</code></pre>
+let doc = input("readme.md", 'markdown')^
+let images = [*doc?&lt;img&gt;]
+images |&gt; ~.src</code></pre>
 <pre><code>lambda images.ls</code></pre>
       </div>
 
@@ -194,8 +202,8 @@ doc?&lt;img&gt; | ~.src</code></pre>
         <h3>Batch CSV → JSON with filtering</h3>
         <p>Read CSV, filter rows, and output as JSON.</p>
 <pre><code>// csv_filter.ls
-let data = input("sales.csv", 'csv')
-let big = data that ~.amount > 1000
+let data = input("sales.csv", 'csv')^
+let big = data |: int(~.amount) &gt; 1000   // CSV fields are strings
 format(big, 'json')</code></pre>
 <pre><code>lambda csv_filter.ls</code></pre>
       </div>

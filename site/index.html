@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="./favicon.ico" sizes="48x48">
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="manifest" href="./site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Lambda Script — Functional Scripting Language &amp; Document Processing Engine</title>
   <meta name="description" content="Lambda Script: a cross-platform functional scripting language and document processing engine. Parse, validate, transform, and render documents as structured data.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -104,26 +109,29 @@
       </div>
 
       <div class="code-panel active" data-panel="pipes">
-<pre><code><span style="color:#6b7094">// Map: double each element</span>
-[1, 2, 3] | ~ * 2                    <span style="color:#6b7094">// [2, 4, 6]</span>
+<pre><code><span style="color:#7c6ef6">let</span> nums = [1, 2, 3, 4, 5]
+<span style="color:#7c6ef6">let</span> users = [{name: <span style="color:#34d399">"Alice"</span>, age: 30}, {name: <span style="color:#34d399">"Bob"</span>, age: 15}, {name: <span style="color:#34d399">"Carol"</span>, age: 42}]
+
+<span style="color:#6b7094">// Map: double each element</span>
+nums |&gt; ~ * 2                          <span style="color:#6b7094">// [2, 4, 6, 8, 10]</span>
 
 <span style="color:#6b7094">// Extract fields from a collection</span>
-users | ~.name                        <span style="color:#6b7094">// ["Alice", "Bob", "Carol"]</span>
+users |&gt; ~.name                        <span style="color:#6b7094">// ["Alice", "Bob", "Carol"]</span>
 
-<span style="color:#6b7094">// Filter with 'that'</span>
-[1, 2, 3, 4, 5] that ~ > 3           <span style="color:#6b7094">// [4, 5]</span>
+<span style="color:#6b7094">// Filter with |:</span>
+nums |: ~ &gt; 3                          <span style="color:#6b7094">// [4, 5]</span>
 
 <span style="color:#6b7094">// Chain: filter → map → aggregate</span>
-users that ~.age >= 18 | ~.name | len <span style="color:#6b7094">// count adult names</span>
+users |: ~.age &gt;= 18 |&gt; ~.name |&gt; len  <span style="color:#6b7094">// 2 adults</span>
 
 <span style="color:#6b7094">// Vector arithmetic broadcasts automatically</span>
-[1, 2, 3] + 10                        <span style="color:#6b7094">// [11, 12, 13]</span>
-[1, 2] * [3, 4]                       <span style="color:#6b7094">// [3, 8]</span></code></pre>
+nums + 10                              <span style="color:#6b7094">// [11, 12, 13, 14, 15]</span>
+nums * nums                            <span style="color:#6b7094">// [1, 4, 9, 16, 25]</span></code></pre>
       </div>
 
       <div class="code-panel" data-panel="elements">
 <pre><code><span style="color:#6b7094">// First-class markup syntax</span>
-<span style="color:#7c6ef6">let</span> card = &lt;<span style="color:#38bdf8">div</span> class: <span style="color:#34d399">"card"</span>
+<span style="color:#7c6ef6">let</span> card = &lt;<span style="color:#38bdf8">div</span> class: <span style="color:#34d399">"card"</span>,
     &lt;<span style="color:#38bdf8">h2</span> <span style="color:#34d399">"Hello World"</span>&gt;
     &lt;<span style="color:#38bdf8">p</span> <span style="color:#34d399">"Lambda treats documents as data."</span>&gt;
 &gt;
@@ -132,18 +140,18 @@ users that ~.age >= 18 | ~.name | len <span style="color:#6b7094">// count adult
 format(card, <span style="color:#34d399">'html'</span>)
 
 <span style="color:#6b7094">// Parse any format into a unified tree</span>
-<span style="color:#7c6ef6">let</span> doc = input(<span style="color:#34d399">"readme.md"</span>, <span style="color:#34d399">'markdown'</span>)
-<span style="color:#7c6ef6">let</span> data = input(<span style="color:#34d399">"config.yaml"</span>, <span style="color:#34d399">'yaml'</span>)
+<span style="color:#7c6ef6">let</span> doc = input(<span style="color:#34d399">"readme.md"</span>, <span style="color:#34d399">'markdown'</span>)^
+<span style="color:#7c6ef6">let</span> config = input(<span style="color:#34d399">"config.yaml"</span>, <span style="color:#34d399">'yaml'</span>)^
 
 <span style="color:#6b7094">// Query the tree</span>
-doc?&lt;<span style="color:#38bdf8">img</span>&gt;                           <span style="color:#6b7094">// all images in document</span>
-doc?&lt;<span style="color:#38bdf8">a</span> href: string&gt;                 <span style="color:#6b7094">// all links with href</span></code></pre>
+doc?&lt;<span style="color:#38bdf8">img</span>&gt;                           <span style="color:#6b7094">// all images in the document</span>
+doc?&lt;<span style="color:#38bdf8">a</span> href: string&gt;                <span style="color:#6b7094">// all links with an href</span></code></pre>
       </div>
 
       <div class="code-panel" data-panel="types">
 <pre><code><span style="color:#6b7094">// Type annotations</span>
 <span style="color:#7c6ef6">let</span> x: int = 42
-<span style="color:#7c6ef6">let</span> items: [string] = [<span style="color:#34d399">"a"</span>, <span style="color:#34d399">"b"</span>]
+<span style="color:#7c6ef6">let</span> items: string[] = [<span style="color:#34d399">"a"</span>, <span style="color:#34d399">"b"</span>]
 
 <span style="color:#6b7094">// Union and optional types</span>
 <span style="color:#7c6ef6">type</span> Result = int | error
@@ -151,31 +159,33 @@ doc?&lt;<span style="color:#38bdf8">a</span> href: string&gt;                 <s
 
 <span style="color:#6b7094">// Object types with methods</span>
 <span style="color:#7c6ef6">type</span> Point {
-    x: float, y: float;
+    x: float, y: float,
     <span style="color:#7c6ef6">fn</span> distance(other: Point) =&gt;
         math.sqrt((x - other.x)**2 + (y - other.y)**2)
 }
 
 <span style="color:#6b7094">// Element type patterns for document schemas</span>
-<span style="color:#7c6ef6">type</span> Link = &lt;a href: string; string&gt;
-<span style="color:#7c6ef6">type</span> Article = &lt;article title: string; string, Section*&gt;</code></pre>
+<span style="color:#7c6ef6">type</span> Section = &lt;<span style="color:#38bdf8">section</span> string*&gt;
+<span style="color:#7c6ef6">type</span> Link = &lt;<span style="color:#38bdf8">a</span> href: string, string&gt;
+<span style="color:#7c6ef6">type</span> Article = &lt;<span style="color:#38bdf8">article</span> title: string, string, Section*&gt;</code></pre>
       </div>
 
       <div class="code-panel" data-panel="for">
-<pre><code><span style="color:#6b7094">// Filter and transform with for-expressions</span>
-<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> data <span style="color:#7c6ef6">where</span> x &gt; 0) x * 2
+<pre><code><span style="color:#7c6ef6">let</span> products = [{name: <span style="color:#34d399">"pen"</span>, price: 2}, {name: <span style="color:#34d399">"lamp"</span>, price: 30}, {name: <span style="color:#34d399">"book"</span>, price: 12}]
+<span style="color:#7c6ef6">let</span> sales = [{region: <span style="color:#34d399">"east"</span>, amount: 120}, {region: <span style="color:#34d399">"west"</span>, amount: 80}, {region: <span style="color:#34d399">"east"</span>, amount: 50}]
+
+<span style="color:#6b7094">// Filter and transform with for-expressions</span>
+<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> [3, -1, 4, -5, 9] <span style="color:#7c6ef6">where</span> x &gt; 0) x * 2          <span style="color:#6b7094">// [6, 8, 18]</span>
 
 <span style="color:#6b7094">// With local bindings</span>
-<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> data, <span style="color:#7c6ef6">let</span> sq = x * x <span style="color:#7c6ef6">where</span> sq &gt; 10) sq
+<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> 1 to 10, <span style="color:#7c6ef6">let</span> sq = x * x <span style="color:#7c6ef6">where</span> sq &gt; 50) sq     <span style="color:#6b7094">// [64, 81, 100]</span>
 
 <span style="color:#6b7094">// Sorting and pagination</span>
-<span style="color:#7c6ef6">for</span> (x <span style="color:#7c6ef6">in</span> items <span style="color:#7c6ef6">order by</span> x.price <span style="color:#7c6ef6">desc</span> <span style="color:#7c6ef6">limit</span> 5) x.name
+<span style="color:#7c6ef6">for</span> (p <span style="color:#7c6ef6">in</span> products <span style="color:#7c6ef6">order by</span> p.price <span style="color:#7c6ef6">desc</span> <span style="color:#7c6ef6">limit</span> 2) p.name <span style="color:#6b7094">// ["lamp", "book"]</span>
 
 <span style="color:#6b7094">// Grouping and aggregation</span>
-<span style="color:#7c6ef6">for</span> (u <span style="color:#7c6ef6">in</span> users <span style="color:#7c6ef6">where</span> u.active
-     <span style="color:#7c6ef6">order by</span> u.age <span style="color:#7c6ef6">desc</span>
-     <span style="color:#7c6ef6">limit</span> 10 <span style="color:#7c6ef6">offset</span> 5)
-  {name: u.name, age: u.age}</code></pre>
+<span style="color:#7c6ef6">for</span> (s <span style="color:#7c6ef6">in</span> sales <span style="color:#7c6ef6">group by</span> s.region <span style="color:#7c6ef6">into</span> g)
+  {region: g.region, total: sum(content(g) |&gt; ~.amount)} <span style="color:#6b7094">// east 170, west 80</span></code></pre>
       </div>
 
       <div class="code-panel" data-panel="match">
@@ -185,14 +195,15 @@ doc?&lt;<span style="color:#38bdf8">a</span> href: string&gt;                 <s
     <span style="color:#7c6ef6">case</span> 1 to 9:           <span style="color:#34d399">"small number"</span>
     <span style="color:#7c6ef6">case</span> int that (~ &gt; 9): <span style="color:#34d399">"big number"</span>
     <span style="color:#7c6ef6">case</span> string:           <span style="color:#34d399">"text: "</span> ++ ~
-    <span style="color:#7c6ef6">case</span> [int]:            <span style="color:#34d399">"int array"</span>
+    <span style="color:#7c6ef6">case</span> int[]:            <span style="color:#34d399">"int array"</span>
     <span style="color:#7c6ef6">default</span>:               <span style="color:#34d399">"something else"</span>
 }
 
 <span style="color:#6b7094">// Query operator — like jQuery for data trees</span>
+<span style="color:#7c6ef6">let</span> html = input(<span style="color:#34d399">"page.html"</span>, <span style="color:#34d399">'html'</span>)^
 html?&lt;<span style="color:#38bdf8">img</span>&gt;                    <span style="color:#6b7094">// all images</span>
-html?&lt;<span style="color:#38bdf8">div</span> class: string&gt;      <span style="color:#6b7094">// divs with class</span>
-data?{status: <span style="color:#34d399">"ok"</span>}           <span style="color:#6b7094">// maps with status=="ok"</span></code></pre>
+html?&lt;<span style="color:#38bdf8">div</span> class: string&gt;      <span style="color:#6b7094">// divs with a class</span>
+html?&lt;<span style="color:#38bdf8">div</span>&gt;?&lt;<span style="color:#38bdf8">a</span>&gt;                <span style="color:#6b7094">// links nested inside divs</span></code></pre>
       </div>
     </div>
   </div>
