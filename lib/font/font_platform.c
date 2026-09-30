@@ -281,7 +281,10 @@ void scan_windows_registry_fonts(FontDatabase* db) {
     char font_name[256];
     char font_file[260];
     DWORD name_size, file_size;
+#ifndef NDEBUG
+    // release strips info logs, so count only when the scan diagnostic is emitted.
     int added = 0;
+#endif
 
     while (1) {
         name_size = sizeof(font_name);
@@ -349,14 +352,18 @@ void scan_windows_registry_fonts(FontDatabase* db) {
                     entry->family_name = arena_strdup(db->arena, reg_family[0] ? reg_family : "Unknown");
                     entry->file_size = (size_t)file_stat.st_size;
                     arraylist_append(db->all_fonts, entry);
+#ifndef NDEBUG
                     added++;
+#endif
                 }
             }
         }
     }
 
     RegCloseKey(hkey);
+#ifndef NDEBUG
     log_info("scan_windows_registry_fonts: added %d fonts from registry", added);
+#endif
 }
 
 /**
