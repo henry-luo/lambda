@@ -3256,9 +3256,10 @@ static VirtualOpStatus element_attr_key_at_for(Item item, int64_t index, Item* o
     }
     ShapeEntry* field = materialized_element_attr_at(item.element, index);
     if (!field || !field->name || !out) return field ? VIRTUAL_OP_ERROR : VIRTUAL_OP_MISSING;
-    Symbol* key = heap_create_symbol(field->name->str, field->name->length);
+    Symbol* key = name_key_symbol(field->name->str, field->name->length);
     if (!key) return VIRTUAL_OP_ERROR;
-    key->ns = field->ns;
+    // symbol.empty is shared and immutable; only a heap key carries the namespace
+    if (key != symbol_empty()) key->ns = field->ns;
     *out = {.item = y2it(key)};
     return VIRTUAL_OP_OK;
 }
@@ -6779,6 +6780,16 @@ Item fn_member(Item item, Item key) {
         // lookup; route them through the existing indexed-array helper.
         if (lambda_item_to_int64_exact(key, &index)) {
             return item_at(item, index);
+        }
+        return ItemNull;
+    }
+    case LMD_TYPE_TYPE: {
+        // S2.2.2v2: `symbol.empty` names the one zero-length symbol
+        TypeType* type_value = (TypeType*)item.type;
+        if (type_value && type_value->type && type_value->type->type_id == LMD_TYPE_SYMBOL &&
+                is_text_type_id(key._type_id) && key.get_len() == 5 &&
+                strncmp(key.get_chars(), "empty", 5) == 0) {
+            return {.item = y2it(symbol_empty())};
         }
         return ItemNull;
     }

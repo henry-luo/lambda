@@ -394,7 +394,10 @@ struct PrintItemVisitor {
 
     void operator()(lam::ItemOf<LMD_TYPE_SYMBOL> item) const {
         Symbol* symbol = item.ptr();
-        if (symbol) {
+        if (symbol && symbol->len == 0) {
+            // '' is no literal (S2.2.2v2); print the constant's name
+            strbuf_append_str(strbuf, "symbol.empty");
+        } else if (symbol) {
             print_quoted_text(strbuf, symbol->chars, symbol->len, '\'', depth > 0);
         } else {
             print_quoted_text(strbuf, "", 0, '\'', depth > 0);

@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 51.0.0 (2026-09-29)
+**Spec version:** 52.0.0 (2026-09-30)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -235,10 +235,13 @@ harnesses.
 
 - **S2.2.1** `""` is a genuine `string` with `len 0`. `"" == null` is false;
   `"" is string` is true. [C1]
-- **S2.2.2** `symbol` and `binary` are **solid types**: every value has
-  `len ≥ 1`. The literals `''` and `b''` do not exist — writing them is a
-  compile error; runtime operations that would produce a zero-length symbol or
-  binary produce `null`. [C1, C1.6a]
+- **S2.2.2v2** `symbol` and `binary` are **solid types**: every value has
+  `len ≥ 1` — with one predefined exception, `symbol.empty`, the zero-length
+  symbol that stands for the empty name (S8.2.2v3). The literals `''` and
+  `b''` do not exist — writing them is a compile error, and `symbol.empty`
+  prints by its name; runtime operations that would produce a zero-length
+  symbol or binary still produce `null` (`symbol("")` is `null`). [C1, C1.6a,
+  C1.6b]
 - **S2.2.3** Element construction normalizes empty text: `<e "">` ≡ `<e>` — a
   tree-construction rule (the XDM position), independent of string equality;
   one case of the content model's S2.6.2. [C1]
@@ -303,7 +306,7 @@ harnesses.
   spelling is retired with the divider `;`.
   Static specialization and generic dynamic lookup must be semantically
   identical; the scheme introduces no mutable reference identity. [S1.6,
-  S5.1.4v2, S8.2.2v2, S9.1.5v2, S16.9.3, S16.9.4, PTH13–PTH15, PTH16v3, PTH20]
+  S5.1.4v2, S8.2.2v3, S9.1.5v2, S16.9.3, S16.9.4, PTH13–PTH15, PTH16v3, PTH20]
 - **S2.4.4*** Each evaluation's immutable resolver deterministically maps
   logical `/` prefixes, namespaces, and provider aliases to qualified roots.
   Resolution obeys lexical visibility, exports, sandboxing, and capabilities;
@@ -1101,7 +1104,7 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   The axis still decides membership, so the paired forms are not synonyms —
   on an element `for (k, v at e)` yields attribute pairs only, while
   `for (k, v in e)` also walks children; on an array `for (k, v at a)` is
-  empty because an `IntKey` is not a name (S8.2.2v2). S8.1.1's mirror law is
+  empty because an `IntKey` is not a name (S8.2.2v3). S8.1.1's mirror law is
   unaffected: it equates the single-name iteration with membership on the same
   axis, and the paired form walks that identical member set. [C5.3a]
 
@@ -1130,12 +1133,15 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   reaching the type's methods before yielding `null`.
   `for (k, v in c)` exposes the resulting canonical key uniformly
   (`[for (k, v in [10,20]) k]` → `[0, 1]`). [C5.3b, C8.6a]
-- **S8.2.2v2*** A *name* is a `NameKey`: string and symbol subscripts with the
+- **S8.2.2v3*** A *name* is a `NameKey`: string and symbol subscripts with the
   same exact contents normalize to the same name, including the empty name.
-  `at` ranges over names, so
+  Iteration exposes the empty name as `symbol.empty` (S2.2.2v2), so
+  `for (k, v in {"": 1})` yields `k == symbol.empty` and `len` still counts
+  every name the walk yields; `m[symbol.empty]` reads it. `at` ranges over
+  names, so
   `1 at [10, 20, 30]` is **false** — the narrower reading is what lets
   `for (k at e)` give an element's attributes without its children; an index
-  bound is written `i < len(arr)`. [C5.3b; §8.0.1 record]
+  bound is written `i < len(arr)`. [C5.3b, C1.6b; §8.0.1 record]
 - **S8.2.3*** **Methods are members of the type, never of the value.** An
   object's key domain is its attributes and content; its methods live on the
   type value `T`. Everything that walks the key domain — `in`, `at`,
@@ -2320,7 +2326,7 @@ below by its section.
   attribute list admits an entry whose key is a bracketed expression, chosen
   for symmetry with the dynamic read `m[expr]` (S12.3.3v2): `{[k]: v}`
   defines what `m[k]` reads. `expr` must yield a name (string or symbol,
-  S8.2.2v2); any other value is an error, as the literal `{1: v}` is — the
+  S8.2.2v3); any other value is an error, as the literal `{1: v}` is — the
   key domain is unchanged and a computed key never makes a `VMap`. Entries
   evaluate left to right and a later entry wins, as with `*: m` spread; a
   literal holding a computed key builds its shape at run time exactly as a
@@ -2584,7 +2590,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.10.5v2 (v1 residue) | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
 | S7.1.1v3, S7.10.5v3 (numeric functions, unary operators) | **Conformant as of 2026-09-23 (USER ruling), both tiers.** A `null` argument makes a numeric function's result `null` -- `math.*`, `abs`/`round`/`floor`/`ceil`/`trunc`/`sign`, the scalar `min`/`max` pair, `clip` and `**` -- and so does the unary `-`/`+`; every one of them had returned `error`. The JIT's native libm, rounding and unary lowerings now test the argument's lane null: they had computed on the sentinel's bits, giving NaN for a `float[]` read out of range and, for an `int[]` read, the routine applied to 0.0 (`math.sqrt` gave 0, `-a[i]` gave -inf). `a[i] / 2` on an `int[]` read is null, not 0; a nullable float result boxes as null wherever it escapes (it printed as NaN, typed `int`); and a failed reassignment into a declared `float` is reported naming the binding on both tiers (S7.7.4). A `REAL_TO_FLOAT` sys-func result is typed `float` only when every argument is real (`math.pow(2, [1, 2])` had been typed `float` and unboxed as NaN). Fixtures: `proc/null_numeric_propagation.ls`, `negative/runtime/null_numeric_reassign_float.ls`. **Residue:** an untyped binding of a nullable float result (`let x = v[i] + 1.0`, or `var t = 0.0` reassigned `t + v[i]`) still loses the null on the JIT, because arithmetic inference drops D2.5.3's `?` and nothing marks the binding's lane nullable. |
 | S7.11.4 | Exec recovery implemented on POSIX. **Blocking hazard H1**: batch mode overwrites the stack-overflow handler, so fault capture differs between batch and standalone runs. Windows SEH never exercised. |
-| S8.2.1v4, S8.2.2v2, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains (the v4 object face is not built — see the S2.1.3v2 row), including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. VMap additionally admits its two canonical NameKey/IntKey classes and rejects fractional/poison keys. Specialized editor/host access sites still need the same audit. Empty-string map keys are now semantically valid, but their known JSON round-trip corruption remains to be fixed. `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v2 (this row previously recorded it as still true). |
+| S8.2.1v4, S8.2.2v3, S9.1.6 | Core MIR Direct and AST-interpreter computed access now enforce fixed array/map/element key domains (the v4 object face is not built — see the S2.1.3v2 row), including exact integral float/decimal normalization, empty-string names, and no array-to-map promotion. VMap additionally admits its two canonical NameKey/IntKey classes and rejects fractional/poison keys. Specialized editor/host access sites still need the same audit. Empty-string map keys are semantically valid and round-trip through JSON; since 2026-09-30 every key walk (`for … in`/`at`, host VMap/VElmt keys) yields the empty name as `symbol.empty`, so `len` and iteration agree (`test/lambda/symbol_empty.ls`). `at` membership now conforms: `1 at [10,20,30]` is false, matching S8.2.2v3 (this row previously recorded it as still true). |
 | S8.1.3 | **Conformant as of 2026-08-24.** The paired `at` form bound both names to the key (a silent wrong answer); fixed in `build_ast`, one fix covering both tiers. Full record: [LR02-R9](../vibe/Lambda_Issue_Ledger.md). |
 | S8.3.2 | Streams (and hence stream `len`) not implemented. |
 | S9.1.3, S9.1.4, S9.2.2–S9.2.4 | COW Stage 1 landed (`let`-finality real for Array/Map/Object/Element/VMap — **and, as of CW32v2 2026-08-29 on `nm-impl-work`, for plain ArrayNum**: binding aliases are O(1) mark-and-share, the eager bind clone is retired, marked roots' lane stores consult the shared bit once per store, and mask writes go through a preparing wrapper; fixture `cow_arraynum_alias.ls`, exact tier parity; mutable write-through views deliberately excluded — open/todo). Stage 2 pending: exclusivity checks (faces 1+3+4 landed, face 2 unreachable behind `E229`), capture-assignment compile errors, view-borrow confinement. The **module-`var` half of S9.2.4 needs no work** — it is vacuous by construction (S9.2.4v2); only the view-state half is outstanding. `var` params parse and mutate the caller's value today, but a *plain* param does so too — the snapshot half of S9.1.3 is **UNCONDITIONAL since the 2026-08-29 flip** (escape hatch retired; `is_proc_param` deleted) (CW29, COW doc §11.9; current tree): both tiers snapshot mutated plain params — flat, nested-path, and array writes all stay local (fixture `cow_param_snapshot.ls`); `var` is the sole write-through construct. Migration outcome: the 88-script sweep ceiling collapsed to **13 actual reliance sites** (7 ABI-pinning proc tests, 6 benchmarks — the SOM PRNG/out-param idiom), all migrated to `var` with goldens unchanged. **Mutated place-copy binds mark their value** (`var row = m.rows[i]` followed by a write through `row` is a true S9.1.2 snapshot on both tiers: the first write detaches), closing the get-modify aliasing half of C4.1; an UNMUTATED place copy stays a borrow — observationally identical to a copy (P6) — and expression-position reads still borrow, unobservable since no write occurs through an unnamed temporary. With CW32v2 landed, ArrayNum-through-plain-param snapshots too (probed both tiers); the residual write-through is only the declared typed-array *native-witness* path, whose raw pointer feeds a native body. |

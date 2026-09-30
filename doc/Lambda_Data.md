@@ -209,6 +209,11 @@ The empty symbol literal `''` is not valid syntax. Symbols are solid identifier
 values with length at least 1; runtime operations that would produce an empty
 symbol return `null`.
 
+The one exception is the predefined constant `symbol.empty`, which stands for
+the empty name. A map or document can carry an empty key (JSON `{"": 1}`, a
+`.properties` line `=value`); iterating it yields `symbol.empty` as that key,
+and `m[symbol.empty]` reads it (S2.2.2v2, S8.2.2v3).
+
 **Symbol vs String**:
 - Symbols are interned (only one copy exists in memory)
 - Comparison is O(1) pointer equality

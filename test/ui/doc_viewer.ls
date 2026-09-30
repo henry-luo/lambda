@@ -1153,7 +1153,8 @@ on mouseup(evt) {
       .csv-more:hover { background: #e7f0fb; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
-      .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
+      /* an iframe is replaced: inset:0 alone keeps its 150px intrinsic height (CSS 2.1 §10.6.5) */
+      .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; height: 100%; border: 0; display: block; background: #fff; }
       .document-tabs { flex: 0 0 auto; display: flex; gap: 2px; justify-content: flex-end;
                        padding: 7px 18px; border-top: 1px solid #e2e6ec; background: #fbfcfe; }
       .document-tab { padding: 5px 11px; border: 0; border-radius: 5px; background: transparent;

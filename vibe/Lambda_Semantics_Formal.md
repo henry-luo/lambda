@@ -454,6 +454,21 @@ is unchanged: zero-length symbols/binaries still cannot exist; runtime
 producers (slices, conversions) still yield null. `b''` included for symmetry
 (review recommendation, same rationale). Implementation: impl plan item 3.3.
 
+#### C1.6b Amendment (designer, 2026-09-30): `symbol.empty` names the empty key
+
+S8.2.2v2 admitted the empty name as a map key, but iteration had no key to
+hand out for it: keys are symbols, and a zero-length symbol could not exist, so
+`for (k, v in {"": 1})` silently skipped the entry while `len` counted it. The
+options weighed: yield `null` (the literal reading of C1.6a, but indistinguishable
+from an absent key), yield the string `""` (keys change kind in exactly one case),
+or keep skipping (breaks the `len` = walk-count law). **Ruled: a predefined
+symbol, `symbol.empty`** — the one zero-length symbol, reachable only as that
+constant and as the key every walk yields for the empty name. It prints by its
+name because `''` stays banned; `symbol("")` and other runtime producers still
+yield `null`, so the solid-type invariant holds everywhere else. Formalized as
+S2.2.2v2 + S8.2.2v3 (spec v52.0.0). Surfaced by Java `.properties` input, whose
+`=value` lines carry an empty key.
+
 #### C1.7 Deferred follow-ups
 
 1. **Truthiness of `""`** — review recommends falsy (preserves the one-check
@@ -464,7 +479,8 @@ producers (slices, conversions) still yield null. `b''` included for symmetry
 3. Fixture and stdlib migration: audit for reliance on `"" == null` (note: code
    comparing *data-derived* empties to `""` or `null` is already broken today, so
    part of the migration is bug-fixing).
-4. Empty JSON keys: `{"": 1}` currently round-trips as `{"''": 1}` (corruption);
+4. *(Resolved by C1.6b, 2026-09-30: the empty name iterates as `symbol.empty`;
+   JSON round-trips `""`.)* Empty JSON keys: `{"": 1}` currently round-trips as `{"''": 1}` (corruption);
    with `'' ≡ null` retained for symbols, map keys from data need a defined answer
    (e.g. string keys for non-identifier keys).
 5. Whether `b''` merits revisiting separately once file/network I/O semantics are

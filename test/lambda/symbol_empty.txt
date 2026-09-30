@@ -1,0 +1,18 @@
+'=== constant ==='
+symbol.empty
+symbol
+0
+true
+true
+true
+true
+'=== json empty key ==='
+true
+['a', symbol.empty]
+['a', symbol.empty]
+[1, 2]
+2
+true
+'=== properties empty key ==='
+['a.b', symbol.empty]
+"root"
