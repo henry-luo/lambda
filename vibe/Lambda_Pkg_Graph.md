@@ -1399,10 +1399,11 @@ history states, richer state-description markup, and `hide empty description`
 remain state follow-up work. Requirement, architecture, block, and mindmap
 adapters also remain subsequent Stage 2E tranches. Chart-oriented family
 dispatch rejects the remaining unsupported families with structured ownership
-diagnostics. Basic sequence participants, messages, loops, and side notes render
-through `lambda.chart`; activations, alternate/parallel blocks, and further
-sequence syntax remain chart follow-up work alongside Gantt, pie, Sankey,
-timeline, and XY support.
+diagnostics. Sequence participants, messages, loops, over/side notes, activation
+bars, and alternate/parallel blocks render through `lambda.chart` (D7.2.4).
+Further sequence syntax remains chart follow-up work alongside Gantt, pie,
+Sankey, timeline, and XY support. The ordered sequence IR records branch and
+activation events so their visual scope survives graph normalization.
 
 ## 19. Stage 3 - Graphviz DOT Support
 

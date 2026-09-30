@@ -89,6 +89,8 @@ fn edge_spec() => {
       "Graph edge requires a 'to' endpoint"),
     attr("label", "text"),
     attr("label-format", "text", false, ["text", "markdown", "html"]),
+    attr("relation", "text"), attr("activation", "text", false,
+      ["start", "end"]),
     attr("from-port", "text"), attr("to-port", "text"),
     attr("from-compass", "text"), attr("to-compass", "text"), attr("source-id", "text"),
     attr("directed", "boolish"), attr("arrow-head", "text"),
@@ -160,8 +162,10 @@ fn constraint_spec() => {
 
 fn metadata_spec(value_tag) {
   if (value_tag == "sequence-block") {
-    {attrs: [*common_attrs(), attr("kind", "text", true, ["loop"]),
-      attr("phase", "text", true, ["start", "end"]), attr("label", "text")],
+    {attrs: [*common_attrs(), attr("kind", "text", true,
+        ["loop", "alt", "par"]),
+      attr("phase", "text", true, ["start", "branch", "end"]),
+      attr("label", "text")],
       children: [], open_children: false, scalar_children: false}
   }
   else if (value_tag == "style-rule") {
@@ -190,6 +194,7 @@ fn metadata_spec(value_tag) {
     {attrs: [*common_attrs(), attr("owner-kind", "text", true,
         ["graph", "subgraph", "node", "edge"]), attr("owner-id", "text", true),
       attr("kind", "text", true), attr("label", "text", true),
+      attr("to-id", "text"),
       attr("label-format", "text", false, ["text", "markdown", "html"]),
       attr("font-name", "text"), attr("font-size", "number"),
       attr("font-color", "text"), attr("z", "integerish")],

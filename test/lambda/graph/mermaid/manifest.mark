@@ -205,6 +205,24 @@
       <sequence-block kind: 'loop', phase: 'start', label: 'HealthCheck'>
     >
   >
+  <case id: 'sequence-diagram-branches', source: 'sequence_diagram2.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir',
+      features: 'sequence-notes,alt,par,activation,async-messages';
+    <expect kind: 'sequence', nodes: 5, edges: 10, annotations: 2,
+        sequence-blocks: 6;
+      <node id: 'web', label: 'Web Browser'>
+      <node id: 'db', label: 'Storage'>
+      <edge from: 'web', to: 'account', label: 'Logs in using credentials',
+        relation: '->>', activation: 'start'>
+      <edge from: 'blog', to: 'mail', label: 'Send mail to blog subscribers',
+        relation: '--)'>
+      <edge from: 'blog', to: 'web', label: 'Successfully posted',
+        relation: '-->>', activation: 'end'>
+      <annotation owner-kind: 'node', owner-id: 'web', to-id: 'db',
+        kind: 'note-over', label: 'The user must be logged in to submit blog posts'>
+      <sequence-block kind: 'alt', phase: 'start', label: 'Credentials not found'>
+    >
+  >
   <case id: 'upstream-single-diamond',
       source: 'cases/flowchart/nodes/upstream_single_diamond.mmd',
       origin: 'mermaid', status: 'baseline', policy: 'scene-semantic',
