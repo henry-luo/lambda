@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "S5.1.1–S5.1.2/S7.1.1v3: a witnessed string[] element read compares strings through the pointer helper while nullable reads retain fn_eq/fn_ne.",
+  "checks": [
+    {
+      "in_func": "_same_#",
+      "expect_seq": [
+        { "pattern": "and\t{{r}}, {{r}}, -72057594037927936" },
+        { "pattern": "bne\tL" },
+        "fn_str_eq_ptr_p, fn_str_eq_ptr",
+        "fn_eq_p, fn_eq"
+      ]
+    },
+    {
+      "in_func": "_different_#",
+      "expect": ["fn_str_eq_ptr_p, fn_str_eq_ptr", "fn_ne_p, fn_ne"]
+    }
+  ]
+}

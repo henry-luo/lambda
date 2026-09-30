@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "description": "P4 / D4.4.4v4 / S9.1.2: aligned int and packed bool leaves use guarded raw stores, while an unaligned int leaf and failed ownership guards retain checked COW stores.",
+  "checks": [
+    {
+      "in_func": "_update_#",
+      "expect": [
+        "mov\ti64:({{r}}), {{r}}",
+        "mov\tu8:8({{r}}), {{r}}",
+        "call\tlambda_map_path_set_checked_keys_p, lambda_map_path_set_checked_keys"
+      ],
+      "count": {
+        "call\tlambda_map_path_set_checked_keys_p, lambda_map_path_set_checked_keys": 3
+      }
+    }
+  ]
+}

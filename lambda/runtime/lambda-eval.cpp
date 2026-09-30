@@ -28,6 +28,9 @@
 #include <time.h>
 #include <errno.h>  // for errno checking
 #include <math.h>
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
 #if _WIN32
 #include <windows.h>
 #include <process.h>
@@ -10006,7 +10009,70 @@ typedef struct CowProfileCounters {
 
 static CowProfileCounters g_cow_profile = {};
 static int g_cow_profile_enabled = -1;
+static bool g_cow_profile_sites_enabled = false;
 static bool g_cow_profile_registered = false;
+
+typedef enum CowProfileSiteEvent {
+    COW_SITE_SHARE_MARK,
+    COW_SITE_UNIQUE_WRITE,
+    COW_SITE_SHARED_COPY,
+} CowProfileSiteEvent;
+
+typedef struct CowProfileSiteCounters {
+    uint8_t state;
+    uintptr_t caller;
+    uint64_t count;
+    uint64_t bytes;
+    TypeId type_id;
+    CowProfileSiteEvent event;
+} CowProfileSiteCounters;
+
+// Diagnostic-only bounded census. Ordinary release code never touches this
+// table; a full table reports overflow rather than silently losing totals.
+static CowProfileSiteCounters g_cow_profile_sites[16384] = {};
+static uint64_t g_cow_profile_site_overflow = 0;
+static_assert(__atomic_always_lock_free(sizeof(uint8_t), 0) &&
+              __atomic_always_lock_free(sizeof(uint64_t), 0),
+    "COW diagnostic counters must lower to non-calling atomic instructions");
+#if defined(__GNUC__) || defined(__clang__)
+#define COW_PROFILE_CALLER() ((uintptr_t)__builtin_extract_return_addr(__builtin_return_address(0)))
+#else
+#define COW_PROFILE_CALLER() ((uintptr_t)0)
+#endif
+
+static void cow_profile_note_site(CowProfileSiteEvent event, TypeId type_id,
+        uintptr_t caller, uint64_t count, uint64_t bytes = 0) {
+    if (!g_cow_profile_sites_enabled) return;
+    if (!count) return;
+    uintptr_t hash = caller ^ ((uintptr_t)type_id << 5) ^
+        ((uintptr_t)event * UINT64_C(0x9e3779b97f4a7c15));
+    for (size_t probe = 0; probe < 16384; probe++) {
+        CowProfileSiteCounters* site = &g_cow_profile_sites[(hash + probe) & 16383];
+        uint8_t state = __atomic_load_n(&site->state, __ATOMIC_ACQUIRE);
+        if (state == 0) {
+            uint8_t empty = 0;
+            if (__atomic_compare_exchange_n(&site->state, &empty, 1, false,
+                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                site->caller = caller;
+                site->type_id = type_id;
+                site->event = event;
+                __atomic_store_n(&site->state, 2, __ATOMIC_RELEASE);
+                state = 2;
+            } else {
+                state = empty;
+            }
+        }
+        while (state == 1) state = __atomic_load_n(&site->state, __ATOMIC_ACQUIRE);
+        if (site->caller != caller || site->type_id != type_id ||
+                site->event != event) {
+            continue;
+        }
+        __atomic_fetch_add(&site->count, count, __ATOMIC_RELAXED);
+        __atomic_fetch_add(&site->bytes, bytes, __ATOMIC_RELAXED);
+        return;
+    }
+    __atomic_fetch_add(&g_cow_profile_site_overflow, count, __ATOMIC_RELAXED);
+}
 
 static bool cow_profile_truthy(const char* value) {
     return value && value[0] && strcmp(value, "0") != 0 &&
@@ -10017,6 +10083,8 @@ static bool cow_profile_truthy(const char* value) {
 static bool cow_profile_enabled(void) {
     if (g_cow_profile_enabled >= 0) return g_cow_profile_enabled != 0;
     g_cow_profile_enabled = cow_profile_truthy(getenv("COW_EXEC_PROFILE")) ? 1 : 0;
+    g_cow_profile_sites_enabled = g_cow_profile_enabled &&
+        cow_profile_truthy(getenv("COW_EXEC_PROFILE_SITES"));
     if (g_cow_profile_enabled && !g_cow_profile_registered) {
         // Register once so a release benchmark can emit its counters without
         // putting any output or allocation into the raw mutation path.
@@ -10024,6 +10092,11 @@ static bool cow_profile_enabled(void) {
         g_cow_profile_registered = true;
     }
     return g_cow_profile_enabled != 0;
+}
+
+bool cow_profile_sites_enabled(void) {
+    (void)cow_profile_enabled();
+    return g_cow_profile_sites_enabled;
 }
 
 static void string_profile_note(StringBuilderCounter counter, uint64_t count) {
@@ -10197,6 +10270,190 @@ void cow_profile_dump(void) {
         log_error("cow profile: failed to write '%s'", output_path);
     }
     strbuf_free(output);
+
+    if (!g_cow_profile_sites_enabled) return;
+    const char* sites_path = getenv("COW_EXEC_PROFILE_SITES_OUT");
+    if (!sites_path || !sites_path[0]) sites_path = "temp/cow_exec_sites.tsv";
+    StrBuf* sites = strbuf_new();
+    if (!sites) return;
+    strbuf_append_str(sites, "event\ttype\tcaller_pc\tcount\tbytes\tnative_symbol\tsymbol_offset\n");
+    uint64_t site_counts[LMD_TYPE_COUNT][3] = {};
+    uint64_t site_bytes[LMD_TYPE_COUNT][3] = {};
+    for (size_t index = 0; index < 16384; index++) {
+        CowProfileSiteCounters* site = &g_cow_profile_sites[index];
+        if (__atomic_load_n(&site->state, __ATOMIC_ACQUIRE) != 2 ||
+                !site->count) continue;
+        const char* event = site->event == COW_SITE_SHARE_MARK ? "share_mark" :
+            site->event == COW_SITE_UNIQUE_WRITE ? "unique_write" : "shared_copy";
+        const char* symbol = "";
+        uintptr_t symbol_offset = 0;
+#if !defined(_WIN32)
+        Dl_info info = {};
+        if (site->caller && dladdr((void*)site->caller, &info) && info.dli_sname) {
+            symbol = info.dli_sname;
+            symbol_offset = site->caller - (uintptr_t)info.dli_saddr;
+        }
+#endif
+        strbuf_append_format(sites, "%s\t%s\t0x%llx\t%llu\t%llu\t%s\t0x%llx\n",
+            event, get_type_name(site->type_id),
+            (unsigned long long)site->caller,
+            (unsigned long long)site->count,
+            (unsigned long long)site->bytes, symbol,
+            (unsigned long long)symbol_offset);
+        if (site->type_id < LMD_TYPE_COUNT) {
+            site_counts[site->type_id][site->event] += site->count;
+            site_bytes[site->type_id][site->event] += site->bytes;
+        }
+    }
+    // Runtime-only calls have no MIR return PC. Keep their aggregate as a
+    // visible fallback so the site census never silently drops COW work.
+    for (int type = 0; type < LMD_TYPE_COUNT; type++) {
+        const CowProfileTypeCounters* counters = &g_cow_profile.by_type[type];
+        const uint64_t totals[] = {counters->share_marks,
+            counters->unique_mutations, counters->shared_copies};
+        const char* events[] = {"share_mark", "unique_write", "shared_copy"};
+        for (int event = 0; event < 3; event++) {
+            uint64_t total_bytes = event == COW_SITE_SHARED_COPY
+                ? counters->copied_bytes : 0;
+            if (totals[event] < site_counts[type][event] ||
+                    total_bytes < site_bytes[type][event]) {
+                log_error("cow profile sites: site totals exceed aggregate for type %d event %d",
+                    type, event);
+                continue;
+            }
+            uint64_t missing = totals[event] - site_counts[type][event];
+            uint64_t missing_bytes = total_bytes - site_bytes[type][event];
+            if (missing || missing_bytes) {
+                strbuf_append_format(sites, "%s\t%s\t0x0\t%llu\t%llu\t\t0x0\n",
+                    events[event], get_type_name((TypeId)type),
+                    (unsigned long long)missing,
+                    (unsigned long long)missing_bytes);
+            }
+        }
+    }
+    strbuf_append_format(sites, "overflow\t-\t-\t%llu\t0\t\t\n",
+        (unsigned long long)g_cow_profile_site_overflow);
+    if (write_text_file_atomic(sites_path, sites->str ? sites->str : "") != 0) {
+        log_error("cow profile sites: failed to write '%s'", sites_path);
+    }
+    strbuf_free(sites);
+}
+
+typedef struct LambdaExecCallRow {
+    uint8_t state;
+    uint8_t kind;
+    const char* name;
+    uint64_t count;
+} LambdaExecCallRow;
+
+// Compilation registers names once; diagnostic MIR increments only its fixed
+// row. No lookup, lock, or counter instruction exists in ordinary MIR
+// (D5.4.4). A saturated table has an explicit overflow row in the report.
+static LambdaExecCallRow g_lambda_exec_calls[8192] = {};
+static uint64_t g_lambda_exec_call_overflow = 0;
+static int g_lambda_exec_profile_enabled = -1;
+
+static void lambda_exec_profile_dump(void) {
+    const char* path = getenv("LAMBDA_EXEC_PROFILE_OUT");
+    if (!path || !path[0]) path = "temp/lambda_exec_profile.tsv";
+    StrBuf* output = strbuf_new();
+    if (!output) return;
+    strbuf_append_str(output, "kind\tname\tcount\n");
+    static const char* kinds[] = {"unknown", "helper", "raw", "boxed",
+        "indirect", "unknown", "root_store", "root_reload", "frame_entry",
+        "dense_attempt", "dense_fast", "field_attempt", "field_fast",
+        "layout_items_reload", "layout_length_reload"};
+    for (size_t i = 0; i < 8192; i++) {
+        LambdaExecCallRow* row = &g_lambda_exec_calls[i];
+        if (__atomic_load_n(&row->state, __ATOMIC_ACQUIRE) != 2) continue;
+        uint64_t count = __atomic_load_n(&row->count, __ATOMIC_RELAXED);
+        if (!count) continue;
+        const char* kind = row->kind <= LAMBDA_EXEC_LAYOUT_LENGTH_RELOAD
+            ? kinds[row->kind] : kinds[0];
+        strbuf_append_format(output, "%s\t%s\t%llu\n", kind,
+            row->name ? row->name : "<unnamed>",
+            (unsigned long long)count);
+    }
+    strbuf_append_format(output, "overflow\t-\t%llu\n",
+        (unsigned long long)__atomic_load_n(&g_lambda_exec_call_overflow,
+            __ATOMIC_RELAXED));
+    if (write_text_file_atomic(path, output->str ? output->str : "") != 0) {
+        log_error("lambda-exec-profile: failed to write '%s'", path);
+    }
+    strbuf_free(output);
+    for (size_t i = 0; i < 8192; i++) {
+        if (__atomic_load_n(&g_lambda_exec_calls[i].state,
+                __ATOMIC_ACQUIRE) == 2) free((void*)g_lambda_exec_calls[i].name);
+    }
+}
+
+extern "C" bool lambda_exec_profile_enabled(void) {
+    int state = __atomic_load_n(&g_lambda_exec_profile_enabled,
+        __ATOMIC_ACQUIRE);
+    if (state >= 0) return state != 0;
+    int uninitialized = -1;
+    if (__atomic_compare_exchange_n(&g_lambda_exec_profile_enabled,
+            &uninitialized, -2, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        bool enabled = cow_profile_truthy(getenv("LAMBDA_EXEC_PROFILE"));
+        if (enabled) atexit(lambda_exec_profile_dump);
+        __atomic_store_n(&g_lambda_exec_profile_enabled, enabled ? 1 : 0,
+            __ATOMIC_RELEASE);
+        return enabled;
+    }
+    do {
+        state = __atomic_load_n(&g_lambda_exec_profile_enabled,
+            __ATOMIC_ACQUIRE);
+    } while (state == -2);
+    return state != 0;
+}
+
+extern "C" uint64_t lambda_exec_profile_register_call(const char* name,
+        uint64_t kind) {
+    if (!lambda_exec_profile_enabled() || !name || !name[0] ||
+            kind < LAMBDA_EXEC_CALL_HELPER ||
+            kind > LAMBDA_EXEC_LAYOUT_LENGTH_RELOAD) return 0;
+    uint64_t hash = UINT64_C(1469598103934665603) ^ kind;
+    for (const unsigned char* p = (const unsigned char*)name; *p; p++) {
+        hash = (hash ^ *p) * UINT64_C(1099511628211);
+    }
+    for (size_t probe = 0; probe < 8192; probe++) {
+        size_t index = (hash + probe) & 8191;
+        LambdaExecCallRow* row = &g_lambda_exec_calls[index];
+        uint8_t state = __atomic_load_n(&row->state, __ATOMIC_ACQUIRE);
+        if (state == 0) {
+            uint8_t empty = 0;
+            if (__atomic_compare_exchange_n(&row->state, &empty, 1, false,
+                    __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                row->name = str_dup(name, strlen(name));
+                if (!row->name) {
+                    // leave the slot occupied so concurrent probes cannot reuse it.
+                    __atomic_store_n(&row->state, 3, __ATOMIC_RELEASE);
+                    return 0;
+                }
+                row->kind = (uint8_t)kind;
+                __atomic_store_n(&row->state, 2, __ATOMIC_RELEASE);
+                return index + 1;
+            }
+            state = empty;
+        }
+        while (state == 1) {
+            state = __atomic_load_n(&row->state, __ATOMIC_ACQUIRE);
+        }
+        if (state == 2 && row->kind == kind && row->name &&
+                strcmp(row->name, name) == 0) return index + 1;
+    }
+    return 0;
+}
+
+extern "C" uint64_t lambda_exec_profile_note_call(uint64_t id) {
+    if (id == 0 || id > 8192) {
+        __atomic_fetch_add(&g_lambda_exec_call_overflow, 1,
+            __ATOMIC_RELAXED);
+    } else {
+        __atomic_fetch_add(&g_lambda_exec_calls[id - 1].count, 1,
+            __ATOMIC_RELAXED);
+    }
+    return 0;
 }
 
 Item cow_mark_shared(Item value) {
@@ -10215,8 +10472,7 @@ Item cow_mark_shared(Item value) {
 // container slot, or a plain (non-`var`) parameter -- is captured BY VALUE.
 // Under COW that capture is a share-mark, so the next write through EITHER
 // handle detaches at cow_prepare_write and neither observer sees the other's
-// update. Callers must treat this as possibly allocating: the ArrayNum arm
-// still copies eagerly.
+// update. Binding only marks the header; a later write owns any allocation.
 Item cow_bind_var(Item value) {
     if (get_type_id(value) == LMD_TYPE_ARRAY_NUM) {
         ArrayNum* an = value.array_num;
@@ -10248,6 +10504,29 @@ Item cow_bind_var(Item value) {
 // no longer consulted anywhere.
 Item cow_capture_value(Item value) {
     return cow_mark_shared(value);
+}
+
+static Item cow_profile_mark_with_caller(Item value, uintptr_t caller,
+        bool binding) {
+    TypeId type_id = get_type_id(value);
+    CowProfileTypeCounters* counters = cow_profile_for(value);
+    uint64_t before = counters ? counters->share_marks : 0;
+    Item result = binding ? cow_bind_var(value) : cow_capture_value(value);
+    if (counters) cow_profile_note_site(COW_SITE_SHARE_MARK, type_id, caller,
+        counters->share_marks - before);
+    return result;
+}
+
+Item cow_bind_var_profiled(Item value) {
+    return cow_profile_mark_with_caller(value, COW_PROFILE_CALLER(), true);
+}
+
+Item cow_capture_value_profiled(Item value) {
+    return cow_profile_mark_with_caller(value, COW_PROFILE_CALLER(), false);
+}
+
+Item cow_mark_shared_profiled(Item value) {
+    return cow_profile_mark_with_caller(value, COW_PROFILE_CALLER(), false);
 }
 
 // CW34 (COW §11.11): bind a read-modify-write handle. `value` was just read
@@ -10516,13 +10795,32 @@ Item cow_prepare_write(Item old) {
         CowProfileTypeCounters* counters = cow_profile_for(old);
         if (counters) {
             counters->shared_copies++;
-            counters->copied_bytes += cow_one_level_copy_bytes(old);
+            uint64_t bytes = cow_one_level_copy_bytes(old);
+            counters->copied_bytes += bytes;
         }
     }
 
     Container* replacement_container = cow_item_container(replacement);
     if (replacement_container) replacement_container->cow_state &= ~COW_STATE_SHARED;
     return replacement;
+}
+
+Item cow_prepare_write_profiled(Item old) {
+    uintptr_t caller = COW_PROFILE_CALLER();
+    TypeId type_id = get_type_id(old);
+    CowProfileTypeCounters* counters = cow_profile_for(old);
+    uint64_t unique_before = counters ? counters->unique_mutations : 0;
+    uint64_t copies_before = counters ? counters->shared_copies : 0;
+    uint64_t bytes_before = counters ? counters->copied_bytes : 0;
+    Item result = cow_prepare_write(old);
+    if (counters) {
+        cow_profile_note_site(COW_SITE_UNIQUE_WRITE, type_id, caller,
+            counters->unique_mutations - unique_before);
+        cow_profile_note_site(COW_SITE_SHARED_COPY, type_id, caller,
+            counters->shared_copies - copies_before,
+            counters->copied_bytes - bytes_before);
+    }
+    return result;
 }
 
 static ShapeEntry* map_find_shape_entry(TypeMap* tm, const char* key_cstr,
@@ -11695,6 +11993,36 @@ Item map_set_cow(Item owner, Item key, Item value) {
     Item result = fn_map_set(replacement, key, value);
     if (get_type_id(result) == LMD_TYPE_ERROR) return result;
     return replacement;
+}
+
+// Diagnostic entries carry the MIR call PC through a native setter without
+// putting stack inspection in the ordinary helper path.
+static Item cow_profile_set_with_caller(Item owner, Item key, Item value,
+        uintptr_t caller, Item (*setter)(Item, Item, Item)) {
+    TypeId type_id = get_type_id(owner);
+    CowProfileTypeCounters* counters = cow_profile_for(owner);
+    uint64_t unique_before = counters ? counters->unique_mutations : 0;
+    uint64_t copies_before = counters ? counters->shared_copies : 0;
+    uint64_t bytes_before = counters ? counters->copied_bytes : 0;
+    Item result = setter(owner, key, value);
+    if (counters) {
+        cow_profile_note_site(COW_SITE_UNIQUE_WRITE, type_id, caller,
+            counters->unique_mutations - unique_before);
+        cow_profile_note_site(COW_SITE_SHARED_COPY, type_id, caller,
+            counters->shared_copies - copies_before,
+            counters->copied_bytes - bytes_before);
+    }
+    return result;
+}
+
+Item map_set_cow_profiled(Item owner, Item key, Item value) {
+    return cow_profile_set_with_caller(owner, key, value,
+        COW_PROFILE_CALLER(), map_set_cow);
+}
+
+Item member_set_cow_profiled(Item owner, Item key, Item value) {
+    return cow_profile_set_with_caller(owner, key, value,
+        COW_PROFILE_CALLER(), member_set_cow);
 }
 
 Item cow_path_set_raw(Item owner, Item key, Item value) {
@@ -12927,19 +13255,11 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
     }
     expected = runtime_boundary_unwrap_type(expected);
     if (!expected) return false;
-    // T28-5: a string value against the bare `string` contract is admitted
-    // unchanged. `&TYPE_STRING` is the global singleton, which cannot carry a
-    // literal, pattern or `that` refinement, and no probe below converts a
-    // string -- so the only other way out is the fallback further down, which
-    // answers `lambda_type_matches` true and returns the value as is. Counted
-    // at that fallback: 32.9M calls on three_way_merge and 33.3M on
-    // log_pipeline, every one of them a `string` contract, each descending the
-    // whole ladder for a tag compare.
+    // The bare string singleton cannot convert or refine a string value.
     if (expected == &TYPE_STRING && get_type_id(value) == LMD_TYPE_STRING) {
         *converted = value;
         return true;
     }
-    bool binder_dependent = runtime_contract_uses_binder(expected);
     // T27-4: `any` admits every non-error value unchanged (lambda_type_matches
     // answers true at once); the numeric, array and map probes below only
     // rediscovered that on every open leaf store, e.g. richards'
@@ -12949,12 +13269,39 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         *converted = value;
         return true;
     }
+    // An admitted record's trusted shape is its exact contract. Check that
+    // identity before numeric/array probes, but retain binder admission for
+    // contracts whose fields publish invocation slots (D3.2.4v4, S4.2.2).
+    if (get_type_id(value) == LMD_TYPE_MAP && value.map) {
+        Type* map_arm = runtime_boundary_nonnull_map_arm(expected);
+        if (map_arm && ((TypeMap*)map_arm)->is_trusted_contract &&
+                value.map->type == map_arm &&
+                !runtime_contract_uses_binder(expected)) {
+            if (cow_profile_enabled()) {
+                g_cow_profile.map_admit_calls++;
+                g_cow_profile.map_admit_exact_shape_hits++;
+            }
+            *converted = value;
+            return true;
+        }
+    }
+    TypeId value_type = get_type_id(value);
+    if ((value_type == LMD_TYPE_ARRAY || value_type == LMD_TYPE_ARRAY_NUM) &&
+            value.array && value.array->rep_cert &&
+            value.array->rep_cert->array_contract == expected &&
+            !runtime_contract_uses_binder(expected) &&
+            lambda_array_rep_proves_cert(value, value.array->rep_cert, true)) {
+        // The carrier check still enforces counted extents and native lanes
+        // (D3.3.3v3, S11.1.1v3).
+        *converted = value;
+        return true;
+    }
+    bool binder_dependent = runtime_contract_uses_binder(expected);
     if (lambda_type_is_union(expected) && cow_profile_enabled())
         g_cow_profile.union_admit_calls++;
 
     // Reuse the resolved, heap-local proof before decomposing a T[] contract.
     // The carrier check remains mandatory even when certificate identity hits.
-    TypeId value_type = get_type_id(value);
     if (!binder_dependent && value_type == LMD_TYPE_MAP && value.map &&
             lambda_type_is_union(expected)) {
         TypeMap* candidate = (TypeMap*)value.map->type;
@@ -13044,11 +13391,6 @@ static bool runtime_type_admit_value_env(Item value, Type* expected, Type** env,
         if (candidate_map && typemap_ptr_is_plausible(candidate_map)) {
             MapContractRelation relation = runtime_map_contract_relation_cached(
                 candidate_map, expected_map);
-            if (relation == MAP_CONTRACT_EXACT_TRUSTED) {
-                if (cow_profile_enabled()) g_cow_profile.map_admit_exact_shape_hits++;
-                *converted = value;
-                return true;
-            }
             if (relation == MAP_CONTRACT_STORAGE_COMPATIBLE) {
                 if (cow_profile_enabled()) {
                     g_cow_profile.map_admit_storage_compatible_hits++;

@@ -27,7 +27,7 @@ DomDocument* show_html_doc(Url* base, char* doc_url,
 
 DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
     (void)doc_url;
-    // The session owns the document; presentation only publishes it.
+    // The presentation seam publishes the session-owned document.
     if (g_session_test_uicon) g_session_test_uicon->document = doc;
     return doc;
 }

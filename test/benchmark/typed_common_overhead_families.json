@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-09-29",
+  "purpose": "Predeclared, disjoint mechanism pilots for the typed common-overhead campaign; the overall result always includes every typed row.",
+  "families": {
+    "scalar_calls": [
+      "r7rs/ack", "r7rs/cpstak", "r7rs/fib", "r7rs/fibfp", "r7rs/tak",
+      "larceny/diviter", "larceny/divrec", "larceny/paraffins", "beng/spectralnorm"
+    ],
+    "numeric_arrays": [
+      "awfy/nbody", "awfy/mandelbrot", "jetstream/navier_stokes",
+      "kostya/matmul", "larceny/array1", "larceny/pnpoly", "r7rs/fft"
+    ],
+    "bitwise_bytes": [
+      "jetstream/crypto_sha1", "kostya/base64", "kostya/brainfuck"
+    ],
+    "record_graphs": [
+      "awfy/richards", "awfy/havlak", "awfy/deltablue", "awfy/cd",
+      "jetstream/splay", "jetstream/hashmap", "jetstream/raytrace3d",
+      "jetstream/cube3d"
+    ],
+    "text_collections": [
+      "text/fast_diff", "text/microdiff", "text/hyphen",
+      "text/prettier_ast", "text/text_search", "text/three_way_merge",
+      "text/log_pipeline", "beng/revcomp", "beng/regexredux",
+      "beng/knucleotide", "beng/fasta", "kostya/json_gen", "awfy/json"
+    ],
+    "regression_controls": [
+      "r7rs/sum", "r7rs/sumfp", "awfy/towers", "awfy/queens",
+      "kostya/primes"
+    ]
+  }
+}

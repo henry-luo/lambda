@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "description": "S4.4.4: an admitted u32 shift keeps its native MIR shift for counts below 32, while the width guard selects a zero result before the shift. The .txt fixture checks the zero arm against the interpreter at counts 32, 33, and 64, including the host-width alias at 64.",
+  "checks": [
+    {
+      "in_func": "_left_#",
+      "expect_seq": [
+        { "pattern": "ges\t{{r}}, %p2, 32" },
+        { "pattern": "mov\t{{r:raw}}, 0" },
+        { "pattern": "jmp\tL", "next_line": true },
+        { "pattern": "lsh\t{{r}}, {{r}}, %p2" },
+        { "pattern": "and\t{{r:raw}}, {{r}}, 4294967295" },
+        { "pattern": "or\t{{r}}, 289637751035265024, {{r:raw}}" }
+      ]
+    },
+    {
+      "in_func": "_right_#",
+      "expect_seq": [
+        { "pattern": "ges\t{{r}}, %p2, 32" },
+        { "pattern": "mov\t{{r:raw}}, 0" },
+        { "pattern": "jmp\tL", "next_line": true },
+        { "pattern": "ursh\t{{r}}, {{r}}, %p2" },
+        { "pattern": "and\t{{r:raw}}, {{r}}, 4294967295" },
+        { "pattern": "or\t{{r}}, 289637751035265024, {{r:raw}}" }
+      ]
+    }
+  ]
+}

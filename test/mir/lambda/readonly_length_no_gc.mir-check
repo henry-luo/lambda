@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "D5.3.1/S8.3.1v2: flat array length reads its header; an N-D carrier retains the NO_GC helper fallback.",
+  "checks": [
+    {
+      "in_func": "_lens__raw0_#",
+      "expect": ["u8:({{r}})", "i64:40({{r}})", "fn_len_l_p, fn_len_l", "fn_len_s_p, fn_len_s"],
+      "count": {"fn_len_l_p, fn_len_l": 2, "fn_len_s_p, fn_len_s": 1}
+    },
+    {
+      "in_func": "_shaped__raw0_#",
+      "expect": ["fn_len_l_p, fn_len_l"]
+    }
+  ]
+}

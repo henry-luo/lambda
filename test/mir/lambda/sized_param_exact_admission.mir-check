@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "description": "S4.4.1 and D2.4.1-D2.4.3: canonical packed integer-sized parameters take an identity path after a tag, subtype, and reserved-bit check. Other Item carriers keep coerce_num_sized; int() decodes exact signed and unsigned payloads without fn_int.",
+  "checks": [
+    {
+      "in_func": "_accept_u32_#",
+      "expect_seq": [
+        { "pattern": "and\t{{r:tag}}, %p1, -4294967296" },
+        { "pattern": "beq\tL", "next_line": true },
+        { "pattern": "call\tcoerce_num_sized_p, coerce_num_sized" },
+        { "pattern": "mov\t{{r:admitted}}, {{r}}" },
+        { "pattern": "jmp\tL", "next_line": true },
+        { "pattern": "mov\t{{r:admitted}}, %p1" },
+        { "pattern": "and\t{{r}}, {{r:admitted}}, 4294967295" }
+      ],
+      "count": {
+        "call\tcoerce_num_sized_p, coerce_num_sized": 1
+      },
+      "forbid": ["call\tfn_int_p, fn_int"]
+    },
+    {
+      "in_func": "_accept_i8_#",
+      "expect_seq": [
+        { "pattern": "and\t{{r:tag}}, %p1, -256" },
+        { "pattern": "beq\tL", "next_line": true },
+        { "pattern": "call\tcoerce_num_sized_p, coerce_num_sized" },
+        { "pattern": "mov\t{{r:admitted}}, %p1" },
+        { "pattern": "and\t{{r}}, {{r:admitted}}, 255" },
+        { "pattern": "lsh\t{{r}}" },
+        { "pattern": "rsh\t{{r}}" }
+      ],
+      "count": {"call\tcoerce_num_sized_p, coerce_num_sized": 1},
+      "forbid": ["call\tfn_int_p, fn_int"]
+    },
+    {
+      "in_func": "_accept_u16_#",
+      "expect_seq": [
+        { "pattern": "and\t{{r:tag}}, %p1, -65536" },
+        { "pattern": "beq\tL", "next_line": true },
+        { "pattern": "call\tcoerce_num_sized_p, coerce_num_sized" },
+        { "pattern": "mov\t{{r:admitted}}, %p1" },
+        { "pattern": "and\t{{r}}, {{r:admitted}}, 65535" }
+      ],
+      "count": {"call\tcoerce_num_sized_p, coerce_num_sized": 1},
+      "forbid": ["call\tfn_int_p, fn_int"]
+    },
+    {
+      "in_func": "_main_#",
+      "count": {
+        "call\tfn_bor_item_p, fn_bor_item": 2,
+        "call\tfn_int_p, fn_int": 2,
+        "call\tfn_add_p, fn_add": 1,
+        "call\tfn_ushr_item_p, fn_ushr_item": 1,
+        "call\tfn_shl_item_p, fn_shl_item": 1
+      }
+    }
+  ]
+}

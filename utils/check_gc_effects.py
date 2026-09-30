@@ -38,6 +38,15 @@ SKIP_SOURCE_PARTS = {
 # is deterministic over caller-owned memory/scalars and cannot enter Lambda GC
 # or generated code.  Adding an entry is a security-relevant review action.
 VERIFIED_EXTERNAL_LEAVES = {
+    # These compiler intrinsics only inspect the current native stack.
+    "_AddressOfReturnAddress",
+    "__builtin_frame_address",
+    # The site census uses only statically lock-free widths (asserted in the
+    # runtime), so these lower to instructions and cannot call Lambda GC.
+    "__atomic_compare_exchange_n",
+    "__atomic_fetch_add",
+    "__atomic_load_n",
+    "__atomic_store_n",
     "abort",
     "assert",
     # Process configuration and teardown registration are C-runtime calls.
@@ -45,6 +54,17 @@ VERIFIED_EXTERNAL_LEAVES = {
     # Lambda heap, so they are safe leaves for a NO_GC import path.
     "atexit",
     "d2it",
+    # Sized-Item and pointer-tagging macros only pack caller-owned bits.
+    "c2it",
+    "i2it",
+    "i8_to_item",
+    "i16_to_item",
+    "i32_to_item",
+    "u8_to_item",
+    "u16_to_item",
+    "u32_to_item",
+    "x2it",
+    "y2it",
     "fmod",
     "floor",
     # Audited scalar math leaves used by the common pure-call metadata.
@@ -66,7 +86,10 @@ VERIFIED_EXTERNAL_LEAVES = {
     # Diagnostic logging does not enter generated code or Lambda's collector.
     "log_error",
     "memcpy",
+    "memchr",
+    "memcmp",
     "memset",
+    "strlen",
     "mpd_free",
     "mpd_isinfinite",
     "mpd_isinteger",
@@ -111,13 +134,16 @@ VERIFIED_READER_METHODS = {
     "type_id",
 }
 
-# Pending-pair resolution is emitted only by the MIR materialization path. Its
-# runtime `AutoAssertNoGC` guard proves the no-GC boundary dynamically, while
-# its number-stack error fallback is intentionally not a general callee path.
-# Expanding it lexically would misclassify the intrinsic and hide the emitter's
-# required pending-pair calling convention.
+# These helpers encode scalars or write only the reserved number side stack.
+# Their debug `AutoAssertNoGC` guard catches an unexpected collection; lexical
+# expansion reaches OS page reservation and pre-reserved stack-fault recovery,
+# neither of which enters Lambda GC (D5.2.2v3, D5.3.2). Keep the guard check
+# below fail-closed if any audited boundary loses its assertion.
 DYNAMICALLY_GUARDED_NO_GC = {
     "lambda_item_resolve_pending",
+    "push_d",
+    "box_int64_value",
+    "box_uint64_value",
 }
 
 # Function-like language constructs and local RAII variable construction that

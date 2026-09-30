@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "D5.2.2v3/D5.3.1-D5.3.2: scalar homes preserve GC ownership, while callers whose live-string observation is a NO_GC length leaf use a native stack guard.",
+  "checks": [
+    {
+      "in_func": "_gc_scalar_home_i64_#",
+      "expect": ["call\tbox_int64_value_p, box_int64_value", "bstart\t{{r}}"],
+      "forbid": ["call\tlambda_stack_is_exhausted"]
+    },
+    {
+      "in_func": "_gc_scalar_home_u64_#",
+      "expect": ["call\tbox_uint64_value_p, box_uint64_value", "bstart\t{{r}}"],
+      "forbid": ["call\tlambda_stack_is_exhausted"]
+    },
+    {
+      "in_func": "_gc_scalar_home_float_#",
+      "expect": ["call\tpush_d_p, push_d", "bstart\t{{r}}"],
+      "forbid": ["call\tlambda_stack_is_exhausted"]
+    },
+    {
+      "in_func": "_gc_scalar_use_i64_#",
+      "expect": ["call\t_gc_scalar_home_i64_", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
+      "forbid": ["call\tlambda_stack_is_exhausted"]
+    },
+    {
+      "in_func": "_gc_scalar_use_u64_#",
+      "expect": ["call\t_gc_scalar_home_u64_", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
+      "forbid": ["call\tlambda_stack_is_exhausted"]
+    },
+    {
+      "in_func": "_gc_scalar_use_float_#",
+      "expect": ["call\t_gc_scalar_home_float_", "call\tfn_len_s_p, fn_len_s", "bstart\t{{r}}"],
+      "forbid": ["call\tlambda_stack_is_exhausted"]
+    }
+  ]
+}

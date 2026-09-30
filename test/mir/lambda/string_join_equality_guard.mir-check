@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "description": "S5.1.2/S11.4.1v3: equality of an explicit string-success/error join guards both Item tags, compares string pointers on success, and preserves fn_eq for the non-string arm.",
+  "checks": [
+    {
+      "in_func": "_main_#",
+      "expect": ["fn_str_eq_ptr_p, fn_str_eq_ptr", "fn_eq_p, fn_eq", "fn_ne_p, fn_ne"],
+      "expect_seq": [
+        { "pattern": "and\t{{r}}, {{r}}, -72057594037927936" },
+        { "pattern": "bne\tL" },
+        "fn_str_eq_ptr_p, fn_str_eq_ptr",
+        "fn_eq_p, fn_eq"
+      ]
+    }
+  ]
+}

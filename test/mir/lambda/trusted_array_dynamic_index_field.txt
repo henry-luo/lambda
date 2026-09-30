@@ -1,0 +1,4 @@
+[7, null, null, null, 0, null]
+[true, null]
+[3, null]
+[-7, null]

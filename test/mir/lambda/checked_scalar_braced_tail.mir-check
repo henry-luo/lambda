@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6/S9.1.2: a checked int result in a braced block keeps a proven self-call in tail position, including an allocating local and live array parameter; a non-tail operand or changed pointer owner remains a call.",
+  "checks": [
+    {
+      "in_func": "_checked_tail_#",
+      "expect": ["add\t{{r}}, {{r}}, 1", "ble\t"],
+      "forbid": ["call\t_checked_tail_"],
+      "count": {", 1000000": 1}
+    },
+    {
+      "in_func": "_non_tail_#",
+      "expect": ["call\t_non_tail_"]
+    },
+    {
+      "in_func": "_changing_owner_#",
+      "expect": ["call\t_changing_owner_"]
+    }
+  ]
+}

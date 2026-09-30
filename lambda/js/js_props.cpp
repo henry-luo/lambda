@@ -248,7 +248,11 @@ static JsShapeSlotStatus js_own_shape_slot_status_impl(Item object,
     return JS_SHAPE_SLOT_DATA;
 }
 
-JS_FORWARD_RETURN(JsShapeSlotStatus, js_own_shape_slot_status, (Item object, const char* name, int name_len, Item* out_slot, ShapeEntry** out_se), js_own_shape_slot_status_impl, (object, name, name_len, NAME_ID_NONE, true, out_slot, out_se, NULL))
+extern "C" JsShapeSlotStatus js_own_shape_slot_status(Item object,
+        const char* name, int name_len, Item* out_slot, ShapeEntry** out_se) {
+    return js_own_shape_slot_status_impl(object, name, name_len,
+        NAME_ID_NONE, true, out_slot, out_se, NULL);
+}
 
 extern "C" JsShapeSlotStatus js_own_shape_slot_status_name_id(Item object,
         NameId name_id, Item* out_slot, ShapeEntry** out_se) {

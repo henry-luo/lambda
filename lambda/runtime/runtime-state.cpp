@@ -57,6 +57,26 @@ static ModuleUnitIndexEntry* runtime_module_unit_index_find(
     return NULL;
 }
 
+static ModuleUnitIndexEntry* runtime_module_unit_index_find_state(
+        const Runtime* runtime, uint32_t module_state_id) {
+    if (!runtime || !runtime->module_unit_index) return NULL;
+    for (int index = 0; index < runtime->module_unit_index->length; index++) {
+        ModuleUnitIndexEntry* entry = (ModuleUnitIndexEntry*)
+            runtime->module_unit_index->data[index];
+        if (entry && entry->module_state_id == module_state_id) return entry;
+    }
+    return NULL;
+}
+
+static void runtime_module_state_set_layout_key(Runtime* runtime,
+        uint32_t module_state_id, uint32_t layout_id) {
+    EvalContext* owner = runtime ? runtime->eval_context : NULL;
+    if (!owner || !owner->module_states ||
+            module_state_id >= owner->module_state_capacity) return;
+    LambdaModuleState* state = owner->module_states[module_state_id];
+    if (state) state->module_layout_id = layout_id;
+}
+
 bool runtime_module_state_id_for_unit(const Runtime* runtime, uint32_t unit_id,
         uint32_t* out_module_state_id) {
     ModuleUnitIndexEntry* found = runtime_module_unit_index_find(runtime, unit_id);
@@ -70,7 +90,13 @@ bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
     if (!runtime || unit_id == 0) return true;
     ModuleUnitIndexEntry* found = runtime_module_unit_index_find(runtime, unit_id);
     if (found) {
+        // A reused logical id must stop matching an old active slab before
+        // its new binding can be observed (D5.4.3, D8.5.1v2).
+        runtime_module_state_set_layout_key(runtime, found->module_state_id,
+            found->module_state_id);
         found->module_state_id = module_state_id;
+        runtime_module_state_set_layout_key(runtime, module_state_id,
+            unit_id | LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG);
         return true;
     }
     if (!runtime->module_unit_index) {
@@ -82,7 +108,11 @@ bool runtime_module_state_bind_unit(Runtime* runtime, uint32_t unit_id,
     if (!entry) return false;
     entry->unit_id = unit_id;
     entry->module_state_id = module_state_id;
-    if (arraylist_append(runtime->module_unit_index, entry)) return true;
+    if (arraylist_append(runtime->module_unit_index, entry)) {
+        runtime_module_state_set_layout_key(runtime, module_state_id,
+            unit_id | LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG);
+        return true;
+    }
     mem_free(entry);
     log_error("module-unit-index: failed to bind logical unit %u", unit_id);
     return false;
@@ -96,6 +126,8 @@ void runtime_module_state_unbind_unit(Runtime* runtime, uint32_t unit_id,
             runtime->module_unit_index->data[index];
         if (!entry || entry->unit_id != unit_id ||
                 entry->module_state_id != module_state_id) continue;
+        runtime_module_state_set_layout_key(runtime, module_state_id,
+            module_state_id);
         mem_free(entry);
         arraylist_remove(runtime->module_unit_index, index);
         return;
@@ -105,7 +137,13 @@ void runtime_module_state_unbind_unit(Runtime* runtime, uint32_t unit_id,
 void runtime_module_state_clear_unit_index(Runtime* runtime) {
     if (!runtime || !runtime->module_unit_index) return;
     for (int index = 0; index < runtime->module_unit_index->length; index++) {
-        mem_free(runtime->module_unit_index->data[index]);
+        ModuleUnitIndexEntry* entry = (ModuleUnitIndexEntry*)
+            runtime->module_unit_index->data[index];
+        if (entry) {
+            runtime_module_state_set_layout_key(runtime, entry->module_state_id,
+                entry->module_state_id);
+            mem_free(entry);
+        }
     }
     arraylist_free(runtime->module_unit_index);
     runtime->module_unit_index = NULL;
@@ -245,6 +283,30 @@ static LambdaModuleState* lambda_module_state_at(EvalContext* owner,
     return owner && owner->module_states &&
             module_id < owner->module_state_capacity
         ? owner->module_states[module_id] : NULL;
+}
+
+RuntimeJitModuleStateScope::RuntimeJitModuleStateScope(EvalContext* owner)
+        : owner_(owner), previous_id_(UINT32_MAX) {
+    if (owner_ && owner_->jit_current_module_state) {
+        previous_id_ = owner_->jit_current_module_state->module_id;
+    }
+}
+
+RuntimeJitModuleStateScope::~RuntimeJitModuleStateScope() {
+    // A recovery landing may have released the former slab. Resolve its id
+    // again rather than restoring a possibly freed pointer (D5.3.1).
+    if (owner_ && context == owner_) {
+        owner_->jit_current_module_state = lambda_module_state_at(owner_,
+            previous_id_);
+    }
+}
+
+bool RuntimeJitModuleStateScope::activate(uint32_t module_id) {
+    if (!owner_ || context != owner_) return false;
+    LambdaModuleState* state = lambda_module_state_at(owner_, module_id);
+    if (!state) return false;
+    owner_->jit_current_module_state = state;
+    return true;
 }
 
 // Retained code marks a process-stable logical unit, while EvalContext keeps a
@@ -397,6 +459,10 @@ extern "C" bool lambda_module_state_prepare(uint32_t module_id,
     state = (LambdaModuleState*)mem_calloc(1, sizeof(LambdaModuleState), MEM_CAT_EVAL);
     if (!state) return false;
     state->module_id = module_id;
+    ModuleUnitIndexEntry* unit = runtime_module_unit_index_find_state(
+        owner->runtime, module_id);
+    state->module_layout_id = unit
+        ? unit->unit_id | LAMBDA_MODULE_ID_LOGICAL_UNIT_FLAG : module_id;
     state->var_count = var_count;
     state->var_capacity = var_count;
     if (var_count) {
@@ -578,6 +644,9 @@ static void lambda_module_state_release_at(EvalContext* owner, uint32_t module_i
     }
     if (owner->active_module_state == state) {
         owner->active_module_state = NULL;
+    }
+    if (owner->jit_current_module_state == state) {
+        owner->jit_current_module_state = NULL;
     }
     mem_free(state->vars);
     mem_free(state->var_payloads);

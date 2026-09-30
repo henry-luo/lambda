@@ -11,11 +11,17 @@ Usage:
 """
 
 import argparse
+import datetime
+import hashlib
+import json
+import platform
 import pathlib
 import re
 import subprocess
 import sys
 import time
+
+from benchmark_provenance import c2mir_source_corpus, command_output, sha256_file
 
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -157,11 +163,17 @@ def parse_args():
     parser.add_argument("--list", action="store_true", help="list available ports and exit")
     parser.add_argument("--timeout", type=float, default=120.0,
                         help="per-benchmark timeout in seconds (default: 120)")
+    parser.add_argument("--repeat", type=int, default=1,
+                        help="independent timed runs per C port (default: 1)")
+    parser.add_argument("--output", type=pathlib.Path,
+                        help="write source-pinned raw results as JSON, under ./temp")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    if args.repeat < 1:
+        raise ValueError("--repeat must be positive")
     selected_suites = args.suite or list(SUITES)
     if args.list:
         for suite in selected_suites:
@@ -173,6 +185,21 @@ def main():
         print(driver_error, file=sys.stderr)
         return 2
 
+    artifact = {
+        "_metadata": {
+            "schema_version": 1,
+            "started_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "platform": platform.platform(),
+            "git_commit": command_output(["git", "rev-parse", "HEAD"]),
+            "c2m_sha256": sha256_file(C2M),
+            "mir_revision": command_output(["git", "-C", "lambda/mir", "rev-parse", "HEAD"]),
+            "timer_sha256": sha256_file(TIMER_MAIN),
+            "source_corpus": c2mir_source_corpus(),
+            "repeat": args.repeat,
+            "timeout_s": args.timeout,
+        },
+        "rows": [],
+    }
     failures = 0
     total = 0
     for suite in selected_suites:
@@ -184,37 +211,73 @@ def main():
                 failures += 1
                 print(f"  {name:<12} MISSING SOURCE")
                 continue
-            started = time.perf_counter()
-            try:
-                result = subprocess.run(
-                    build_command(source), cwd=PROJECT_ROOT,
-                    capture_output=True, text=True, timeout=args.timeout,
-                )
-            except subprocess.TimeoutExpired:
-                failures += 1
-                print(f"  {name:<12} TIMEOUT")
-                continue
-            wall_ms = (time.perf_counter() - started) * 1000.0
-            # workload-only time when the port reported it; wall time (which
-            # includes c2m's own compile) only as a fallback
-            body_ms = parse_timing(result.stdout)
-            elapsed_ms = body_ms if body_ms is not None else wall_ms
-            output = strip_timing(result.stdout)
+            row = {
+                "suite": suite,
+                "name": name,
+                "source": str(source.relative_to(PROJECT_ROOT)),
+                "source_sha256": sha256_file(source),
+                "command": build_command(source),
+                "samples": [],
+            }
             if expected.startswith("@file:"):
                 golden = PROJECT_ROOT / expected.removeprefix("@file:")
                 expected_output = golden.read_text().strip()
+                row["expected_file"] = str(golden.relative_to(PROJECT_ROOT))
+                row["expected_sha256"] = sha256_file(golden)
             else:
                 expected_output = expected
-            if result.returncode == 0 and output == expected_output:
-                print(f"  {name:<12} PASS  {elapsed_ms:8.2f} ms")
+            for _ in range(args.repeat):
+                started = time.perf_counter()
+                try:
+                    result = subprocess.run(
+                        build_command(source), cwd=PROJECT_ROOT,
+                        capture_output=True, text=True, timeout=args.timeout,
+                    )
+                except subprocess.TimeoutExpired:
+                    row["samples"].append({"status": "timeout", "exec_ms": None})
+                    continue
+                wall_ms = (time.perf_counter() - started) * 1000.0
+                body_ms = parse_timing(result.stdout)
+                output = strip_timing(result.stdout)
+                passed = result.returncode == 0 and output == expected_output
+                row["samples"].append({
+                    "status": "ok" if passed and body_ms is not None
+                        else "wall_fallback" if passed else "wrong_output",
+                    "exec_ms": body_ms,
+                    "wall_ms": wall_ms,
+                    "returncode": result.returncode,
+                    "stdout_sha256": hashlib.sha256(output.encode()).hexdigest(),
+                    "expected_stdout_matches": passed,
+                    "stderr": result.stderr.strip() if not passed else "",
+                })
+            values = sorted(sample["exec_ms"] for sample in row["samples"]
+                            if sample["status"] == "ok")
+            row["median_exec_ms"] = values[len(values) // 2] if values else None
+            row["valid_samples"] = len(values)
+            row["status"] = "ok" if len(values) == args.repeat else "failed"
+            artifact["rows"].append(row)
+            if row["status"] == "ok":
+                print(f"  {name:<12} PASS  {row['median_exec_ms']:8.2f} ms"
+                      f" ({len(values)} sample(s))")
             else:
                 failures += 1
-                print(f"  {name:<12} FAIL  {elapsed_ms:8.2f} ms")
-                if output:
-                    print(f"    stdout: {output}")
-                if result.stderr.strip():
-                    print(f"    stderr: {result.stderr.strip()}")
+                print(f"  {name:<12} FAIL  {len(values)}/{args.repeat} timed samples")
+                for sample in row["samples"]:
+                    if sample["status"] != "ok" and sample.get("stderr"):
+                        print(f"    stderr: {sample['stderr']}")
 
+    artifact["_metadata"]["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    artifact["_metadata"]["c2m_final_sha256"] = sha256_file(C2M)
+    artifact["_metadata"]["source_corpus_final_sha256"] = c2mir_source_corpus()["sha256"]
+    artifact["_metadata"]["binary_and_sources_stable"] = (
+        artifact["_metadata"]["c2m_sha256"] == artifact["_metadata"]["c2m_final_sha256"]
+        and artifact["_metadata"]["source_corpus"]["sha256"]
+            == artifact["_metadata"]["source_corpus_final_sha256"]
+    )
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(artifact, indent=2) + "\n")
+        print(f"Raw C2MIR results saved to {args.output}")
     print(f"\n{total - failures}/{total} native C2MIR benchmarks passed")
     return 1 if failures else 0
 

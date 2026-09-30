@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "S4.4.4/S11.4.1v3: a compact bitwise result converted by int() has an int success and a possible error from its operand. The return boundary must forward that error without rechecking the successful int on every call.",
+  "checks": [
+    {
+      "in_func": "_compact_bitwise_int_cast_#",
+      "count": {
+        "call\tlambda_type_check_p, lambda_type_check": 0,
+        "call\tfn_int_p, fn_int": 1
+      },
+      "expect_seq": [
+        { "pattern": "call\tfn_int_p, fn_int" },
+        { "pattern": "eq\t{{r}}, {{r}}, 27" },
+        { "pattern": "ret\t" }
+      ]
+    }
+  ]
+}

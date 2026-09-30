@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "S9.1.2/S9.3.1: a tagged string bypasses COW ownership helpers while dynamic values retain them.",
+  "checks": [
+    {
+      "in_func": "_capture_string_#",
+      "expect_seq": [
+        { "pattern": "and\t{{r}}, {{r}}, -72057594037927936" },
+        { "pattern": "beq\tL" },
+        "cow_bind_var_p, cow_bind_var",
+        { "pattern": "and\t{{r}}, {{r}}, -72057594037927936" },
+        { "pattern": "beq\tL" },
+        "cow_capture_value_p, cow_capture_value"
+      ]
+    },
+    {
+      "in_func": "_capture_dynamic_#",
+      "expect": ["cow_bind_var_p, cow_bind_var", "cow_capture_value_p, cow_capture_value"]
+    }
+  ]
+}
