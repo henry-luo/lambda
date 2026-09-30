@@ -1,0 +1,7 @@
+# Example measurements
+# The next line is the table header.
+name	value
+alpha	1
+# A comment between data rows.
+beta	2
+"#hash"	3

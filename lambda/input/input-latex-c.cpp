@@ -924,8 +924,8 @@ private:
     bool tabular_mode_;
 
     void error(const char* message) {
-        ctx_.tracker.seek(position_);
-        ctx_.addError(ctx_.location(), "latex_c: %s", message);
+        ctx_.tracker.seek(source_offset(source_ + position_));
+        ctx_.addError("latex_c: %s", message);
     }
 
     void append_text(ElementBuilder& parent, size_t begin, size_t end) {
@@ -977,6 +977,13 @@ private:
         nested.position_ = 0;
         nested.parse_children(group, 0, false);
         return group.final();
+    }
+
+    Item parse_raw_group() {
+        size_t begin = 0, end = 0;
+        if (!consume_group_span(&begin, &end)) return ItemNull;
+        // declaration bodies can contain unmatched environment delimiters until expansion.
+        return builder_.element("curly_group").text(source_ + begin, end - begin).final();
     }
 
     Item parse_brack_group() {
@@ -1205,13 +1212,18 @@ private:
             strcmp(name, "renewcommand") == 0 || strcmp(name, "providecommand") == 0 ||
             strcmp(name, "def") == 0 || strcmp(name, "gdef") == 0 ||
             strcmp(name, "edef") == 0 || strcmp(name, "xdef") == 0;
+        bool environment_definition = strcmp(name, "newenvironment") == 0 ||
+            strcmp(name, "renewenvironment") == 0;
         int curly_index = 0;
         while (position_ < length_) {
             if (source_[position_] == '{') {
-                if (macro_definition && curly_index == 0) {
+                if ((macro_definition || environment_definition) && curly_index == 0) {
                     size_t begin = 0, end = 0;
                     if (!consume_group_span(&begin, &end)) break;
                     elem.child(builder_.createStringItem(source_ + begin, end - begin));
+                } else if (environment_definition) {
+                    Item group = parse_raw_group();
+                    if (item_present(group)) elem.child(group);
                 } else if (macro_definition) {
                     Item group = parse_group();
                     if (item_present(group)) elem.child(group);

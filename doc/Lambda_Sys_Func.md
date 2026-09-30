@@ -1038,23 +1038,6 @@ explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
 
-#### temp(name) / temp(name, content)
-
-Create or open an **in-memory document** under the `temp.` root. Runtime data
-has no identity until it is placed in a document, which is what `temp` is for;
-the documents live for the evaluation.
-
-| Function | Result | Description |
-|----------|--------|-------------|
-| `temp(name, content)` | `data^E` | Create `temp.name` with `content` as its head, and answer that head; raises if the name is taken |
-| `temp(name)` | `data` | The existing head, creating an empty document when there is none |
-
-Creation is immediate and outside any write set — document management like
-`io.mkdir`, not a Tier-3 edit — so the document is readable in the same
-evaluation without a `commit`. The dotted form `temp.'name'` addresses it.
-See [Lambda_Document_Updates.md](Lambda_Document_Updates.md) for writing to
-documents.
-
 | Format | Description | Example |
 |--------|-------------|---------|
 | JSON | JavaScript Object Notation | `input(/.'data.json', 'json')` |

@@ -83,6 +83,7 @@ void emit_table_org(StringBuf* sb, const ElementReader& elem, void* emitter_ctx)
 // ==============================================================================
 
 bool org_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);
+bool wiki_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);
 bool textile_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);
 // CommonMark block layer and inline overrides (format-md.cpp).
 bool markdown_custom_handler(void* ctx, StringBuf* sb, const ElementReader& elem);

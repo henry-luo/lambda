@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../favicon.ico" sizes="48x48">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="manifest" href="../site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Blog — Lambda Script</title>
   <meta name="description" content="Lambda Script blog: tutorials, release notes, comparisons, and deep-dives into document processing and functional programming.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -49,18 +54,19 @@
       <p>Lambda Script approaches documents differently. Instead of treating formats as output targets, Lambda parses 20+ input formats into a unified Lambda/Mark node tree. This means your Markdown, HTML, JSON, YAML, LaTeX, or CSV files become structured data you can query, transform, validate, and render — all with one language and one runtime.</p>
       <p>Where most workflows require stitching together pandoc, jq, custom scripts, and template engines, Lambda provides a single, coherent pipeline:</p>
 <pre><code>// Parse any format → unified tree → transform → output
-let doc = input("report.md", 'markdown')
-let images = doc?&lt;img&gt; | ~.src
-let headings = doc?&lt;h1&gt; ++ doc?&lt;h2&gt;
+let doc = input("report.md", 'markdown')^
+let images = [*doc?&lt;img&gt;] |&gt; ~.src
+let headings = doc?(&lt;h1&gt; | &lt;h2&gt;)
 
 // Build a styled HTML page with a table of contents
-&lt;html
+let page = &lt;html
   &lt;head &lt;title "Report"&gt;&gt;
   &lt;body
-    &lt;nav &lt;ul (for (h in headings) &lt;li h[string]&gt;)&gt;&gt;
-    doc
+    &lt;nav &lt;ul for (h in headings) &lt;li h[0]&gt;&gt;&gt;
+    for (block in content(doc?&lt;body&gt;)) block
   &gt;
-&gt;</code></pre>
+&gt;
+format(page, 'html')</code></pre>
       <p>Combined with JIT-compiled performance (competitive with V8, 13× faster than CPython), a rich type system, and a built-in HTML/CSS/SVG layout engine, Lambda Script is designed for anyone who processes documents or structured data as part of their workflow.</p>
       <p><a href="../docs/quickstart/">Get started →</a></p>
     </article>

@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../../favicon.ico" sizes="48x48">
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../../apple-touch-icon.png">
+  <link rel="manifest" href="../../site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Language Tour — Lambda Script</title>
   <meta name="description" content="A guided tour of Lambda Script: data types, pipes, for-expressions, pattern matching, type system, functions, and document processing.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -46,83 +51,97 @@
     <p>Lambda Script has a rich set of primitive and composite types:</p>
 
     <h3>Primitives</h3>
-<pre><code>42              // int (56-bit signed)
+<pre><code>42              // int
 3.14            // float (64-bit)
-123.45n         // decimal (arbitrary precision)
+123.45m         // decimal (exact)
+42n             // integer (arbitrary precision)
 "hello"         // string (UTF-8)
 'symbol'        // symbol (interned identifier)
-true false      // bool
+true            // bool
 null            // null
 t'2025-04-01'   // datetime
 b'\xDEADBEEF'   // binary</code></pre>
 
     <h3>Collections</h3>
-<pre><code>[1, 2, 3]                   // array
-{name: "Alice", age: 30}    // map
-&lt;div class: "card"; "text"&gt; // element (markup literal)
-1 to 10                     // range (inclusive)</code></pre>
+<pre><code>let a = [1, 2, 3]                     // array
+let m = {name: "Alice", age: 30}      // map
+let e = &lt;div class: "card", "text"&gt;   // element (markup literal)
+let r = 1 to 10                       // range (inclusive)</code></pre>
 
     <h3>Indexing &amp; Slicing</h3>
-<pre><code>arr[0]            // first element
-arr[1 to 3]       // slice (indices 1, 2, 3)
-map.key           // field access
+<pre><code>let arr = [10, 20, 30, 40]
+let user = {name: "Alice", age: 30}
+
+arr[0]            // 10 — first element
+arr[1 to 3]       // [20, 30, 40] — slice
+user.name         // "Alice" — field access
 "hello"[1 to 3]   // "ell" — string slicing</code></pre>
 
     <!-- Variables -->
     <h2 id="variables">Variables &amp; Bindings</h2>
 <pre><code>// Immutable bindings (default)
 let x = 42
-let name: string = "Lambda"
+let lang: string = "Lambda"
 
 // Let expressions (inline bindings)
-(let a = 1, b = 2, a + b)   // 3
+let three = (let a = 1, let b = 2, a + b)   // 3
 
-// Mutable variables (in procedural functions)
+// Mutable variables (in procedures)
 pn main() {
-    var count = 0
-    count = count + 1
+    var n = 0
+    n = n + 1
+    print(n)    // 1
 }</code></pre>
 
     <!-- Pipes -->
     <h2 id="pipes">Pipe Operator &amp; Data Pipelines</h2>
-    <p>The pipe operator <code>|</code> is Lambda's signature feature — fluent, set-oriented data transformations. Use <code>~</code> to reference the current item:</p>
+    <p>The pipe operators are Lambda's signature feature — fluent, set-oriented data transformations. <code>|&gt;</code> maps, <code>|:</code> filters, and <code>~</code> is the current item:</p>
 
-<pre><code>// Map: apply a transformation to every element
-[1, 2, 3] | ~ * 2                    // [2, 4, 6]
+<pre><code>let nums = [1, 2, 3, 4, 5]
+let users = [{name: "Alice", age: 30}, {name: "Bob", age: 15}, {name: "Carol", age: 42}]
+
+// Map with |&gt;: apply a transformation to every item
+nums |&gt; ~ * 2                          // [2, 4, 6, 8, 10]
 
 // Extract fields
-users | ~.name                        // ["Alice", "Bob", "Carol"]
+users |&gt; ~.name                        // ["Alice", "Bob", "Carol"]
 
-// Filter with 'that'
-[1, 2, 3, 4, 5] that ~ > 3           // [4, 5]
+// Filter with |:
+nums |: ~ &gt; 3                          // [4, 5]
 
 // Chain operations: filter → map → aggregate
-users that ~.age >= 18 | ~.name | len // count adult names
+users |: ~.age &gt;= 18 |&gt; ~.name |&gt; len  // 2 adults
 
-// Pipe spread in array literals
-[0, [1, 2, 3] | ~ * 10, 99]          // [0, 10, 20, 30, 99]</code></pre>
+// Spread a pipe result into an array literal
+let spread = [0, *(nums |&gt; ~ * 10), 99]  // [0, 10, 20, 30, 40, 50, 99]</code></pre>
 
     <h3>Vector Arithmetic</h3>
     <p>Scalar operations automatically broadcast over collections:</p>
-<pre><code>1 + [2, 3]          // [3, 4]
-[1, 2] * 2          // [2, 4]
-[1, 2] + [3, 4]     // [4, 6]
-[1, 2] ^ 2          // [1, 4]</code></pre>
+<pre><code>let v = [1, 2]
+
+1 + v               // [2, 3]
+v * 2               // [2, 4]
+v + [3, 4]          // [4, 6]
+v ** 2              // [1, 4]</code></pre>
 
     <!-- For-Expressions -->
     <h2 id="for-expressions">For-Expressions</h2>
     <p>SQL-like comprehensions with <code>where</code>, <code>order by</code>, <code>limit</code>, <code>offset</code>:</p>
-<pre><code>// Filter and transform
-for (x in data where x > 0) x * 2
+<pre><code>let data = [3, -1, 4, -5, 9]
+let items = [{name: "pen", price: 2}, {name: "lamp", price: 30}, {name: "book", price: 12}]
+let xs = [1, 5, 8], ys = [4, 6]
+
+// Filter and transform
+for (x in data where x &gt; 0) x * 2                      // [6, 8, 18]
 
 // With local bindings
-for (x in data, let sq = x * x where sq > 10) sq
+for (x in data, let sq = x * x where sq &gt; 10) sq       // [16, 25, 81]
 
 // Sorting and pagination
-for (x in items order by x.price desc limit 5) x.name
+for (x in items order by x.price desc limit 2) x.name  // ["lamp", "book"]
 
 // Multi-source comprehension
-for (x in xs, y in ys where x + y > 10) {x, y}</code></pre>
+for (x in xs, y in ys where x + y &gt; 10) {x: x, y: y}   // (5, 6), (8, 4), (8, 6)</code></pre>
 
     <!-- Type System -->
     <h2 id="type-system">Type System</h2>
@@ -130,7 +149,7 @@ for (x in xs, y in ys where x + y > 10) {x, y}</code></pre>
 
 <pre><code>// Type annotations
 let x: int = 42
-let items: [string] = ["a", "b"]
+let items: string[] = ["a", "b"]
 
 // Union and optional types
 type Result = int | error
@@ -142,78 +161,88 @@ type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"</code></pre>
 
     <h3>Object Types</h3>
 <pre><code>type Point {
-    x: float, y: float;
-    fn distance(other: Point) =>
+    x: float, y: float,
+    fn distance(other: Point) =&gt;
         math.sqrt((x - other.x)**2 + (y - other.y)**2)
 }
 
-type Circle : Point { radius: float; }  // inheritance
+type Circle : Point { radius: float }   // inheritance
 
-let p = {Point x: 3.0, y: 4.0}          // object literal
-p.distance({Point x: 0.0, y: 0.0})      // method call
-p is Point                                // true (nominal)</code></pre>
+let p = &lt;Point x: 3.0, y: 4.0&gt;          // object literal
+p.distance(&lt;Point x: 0.0, y: 0.0&gt;)      // 5 — method call
+p is Point                              // true (nominal)
+{x: 3.0, y: 4.0} is Point               // false — a plain map is not a Point</code></pre>
 
     <h3>Element Type Patterns</h3>
 <pre><code>// Schema types for document structures
-type Link = &lt;a href: string; string&gt;
-type Article = &lt;article title: string; string, Section*&gt;
+type Section = &lt;section string*&gt;
+type Link = &lt;a href: string, string&gt;
+type Article = &lt;article title: string, string, Section*&gt;
 type ImgTag = &lt;img src: string, alt: string&gt;</code></pre>
 
     <!-- Functions -->
     <h2 id="functions">Functions</h2>
 <pre><code>// Pure functions (fn)
-fn add(a: int, b: int) => a + b
-fn greet(name: string) => "Hello, " ++ name ++ "!"
+fn add(a: int, b: int) =&gt; a + b
+fn greet(who: string) =&gt; "Hello, " ++ who ++ "!"
 
-// Lambda expressions
-let double = (x) => x * 2
-let add3 = fn(a, b, c) => a + b + c
+// Anonymous functions
+let double = (x) =&gt; x * 2
+let add3 = (a, b, c) =&gt; a + b + c
 
-// Procedural functions with mutation (pn)
-pn process() {
+// Procedures with mutation (pn)
+pn main() {
     var total = 0
-    for i in range(0, 10) {
+    for i in 0 to 9 {
         total = total + i
     }
-    print(total)
+    print(total)    // 45
 }</code></pre>
 
     <!-- Pattern Matching -->
     <h2 id="pattern-matching">Pattern Matching</h2>
-<pre><code>fn describe(x) => match x {
+<pre><code>fn describe(x) =&gt; match x {
     case null:             "nothing"
     case 0:                "zero"
     case 1 to 9:           "small number"      // range
-    case int that (~ > 9): "big number"        // type + constraint
+    case int that (~ &gt; 9): "big number"        // type + constraint
     case string:           "text: " ++ ~        // type
-    case [int]:            "int array"          // collection type
+    case int[]:            "int array"          // collection type
     default:               "something else"
 }</code></pre>
 
     <h3>Query Operator</h3>
     <p>The <code>?</code> query operator searches data trees by type or structure:</p>
-<pre><code>html?&lt;img&gt;                    // all &lt;img&gt; descendants
+<pre><code>let html = input("page.html", 'html')^
+let data = input("status.json", 'json')^
+
+html?&lt;img&gt;                    // all &lt;img&gt; descendants
 html?&lt;div class: string&gt;      // &lt;div&gt;s with a class attribute
 data?{status: "ok"}           // maps where status == "ok"
-html[body][div]?&lt;a&gt;           // direct path then recursive</code></pre>
+html?&lt;div&gt;?&lt;a&gt;                // &lt;a&gt;s nested inside &lt;div&gt;s</code></pre>
 
     <!-- Error Handling -->
     <h2 id="error-handling">Error Handling</h2>
-<pre><code>// Functions that can fail return T^E (value ^ error)
-fn divide(a: float, b: float) float^error =>
-    if b == 0 { raise "division by zero" }
-    else { a / b }
+<pre><code>// Functions that can fail declare T^E: a value, or a raised error
+fn divide(a: float, b: float) float^ {
+    if (b == 0) raise error("division by zero")
+    else a / b
+}
 
-// Propagate errors with ?
-fn compute(x: float) float^error => {
-    let r = divide(100, x)?    // propagates error if divide fails
+// Propagate with postfix ^: an error returns to the caller
+fn compute(x: float) float^ {
+    let r = divide(100, x)^
     r * 2
 }
 
-// Handle the error with a braced postfix handler
-let result = divide(10, 0) ^ { 0 }
-if err { print("Error: " ++ err.message) }
-else { print("Result: " ++ str(result)) }</code></pre>
+// Handle it with a braced handler, where ^ is the error
+pn main() {
+    let result = compute(0) ^ {
+        print("Error: " ++ ^.message ++ "\n")
+        0
+    }
+    print("Result: " ++ string(result) ++ "\n")
+}</code></pre>
 
     <!-- Document Processing -->
     <h2 id="documents">Document Processing</h2>
@@ -234,18 +263,20 @@ else { print("Result: " ++ str(result)) }</code></pre>
 format(page, 'html')    // render to HTML string</code></pre>
 
     <h3>Multi-Format Parsing</h3>
-<pre><code>let md   = input("readme.md",    'markdown')
-let html = input("page.html",    'html')
-let json = input("data.json",    'json')
-let yaml = input("config.yaml",  'yaml')
-let csv  = input("data.csv",     'csv')
-let tex  = input("paper.tex",    'latex')</code></pre>
+<pre><code>let md   = input("readme.md",    'markdown')^
+let html = input("page.html",    'html')^
+let json = input("data.json",    'json')^
+let yaml = input("config.yaml",  'yaml')^
+let csv  = input("data.csv",     'csv')^
+let tex  = input("paper.tex",    'latex')^</code></pre>
 
     <h3>Format Conversion</h3>
-<pre><code>// Direct format conversion
-format(data, 'json')       // to JSON string
-format(data, 'yaml')       // to YAML string
-format(data, 'markdown')   // to Markdown string</code></pre>
+<pre><code>let data = {name: "Lambda", tags: ["fast", "functional"]}
+
+// Direct format conversion
+format(data, 'json')       // to a JSON string
+format(data, 'yaml')       // to a YAML string
+format(data, 'xml')        // to an XML string</code></pre>
 
     <div class="text-center mt-3xl">
       <a href="../../docs/cli/" class="btn btn-primary">Explore the CLI →</a>

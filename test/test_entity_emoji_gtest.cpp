@@ -19,6 +19,7 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/io/mark_builder.hpp"
 #include "../lib/html_entities.h"
+#include "../lib/emoji_shortcodes.h"
 #include "../lambda/input/input-utils.h"
 #include "../lib/log.h"
 #include "../lib/url.h"
@@ -217,6 +218,49 @@ protected:
         return input_from_source(content, url, type, nullptr);
     }
 };
+
+static int count_shortcode_symbols(ItemReader item, const char* name) {
+    if (item.isSymbol()) {
+        Symbol* symbol = item.asSymbol();
+        size_t length = strlen(name);
+        return symbol && symbol->len == length &&
+            memcmp(symbol->chars, name, length) == 0 ? 1 : 0;
+    }
+    int count = 0;
+    if (item.isElement()) {
+        ElementReader element = item.asElement();
+        for (int64_t i = 0; i < element.childCount(); i++) {
+            count += count_shortcode_symbols(element.childAt(i), name);
+        }
+    } else if (item.isArray()) {
+        ArrayReader array = item.asArray();
+        for (int64_t i = 0; i < array.length(); i++) {
+            count += count_shortcode_symbols(array.get(i), name);
+        }
+    }
+    return count;
+}
+
+TEST_F(MarkdownEmojiParsingTest, RendererSupportedNamesParseAsSymbols) {
+    Input* input = parseMarkdown(":smiley: :worried: :monkey_face: :hamburger: :+1: :invalid: :octocat:");
+    ASSERT_NE(input, nullptr);
+    ItemReader root(input->root.to_const());
+    EXPECT_EQ(count_shortcode_symbols(root, "smiley"), 1);
+    EXPECT_EQ(count_shortcode_symbols(root, "worried"), 1);
+    EXPECT_EQ(count_shortcode_symbols(root, "monkey_face"), 1);
+    EXPECT_EQ(count_shortcode_symbols(root, "hamburger"), 1);
+    EXPECT_EQ(count_shortcode_symbols(root, "+1"), 1);
+    EXPECT_EQ(count_shortcode_symbols(root, "invalid"), 0);
+    EXPECT_EQ(count_shortcode_symbols(root, "octocat"), 0);
+}
+
+TEST_F(MarkdownEmojiParsingTest, SharedLookupRetainsLegacyAliases) {
+    EXPECT_STREQ(emoji_shortcode_lookup("+1", 2), "👍");
+    EXPECT_STREQ(emoji_shortcode_lookup("clock", 5), "🕐");
+    EXPECT_STREQ(emoji_shortcode_lookup("info", 4), "ℹ️");
+    EXPECT_STREQ(emoji_shortcode_lookup("fearful", 7), "😨");
+    EXPECT_EQ(emoji_shortcode_lookup("octocat", 7), nullptr);
+}
 
 TEST_F(MarkdownEmojiParsingTest, EmojiShortcodeParsesAsSymbol) {
     // Emoji shortcodes should parse as Symbol items

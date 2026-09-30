@@ -1,0 +1,22 @@
+{
+  "name": "Document editor renders standard Markdown emoji shortcodes",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1800},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "comprehensive_emoji_test.md"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_comprehensive_emoji_test_md .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "comprehensive_emoji_test.md"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "not_contains": ":smiley:"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "not_contains": ":joy:"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "not_contains": ":worried:"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "not_contains": ":ear:"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "not_contains": ":monkey_face:"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "not_contains": ":hamburger:"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": ":invalid:"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": ":octocat:"},
+    {"type": "render", "file": "./temp/doc_editor_emoji_shortcodes.png"}
+  ]
+}

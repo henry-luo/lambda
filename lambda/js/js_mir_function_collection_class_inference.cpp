@@ -2064,6 +2064,7 @@ void jm_populate_boxed_closed_numeric_binding_facts(JsMirTranspiler* mt,
 
 TypeId jm_numeric_binding_type(JsMirTranspiler* mt, NameEntry* binding) {
     if (!mt || !mt->current_fc || !binding) return LMD_TYPE_ANY;
+    if (mt->guarded_loop_numeric_binding == binding) return LMD_TYPE_FLOAT;
     FnAnalysis* analysis = jm_function_analysis(mt->current_fc);
     FnVariantAnalysis* body = fn_analysis_variant(analysis,
         mt->in_native_func ? FN_ENTRY_NATIVE_BODY : FN_ENTRY_BOXED_BODY);
@@ -2431,6 +2432,52 @@ JsClassEntry* jm_matching_static_superclass(JsClassEntry* ce, JsAstNode* heritag
 
 // Allocates stack space for an Item[] args array, stores evaluated args,
 // returns register pointing to the array. If arg_count == 0, returns 0.
+static MIR_reg_t jm_reserve_args_array(JsMirTranspiler* mt, int arg_count) {
+    // Args occupy fixed slots in the generated function's canonical root
+    // frame. Nested call expressions use disjoint higher slots, while sibling
+    // calls reuse the same bounded extent.
+    if (!mt->arg_stack_scope) {
+        log_error("js-mir arg-frame invariant: args without call/new scope");
+        abort();
+    }
+    JsMirArgStackScope* scope = mt->arg_stack_scope;
+    if (scope->base_slot < 0) {
+        scope->base_slot = mt->arg_frame_depth;
+        scope->slot_count = arg_count;
+        mt->arg_frame_depth += arg_count;
+        if (mt->arg_frame_depth > mt->arg_frame_slot_count) {
+            mt->arg_frame_slot_count = mt->arg_frame_depth;
+        }
+    } else if (scope->slot_count != arg_count) {
+        log_error("js-mir arg-frame invariant: scope arity changed");
+        abort();
+    }
+    MIR_reg_t args_ptr = jm_new_reg(mt, "js_args_ptr", MIR_T_I64);
+    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
+        MIR_new_reg_op(mt->ctx, args_ptr),
+        MIR_new_reg_op(mt->ctx, jm_arg_frame_base(mt)),
+        MIR_new_int_op(mt->ctx,
+            (int64_t)scope->base_slot * (int64_t)sizeof(uint64_t))));
+    // The prerooted ABI is valid only for this exact frame-relative register;
+    // another same-arity buffer may have unrelated lifetime ownership.
+    scope->args_reg = args_ptr;
+
+    return args_ptr;
+}
+
+MIR_reg_t jm_build_args_array_from_regs(JsMirTranspiler* mt,
+        const MIR_reg_t* arguments, int arg_count) {
+    if (!arguments || arg_count <= 0) return 0;
+    // A cold direct-call miss uses the original evaluated arguments. Reserve
+    // the same canonical frame slots as the ordinary call ABI (D5.3).
+    MIR_reg_t args_ptr = jm_reserve_args_array(mt, arg_count);
+    for (int i = 0; i < arg_count; i++) {
+        jm_emit_store_i64(mt, i * (int)sizeof(uint64_t), args_ptr,
+            arguments[i]);
+    }
+    return args_ptr;
+}
+
 MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg_count) {
     if (arg_count == 0) return 0;
 
@@ -2475,34 +2522,7 @@ MIR_reg_t jm_build_args_array(JsMirTranspiler* mt, JsAstNode* first_arg, int arg
         return args_ptr;
     }
 
-    // Args occupy fixed slots in the generated function's canonical root
-    // frame. Nested call expressions use disjoint higher slots, while sibling
-    // calls reuse the same bounded extent.
-    if (!mt->arg_stack_scope) {
-        log_error("js-mir arg-frame invariant: args without call/new scope");
-        abort();
-    }
-    JsMirArgStackScope* scope = mt->arg_stack_scope;
-    if (scope->base_slot < 0) {
-        scope->base_slot = mt->arg_frame_depth;
-        scope->slot_count = arg_count;
-        mt->arg_frame_depth += arg_count;
-        if (mt->arg_frame_depth > mt->arg_frame_slot_count) {
-            mt->arg_frame_slot_count = mt->arg_frame_depth;
-        }
-    } else if (scope->slot_count != arg_count) {
-        log_error("js-mir arg-frame invariant: scope arity changed");
-        abort();
-    }
-    MIR_reg_t args_ptr = jm_new_reg(mt, "js_args_ptr", MIR_T_I64);
-    jm_emit(mt, MIR_new_insn(mt->ctx, MIR_ADD,
-        MIR_new_reg_op(mt->ctx, args_ptr),
-        MIR_new_reg_op(mt->ctx, jm_arg_frame_base(mt)),
-        MIR_new_int_op(mt->ctx,
-            (int64_t)scope->base_slot * (int64_t)sizeof(uint64_t))));
-    // The prerooted ABI is valid only for this exact frame-relative register;
-    // another same-arity buffer may have unrelated lifetime ownership.
-    scope->args_reg = args_ptr;
+    MIR_reg_t args_ptr = jm_reserve_args_array(mt, arg_count);
 
     // Evaluate and store each argument
     JsAstNode* arg = first_arg;

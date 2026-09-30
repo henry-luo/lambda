@@ -3,11 +3,11 @@
 Lambda reads documents with the force step `#`, gives the nodes inside them an identity, and changes them only through a small set of update statements — `put`, `del`, `output`, grouped into transactions with `open`, `commit` and `rollback`. This document describes that model: references and forcing, node identity, the three tiers of reads and writes, the update statements, transactions, and in-memory `temp.` documents.
 
 > **Related Documentation**:
-> - [Lambda Data](Lambda_Data.md#path-literals) — path literals, the value side of a reference
-> - [Lambda Procedural](Lambda_Procedural.md) — `var`, assignment and value semantics (Tier 2)
-> - [Lambda System Functions](Lambda_Sys_Func.md#inputoutput-functions) — `input`, `output`, `temp`
+> - [Lambda Data](../Lambda_Data.md#path-literals) — path literals, the value side of a reference
+> - [Lambda Procedural](../Lambda_Procedural.md) — `var`, assignment and value semantics (Tier 2)
+> - [Lambda System Functions](../Lambda_Sys_Func.md#inputoutput-functions) — `input`, `output`, `temp`
 
-> **Status.** The model is designed in [`vibe/Lambda_Design_Reference.md`](../vibe/Lambda_Design_Reference.md) (rulings PTH30–PTH80) and implemented; its ratification into the formal semantics as S9.4 "Document updates" is pending, so this document cites the design IDs (`PTH#`). Differences between the design and the current build are marked **Not yet implemented**.
+> **Status.** The model is designed in [`vibe/Lambda_Design_Reference.md`](../../vibe/Lambda_Design_Reference.md) (rulings PTH30–PTH80) and implemented; its ratification into the formal semantics as S9.4 "Document updates" is pending, so this document cites the design IDs (`PTH#`). Differences between the design and the current build are marked **Not yet implemented**.
 
 ---
 

@@ -3878,7 +3878,7 @@ typedef struct UiContext {
     bool headless;          // true if running headless (no visible window). When true, clipboard
                             // operations use the in-process ClipboardStore only and do NOT touch
                             // the OS pasteboard via GLFW (avoids cross-process races in tests).
-    bool async_script_navigation; // host event loop can present frames while .ls loads
+    bool async_script_navigation; // host event loop can present frames while local documents load
     UiAppMode app_mode;     // viewer or edit application (set after init)
     // Edit-application close decision. The document arms the guard while it
     // has unsaved changes; an armed guard turns a platform close into a
@@ -3947,6 +3947,10 @@ typedef struct DocumentJsHostConfig {
     bool redirect_stdout_to_stderr;
     bool disable_css_animations;
 } DocumentJsHostConfig;
+DocumentJsHostConfig document_js_host_config_inherit(UiContext* uicon,
+                                                     const struct DomDocument* source);
+void document_apply_js_host_config(struct DomDocument* doc,
+                                   const DocumentJsHostConfig* config);
 
 extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
@@ -3984,7 +3988,9 @@ typedef struct HtmlLoadPhaseTiming {
 
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
-                           struct CookieJar* top_level_cookie_jar = nullptr);
+                           struct CookieJar* top_level_cookie_jar = nullptr,
+                           bool defer_html_scripts = false);
+void complete_deferred_html_scripts(DomDocument* doc);
 DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_width,
                                     int viewport_height,
                                     const DocumentJsHostConfig* js_host_config,

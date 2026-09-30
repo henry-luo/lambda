@@ -5417,10 +5417,6 @@ static MIR_reg_t emit_double_bits(MirTranspiler* mt, MIR_reg_t d_reg) {
     return em_emit_double_bits(&mt->em, d_reg);
 }
 
-static MIR_reg_t emit_bits_double(MirTranspiler* mt, MIR_reg_t bits_reg) {
-    return em_emit_bits_double(&mt->em, bits_reg);
-}
-
 // Is this float-lane value the null sentinel? One straight-line bits compare.
 // A register-only `x != x` prefilter was measured (Tune27 §10.15): the extra
 // branch splits the block at every test and MIR's allocator paid more than
@@ -5995,6 +5991,12 @@ static MIR_reg_t emit_unbox_container(MirTranspiler* mt, MIR_reg_t item_reg) {
     return ptr;
 }
 
+static MIR_reg_t mir_unbox_f64_cold(void* owner, MIR_reg_t item) {
+    MirTranspiler* mt = (MirTranspiler*)owner;
+    return emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64,
+        MIR_new_reg_op(mt->ctx, item));
+}
+
 // Unbox Item -> native type
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id) {
     item_reg = mir_materialize_pending_reg(mt, item_reg,
@@ -6007,32 +6009,7 @@ static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_i
         // machine-integer question, and a sentinel is not a machine integer.
         return emit_unbox_int_lane(mt, BoxedReg(item_reg)).r;
     case LMD_TYPE_FLOAT:
-        {
-            MIR_reg_t in_band = new_reg(mt, "fumask", MIR_T_I64);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_AND,
-                MIR_new_reg_op(mt->ctx, in_band),
-                MIR_new_reg_op(mt->ctx, item_reg),
-                MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK)));
-            MIR_reg_t result = new_reg(mt, "unboxf", MIR_T_D);
-            MIR_label_t l_inline = new_label(mt);
-            MIR_label_t l_end = new_label(mt);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-                MIR_new_label_op(mt->ctx, l_inline),
-                MIR_new_reg_op(mt->ctx, in_band)));
-            MIR_reg_t cold = emit_call_1(mt, "it2d", MIR_T_D, MIR_T_I64,
-                MIR_new_reg_op(mt->ctx, item_reg));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, cold)));
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_end)));
-            emit_label(mt, l_inline);
-            MIR_reg_t inline_d = emit_bits_double(mt, item_reg);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_DMOV,
-                MIR_new_reg_op(mt->ctx, result),
-                MIR_new_reg_op(mt->ctx, inline_d)));
-            emit_label(mt, l_end);
-            return result;
-        }
+        return em_unbox_f64_item(&mt->em, mt, mir_unbox_f64_cold, item_reg);
     case LMD_TYPE_BOOL:
         return emit_uext8(mt, emit_call_1(mt, "it2b", MIR_T_I64, MIR_T_I64, MIR_new_reg_op(mt->ctx, item_reg)));
     case LMD_TYPE_STRING:
@@ -46386,9 +46363,7 @@ static void transpile_handler_def(MirTranspiler* mt, AstEventHandler* handler,
         AstListNode* body_list = (AstListNode*)view->body;
         AstNode* body_item = body_list->item;
         while (body_item) {
-            if (body_item->node_type == AST_NODE_LET_STAM ||
-                body_item->node_type == AST_NODE_PUB_STAM ||
-                body_item->node_type == AST_NODE_VAR_STAM) {
+            if (is_view_handler_body_binding(body_item->node_type)) {
                 transpile_let_stam(mt, (AstLetNode*)body_item);
             }
             body_item = body_item->next;
@@ -47855,6 +47830,136 @@ static int lambda_mir_link_compiler_pass(void* opaque) {
     return pass->main_func != NULL;
 }
 
+// Recreate execution-owned view/edit dispatch after loading a sealed MIR image.
+void lambda_register_mir_view_templates(Script* script) {
+    if (!script || !script->main_func || !script->ast_root || !script->jit_context) return;
+    if (!g_template_registry) g_template_registry = template_registry_new();
+    if (!g_template_registry) return;
+    AstScript* ast_root = (AstScript*)script->ast_root;
+    MIR_context_t ctx = script->jit_context;
+    // Walk the sealed AST because the registry belongs to this execution.
+    {
+        // Walk through content block to find view/edit nodes
+        AstNode* first_child = ast_root->child;
+        AstNode* tmpl_child = first_child;
+        // If the first child is a content block, walk its items
+        if (tmpl_child && tmpl_child->node_type == AST_NODE_CONTENT) {
+            tmpl_child = ((AstListNode*)tmpl_child)->item;
+        }
+        int view_idx = 0;
+        while (tmpl_child) {
+            AstNode* view_child = tmpl_child;
+            AstNode* next_tmpl_child = tmpl_child->next;
+            if (tmpl_child->node_type == AST_NODE_CONTENT) {
+                view_child = ((AstListNode*)tmpl_child)->item;
+            }
+            while (view_child) {
+                if (view_child->node_type == AST_NODE_VIEW) {
+                    AstViewNode* view = (AstViewNode*)view_child;
+
+                    // build the function name used during transpilation
+                    char func_name[64];
+                    snprintf(func_name, sizeof(func_name), "_view_%d", view_idx++);
+
+                    void* func_ptr = find_func(ctx, func_name);
+                    if (func_ptr) {
+                        // determine specificity from the pattern
+                        TemplateSpecificity spec = TMPL_SPEC_CATCHALL;
+                        TypeId match_type = LMD_TYPE_ANY;
+                        const char* match_tag = NULL;
+                        int match_tag_len = 0;
+                        const TypeElmt* match_elmt = NULL;
+
+                        if (view->pattern) {
+                            AstNode* pat = view->pattern;
+                            if (pat->type) {
+                                TypeId tid = pat->type->type_id;
+                                if (tid == LMD_TYPE_TYPE) {
+                                    // unwrap TypeType to get the actual matched type
+                                    TypeType* tt = (TypeType*)pat->type;
+                                    if (tt->type && tt->type->type_id != LMD_TYPE_ANY) {
+                                        match_type = tt->type->type_id;
+                                        spec = TMPL_SPEC_SIMPLE_TYPE;
+                                        // extract element tag for element patterns
+                                        if (match_type == LMD_TYPE_ELEMENT) {
+                                            TypeElmt* elmt_type = (TypeElmt*)tt->type;
+                                            if (elmt_type->name.str && elmt_type->name.length > 0) {
+                                                match_tag = elmt_type->name.str;
+                                                match_tag_len = (int)elmt_type->name.length;
+                                                match_elmt = elmt_type;
+                                                spec = elmt_type->length > 0
+                                                    ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
+                                            }
+                                        }
+                                    }
+                                } else if (tid != LMD_TYPE_ANY) {
+                                    match_type = tid;
+                                    spec = TMPL_SPEC_SIMPLE_TYPE;
+                                }
+                            }
+                        }
+
+                        // named templates have highest specificity
+                        if (view->name) spec = TMPL_SPEC_NAMED;
+
+                        const char* tmpl_name = view->name ? view->name->chars : NULL;
+                        template_registry_add(g_template_registry,
+                            tmpl_name, view->is_edit,
+                            (fn_ptr)func_ptr, spec,
+                            match_type, match_tag, match_tag_len,
+                            0, 0);
+
+                        // get the just-added entry (it's the last one)
+                        TemplateEntry* tmpl_entry = g_template_registry->last;
+                        template_registry_set_element_pattern(tmpl_entry, match_elmt);
+
+                        // set template_ref for state store keying
+                        // func_name is stack-local, so we need a persistent copy
+                        if (tmpl_name) {
+                            tmpl_entry->template_ref = tmpl_name;
+                        } else {
+                            // JIT handlers embed this interned pointer. On a
+                            // hit, reuse it without mutating the cached pool.
+                            String* ref = script->cache_template
+                                ? name_pool_lookup_len(script->name_pool,
+                                    func_name, strlen(func_name))
+                                : name_pool_create_len(script->name_pool,
+                                    func_name, strlen(func_name));
+                            if (!ref) {
+                                log_error("MIR template: missing compiled ref %s", func_name);
+                            }
+                            tmpl_entry->template_ref = ref ? ref->chars : NULL;
+                        }
+
+                        // register event handlers on the template entry
+                        int hidx = 0;
+                        for (AstEventHandler* h = view->handler; h; h = h->next_handler) {
+                            char hname[64];
+                            snprintf(hname, sizeof(hname), "%s_h%d", func_name, hidx++);
+                            void* hptr = find_func(ctx, hname);
+                            if (hptr) {
+                                const char* ename = h->event ? h->event->chars : "unknown";
+                                template_entry_add_handler(tmpl_entry, ename, (fn_ptr)hptr);
+                            } else {
+                                log_error("MIR Direct: handler function '%s' not found", hname);
+                            }
+                        }
+
+                        log_debug("registered template '%s' func=%s spec=%d type=%d handlers=%d",
+                            tmpl_name ? tmpl_name : "(anonymous)", func_name,
+                            (int)spec, (int)match_type, hidx);
+                    } else {
+                        log_error("MIR Direct: view function '%s' not found after JIT", func_name);
+                    }
+                }
+                view_child = (tmpl_child->node_type == AST_NODE_CONTENT) ? view_child->next : NULL;
+            }
+            tmpl_child = next_tmpl_child;
+        }
+    }
+
+}
+
 void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* script_path,
                                    double* out_jit_init_ms,
                                    double* out_transpile_ms,
@@ -48047,117 +48152,8 @@ void compile_script_as_mir_direct(Transpiler* tp, Script* script, const char* sc
     finalize_context_module_layout(ctx, script, property_keys);
     if (property_keys) arraylist_free(property_keys);
 
-    // Register view/edit templates: walk AST, look up compiled body functions,
-    // and add them to the global template registry.
-    if (g_template_registry && tp->main_func) {
-        // Walk through content block to find view/edit nodes
-        AstNode* first_child = ast_root->child;
-        AstNode* tmpl_child = first_child;
-        // If the first child is a content block, walk its items
-        if (tmpl_child && tmpl_child->node_type == AST_NODE_CONTENT) {
-            tmpl_child = ((AstListNode*)tmpl_child)->item;
-        }
-        int view_idx = 0;
-        while (tmpl_child) {
-            AstNode* view_child = tmpl_child;
-            AstNode* next_tmpl_child = tmpl_child->next;
-            if (tmpl_child->node_type == AST_NODE_CONTENT) {
-                view_child = ((AstListNode*)tmpl_child)->item;
-            }
-            while (view_child) {
-                if (view_child->node_type == AST_NODE_VIEW) {
-                    AstViewNode* view = (AstViewNode*)view_child;
-
-                    // build the function name used during transpilation
-                    char func_name[64];
-                    snprintf(func_name, sizeof(func_name), "_view_%d", view_idx++);
-
-                    void* func_ptr = find_func(ctx, func_name);
-                    if (func_ptr) {
-                        // determine specificity from the pattern
-                        TemplateSpecificity spec = TMPL_SPEC_CATCHALL;
-                        TypeId match_type = LMD_TYPE_ANY;
-                        const char* match_tag = NULL;
-                        int match_tag_len = 0;
-                        const TypeElmt* match_elmt = NULL;
-
-                        if (view->pattern) {
-                            AstNode* pat = view->pattern;
-                            if (pat->type) {
-                                TypeId tid = pat->type->type_id;
-                                if (tid == LMD_TYPE_TYPE) {
-                                    // unwrap TypeType to get the actual matched type
-                                    TypeType* tt = (TypeType*)pat->type;
-                                    if (tt->type && tt->type->type_id != LMD_TYPE_ANY) {
-                                        match_type = tt->type->type_id;
-                                        spec = TMPL_SPEC_SIMPLE_TYPE;
-                                        // extract element tag for element patterns
-                                        if (match_type == LMD_TYPE_ELEMENT) {
-                                            TypeElmt* elmt_type = (TypeElmt*)tt->type;
-                                            if (elmt_type->name.str && elmt_type->name.length > 0) {
-                                                match_tag = elmt_type->name.str;
-                                                match_tag_len = (int)elmt_type->name.length;
-                                                match_elmt = elmt_type;
-                                                spec = elmt_type->length > 0
-                                                    ? TMPL_SPEC_ELMT_ATTR : TMPL_SPEC_ELMT_TAG;
-                                            }
-                                        }
-                                    }
-                                } else if (tid != LMD_TYPE_ANY) {
-                                    match_type = tid;
-                                    spec = TMPL_SPEC_SIMPLE_TYPE;
-                                }
-                            }
-                        }
-
-                        // named templates have highest specificity
-                        if (view->name) spec = TMPL_SPEC_NAMED;
-
-                        const char* tmpl_name = view->name ? view->name->chars : NULL;
-                        template_registry_add(g_template_registry,
-                            tmpl_name, view->is_edit,
-                            (fn_ptr)func_ptr, spec,
-                            match_type, match_tag, match_tag_len,
-                            0, 0);
-
-                        // get the just-added entry (it's the last one)
-                        TemplateEntry* tmpl_entry = g_template_registry->last;
-                        template_registry_set_element_pattern(tmpl_entry, match_elmt);
-
-                        // set template_ref for state store keying
-                        // func_name is stack-local, so we need a persistent copy
-                        if (tmpl_name) {
-                            tmpl_entry->template_ref = tmpl_name;
-                        } else {
-                            tmpl_entry->template_ref = name_pool_create_len(tp->name_pool, func_name, strlen(func_name))->chars;
-                        }
-
-                        // register event handlers on the template entry
-                        int hidx = 0;
-                        for (AstEventHandler* h = view->handler; h; h = h->next_handler) {
-                            char hname[64];
-                            snprintf(hname, sizeof(hname), "%s_h%d", func_name, hidx++);
-                            void* hptr = find_func(ctx, hname);
-                            if (hptr) {
-                                const char* ename = h->event ? h->event->chars : "unknown";
-                                template_entry_add_handler(tmpl_entry, ename, (fn_ptr)hptr);
-                            } else {
-                                log_error("MIR Direct: handler function '%s' not found", hname);
-                            }
-                        }
-
-                        log_debug("registered template '%s' func=%s spec=%d type=%d handlers=%d",
-                            tmpl_name ? tmpl_name : "(anonymous)", func_name,
-                            (int)spec, (int)match_type, hidx);
-                    } else {
-                        log_error("MIR Direct: view function '%s' not found after JIT", func_name);
-                    }
-                }
-                view_child = (tmpl_child->node_type == AST_NODE_CONTENT) ? view_child->next : NULL;
-            }
-            tmpl_child = next_tmpl_child;
-        }
-    }
+    // The same registration runs when a cached MIR graph enters a fresh Runtime.
+    lambda_register_mir_view_templates(tp);
 
     if (!tp->main_func) {
         log_error("MIR Direct: failed to generate 'main' for '%s'",
@@ -48366,7 +48362,10 @@ static bool interp_script_needs_large_stack(const Script* script) {
 Input* run_script_mir(Runtime *runtime, const char* source, char* script_path,
         bool run_main, Script** out_script) {
     if (out_script) *out_script = NULL;
-    log_notice("Running script with MIR JIT compilation (direct)");
+    LambdaTier tier = lambda_tier_selected();
+    log_notice("lambda-script: starting tier=%s backend=mir-direct",
+        tier == LAMBDA_TIER_JIT ? "jit" :
+        tier == LAMBDA_TIER_INTERP ? "interp" : "auto");
 
     // Initialize runner
     Runner runner;

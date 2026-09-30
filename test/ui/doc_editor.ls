@@ -16,8 +16,10 @@ import dom
 import pdf_html: lambda.pdf.html
 import latex: lambda.latex.latex
 import latex_css: lambda.latex.css
+import math_renderer: lambda.doc.math.math
 import math_css: lambda.doc.math.css
 import graph_doc: lambda.graph.document
+import tikz: lambda.doc.tikz.tikz
 
 let PROJECT_ROOT = "."
 
@@ -40,8 +42,10 @@ let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT)
 
 fn path_is_open(open_paths, path) => contains(open_paths, path) or false
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
-// a non-text parent class errors (S7.9.3): no hit
-fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ") or false
+// An empty-space hit targets the row; absent event classes discharge to false (S7.9.2-3).
+fn event_hits_tree_row(evt, hit_class) =>
+  (contains(evt["target_class"], hit_class ++ " ") or
+   contains(evt["target_parent_class"], hit_class ++ " ")) or false
 
 pn reset_document_scroll(target) {
   let root = dom.root_node(target)
@@ -50,6 +54,14 @@ pn reset_document_scroll(target) {
   // The preview element is reused by the reactive render, including its scroll state.
   if (preview != null) { dom.set_scroll_state(preview, 0.0, 0.0) }
   if (source != null) { dom.set_scroll_state(source, 0.0, 0.0) }
+}
+
+fn pgf_text_width_px(target) {
+  let panel = dom.query_selector(dom.root_node(target), ".document-panel")
+  let box = if (panel == null) null else dom.bounding_box(panel)
+  let width = if (box == null) null else box.width
+  // PGFPlots dimensions such as 0.8\textwidth need the current document pane.
+  if ((type(width) == int or type(width) == float) and width > 0) width else null
 }
 
 fn bounded_text_offset(value, offset) {
@@ -125,19 +137,96 @@ fn is_latex_document(extension) {
 }
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
+fn is_eml_document(extension) => lower(extension) == "eml"
+fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
+fn is_table_document(extension) => contains(["csv", "tsv"], lower(extension)) or false
 fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
   else if (ext == "dot") { "dot" }
+  else if (ext == "d2") { "d2" }
+  else { null }
+}
+
+fn property_format(extension) {
+  let ext = lower(extension)
+  if (ext == "json") { "json" }
+  else if (contains(["yaml", "yml"], ext)) { "yaml" }
+  else if (ext == "toml") { "toml" }
+  else if (ext == "ini") { "ini" }
+  else if (contains(["ics", "ical"], ext)) { "ics" }
+  else if (ext == "vcf") { "vcf" }
   else { null }
 }
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_image_document(extension) or
-    graph_flavor(extension) != null
+    is_pdf_document(extension) or is_eml_document(extension) or
+    is_pgf_document(extension) or is_image_document(extension) or
+    graph_flavor(extension) != null or property_format(extension) != null or is_table_document(extension)
+
+// seti private-use glyphs; keep codepoints readable alongside the bundled font.
+let SETI_CLOCK = chr(0xE012)
+let SETI_CONFIG = chr(0xE019)
+let SETI_CSS = chr(0xE01D)
+let SETI_CSV = chr(0xE01E)
+let SETI_DB = chr(0xE022)
+let SETI_HTML = chr(0xE048)
+let SETI_IMAGE = chr(0xE04C)
+let SETI_INFO = chr(0xE04D)
+let SETI_JSON = chr(0xE055)
+let SETI_MARKDOWN = chr(0xE060)
+let SETI_PDF = chr(0xE06D)
+let SETI_PIPELINE = chr(0xE071)
+let SETI_REACT = chr(0xE07D)
+let SETI_SVG = chr(0xE091)
+let SETI_TEX = chr(0xE094)
+let SETI_WORD = chr(0xE0A3)
+let SETI_XML = chr(0xE0A5)
+let SETI_YAML = chr(0xE0A7)
+
+fn file_icon(extension) {
+  let ext = if (extension == null) "" else lower(extension)
+  // seti glyphs identify parsed formats; source-only files retain the plain-text icon.
+  if (ext == "ls") { "λ" }
+  else if (ext == "json") { SETI_JSON }
+  else if (contains(["yaml", "yml"], ext)) { SETI_YAML }
+  else if (contains(["toml", "ini", "properties", "props"], ext)) { SETI_CONFIG }
+  else if (is_table_document(ext)) { SETI_CSV }
+  else if (ext == "xml") { SETI_XML }
+  else if (contains(["db", "sqlite", "sqlite3"], ext)) { SETI_DB }
+  else if (contains(["md", "markdown", "mdown", "mkdn", "mdx", "wiki", "mediawiki",
+                     "rst", "rest", "org", "adoc", "asciidoc", "asc", "textile", "txtl",
+                     "m", "mk", "mark", "typ", "typst"], ext) or
+           ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { SETI_MARKDOWN }
+  else if (contains(["htm", "html"], ext)) { SETI_HTML }
+  else if (ext == "rtf") { SETI_WORD }
+  else if (is_latex_document(ext)) { SETI_TEX }
+  else if (is_pdf_document(ext)) { SETI_PDF }
+  else if (is_pgf_document(ext)) { SETI_SVG }
+  else if (contains(["mmd", "dot", "gv", "d2", "dsl", "structurizr"], ext)) { SETI_PIPELINE }
+  else if (ext == "svg") { SETI_SVG }
+  else if (contains(["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "ico"], ext)) { SETI_IMAGE }
+  else if (ext == "css") { SETI_CSS }
+  else if (ext == "jsx") { SETI_REACT }
+  else if (contains(["vcf", "vcard", "eml"], ext)) { SETI_INFO }
+  else if (contains(["ics", "ical"], ext)) { SETI_CLOCK }
+  else { "▤" }
+}
+
+fn file_icon_color(icon) {
+  if (icon == SETI_JSON) "#cbcb41"
+  else if (icon == SETI_YAML or icon == SETI_IMAGE or icon == SETI_SVG) "#a074c4"
+  else if (icon == SETI_CSV) "#8dc149"
+  else if (icon == SETI_PDF) "#cc3e44"
+  else if (icon == SETI_XML or icon == SETI_PIPELINE) "#e37933"
+  else if (icon == SETI_DB) "#f55385"
+  else if (icon == SETI_CONFIG) "#6d8086"
+  else if (icon == "λ") "#b7a0ff"
+  else "#519aba"
+}
 
 fn selected_source(file) {
   if (file == null) { "" }
@@ -168,6 +257,14 @@ fn selected_preview(file) {
       if (parsed == null) { <p class:"preview-error", "Unable to read selected LaTeX"> }
       else { latex.render(parsed, null) ^ { <p class:"preview-error", "Unable to render selected LaTeX"> } }
     }
+    else if (is_pgf_document(file["extension"])) {
+      // Reuse the parsed TikZ document so PGF fragments render inside the editor runtime.
+      let parsed = input(selected_path, {type:"tikz"}) ^ { null }
+      if (parsed == null) { <p class:"preview-error", "Unable to read selected PGF"> }
+      else { tikz.render_document(parsed, {text_width_px:file["text_width_px"]}) ^ {
+        <p class:"preview-error", "Unable to render selected PGF: " ++ ^.message>
+      } }
+    }
     else if (flavor != null) {
       // The graph document adapter installs Radiant's layout for this inline preview.
       let parsed = input(selected_path, {type:"graph", flavor:flavor}) ^ { null }
@@ -177,6 +274,108 @@ fn selected_preview(file) {
     else if (format == null) { null }
     else { input(selected_path, format) ^ { <p class:"preview-error", "Unable to render selected file"> } }
   }
+}
+
+fn property_children(value, format) {
+  if (format == "vcf" and type(value) == map and type(value["contacts"]) == array) {
+    [for (index, contact in value["contacts"])
+      {name:"VCARD", value:contact, segment:string(index)}]
+  } else if (contains(["ics", "vcf"], format) and type(value) == map and
+             type(value["entries"]) == array) {
+    // RFC content lines retain order, repeated names, and their parameters.
+    [for (index, entry in value["entries"])
+      {name:(if (format == "vcf") upper(entry["name"]) else entry["name"]),
+       value:(if (entry["parameters"] != null)
+         {value:entry["value"], parameters:entry["parameters"]} else entry["value"]),
+       segment:string(index)}]
+  } else if (type(value) == map) {
+    // Numeric segments keep expand state distinct for keys containing punctuation.
+    let fields = [for (key, child in value) {name:string(key), value:child}];
+    [for (index, field in fields)
+      {name:field.name, value:field.value, segment:string(index)}]
+  } else if (type(value) == array) {
+    [for (index, child in value) {name:string(index), value:child, segment:string(index)}]
+  } else { [] }
+}
+
+fn property_is_container(value) => type(value) == map or type(value) == array
+fn property_roots(parsed, format) {
+  if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
+  else if (format == "vcf" and type(parsed["contacts"]) != array) {
+    [{name:"VCARD", value:parsed, segment:"card"}]
+  } else { property_children(parsed, format) }
+}
+fn property_initial_open_paths(parsed, format) {
+  if (not property_is_container(parsed)) { [] }
+  else {
+    let roots = property_roots(parsed, format)
+    // Expand a lone top-level group once, while leaving later toggles in user control.
+    if (len(roots) == 1 and property_is_container(roots[0].value)) [roots[0].segment] else []
+  }
+}
+let PROPERTY_PAGE_SIZE = 60
+fn property_visible_count(path, more_paths) =>
+  PROPERTY_PAGE_SIZE * (1 + len([for (more_path in more_paths where more_path == path) more_path]))
+fn property_hit_class(path) =>
+  "property-hit-" ++ replace(replace(replace(path, "/", "_"), ".", "_"), " ", "_")
+
+fn property_matches(value, name, filter_text, format) {
+  if (filter_text == "" or contains(lower(name), filter_text)) { true }
+  else if (property_is_container(value)) {
+    any([for (child in property_children(value, format))
+      property_matches(child.value, child.name, filter_text, format)])
+  } else { false }
+}
+
+fn property_value_text(value) {
+  if (type(value) == string) { value }
+  else if (value == null) { "null" }
+  else { string(value) }
+}
+
+fn property_summary(value, format) {
+  if (contains(["ics", "vcf"], format) and type(value) == map and
+      value["parameters"] != null and value["value"] != null) {
+    property_value_text(value["value"])
+  }
+  else if (format == "vcf" and type(value) == map and type(value["entries"]) == array) {
+    if (value["full_name"] != null) { value["full_name"] }
+    else { string(len(value["entries"])) ++ " fields" }
+  }
+  else if (format == "vcf" and type(value) == map and type(value["contacts"]) == array) {
+    string(len(value["contacts"])) ++ " contacts"
+  }
+  else if (format == "ics" and type(value) == map and type(value["entries"]) == array) {
+    let label = value["summary"]
+    if (label != null) { label }
+    else { string(len(value["entries"])) ++ " entries" }
+  }
+  else if (type(value) == map) { "Object · " ++ string(len(value)) ++ " properties" }
+  else if (type(value) == array) { "Array · " ++ string(len(value)) ++ " items" }
+  else { property_value_text(value) }
+}
+
+// CSV input returns named maps for header rows and positional arrays otherwise.
+fn csv_columns(rows) {
+  if (type(rows) != array or len(rows) == 0) { [] }
+  else if (type(rows[0]) == map) {
+    [for (key, value in rows[0]) {key:string(key), label:string(key)}]
+  } else if (type(rows[0]) == array) {
+    [for (index, value in rows[0]) {key:index, label:"Column " ++ string(index + 1)}]
+  } else { [] }
+}
+fn csv_cell(row, column) {
+  if (type(row) == map or type(row) == array) { row[column.key] }
+  else { null }
+}
+let CSV_DEFAULT_WIDTH = 150
+let CSV_MIN_WIDTH = 72
+let CSV_PAGE_SIZE = 200
+fn csv_width(widths, index) =>
+  if (index < len(widths)) widths[index] else CSV_DEFAULT_WIDTH
+fn csv_resized_widths(widths, gesture, x) {
+  let width = max(CSV_MIN_WIDTH, gesture.width + x - gesture.x);
+  [for (index, previous in widths) if (index == gesture.index) width else previous]
 }
 
 // --------------------------------------------------------------------------
@@ -208,12 +407,13 @@ view <h4> { <h4 id:~.id, *[rendered_children(~)]> }
 view <h5> { <h5 id:~.id, *[rendered_children(~)]> }
 view <h6> { <h6 id:~.id, *[rendered_children(~)]> }
 view <p> { <p *[rendered_children(~)]> }
-view <div> { <div class:~.class, *[rendered_children(~)]> }
+view <div> { <div class:~.class, style:~.style, *[rendered_children(~)]> }
 view <nav> { <nav class:~.class, *[rendered_children(~)]> }
 view <dl> { <dl *[rendered_children(~)]> }
 view <dt> { <dt *[rendered_children(~)]> }
 view <dd> { <dd *[rendered_children(~)]> }
-view <span> { <span *[rendered_children(~)]> }
+// TikZ uses positioned spans for the drawing frame and math labels.
+view <span> { <span class:~.class, style:~.style, *[rendered_children(~)]> }
 view <strong> { <strong *[rendered_children(~)]> }
 view <em> { <em *[rendered_children(~)]> }
 view <del> { <del *[rendered_children(~)]> }
@@ -221,6 +421,18 @@ view <u> { <u *[rendered_children(~)]> }
 view <code> {
   if (~.type == "block") { <pre <code *[rendered_children(~)]>> }
   else { <code *[rendered_children(~)]> }
+}
+view <math> {
+  // Markup readers keep TeX source in math nodes; parse it for the shared typesetter.
+  let source = if (len(content(~)) > 0) content(~)[0] else ""
+  let parsed = if (~.flavor == "ascii") { null }
+    else { parse(source, {type: "math", flavor: "latex"}) ^ { null } }
+  let display = ~.type == "block"
+  let rendered = if (parsed == null) { null }
+    else { math_renderer.render_math(parsed, {display: display}) ^ { null } }
+  let body = if (rendered == null) { <code class:"math-error", source> } else { rendered }
+  if (display) { <div class:"math-display-container", body> }
+  else { body }
 }
 view <pre> { <pre *[rendered_children(~)]> }
 view <ul> { <ul *[rendered_children(~)]> }
@@ -240,11 +452,220 @@ view <tr> { <tr *[rendered_children(~)]> }
 view <th> { <th *[rendered_children(~)]> }
 view <td> { <td *[rendered_children(~)]> }
 
+// The CSV reader supplies decoded cells, so quoting and tab separators share one view.
+view <csv_preview> {
+  let columns = csv_columns(~.rows)
+  // Mount a bounded number of rows so large timing tables remain interactive.
+  let row_count = if (type(~.rows) == array) len(~.rows) else 0
+  let visible_rows = if (row_count == 0) [] else take(~.rows, ~.visible_rows)
+  let table_width = sum([for (index, column in columns) csv_width(~.widths, index)]);
+  <section id:"csv-preview", class:"rendered-preview csv-preview"
+  , if (len(columns) == 0) {
+      <p class:"csv-empty", "No rows to display">
+    } else {
+      <table class:"csv-table", style:("width:" ++ string(table_width) ++ "px")
+      , <thead <tr
+          for (index, column in columns) {
+              let width = csv_width(~.widths, index);
+              <th class:"csv-header", style:("width:" ++ string(width) ++ "px")
+              , <span class:"csv-header-label", column.label>
+                <span class:"csv-resize", 'data-csv-column':string(index),
+                  title:("Resize " ++ column.label), "">
+              >
+            }
+          >
+        >
+        <tbody
+        for (row in visible_rows) {
+            <tr
+            for (index, column in columns) {
+                let cell = csv_cell(row, column);
+                <td style:("width:" ++ string(csv_width(~.widths, index)) ++ "px"),
+                  if (cell == null) "" else property_value_text(cell)>
+              }
+            >
+          }
+        >
+      >
+      if (row_count > len(visible_rows)) {
+        <button class:"csv-more", "Show more rows (" ++
+          string(row_count - len(visible_rows)) ++ " remaining)">
+      }
+    }
+  >
+}
+on click(evt) {
+  if (contains(evt.target_class, "csv-more")) { emit("csv_more_rows", null) }
+}
+on mousedown(evt) {
+  if (evt.button != 0 or not contains(evt.target_class, "csv-resize")) { return }
+  let column_id = dom.get_attribute(evt.target, "data-csv-column")
+  let indices = [for (index, column in csv_columns(~.rows) where string(index) == column_id) index]
+  if (len(indices) == 0) { return }
+  let index = indices[0]
+  emit("csv_resize_start", {index:index, x:evt.x, width:csv_width(~.widths, index)})
+  'prevent-default'
+}
+on mousemove(evt) { emit("csv_resize_move", evt.x) }
+
+// --------------------------------------------------------------------------
+// Structured property inspector
+// --------------------------------------------------------------------------
+
+view <property_node> {
+  let expandable = property_is_container(~.value)
+  let is_open = expandable and
+    (if (~.filter_text == "") { path_is_open(~.open_paths, ~.path) }
+     else { not path_is_open(~.closed_paths, ~.path) })
+  let matching_children = if (is_open) {
+    [for (child in property_children(~.value, ~.format)
+      where property_matches(child.value, child.name, ~.filter_text, ~.format)) child]
+  } else { [] }
+  // Bound mounted rows; broad filters can match thousands of keys at once.
+  let visible_children = take(matching_children, property_visible_count(~.path, ~.more_paths))
+  let row_style = "padding-left:" ++ string(~.depth * 18 + 16) ++ "px";
+  let summary = property_summary(~.value, ~.format);
+
+  <div class:"property-entry", 'data-property-name':~.name
+  , <div class:"property-row", style:row_style
+    , if (expandable) {
+        <button class:("property-toggle " ++ property_hit_class(~.path) ++ " property-control"),
+          'aria-label':((if (is_open) "Collapse " else "Expand ") ++ ~.name),
+          'aria-expanded':(if (is_open) "true" else "false"),
+          if (is_open) "▾" else "▸">
+      } else { <span class:"property-spacer", ""> }
+      <span class:"property-name", ~.name>
+      <span class:(if (expandable) "property-value property-summary" else "property-value"),
+        title:summary, summary>
+    >
+    if (is_open and len(matching_children) > 0) {
+      <div class:"property-children"
+      , for (child in visible_children)
+          apply(<property_node name:child.name, value:child.value,
+            path:(~.path ++ "/" ++ child.segment), depth:(~.depth + 1),
+            filter_text:~.filter_text, open_paths:~.open_paths,
+            closed_paths:~.closed_paths, more_paths:~.more_paths, format:~.format>)
+        if (len(matching_children) > len(visible_children)) {
+          <button class:("property-more " ++ property_hit_class(~.path) ++ " property-control"),
+            (if (~.filter_text == "") "Show more properties (" else "Show more matching properties (") ++
+            string(len(matching_children) - len(visible_children)) ++ " remaining)">
+        }
+      >
+    }
+  >
+}
+on click(evt) {
+  if (contains(evt.target_class, "property-more ") and
+      contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
+    emit("property_more", ~.path)
+  } else if (contains(evt.target_class, "property-toggle ") and
+             contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
+    emit("property_toggle", {path:~.path, is_open: is_open})
+  }
+}
+
+view <property_inspector> {
+  let format = property_format(~.file["extension"])
+  let parsed = ~.parsed
+  let query = lower(~.filter_text);
+  <section id:"property-preview", class:"rendered-preview property-preview"
+  , <div class:"property-filter-bar"
+    , <span class:"property-filter-icon", 'aria-hidden':"true", "⌕">
+      <input id:"property-filter", type:"search", class:"property-filter",
+        value:~.filter_text, placeholder:"Filter property names",
+        'aria-label':"Filter property names">
+      if (~.filter_text != "") {
+        <button class:"property-filter-clear", title:"Clear property filter", "×">
+      }
+    >
+    if (parsed == null) {
+      <p class:"property-message preview-error", "Unable to parse selected file">
+    } else if (not property_is_container(parsed)) {
+      if (~.filter_text == "" or contains("value", lower(~.filter_text))) {
+        <div class:"property-row property-root-value"
+        , <span class:"property-name", "value">
+          <span class:"property-value", property_value_text(parsed)>
+        >
+      } else { <p class:"property-message", "No matching properties"> }
+    } else {
+      let roots = property_roots(parsed, format)
+      let matches = [for (child in roots
+        where property_matches(child.value, child.name, query, format)) child]
+      let visible_roots = take(matches, property_visible_count("", ~.more_paths))
+      if (len(matches) == 0) {
+        <p class:"property-message", "No matching properties">
+      } else {
+        <div class:"property-list"
+        , for (child in visible_roots)
+            apply(<property_node name:child.name, value:child.value,
+              path:child.segment, depth:0, filter_text:query,
+              open_paths:~.open_paths, closed_paths:~.closed_paths,
+              more_paths:~.more_paths, format:format>)
+          if (len(matches) > len(visible_roots)) {
+            <button class:"property-more property-root-more",
+              (if (query == "") "Show more properties (" else "Show more matching properties (") ++
+              string(len(matches) - len(visible_roots)) ++ " remaining)">
+          }
+        >
+      }
+    }
+  >
+}
+on click(evt) {
+  if (contains(evt.target_class, "property-root-more")) { emit("property_more", "") }
+}
+
+fn eml_html_root(body) {
+  // HTML5 returns #document; enter at html so the editor's element views run.
+  let roots = [for (child in content(body) where type(child) == element and name(child) == 'html') child]
+  if (len(roots) > 0) roots[0] else body
+}
+
+view <eml_preview> {
+  let message = ~.message
+  let headers = if (message != null and type(message["headers"]) == map) message["headers"] else null;
+  let body = if (message == null) null else message["body"];
+  <section id:"eml-preview", class:"rendered-preview eml-preview"
+  , if (message == null) {
+      <p class:"preview-error", "Unable to read selected email">
+    } else {
+      <div class:"eml-message"
+      , if (headers != null) {
+          <table class:"eml-header-table"
+          , <tbody
+              for (header, value in headers) {
+                <tr 'data-header-name':string(header)
+                , <th scope:"row", string(header)>
+                  <td property_value_text(value)>
+                >
+              }
+            >
+          >
+        }
+        // HTML MIME bodies are parsed Mark elements; strings retain plain-text wrapping.
+        if (type(body) == element) {
+          <div id:"eml-body", class:"eml-html-body", apply(eml_html_root(body))>
+        } else {
+          <pre id:"eml-body", class:"eml-body",
+            if (body != null) body else "">
+        }
+      >
+    }
+  >
+}
+
 // --------------------------------------------------------------------------
 // Lazy file-tree rows
 // --------------------------------------------------------------------------
 
-view <tree_entry> state is_open: ~.initial_open, children: null {
+view <tree_entry> state children: null {
+  let is_open = ~.initial_open
+  let icon_text = if (~.is_dir) "" else file_icon(~.extension)
+  let icon_class = if (~.is_dir) "tree-icon folder-icon"
+    else if (icon_text == "▤") "tree-icon file-icon default-icon"
+    else if (icon_text == "λ") "tree-icon file-icon lambda-icon"
+    else "tree-icon file-icon seti-icon"
+  let icon_style = if (~.is_dir or icon_text == "▤") "" else "color:" ++ file_icon_color(icon_text)
   let entry_path = child_path(~.parent_path, ~.name)
   let indent = (~.depth * 16) ++ "px"
   let hit_class = tree_hit_class(entry_path)
@@ -266,8 +687,8 @@ view <tree_entry> state is_open: ~.initial_open, children: null {
       } else {
         <span class:"tree-spacer", "">
       }
-      <span class:(if (~.is_dir) "tree-icon folder-icon" else "tree-icon file-icon"),
-        if (~.is_dir) "▣" else "▤">
+      <span class:icon_class, style:icon_style, 'aria-hidden':"true",
+        if (~.is_dir) "▣" else icon_text>
       <span class:"tree-label", ~.name>
     >
     if (~.is_dir and is_open) {
@@ -292,25 +713,17 @@ view <tree_entry> state is_open: ~.initial_open, children: null {
   >
 }
 on click(evt) {
-  let target_class = evt["target_class"]
   let entry_path = child_path(~.parent_path, ~.name)
   let hit_class = tree_hit_class(entry_path)
   let hits_this_row = event_hits_tree_row(evt, hit_class)
-  if (~.is_dir and hits_this_row and
-      (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
-    if (is_open) {
-      is_open = false
-      emit("directory_toggle", {path:entry_path, is_open:false})
-    } else {
-      // Directory input performs a stat for every child, so retain the result
-      // for this row and never repeat that work while it remains mounted.
-      if (children == null) { children = directory_entries(entry_path) }
-      is_open = true
-      emit("directory_toggle", {path:entry_path, is_open:true})
-    }
+  if (~.is_dir and hits_this_row) {
+    // The parent's open-path state drives the render; avoid a second row update.
+    if (not is_open and children == null) { children = directory_entries(entry_path) }
+    emit("directory_toggle", {path:entry_path, is_open:not is_open})
   } else if (not ~.is_dir) {
     if (~.selected_path != entry_path) { reset_document_scroll(evt.target) }
-    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
+    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
+      text_width_px:(if (is_pgf_document(~.extension)) pgf_text_width_px(evt.target) else null)})
   }
 }
 
@@ -321,7 +734,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "Markdown, wiki, RST, Org, AsciiDoc, man, Textile, HTML, LaTeX, PDF, Mermaid, DOT, and image files open as rendered documents; all other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. Email shows its headers and body. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -333,8 +746,18 @@ view <document_pane> {
         >
         <span class:"preview-kind rendered", if (~.preview_mode == "view") "View" else "Source">
       >
-      if (~.preview_mode == "view") {
-        if (is_image_document(~.file["extension"])) {
+      <div class:"document-content"
+      , if (~.preview_mode == "view") {
+        if (property_format(~.file["extension"]) != null) {
+          apply(<property_inspector file:~.file, parsed:~.property_data,
+            filter_text:~.property_filter, open_paths:~.property_open_paths,
+            closed_paths:~.property_closed_paths, more_paths:~.property_more_paths>)
+        } else if (is_eml_document(~.file["extension"])) {
+          apply(<eml_preview message:~.eml_data>)
+        } else if (is_table_document(~.file["extension"])) {
+          apply(<csv_preview rows:~.csv_data, widths:~.csv_widths,
+            visible_rows:~.csv_visible_rows>)
+        } else if (is_image_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
         } else if (is_pdf_document(~.file["extension"])) {
@@ -356,6 +779,7 @@ view <document_pane> {
         , <pre id:"source-preview", class:"source-preview", source>
         >
       }
+      >
       <nav class:"document-tabs"
       , <button class:(if (~.preview_mode == "view") "document-tab tab-view active" else "document-tab tab-view"), "View">
         if (not is_raster_document(~.file["extension"])) {
@@ -389,7 +813,7 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view" {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
@@ -434,12 +858,23 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
       >
     <div class:"file-panel-footer", if (filter_text == "") "Project root: ." else "Filtering file names">
   >
-  apply(<document_pane file:selected_file, preview_mode:preview_mode>)
+  apply(<document_pane file:selected_file, preview_mode:preview_mode,
+    property_filter:property_filter, property_data:property_data,
+    property_open_paths:property_open_paths, property_closed_paths:property_closed_paths,
+    property_more_paths:property_more_paths, eml_data:eml_data,
+    csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>)
   >
 }
 on click(evt) {
-  if (evt["target_class"] == "root-toggle") { root_open = not root_open }
-  else if (evt["target_class"] == "tree-filter-clear") { filter_text = "" }
+  let target_class = evt["target_class"]
+  let parent_class = evt["target_parent_class"]
+  if (contains(target_class, "tree-row project-root") or
+      contains(parent_class, "tree-row project-root")) { root_open = not root_open }
+  else if (target_class == "tree-filter-clear") { filter_text = "" }
+  else if (target_class == "property-filter-clear") {
+    property_filter = ""
+    property_more_paths = []
+  }
 }
 on directory_toggle(entry) {
   let path = entry["path"]
@@ -456,29 +891,80 @@ on directory_toggle(entry) {
 on input(evt) {
   let target_class = evt.target_class
   let character = evt.char
-  if (target_class == "tree-filter" and character != null and character != "") {
+  if ((target_class == "tree-filter" or target_class == "property-filter") and
+      character != null and character != "") {
     let caret_pos = evt.caret_pos
-    filter_text = slice(filter_text, 0, caret_pos) ++ character ++ slice(filter_text, caret_pos, len(filter_text))
+    if (target_class == "tree-filter") {
+      filter_text = slice(filter_text, 0, caret_pos) ++ character ++ slice(filter_text, caret_pos, len(filter_text))
+    } else {
+      property_filter = slice(property_filter, 0, caret_pos) ++ character ++
+        slice(property_filter, caret_pos, len(property_filter))
+      property_closed_paths = []
+      property_more_paths = []
+    }
   }
 }
 on keydown(evt) {
   let target_class = evt.target_class
   let key = evt.key
-  if (target_class == "tree-filter") {
-    if (key == "Backspace") { filter_text = erase_backwards(filter_text, evt) }
-    else if (key == "Delete") { filter_text = erase_forwards(filter_text, evt) }
-    else if (key == "Escape") { filter_text = "" }
-    else { return }
+  if (target_class == "tree-filter" or target_class == "property-filter") {
+    let current = if (target_class == "tree-filter") filter_text else property_filter
+    let next = if (key == "Backspace") { erase_backwards(current, evt) }
+      else if (key == "Delete") { erase_forwards(current, evt) }
+      else if (key == "Escape") { "" }
+      else { null }
+    if (next == null) { return }
+    if (target_class == "tree-filter") { filter_text = next }
+    else { property_filter = next; property_closed_paths = []; property_more_paths = [] }
     // The model owns this edit; a second native edit would desynchronize it.
     return 'prevent-default'
   }
 }
 on file_select(entry) {
-  selected_file = {file_path: entry["file_path"], name: entry["name"], extension: entry["extension"]}
+  selected_file = {file_path: entry["file_path"], name: entry["name"],
+    extension: entry["extension"], text_width_px: entry["text_width_px"]}
+  let format = property_format(entry["extension"])
+  // Retain the parsed tree while the user edits the filter or expands nodes.
+  property_data = if (format == null) null else input(entry["file_path"], format) ^ { null }
+  eml_data = if (is_eml_document(entry["extension"])) input(entry["file_path"], 'eml') ^ { null } else null
+  csv_data = if (is_table_document(entry["extension"]))
+    input(entry["file_path"], lower(entry["extension"])) ^ { null } else null
+  csv_widths = [for (column in csv_columns(csv_data)) CSV_DEFAULT_WIDTH]
+  csv_visible_rows = CSV_PAGE_SIZE
+  csv_resize = null
   preview_mode = "view"
+  property_filter = ""
+  property_open_paths = property_initial_open_paths(property_data, format)
+  property_closed_paths = []
+  property_more_paths = []
 }
 on preview_tab(tab) {
   preview_mode = tab
+}
+on property_toggle(entry) {
+  let path = entry["path"]
+  if (property_filter == "") {
+    if (entry["is_open"]) {
+      property_open_paths = [for (open_path in property_open_paths where open_path != path) open_path]
+    } else { property_open_paths = [*property_open_paths, path] }
+  } else {
+    if (entry["is_open"]) { property_closed_paths = [*property_closed_paths, path] }
+    else { property_closed_paths = [for (closed_path in property_closed_paths where closed_path != path) closed_path] }
+  }
+}
+on property_more(path) {
+  property_more_paths = [*property_more_paths, path]
+}
+on csv_resize_start(gesture) { csv_resize = gesture }
+on csv_more_rows(_) { csv_visible_rows = csv_visible_rows + CSV_PAGE_SIZE }
+on csv_resize_move(x) {
+  if (csv_resize != null) { csv_widths = csv_resized_widths(csv_widths, csv_resize, x) }
+}
+// A release can land over the file panel after shrinking a wide column.
+on mouseup(evt) {
+  if (csv_resize == null) { return }
+  csv_widths = csv_resized_widths(csv_widths, csv_resize, evt.x)
+  csv_resize = null
 }
 
 // --------------------------------------------------------------------------
@@ -489,6 +975,8 @@ on preview_tab(tab) {
   <head
     <meta charset:"UTF-8">
     <title "Lambda Document Editor — Prototype">
+    // the math stylesheet selects KaTeX symbol fonts; register their bundled faces.
+    <link rel:"stylesheet", href:"../../lmd/package/math/katex.css">
     <style pdf_html.DEFAULT_CSS>
     <style latex_css.STYLESHEET>
     <style math_css.get_stylesheet(null)>
@@ -531,7 +1019,11 @@ on preview_tab(tab) {
       /* Keep the indentation and icon fixed when a file name overflows. */
       .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
-      .file-icon { color: #9bbdfc; }
+      @font-face { font-family: 'Seti Icons'; src: url('icons/seti.woff') format('woff'); }
+      .file-icon { height: 20px; line-height: 20px; color: #9bbdfc; }
+      .default-icon { font-size: 13px; }
+      .lambda-icon { font-size: 19px; }
+      .seti-icon { font-family: 'Seti Icons'; font-size: 19px; font-weight: normal; }
       /* Hit-tested text spans need their own cursor value in the file tree. */
       .tree-label, .tree-icon, .tree-spacer { cursor: pointer; }
       .tree-label { white-space: nowrap; font-size: 13px; }
@@ -539,6 +1031,11 @@ on preview_tab(tab) {
                            font-size: 11px; }
 
       .document-panel { min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; background: #fff; }
+      /* A definite pane keeps long documents out of the column flex container's
+         intrinsic-size pass while preserving the preview's own scrolling. */
+      .document-content { position: relative; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+      .document-content > .rendered-preview, .document-content > .source-tab-panel,
+      .document-content > .document-preview { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
       .document-header { min-height: 77px; display: flex; align-items: center; justify-content: space-between;
                          gap: 18px; padding: 15px 28px; border-bottom: 1px solid #e2e6ec; background: #fbfcfe; }
       .document-path { margin-bottom: 3px; color: #7b8798; font-size: 12px; font-family: 'SF Mono', Menlo, monospace; }
@@ -554,8 +1051,71 @@ on preview_tab(tab) {
       .empty-preview-note { margin-top: 18px !important; color: #8491a1; font-size: 13px; }
       .source-tab-panel { min-height: 0; flex: 1; overflow: auto; background: #fcfcfd; }
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
-                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre-wrap; }
+                        color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .property-preview { padding: 0 0 40px; background: #fff; color: #263448;
+                          font: 13px/1.4 'SF Mono', Menlo, Consolas, monospace; }
+      .property-filter-bar { position: sticky; top: 0; z-index: 1; height: 44px; display: flex;
+                             align-items: center; gap: 7px; padding: 0 16px; border-bottom: 1px solid #dce2eb;
+                             background: #fbfcfe; }
+      .property-filter-icon { color: #8b98a8; font-size: 21px; line-height: 1; }
+      .property-filter { min-width: 0; flex: 1; height: 32px; border: 0; outline: none;
+                         background: transparent; color: #263448; font: inherit; }
+      .property-filter::placeholder { color: #8b98a8; }
+      .property-filter-clear { border: 0; background: transparent; color: #77869a;
+                               cursor: pointer; font-size: 20px; }
+      .property-row { display: flex; min-height: 30px; align-items: baseline; gap: 8px;
+                      padding: 5px 18px 5px 0; border-bottom: 1px solid #f0f2f5; }
+      .property-entry:nth-child(even) > .property-row { background: #f7f9fb; }
+      .property-row:hover { background: #edf4ff !important; }
+      .property-toggle, .property-spacer { flex: 0 0 16px; width: 16px; height: 18px;
+                                           padding: 0; border: 0; background: none; color: #7b8798;
+                                           font: 13px/18px sans-serif; text-align: center; }
+      .property-toggle { cursor: pointer; }
+      .property-toggle:hover { color: #185da8; }
+      .property-name { flex: 0 0 38%; min-width: 0; overflow-wrap: anywhere; color: #1268c0; }
+      .property-value { min-width: 0; flex: 1; overflow-wrap: anywhere; white-space: pre-wrap;
+                        color: #ab2778; }
+      .property-summary { color: #6b788b; font-style: italic; }
+      .property-message { padding: 18px 22px; color: #6b788b; }
+      .property-root-value { padding-left: 32px; }
+      .eml-preview { background: #fff; color: #263448; }
+      .eml-message { max-width: 900px; min-width: 0; margin: 0 auto; }
+      .eml-header-table { width: 100%; table-layout: fixed; border-collapse: collapse;
+                          font: 13px/1.45 'SF Mono', Menlo, Consolas, monospace; }
+      .eml-header-table tr:nth-child(even) { background: #f7f9fb; }
+      .eml-header-table th, .eml-header-table td { padding: 7px 10px; border-bottom: 1px solid #e8edf3;
+                                                   text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      .eml-header-table th { width: 30%; color: #1268c0; font-weight: 600; }
+      .eml-header-table td { color: #263448; white-space: pre-wrap; }
+      .eml-body { box-sizing: border-box; width: 100%; margin: 22px 0 0;
+                  color: #263448; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace;
+                  white-space: pre-wrap; overflow-wrap: anywhere; }
+      .eml-html-body { margin-top: 22px; overflow-wrap: anywhere; }
+      .property-more { display: block; width: 100%; padding: 9px 20px; border: 0;
+                       background: #f3f7fc; color: #195fa8; text-align: left;
+                       font: 600 12px/18px sans-serif; cursor: pointer; }
+      .property-more:hover { background: #e7f0fb; }
+      .csv-preview { padding: 0 0 32px; background: #fff; }
+      .csv-empty { padding: 22px; color: #68778a; }
+      .csv-table { table-layout: fixed; border-collapse: separate; border-spacing: 0;
+                   font: 13px/1.4 'SF Mono', Menlo, Consolas, monospace; color: #263448; }
+      .csv-table th, .csv-table td { box-sizing: border-box; max-width: 0; padding: 9px 14px;
+                                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                                     border-right: 1px solid #e5e9ef; border-bottom: 1px solid #edf0f4; }
+      .csv-table th { position: sticky; top: 0; z-index: 1; padding-right: 20px;
+                      background: #f0f5fb; color: #294e78; font-weight: 650; text-align: left; }
+      .csv-table tbody tr:nth-child(even) { background: #f8fafc; }
+      .csv-table tbody tr:hover { background: #edf5ff; }
+      .csv-header-label { display: block; overflow: hidden; text-overflow: ellipsis; }
+      .csv-resize { position: absolute; top: 0; right: 0; width: 10px; height: 37px;
+                    box-sizing: border-box; border-left: 2px solid #c5d5e8;
+                    cursor: col-resize; user-select: none; }
+      .csv-resize:hover { background: #d2e5fb; border-left-color: #4588d0; }
+      .csv-more { display: block; width: 100%; padding: 10px 18px; border: 0;
+                  background: #f3f7fc; color: #195fa8; text-align: left;
+                  font: 600 12px/18px sans-serif; cursor: pointer; }
+      .csv-more:hover { background: #e7f0fb; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
       .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
@@ -571,6 +1131,11 @@ on preview_tab(tab) {
       .document-body h1, .latex-output h1 { margin: .2em 0 .65em; font-size: 2em; }
       .document-body h2, .latex-output h2 { margin: 1.45em 0 .55em; font-size: 1.55em; }
       .document-body h3, .latex-output h3 { margin: 1.3em 0 .45em; font-size: 1.25em; }
+      /* Email is read inside the editor pane, so use a tighter type scale than full documents. */
+      .eml-html-body .document-body { font-size: 14px; line-height: 1.55; }
+      .eml-html-body .document-body h1 { margin: .8em 0 .45em; font-size: 21px; }
+      .eml-html-body .document-body h2 { margin: 1.2em 0 .4em; font-size: 17px; }
+      .eml-html-body .document-body h3 { margin: 1em 0 .35em; font-size: 15px; }
       .document-body p, .latex-output p { margin: .75em 0; }
       .document-body ul, .document-body ol, .latex-output ul, .latex-output ol { padding-left: 1.5em; }
       .document-body blockquote, .latex-output blockquote { margin: 1em 0; padding: .15em 1em;

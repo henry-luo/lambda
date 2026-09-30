@@ -1,0 +1,16 @@
+{
+  "name": "Doc editor paints a visible caret in the dark file filter",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 800},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "assert_focus", "target": {"selector": "#file-filter"}},
+    {"type": "assert_caret", "target": {"selector": "#file-filter"}, "char_offset": 0},
+    {"type": "assert_pixel", "target": {"selector": "#file-filter", "offset_x": 11, "offset_y": 16},
+      "min_r": 180, "min_g": 180, "min_b": 180},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "doc"},
+    {"type": "assert_value", "target": {"selector": "#file-filter"}, "equals": "doc"},
+    {"type": "assert_focus", "target": {"selector": "#file-filter"}},
+    {"type": "assert_caret", "target": {"selector": "#file-filter"}, "char_offset": 3}
+  ]
+}

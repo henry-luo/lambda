@@ -61,7 +61,10 @@ fn serialize_list_rec(lst, i, n, acc) {
 
 fn serialize_element(el) {
     let tag = string(name(el))
-    if (is_transparent_math_boundary(el)) {
+    if (el.math_raw_markup != null) {
+        // SVG arrow boxes retain MathLive's exact markup alongside live elements.
+        string(el.math_raw_markup)
+    } else if (is_transparent_math_boundary(el)) {
         serialize_children(el)
     } else if (is_void_element(tag)) {
         "<" ++ tag ++ serialize_attrs(el) ++ ">"
@@ -125,7 +128,7 @@ fn format_attr(key, val) {
     if (string(key) == "math_data_attrs") {
         format_data_attrs(val)
     }
-    else if (string(key) == "math_raw_relation") { "" }
+    else if (string(key) == "math_raw_relation" or string(key) == "math_raw_markup") { "" }
     else if (val is bool) {
         if (val == true) { " " ++ key }
         else { "" }

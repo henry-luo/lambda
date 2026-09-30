@@ -442,7 +442,7 @@ public:
     }
 
     bool detectThematicBreak(const char* line) override {
-        // ''' or ---
+        // Four dashes delimit a listing block; only three form a thematic break.
         const char* p = line;
         while (*p == ' ') p++;
         if (*p == '\'' || *p == '-') {
@@ -450,7 +450,7 @@ public:
             int count = 0;
             while (*p == c) { count++; p++; }
             while (*p == ' ') p++;
-            return count >= 3 && (*p == '\0' || *p == '\n');
+            return count == 3 && (*p == '\0' || *p == '\n');
         }
         return false;
     }

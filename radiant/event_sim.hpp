@@ -141,6 +141,7 @@ enum SimEventType {
     SIM_EVENT_ASSERT_POSITION, // verify spatial relation between two elements
     SIM_EVENT_ASSERT_ELEMENT_AT, // verify element at given coordinates
     SIM_EVENT_ASSERT_HIT_TEST, // verify document.elementFromPoint() at coordinates
+    SIM_EVENT_ASSERT_FRAME_URL, // wait for an iframe document to commit without reflowing its parent
     SIM_EVENT_ASSERT_ATTRIBUTE,  // verify HTML attribute value
     SIM_EVENT_ASSERT_COUNT,      // verify number of elements matching a selector
     SIM_EVENT_ASSERT_STATE_STORE, // verify DocState/ViewState store invariants

@@ -329,6 +329,7 @@ struct DomDocument {
     // the tail (rather than beside html_version) so no existing member offset
     // shifts for the native/JIT consumers noted above.
     DomPageKind page_kind;
+    bool html_scripts_deferred; // Async parse handed script execution to the host thread.
 
     // True once the script runner has established a real JS DOM script realm on
     // this document. A Lambda-script page may retain a Jube support capsule in

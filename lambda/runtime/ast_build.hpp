@@ -222,9 +222,12 @@ LambdaParseStatus lambda_rd_resolve_syntax(Transpiler* tp,
 void lambda_rd_destroy_syntax(LambdaSyntaxUnit* unit);
 
 // Resolve a Lambda source import through the same package/relative rules used
-// by AST construction. The returned `.ls` path is caller-owned.
+// by AST construction (S16.9.8). The returned `.ls` path is caller-owned; NULL
+// means the bare root names no package.
 char* lambda_resolve_import_module_path(const char* base_directory,
     StrView module);
+// S16.9.8: an import spelled from `.` or a leading `~~` is relative.
+bool lambda_import_is_relative(StrView module);
 
 // Both phases back to back, for callers that need only the resolved tree.
 LambdaParseStatus lambda_rd_reduce_ast(Transpiler* tp, const char* source,

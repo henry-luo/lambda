@@ -364,6 +364,9 @@ void transpiler_clear_direct_imports(Transpiler* tp, const Script* script);
 // Shared by the MIR Direct handoff and the T0 plan-only load path.
 void script_adopt_transpiler(Script* script, Transpiler* tp);
 
+// Restore compiled view/edit dispatch when a cached MIR graph enters a new Runtime.
+void lambda_register_mir_view_templates(Script* script);
+
 Script* load_script(Runtime *runtime, const char* script_path, const char* source, bool is_import = false);
 Script* load_script_mir_direct(Runtime *runtime, const char* script_path,
                                const char* source, bool is_import = false);
@@ -375,6 +378,7 @@ void preserve_context_last_error(Item result);
 void eval_context_set_last_error(EvalContext* ctx, LambdaError* error);
 Input* execute_script_and_create_output(Runner* runner, bool run_main);
 void runtime_init(Runtime* runtime);
+void runtime_set_ui_result_arena(Runtime* runtime, Arena* arena);
 // Non-blocking close notification: satellite workers observe this before the
 // document/runtime owner starts its full teardown.
 void runtime_request_satellite_cancel(Runtime* runtime);

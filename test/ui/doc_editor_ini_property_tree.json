@@ -1,0 +1,26 @@
+{
+  "name": "Document editor inspects INI sections as a property tree",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1600},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "test.ini"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_ini .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "test.ini"},
+    {"type": "assert_count", "target": {"selector": "#property-preview"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='global']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='database']"}, "count": 1},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='global'] > .property-row .property-toggle"}},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='global_number'] > .property-row .property-value"}, "equals": "42"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='database'] > .property-row .property-toggle"}},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='host'] > .property-row .property-value"}, "equals": "localhost"},
+    {"type": "click", "target": {"selector": "#property-filter"}},
+    {"type": "type", "target": {"selector": "#property-filter"}, "text": "ssl_enabled"},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='ssl_enabled']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='global']"}, "count": 0},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "[database]"}
+  ]
+}

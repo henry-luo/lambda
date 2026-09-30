@@ -787,7 +787,8 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
             float caret_y_pos = text_y;
             float caret_h = font_size_scaled;
             float caret_w = 2.0f * s;
-            Color caret_color = make_color(0x33, 0x33, 0x33, 0xCC);
+            // The auto caret follows the control's text color on light and dark backgrounds.
+            Color caret_color = form_text_color(block, form, false);
             rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
         }
     }
@@ -1529,7 +1530,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             float caret_w = 2.0f * s;
 
             // draw textarea caret via RdtVector
-            Color ta_caret_color = make_color(0x33, 0x33, 0x33, 0xCC);
+            Color ta_caret_color = form_text_color(block, form, false);
             rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
         }
     }

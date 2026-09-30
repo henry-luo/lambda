@@ -6821,10 +6821,10 @@ static Item js_set_array_core(Item object, Item key, Item value,
                     receiver, bypass_accessor_dispatch, strict);
                 return value;
             }
-            JS_ASSIGN_OR_RETURN(value_num, js_to_number(value));
-            // ArraySetLength performs ToNumber twice; both conversions are
-            // observable and happen before the existing length flag is checked.
-            JS_ASSIGN_OR_RETURN(second_value_num, js_to_number(value));
+            JS_ROOTS(roots, object_root, object, value_root, value);
+            JS_ASSIGN_OR_RETURN(value_num, js_to_number(value_root.get()));
+            // Consume the first numeric home before the second conversion can
+            // allocate another; ToUint32 itself cannot invoke guest code.
             double u32_num = js_get_number(value_num);
             uint32_t u32_len = 0;
             if (isfinite(u32_num)) {
@@ -6832,26 +6832,34 @@ static Item js_set_array_core(Item object, Item key, Item value,
                 if (u32_mod < 0.0) u32_mod += 4294967296.0;
                 u32_len = (uint32_t)u32_mod;
             }
+            // ArraySetLength performs ToNumber twice; both conversions are
+            // observable and happen before the existing length flag is checked.
+            JS_ASSIGN_OR_RETURN(second_value_num, js_to_number(value_root.get()));
             double new_len_num = js_get_number(second_value_num);
             if ((double)u32_len != new_len_num) {
                 return js_throw_range_error("Invalid array length");
             }
-            if (!js_props_obj_query_writable(object, "length", 6)) {
+            if (!js_props_obj_query_writable(object_root.get(), "length", 6)) {
                 JS_RETURN_IF_ERROR(js_property_error_if_strict(strict,
                     "assign to read only property", "length", 6));
-                return value;
+                return value_root.get();
             }
             int64_t new_len = (int64_t)u32_len;
-            Array* arr = object.array;
+            Array* arr = object_root.get().array;
             if (new_len >= 0) {
                 if (new_len > arr->length) {
                     if (js_array_should_keep_length_sparse(arr, new_len)) {
                         log_debug("js_set_key_default: sparse length expansion %lld->%lld (gap %lld), skipping dense holes",
                                   (long long)arr->length, (long long)new_len,
                                   (long long)(new_len - arr->length));
+                        // Expanding length creates holes even when no dense
+                        // buffer is allocated. A packed reader must not treat
+                        // those absent indices as own data (S1.11, D8.4.3v2).
+                        container_set_js_elements_kind((Container*)arr,
+                                                       JS_ELEMENTS_SPARSE_TAGGED);
                         js_array_stamp_dense_tail_holes(arr);
                         arr->length = new_len;
-                        return value;
+                        return value_root.get();
                     }
                     // Extend: ensure capacity and fill with undefined.
                     // Use direct realloc to avoid GC-triggering array_push loops.
@@ -6859,6 +6867,7 @@ static Item js_set_array_core(Item object, Item key, Item value,
                         int64_t new_cap = new_len + arr->extra + 4;
                         Item* new_items = js_array_runtime_items_alloc(new_cap);
                         if (!new_items) return js_throw_type_error("Array length allocation failed");
+                        arr = object_root.get().array;
                         if (arr->items && arr->length > 0) {
                             int64_t dense_copy = arr->length < js_array_dense_capacity(arr) ?
                                 arr->length : js_array_dense_capacity(arr);
@@ -6871,14 +6880,22 @@ static Item js_set_array_core(Item object, Item key, Item value,
                     for (int64_t i = arr->length; i < new_len; i++) {
                         arr->items[i] = hole;
                     }
+                    JsElementsKind kind = container_js_elements_kind(
+                        (Container*)arr);
+                    if (kind == JS_ELEMENTS_PACKED_TAGGED ||
+                            kind == JS_ELEMENTS_PACKED_NUMERIC) {
+                        container_set_js_elements_kind((Container*)arr,
+                                                       JS_ELEMENTS_HOLEY_TAGGED);
+                    }
                     arr->length = new_len;
                 } else if (new_len < arr->length) {
                     // Truncate
                     js_array_delete_sparse_indices_from(lam::gc_borrow(arr), new_len);
+                    arr = object_root.get().array;
                     arr->length = new_len;
                 }
             }
-            return value;
+            return value_root.get();
         }
     }
     // v25: non-numeric string keys on arrays → store in the companion map.
@@ -8973,6 +8990,13 @@ extern "C" Item js_try_ascii_string_builtin_no_gc(Item callee, Item receiver,
     }
 
     return ItemNull;
+}
+
+extern "C" int64_t js_builtin_callable_is_id(Item callee, int64_t catalog_id) {
+    if (get_type_id(callee) != LMD_TYPE_FUNC || !callee.function ||
+            !js_fn_is_js_layout(callee.function)) return 0;
+    const JsCallableCode* code = js_fn_code((JsFunction*)callee.function);
+    return code && code->catalog_id == catalog_id;
 }
 
 // JS-aware substring: indices are UTF-16 code unit indices (not codepoints).

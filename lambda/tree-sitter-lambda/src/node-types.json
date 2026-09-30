@@ -5396,6 +5396,10 @@
         {
           "type": "identifier",
           "named": true
+        },
+        {
+          "type": "path_parent",
+          "named": true
         }
       ]
     }

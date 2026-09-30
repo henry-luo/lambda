@@ -1,0 +1,40 @@
+{
+  "method": "Fixed common validated JS sources. Ratios from source-defined execution medians; separate-day snapshots are descriptive, not a causal replay.",
+  "before": {
+    "artifact": "test/benchmark/js_mvp/tune_more_20260929/overall-after-profile-comparison.json",
+    "sha256": "a72c6f5cc0e5931a51426649a6753dd6a768a6442a821b2e0843eddf5ec4a012",
+    "binary_sha256": "e3b6effce178cf2568bdf7b4fff7e036763f487f06e56c8048bd33bfbc597545",
+    "rows": 62,
+    "full_over_mvp_exec_geomean": 1.5442256866173971,
+    "full_over_mvp_exec_sum_ratio": 1.4257300099656918,
+    "full_over_mvp_wall_geomean": 1.8268216291346993,
+    "full_wins": 17,
+    "mvp_wins": 45,
+    "full_exec_median_sum_ms": 96707.11687467193,
+    "mvp_exec_median_sum_ms": 67829.89500024557
+  },
+  "after": {
+    "artifact": "test/benchmark/js_mvp/untyped_tuning_20260929/final-full-mvp.json",
+    "sha256": "11671af03d0e858bf4e8ca9f6acf9353e630aebc97ce8a4560c23414bc4925c7",
+    "binary_sha256": "b1f79a45f35d28309d320f1d36d827446b4e5bf63dbfba5ef3b9708f05cfcdc9",
+    "rows": 62,
+    "full_over_mvp_exec_geomean": 1.5496089816144825,
+    "full_over_mvp_exec_sum_ratio": 1.2622959234222242,
+    "full_over_mvp_wall_geomean": 1.9077119727809468,
+    "full_wins": 17,
+    "mvp_wins": 45,
+    "full_exec_median_sum_ms": 99339.68995852137,
+    "mvp_exec_median_sum_ms": 78697.62400024271
+  },
+  "checks": {
+    "before_rows": 63,
+    "after_rows": 63,
+    "before_validated": 62,
+    "after_validated": 62,
+    "common_validated": 62,
+    "same_source_hashes": true,
+    "after_all_but_navier_validated": true,
+    "after_binary_unchanged": true,
+    "after_sources_unchanged": true
+  }
+}

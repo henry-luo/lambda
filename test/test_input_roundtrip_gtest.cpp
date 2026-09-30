@@ -1423,6 +1423,64 @@ TEST_F(LatexTests, NestedSameNameEnvironmentsParseWithoutErrors) {
     url_destroy(cwd);
 }
 
+TEST_F(LatexTests, EnvironmentDefinitionBodiesAreNotDocumentEnvironments) {
+    const char* latex_content =
+        "\\newenvironment{box}[1]{\\begin{center}\\textbf{#1}}{\\end{center}}\n"
+        "\\renewenvironment{box}{\\begin{quote}}{\\end{quote}}\n"
+        "\\begin{document}Visible text\\end{document}";
+
+    String* type_str = create_lambda_string("latex");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("environment-definitions.tex", cwd);
+    char* latex_copy = strdup(latex_content);
+
+    Input* parsed_input = input_from_source(latex_copy, dummy_url, type_str, NULL);
+
+    ASSERT_NE(parsed_input, nullptr);
+    EXPECT_FALSE(parsed_input->parse_failed);
+
+    free(latex_copy);
+    url_destroy(dummy_url);
+    url_destroy(cwd);
+}
+
+class EmlTests : public InputRoundtripTest {};
+
+TEST_F(EmlTests, BlankLineSeparatesHeadersFromBody) {
+    const char* sources[] = {
+        "From: sender@example.com\nReceived: first\n second\n\nHello\nPhone: body text\n",
+        "From: sender@example.com\r\nReceived: first\r\n second\r\n\r\nHello\r\nPhone: body text\r\n",
+        "From: sender@example.com\nX-Empty:\n\nHello\nPhone: body text\n"
+    };
+    const char* expected_bodies[] = {
+        "Hello\nPhone: body text\n",
+        "Hello\r\nPhone: body text\r\n",
+        "Hello\nPhone: body text\n"
+    };
+    String* type_str = create_lambda_string("eml");
+    Url* cwd = url_parse("file://./");
+    Url* dummy_url = url_parse_with_base("header-body.eml", cwd);
+
+    for (size_t i = 0; i < 3; i++) {
+        char* source = strdup(sources[i]);
+        Input* parsed = input_from_source(source, dummy_url, type_str, NULL);
+        ASSERT_NE(parsed, nullptr);
+        ASSERT_FALSE(parsed->parse_failed);
+        MapReader message = MapReader::fromItem(parsed->root);
+        ASSERT_TRUE(message.isValid());
+        MapReader headers = message.get("headers").asMap();
+        ASSERT_TRUE(headers.isValid());
+        if (i < 2) EXPECT_STREQ(headers.get("received").cstring(), "first second");
+        else EXPECT_STREQ(headers.get("x-empty").cstring(), "");
+        EXPECT_FALSE(headers.has("phone"));
+        EXPECT_STREQ(message.get("body").cstring(), expected_bodies[i]);
+        free(source);
+    }
+
+    url_destroy(dummy_url);
+    url_destroy(cwd);
+}
+
 // RST Tests
 class RstTests : public InputRoundtripTest {};
 

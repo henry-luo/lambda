@@ -300,6 +300,7 @@ fn render_element(el, info) {
 // skip commands that produce null output
 let SKIP_COMMANDS = {
     'newcommand': true, 'renewcommand': true, 'providecommand': true,
+    'newenvironment': true, 'renewenvironment': true,
     'setcounter': true, 'newcounter': true, 'addtocounter': true,
     'stepcounter': true, 'comment': true,
     'setlength': true, 'newlength': true,

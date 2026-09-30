@@ -1,0 +1,31 @@
+{
+  "name": "Doc editor previews PGF diagrams and plots",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1800},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "pgf"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz_diagrama_venn1_pgf .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "diagrama_venn1.pgf"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-picture"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "#rendered-preview .tikz-picture"}, "attribute": "style", "contains": "position:relative"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview svg ellipse"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview svg rect"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-label"}, "count": 5},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz_plot_logaxis_pgf .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "plot_logaxis.pgf"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-fragment-gallery"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-axis"}, "count": 2},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "\\begin{tikzpicture}"},
+    {"type": "click", "target": {"selector": ".tab-view"}},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-axis"}, "count": 2},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz_serie_coordinate_pgf .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "serie_coordinate.pgf"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-axis"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Number of failed banks"}
+  ]
+}

@@ -1454,6 +1454,68 @@ static inline MIR_reg_t em_emit_bits_double(MirEmitter* em, MIR_reg_t bits_reg) 
     return dval;
 }
 
+typedef MIR_reg_t (*MirF64UnboxColdCall)(void* owner, MIR_reg_t item);
+
+// The two zero sentinels and out-of-band Float homes share one physical Item
+// decoder. The unsigned payload check admits only the exact sentinel words;
+// all other non-inline Items retain the caller's conversion leaf (D8.2.3).
+static inline MIR_reg_t em_unbox_f64_noninline_item(MirEmitter* em, void* owner,
+        MirF64UnboxColdCall cold_unbox, MIR_reg_t item) {
+    if (!em || !cold_unbox || !item) return 0;
+    MIR_reg_t payload = em_new_reg(em, "unbox_f64_zero_payload", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_SUB,
+        MIR_new_reg_op(em->ctx, payload), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_FLOAT_P0)));
+    MIR_reg_t result = em_new_reg(em, "unbox_f64_noninline", MIR_T_D);
+    MIR_label_t zero = em_new_label(em);
+    MIR_label_t done = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_UBLE,
+        MIR_new_label_op(em->ctx, zero), MIR_new_reg_op(em->ctx, payload),
+        MIR_new_int_op(em->ctx, 1)));
+    MIR_reg_t cold = cold_unbox(owner, item);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DMOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, cold)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, done)));
+    em_emit_label(em, zero);
+    MIR_reg_t signed_zero = em_new_reg(em, "unbox_f64_signed_zero", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_LSH,
+        MIR_new_reg_op(em->ctx, signed_zero), MIR_new_reg_op(em->ctx, payload),
+        MIR_new_int_op(em->ctx, 63)));
+    MIR_reg_t zero_number = em_emit_bits_double(em, signed_zero);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DMOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, zero_number)));
+    em_emit_label(em, done);
+    return result;
+}
+
+static inline MIR_reg_t em_unbox_f64_item(MirEmitter* em, void* owner,
+        MirF64UnboxColdCall cold_unbox, MIR_reg_t item) {
+    if (!em || !cold_unbox || !item) return 0;
+    MIR_reg_t in_band = em_new_reg(em, "unbox_f64_mask", MIR_T_I64);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_AND,
+        MIR_new_reg_op(em->ctx, in_band), MIR_new_reg_op(em->ctx, item),
+        MIR_new_int_op(em->ctx, (int64_t)ITEM_DBL_MASK)));
+    MIR_reg_t result = em_new_reg(em, "unbox_f64", MIR_T_D);
+    MIR_label_t inline_value = em_new_label(em);
+    MIR_label_t done = em_new_label(em);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_BT,
+        MIR_new_label_op(em->ctx, inline_value), MIR_new_reg_op(em->ctx, in_band)));
+    // The generic conversion keeps the compact cold lane. Sites that have
+    // already ruled out inline values may select the zero-sentinel decoder.
+    MIR_reg_t noninline = cold_unbox(owner, item);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DMOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, noninline)));
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_JMP,
+        MIR_new_label_op(em->ctx, done)));
+    em_emit_label(em, inline_value);
+    MIR_reg_t inline_number = em_emit_bits_double(em, item);
+    em_emit_insn(em, MIR_new_insn(em->ctx, MIR_DMOV,
+        MIR_new_reg_op(em->ctx, result), MIR_new_reg_op(em->ctx, inline_number)));
+    em_emit_label(em, done);
+    return result;
+}
+
 // Both Lambda and LambdaJS represent an admitted non-null IEEE F64 in an Item
 // with the same bit encoding. The caller owns only the cold allocation call:
 // it may need profile-specific completion bookkeeping. Keeping the hot bits,

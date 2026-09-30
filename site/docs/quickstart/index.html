@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../../favicon.ico" sizes="48x48">
+  <link rel="icon" href="../../favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../../apple-touch-icon.png">
+  <link rel="manifest" href="../../site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Quick Start — Lambda Script</title>
   <meta name="description" content="Get up and running with Lambda Script in 15 minutes. Learn to parse, transform, validate, and render documents.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -49,61 +54,60 @@
     <h2>Step 2: Explore the REPL</h2>
     <p>Start the interactive REPL by running <code>lambda</code> with no arguments:</p>
 <pre><code>$ lambda
-λ> 1 + 2
+λ&gt; 1 + 2
 3
 
-λ> [1, 2, 3] | ~ * 10
+λ&gt; [1, 2, 3] |&gt; ~ * 10
 [10, 20, 30]
 
-λ> let greeting = "Hello, Lambda Script!"
-"Hello, Lambda Script!"
-
-λ> len(greeting)
+λ&gt; len("Hello, Lambda Script!")
 21
 
-λ> quit</code></pre>
+λ&gt; quit</code></pre>
     <p>The REPL supports multi-line input. Type <code>quit</code> or <code>exit</code> to leave.</p>
 
     <h2>Step 3: Transform Data with Pipes</h2>
     <p>Create a file called <code>hello.ls</code>:</p>
 <pre><code>// hello.ls — Your first Lambda Script
 let data = [
-  {name: "Alice", age: 30, active: true},
+  {name: "Carol", age: 35, active: true},
   {name: "Bob",   age: 25, active: false},
-  {name: "Carol", age: 35, active: true}
+  {name: "Alice", age: 30, active: true}
 ]
 
 // Filter active users, extract names, sort
-data that ~.active | ~.name | sort</code></pre>
+data |: ~.active |&gt; ~.name |&gt; sort</code></pre>
     <p>Run it:</p>
 <pre><code>$ lambda hello.ls
 ["Alice", "Carol"]</code></pre>
 
     <h2>Step 4: Parse and Convert Formats</h2>
     <p>Lambda Script can parse many formats into a unified tree and convert between them:</p>
-<pre><code>// Convert JSON to YAML
+<pre><code># Convert JSON to YAML
 $ lambda convert data.json -t yaml -o data.yaml
 
-// Convert Markdown to HTML
+# Convert Markdown to HTML
 $ lambda convert readme.md -t html -o readme.html
 
-// Convert LaTeX to HTML
+# Convert LaTeX to HTML
 $ lambda convert formula.tex -t html -o formula.html --full-document</code></pre>
 
     <p>You can also parse and transform inside scripts:</p>
 <pre><code>// transform.ls
-let doc = input("readme.md", 'markdown')
+let doc = input("readme.md", 'markdown')^
 
-// Query all images
-let images = doc?&lt;img&gt;
-images | ~.src</code></pre>
+// Query all images; [* ] keeps a list even when only one matches
+let images = [*doc?&lt;img&gt;]
+images |&gt; ~.src</code></pre>
 
     <h2>Step 5: Validate Data</h2>
     <p>Define a schema and validate JSON/YAML/HTML:</p>
 <pre><code>// schema.ls — A Lambda schema
+type Age = int that (0 &lt;= ~ &lt;= 150)
+
 type User = {
     name: string,
-    age: int that (0 &lt;= ~ &lt;= 150),
+    age: Age,
     email: string?
 }</code></pre>
 <pre><code>$ lambda validate users.json -s schema.ls</code></pre>
@@ -126,23 +130,27 @@ $ lambda render page.html -o screenshot.png -vw 1920 -vh 1080</code></pre>
     <h2>Step 7: Write a Document Pipeline</h2>
     <p>Combine parsing, transformation, and rendering in a single script:</p>
 <pre><code>// pipeline.ls — End-to-end document pipeline
-let doc = input("report.md", 'markdown')
+let doc = input("report.md", 'markdown')^
 
-// Extract all headings
-let headings = doc?&lt;h1&gt; ++ doc?&lt;h2&gt; ++ doc?&lt;h3&gt;
+// Collect the headings, in document order
+let headings = doc?(&lt;h1&gt; | &lt;h2&gt; | &lt;h3&gt;)
 
 // Build a table of contents
-let toc = &lt;nav class: "toc"
+let toc = &lt;nav class: "toc",
     &lt;h2 "Table of Contents"&gt;
-    &lt;ul (for (h in headings) &lt;li &lt;a href: ("#" ++ h.id); h[string]&gt;&gt;)&gt;
+    &lt;ul for (h in headings) &lt;li h[0]&gt;&gt;
 &gt;
 
-// Wrap in styled HTML
-&lt;html
+// Wrap it all in a styled HTML page
+let page = &lt;html
     &lt;head &lt;style "body { max-width: 800px; margin: 0 auto; font-family: sans-serif; }"&gt;&gt;
-    &lt;body toc, doc&gt;
-&gt;</code></pre>
-<pre><code>$ lambda pipeline.ls | lambda render -o report.pdf</code></pre>
+    &lt;body
+        toc
+        for (block in content(doc?&lt;body&gt;)) block
+    &gt;
+&gt;
+page</code></pre>
+<pre><code>$ lambda render pipeline.ls -o report.pdf</code></pre>
 
     <h2>What's Next?</h2>
     <div class="card-list" style="margin-top: var(--space-lg);">

@@ -97,18 +97,23 @@ let c = <s.Circle r: 2.0>;
 
 ## How Imports Resolve
 
+The first token of an import path decides where it looks (S16.9.8): a **name** starts a package path, **`.` or `~~`** starts a path relative to the importing file, and **`/`** is reserved.
+
 | Import | Resolves to |
 |---|---|
 | `import .a.b` | `a/b.ls` beside the importing file (after following symlinks), else `a/b.js` |
-| `import a` | `a.ls` in the **current working directory**, else `a.js` |
+| `import ~~.a` | `../a.ls`, one directory up from the importing file; each further leading `~~.` goes up one more (`import ~~.~~.lib.util` is `../../lib/util.ls`) |
 | `import lambda.<package>.m` | `<LAMBDA_HOME>/package/<package>/m.ls` — a shipped package (D7.2.4) |
 | `import lambda.doc.math.m` | `<LAMBDA_HOME>/package/math/m.ls` — document-processing packages live under `lambda.doc` |
 | `import math`, `import io` | The built-in modules; `import lambda.math` and `import lambda.io` are the same modules |
 | `import p: 'uri'` | A namespace prefix for markup, not a module ([Namespaces](Lambda_Syntax.md#namespaces)) |
+| `import a`, `import a.b` (any other name) | Error E216: bare names are reserved for packages, and there is no package `a`. The name never refers to a file in the working directory |
+| `import /.a` | Error: rooted import paths are reserved |
 
+- `~~` steps come only at the start: `import .~~.a` and `import ~~.a.~~.b` are errors. Write `import ~~.a`.
 - Only `.ls` and `.js` files are tried, in that order; `.mjs` and `.ts` files are not modules, and a directory is not a module.
 - `LAMBDA_HOME` is the runtime's asset directory. Without the environment variable it is `./lmd` (in a source checkout and a release bundle alike), **relative to the current working directory**. When you run `lambda` from another folder, set `LAMBDA_HOME` to the absolute path of that directory, or package imports fail with E217.
-- Prefer the relative form `.a` for your own modules: it does not depend on where you run the script from.
+- Your own modules are always imported relatively (`.a`, `~~.a`), so an import means the same thing wherever you run the script from.
 
 ## Built-in Modules
 
@@ -171,6 +176,7 @@ format(math.render_inline(ast), 'html')
 - **Top-level effects run at import time.** A module-level `let` is evaluated when the module is instantiated, so `pub let config = input('config.json')^` reads the file while the importer is being compiled. The values of the module's top-level expressions are discarded; only the entry script's `main` runs.
 - **A failed initializer stops the import.** If a module's top level raises — say `input()` cannot find its file — the importing script does not run, and the error is reported (D7.2.2). Handle the error in the module to make it optional: `pub let config = input('config.json') ^ { {} }`.
 - **Cycles are errors.** Two modules that import each other fail with *Circular import detected*, followed by error E217.
+- **An unknown package** is error E216, *no package 'tools' for import 'tools.util'*: a bare import root must name a package. Import your own files relatively (`.tools.util`, `~~.tools.util`).
 - **A missing module** is error E217, *failed to import Lambda module '.nosuch'*, naming the path it tried. A module that fails to compile is reported the same way, after its own errors.
 - **Paths inside a module** — `input("data.json")`, `\.'data.json'` — resolve against the current working directory, not the module's directory.
 

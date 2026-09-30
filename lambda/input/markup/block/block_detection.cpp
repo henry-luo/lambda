@@ -363,10 +363,10 @@ BlockType detect_block_type(MarkupParser* parser, const char* line) {
         return BlockType::QUOTE;
     }
 
-    // Markdown tables require the adapter's separator-row check above. This
-    // generic fallback mistakes pipes inside Markdown link and image URLs for
-    // cell delimiters.
+    // markdown and Wiki tables require their adapters' delimiters above.
+    // a Wiki template argument line starting with | is not a table opener.
     if (parser->config.format != Format::MARKDOWN && parser->config.format != Format::RST &&
+        parser->config.format != Format::WIKI &&
         parser->config.flavor != Flavor::COMMONMARK && is_table_line(line)) {
         return BlockType::TABLE;
     }

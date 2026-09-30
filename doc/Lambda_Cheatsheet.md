@@ -1,22 +1,20 @@
 ## CLI Commands
 ```bash
-lambda                    # Start REPL (commands: quit, help, clear)
+lambda                    # Start REPL (cmds: quit, help)
 lambda script.ls          # Eval a functional script
-lambda run script.ls      # Run a procedural script (calls main())
+lambda run script.ls      # Run a procedural script
 lambda --help             # Show help
 ```
 The dev build is `./lambda.exe`; release bundles ship it as `lambda`.
 
 **Documents:**
 ```bash
-lambda validate file.json -s schema.ls          # Validate against a schema
-lambda validate page.html                       # Built-in schema (html, md, eml, ics, vcf)
-lambda convert doc.md -t html -o doc.html       # Convert between formats
-lambda layout page.html                         # Print the CSS layout tree
-lambda render page.html -o page.pdf             # Render to svg | pdf | png | jpg
-lambda view page.html                           # Open the interactive viewer
-lambda edit notes.md                            # Edit Markdown, HTML or SVG
-lambda fetch https://example.com -o page.html   # Download a URL
+lambda validate file.json -s schema.ls      # Against a schema
+lambda validate page.html      # Built-in schema (html, md...)
+lambda convert doc.md -t html -o doc.html 
+lambda render page.html -o page.pdf       # To svg|pdf|png|jpg
+lambda view page.html            # Open the interactive viewer
+lambda edit notes.md              # Edit Markdown, HTML or SVG
 ```
 
 ## Type System
@@ -103,14 +101,14 @@ Type Checking (nominal only):
 | `p is map` | true (objects are map-compatible) |
 | `{x: 1} is Point` | false (plain maps don't match) |
 
-**Constraints** (parsed, but not yet enforced inside object types — alpha):
+**Constraints:**
 ```lambda
 type User {
   name: string that (len(~) > 1),  // Field constraint
   age: int that (0 <= ~ <= 150),
   that (~.name != "admin")         // Object constraint
 }
-type Age = int that (0 <= ~ <= 150)   // a named constrained type IS enforced by `is`
+type Age = int that (0 <= ~ <= 150)   
 ```
 
 **Self reference `~`:**
@@ -223,7 +221,7 @@ Indexing & Slicing:
 | `'hello'[1 to 3]` | 'ell' — symbol slicing |
 | `"café"[2 to 3]` | "fé" — UTF-8 aware |
 
-**Namespaces (via `import` with bare URI):**
+**Namespaces:** (via `import` with bare URI)
 ```lambda
 import svg: 'http://www.w3.org/2000/svg'
 import xlink: 'http://www.w3.org/1999/xlink'
@@ -273,15 +271,12 @@ Var Statements (mutable, `pn` only):
 
 Arithmetic:
 
-| Operator | Meaning |
-|---|---|
-| `+` | addition |
-| `-` | subtraction |
-| `*` | multiplication |
-| `/` | division |
-| `div` | integer division |
-| `%` | modulo |
-| `**` | exponentiation |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `+` | addition | `-` | subtraction |
+| `*` | multiplication | `/` | division |
+| `div` | integer division | `%` | modulo |
+| `**` | exponentiation |  |  |
 
 Spread `*`:
 
@@ -291,14 +286,11 @@ Spread `*`:
 
 Comparison:
 
-| Operator | Meaning |
-|---|---|
-| `==` | equal |
-| `!=` | not equal |
-| `<` | less than |
-| `<=` | less or equal |
-| `>` | greater than |
-| `>=` | greater or equal |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `==` | equal | `!=` | not equal |
+| `<` | less than | `<=` | less or equal |
+| `>` | greater than | `>=` | greater or equal |
 
 `==` performs **structural deep equality** on all types:
 
@@ -311,29 +303,18 @@ Comparison:
 
 Logical:
 
-| Operator | Meaning |
-|---|---|
-| `and` | logical and |
-| `or` | logical or |
-| `not` | logical not |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `and` | logical and | `or` | logical or |
+| `not` | logical not |  |  |
 
 Type & Set:
 
-| Operator | Meaning |
-|---|---|
-| `is` | type check |
-| `in` | membership |
-| `to` | range |
-| `\|` | union |
-| `&` | intersection |
-| `!` | exclusion |
-
-Query: type-based search
-
-| Form | Meaning |
-|---|---|
-| `?   .?` | recursive descendant search |
-| `expr[T]` | child-level query (direct only); a query yields `null`, the match, or a list — count with `count(q)`; on a list it steps through each item |
+| Operator | Meaning | Operator | Meaning |
+|---|---|---|---|
+| `is` | type check | `in` | membership |
+| `to` | range | `\|` | union |
+| `&` | intersection | `!` | exclusion |
 
 Vector Arithmetic:
 
@@ -342,7 +323,7 @@ Vector Arithmetic:
 | `1 + [2, 3]` | `[3, 4]` | scalar broadcast |
 | `[1, 2] * 2` | `[2, 4]` | scalar broadcast |
 | `[1, 2] + [3, 4]` | `[4, 6]` | element-wise |
-| `[1, 2, 3] eq 2` | `[false, true, false]` | element-wise comparison: `eq ne lt le gt ge` (S10.2.2) |
+| `[1, 2, 3] eq 2` | `[false, true, false]` | element-wise comparison: `eq ne lt le gt ge` |
 | `[10, 20, 30][[1, 2, 3] gt 1]` | `[20, 30]` | mask indexing; `sum(mask)` counts |
 Use `++` for list/array concat: `[1,2] ++ [3,4] = [1,2,3,4]`.
 
@@ -365,7 +346,7 @@ Filter with `|:` (the body must mention `~`):
 | `users \|: ~.age >= 18 \|> ~.name` | filter then map |
 | `[1,2,3] \|> ~ ** 2 \|: (~ > 3) \|> sum` | 13 (4+9) |
 
-Proviso with `that` (one value, never walked):
+Self-qualifier with `that` (one value, never walked):
 
 | Form | Meaning |
 |---|---|
@@ -383,9 +364,9 @@ Pipe and filter results in array literals: an array result is one item
 
 ## Query Expressions
 
-**Results in document order** (depth-first, pre-order).
+Results in document order (depth-first, pre-order).
 
-Query `?` — attributes + all descendants:
+Query `?` - search attributes + all descendants:
 
 | Form | Meaning |
 |---|---|
@@ -396,7 +377,7 @@ Query `?` — attributes + all descendants:
 | `data?{name: string}` | maps with string 'name' |
 | `data?{status: "ok"}` | maps where status == "ok" |
 
-Self-inclusive query `.?` — self + attributes + all descendants:
+Self-inclusive query `.?` — search self + attributes + all descendants:
 
 | Form | Meaning |
 |---|---|
@@ -404,7 +385,7 @@ Self-inclusive query `.?` — self + attributes + all descendants:
 | `el.?int` | self + all int values in subtree |
 | `42.?int` | 42 — a lone match is the value itself |
 
-Child-level query `[T]` — direct attributes + children only (no recursion):
+Child-level query `[T]` — search direct attributes + children only:
 
 | Form | Meaning |
 |---|---|
@@ -413,72 +394,18 @@ Child-level query `[T]` — direct attributes + children only (no recursion):
 | `el[element]` | direct child elements only |
 | `el[string]` | attr values + text children |
 
-## File Output (procedural only)
-The target can be a string, a symbol, or a path.
-
-| Form | Meaning |
-|---|---|
-| `output(data, 'output.txt')` | File under CWD |
-| `output(data, "./temp/output.txt")` | Relative path |
-| `output(data, "output.txt", {mode: "append"})` | Append mode |
-| `output(data \|> format('json'), "output.json")` | Format then write |
-Data type determines output format:
-
-- String: raw text (no formatting)
-- Binary: raw binary data
-- Other types: Lambda/Mark format
-
-## References & Document Updates
-
-Full reference: [Lambda_Document_Updates.md](Lambda_Document_Updates.md).
-
-A `path` is a reference: it reads nothing until the postfix `#` forces it.
-
-| Form | Meaning |
-|---|---|
-| `p.a.b` | still a path — steps append, nothing is read |
-| `p#` | the document at `p` (exactly `input(p)`) |
-| `p#name` | force, then member `name` (fragment sugar for `p#.name`) |
-| `p.a.b#` | extend the path, then force — the same value |
-| `&x` | the reference `x` carries as its identity, else `null` |
-| `a === b` | reference equality: `&a != null and &a == &b` |
-| `x is reference` | `reference` is the type `symbol \| path` |
-
-Every document write is a statement; `=` never writes a document.
-
-| Statement | Meaning |
-|---|---|
-| `put t = v` | upsert at a location (a position replaces, a key upserts) |
-| `put v before t` / `put v after t` | insert at a head node |
-| `put v into t` | add a member: append, upsert keys, or add a child |
-| `del t` | remove a location |
-| `put a = 1, b = 2` | comma-joined: one statement, written order |
-| `commit` / `rollback` | end the write set, or discard it |
-| `open v = target { … }` | one bounded transaction; `#` implied on `v` |
-| `temp(name, content)` | create an in-memory document; `temp.'name'` addresses it |
-
-Edits build a write-only next version: nothing changes until `commit`, and every
-value operand reads the head. Outside `open`, each statement commits at once.
-
 ## Control Flow
 
-If Expressions (parenthesized condition, else required):
+If Expressions / Statements (else optional):
 
 | Form | Meaning |
 |---|---|
 | `if (x > 0) "positive" else "non-positive"` | Simple |
 | `if (score >= 90) "A" else if (score >= 80) "B" else "C"` | Chained |
 | `if (x > 0) "pos" else { "neg" }` | Block `else` |
-
-If Statements (block body, else optional):
-
-| Form | Meaning |
-|---|---|
 | `if x > 0 { "positive" }` | No `else` |
 | `if condition { something() } else { otherThing() }` | Both blocks |
 | `if x > 0 { compute() } else "default"` | Expression `else` |
-
-Both forms share the same `else` syntax: `else expr`, `else { stam }`, or `else if ...`.
 
 **Match Expressions:**
 ```lambda
@@ -502,7 +429,7 @@ match input {
 }
 ```
 
-For Expressions: (produce spreadable lists; pipe and filter results are arrays and do not spread, see above)
+**For Expressions:** produce spreadable lists
 
 | Expression | Result | |
 |---|---|---|
@@ -514,7 +441,7 @@ For Expressions: (produce spreadable lists; pipe and filter results are arrays a
 | `for (k at {a: 1, b: 2}) k` | `['a', 'b']` | iterate a map by key |
 | `for (k, v at {a: 1, b: 2}) k ++ v` | `['a1', 'b2']` | key and value (S8.1.3) |
 
-**For Expression Clauses:** `let`, `where`, `group by`, `order by`, `limit`, `offset`
+For Expression Clauses: `let`, `where`, `group by`, `order by`, `limit`, `offset`
 ```lambda
 for (x in data where x > 0) x           // filter
 for (x in data, let sq = x*x) sq        // let binding
@@ -523,26 +450,25 @@ for (x in [3,1,2] order by x desc) x    // (3,2,1)
 for (x in data limit 5 offset 10) x     // pagination
 for (x in data, let y=x*2
     where y>5 order by y desc limit 3) y
-// group by → g is an <group> element (keys=attrs, members=children)
+// g is an <group keys as attrs, members as children>
 for (x in sales group by x.region into g)
-    {region: g.region, n: len(content(g))}   // content(g) = the members
+    {region: g.region, n: len(content(g))}
 ```
 
-**Joins (`on`):** relate comma sources; `?` = left join
+Joins (`on`): relate comma sources; `?` = left join
 ```lambda
 for (o in orders, c in customers on o.cust_id == c.id)
     {id: o.id, name: c.name}            // inner equi-join
 for (o in orders, c? in customers on o.cust_id == c.id)
-    {id: o.id, name: c}                 // left join (c=null on miss)
-for (o in os, c in cs on o.a==c.a and o.b==c.b) {...}  // multi-key
+    {id: o.id, name: c}           // left join (c=null on miss)
 ```
 
-**For Statements:**
+For Statements:
 ```lambda
 for item in collection { transform(item) }
 ```
 
-Procedural Control (in `pn`):
+**Procedural Control (in `pn`):**
 
 | Form | Meaning |
 |---|---|
@@ -559,6 +485,35 @@ Assignment Targets (in `pn`):
 | `elem.attr = val` | Element attribute reassignment |
 | `elem[i] = val` | Element child reassignment |
 
+## String and Symbol Patterns
+
+Define named patterns for string and symbol validation and matching. Uses regex-like syntax integrated into the type system.
+
+| Form | Meaning |
+|---|---|
+| `type digits = \(d+)` | one or more digits |
+| `type email = \(w+ "@" w+ "." a{2,6})` | email-like |
+| `type ws = \(s+)` | whitespace |
+| `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
+| `type SymIdent = \symbol(a w*)` | symbol pattern |
+
+`\(...)` matches strings, `\symbol(...)` matches symbols.
+Character classes inside `\(...)`: `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string.
+Negation: `!` matches one character outside a set of single characters.
+Quantifiers: `?`, `+`, `*`, `{n}`, `{n,m}`, `{n+}`.
+
+**Inline (unnamed) patterns** work anywhere a type does:
+
+| Form | Meaning |
+|---|---|
+| `"abc" is email` | false |
+| `"123" is digits` | true |
+| `'foo' is SymIdent` | `true` |
+| `"foo" is SymIdent` | `false` — string value, symbol pattern |
+| `"abc" is \(a+)` | `true` |
+| `fn f(x: \(d+)) => x` | Parameter annotation |
+| `match s { case \(d+): "num" default: "other" }` | Match arm |
+
 ## Functions
 
 Function Declaration:
@@ -573,35 +528,6 @@ Function Declaration:
 | `function each(f: function, xs) => for (x in xs) f(x)` | Pure iff `f` is (S12.1.4v3) |
 | `pn advance(pos: float[], vel: float[], n: int) { ... }` | Array parameters |
 
-## Concurrency (`pn` only)
-
-Full reference: [Lambda_Concurrency.md](Lambda_Concurrency.md).
-
-```lambda
-pn worker() { return receive()^ }
-pn job(n) { sleep(n)^; return n }
-
-pn main() {
-    let h = start(worker)                    // scoped child, opaque identity handle
-    send(h, "job")^                          // bounded FIFO mailbox (default 1024)
-    print(wait(h)^)                          // wait for the T^E result
-
-    let j = start(job, [5], {mode: 'task'})  // args array + launch options (S13.1.1v2)
-    let k = start(job, [1])
-    wait(j, timeout: 10)^                    // a timeout does not cancel j
-    select(j, k, timeout: 100)^              // first completed handle
-    sleep(5)^                                // shared libuv timer
-    self()                                   // current handle
-    cancel(k)                                // idempotent cancellation request
-    io.read("file.txt")^                     // async local file read
-}
-```
-
-No `async`/`await` keywords are used. Normal block exit joins children; error
-exit cancels then joins. A `start` operand may not capture an outer `var` by
-reference—copy to `let` or use messages. Imported JS Promises are `wait`-able;
-exported Lambda `pn`s return Promises to JavaScript.
-
 Advanced Features:
 
 | Form | Meaning |
@@ -612,52 +538,31 @@ Advanced Features:
 | `f(b:2, a:1)` | named param call |
 | `fn outer(n) { fn inner(x)=>x+n; inner }` | closure |
 
-## String Patterns
+## Concurrency (`pn` only)
 
-Define named patterns for string validation and matching. Uses regex-like syntax integrated into the type system. Full reference: [Lambda_String_Pattern.md](Lambda_String_Pattern.md).
+```lambda
+pn worker() { return receive()^ }
+pn job(n) { sleep(n)^; return n }
 
-Definition:
+pn main() {
+    let h = start(worker)        // start a child
+    send(h, "job")^              // bounded FIFO mailbox
+    print(wait(h)^)              // wait for the T^E result
 
-| Form | Meaning |
-|---|---|
-| `type digits = \(d+)` | one or more digits |
-| `type email = \(w+ "@" w+ "." a{2,6})` | email-like |
-| `type ws = \(s+)` | whitespace |
-| `type keyword = 'if' \| 'else' \| 'for'` | symbol literal union |
+    let j = start(job, [5], {mode: 'task'})  
+    let k = start(job, [1])
+    wait(j, timeout: 10)^        // timeout does not cancel j
+    select(j, k, timeout: 100)^  // first completed handle
+    sleep(5)^                    // shared libuv timer
+    self()                       // current handle
+    cancel(k)                    // idempotent cancellation request
+    io.read("file.txt")^         // async local file read
+}
+```
 
-Type check (`is`) — full-match semantics:
-
-| Form | Meaning |
-|---|---|
-| `"hello@world.com" is email` | true |
-| `"abc" is email` | false |
-| `"123" is digits` | true |
-
-**Character classes inside `\(...)`:** `d` digit, `w` word, `s` whitespace, `a` alpha, `.` any char, `...` any string
-
-**Negation:** `!` matches one character outside a set of single characters, like regex `[^…]`: `\(!d)`, `\(!("a" | "b"))`, `\(!">")`. Negating anything longer is an error. Inside a pattern `!` is prefix-only: `\(w ! d)` is `w` followed by `!d`. Exclude whole patterns at the type level: `\(w+) ! \(d+)`.
-
-Reserved inside the island only — quote to match one literally: `\("d" w+)`.
-
-**Quantifiers:** `?` optional, `+` one or more, `*` zero or more, `{n}` exactly n, `{n,m}` n to m, `{n+}` n or more (not regex's `{n,}`)
-
-**Precedence inside `\(...)`**, tightest first: atom (`"a" to "z"` is one), prefix `!`, quantifier, concatenation, `|`. So `\(!d+)` is `(!d)+` and `\("a" | "b" "c")` matches `"a"` or `"bc"`. `|` is the only binary operator; there is no `&` inside a pattern, so intersect whole patterns: `\(a+) & \(w+)`.
-
-**Domain:** `\(...)` matches strings, `\symbol(...)` matches symbols; the tag is checked before the content, and pattern bodies always use string literals for content.
-Given `type SymIdent = \symbol(a w*)`:
-
-| Form | Result |
-|---|---|
-| `'foo' is SymIdent` | `true` |
-| `"foo" is SymIdent` | `false` — string value, symbol pattern |
-
-**Inline (unnamed) patterns** work anywhere a type does:
-
-| Form | Meaning |
-|---|---|
-| `"abc" is \(a+)` | `true` |
-| `fn f(x: \(d+)) => x` | Parameter annotation |
-| `match s { case \(d+): "num" default: "other" }` | Match arm |
+No `async`/`await`. Normal block exit joins children; error
+exit cancels then joins. A `start` operand may not capture an outer `var` by
+reference—copy to `let` or use messages.
 
 ## System Functions
 
@@ -691,43 +596,15 @@ Given `type SymIdent = \symbol(a w*)`:
 
 **String:**
 
-`replace(str,old,new)` `split(str,sep)` `join(strs,sep)` `find(str,pattern)` `normalize(str)` `ord(str)` `chr(int)`
-
-All three accept both plain strings and named patterns as the second argument:
-Given `type digit = \(d)`, `type digits = \(d+)`, `type ws = \(s+)`:
-
+`join(strs,sep)` `normalize(str)` `ord(str)` `chr(int)`
 `replace(str, pattern_or_string, replacement)`
-
-| Form | Result |
-|---|---|
-| `replace("a1b2c3", digit, "X")` | `"aXbXcX"` |
-| `replace("hello   world", ws, " ")` | `"hello world"` |
-| `replace("abc", "b", "")` | `"ac"` |
-| `replace("aab", \("a"*), "-")` | `"--b-"` — empty matches count, as in JS `replaceAll`; the replacement is literal |
-
 `split(str, pattern_or_string)`
-
-| Form | Result |
-|---|---|
-| `split("a,b,c", ",")` | `["a", "b", "c"]` |
-| `split("a1b2c3", digit)` | `["a", "b", "c", ""]` |
-| `split("hello   world", ws)` | `["hello", "world"]` |
-| `split("a1b2c3", digit, true)` | `["a", "1", "b", "2", "c", "3", ""]` — keep delimiters |
-| `split("ab", \(d*))` | `["a", "b"]` — zero-width: no end empties |
-| `split("", ",")` | `[""]`; `split("", \(d*))` → `[]` |
-
-Follows ECMAScript `String.prototype.split` (S17.1.1).
-
 `find(str, pattern_or_string)` → `[{value, index}, ...]`
-
-| Form | Result |
-|---|---|
-| `find("a1b22c333", digits)` | `[{value:"1", index:1}, {value:"22", index:3}, ...]` |
-| `find("hello world", "lo")` | `[{value: "lo", index: 3}]` |
 
 **Collection:**
 
-`slice(v,i)` `slice(v,i,j)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `intersect(a,b)` `except(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(s,e,step)` `reduce(v,f)` `contains(v,x)` `index_of(v,x)`; map and filter are the pipes `|>` and `|:`
+`slice(v,i)` `slice(v,i,j)` `all(v)` `any(v)` `reverse(v)` `sort(v)` `unique(v)` `intersect(a,b)` `except(a,b)` `take(v,n)` `drop(v,n)` `zip(a,b)` `fill(n,x)` `range(s,e,step)` `reduce(v,f)` `contains(v,x)` `index_of(v,x)`
+map and filter are the pipes `|>` and `|:`
 
 **Vector:**
 
@@ -739,7 +616,7 @@ Follows ECMAScript `String.prototype.split` (S17.1.1).
 
 ## Input/Output Formats
 
-**Supported Input Types:** `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text` (see [Markup_Formats_Support.md](Markup_Formats_Support.md))
+**Supported Input Types:** `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text`
 ```lambda
 input("path/file.md", 'markdown')^   // Input Markdown
 ```
@@ -753,10 +630,12 @@ input("math.txt", {'type':'math', 'flavor':'ascii'})^
 ```lambda
 format(data, 'yaml')                // Format as YAML
 ```
+When no specified output format:
+• String data: raw text (no formatting)
+• Binary data: raw binary data
+• Other data: Lambda/Mark format
 
 ## Modules, Imports & Exports
-
-Full reference: [Lambda_Modules.md](Lambda_Modules.md).
 
 Import Syntax:
 
@@ -826,10 +705,10 @@ fun()^               // propagate error, discard value
 
 **`e ^ { }` — handle the error here (`~` is the error):**
 ```lambda
-pn main() {                     // print is a pn: only a pn may call it
+pn main() {              
   let result = divide(10, x) ^ {
-    print(^.message)            // ^ = the current handler error
-    0                           // handler value, or raise/return
+    print(^.message)    // ^ = the current handler error
+    0                   // handler value, or raise/return
   }
   print(result * 2)             // result is clean here
 }
@@ -853,7 +732,7 @@ pn main() {                     // print is a pn: only a pn may call it
 13. `not` - Logical NOT: `not a == b` is `not (a == b)`
 14. `and` - Logical AND
 15. `or` - Logical OR
-16. `|>` `|:` `that` - Pipe, Filter and Proviso
+16. `|>` `|:` `that` - Pipe, Filter and Qualifier
 
 There is no unary `!` in expressions: use `not`. In type position `!T` is
 the complement type, as in `x is !null`.

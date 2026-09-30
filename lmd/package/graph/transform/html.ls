@@ -221,11 +221,14 @@ fn node_sizing_css(node) {
   let height = source_attr(node, "height", null);
   let fixed = source_attr(node, "fixed-size", false) == true;
   let regular = source_attr(node, "regular", false) == true;
+  let shape = string(source_attr(node, "shape", "box"));
+  // Circular shapes need equal outer dimensions, including intrinsic label sizing.
+  let square_shape = regular or contains(["circle", "doublecircle", "f-circ"], shape);
   let authored = [for (value in [width, height] where value != null) float(value)];
   let square = if (len(authored) > 0) max(authored) else null;
-  let width_value = if (regular and square != null) square else width;
-  let height_value = if (regular and square != null) square else height;
-  (if (regular) "aspect-ratio:1;" else "") ++
+  let width_value = if (square_shape and square != null) square else width;
+  let height_value = if (square_shape and square != null) square else height;
+  (if (square_shape) "aspect-ratio:1;" else "") ++
     dimension_rule(if (fixed) "width" else "min-width", width_value) ++
     dimension_rule(if (fixed) "height" else "min-height", height_value)
 }
@@ -244,7 +247,10 @@ fn node_style(node, parsed, palette) {
   let effective = {*:palette,
     node_background: if (parsed.fill != null) parsed.fill else palette.node_background,
     node_border: if (parsed.stroke != null) parsed.stroke else palette.node_border};
-  "display:inline-block;box-sizing:border-box;" ++ node_padding_css(node) ++
+  (if (contains(["circle", "doublecircle", "f-circ"], shape))
+    "display:inline-flex;align-items:center;justify-content:center;"
+    else "display:inline-block;") ++
+    "box-sizing:border-box;" ++ node_padding_css(node) ++
     node_sizing_css(node) ++
     "border:1px solid " ++ palette.node_border ++ ";" ++
     "background:" ++ background ++ ";" ++ shape_css(node, effective) ++
@@ -608,6 +614,7 @@ pub fn to_html(graph, opts = null) {
   ];
   <'graph' class: "lambda-graph lambda-graph-theme-" ++ theme,
       'data-graph-role': "graph", 'data-radiant-layout': "lambda-graph", 'data-theme': theme,
+      'data-graph-flavor': source_attr(graph, "flavor", null),
       role: "group", 'aria-label': title, 'aria-description': description,
       'data-graph-title': title,
       'data-edge-color': palette.edge,

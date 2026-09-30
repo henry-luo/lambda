@@ -1,0 +1,13 @@
+{
+  "name": "rapid iframe navigation presents the newest script-bearing page",
+  "viewport": {"width": 800, "height": 500},
+  "events": [
+    {"type": "click", "target": {"selector": "a", "index": 0}},
+    {"type": "click", "target": {"selector": "a", "index": 1}},
+    {"type": "click", "target": {"selector": "a", "index": 2}},
+    {"type": "switch_frame", "selector": "iframe"},
+    {"type": "assert_text", "target": {"selector": "#result"}, "equals": "Third page ready"},
+    {"type": "wait", "ms": 20},
+    {"type": "assert_text", "target": {"selector": "#timer"}, "equals": "Timer ready"}
+  ]
+}

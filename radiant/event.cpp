@@ -3222,15 +3222,11 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     return !declined;
 }
 
-// EO4: create and bind a document's evaluator at setup, for interactive
-// sessions only. A one-shot layout/render run dispatches no events and needs
-// none. A `.ls` page and a script-bearing page already own one; a script-less
-// HTML page is the only case this adds.
-//
-// Deciding here rather than at first event is the whole point: at setup the
-// parser has already seen whether the page has scripts, whereas at dispatch
-// nothing can tell whether JS will start later — which is what stranded
-// js_active_runtime_state and crashed an iframe page.
+// D5.4.1: a script-less interactive document claims its own evaluator when
+// behavior first needs one; a script-bearing document already owns its realm.
+// A claim may replace the thread binding only outside an active event scope.
+static __thread int s_event_scope_depth = 0;
+
 extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     if (!doc) return false;
     if (dom_document_script_runtime(doc)) return true;   // EO3: already owns one
@@ -3250,12 +3246,21 @@ extern "C" bool radiant_document_ensure_evaluator(DomDocument* doc) {
     }
     if (!s_enabled) return false;
     if (doc->js_has_dom_realm) return false;             // EO6 owns that case
+    if (s_event_scope_depth > 0 || (context && context->execution_depth > 0)) {
+        log_debug("document-evaluator: deferred evaluator claim during active dispatch");
+        return false;
+    }
 
     Runtime* rt = (Runtime*)mem_calloc(1, sizeof(Runtime), MEM_CAT_LAYOUT);
     if (!rt) return false;
     runtime_init(rt);
+    // D8.1.1v13: behavior handlers can retain nodes in this document's arena;
+    // mark even a script-less evaluator as UI-owned before loading dom.ls.
+    runtime_set_ui_result_arena(rt, doc->input ? doc->input->arena : nullptr);
     EvalContext* ctx = runtime_get_eval_context(rt);
-    if (!ctx || !eval_context_init(ctx)) {
+    // A script-less parent may first need behavior while an iframe evaluator
+    // is bound. Claim its own evaluator at this quiescent input boundary.
+    if (!ctx || !radiant_eval_context_switch(ctx)) {
         log_error("document-evaluator: could not create and bind an evaluator");
         runtime_cleanup(rt);
         mem_free(rt);
@@ -3531,15 +3536,12 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // document-owned script runtime.
     // It remains valid for either document-loader ordering.
     //
-    // EO4: dispatch never creates. The evaluator, if this document is to have
-    // one, was created and bound at document setup by
-    // radiant_document_ensure_evaluator() — which runs after the loader has
-    // executed the page's scripts, so js_has_dom_realm is already settled.
+    // The loader has settled js_has_dom_realm before a direct event can claim
+    // a script-less document's evaluator through radiant_document_ensure_evaluator().
     Runtime* rt = dom_document_script_runtime(doc);
-    if (!rt && context && context->runtime) {
-        // A synchronous JS bridge may execute before the loader retains the
-        // document realm. The current evaluator can load the package for this
-        // call; the document must not borrow that stack-owned host pointer.
+    if (!rt && context && context->runtime && context->runtime->dom_doc == doc) {
+        // A load-time script may click before the loader publishes its realm.
+        // Its active runtime already belongs to this document.
         rt = context->runtime;
     }
     if (!rt) {
@@ -3565,7 +3567,9 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // focus target, the body remains available on an unfocused static page,
         // which is exactly where PageDown needs to load package policy first.
         DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
+        // Script clicks can precede layout, when controls have no form role yet.
         bool package_governs = te && (te->form_control() ||
+            target_inside_click_control(target) ||
             te == radiant_document_body_element(doc));
         if (!package_governs && target) {
             EditingSurface governed_surface;
@@ -10566,12 +10570,15 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
     return true;
 }
 
+static bool navigation_schedule_async_document(UiContext* uicon,
+        DomDocument* source, DomElement* iframe, const char* url,
+        int viewport_width, int viewport_height, int redirect_count = 0);
+
 static bool navigation_execute_iframe_target(UiContext* uicon,
                                              DomElement* iframe,
                                              const char* url) {
     if (!uicon || !iframe || iframe->tag() != MARKUP_NAME_IFRAME ||
         !iframe->doc || !url || !url[0] ||
-        !navigation_release_evaluator_for_document_load() ||
         !iframe->set_attribute("src", url)) return false;
     DomDocument* owner = iframe->doc;
     View* iframe_view = owner->view_tree
@@ -10582,7 +10589,14 @@ static bool navigation_execute_iframe_target(UiContext* uicon,
     if (!block) return false;
     int css_vw = (int)block->width; // INT_CAST_OK: loader viewport is integer CSS pixels.
     int css_vh = (int)block->height; // INT_CAST_OK: loader viewport is integer CSS pixels.
-    DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh);
+    // Local document parsing may own a Lambda evaluator; load it on a worker
+    // and publish only after the current event turn has released its context.
+    if (navigation_schedule_async_document(uicon, owner, iframe, url,
+            css_vw, css_vh)) return true;
+    if (!navigation_release_evaluator_for_document_load()) return false;
+    DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, owner);
+    DomDocument* new_doc = load_html_doc(owner->url, (char*)url, css_vw, css_vh,
+                                         &host_config);
     if (!new_doc) return false;
     if (!navigation_commit_iframe_document(uicon, iframe, new_doc)) {
         free_document(new_doc);
@@ -10599,21 +10613,19 @@ struct AsyncScriptNavigation {
     DomNodeRef iframe_ref;
     Url* target;
     DomDocument* loaded;
+    DocumentJsHostConfig host_config;
     int viewport_width;
     int viewport_height;
     bool iframe;
     bool superseded;
     bool completed;
     int status;
+    int redirect_count;
 };
 
 static AsyncScriptNavigation* s_async_script_navigations = nullptr;
 static pthread_t s_async_script_host_thread;
 static bool s_async_script_host_thread_set = false;
-
-static bool navigation_schedule_async_script(UiContext* uicon, DomDocument* source,
-        DomElement* iframe, const char* url, int viewport_width,
-        int viewport_height);
 
 static void navigation_save_session_scroll(BrowsingSession* session,
                                            DomDocument* document) {
@@ -10647,7 +10659,7 @@ static bool navigation_execute_top_target(UiContext* uicon, DomDocument* documen
     }
     int css_vw = (int)uicon->viewport_width; // INT_CAST_OK: loader viewport is integer CSS pixels.
     int css_vh = (int)uicon->viewport_height; // INT_CAST_OK: loader viewport is integer CSS pixels.
-    if (navigation_schedule_async_script(uicon, document, nullptr, url,
+    if (navigation_schedule_async_document(uicon, document, nullptr, url,
                                          css_vw, css_vh)) return true;
     if (!navigation_release_evaluator_for_document_load()) return false;
     BrowsingSession* session = uicon->browsing_session;
@@ -10666,11 +10678,8 @@ static bool navigation_execute_top_target(UiContext* uicon, DomDocument* documen
     return true;
 }
 
-static bool navigation_async_is_lambda_file(const Url* target) {
-    if (!target || target->scheme != URL_SCHEME_FILE || !target->pathname) return false;
-    const char* path = target->pathname->chars;
-    size_t length = target->pathname->len;
-    return length >= 3 && strcmp(path + length - 3, ".ls") == 0;
+static bool navigation_async_is_local_file(const Url* target) {
+    return target && target->scheme == URL_SCHEME_FILE && target->pathname;
 }
 
 static void navigation_async_unlink(AsyncScriptNavigation* job) {
@@ -10683,7 +10692,8 @@ static void navigation_async_work(uv_work_t* request) {
     AsyncScriptNavigation* job = (AsyncScriptNavigation*)request->data;
     const char* href = url_get_href(job->target);
     job->loaded = load_html_doc(nullptr, (char*)href,
-                                job->viewport_width, job->viewport_height);
+                                job->viewport_width, job->viewport_height,
+                                &job->host_config, nullptr, true);
     // The document and its retained evaluator may cross threads only after
     // the worker releases its quiescent TLS binding (D5.4.1).
     if (context && !eval_context_shutdown(context)) {
@@ -10701,18 +10711,54 @@ static void navigation_async_complete(uv_work_t* request, int status) {
     job->completed = true;
 }
 
+static bool navigation_async_follow_redirect(AsyncScriptNavigation* job,
+                                             DomElement* iframe) {
+    DomDocument* loaded = job->loaded;
+    if (!loaded || !loaded->pending_navigation_url ||
+        !loaded->pending_navigation_url[0]) return false;
+    if (job->redirect_count >= 8) {
+        log_error("navigation-async: too many document redirects from %s",
+                  url_get_href(job->target));
+        return false;
+    }
+    Url* resolved = url_parse_with_base(loaded->pending_navigation_url, loaded->url);
+    if (!resolved || !url_is_valid(resolved)) {
+        log_error("navigation-async: invalid document redirect from %s",
+                  url_get_href(job->target));
+        if (resolved) url_destroy(resolved);
+        return false;
+    }
+    const char* href = url_get_href(resolved);
+    bool scheduled = href && navigation_schedule_async_document(
+        job->uicon, job->source, iframe, href, job->viewport_width,
+        job->viewport_height, job->redirect_count + 1);
+    if (scheduled && iframe) scheduled = iframe->set_attribute("src", href);
+    if (!scheduled && href) {
+        scheduled = iframe
+            ? navigation_execute_iframe_target(job->uicon, iframe, href)
+            : navigation_execute_top_target(job->uicon, job->source, href);
+    }
+    url_destroy(resolved);
+    return scheduled;
+}
+
 static bool navigation_async_commit(AsyncScriptNavigation* job) {
     navigation_async_unlink(job);
     UiContext* uicon = job->uicon;
     DomDocument* source = job->source;
     DomDocument* loaded = job->loaded;
     bool live = job->status == 0 && loaded && source && uicon &&
-        !job->superseded &&
-        uicon->async_script_navigation && uicon->document == source;
+        !job->superseded && uicon->async_script_navigation &&
+        (job->iframe || uicon->document == source);
     bool navigated = false;
     log_debug("navigation-async: completed target=%s iframe=%d status=%d loaded=%p live=%d",
               url_get_href(job->target), job->iframe, job->status,
               (void*)loaded, live);
+    if (live) {
+        // The worker cannot own the UI context; bind it before Lambda DOM handlers read geometry.
+        loaded->js.host_ui_context = uicon;
+        loaded->js.host_driven_loop = uicon->async_script_navigation;
+    }
     if (live && job->iframe) {
         DomNode* node = dom_node_ref_validate(source, job->iframe_ref);
         DomElement* iframe = node && node->is_element() ? node->as_element() : nullptr;
@@ -10720,9 +10766,20 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
         Url* current = src ? url_parse_with_base(src, source->url) : nullptr;
         bool same_target = current && url_equals(current, job->target);
         if (current) url_destroy(current);
+        if (same_target) {
+            DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
+            document_apply_js_host_config(loaded, &host_config);
+            complete_deferred_html_scripts(loaded);
+        }
+        if (same_target && navigation_async_follow_redirect(job, iframe)) {
+            navigated = true;
+        }
         Runtime* runtime = dom_document_script_runtime(loaded);
         EvalContext* owner = runtime ? runtime_get_eval_context(runtime) : nullptr;
-        if (same_target && owner && radiant_eval_context_switch(owner) &&
+        bool owner_ready = same_target && !navigated && (owner
+            ? radiant_eval_context_switch(owner)
+            : navigation_release_evaluator_for_document_load());
+        if (owner_ready &&
             navigation_commit_iframe_document(uicon, iframe, loaded)) {
             loaded = nullptr;
             navigated = true;
@@ -10737,27 +10794,34 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
             to_repaint();
         }
     } else if (live) {
-        BrowsingSession* session = uicon->browsing_session;
-        navigation_save_session_scroll(session, source);
-        if (session) {
-            DomDocument* presented = session_navigate_loaded(
-                session, uicon, job->target, loaded);
-            if (presented) {
-                loaded = nullptr;
-                job->target = nullptr; // history now owns the resolved URL
-                navigated = true;
-                navigation_update_window_title(session, presented);
-                to_repaint();
-            }
+        DocumentJsHostConfig host_config = document_js_host_config_inherit(uicon, source);
+        document_apply_js_host_config(loaded, &host_config);
+        complete_deferred_html_scripts(loaded);
+        if (navigation_async_follow_redirect(job, nullptr)) {
+            navigated = true;
         } else {
-            DomDocument* presented = show_loaded_html_doc(
-                loaded, url_get_href(job->target));
-            if (presented) {
-                loaded = nullptr;
-                navigated = true;
-                free_document(source);
-                navigation_update_window_title(nullptr, presented);
-                to_repaint();
+            BrowsingSession* session = uicon->browsing_session;
+            navigation_save_session_scroll(session, source);
+            if (session) {
+                DomDocument* presented = session_navigate_loaded(
+                    session, uicon, job->target, loaded);
+                if (presented) {
+                    loaded = nullptr;
+                    job->target = nullptr; // history now owns the resolved URL
+                    navigated = true;
+                    navigation_update_window_title(session, presented);
+                    to_repaint();
+                }
+            } else {
+                DomDocument* presented = show_loaded_html_doc(
+                    loaded, url_get_href(job->target));
+                if (presented) {
+                    loaded = nullptr;
+                    navigated = true;
+                    free_document(source);
+                    navigation_update_window_title(nullptr, presented);
+                    to_repaint();
+                }
             }
         }
     }
@@ -10792,13 +10856,13 @@ bool radiant_async_document_loads_pending(UiContext* uicon) {
     return false;
 }
 
-static bool navigation_schedule_async_script(UiContext* uicon, DomDocument* source,
+static bool navigation_schedule_async_document(UiContext* uicon, DomDocument* source,
         DomElement* iframe, const char* url, int viewport_width,
-        int viewport_height) {
+        int viewport_height, int redirect_count) {
     if (!uicon || !uicon->async_script_navigation || !source || !source->url ||
         !url || !url[0]) return false;
     Url* target = url_parse_with_base(url, source->url);
-    if (!navigation_async_is_lambda_file(target)) {
+    if (!navigation_async_is_local_file(target)) {
         if (target) url_destroy(target);
         return false;
     }
@@ -10809,7 +10873,7 @@ static bool navigation_schedule_async_script(UiContext* uicon, DomDocument* sour
     }
     for (AsyncScriptNavigation* pending = s_async_script_navigations;
          pending; pending = pending->next) {
-        if (!pending->superseded && pending->source == source &&
+        if (!pending->superseded && !pending->completed && pending->source == source &&
             pending->uicon == uicon &&
             pending->iframe == (iframe != nullptr) &&
             (!iframe || (pending->iframe_ref.address == iframe_ref.address &&
@@ -10834,6 +10898,11 @@ static bool navigation_schedule_async_script(UiContext* uicon, DomDocument* sour
     job->viewport_width = viewport_width;
     job->viewport_height = viewport_height;
     job->iframe = iframe != nullptr;
+    job->redirect_count = redirect_count;
+    job->host_config = document_js_host_config_inherit(uicon, source);
+    // The worker may use the inherited policy while parsing, but only the
+    // host thread may bind the live UiContext before script execution.
+    job->host_config.ui_context = nullptr;
     if (!s_async_script_navigations) {
         s_async_script_host_thread = pthread_self();
         s_async_script_host_thread_set = true;
@@ -10846,25 +10915,30 @@ static bool navigation_schedule_async_script(UiContext* uicon, DomDocument* sour
         navigation_async_unlink(job);
         url_destroy(target);
         mem_free(job);
-        log_error("navigation-async: could not queue Lambda document: %s",
+        log_error("navigation-async: could not queue local document: %s",
                   uv_strerror(queued));
         return false;
     }
-    if (!iframe) {
-        // A later top-level navigation supersedes earlier loads from the
-        // same page, regardless of which worker finishes first.
-        for (AsyncScriptNavigation* prior = job->next; prior; prior = prior->next) {
-            if (prior->source == source && !prior->iframe) prior->superseded = true;
+    // A later request for the same browsing context wins even if an earlier
+    // worker finishes last; source/src equality alone misses A -> B -> A.
+    for (AsyncScriptNavigation* prior = job->next; prior; prior = prior->next) {
+        if (prior->source == source && prior->iframe == job->iframe &&
+            (!iframe || (prior->iframe_ref.address == job->iframe_ref.address &&
+                        prior->iframe_ref.expected_id == job->iframe_ref.expected_id))) {
+            prior->superseded = true;
+            // Cancellation skips work still waiting in libuv's pool; running
+            // jobs publish nothing and are discarded on completion.
+            if (!prior->completed) uv_cancel((uv_req_t*)&prior->work);
         }
     }
-    log_debug("navigation-async: queued Lambda document %s", url_get_href(target));
+    log_debug("navigation-async: queued local document %s", url_get_href(target));
     return true;
 }
 
 bool radiant_schedule_async_iframe_load(UiContext* uicon, DomElement* iframe,
                                         const char* url, int viewport_width,
                                         int viewport_height) {
-    return iframe && iframe->doc && navigation_schedule_async_script(
+    return iframe && iframe->doc && navigation_schedule_async_document(
         uicon, iframe->doc, iframe, url, viewport_width, viewport_height);
 }
 
@@ -11388,10 +11462,6 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target) {
     target->stack_limit = lambda_stack_recoverable_limit();
     return true;
 }
-
-// Depth of active event scopes on this thread. A switch is only taken at the
-// outermost one; a nested dispatch runs on whatever is already bound.
-static __thread int s_event_scope_depth = 0;
 
 struct EventDocumentScope {
     bool active;

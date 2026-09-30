@@ -160,23 +160,18 @@ struct FixtureRun {
 // choose would make the counters depend on its heuristics.
 // `tier == NULL` runs the script through the `js` subcommand (LambdaJS), so
 // its exec-profile rows -- the same TSV -- can be pinned by the same reader.
-static FixtureRun run_fixture(const char* name, const char* tier,
-                              const std::string& source, bool profile_enabled,
-                              bool sites_enabled = false) {
+static FixtureRun run_fixture_script(const char* name, const char* tier,
+                                     const std::string& script_path, bool profile_enabled,
+                                     bool sites_enabled = false) {
     FixtureRun run;
     ensure_opt_dir();
     bool js = tier == NULL;
-    std::string script_path = std::string(kOptDir) + "/" + name + (js ? ".js" : ".ls");
     run.profile_path = std::string(kOptDir) + "/" + name + "_" + (js ? "js" : tier) +
         (profile_enabled ? "" : "_off") + ".tsv";
     run.sites_path = std::string(kOptDir) + "/" + name + "_" + (js ? "js" : tier) +
         (profile_enabled ? "" : "_off") + "_sites.tsv";
     remove(run.profile_path.c_str());
     remove(run.sites_path.c_str());
-    if (!write_text(script_path, source)) {
-        ADD_FAILURE() << "cannot write fixture script " << script_path;
-        return run;
-    }
 
     std::string tier_arg = std::string("--tier=") + (js ? "" : tier);
     const char* executable = opt_executable();
@@ -227,14 +222,25 @@ static FixtureRun run_fixture(const char* name, const char* tier,
     return run;
 }
 
+static FixtureRun run_fixture(const char* name, const char* tier,
+                              const std::string& source, bool profile_enabled,
+                              bool sites_enabled = false) {
+    ensure_opt_dir();
+    std::string script_path = std::string(kOptDir) + "/" + name + (tier ? ".ls" : ".js");
+    if (!write_text(script_path, source)) {
+        ADD_FAILURE() << "cannot write fixture script " << script_path;
+        return {};
+    }
+    return run_fixture_script(name, tier, script_path, profile_enabled,
+        sites_enabled);
+}
+
+// a checked-in script runs in place: its relative imports (S16.9.8) resolve
+// beside the file, so a copy under the fixture dir would lose its modules
 static FixtureRun run_source_fixture(const char* name, const char* source_path,
         const char* tier) {
-    char* source = read_text_file(source_path);
-    EXPECT_NE(source, nullptr) << source_path;
-    if (!source) return {};
-    FixtureRun run = run_fixture(name, tier, source, true);
-    free(source);
-    return run;
+    EXPECT_TRUE(file_exists(source_path)) << source_path;
+    return run_fixture_script(name, tier, source_path, true);
 }
 
 TEST(LambdaOptGc, ContradictoryPlannedEffectFailsBeforePublication) {

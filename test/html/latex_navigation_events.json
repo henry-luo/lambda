@@ -1,0 +1,11 @@
+{
+  "name": "latex iframe navigation accepts another parent link without scrolling",
+  "viewport": {"width": 1200, "height": 800},
+  "events": [
+    {"type": "click", "target": {"selector": "a", "index": 2}},
+    {"type": "assert_frame_url", "selector": "iframe", "contains": "latex-showcase.tex", "assert_timeout": 10000},
+    {"type": "mouse_down", "x": 146.94, "y": 41},
+    {"type": "mouse_up", "x": 146.94, "y": 41},
+    {"type": "assert_frame_url", "selector": "iframe", "contains": "comprehensive_test.md", "assert_timeout": 10000}
+  ]
+}

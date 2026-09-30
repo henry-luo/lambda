@@ -1,5 +1,5 @@
 // JetStream Richards typed wrapper; the shared handle-store kernel is used by both suites.
-import test.benchmark.richards2_core
+import ~~.richards2_core
 
 pn main() {
     let t0 = clock()

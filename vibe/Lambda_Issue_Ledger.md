@@ -329,6 +329,10 @@ A crash, two stale caps and three latent hazards were closed together, each with
 
 Verified on the tree merged with master: `make test-lambda-baseline` 5967/5967 (`Test262Prelim.RunnerContracts` needs the Test262 data, which a nested worktree reaches only when linked); every golden 1008/1008 with the tier pinned to `jit` and to `interp`. Before the merge, `make test-radiant-baseline` was green but for fixtures a nested worktree cannot reach through the tracked relative link `test/jquery-ui` (the four jQuery UI clicks, 31/31 assertions with the data linked) and two runs killed under load (the page suite and `RadiantViewTest.WindowScrollOnlyEmitsForPositionChanges`), each of which passes when rerun. Found on the way, not a defect of these: a `that` body cannot name a type declared after it, since only a type's own name is bound before its body and S10.1.7v2 reads an unbound bare name as `~.Name`, so two types cannot name each other.
 
+### Site snippet pass — 2026-09-30
+
+Running every Lambda snippet on the website (`site/`) against the current build found five defects: [LR01-18](#lr01-18), [LR02-32](#lr02-32), [LR02-33](#lr02-33), [LR11-9](#lr11-9) and [LR13-16](#lr13-16). Two further findings are not defects. A constrained type used as a map field is enforced by its base only, by `is` and by `lambda validate` alike (`{age: 300} is {age: Age}` is `true`); S11.4.6 rules that interim ("enforce the base only, for now") and its status row records it. And `<body d *content(b)>` multiplies `d` by the array, because juxtaposed content continues through a binary `*`; `;` is the separator that makes the spread an item (`<body d; *content(b)>` works on both tiers), and the `error` child the product leaves is a value error flowing as data (S7.4.1).
+
 ---
 
 
@@ -394,6 +398,9 @@ Thirteen `test/lambda/conc/*` scripts and three `proc/*` async scripts
 pre-existing: the pre-P1 binary fails identically on `interp` and `auto`.
 Either the interpreter must run S13 tasks, or `auto` must not admit a script
 that starts one.
+
+<a id="lr01-18"></a>**LR01-18 · The REPL echoes `null` after a declaration-only entry · OPEN (found 2026-09-30, site snippet pass)**
+Piped into `lambda`, the entries `let x = 1` then `x` print `null` then `1`, and `1 + 2`, `let x = 1`, `x` print `3`, `null`, `1`. A script holding only declarations prints `null`, since its root is `null` (S2.5.4v2), but the script `1 + 2; let x = 1` prints only `3`, so the second echo is the REPL's own. `run_repl` (`lambda/main.cpp:1094`) re-runs the whole history each turn and prints the part of the root's output that is new (`:1235`–`:1266`); the path that turns an output that did not grow into `null` is not traced yet. No S# or D# ruling says what a REPL entry echoes; S16.2.3v3 covers only how entries are separated. The website's quickstart REPL sample avoids a `let` for this reason.
 
 ---
 
@@ -588,6 +595,12 @@ A datetime (`t'2025-01-01'`), binary (`b'\xDEAD'`), decimal (`1.5m`), suffixed (
 
 <a id="lr02-31"></a>**LR02-31 · `T^` does not parse in a value position · OPEN (found 2026-09-27)**
 **S7.4.2** rules `T^` ≡ `T | error` in value positions, and `doc/Lambda_Error_Handling.md` "Error Forms in Parameters and Let Bindings" shows `let result: int^ = may_fail(x)` and `fn process(input: int^) int`. The C parser rejects both: `let x: int^ = r()` is E100 "expected '=' after let binding" and `fn f(a: int^, b: int)` is E100 "expected ')' after parameters". Only a function's return annotation accepts the caret. The E228 migration therefore spelled such bindings `any | error`.
+
+<a id="lr02-32"></a>**LR02-32 · An inline element pattern in a subscript is built as an element value, so `e[<p>]` is `null` (S8.2.4v3) · OPEN (found 2026-09-30, site snippet pass)**
+S8.2.4v3 gives `doc[<title>]` as the lone-match idiom of the type-key subscript. With `let x = <div <p "x"> <span "y">>`, `x[<p>]` and `x[<span>]` are `null` on both tiers, while `x?<p>`, `x[element]`, and `type P = <p>` then `x[P]` all answer `<p "x">`. The query forms read their operand as a type: `?` and `.?` call `parse_primary_type_slot` (`lambda/runtime/parser/lambda_parser.c:928`, used at `:1943`). A subscript parses its items as expressions (`parser_parse_postfix_delimited_into`, `:1848`), so `<p>` is an element literal and the key never reaches `fn_child_query` (`lambda/runtime/lambda-eval.cpp:4627`), which handles elements correctly. The ruling's XPath example `html[table][tr][td]` spells its keys as bare names, and `x[p]` is `null` as well because `p` is an unbound name; whether a bare tag name is a key needs a ruling. The website's query samples use `?` meanwhile (`html?<div>?<a>`).
+
+<a id="lr02-33"></a>**LR02-33 · A system function called with an arity it lacks compiles, then fails or answers wrongly at run time · OPEN (found 2026-09-30, site snippet pass)**
+`range(0, 10)` fails on T0 with "interp: call target is not a function (type 24)" and on the JIT with E212 "fn_call2: cannot call non-function value", since `range` has only a three-argument row. `sort(1, 2, 3)` is E212 on the JIT after "mir: undefined variable 'sort'", and `len(1, 2)` answers `0` on both tiers. `--dry-run` diagnoses none of them, while a user function called with too many arguments is E206 at compile time. `get_sys_func_info` (`lambda/runtime/build_ast.cpp:459`) returns `NULL` when no `(name, arity)` row matches, and `resolve_call_body` (`:9573`) then lowers a generic call of whatever the name binds: the base type `range`, or nothing. S12.3.6 makes the registry's `(name, arity)` keying a dispatch optimization, never a language rule, and S12.3.4 reserves run-time arity checks for `call(f, args)`. No ruling names the diagnostic for a direct builtin call; E206, the user-function precedent, is the natural one.
 
 ## 3. Value & type model (LR_03)
 
@@ -986,6 +999,9 @@ They are runtime builtins in `lambda/runtime/collection_runtime.cpp` (registered
 as `SYSPROC_PUSH` / `SYSPROC_SPLICE`) and belong to
 [§12](#12-procedural-runtime-lr_12), not the editor surface.
 
+<a id="lr11-9"></a>**LR11-9 · An input parser's informational notes are logged at error level · OPEN (found 2026-09-30, site snippet pass)**
+Every CSV read logs `[ERR!] Parse errors (0 errors):` followed by "CSV has 2 columns with headers" and "CSV parsed: 3 rows, 2 columns". The CSV parser adds both as notes (`lambda/input/input-csv.cpp:152`, `:255`), and `InputContext::logErrors` (`lambda/input/input-context.cpp:175`) calls `log_error` whenever the list holds any entry. It already copies the text into `parse_error_message` only when `hasErrors()`; the log needs the same severity test, with notes at debug level. As it stands, every script that reads a CSV file shows a false error on the console, and a real failure is harder to find in `log.txt`.
+
 ---
 
 
@@ -1353,6 +1369,9 @@ Not attributed. The `elmt code clean up` commit (2cdcc1ea1) touches none of the 
 
 <a id="lr13-15"></a>**LR13-15 · A present `null` map field is admitted only by a run type: `{a: null} is {a: null}` is `false` (S11.1.6v3) · OPEN (found 2026-09-26, extending S11.1.7 to container literals)**
 A map keeps a `null` field (`len({a: null})` is 1), and the validator admits it only when the field's type is a run with a zero minimum (`type_admits_null_value`, `validator_internal.hpp`). So `{a: null} is {a: int?}` is `true`, while `{a: null} is {a: int | null}` and `{a: null} is {a: null}` are `false` on both tiers, though S11.1.6v3 makes `T?` the same type as `T | null`. A fix asks the field's type whether it admits `null` (`lambda_type_matches`) and leaves absence to `f?:`. The S11.1.7 reduction does not decide on a field that may be `null`, so it is not affected.
+
+<a id="lr13-16"></a>**LR13-16 · A literal-type mismatch names the literal's kind: "Expected type 'string', but got 'string'" · OPEN (found 2026-09-30, site snippet pass)**
+With `type LogLevel = "debug" | "info" | "warn" | "error"` as a field type, `log_level: verbose` in YAML fails validation correctly, but the first error reads `[TYPE_MISMATCH] Expected type 'string', but got 'string' at .log_level|1`. `add_type_mismatch_error_ex` (`lambda/validator/validate_helpers.cpp:60`) names the expected type with `type_to_string`, which gives a literal type's kind. A range contract already gets its own name from `lambda_type_format_contract_name` (`:74`); a literal arm needs the same, so the message can read `Expected "debug", got "verbose"`. The union summary that follows it is right.
 
 ## 13.1 Ledger hygiene observations (not issues)
 

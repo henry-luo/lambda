@@ -1,12 +1,13 @@
 # Text benchmark suite
 
 These are standalone text-library benchmarks. The JavaScript files embed the
-library cores or load their checked-in fixture data; `*.ls`, `*2.ls`, and
-`c2mir/*.c` implement the same bounded workloads for the Lambda and native
-reference columns.
+library cores or load their checked-in fixture data; `*.ls`, `*2.ls`,
+`c2mir/*.c`, `python/*.py`, and `../go/cmd/text/*` implement the same bounded
+workloads for the Lambda and native reference columns.
 
 - fast_diff.js: multiline source-text diffs with semantic cleanup, 256 rounds
-  over six old/new source pairs.
+  over six old/new source pairs. `generate_fast_diff_fixture.js` extracts the
+  source pairs into `fast_diff_pairs.json` for the Go and Python ports.
 - microdiff.js: recursive nested document snapshots with arrays, dates, regular
   expressions, and changes, 512 rounds over four pairs. The Lambda and C2MIR
   ports construct snapshots and diff records; they do not score precomputed
@@ -16,8 +17,8 @@ reference columns.
   hidden by the library cache. The cases cover ordinary patterns, dictionary
   exceptions and no-break exceptions, HTML tags/attributes, entities, explicit
   hyphens, apostrophes, repeated words, capitalization, and malformed markup.
-  `hyphen_patterns.json`, `c2mir/hyphen_patterns_data.h`, `hyphen_tables.json`
-  and `test/benchmark/hyphen_tables.ls` are generated from the checked-in
+  `hyphen_patterns.json`, `c2mir/hyphen_patterns_data.h`, `hyphen_tables.json`,
+  `hyphen_cases.json`, and `test/benchmark/hyphen_tables.ls` are generated from the checked-in
   en-US library data by `generate_hyphen_fixture.js`; regenerate them whenever
   `hyphen.js` changes its embedded pattern data. The typed entry uses flat
   `int[]` trie tables, typed caches and string spans in

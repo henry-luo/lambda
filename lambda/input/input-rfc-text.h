@@ -15,6 +15,7 @@
 #include "input-context.hpp"
 #include "../../lib/str.h"
 #include "../../lib/stringbuf.h"
+#include "../../lib/arraylist.h"
 
 /**
  * Parse an RFC-style property name: the text before the first ':' or ';'.
@@ -162,6 +163,30 @@ static inline void parse_rfc_property_params(StringBuf* sb, const char** pos,
             builder.putToMap(lam::gc_borrow(params_map), param_name, value);
         }
     }
+}
+
+// RFC record formats keep repeated fields in an ordered array alongside
+// their convenience maps; append each entry verbatim per D2.6.5v3.
+static inline List* rfc_new_entry_list(Input* input) {
+    List* list = (List*)pool_calloc(input->pool, sizeof(List));
+    if (list) list->type_id = LMD_TYPE_ARRAY;
+    return list;
+}
+
+static inline void rfc_append_entry(InputContext& ctx, List* entries,
+                                    String* name, Item value, Map* parameters = NULL) {
+    if (!entries || !name) return;
+    Input* input = ctx.input();
+    Map* entry = map_pooled(input->pool);
+    if (!entry) return;
+    MarkBuilder& builder = ctx.builder;
+    builder.putToMap(lam::gc_borrow(entry), builder.createName("name"), {.item = s2it(name)});
+    builder.putToMap(lam::gc_borrow(entry), builder.createName("value"), value);
+    if (parameters) {
+        builder.putToMap(lam::gc_borrow(entry), builder.createName("parameters"),
+                         {.item = (uint64_t)parameters});
+    }
+    array_append((Array*)entries, {.item = (uint64_t)entry}, input->pool);
 }
 } // namespace lambda
 
