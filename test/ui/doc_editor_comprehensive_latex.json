@@ -1,0 +1,17 @@
+{
+  "name": "Document editor renders comprehensive LaTeX with environment definitions",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1600},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "comprehensive.tex"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_comprehensive_tex .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "comprehensive.tex"},
+    {"type": "assert_count", "target": {"selector": ".preview-error"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "This comprehensive test document"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Text Formatting"},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "not_contains": "myenv"}
+  ]
+}

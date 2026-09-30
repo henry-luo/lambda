@@ -108,35 +108,12 @@ void parse_eml(Input* input, const char* eml_string) {
 
     // Parse headers
     while (*eml) {
-        // Check if we've reached the empty line separating headers from body
-        if (*eml == '\n') {
-            // Look ahead to see if the next character is also a newline (empty line)
-            if (*(eml+1) == '\n') {
-                // Found double newline - end of headers
-                eml += 2; // Skip both newlines to get to body
-                break;
-            } else if (*(eml+1) == '\r' && *(eml+2) == '\n') {
-                // Found \n\r\n - end of headers
-                eml += 3; // Skip all three characters to get to body
-                break;
-            }
-        } else if (*eml == '\r' && *(eml+1) == '\n') {
-            // Check for \r\n\r\n or \r\n\n
-            if (*(eml+2) == '\r' && *(eml+3) == '\n') {
-                // Found \r\n\r\n - end of headers
-                eml += 4; // Skip all four characters to get to body
-                break;
-            } else if (*(eml+2) == '\n') {
-                // Found \r\n\n - end of headers
-                eml += 3; // Skip all three characters to get to body
-                break;
-            }
-        }
-
-        // Skip empty lines in headers
-        if (*eml == '\n' || *eml == '\r') {
-            skip_to_newline(&eml);
-            continue;
+        // The header-value reader already consumes its line ending, so one
+        // remaining empty line marks the start of the body.
+        if (*eml == '\n') { eml++; break; }
+        if (*eml == '\r') {
+            eml += *(eml + 1) == '\n' ? 2 : 1;
+            break;
         }
 
         // Skip lines that start with whitespace (continuation lines are handled in parse_header_value)
@@ -151,16 +128,19 @@ void parse_eml(Input* input, const char* eml_string) {
             skip_to_newline(&eml);
             continue;
         }
+        if (*eml != ':') {
+            skip_to_newline(&eml);
+            continue;
+        }
 
         // Parse header value
         StringBuf* header_sb = ctx.sb;
         size_t header_value_len = parse_rfc_header_value(header_sb, &eml);
-        String* header_value = header_value_len > 0
-            ? ctx.builder.createString(header_sb->str->chars, header_value_len)
-            : NULL;
+        String* header_value = ctx.builder.createString(
+            header_value_len > 0 ? header_sb->str->chars : "", header_value_len);
         if (!header_value) {
-            skip_to_newline(&eml);
-            continue;
+            ctx.addError("Failed to create EML header value");
+            break;
         }
 
         // Normalize header name to lowercase for consistency
