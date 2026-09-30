@@ -6,6 +6,7 @@ import normalize: .normalize
 import scene: .scene
 import html: .transform.html
 import paint: .transform.paint
+import sequence: lambda.chart.sequence
 
 fn lambda_graph_layout(parent, children, ctx) {
   let result = graph_layout.from_velmts(parent, children, ctx);
@@ -21,7 +22,12 @@ fn lambda_graph_layout(parent, children, ctx) {
 
 pub fn install() => radiant.register_layout("lambda-graph", lambda_graph_layout)
 
-pub fn to_html(graph, opts = null) => html.to_html(normalize.normalize(graph).graph, opts)
+pub fn to_html(graph, opts = null) {
+  let canonical = normalize.normalize(graph).graph;
+  if (canonical is element and canonical.flavor == "mermaid" and
+      canonical.kind == "sequence") sequence.to_html(canonical, opts)
+  else html.to_html(canonical, opts)
+}
 
 pub fn render_svg(graph, width: int, height: int, opts = null) {
   // the transform module owns the Radiant import, avoiding duplicate retained

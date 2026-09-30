@@ -182,9 +182,45 @@
     <diagnostic code: 'mermaid.state.composite-unsupported', severity: 'error'>
   >
   <case id: 'chart-routing', source: 'chart_routing.mmd',
-      origin: 'lambda', status: 'unsupported', policy: 'ir', features: 'chart-dispatch';
-    <expect kind: 'sequence', status: 'unsupported', nodes: 0, edges: 0;
-      <diagnostic code: 'mermaid.chart-family', severity: 'error'>
+      origin: 'lambda', status: 'baseline', policy: 'ir', features: 'sequence-dispatch';
+    <expect kind: 'sequence', nodes: 2, edges: 1;
+      <node id: 'Alice', label: 'Alice'>
+      <node id: 'Bob', label: 'Bob'>
+      <edge from: 'Alice', to: 'Bob', label: 'Hello', relation: '->>'>
+    >
+  >
+  <case id: 'sequence-diagram', source: 'sequence_diagram.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir',
+      features: 'sequence-participants,messages,loop,note';
+    <expect kind: 'sequence', nodes: 3, edges: 5, annotations: 1,
+        sequence-blocks: 2;
+      <node id: 'Alice', label: 'Alice'>
+      <node id: 'Bob', label: 'Bob'>
+      <node id: 'John', label: 'John'>
+      <edge from: 'Alice', to: 'John', label: 'Hello John, how are you?',
+        relation: '->>'>
+      <edge from: 'John', to: 'Alice', label: 'Great!', relation: '-->>'>
+      <annotation owner-kind: 'node', owner-id: 'John', kind: 'note-right',
+        label: 'Rational thoughts<br/>prevail...'>
+      <sequence-block kind: 'loop', phase: 'start', label: 'HealthCheck'>
+    >
+  >
+  <case id: 'sequence-diagram-branches', source: 'sequence_diagram2.mmd',
+      origin: 'lambda', status: 'baseline', policy: 'ir',
+      features: 'sequence-notes,alt,par,activation,async-messages';
+    <expect kind: 'sequence', nodes: 5, edges: 10, annotations: 2,
+        sequence-blocks: 6;
+      <node id: 'web', label: 'Web Browser'>
+      <node id: 'db', label: 'Storage'>
+      <edge from: 'web', to: 'account', label: 'Logs in using credentials',
+        relation: '->>', activation: 'start'>
+      <edge from: 'blog', to: 'mail', label: 'Send mail to blog subscribers',
+        relation: '--)'>
+      <edge from: 'blog', to: 'web', label: 'Successfully posted',
+        relation: '-->>', activation: 'end'>
+      <annotation owner-kind: 'node', owner-id: 'web', to-id: 'db',
+        kind: 'note-over', label: 'The user must be logged in to submit blog posts'>
+      <sequence-block kind: 'alt', phase: 'start', label: 'Credentials not found'>
     >
   >
   <case id: 'upstream-single-diamond',

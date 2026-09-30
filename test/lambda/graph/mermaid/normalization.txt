@@ -6,6 +6,6 @@
   parsed_diagnostics: [],
   node_spans: [["A", true, true], ["B", true, true], ["C", true, true], ["D", true, true], ["E", true, true]],
   edge_spans: [["e1", true, true], ["e2", true, true], ["e3", true, true], ["e4", true, true]],
-  chart_valid: false,
-  chart_codes: ["mermaid.chart-family"]
+  chart_valid: true,
+  chart_codes: []
 }

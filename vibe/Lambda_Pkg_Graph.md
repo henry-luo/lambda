@@ -682,6 +682,13 @@ Mermaid source
 The graph proposal specifies only the graph-oriented branch and the boundary by
 which chart-oriented source-stage Mark is handed to `lambda.chart`.
 
+The first sequence adapter accepts the input parser's ordered source envelope,
+converts it to a canonical `<chart kind: "sequence">` value, and lays out
+participant columns, lifelines, messages, loops, and notes in `lambda.chart`.
+The render path repeats styled participants at both lifeline ends, places loop
+borders around their member actors, and keeps self messages curved.
+Graph ranking and routing are not used. The package import follows D7.2.4.
+
 ### 18.2 Stage 2 pipeline
 
 The complete graph path is:
@@ -1228,9 +1235,9 @@ The initial Stage 2 tranche is implemented as follows:
   `rect`, `diam`, `dbl-circ`, and `cyl` aliases canonicalized to the existing
   graph shape vocabulary while other shape names remain available to later
   renderers;
-- chart-oriented Mermaid headers produce an `unsupported` graph result and a
-  diagnostic identifying `lambda.chart` as their owner, rather than
-  being parsed as fake flowcharts;
+- unsupported chart-oriented Mermaid headers produce an `unsupported` graph
+  result with a diagnostic identifying `lambda.chart` as their owner; the
+  supported `sequenceDiagram` header enters the chart sequence adapter;
 - `graph/model.ls` provides recursive node, edge, subgraph, style, class, and
   direction queries over Mark without replacing the public IR with maps;
 - `graph/normalize.ls` recursively rebuilds `<graph>`, `<subgraph>`, `<node>`,
@@ -1391,9 +1398,12 @@ follow-up work. Composite states, nested transitions, concurrency regions,
 history states, richer state-description markup, and `hide empty description`
 remain state follow-up work. Requirement, architecture, block, and mindmap
 adapters also remain subsequent Stage 2E tranches. Chart-oriented family
-dispatch is already rejected with structured ownership diagnostics, but detailed sequence,
-Gantt, pie, Sankey, timeline, and XY support belongs to
-`lambda.chart` and its independent test suites.
+dispatch rejects the remaining unsupported families with structured ownership
+diagnostics. Sequence participants, messages, loops, over/side notes, activation
+bars, and alternate/parallel blocks render through `lambda.chart` (D7.2.4).
+Further sequence syntax remains chart follow-up work alongside Gantt, pie,
+Sankey, timeline, and XY support. The ordered sequence IR records branch and
+activation events so their visual scope survives graph normalization.
 
 ## 19. Stage 3 - Graphviz DOT Support
 

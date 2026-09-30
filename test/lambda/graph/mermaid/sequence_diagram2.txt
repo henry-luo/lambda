@@ -1,0 +1,11 @@
+{
+  valid: true,
+  participants: ["web", "blog", "account", "mail", "db"],
+  counts: [10, 2, 6, 2, 2, 2],
+  blocks: ["alt:start", "alt:branch", "par:start", "par:branch", "par:end", "alt:end"],
+  guards: ["Credentials not found", "Credentials found", "Notifications", "Response"],
+  notes: [["note-over", "web", "db"], ["note-over", "web", "db"]],
+  activations: ["web:account:start", "account:web:end", "web:blog:start", "blog:web:end"],
+  messages: ["Logs in using credentials", "Query stored accounts", "Respond with query result", "Invalid credentials", "Successfully logged in", "Submit new post", "Store post data", "Send mail to blog subscribers", "Store in-site notifications", "Successfully posted"],
+  rendered: [true, true, true, true, true, true, true]
+}
