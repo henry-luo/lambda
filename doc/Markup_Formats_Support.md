@@ -576,7 +576,7 @@ The RTF parser is **experimental**: it currently yields the document's control g
 
 ### 3.4 Email (EML / RFC 822)
 
-E-mail files parse into a map of the well-known headers plus a `headers` map with every header as written; `date` is kept as the header string, and `body` holds the text when the message has one. `.eml` is not auto-detected by `lambda convert`, so give the type explicitly.
+E-mail files parse into a map of the well-known headers plus a `headers` map with every header as written; `date` is kept as the header string. A plain message keeps its source text in `body`. For a `text/html` MIME body, including an HTML part nested in a multipart message, `body` is the document element tree produced by Lambda's HTML parser. Standard `base64` and `quoted-printable` transfer encodings are decoded before HTML parsing; `7bit`, `8bit`, and `binary` pass through unchanged. HTML attachments are not selected as the message body. `.eml` is not auto-detected by `lambda convert`, so give the type explicitly.
 
 <table>
 <thead>
