@@ -32,10 +32,11 @@ struct KvConfig {
     const char* kv_separators;        // chars accepted as key/value separators
     bool        support_escape;       // prop=true: handle \n \t \uXXXX etc.
     bool        strip_value_comments; // INI=true: trim inline ; # from values
+    bool        allow_empty_key;      // prop=true: java.util.Properties accepts "=value"
 };
 
-static const KvConfig INI_CONFIG  = { true,  ";#", "=",  false, true  };
-static const KvConfig PROP_CONFIG = { false, "#!", "=:", true,  false };
+static const KvConfig INI_CONFIG  = { true,  ";#", "=",  false, true,  false };
+static const KvConfig PROP_CONFIG = { false, "#!", "=:", true,  false, true  };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,7 @@ static bool kv_is_separator(char c, const char* seps) {
 }
 
 // Parse a key name — stops at separator, whitespace, or end-of-line.
-static String* kv_parse_key(InputContext& ctx, const char** pos) {
+static String* kv_parse_key(InputContext& ctx, const char** pos, bool allow_empty) {
     SourceTracker& tracker = ctx.tracker;
     SourceLocation key_loc = tracker.location();
     StringBuf* sb = ctx.sb;
@@ -65,7 +66,7 @@ static String* kv_parse_key(InputContext& ctx, const char** pos) {
         (*pos)++;
     }
 
-    if (sb->length == 0) {
+    if (sb->length == 0 && !allow_empty) {
         ctx.addError(key_loc, "kv parser: empty key name");
         return NULL;
     }
@@ -192,7 +193,7 @@ static void parse_kv_section(InputContext& ctx, const char** pos,
         if (kv_is_comment(**pos, cfg->comment_chars)) { skip_to_newline(pos); continue; }
         if (cfg->support_sections && **pos == '[') break;   // next section starts
 
-        String* key = kv_parse_key(ctx, pos);
+        String* key = kv_parse_key(ctx, pos, cfg->allow_empty_key);
         if (!key) { skip_to_newline(pos); continue; }
 
         skip_tab_pace(pos);

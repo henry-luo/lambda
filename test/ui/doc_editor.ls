@@ -158,9 +158,35 @@ fn property_format(extension) {
   else if (contains(["yaml", "yml"], ext)) { "yaml" }
   else if (ext == "toml") { "toml" }
   else if (ext == "ini") { "ini" }
+  else if (contains(["properties", "props"], ext)) { "properties" }
   else if (contains(["ics", "ical"], ext)) { "ics" }
   else if (ext == "vcf") { "vcf" }
   else { null }
+}
+
+// Java properties are flat; the inspector nests dotted keys into groups. A group
+// is {props, has_own, own}: `own` keeps the value of a key that is also a prefix
+// (log4j `a.b=x` beside `a.b.c=y`). Parsed values are scalars, so in this format
+// every map is a group.
+fn properties_group(children, own) =>
+  {props: children, has_own: len(own) > 0, own: (if (len(own) > 0) own[0].value else null)}
+fn properties_node(name, members, depth) {
+  let own = [for (entry in members where len(entry.path) == depth + 1) entry]
+  let deeper = [for (entry in members where len(entry.path) > depth + 1) entry]
+  if (len(deeper) == 0) { {name:name, value:own[0].value} }
+  else { {name:name, value:properties_group(properties_nodes(deeper, depth + 1), own)} }
+}
+fn properties_nodes(entries, depth) {
+  let names = unique([for (entry in entries) entry.path[depth]]);
+  [for (name in names)
+    properties_node(name, [for (entry in entries where entry.path[depth] == name) entry], depth)]
+}
+fn properties_tree(flat) {
+  if (type(flat) != map) { flat }
+  else {
+    let entries = [for (key, value in flat) {path:split(string(key), "."), value:value}]
+    properties_group(properties_nodes(entries, 0), [])
+  }
 }
 
 fn is_renderable_document(extension) =>
@@ -279,7 +305,9 @@ fn selected_preview(file) {
 }
 
 fn property_children(value, format) {
-  if (format == "vcf" and type(value) == map and type(value["contacts"]) == array) {
+  if (format == "properties" and type(value) == map) {
+    [for (index, child in value.props) {name:child.name, value:child.value, segment:string(index)}]
+  } else if (format == "vcf" and type(value) == map and type(value["contacts"]) == array) {
     [for (index, contact in value["contacts"])
       {name:"VCARD", value:contact, segment:string(index)}]
   } else if (contains(["ics", "vcf"], format) and type(value) == map and
@@ -336,7 +364,11 @@ fn property_value_text(value) {
 }
 
 fn property_summary(value, format) {
-  if (contains(["ics", "vcf"], format) and type(value) == map and
+  if (format == "properties" and type(value) == map) {
+    let count = string(len(value.props)) ++ " properties"
+    if (value.has_own) { property_value_text(value.own) ++ " · " ++ count } else { count }
+  }
+  else if (contains(["ics", "vcf"], format) and type(value) == map and
       value["parameters"] != null and value["value"] != null) {
     property_value_text(value["value"])
   }
@@ -927,7 +959,8 @@ on file_select(entry) {
     extension: entry["extension"], text_width_px: entry["text_width_px"]}
   let format = property_format(entry["extension"])
   // Retain the parsed tree while the user edits the filter or expands nodes.
-  property_data = if (format == null) null else input(entry["file_path"], format) ^ { null }
+  let parsed = if (format == null) null else input(entry["file_path"], format) ^ { null }
+  property_data = if (format == "properties") properties_tree(parsed) else parsed
   eml_data = if (is_eml_document(entry["extension"])) input(entry["file_path"], 'eml') ^ { null } else null
   csv_data = if (is_table_document(entry["extension"]))
     input(entry["file_path"], lower(entry["extension"])) ^ { null } else null
