@@ -3979,7 +3979,31 @@ static void behavior_init_visit(DomNode* node, DomDocument* doc, DocState* state
     }
 }
 
+// Package policy (wheel/key scrolling, S12.1.3) loads lazily on the first event
+// that needs it, but a claim is refused inside an event scope — and a parent
+// that owns a runtime (a Lambda view, a scripted page) keeps one open for every
+// event, so a static iframe inside it would never get the package and never
+// scroll. Claim those evaluators here instead: the init phase is quiescent.
+static void claim_embedded_evaluators(DomNode* node) {
+    if (!node || !node->is_element()) return;
+    DomElement* elem = node->as_element();
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
+        claim_embedded_evaluators(child);
+    }
+    if (!elem->embed || !elem->embedp()->doc) return;
+    DomDocument* embedded = elem->embedp()->doc;
+    radiant_document_ensure_evaluator(embedded);  // no-op for script/Lambda pages
+    claim_embedded_evaluators(static_cast<DomNode*>(embedded->root));
+}
+
 void radiant_run_behavior_init(DomDocument* doc, BehaviorInitPhaseTiming* timing) {
+    if (doc && doc->embedded_evaluator_pending) {
+        doc->embedded_evaluator_pending = false;
+        // a runtime-less parent opens no event scope, so lazy claims already work
+        if (dom_document_script_runtime(doc)) {
+            claim_embedded_evaluators(static_cast<DomNode*>(doc->root));
+        }
+    }
     if (!doc || !doc->behavior_init_pending) return;
     // Cleared up front: a handler may create a control (and re-arm the gate),
     // and that control belongs to the next phase, not to this walk.
@@ -4399,6 +4423,15 @@ static bool apply_keyboard_scroll_operation(EventContext* evcon, View* origin,
     if (!doc || !state || !operation) return false;
 
     ViewBlock* block = keyboard_scrollport_from_view(doc, origin);
+    // An embedded root does not scroll itself (restore_embedded_document_scroll_model):
+    // as for the wheel, the chain continues at the iframe container in the parent.
+    if ((!block || !block->scroll()->pane) && evcon->iframe_container &&
+            evcon->iframe_container->is_element()) {
+        doc = lam::view_require_element(evcon->iframe_container)->doc;
+        state = doc ? (DocState*)doc->state : nullptr;
+        if (!state) return false;
+        block = keyboard_scrollport_from_view(doc, evcon->iframe_container);
+    }
     if (!block || !block->scroll()->pane) return false;
 
     float x = 0.0f, y = 0.0f;
@@ -8540,6 +8573,34 @@ static bool radiant_dispatch_wheel_event(EventContext* evcon, View* target,
         &args, true, nullptr, true, "mousewheel") || prevented;
 }
 
+// A pointer press makes its document the focused browsing context: record the
+// iframe hop on every ancestor, and clear the chain below the pressed document.
+static void event_note_pointer_active_frame(DomDocument* pressed) {
+    if (!pressed) return;
+    pressed->active_frame_ref = {};
+    for (DomDocument* doc = pressed; doc->embedding_document; doc = doc->embedding_document) {
+        doc->embedding_document->active_frame_ref = doc->embedding_element_ref;
+    }
+}
+
+// Follow active_frame_ref down to the innermost live frame. Refs are
+// generation-checked and a released iframe drops its embed doc, so a stale
+// chain just stops at the last live document.
+static DomDocument* event_context_find_active_frame_document(DomDocument* doc,
+                                                             View** iframe_container) {
+    for (uint8_t depth = 0; doc && depth < 8; depth++) {
+        DomNode* frame = doc->active_frame_ref.address
+            ? dom_node_ref_validate(doc, doc->active_frame_ref) : nullptr;
+        if (!frame || !frame->is_element() || !frame->is_block()) return doc;
+        ViewBlock* block = lam::view_require_block(static_cast<View*>(frame));
+        if (!block->embed || !block->embedp()->doc) return doc;
+        // keyboard reflow needs the direct (innermost) iframe viewport
+        if (iframe_container) *iframe_container = static_cast<View*>(block);
+        doc = block->embedp()->doc;
+    }
+    return doc;
+}
+
 void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) {
     memset(evcon, 0, sizeof(EventContext));
     evcon->dom_event = ItemNull;
@@ -8552,7 +8613,10 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
         ? event_context_find_focused_document(uicon->document, 0,
                                               &evcon->iframe_container)
         : NULL;
-    if (!evcon->target_document && uicon) evcon->target_document = uicon->document;
+    if (!evcon->target_document && uicon) {
+        evcon->target_document = event_context_find_active_frame_document(
+            uicon->document, &evcon->iframe_container);
+    }
     // load default font Arial, size 16 px
     setup_font(uicon, &evcon->font, &uicon->default_font);
     evcon->new_cursor = CSS_VALUE_AUTO;
@@ -12124,6 +12188,18 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
         target_html_doc(&evcon, doc->view_tree);
         document_scope.activate_target(&evcon);
         event_log_hit_target(cascade_log, cascade_id, &evcon);
+        if (event->type == RDT_EVENT_MOUSE_DOWN) {
+            DomElement* pressed = view_geometry_nearest_dom_element(evcon.target, 0);
+            DomDocument* pressed_doc = pressed ? pressed->doc : doc;
+            // a press on the iframe box itself (no hit inside it) enters the frame too
+            if (pressed && pressed->is_block()) {
+                ViewBlock* pressed_block = lam::view_require_block(static_cast<View*>(pressed));
+                if (pressed_block->embed && pressed_block->embedp()->doc) {
+                    pressed_doc = pressed_block->embedp()->doc;
+                }
+            }
+            event_note_pointer_active_frame(pressed_doc);
+        }
 
         // Forward mouse button events to layer-mode webview
         if (evcon.target && evcon.target->is_element() && evcon.target->is_block()) {

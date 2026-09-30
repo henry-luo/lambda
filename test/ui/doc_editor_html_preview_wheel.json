@@ -1,0 +1,17 @@
+{
+  "name": "Document editor scrolls a static HTML iframe preview with the mouse wheel",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "position"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_html .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_html_position_html .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#html-preview"}, "count": 1},
+    {"type": "mouse_move", "x": 700, "y": 450},
+    {"type": "scroll", "x": 700, "y": 450, "dx": 0, "dy": -5},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#html-preview"}, "view_scroll_y": 250, "tolerance": 5}
+  ]
+}
