@@ -1436,6 +1436,10 @@ static void gc_finalize_all_objects(gc_heap_t *gc) {
 
 void print_heap_entries() {
 #ifndef NDEBUG
+    // A document can retain millions of objects; logging each one during
+    // teardown blocks window close unless the heap dump was requested.
+    const char* dump_entries = getenv("LAMBDA_DUMP_HEAP_ENTRIES");
+    if (!dump_entries || !dump_entries[0] || dump_entries[0] == '0') return;
     gc_heap_t *gc = context->heap->gc;
     log_debug("after exec gc objects: %zu", gc->object_count);
     gc_header_t *header = gc->all_objects;
