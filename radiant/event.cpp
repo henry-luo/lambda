@@ -10873,12 +10873,14 @@ static bool navigation_schedule_async_document(UiContext* uicon, DomDocument* so
     }
     for (AsyncScriptNavigation* pending = s_async_script_navigations;
          pending; pending = pending->next) {
-        if (!pending->superseded && !pending->completed && pending->source == source &&
+        if (!pending->superseded && pending->source == source &&
             pending->uicon == uicon &&
             pending->iframe == (iframe != nullptr) &&
             (!iframe || (pending->iframe_ref.address == iframe_ref.address &&
                          pending->iframe_ref.expected_id == iframe_ref.expected_id)) &&
             url_equals(pending->target, target)) {
+            // A completed worker still owns this navigation until host commit;
+            // relayout must not replace its result with a duplicate request.
             url_destroy(target);
             return true;
         }

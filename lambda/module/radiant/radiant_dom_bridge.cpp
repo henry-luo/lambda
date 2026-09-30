@@ -15,6 +15,7 @@
 #include "../../dom/dom.h"
 #include "../../dom/dom_core.h"
 #include "../../js/js_runtime.h"
+#include "../../runtime/heap_api.h"
 #include "../../../radiant/view.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/render.hpp"
@@ -37,6 +38,7 @@ extern "C" Item vmap_backing_get(VMap* vm, Item key);
 extern "C" bool vmap_backing_has(VMap* vm, Item key);
 extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
 extern Item js_make_number(double value);
+extern __thread EvalContext* context;
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void);
 RADIANT_C_API const void* radiant_dom_html_element_host_type(void);
@@ -147,6 +149,8 @@ static const char s_radiant_dom_vmap_type_marker = 0;
 struct RadiantDomWrapperCacheEntry {
     DomNodeRef node_ref;
     DomDocument* owner_doc;
+    Context* owner_context;
+    uint64_t owner_generation;
     uint64_t item;
     RadiantDomWrapperCacheEntry* next_free;
     RadiantDomWrapperCacheEntry* next_sweep;
@@ -154,6 +158,8 @@ struct RadiantDomWrapperCacheEntry {
 
 struct RadiantDomWrapperCacheIndexEntry {
     DomNode* node;
+    Context* owner_context;
+    uint64_t owner_generation;
     RadiantDomWrapperCacheEntry* entry;
 };
 
@@ -185,14 +191,28 @@ static void radiant_dom_cache_free(void* ptr) {
 
 static uint64_t radiant_dom_cache_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const RadiantDomWrapperCacheIndexEntry* entry = (const RadiantDomWrapperCacheIndexEntry*)item;
-    return hashmap_hash_bytes(&entry->node, sizeof(entry->node), seed0, seed1);
+    return hashmap_hash_bytes(&entry->node,
+        sizeof(entry->node) + sizeof(entry->owner_context) + sizeof(entry->owner_generation),
+        seed0, seed1);
 }
 
 static int radiant_dom_cache_index_compare(const void* a, const void* b, void* udata) {
     (void)udata;
     const RadiantDomWrapperCacheIndexEntry* ea = (const RadiantDomWrapperCacheIndexEntry*)a;
     const RadiantDomWrapperCacheIndexEntry* eb = (const RadiantDomWrapperCacheIndexEntry*)b;
-    return ea->node == eb->node ? 0 : 1;
+    return ea->node == eb->node && ea->owner_context == eb->owner_context &&
+        ea->owner_generation == eb->owner_generation ? 0 : 1;
+}
+
+static RadiantDomWrapperCacheIndexEntry radiant_dom_cache_index_key(
+        DomNode* node, Context* owner, uint64_t generation,
+        RadiantDomWrapperCacheEntry* cache_entry = nullptr) {
+    RadiantDomWrapperCacheIndexEntry key = {};
+    key.node = node;
+    key.owner_context = owner;
+    key.owner_generation = generation;
+    key.entry = cache_entry;
+    return key;
 }
 
 static void radiant_dom_cache_check_owner(const char* op) {
@@ -909,7 +929,11 @@ static Item radiant_dom_lookup_wrapper(DomNode* node) {
     radiant_dom_cache_check_owner("lookup_wrapper");
     HashMap* index = s_radiant_dom_wrapper_index;
     if (!index || !node) return ItemNull;
-    RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
+    // The same native node may be projected into several document heaps;
+    // returning another heap's wrapper leaves a dangling Item after teardown.
+    Context* active = (Context*)context;
+    RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
+        node, active, heap_generation_for(active));
     const RadiantDomWrapperCacheIndexEntry* found =
         (const RadiantDomWrapperCacheIndexEntry*)hashmap_get(index, &probe);
     if (found && found->entry && found->entry->item != 0 &&
@@ -945,7 +969,8 @@ static void radiant_dom_weak_wrapper_cleared(uint64_t*, void* context) {
     if (!entry || !entry->owner_doc || !entry->node_ref.address) return;
     DomNode* address = entry->node_ref.address;
     if (s_radiant_dom_wrapper_index) {
-        RadiantDomWrapperCacheIndexEntry probe = {.node = address, .entry = nullptr};
+        RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
+            address, entry->owner_context, entry->owner_generation);
         hashmap_delete(s_radiant_dom_wrapper_index, &probe);
     }
     // The wrapper pin guarantees the generation is still registered. Weak
@@ -1002,10 +1027,14 @@ static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
     }
     entry->owner_doc = radiant_dom_node_document(node, true);
     entry->node_ref = dom_node_ref(node);
+    entry->owner_context = (Context*)context;
+    entry->owner_generation = heap_generation_for(entry->owner_context);
     if (!entry->owner_doc ||
         !dom_node_ref_validate(entry->owner_doc, entry->node_ref)) {
         entry->node_ref = {nullptr, 0};
         entry->owner_doc = nullptr;
+        entry->owner_context = nullptr;
+        entry->owner_generation = 0;
         entry->item = 0;
         entry->next_free = s_radiant_dom_wrapper_free;
         s_radiant_dom_wrapper_free = entry;
@@ -1019,7 +1048,8 @@ static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
     if (index) {
         // The hash table stores pointers to stable chunk slots; GC root slots
         // never move when the index grows or rehashes.
-        RadiantDomWrapperCacheIndexEntry index_entry = {.node = node, .entry = entry};
+        RadiantDomWrapperCacheIndexEntry index_entry = radiant_dom_cache_index_key(
+            node, entry->owner_context, entry->owner_generation, entry);
         hashmap_set(index, &index_entry);
     }
     // Wrapper identity is weak: live JS reaches the wrapper naturally; this
@@ -1034,13 +1064,13 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
     if (!entry || entry->item == 0) return;
     DomNode* node = entry->node_ref.address;
     if (s_radiant_dom_wrapper_index && node) {
-        RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
+        RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
+            node, entry->owner_context, entry->owner_generation);
         hashmap_delete(s_radiant_dom_wrapper_index, &probe);
     }
     DomNode* live_node = dom_node_ref_validate(entry->owner_doc, entry->node_ref);
-    if (live_node && live_node->is_element()) {
-        form_control_release_prop(live_node->as_element());
-    }
+    // Form state belongs to the native node and can outlive one realm's weak
+    // wrapper; document and detached-node teardown release it separately.
     Item wrapper = (Item){.item = entry->item};
     // document teardown frees arena-owned DOM nodes; retained wrappers must
     // keep their JS identity but lose the native payload through the husk protocol.
@@ -1053,10 +1083,21 @@ static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
     }
     entry->node_ref = {nullptr, 0};
     entry->owner_doc = nullptr;
+    entry->owner_context = nullptr;
+    entry->owner_generation = 0;
     entry->item = 0;
     entry->next_sweep = nullptr;
     entry->next_free = s_radiant_dom_wrapper_free;
     s_radiant_dom_wrapper_free = entry;
+}
+
+static bool radiant_dom_wrapper_cache_has_live_entries(void) {
+    for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
+        for (int i = 0; i < chunk->count; i++) {
+            if (chunk->entries[i].item != 0) return true;
+        }
+    }
+    return false;
 }
 
 RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc) {
@@ -1065,10 +1106,31 @@ RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc) {
     for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
         for (int i = 0; i < chunk->count; i++) {
             RadiantDomWrapperCacheEntry* entry = &chunk->entries[i];
-            if (entry->owner_doc == doc) {
+            if (entry->owner_doc == doc) radiant_dom_clear_cache_entry(entry);
+        }
+    }
+    // Reclaim the shared cache only after the last document's weak slots have
+    // been removed; another live document may still use its wrapper identity.
+    if (!radiant_dom_wrapper_cache_has_live_entries() && !s_radiant_dom_wrapper_sweep) {
+        radiant_dom_reset_wrapper_cache();
+    }
+}
+
+RADIANT_C_API void radiant_dom_reset_wrapper_cache_current_heap(void) {
+    radiant_dom_cache_check_owner("reset_wrapper_cache_current_heap");
+    Context* active = (Context*)context;
+    uint64_t generation = heap_generation_for(active);
+    for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
+        for (int i = 0; i < chunk->count; i++) {
+            RadiantDomWrapperCacheEntry* entry = &chunk->entries[i];
+            if (entry->owner_context == active && entry->owner_generation == generation) {
                 radiant_dom_clear_cache_entry(entry);
             }
         }
+    }
+    // A nested realm may retire while other realms still own cache entries.
+    if (!radiant_dom_wrapper_cache_has_live_entries() && !s_radiant_dom_wrapper_sweep) {
+        radiant_dom_reset_wrapper_cache();
     }
 }
 
@@ -1139,12 +1201,14 @@ RADIANT_C_API DomDocument* radiant_dom_item_document(Item item) {
     }
     DomNode* node = (DomNode*)virtual_host_data(item);
     if (!node || !s_radiant_dom_wrapper_index) return nullptr;
-    RadiantDomWrapperCacheIndexEntry probe = {.node = node, .entry = nullptr};
+    Context* active = (Context*)context;
+    RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
+        node, active, heap_generation_for(active));
     const RadiantDomWrapperCacheIndexEntry* found =
         (const RadiantDomWrapperCacheIndexEntry*)hashmap_get(
             s_radiant_dom_wrapper_index, &probe);
     RadiantDomWrapperCacheEntry* entry = found ? found->entry : nullptr;
-    if (!entry || !entry->owner_doc ||
+    if (!entry || entry->item != item.item || !entry->owner_doc ||
             dom_node_ref_validate(entry->owner_doc, entry->node_ref) != node) {
         return nullptr;
     }

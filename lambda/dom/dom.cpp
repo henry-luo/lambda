@@ -1210,6 +1210,8 @@ extern "C" void dom_shutdown() {
     if (!js_active_runtime_state) return;
     reset_pending_iframe_loads();
     expando_reset();
+    // Drop only wrappers allocated by this evaluator; another document may
+    // still have live wrappers in its own heap on the same host thread.
     reset_dom_wrapper_cache();
     dom_events_reset();
     js_xhr_reset();

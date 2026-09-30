@@ -3157,7 +3157,7 @@ void runtime_reset_heap(Runtime* runtime) {
         }
         if (runtime->js_runtime_used) {
             js_event_loop_shutdown();
-            lambda_uv_cleanup();
+            if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
             runtime->js_runtime_used = false;
         }
 
@@ -3235,6 +3235,8 @@ void runtime_cleanup(Runtime* runtime) {
             cleanup_owner->cwd = NULL;
         }
     }
+    // The Radiant host owns the shared libuv loop across document and script
+    // runtimes; retiring either one must leave other realms' handles live.
     // Dump profiling data if enabled (before freeing anything)
     profile_dump_to_file();
     js_opt_trace_dump();
@@ -3277,7 +3279,7 @@ void runtime_cleanup(Runtime* runtime) {
         }
 
         if (js_runtime_state_for(cleanup_context)) js_event_loop_shutdown();
-        lambda_uv_cleanup();
+        if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
         event_loop_cleaned = true;
 
         dom_shutdown();
@@ -3356,7 +3358,7 @@ void runtime_cleanup(Runtime* runtime) {
             if (!js_runtime_state_init(runtime->eval_context)) return;
             js_event_loop_shutdown();
         }
-        lambda_uv_cleanup();
+        if (!lambda_uv_is_host_owned()) lambda_uv_cleanup();
     }
     if (runtime->eval_context) {
         EvalContext* retiring_context = runtime->eval_context;

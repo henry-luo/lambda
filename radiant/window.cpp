@@ -59,6 +59,8 @@ static void window_cleanup_load_failure(Pool* pool, Url* cwd, UiContext* uicon,
     dom_set_host_driven_loop(false);
     if (reset_virtual_clock) js_event_loop_set_virtual_clock(false, 0.0);
     ui_context_cleanup(uicon);
+    lambda_uv_set_host_owned(false);
+    lambda_uv_cleanup();
 }
 
 typedef enum RadiantJsLoopAction {
@@ -1162,6 +1164,7 @@ static void window_cleanup_view_runtime(NetworkThreadPool* thread_pool,
     if (timing) timing->cleanup_ui_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
 
     phase_start = time_now_ns();
+    lambda_uv_set_host_owned(false);
     lambda_uv_cleanup();
     if (timing) timing->cleanup_uv_ms = view_phase_elapsed_ms(phase_start, time_now_ns());
     js_event_loop_set_virtual_clock(false, 0.0);
@@ -1314,6 +1317,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
         ui_context_cleanup(&ui_context);
         return -1;
     }
+    // The viewer is the libuv lifetime owner while documents and their
+    // nested Lambda evaluators come and go during navigation.
+    lambda_uv_set_host_owned(true);
 
     int width, height;
 

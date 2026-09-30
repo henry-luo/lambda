@@ -211,6 +211,7 @@ RADIANT_C_API Item radiant_dom_element_operation(Item elem_item,
 RADIANT_C_API Item fn_radiant_radio_group(Item node_item);
 RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc);
 RADIANT_C_API void radiant_dom_reset_wrapper_cache(void);
+RADIANT_C_API void radiant_dom_reset_wrapper_cache_current_heap(void);
 
 RADIANT_C_API int radiant_dom_host_get_property(Item object, Item key, Item* out);
 RADIANT_C_API int radiant_dom_host_set_property(Item object, Item key, Item value, Item* out);

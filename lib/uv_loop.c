@@ -15,6 +15,15 @@ static void (*g_microtask_drain)(void) = NULL;
 static void (*g_task_drain)(void) = NULL;
 static int g_prepare_active = 0;
 static int g_check_active = 0;
+static bool g_host_owned = false;
+
+void lambda_uv_set_host_owned(bool owned) {
+    g_host_owned = owned;
+}
+
+bool lambda_uv_is_host_owned(void) {
+    return g_host_owned;
+}
 
 static void drain_task_checkpoint(void) {
     if (g_microtask_drain) {
