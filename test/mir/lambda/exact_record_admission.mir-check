@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "D3.2.4v4: an admitted nullable record reads its fixed field directly, while a dynamic record still crosses the checked boundary before its layout is trusted.",
+  "checks": [
+    {
+      "in_func": "_read_node_#",
+      "expect": ["mov\t{{r}}, i64:16({{r}})"],
+      "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
+    },
+    {
+      "in_func": "main",
+      "expect": ["call\tlambda_type_check_p, lambda_type_check"]
+    }
+  ]
+}

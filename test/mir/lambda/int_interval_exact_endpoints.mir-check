@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "D2.2.2/S4.1.2: exact interval endpoints retain a slow arm only when the len() maximum can cross INT53_MAX.",
+  "checks": [
+    {
+      "in_func": "_int_interval_safe_#",
+      "forbid": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]
+    },
+    {
+      "in_func": "_int_interval_crosses_#",
+      "expect": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]
+    }
+  ]
+}

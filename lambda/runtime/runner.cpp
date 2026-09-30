@@ -6,6 +6,10 @@
 #ifndef _WIN32
 #include <pthread.h>
 #include <unistd.h>    // for sysconf
+#include <sys/resource.h>
+#else
+#include <windows.h>
+#include <psapi.h>
 #endif
 #include "transpiler.hpp"
 #include "doc_context.hpp"
@@ -56,6 +60,24 @@ extern "C" bool radiant_eval_context_switch(EvalContext* target);
 
 static __thread LambdaCompilerTiming g_last_lambda_compiler_timing;
 static int g_compiler_timing_enabled = -1;
+
+// The compiler report samples this before execution. A fresh CLI process
+// makes ru_maxrss a peak through compilation, including MIR's own allocator.
+extern "C" double lambda_process_peak_rss_mb(void) {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS counters;
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) return 0.0;
+    return (double)counters.PeakWorkingSetSize / (1024.0 * 1024.0);
+#else
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0.0;
+#if defined(__APPLE__)
+    return (double)usage.ru_maxrss / (1024.0 * 1024.0);
+#else
+    return (double)usage.ru_maxrss / 1024.0;
+#endif
+#endif
+}
 
 typedef struct LambdaAstPrebuildDiscoverState {
     const char* source;
@@ -1543,6 +1565,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 timing->build_transpile_us = timing->parse_us + timing->ast_build_us +
                     timing->bind_us + timing->validate_us + timing->index_us +
                     timing->plan_us;
+                timing->compile_peak_rss_bytes =
+                    (uint64_t)(lambda_process_peak_rss_mb() * 1024.0 * 1024.0);
                 timing->valid = 1;
             }
             if (profiling) {
@@ -1617,6 +1641,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             timing->mir_module_count = mir_module_count;
             timing->mir_function_count = mir_function_count;
             timing->mir_insn_count = mir_instruction_count;
+            timing->compile_peak_rss_bytes =
+                (uint64_t)(lambda_process_peak_rss_mb() * 1024.0 * 1024.0);
             timing->valid = 1;
         }
         if (profiling) {
@@ -2533,6 +2559,8 @@ Input* execute_script_and_create_output(Runner* runner, bool run_main) {
                 runner->script->const_list ? runner->script->const_list->data : nullptr,
                 runner->script->type_list)) return nullptr;
     }
+    RuntimeJitModuleStateScope module_scope(ctx);
+    (void)module_scope.activate(runner->script->module_state_id);
 
     // set the run_main flag in the execution context
     ctx->run_main = run_main;

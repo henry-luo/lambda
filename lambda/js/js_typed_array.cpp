@@ -270,17 +270,25 @@ static void* js_typed_array_current_data(JsTypedArray* ta) {
 
 static void js_typed_array_refresh_arraynum_view(JsTypedArray* ta);
 
+static void* js_typed_array_cached_read_data(JsTypedArray* ta) {
+    if (!ta || !ta->view) return NULL;
+    if (!ta->base.buffer) return ta->view->data;
+    if (js_arraybuffer_detached(ta->base.buffer)) return NULL;
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)ta->view->extra;
+    if (shape && shape->backing_kind == ARRAY_NUM_BACKING_BUFFER_HANDLE &&
+            shape->backing == ta->base.buffer &&
+            shape->resolved_generation == ta->base.buffer->generation) {
+        // D5.3.2: a matching handle generation keeps this borrow live.
+        return ta->view->data;
+    }
+    return NULL;
+}
+
 static void* js_typed_array_resolve_view_data(JsTypedArray* ta, bool write) {
     if (!ta || !ta->view) return NULL;
-    if (!write && ta->base.buffer && !js_arraybuffer_detached(ta->base.buffer)) {
-        ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)ta->view->extra;
-        if (shape && shape->backing_kind == ARRAY_NUM_BACKING_BUFFER_HANDLE &&
-                shape->backing == ta->base.buffer &&
-                shape->resolved_generation == ta->base.buffer->generation &&
-                ta->view->data) {
-            // A matching handle generation keeps the borrowed byte pointer live.
-            return ta->view->data;
-        }
+    if (!write) {
+        void* cached = js_typed_array_cached_read_data(ta);
+        if (cached) return cached;
     }
     // Writes always resolve through ArrayNum: copy-on-write can replace the
     // handle storage and advances its generation during this operation.
@@ -2497,15 +2505,14 @@ extern "C" void* js_typed_array_data_at_if_kind(Item ta_item,
             JS_OPT_OUTCOME_FALLBACK);
         return NULL;
     }
-    // Refresh once before both the live-length check and pointer borrow. No
-    // guest code or safepoint follows this leaf before the generated load.
-    js_typed_array_refresh_arraynum_view(ta);
+    // The NO_GC read can borrow only a generation-matched pointer. A resized
+    // buffer goes through the ordinary path, which refreshes the view safely.
     if (index >= js_typed_array_current_length(ta)) {
         js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
             JS_OPT_OUTCOME_FALLBACK);
         return NULL;
     }
-    void* data = js_typed_array_current_data(ta);
+    void* data = js_typed_array_cached_read_data(ta);
     js_opt_trace_record(JS_OPT_TYPED_NUMBER_READ, JS_OPT_REASON_NONE,
         data ? JS_OPT_OUTCOME_TAKEN : JS_OPT_OUTCOME_FALLBACK);
     return data;

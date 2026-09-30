@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "description": "S11.1.2v2/S2.5.1v2: generic map/array tests use the audited value kind, while a first-class type value still uses fn_is.",
+  "checks": [
+    {
+      "in_func": "_classify_#",
+      "count": {"call\titem_type_id_p, item_type_id": 2},
+      "forbid": ["call\tfn_is_p, fn_is", "call\tbase_type_p, base_type"]
+    },
+    {
+      "in_func": "_dynamic_#",
+      "expect": ["call\tfn_is_p, fn_is"]
+    },
+    {
+      "in_func": "_error_kind_#",
+      "count": {"eq\t{{r}}, {{r}}, 27": 2},
+      "forbid": ["call\tfn_is_p, fn_is", "call\tbase_type_p, base_type"]
+    }
+  ]
+}

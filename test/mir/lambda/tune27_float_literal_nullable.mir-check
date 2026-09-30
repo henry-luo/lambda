@@ -6,7 +6,7 @@
       "in_func": "_tune27_float_literal_nullable_#",
       "expect_seq": [
         {
-          "pattern": "call\tarray_float_new_p, array_float_new"
+          "pattern": "call\tarray_num_new_uninit_p, array_num_new_uninit"
         },
         {
           "pattern": "dmov\td:8({{r}})"
@@ -25,6 +25,7 @@
       "in_func": "_tune27_float_literal_mixed_#",
       "forbid": [
         "call\tarray_float_new_p, array_float_new",
+        "call\tarray_num_new_uninit_p, array_num_new_uninit",
         "call\tarray_float_literal_with_nulls_p, array_float_literal_with_nulls"
       ]
     }

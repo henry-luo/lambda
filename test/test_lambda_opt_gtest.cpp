@@ -150,6 +150,7 @@ struct FixtureRun {
     std::string std_err;
     AdmitProfile profile;
     std::string profile_path;
+    std::string sites_path;
 };
 
 // Runs `lambda.exe run --tier=<tier> <fixture>` in a child with the COW exec
@@ -160,14 +161,18 @@ struct FixtureRun {
 // `tier == NULL` runs the script through the `js` subcommand (LambdaJS), so
 // its exec-profile rows -- the same TSV -- can be pinned by the same reader.
 static FixtureRun run_fixture(const char* name, const char* tier,
-                              const std::string& source, bool profile_enabled) {
+                              const std::string& source, bool profile_enabled,
+                              bool sites_enabled = false) {
     FixtureRun run;
     ensure_opt_dir();
     bool js = tier == NULL;
     std::string script_path = std::string(kOptDir) + "/" + name + (js ? ".js" : ".ls");
     run.profile_path = std::string(kOptDir) + "/" + name + "_" + (js ? "js" : tier) +
         (profile_enabled ? "" : "_off") + ".tsv";
+    run.sites_path = std::string(kOptDir) + "/" + name + "_" + (js ? "js" : tier) +
+        (profile_enabled ? "" : "_off") + "_sites.tsv";
     remove(run.profile_path.c_str());
+    remove(run.sites_path.c_str());
     if (!write_text(script_path, source)) {
         ADD_FAILURE() << "cannot write fixture script " << script_path;
         return run;
@@ -181,6 +186,8 @@ static FixtureRun run_fixture(const char* name, const char* tier,
     ShellEnvEntry env[] = {
         {"COW_EXEC_PROFILE", profile_enabled ? "1" : "0"},
         {"COW_EXEC_PROFILE_OUT", run.profile_path.c_str()},
+        {"COW_EXEC_PROFILE_SITES", sites_enabled ? "1" : "0"},
+        {"COW_EXEC_PROFILE_SITES_OUT", run.sites_path.c_str()},
         // a module-cache hit would reuse prior emission; keep each fixture
         // child hermetic so tier pinning always takes effect
         {"LAMBDA_DISABLE_MIR_CACHE", "1"},
@@ -228,6 +235,51 @@ static FixtureRun run_source_fixture(const char* name, const char* source_path,
     FixtureRun run = run_fixture(name, tier, source, true);
     free(source);
     return run;
+}
+
+TEST(LambdaOptGc, ContradictoryPlannedEffectFailsBeforePublication) {
+    const char* executable = opt_executable();
+    const char* args[] = {executable, "run", "--tier=jit",
+        "test/mir/lambda/gc_effect_forward_allocating.ls", NULL};
+    ShellEnvEntry env[] = {
+        {"LAMBDA_TEST_GC_PLAN_CLAIM", "gc_order_alloc_leaf"},
+        {"LAMBDA_DISABLE_MIR_CACHE", "1"},
+        {NULL, NULL}
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 60000;
+    ShellResult result = shell_exec(executable, args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_NE(result.exit_code, 0);
+    const char* diagnostic = result.stderr_buf ? result.stderr_buf : "";
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_TRUE(strstr(diagnostic, "mir-gc-verify: collecting edge") ||
+        strstr(output, "mir-gc-verify: collecting edge"))
+        << diagnostic << output;
+    shell_result_free(&result);
+}
+
+TEST(LambdaOptGc, RootlessMirStackProbeStillRecoversOverflow) {
+    const char* executable = opt_executable();
+    const char* args[] = {executable, "--tier=jit",
+        "test/lambda/negative/test_stack_overflow.ls", NULL};
+    ShellEnvEntry env[] = {
+        {"LAMBDA_DISABLE_MIR_CACHE", "1"},
+        {NULL, NULL}
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 60000;
+    ShellResult result = shell_exec(executable, args, &options);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_NE(result.exit_code, 0);
+    const char* diagnostic = result.stderr_buf ? result.stderr_buf : "";
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    EXPECT_TRUE(strstr(diagnostic, "error[E308]: Stack overflow") ||
+        strstr(output, "error[E308]: Stack overflow"))
+        << diagnostic << output;
+    shell_result_free(&result);
 }
 
 TEST(LambdaOptStrings, LengthObservationRetainsGeometricGrowth) {
@@ -545,6 +597,383 @@ static std::string fixture_source(const char* path) {
     return buffer.str();
 }
 
+// S4.4.4: MIR's width guard must bypass, rather than re-enter, its shift arm.
+TEST(LambdaOptNumeric, U32ShiftWidthZeroArmMatchesInterpreter) {
+    const std::string source = fixture_source("test/mir/lambda/u32_shift_width.ls");
+    const std::string expected = fixture_source("test/mir/lambda/u32_shift_width.txt");
+    ASSERT_FALSE(source.empty());
+    ASSERT_FALSE(expected.empty());
+    static const char* const tiers[] = {"jit", "interp"};
+    for (const char* tier : tiers) {
+        FixtureRun run = run_fixture("u32_shift_width", tier, source, false);
+        ASSERT_TRUE(run.ok) << tier;
+        EXPECT_EQ(run.std_out, expected + "\n") << tier;
+    }
+}
+
+// D2.4.1-D2.4.3: the guarded identity and the original admission agree on
+// observable values at direct and boxed calls.
+TEST(LambdaOptNumeric, ExactSizedParameterAdmissionMatchesInterpreter) {
+    const std::string source = fixture_source("test/mir/lambda/sized_param_exact_admission.ls");
+    const std::string expected = fixture_source("test/mir/lambda/sized_param_exact_admission.txt");
+    ASSERT_FALSE(source.empty());
+    ASSERT_FALSE(expected.empty());
+    static const char* const tiers[] = {"jit", "interp"};
+    for (const char* tier : tiers) {
+        FixtureRun run = run_fixture("sized_param_exact_admission", tier, source, false);
+        ASSERT_TRUE(run.ok) << tier;
+        EXPECT_EQ(run.std_out, expected + "\n") << tier;
+    }
+}
+
+// D5.4.4: diagnostic call counters are emitted only for the opted-in JIT;
+// the same source and tier must retain identical observable output.
+TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
+    ensure_opt_dir();
+    const char* executable = opt_executable();
+    const char* args[] = {executable, "run", "--tier=jit",
+        "test/mir/lambda/sized_param_exact_admission.ls", NULL};
+    const char* profile_path = "temp/lambda_opt_contract/exec_calls.tsv";
+    const char* mir_path = "temp/lambda_opt_contract/exec_calls.mir";
+    for (int enabled = 0; enabled < 2; enabled++) {
+        remove(profile_path);
+        remove(mir_path);
+        ShellEnvEntry env[] = {
+            {"LAMBDA_EXEC_PROFILE", enabled ? "1" : "0"},
+            {"LAMBDA_EXEC_PROFILE_OUT", profile_path},
+            {"LAMBDA_MIR_DUMP_PATH", mir_path},
+            {"LAMBDA_DISABLE_MIR_CACHE", "1"},
+            {NULL, NULL}
+        };
+        ShellOptions options = {};
+        options.env = env;
+        options.timeout_ms = 60000;
+        ShellResult result = shell_exec(executable, args, &options);
+        EXPECT_EQ(result.exit_code, 0);
+        EXPECT_FALSE(result.timed_out);
+        ASSERT_NE(result.stdout_buf, nullptr);
+        EXPECT_NE(strstr(result.stdout_buf,
+            "7 7 -1 65535 7 7 2 error error error error error error"), nullptr);
+        shell_result_free(&result);
+
+        char* mir = read_text_file(mir_path);
+        ASSERT_NE(mir, nullptr);
+        if (enabled) {
+            EXPECT_NE(strstr(mir, "lambda_exec_profile_note_call"), nullptr);
+            char* profile = read_text_file(profile_path);
+            ASSERT_NE(profile, nullptr);
+            EXPECT_NE(strstr(profile, "raw\t_accept_u32_"), nullptr);
+            EXPECT_NE(strstr(profile, "helper\tpn_print\t26"), nullptr);
+            EXPECT_NE(strstr(profile, "frame_entry\t_accept_u32_"), nullptr);
+            EXPECT_NE(strstr(profile, "root_store\t_main_"), nullptr);
+            EXPECT_NE(strstr(profile, "root_reload\t_main_"), nullptr);
+            EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+            free(profile);
+        } else {
+            EXPECT_EQ(strstr(mir, "lambda_exec_profile_note_call"), nullptr);
+            EXPECT_NE(OPT_ACCESS(profile_path, 0), 0);
+        }
+        free(mir);
+    }
+}
+
+// D5.4.4: caller attribution is a separate diagnostic compile mode; ordinary
+// call profiles retain their aggregate target names.
+TEST(LambdaOptProfile, ExecutedCallsCanBeAttributedToCaller) {
+    ensure_opt_dir();
+    const char* executable = opt_executable();
+    const char* args[] = {executable, "run", "--tier=jit",
+        "test/mir/lambda/readonly_length_no_gc.ls", NULL};
+    const char* profile_path = "temp/lambda_opt_contract/exec_callers.tsv";
+    remove(profile_path);
+    ShellEnvEntry env[] = {
+        {"LAMBDA_EXEC_PROFILE", "1"},
+        {"LAMBDA_EXEC_PROFILE_CALLERS", "1"},
+        {"LAMBDA_EXEC_PROFILE_OUT", profile_path},
+        {"LAMBDA_DISABLE_MIR_CACHE", "1"},
+        {NULL, NULL}
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 60000;
+    ShellResult result = shell_exec(executable, args, &options);
+    EXPECT_EQ(result.exit_code, 0);
+    EXPECT_FALSE(result.timed_out);
+    ASSERT_NE(result.stdout_buf, nullptr);
+    EXPECT_NE(strstr(result.stdout_buf, "[7, 2, 1]"), nullptr);
+    shell_result_free(&result);
+    char* profile = read_text_file(profile_path);
+    ASSERT_NE(profile, nullptr);
+    EXPECT_NE(strstr(profile, "helper\t_shaped__raw0_"), nullptr);
+    EXPECT_NE(strstr(profile, "helper\t_shaped__raw1_"), nullptr);
+    EXPECT_NE(strstr(profile, " -> fn_len_l\t1\n"), nullptr);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+static uint64_t exec_profile_count_prefix(const char* profile,
+        const char* row_prefix) {
+    const char* row = profile ? strstr(profile, row_prefix) : nullptr;
+    if (!row) return UINT64_MAX;
+    const char* count = strchr(row + strlen(row_prefix), '\t');
+    return count ? strtoull(count + 1, nullptr, 10) : UINT64_MAX;
+}
+
+static uint64_t exec_profile_sum_prefix(const char* profile,
+        const char* row_prefix) {
+    if (!profile || !row_prefix) return UINT64_MAX;
+    uint64_t total = 0;
+    size_t prefix_len = strlen(row_prefix);
+    const char* cursor = profile;
+    while ((cursor = strstr(cursor, row_prefix))) {
+        if (cursor == profile || cursor[-1] == '\n') {
+            const char* count = strchr(cursor + prefix_len, '\t');
+            const char* end = strchr(cursor, '\n');
+            if (!count || (end && count >= end)) return UINT64_MAX;
+            total += strtoull(count + 1, nullptr, 10);
+        }
+        cursor += prefix_len;
+    }
+    return total;
+}
+
+static char* run_profiled_lambda_fixture(const char* script,
+        const char* expected_output, const char* profile_path,
+        bool callers = false, bool procedural = true) {
+    ensure_opt_dir();
+    const char* executable = opt_executable();
+    const char* args[] = {executable,
+        procedural ? "run" : script,
+        procedural ? "--tier=jit" : NULL,
+        procedural ? script : NULL, NULL};
+    remove(profile_path);
+    ShellEnvEntry env[] = {
+        {"LAMBDA_EXEC_PROFILE", "1"},
+        {"LAMBDA_EXEC_PROFILE_CALLERS", callers ? "1" : "0"},
+        {"LAMBDA_EXEC_PROFILE_OUT", profile_path},
+        {"LAMBDA_DISABLE_MIR_CACHE", "1"},
+        {"LAMBDA_TIER", "jit"},
+        {NULL, NULL}
+    };
+    ShellOptions options = {};
+    options.env = env;
+    options.timeout_ms = 60000;
+    ShellResult result = shell_exec(executable, args, &options);
+    EXPECT_EQ(result.exit_code, 0);
+    EXPECT_FALSE(result.timed_out);
+    EXPECT_NE(result.stdout_buf, nullptr);
+    if (result.stdout_buf) EXPECT_NE(strstr(result.stdout_buf, expected_output), nullptr);
+    shell_result_free(&result);
+    return read_text_file(profile_path);
+}
+
+// D5.4.3/D8.5.1v2: the current JIT module reads its context-owned slab
+// directly, while imported functions keep the checked logical-unit lookup.
+TEST(LambdaOptProfile, JitModuleHintRetainsCrossModuleFallback) {
+    char* own = run_profiled_lambda_fixture(
+        "test/mir/lambda/empty_string_literal_direct.ls",
+        "[\"\", 0, true, \"filled\"]",
+        "temp/lambda_opt_contract/module_hint_own.tsv", true);
+    ASSERT_NE(own, nullptr);
+    EXPECT_EQ(strstr(own, " -> lambda_module_state_for_unit"), nullptr);
+    EXPECT_NE(strstr(own, "overflow\t-\t0"), nullptr);
+    free(own);
+
+    char* imported = run_profiled_lambda_fixture(
+        "test/lambda/import_pub_let_same_name.ls",
+        "[\"<from-a>\", \"[from-b]\"]",
+        "temp/lambda_opt_contract/module_hint_import.tsv", true, false);
+    ASSERT_NE(imported, nullptr);
+    EXPECT_NE(strstr(imported, "helper\t_who_"), nullptr);
+    EXPECT_NE(strstr(imported, " -> lambda_module_state_for_unit\t1\n"), nullptr);
+    EXPECT_NE(strstr(imported, "overflow\t-\t0"), nullptr);
+    free(imported);
+
+    char* repeated = run_profiled_lambda_fixture(
+        "test/lambda/module_state_hint_reuse.ls",
+        "[\"<from-a>\", \"<from-a>\", \"<from-a>\"]",
+        "temp/lambda_opt_contract/module_hint_reuse.tsv", true, false);
+    ASSERT_NE(repeated, nullptr);
+    EXPECT_NE(strstr(repeated, "helper\t_framed_"), nullptr);
+    EXPECT_NE(strstr(repeated,
+        " -> lambda_module_state_for_unit\t1\n"), nullptr);
+    EXPECT_NE(strstr(repeated, "overflow\t-\t0"), nullptr);
+    free(repeated);
+}
+
+// D5.4.4/D3.2.6: a speculative field read reports both guard entries and
+// actual fast-arm entries, so a persistent wrong shape is visible in P0.
+TEST(LambdaOptProfile, FieldGuardDistinguishesFastAndFallback) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/tune24_branch_proofs.ls", "[10, 28, 28, 56, 0, 5, 20, 40]",
+        "temp/lambda_opt_contract/field_guard.tsv", false, false);
+    ASSERT_NE(profile, nullptr);
+    EXPECT_NE(strstr(profile, "field_attempt\t_total_"), nullptr);
+    EXPECT_NE(strstr(profile, "field_fast\t_total_"), nullptr);
+    EXPECT_NE(strstr(profile, "@160.value\t31\n"), nullptr);
+    EXPECT_NE(strstr(profile, "@160.value\t1\n"), nullptr);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D3.3.3v3/S8.2.4v3: an open array erases its elements' declared layout, so
+// only the exact runtime shape may take the packed-field read.
+TEST(LambdaOptProfile, OpenArrayTrustedRecordFieldKeepsGenericFallback) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/open_array_trusted_record_field.ls",
+        "[7, 17, null, null]\n",
+        "temp/lambda_opt_contract/open_array_trusted_record_field.tsv", true);
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile,
+        "field_attempt\t_read_count_"), 4u);
+    EXPECT_EQ(exec_profile_count_prefix(profile,
+        "field_fast\t_read_count_"), 1u);
+    EXPECT_NE(strstr(profile, " -> fn_member_by_id\t3\n"), nullptr);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D3.3.3v3/S7.1.1v3: packed ints after bool fields are read by bytes only
+// after an exact shape hit; inferred shape and out-of-range cases stay generic.
+TEST(LambdaOptProfile, UnalignedTrustedArrayIntFieldGuardsAndFallsBack) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/trusted_array_dynamic_index_field.ls",
+        "[-7, null]\n",
+        "temp/lambda_opt_contract/unaligned_trusted_array_int.tsv", true);
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile, "field_attempt\t_task_id_"), 4u);
+    EXPECT_EQ(exec_profile_count_prefix(profile, "field_fast\t_task_id_"), 1u);
+    EXPECT_NE(strstr(profile, " -> fn_member_by_id\t3\n"), nullptr);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D2.4.1–D2.4.3: a parameter with several unresolved callers has no layout
+// evidence, so its member reads must not spend hot work on a module-wide guess.
+TEST(LambdaOptProfile, MultiSourceParameterAvoidsWrongShapeGuard) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/benchmark/text/prettier_ast.ls",
+        "prettier_ast: CHECKSUM:56483873",
+        "temp/lambda_opt_contract/multi_source_shape.tsv", true);
+    ASSERT_NE(profile, nullptr);
+    EXPECT_LE(exec_profile_sum_prefix(profile,
+        "field_attempt\t_print_node_"), 10000u);
+    EXPECT_EQ(exec_profile_sum_prefix(profile,
+        "field_attempt\t_expression_precedence_"), 0u);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D8.2.6/S9.1.2: a checked int tail reuses one frame after evaluating its
+// arguments, while a non-tail call and a replaced pointer owner keep calls.
+TEST(LambdaOptProfile, CheckedScalarBracedTailElidesRecursiveFrames) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/checked_scalar_braced_tail.ls",
+        "[3, 3, 0, 10, 3]",
+        "temp/lambda_opt_contract/checked_scalar_braced_tail.tsv");
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(exec_profile_sum_prefix(profile,
+        "frame_entry\t_checked_tail_"), 6u);
+    EXPECT_GE(exec_profile_sum_prefix(profile,
+        "frame_entry\t_non_tail_"), 5u);
+    EXPECT_GE(exec_profile_sum_prefix(profile,
+        "frame_entry\t_changing_owner_"), 4u);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D5.3.1: reads of a live array and string cannot collect, so their helper
+// calls must not force publication/reload of the other live argument.
+TEST(LambdaOptProfile, ReadOnlyLengthAvoidsGcRootTraffic) {
+    const char* profile_path = "temp/lambda_opt_contract/readonly_length.tsv";
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/readonly_length_no_gc.ls", "[7, 2, 1]\n",
+        profile_path);
+    ASSERT_NE(profile, nullptr);
+    EXPECT_NE(strstr(profile, "helper\tfn_len_l\t2"), nullptr);
+    EXPECT_NE(strstr(profile, "helper\tfn_len_s\t1"), nullptr);
+    EXPECT_LE(exec_profile_count_prefix(profile,
+        "root_store\t_lens__raw0_"), 2u);
+    EXPECT_LE(exec_profile_count_prefix(profile,
+        "root_reload\t_lens__raw0_"), 3u);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D3.3.3v3/S4.1.2: a literal's finite lanes need no setters after their
+// fresh array allocation; an expression-valued member keeps checked stores.
+TEST(LambdaOptProfile, FiniteIntLiteralArraySkipsPerElementSetters) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/finite_int_literal_array.ls",
+        "[[0, 1, 2, 3], [0, 7, 2]]",
+        "temp/lambda_opt_contract/finite_int_literal_array.tsv");
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile, "helper\tarray_int_set"), 3u);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D5.3.1/D3.3.3v3: a packed float literal fills its buffer before the next
+// safepoint; the one nullable arm still builds a generic array on demand.
+TEST(LambdaOptProfile, FloatLiteralFillsBeforeNullableFallback) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/tune27_float_literal_nullable.ls",
+        "[2.5, null]",
+        "temp/lambda_opt_contract/float_literal_uninit.tsv");
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile,
+        "helper\tarray_num_new_uninit"), 8u);
+    EXPECT_EQ(exec_profile_count_prefix(profile,
+        "helper\tarray_float_literal_with_nulls"), 1u);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D4.4.4v4/D5.4.4: only the live relocating data-pointer reload executes
+// after the collecting call for a stable typed-array parameter.
+TEST(LambdaOptProfile, StableArrayLengthSurvivesCollectingCall) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/stable_array_length_after_gc.ls", "[9, 6, 8]",
+        "temp/lambda_opt_contract/stable_array_length_after_gc.tsv");
+    ASSERT_NE(profile, nullptr);
+    ASSERT_NE(strstr(profile, "layout_items_reload\t_stable_length_"), nullptr);
+    EXPECT_GT(exec_profile_count_prefix(profile,
+        "layout_items_reload\t_stable_length_"), 0u);
+    EXPECT_EQ(strstr(profile, "layout_length_reload\t_stable_length_"), nullptr);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D5.3.2/S9.1.2: a dynamic binding still marks the owner, but that
+// non-allocating mark must not force a post-call GC-root reload.
+TEST(LambdaOptProfile, CowBindingDoesNotReloadLiveOwner) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/string_cow_capture_guard.ls", "[true, true, true]\n",
+        "temp/lambda_opt_contract/cow_bind_no_gc.tsv");
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile,
+        "helper\tcow_bind_var"), 2u);
+    EXPECT_LE(exec_profile_count_prefix(profile,
+        "root_reload\t_capture_dynamic_"), 17u);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
+// D3.3.3v3/S7.1.1v3: a valid dense carrier enters the fast loop, while a
+// short carrier reaches the checked sibling without suppressing its error.
+TEST(LambdaOptProfile, DenseGuardSelectsFastAndCheckedCopies) {
+    char* profile = run_profiled_lambda_fixture(
+        "test/mir/lambda/tune26_dense_carried_index.ls", "[45, true]\n",
+        "temp/lambda_opt_contract/dense_guard.tsv");
+    ASSERT_NE(profile, nullptr);
+    EXPECT_EQ(exec_profile_count_prefix(profile,
+        "dense_attempt\t_tune26_dense_carried_index_"), 2u);
+    EXPECT_EQ(exec_profile_count_prefix(profile,
+        "dense_fast\t_tune26_dense_carried_index_"), 1u);
+    EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
+    free(profile);
+}
+
 // D4.4.4v2 sibling-field handles + early return (cd's rbt_put): 29 array
 // copies are the fixture's deliberate snapshots (S9.1.2), down from 90 before
 // the ruling; the one map copy is `let before = t`.
@@ -795,6 +1224,62 @@ TEST(LambdaOptAdmission, ProfileDisabledWritesNoTsv) {
     EXPECT_EQ(run.std_out, "20\n");
     EXPECT_NE(OPT_ACCESS(run.profile_path.c_str(), 0), 0)
         << "profile TSV was written with COW_EXEC_PROFILE=0: " << run.profile_path;
+}
+
+TEST(LambdaOptAdmission, CowSiteCensusMatchesAggregateAndIsOptIn) {
+    const char* source =
+        "pn main() {\n"
+        "  var first = {x: 1}\n"
+        "  var second = first\n"
+        "  first.x = 2\n"
+        "  print([first.x, second.x])\n"
+        "}\n";
+    FixtureRun enabled = run_fixture("cow_sites", "jit", source, true, true);
+    ASSERT_TRUE(enabled.ok);
+    EXPECT_EQ(enabled.std_out, "[2, 1]\n");
+    std::ifstream sites(enabled.sites_path.c_str());
+    ASSERT_TRUE(sites.good());
+    uint64_t marks = 0, copies = 0, unique = 0, overflow = 0;
+    uint64_t jit_copies = 0;
+    std::string line;
+    while (std::getline(sites, line)) {
+        std::istringstream row(line);
+        std::string event, type, pc, count, bytes;
+        if (!std::getline(row, event, '\t') ||
+                !std::getline(row, type, '\t') ||
+                !std::getline(row, pc, '\t') ||
+                !std::getline(row, count, '\t') ||
+                !std::getline(row, bytes, '\t')) continue;
+        uint64_t n = (uint64_t)strtoull(count.c_str(), NULL, 10);
+        if (event == "share_mark" && type == "map") marks += n;
+        if (event == "shared_copy" && type == "map") {
+            copies += n;
+            std::string symbol;
+            if (std::getline(row, symbol, '\t') && symbol.empty() && pc != "0x0") {
+                jit_copies += n;
+            }
+        }
+        if (event == "unique_write" && type == "map") unique += n;
+        if (event == "overflow") overflow += n;
+    }
+    EXPECT_EQ(overflow, 0u);
+    EXPECT_EQ(marks, enabled.profile.get("map_share_marks"));
+    EXPECT_EQ(copies, enabled.profile.get("map_shared_copies"));
+    EXPECT_EQ(unique, enabled.profile.get("map_unique_mutations"));
+    EXPECT_GT(marks, 0u);
+    EXPECT_GT(copies, 0u);
+    EXPECT_GT(jit_copies, 0u);
+
+    FixtureRun disabled = run_fixture("cow_sites", "jit", source, true);
+    ASSERT_TRUE(disabled.ok);
+    EXPECT_EQ(disabled.std_out, enabled.std_out);
+    EXPECT_NE(OPT_ACCESS(disabled.sites_path.c_str(), 0), 0);
+
+    FixtureRun off = run_fixture("cow_sites_off", "jit", source, false, true);
+    ASSERT_TRUE(off.ok);
+    EXPECT_EQ(off.std_out, enabled.std_out);
+    EXPECT_NE(OPT_ACCESS(off.profile_path.c_str(), 0), 0);
+    EXPECT_NE(OPT_ACCESS(off.sites_path.c_str(), 0), 0);
 }
 
 TEST(LambdaOptAdmission, ImmutableArrayConsumerAdmitsOnce) {

@@ -24,6 +24,8 @@ typedef struct LambdaCompilerTiming {
     uint64_t mir_module_count;
     uint64_t mir_function_count;
     uint64_t mir_insn_count;
+    // Process high-water RSS at the end of compilation, before execution.
+    uint64_t compile_peak_rss_bytes;
     int valid;
 } LambdaCompilerTiming;
 
@@ -77,6 +79,7 @@ extern "C" {
 void lambda_compiler_timing_reset(void);
 void lambda_compiler_timing_get(LambdaCompilerTiming* out);
 int lambda_compiler_timing_enabled(void);
+double lambda_process_peak_rss_mb(void);
 // The resolve pass runs source-order analyses inline at each function's end.
 // Keep their cost apart from the walk so the phase report can distinguish
 // construction from analysis.

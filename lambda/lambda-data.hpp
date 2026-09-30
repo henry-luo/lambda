@@ -95,6 +95,9 @@ typedef struct LambdaModuleState {
     uint32_t property_key_count;
     uint32_t module_id;
     bool vars_registered;
+    // The active-slab fast path checks this context-local key before using
+    // the slab; cached code still resolves any mismatch through its unit id.
+    uint32_t module_layout_id;
 } LambdaModuleState;
 
 // RC-J7v2: a compilation unit's shared literal pool. Keyed by unit id rather
@@ -145,6 +148,9 @@ typedef struct EvalContext : Context {
     // pointer and use ordinary owner-thread loads/stores in the selected slab.
     LambdaModuleState** module_states;
     uint32_t module_state_capacity;
+    // JIT execution may hint its current slab without changing the semantic
+    // active-module selector used by hosted and interpreter entry points.
+    LambdaModuleState* jit_current_module_state;
     // Keep new shell bookkeeping at the tail: generated and native callers
     // depend on the established module-state offsets (D8.1.3v10).
     uint32_t execution_depth;
@@ -393,6 +399,7 @@ static inline bool shape_field_name_equals(const ShapeEntry* entry,
     if (!entry || !entry->name || !entry->name->str || !chars) return false;
     if (entry->name->length != len) return false;
     const char* name = entry->name->str;
+    if (name == chars) return true;
     // Identifier-length names never reach memcmp's vectorised regime, so the
     // whole comparison stays inline; measured against a first-byte-reject
     // variant that still called memcmp for the tail, this full inline form was

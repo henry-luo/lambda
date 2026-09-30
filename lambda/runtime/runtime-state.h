@@ -72,6 +72,21 @@ private:
     struct LambdaModuleState* previous_;
     bool restore_previous_;
 };
+
+// A context-local lookup hint for generated Lambda entries. Unlike the
+// semantic active-module selector, a mismatch simply takes the checked path.
+class RuntimeJitModuleStateScope {
+public:
+    explicit RuntimeJitModuleStateScope(EvalContext* owner = context);
+    RuntimeJitModuleStateScope(const RuntimeJitModuleStateScope&) = delete;
+    RuntimeJitModuleStateScope& operator=(const RuntimeJitModuleStateScope&) = delete;
+    ~RuntimeJitModuleStateScope();
+    bool activate(uint32_t module_id);
+
+private:
+    EvalContext* owner_;
+    uint32_t previous_id_;
+};
 #endif
 
 #ifdef __cplusplus

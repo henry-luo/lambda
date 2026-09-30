@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "description": "D8.2.6 and S9.1.2: an exact nonescaping record literal uses scalar field homes; an escaping record materializes.",
+  "checks": [
+    {
+      "in_func": "_project_#",
+      "forbid": [
+        "call\theap_calloc_class",
+        "call\tmap_fill",
+        "call\tfn_member"
+      ]
+    },
+    {
+      "in_func": "_escape_#",
+      "expect": [
+        "call\theap_calloc_class"
+      ]
+    },
+    {
+      "in_func": "_checked_#",
+      "expect": [
+        "call\tmap_fill"
+      ]
+    }
+  ]
+}

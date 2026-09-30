@@ -37,6 +37,9 @@ from run_benchmarks import (  # noqa: E402
     mir_script_variants,
     parse_timing,
 )
+from benchmark_provenance import (  # noqa: E402
+    c2mir_source_corpus, command_output, hashed_file_corpus, sha256_file,
+)
 
 
 TIMING_LINE = "__TIMING__:"
@@ -46,23 +49,6 @@ DEFAULT_BOOTSTRAP_SEED = 260026
 
 def oracle_expected_stdout(oracle_id):
     return jetstream_post_timing_oracle_marker(oracle_id)
-
-
-def sha256_file(path):
-    digest = hashlib.sha256()
-    with open(path, "rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def command_output(command):
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-    except OSError:
-        return None
-    output = (result.stdout or result.stderr or "").strip()
-    return output or None
 
 
 def normalized_stdout(stdout):
@@ -299,6 +285,83 @@ def tree_sha256(root):
     return digest.hexdigest()
 
 
+def lambda_source_corpus():
+    """Record all workspace Lambda sources so imports outside a script's directory are covered."""
+    paths = []
+    for directory, subdirs, filenames in os.walk(PROJECT_ROOT):
+        if os.path.abspath(directory) == os.path.abspath(PROJECT_ROOT):
+            subdirs[:] = [name for name in subdirs if name not in (".git", "temp")]
+        subdirs.sort()
+        for filename in sorted(filenames):
+            if not filename.endswith(".ls"):
+                continue
+            path = os.path.join(directory, filename)
+            if os.path.isfile(path):
+                paths.append(path)
+    return hashed_file_corpus(paths, PROJECT_ROOT)
+
+
+def lambda_build_source_corpus():
+    """Hash production and bundled source inputs, including dirty edits."""
+    roots = ("lambda", "lib", "radiant", "builtins", "lmd", "modules", "utils")
+    suffixes = (".c", ".h", ".cpp", ".hpp", ".cc", ".mm", ".m",
+                ".inc", ".json", ".py", ".js", ".lua")
+    ignored = {".git", "build", "build_temp", "node_modules", "temp", "out", "cmake_build"}
+    paths = []
+    for root_name in roots:
+        root = os.path.join(PROJECT_ROOT, root_name)
+        if not os.path.isdir(root):
+            continue
+        for directory, subdirs, filenames in os.walk(root):
+            subdirs[:] = sorted(name for name in subdirs if name not in ignored)
+            for filename in filenames:
+                path = os.path.join(directory, filename)
+                if filename.endswith(suffixes) and os.path.isfile(path):
+                    paths.append(path)
+    return hashed_file_corpus(paths, PROJECT_ROOT)
+
+
+def lambda_build_manifest():
+    """Freeze build configuration and source revisions alongside binary hashes."""
+    files = ("build_lambda_config.json", "Makefile", "utils/generate_premake.py")
+    return {
+        "files": {path: sha256_file(os.path.join(PROJECT_ROOT, path)) for path in files},
+        "source_corpus": lambda_build_source_corpus(),
+        "mir_revision": command_output(["git", "-C", "lambda/mir", "rev-parse", "HEAD"]),
+        "compiler": command_output(["clang++", "--version"]),
+        "build_environment": {
+            key: value for key, value in sorted(os.environ.items())
+            if key in ("CC", "CXX", "CFLAGS", "CXXFLAGS", "LDFLAGS")
+            or key.startswith("LAMBDA_")
+        },
+    }
+
+
+def finalize_provenance(metadata, control, candidate):
+    """Detect source or binary changes during a long paired campaign."""
+    metadata["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    metadata["control"]["final_sha256"] = sha256_file(control)
+    metadata["candidate"]["final_sha256"] = sha256_file(candidate)
+    metadata["binary_inputs_stable"] = all(
+        metadata[name]["sha256"] == metadata[name]["final_sha256"]
+        for name in ("control", "candidate")
+    )
+    if "lambda_source_corpus" in metadata:
+        final_corpus = lambda_source_corpus()
+        metadata["lambda_source_corpus_final_sha256"] = final_corpus["sha256"]
+        metadata["lambda_source_corpus_stable"] = (
+            metadata["lambda_source_corpus"]["sha256"] == final_corpus["sha256"]
+        )
+        final_c = c2mir_source_corpus()
+        metadata["c2mir_source_corpus_final_sha256"] = final_c["sha256"]
+        metadata["c2mir_source_corpus_stable"] = (
+            metadata["c2mir_source_corpus"]["sha256"] == final_c["sha256"]
+        )
+        metadata["lambda_build_manifest_stable"] = (
+            metadata["lambda_build_manifest"] == lambda_build_manifest()
+        )
+
+
 def source_provenance(script, source_root=None):
     """Record entry and transitive-source-tree identities for a timed script."""
     script = os.path.abspath(script)
@@ -464,7 +527,10 @@ def main():
         "control": {"path": control, "sha256": sha256_file(control)},
         "candidate": {"path": candidate, "sha256": sha256_file(candidate)},
         "git_commit": command_output(["git", "rev-parse", "HEAD"]),
+        "git_status": command_output(["git", "status", "--short"]),
         "power_state": command_output(["pmset", "-g", "batt"]) if platform.system() == "Darwin" else None,
+        "os_version": platform.platform(),
+        "mir_cache_disabled": os.environ.get("LAMBDA_DISABLE_MIR_CACHE"),
         "suite_filters": suite_filters or [],
         "bench_filters": bench_filters or [],
         "variants": variants,
@@ -486,6 +552,10 @@ def main():
         "jetstream_post_timing_oracle": args.jetstream_post_timing_oracle,
         "command": " ".join(sys.argv),
     }
+    if args.language == "lambda":
+        metadata["lambda_source_corpus"] = lambda_source_corpus()
+        metadata["c2mir_source_corpus"] = c2mir_source_corpus()
+        metadata["lambda_build_manifest"] = lambda_build_manifest()
     if args.manifest:
         metadata["manifest"] = {
             "path": manifest_path,
@@ -545,8 +615,7 @@ def main():
             ratio_text = "n/a" if ratio is None else f"{ratio:.4f}"
             print(f" ratio={ratio_text} wins={row['candidate_wins']}/{row['pairs_valid']}"
                   f" stdout_equal={row['stdout_equal_all']}")
-        artifact["_metadata"]["finished_at"] = datetime.datetime.now().isoformat(
-            timespec="seconds")
+        finalize_provenance(metadata, control, candidate)
         with open(output, "w") as stream:
             json.dump(artifact, stream, indent=2)
         print(f"Saved paired artifact to {output}")
@@ -596,7 +665,7 @@ def main():
             ratio_text = "n/a" if ratio is None else f"{ratio:.4f}"
             print(f" ratio={ratio_text} wins={row['candidate_wins']}/{row['pairs_valid']} stdout_equal={row['stdout_equal_all']}")
 
-    artifact["_metadata"]["finished_at"] = datetime.datetime.now().isoformat(timespec="seconds")
+    finalize_provenance(metadata, control, candidate)
     with open(output, "w") as stream:
         json.dump(artifact, stream, indent=2)
     print(f"Saved paired artifact to {output}")

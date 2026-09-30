@@ -2885,6 +2885,20 @@ static Item map_get_by_name_id_keyed(Container* owner, TypeMap* map_type,
     if (!map_type || !map_data || name_id == NAME_ID_NONE) return result;
     NameRef key = name_pool_resolve_id(context ? context->name_pool : NULL,
         name_id);
+    if (key && map_type->is_trusted_contract && !map_type->has_spread &&
+            typemap_hash_slots(map_type) &&
+            map_type->field_count < (uint16_t)typemap_hash_capacity(map_type)) {
+        // The builder indexes closed string-only declared shapes. Spreads and
+        // unindexed or saturated shapes keep their declaration-order walk.
+        int key_len = (int)key->len;  // INT_CAST_OK: pooled field-name length
+        ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key->chars,
+            key_len, typemap_name_hash(key->chars, key_len));
+        if (field) {
+            *is_found = true;
+            return map_read_field_for_owner(owner, field, map_data);
+        }
+        return result;
+    }
 
     FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) {

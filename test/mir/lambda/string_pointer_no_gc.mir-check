@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "D5.3.1–D5.3.2: audited fn_str_eq_ptr keeps a typed string-equality leaf rootless, so its entry uses BSTART and does not call the native stack probe.",
+  "checks": [
+    {
+      "in_func": "_equal_#",
+      "expect": ["bstart", "fn_str_eq_ptr_p, fn_str_eq_ptr"],
+      "forbid": ["lambda_stack_is_exhausted_p, lambda_stack_is_exhausted", "lambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for"]
+    }
+  ]
+}

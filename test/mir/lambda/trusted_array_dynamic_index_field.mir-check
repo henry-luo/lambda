@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3/S8.2.4v3: an indexed trusted record layout may be speculated across an untyped key only behind a runtime map-shape guard and a generic fallback.",
+  "checks": [
+    {
+      "in_func": "_local_key_#",
+      "expect": [
+        "mov\t{{r}}, u8:({{r}})",
+        "mov\t{{r}}, i64:8({{r}})",
+        "call\tfn_member_by_id_p, fn_member_by_id"
+      ]
+    },
+    {
+      "in_func": "_selected_key_#",
+      "expect": [
+        "mov\t{{r}}, i64:8({{r}})",
+        "call\tfn_member_by_id_p, fn_member_by_id"
+      ]
+    },
+    {
+      "in_func": "_nullable_position_#",
+      "expect": [
+        "mov\t{{r}}, i64:64({{r}})",
+        "mov\t{{r}}, i64:32({{r}})",
+        "call\titem_at_p, item_at"
+      ]
+    },
+    {
+      "in_func": "_task_flag_#",
+      "expect": [
+        "mov\t{{r}}, u8:({{r}})",
+        ", {{r}}, 18",
+        "mov\t{{r}}, i64:64({{r}})",
+        "mov\t{{r}}, i64:32({{r}})",
+        "call\titem_at_p, item_at"
+      ]
+    },
+    {
+      "in_func": "_task_id_#",
+      "expect": [
+        "mov\t{{r}}, u8:42({{r}})",
+        "mov\t{{r}}, u8:35({{r}})",
+        "call\tfn_member_by_id_p, fn_member_by_id"
+      ]
+    }
+  ]
+}

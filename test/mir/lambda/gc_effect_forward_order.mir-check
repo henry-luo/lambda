@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "description": "D5.3.1-D5.3.2: a later-declared NO_GC callee and a length leaf leave their caller rootless.",
+  "checks": [
+    {
+      "in_func": "_gc_order_forward_caller_#",
+      "expect": [
+        "call\t_gc_order_forward_leaf_",
+        "call\tfn_len_s_p, fn_len_s",
+        "bstart\t{{r}}"
+      ],
+      "forbid": [
+        "call\tlambda_stack_is_exhausted",
+        "call\tlambda_side_stack_ensure_for"
+      ]
+    }
+  ]
+}
