@@ -303,6 +303,14 @@ static inline ScalarReturnClass jit_import_scalar_return_class(const JitImportMe
         JIT_IMPORT_ARGS_BORROWED_AUDITED | JIT_IMPORT_PURE_SCALAR_CALL, \
      JIT_EXCEPTION_PRESERVES, 0}
 
+// A length observation reads a mutable container/string but cannot collect,
+// reenter, or retain its raw pointer; it is not a pure scalar call (D5.3.1).
+#define JIT_IMPORT_READ_ONLY_LENGTH \
+    {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR, \
+     JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER), \
+     JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES | \
+        JIT_IMPORT_ARGS_BORROWED_AUDITED, JIT_EXCEPTION_PRESERVES, 0}
+
 // Void imports have no merged-Item return transport and must be audited as
 // preserving the lane rather than silently relying on the emitter's fold.
 #define JIT_IMPORT_VOID_PRESERVES \

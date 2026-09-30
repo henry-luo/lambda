@@ -1028,6 +1028,7 @@ static Item box_float_number_stack(double dval) {
 // (`vibe/Lambda_Type_Int_Boxing.md` §3). Generated code inlines the hot arm and
 // calls this only for the sentinels and the >= 2^257 drift.
 Item int2it(double value) {
+    AutoAssertNoGC no_gc;
     return {.item = lambda_int_box_double(value)};
 }
 
@@ -1173,6 +1174,7 @@ Item int2it_lane(int64_t lane) {
 // Same encoder for callers that hold a native int64 (the guest-language
 // transpilers, whose compiler API has no int-to-double conversion).
 Item int2it_i64(int64_t value) {
+    AutoAssertNoGC no_gc;
     return {.item = lambda_int_box_lane(value)};
 }
 
@@ -1190,6 +1192,7 @@ Item flt2it(double dval) {
 }
 
 Item push_d(double dval) {
+    AutoAssertNoGC no_gc;
     return flt2it(dval);
 }
 
@@ -1276,6 +1279,7 @@ extern "C" Item lambda_item_resolve_pending_slot(Item value) {
 }
 
 Item box_int64_value(int64_t lval) {
+    AutoAssertNoGC no_gc;
     if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("int64 number-home boxing called with invalid context");
         return ItemError;
@@ -1292,6 +1296,7 @@ Item box_int64_value(int64_t lval) {
 }
 
 Item box_uint64_value(uint64_t uval) {
+    AutoAssertNoGC no_gc;
     if (!context || (!context->side_number_top && !lambda_side_stack_bind())) {
         log_error("uint64 number-home boxing called with invalid context");
         return ItemError;

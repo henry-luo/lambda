@@ -1001,10 +1001,13 @@ enum MapKind {
     MAP_KIND_GENERATOR   = 18, // JSCU9: generator carrier with suspended native state
 };
 
+#define CONTAINER_FLAG_STATIC (1u << 4)
 #define CONTAINER_FLAG_IMMORTAL (1u << 5)
 // the list kind bit (`is_spreadable`, S2.5.1v2), for code that tests `flags`
 // without a Container pointer -- the JIT's slot-store list test (S2.5.6)
 #define CONTAINER_FLAG_SPREADABLE (1u << 1)
+#define CONTAINER_ARRAY_FLAG_NDIM (1u << 0)
+#define CONTAINER_ARRAY_FLAG_NATIVE_LANE (1u << 4)
 // raw masks remain part of the container ABI for code that snapshots `flags`
 // without a Container pointer (notably the moving GC).
 // D2.6.6v2/D2.6.11: bit 6 was `has_js_props`, retired when the JS companion map
@@ -3380,16 +3383,20 @@ extern "C" {
     Element* elmt_literal_begin(struct TypeElmt* type);
     bool cow_item_is_container(Item value);
     Item cow_mark_shared(Item value);
+    Item cow_mark_shared_profiled(Item value);
     Item array_num_set_cow_idx(Item owner, int64_t index, Item value);
     Item index_assign_cow(Item owner, Item key, Item value);
     Item cow_capture_value(Item value);
+    Item cow_capture_value_profiled(Item value);
     Item cow_bind_rmw_handle(Item root, Item value, int64_t count, Item key1, Item key2);  // CW34
     // S9.3.1 insertion capture is unconditional; the helper remains the
     // shared runtime entry point for marking captured values.
     // Capture every field of a freshly built shaped literal (S9.3.1).
     void cow_mark_shape_children(struct TypeMap* type, void* data);
     Item cow_bind_var(Item value);
+    Item cow_bind_var_profiled(Item value);
     Item cow_prepare_write(Item old);
+    Item cow_prepare_write_profiled(Item old);
     // Closed JIT builder path for an unannotated `[]` whose append proof
     // establishes an int lane; it retains normal COW replacement semantics.
     Item lambda_array_int_push_inferred_cow(Item owner, Item value);
@@ -3412,11 +3419,36 @@ extern "C" {
     void cow_profile_note_vmap_snapshot(void);
     void cow_profile_note_vmap_rejection(void);
     void cow_profile_dump(void);
+    // MIR Direct's opt-in executed call census. IDs are registered while
+    // lowering and incremented only by diagnostic MIR (D5.4.4).
+    enum LambdaExecCallKind {
+        LAMBDA_EXEC_CALL_HELPER = 1,
+        LAMBDA_EXEC_CALL_RAW = 2,
+        LAMBDA_EXEC_CALL_BOXED = 3,
+        LAMBDA_EXEC_CALL_INDIRECT = 4,
+        LAMBDA_EXEC_CALL_UNKNOWN = 5,
+        LAMBDA_EXEC_ROOT_STORE = 6,
+        LAMBDA_EXEC_ROOT_RELOAD = 7,
+        LAMBDA_EXEC_FRAME_ENTRY = 8,
+        LAMBDA_EXEC_DENSE_ATTEMPT = 9,
+        LAMBDA_EXEC_DENSE_FAST = 10,
+        LAMBDA_EXEC_FIELD_ATTEMPT = 11,
+        LAMBDA_EXEC_FIELD_FAST = 12,
+        LAMBDA_EXEC_LAYOUT_ITEMS_RELOAD = 13,
+        LAMBDA_EXEC_LAYOUT_LENGTH_RELOAD = 14,
+    };
+    bool lambda_exec_profile_enabled(void);
+    uint64_t lambda_exec_profile_register_call(const char* name,
+        uint64_t kind);
+    uint64_t lambda_exec_profile_note_call(uint64_t id);
     // LambdaJS realm-slot reservation census row (exec profile)
     void cow_profile_count_js_realm_reservation(void);
     Item array_set_cow(Item owner, Item key, Item value);
     Item member_set_cow(Item owner, Item key, Item value);
+    Item member_set_cow_profiled(Item owner, Item key, Item value);
     Item map_set_cow(Item owner, Item key, Item value);
+    Item map_set_cow_profiled(Item owner, Item key, Item value);
+    bool cow_profile_sites_enabled(void);
     Item cow_path_set_raw(Item owner, Item key, Item value);
     int64_t cow_path_set_packed_index(Item owner, int64_t count, Item key0, Item key1,
         Item key2, Item value);

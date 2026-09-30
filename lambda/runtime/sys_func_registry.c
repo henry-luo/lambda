@@ -1462,6 +1462,7 @@ JitImport jit_runtime_imports[] = {
     {"array_float_literal_with_nulls", FPTR(array_float_literal_with_nulls)},
     {"array_float_set", FPTR(array_float_set)},
     {"array_int_new", FPTR(array_int_new)},
+    {"array_num_new_uninit", FPTR(array_num_new_uninit)},
     {"array_int_set", FPTR(array_int_set)},
     {"array_num_new", FPTR(array_num_new)},
     {"array_num_new_ndim", FPTR(array_num_new_ndim)},
@@ -1528,8 +1529,10 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"v2it", FPTR(v2it)},
+    // push_d only encodes an inline float or writes a number-stack home;
+    // side-stack growth cannot collect GC objects (D5.2.2v3, D5.3.2).
     {"push_d", FPTR(push_d),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"complex_new", FPTR(complex_new)},
     {"lambda_item_adopt_scalar_home", FPTR(lambda_item_adopt_scalar_home),
@@ -1558,12 +1561,13 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"box_int64_value", FPTR(box_int64_value),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     // C16 canonical int encoder — the flex-int promote lane's cold path.
     {"int2it", FPTR(int2it),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
 
     // String/binary builders and the arg-extreme pair, declared `&TYPE_ANY`.
     // Every return path was read:
@@ -1724,10 +1728,11 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR)}},
     {"int2it_i64", FPTR(int2it_i64),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
-      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
     {"box_uint64_value", FPTR(box_uint64_value),
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR)}},
     {"owned_item_slot_read", FPTR(owned_item_slot_read),
      {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
@@ -1924,7 +1929,12 @@ JitImport jit_runtime_imports[] = {
     {"fn_rollback", FPTR(fn_rollback)},
     {"fn_open_begin", FPTR(fn_open_begin)},
     {"fn_open_end", FPTR(fn_open_end)},
-    {"fn_str_eq_ptr", FPTR(fn_str_eq_ptr)},
+    // String pointer equality only reads immutable bytes and calls memcmp;
+    // a generated success arm need not publish roots for it (D5.3.2).
+    {"fn_str_eq_ptr", FPTR(fn_str_eq_ptr),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_GC_POINTER)}},
     {"fn_sym_eq_ptr", FPTR(fn_sym_eq_ptr)},
     {"fn_lt", FPTR(fn_lt)},
     {"fn_gt", FPTR(fn_gt)},
@@ -1984,9 +1994,9 @@ JitImport jit_runtime_imports[] = {
     {"fn_ceil_i", FPTR(fn_ceil_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_round_i", FPTR(fn_round_i), JIT_IMPORT_PURE_SCALAR},
     // collection length — type-specialized native variants
-    {"fn_len_l", FPTR(fn_len_l)},
-    {"fn_len_a", FPTR(fn_len_a)},
-    {"fn_len_s", FPTR(fn_len_s)},
+    {"fn_len_l", FPTR(fn_len_l), JIT_IMPORT_READ_ONLY_LENGTH},
+    {"fn_len_a", FPTR(fn_len_a), JIT_IMPORT_READ_ONLY_LENGTH},
+    {"fn_len_s", FPTR(fn_len_s), JIT_IMPORT_READ_ONLY_LENGTH},
     {"fn_len_e", FPTR(fn_len_e)},
 
     // ========================================================================
@@ -2133,18 +2143,42 @@ JitImport jit_runtime_imports[] = {
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"cow_mark_shared_profiled", FPTR(cow_mark_shared_profiled),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"array_num_set_cow_idx", FPTR(array_num_set_cow_idx)},
     {"index_assign_cow", FPTR(index_assign_cow)},
     {"cow_capture_value", FPTR(cow_capture_value),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
       JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
       JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"cow_bind_var", FPTR(cow_bind_var)},
+    {"cow_capture_value_profiled", FPTR(cow_capture_value_profiled),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"lambda_exec_profile_note_call", FPTR(lambda_exec_profile_note_call),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    // Binding now uses the same non-allocating share mark as insertion;
+    // the profiled arm only updates bounded diagnostic counters (D5.3.2).
+    {"cow_bind_var", FPTR(cow_bind_var),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"cow_bind_var_profiled", FPTR(cow_bind_var_profiled),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"cow_bind_rmw_handle", FPTR(cow_bind_rmw_handle)},
     {"cow_prepare_write", FPTR(cow_prepare_write)},
+    {"cow_prepare_write_profiled", FPTR(cow_prepare_write_profiled)},
     {"array_set_cow", FPTR(array_set_cow)},
     {"member_set_cow", FPTR(member_set_cow)},
+    {"member_set_cow_profiled", FPTR(member_set_cow_profiled)},
     {"map_set_cow", FPTR(map_set_cow)},
+    {"map_set_cow_profiled", FPTR(map_set_cow_profiled)},
     {"cow_path_set_raw", FPTR(cow_path_set_raw)},
     {"cow_path_set_packed_index", FPTR(cow_path_set_packed_index)},
     {"cow_path_set", FPTR(cow_path_set)},
@@ -3784,6 +3818,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "setjmp",
 #endif
         "is_truthy",
+        "push_d", "box_int64_value", "box_uint64_value",
+        "int2it", "int2it_i64",
         "lambda_mir_double_bits", "lambda_mir_bits_double",
         "lambda_item_adopt_scalar_home", "lambda_item_resolve_pending",
         "lambda_restore_number_frame_top",
@@ -3794,7 +3830,11 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_async_frame_get_word",
         // Exact String-character equality reads only the already-rooted Item.
         "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at",
+        "fn_str_eq_ptr",
         "item_type_id", "it2l", "it2u", "it2d", "it2k", "it2i", "it2b", "it2s", "it2x",
+        // These three read existing metadata; the element variant can allocate
+        // while flattening spread attributes and remains MAY_GC.
+        "fn_len_l", "fn_len_a", "fn_len_s",
         // v5 int lane: pure integer arithmetic on lane values, no allocation.
         "lambda_int_lane_to_double_c", "lambda_float_null_lane_c",
         "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
@@ -3859,7 +3899,10 @@ bool jit_import_validate_no_gc_allowlist(void) {
         // Emitted only under LAMBDA_ROOT_WITNESS, so release MIR has none.
         "lambda_jit_root_witness",
         // COW share-mark: one header bit, returns the argument (Tune29 §19.1)
-        "cow_mark_shared", "cow_capture_value",
+        "cow_mark_shared", "cow_capture_value", "cow_bind_var",
+        "cow_mark_shared_profiled", "cow_capture_value_profiled",
+        "cow_bind_var_profiled",
+        "lambda_exec_profile_note_call",
     };
     const int audited_count = (int)(sizeof(audited) / sizeof(audited[0]));
     int no_gc_count = 0;

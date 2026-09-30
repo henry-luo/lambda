@@ -6,7 +6,7 @@
       "in_func": "_fixed_result_#",
       "expect": ["dadd", "dsub", "dmul"],
       "count": {"blt": 2, "call\tfn_index_p, fn_index": 0},
-      "forbid": ["call\tarray_float_new_p, array_float_new"]
+      "forbid": ["call\tarray_float_new_p, array_float_new", "call\tarray_num_new_uninit_p, array_num_new_uninit"]
     },
     {
       "in_func": "_escaping_result_#",
@@ -14,7 +14,7 @@
     },
     {
       "in_func": "_rebound_result_#",
-      "expect": ["call\t_vector_mix", "call\tarray_float_new_p, array_float_new"]
+      "expect": ["call\t_vector_mix", "call\tarray_num_new_uninit_p, array_num_new_uninit"]
     }
   ]
 }

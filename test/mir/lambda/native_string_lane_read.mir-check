@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3: an uncertified native string lane takes a physical guard before a direct load; item_at remains the cold fallback.",
+  "checks": [
+    {
+      "in_func": "_read__raw0_#",
+      "expect_seq": [
+        "u8:(%p1)",
+        "u8:2(%p1)",
+        "{{r}}, {{r}}, 16",
+        "u8:3(%p1)",
+        "{{r}}, {{r}}, 7",
+        "u8:7(%p1)",
+        "item_at_p, item_at"
+      ],
+      "forbid": ["fn_index_p, fn_index"]
+    }
+  ]
+}

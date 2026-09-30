@@ -36,7 +36,7 @@
       "in_func": "_literal_arg_#",
       "expect_seq": [
         {
-          "pattern": "call\tarray_float_new_p, array_float_new"
+          "pattern": "call\tarray_num_new_uninit_p, array_num_new_uninit"
         },
         {
           "pattern": "call\tarray_float_literal_with_nulls_p, array_float_literal_with_nulls"

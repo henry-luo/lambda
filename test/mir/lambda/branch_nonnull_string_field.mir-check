@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "description": "S7.1.1v3/D3.2.6: a dominated non-null fact admits a required string field's native pointer load, while nullable and rebound receivers retain null-preserving generic reads.",
+  "checks": [
+    {
+      "in_func": "_guarded_#",
+      "expect": ["mov\t{{r}}, i64:({{r}})"],
+      "forbid": ["call\tfn_member_by_id_p, fn_member_by_id"]
+    },
+    {
+      "in_func": "_unguarded_#",
+      "expect": ["call\tfn_member_by_id_p, fn_member_by_id"]
+    },
+    {
+      "in_func": "_rebound_#",
+      "expect": ["call\tfn_member_by_id_p, fn_member_by_id"]
+    }
+  ]
+}

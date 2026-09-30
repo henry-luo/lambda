@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "D4.4.4v4/S9.1.2: a collecting split refreshes a stable admitted int[] data pointer but does not reload its unchanged logical length; a var-resizing path retains checked mutation and fresh length reads.",
+  "checks": [
+    {
+      "in_func": "_stable_length_#",
+      "expect_seq": [
+        {"pattern": "mov\t{{r:items}}, i64:32({{r:array}})"},
+        {"pattern": "mov\t{{r:length}}, i64:40({{r:array}})"},
+        {"pattern": "call\tfn_split2_p, fn_split2"},
+        {"pattern": "mov\t{{r:items}}, i64:32({{r:array}})"}
+      ],
+      "count": {"mov\t{{r}}, i64:40({{r}})": 2}
+    },
+    {
+      "in_func": "_changing_length_#",
+      "expect": [
+        "call\tfn_split2_p, fn_split2",
+        "call\tlambda_array_push_checked_p, lambda_array_push_checked",
+        "i64:40({{r}})"
+      ]
+    },
+    {
+      "in_func": "_resize_local_#",
+      "expect_seq": [
+        {"pattern": "call\tfn_split2_p, fn_split2"},
+        {"pattern": "call\tlambda_array_push_checked_p, lambda_array_push_checked"},
+        {"pattern": "mov\t{{r}}, i64:40({{r}})"}
+      ]
+    }
+  ]
+}

@@ -506,8 +506,9 @@ static void js_array_install_runtime_items(Array* arr, Item* items, int64_t capa
         JS_OPT_OUTCOME_TAKEN);
 }
 
-JS_FORWARD_STATIC_RETURN(int64_t, js_array_dense_capacity, (const Array* arr),
-    container_dense_capacity, (arr))
+static int64_t js_array_dense_capacity(const Array* arr) {
+    return container_dense_capacity(arr);
+}
 
 // J1: the growth-sizing value for js_array_store_owned (its only caller).
 //
@@ -658,8 +659,7 @@ static bool js_array_promote_numeric_to_tagged(Item array_item) {
 }
 JS_FORWARD_RETURN(bool, js_array_promote_numeric, (Item array_item), js_array_promote_numeric_to_tagged, (array_item))
 
-static void js_array_store_owned(Array* arr, int64_t index, Item value) {
-    if (!arr || index < 0) return;
+static void js_array_note_stored_value(Array* arr, Item value) {
     if (arr->is_js_arguments) {
         container_set_js_elements_kind((Container*)arr, JS_ELEMENTS_NONE);
     } else {
@@ -680,6 +680,11 @@ static void js_array_store_owned(Array* arr, int64_t index, Item value) {
             }
         }
     }
+}
+
+static void js_array_store_owned(Array* arr, int64_t index, Item value) {
+    if (!arr || index < 0) return;
+    js_array_note_stored_value(arr, value);
     if (arr->items && arr->extra == 0 && index < js_array_dense_capacity(arr)) {
         // Only arrays without a scalar tail can bypass the required scan: wide
         // scalar writes consume capacity from that tail and must retain it.
@@ -6621,13 +6626,17 @@ static bool js_func_has_own_property_map_key(Item object, const char* name, int 
 }
 
 static bool js_array_companion_has_numeric_slot(Array* arr, int64_t index) {
-    if (!js_array_has_props(arr) || index < 0) return false;
+    if (!js_array_has_props(arr) || index < 0 ||
+            index > (int64_t)JS_PROPERTY_INDEX_MAX) return false;
     Map* pm = js_array_props(arr);
     if (!pm || !map_kind_is_array_props(pm->map_kind)) return false;
     TypeMap* tm = (TypeMap*)pm->type;
     if (!tm || !tm->has_array_index_shape) return false;
-    int idx_len = 0;
-    const char* idx_buf = js_property_index_chars(index, &idx_len);
+    // This lookup is called from audited NO_GC reads. Converting the index
+    // through ToPropertyKey can enter JS; write its canonical decimal key
+    // into caller-owned storage instead (D5.3.2).
+    char idx_buf[32];
+    int idx_len = (int)str_uint64_decimal_write(idx_buf, (uint64_t)index);
     Item pm_item = (Item){.map = pm};
     JsShapeSlotStatus status = js_own_shape_slot_status(pm_item, idx_buf, idx_len, NULL, NULL);
     return status == JS_SHAPE_SLOT_DATA || status == JS_SHAPE_SLOT_ACCESSOR ||
@@ -9858,17 +9867,18 @@ extern "C" bool js_array_try_set_existing_own_dense_no_gc(Item array, int64_t in
     }
     Array* arr = array.array;
     if (!arr || arr->is_js_arguments == 1 || arr->extra != 0 ||
+            array_has_native_lane(arr) ||
             index >= arr->length || index >= js_array_dense_capacity(arr) ||
             arr->items[index].item == JS_DELETED_SENTINEL_VAL ||
             (js_array_has_props(arr) &&
                 js_array_companion_has_numeric_slot(arr, index))) {
         return false;
     }
-    // These guards exclude descriptor overlays, growth and scalar-home
-    // adoption, so the owned write cannot allocate or re-enter while holding
-    // the raw Array pointer.
+    // D5.3.2: use the proven existing slot directly so this NO_GC entry
+    // cannot reach the allocating growth arm of js_array_store_owned.
     AutoAssertNoGC no_gc;
-    js_array_store_owned(arr, index, value);
+    js_array_note_stored_value(arr, value);
+    arr->items[index] = value;
     js_opt_trace_record(JS_OPT_ARRAY_SET_FAST_HIT,
         JS_OPT_REASON_NONE, JS_OPT_OUTCOME_TAKEN);
     return true;

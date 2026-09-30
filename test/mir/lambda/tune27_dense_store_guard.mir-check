@@ -1,7 +1,15 @@
 {
   "schema_version": 1,
-  "description": "Result44 fix (Tune27 \u00a712): after the extent product (mulo) and the per-root length folds `and g, g, len_ok`, the store guard is a NEW register `and s, g, write_guard` -- the read guard `g` is never folded with T26-4's ownership word, so a `var` store root whose word fails at loop entry cannot send the reads of its sibling roots to the checked arm (typed matmul 3x).",
+  "description": "D3.3.3v3: the dynamic ArrayNum carrier guard reads Container.type_id at byte 0, then layout flags at byte 2; reading Map.type at byte 8 rejects the fast arm for valid numeric arrays. Result44: the extent and unique-owner store guards stay separate, so a failed store ownership word does not force sibling reads to the checked arm.",
   "checks": [
+    {
+      "in_func": "_matmul_#",
+      "expect_seq": [
+        { "pattern": "mov\t{{r:dense_type}}, u8:({{r:array}})" },
+        { "pattern": ", {{r:dense_type}}, 17", "next_line": true },
+        { "pattern": "mov\t{{r}}, u8:2({{r:array}})", "next_line": true }
+      ]
+    },
     {
       "in_func": "_matmul_#",
       "expect_seq": [

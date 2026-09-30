@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "D2.2.2/S4.1.2: dominated two-sided or equality bounds remove int53 slow arithmetic for stable bindings; one-sided, joined, and reassigned values retain it.",
+  "checks": [
+    {"in_func": "_bounded_#", "forbid": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]},
+    {"in_func": "_reversed_#", "forbid": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]},
+    {"in_func": "_equal_#", "forbid": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]},
+    {"in_func": "_bounded_local_#", "forbid": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]},
+    {"in_func": "_bounded_param_#", "forbid": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]},
+    {"in_func": "_unbounded_#", "expect": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]},
+    {"in_func": "_leaked_#", "expect": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]},
+    {"in_func": "_rebound_param_#", "expect": ["call\tlambda_int_lane_add_slow_p, lambda_int_lane_add_slow"]}
+  ]
+}

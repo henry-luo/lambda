@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3/S8.2.4v3: a unique trusted record inside an open array is only a guarded candidate; other maps, non-maps, and invalid indexes keep the generic member read.",
+  "checks": [
+    {
+      "in_func": "_read_count_#",
+      "expect": [
+        "mov\t{{r}}, u8:({{r}})",
+        "mov\t{{r}}, i64:8({{r}})",
+        "mov\t{{r}}, i64:8({{r}})",
+        "call\tfn_member_by_id_p, fn_member_by_id"
+      ]
+    }
+  ]
+}

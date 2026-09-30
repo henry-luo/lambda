@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "description": "S7.1.1v3/D2.5.3: dominated nonnegative and rank-one length facts remove the indexed-read null arm; missing, mismatched, joined, or rebound facts retain it.",
+  "checks": [
+    {"in_func": "_guarded_#", "expect": ["lsh\t{{r}}"], "forbid": ["dmov\t{{r}}, nan"]},
+    {"in_func": "_reversed_#", "expect": ["lsh\t{{r}}"], "forbid": ["dmov\t{{r}}, nan"]},
+    {"in_func": "_no_lower_#", "expect": ["dmov\t{{r}}, nan"]},
+    {"in_func": "_different_#", "expect": ["dmov\t{{r}}, nan"]},
+    {"in_func": "_leaked_#", "expect": ["dmov\t{{r}}, nan"]},
+    {"in_func": "_rebound_#", "expect": ["dmov\t{{r}}, nan"]}
+  ]
+}

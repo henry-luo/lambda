@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "S4.1.2/D3.3.3v3: finite literal int arrays use direct freshly allocated lanes; dynamic members retain checked stores.",
+  "checks": [
+    {
+      "in_func": "_literal_#",
+      "expect": ["call\tarray_num_new_uninit_p, array_num_new_uninit", "i64:({{r}})"],
+      "forbid": ["call\tarray_int_set_p, array_int_set", "call\tarray_int_new_p, array_int_new"]
+    },
+    {
+      "in_func": "_dynamic_#",
+      "expect": ["call\tarray_int_set_p, array_int_set"]
+    }
+  ]
+}

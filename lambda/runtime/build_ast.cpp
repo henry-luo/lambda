@@ -2127,6 +2127,12 @@ static bool ast_index_keys_select(AstNode* field) {
         return true;
     }
     TypeId key_type = key->type ? key->type->type_id : LMD_TYPE_ANY;
+    // A declared int member can carry a TYPE-tagged annotation in the AST;
+    // it remains a positional key, not a type selection (S8.2.4v3).
+    if (key_type == LMD_TYPE_TYPE) {
+        Type* contract = declared_compound_destination_type(NULL, key, NULL);
+        if (contract && is_integer_type_id(contract->type_id)) return false;
+    }
     return key_type == LMD_TYPE_RANGE || key_type == LMD_TYPE_ARRAY ||
         key_type == LMD_TYPE_ARRAY_NUM || key_type == LMD_TYPE_TYPE;
 }
@@ -8481,6 +8487,25 @@ static void syntax_move_attachments(LambdaSyntaxSink* sink, AstNode* from,
     to->syntax_flags |= LSF_FLAG_ATTACHED;
 }
 
+// Declared records are immutable after their shape closes. Build their name
+// index once for dynamic reads of otherwise trusted values; tiny records keep
+// the cheaper chain walk and spread shapes retain source-order traversal.
+static void direct_prepare_trusted_field_index(TypeMap* map, Pool* pool) {
+    if (!map || !pool || !map->is_trusted_contract || map->has_spread ||
+            map->length < 4 || map->field_index) return;
+    FOR_EACH_MAP_FIELD(map, field) {
+        if (!field->name || field->key_kind != NAME_KEY_STRING) return;
+        for (ShapeEntry* earlier = typemap_first_field(map); earlier && earlier != field;
+                earlier = typemap_next_field(map, earlier)) {
+            // The shared hash uses NameId identity; byte-duplicate fields may
+            // have distinct IDs, so keep their ordered walk authoritative.
+            if (shape_field_name_equals(earlier, field->name->str,
+                    field->name->length)) return;
+        }
+    }
+    typemap_hash_build(map, pool);
+}
+
 // Closing a recursive union changes a forward field from a map pointer to
 // an Item. Refresh its cached storage descriptor and any affected packed
 // offsets before literals or native readers can consume the contract (D3.4.1).
@@ -8567,6 +8592,7 @@ static void direct_finalize_type_alias(Transpiler* tp, AstDeclaratorNode* alias)
         TypeMap* map = (TypeMap*)actual;
         map->struct_name = alias->name->chars;
         map->is_trusted_contract = true;
+        direct_prepare_trusted_field_index(map, tp->pool);
     }
     // S11.2.1: every literal is a type -- its value's singleton -- so a numeric
     // literal is wrapped like a string one. Only string and symbol literals
@@ -15611,6 +15637,7 @@ static void resolver_object_end(LambdaResolver* r) {
     }
     r->object_type->byte_size = r->object_byte_offset;
     r->object_type->last = r->object_shape_tail;
+    direct_prepare_trusted_field_index((TypeMap*)r->object_type, r->tp->pool);
     arraylist_append(r->tp->type_list, r->object_node->type);
     r->object_type->type_index = r->tp->type_list->length - 1;
     lambda_ast_leave_scope(r->tp, r->object_scope);

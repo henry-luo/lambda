@@ -22,5 +22,6 @@ let html = structurizr.to_html(workspace, "Context")
     [for (node in model.nodes(cluster)) [node.id, node["c4-kind"]]],
     [for (node in direct(containers, "node")) node.id],
     [for (edge in model.edges(containers)) [edge.from, edge.to]]],
-  html: [string(name(html)), html.class, html["data-radiant-layout"], len(html)]
+  html: [string(name(html)), html.class, html["data-radiant-layout"],
+    html["data-graph-flavor"], len(content(html))]
 }

@@ -1,0 +1,2 @@
+[false, null, 2.5, null]
+[null, 1.25]

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "description": "S5.1.4v2/D2.4.1: an empty string literal uses the immutable shared String and does not resolve a module constant; a nonempty literal still uses its module slab.",
+  "checks": [
+    {
+      "in_func": "_empty_#",
+      "forbid": ["lambda_module_state_for_unit_p, lambda_module_state_for_unit"]
+    },
+    {
+      "in_func": "_filled_#",
+      "expect": ["lambda_module_state_for_unit_p, lambda_module_state_for_unit"]
+    }
+  ]
+}

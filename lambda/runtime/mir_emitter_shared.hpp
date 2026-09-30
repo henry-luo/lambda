@@ -503,6 +503,8 @@ struct MirEmitter {
     int label_counter;            // monotonic label/proto-id source
     struct hashmap* import_cache; // name -> import (proto+import) memo
     void (*note_mir_call)(const char* name); // optional per-language call telemetry hook
+    uint64_t (*profile_call_id)(const char* name, uint64_t kind);
+    bool profile_callers;
     // Optional front-end telemetry for a call moved out of a structured loop.
     // The common optimizer owns the move; a profile can classify its own imports.
     void (*note_loop_invariant_call)(void* owner, const char* name);
@@ -1145,6 +1147,8 @@ static inline void em_emit_borrowed_call(MirEmitter* em,
         const char* call_name, MIR_insn_t insn);
 static inline void em_emit_destination_owned_call(MirEmitter* em,
         const char* call_name, MIR_insn_t insn);
+static inline void em_profile_before_call(MirEmitter* em, MIR_insn_t call,
+        const char* name, uint64_t kind);
 
 static inline void em_emit_insn(MirEmitter* em, MIR_insn_t insn) {
     if (em && em->frame.active && insn &&
@@ -2232,6 +2236,26 @@ static inline void em_drop_unused_definition(MirEmitter* em, MIR_reg_t reg) {
 static inline void em_insert_native_stack_guard(MirEmitter* em,
         MIR_insn_t before, MIR_label_t overflow) {
     if (!em || !before || !overflow) return;
+    MIR_reg_t limit = em_new_reg(em, "stack_limit", MIR_T_I64);
+    MIR_insert_insn_before(em->ctx, em->func_item, before,
+        MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, limit),
+            MIR_new_mem_op(em->ctx, MIR_T_I64,
+                (MIR_disp_t)offsetof(Context, stack_limit), em->frame.runtime, 0, 1)));
+    if (em->frame.root_slot_count == 0) {
+        // MIR_BSTART changes backend allocation; root-bearing hot bodies
+        // regressed when it replaced their existing audited probe.
+        MIR_reg_t stack_at_entry = em_new_reg(em, "stack_at_entry", MIR_T_I64);
+        MIR_insert_insn_before(em->ctx, em->func_item, before,
+            MIR_new_insn(em->ctx, MIR_BSTART,
+                MIR_new_reg_op(em->ctx, stack_at_entry)));
+        MIR_insert_insn_before(em->ctx, em->func_item, before,
+            MIR_new_insn(em->ctx, MIR_UBLT, MIR_new_label_op(em->ctx, overflow),
+                MIR_new_reg_op(em->ctx, stack_at_entry),
+                MIR_new_reg_op(em->ctx, limit)));
+        em_profile_before_call(em, before,
+            MIR_item_name(em->ctx, em->func_item), LAMBDA_EXEC_FRAME_ENTRY);
+        return;
+    }
     MIR_var_t arg = {MIR_T_I64, "stack_limit", 0};
     MirImportEntry* stack_check = em_ensure_import(em,
         "lambda_stack_is_exhausted", MIR_T_I64, 1, &arg, 1, false);
@@ -2240,19 +2264,18 @@ static inline void em_insert_native_stack_guard(MirEmitter* em,
         log_error("mir-stack-guard: stack probe lost its audited no-GC contract");
         abort();
     }
-    MIR_reg_t limit = em_new_reg(em, "stack_limit", MIR_T_I64);
     MIR_reg_t exhausted = em_new_reg(em, "stack_exhausted", MIR_T_I64);
-    MIR_insert_insn_before(em->ctx, em->func_item, before,
-        MIR_new_insn(em->ctx, MIR_MOV, MIR_new_reg_op(em->ctx, limit),
-            MIR_new_mem_op(em->ctx, MIR_T_I64,
-                (MIR_disp_t)offsetof(Context, stack_limit), em->frame.runtime, 0, 1)));
     MIR_op_t arg_op = MIR_new_reg_op(em->ctx, limit);
-    MIR_insert_insn_before(em->ctx, em->func_item, before,
-        mir_new_call_with_args(em->ctx, stack_check->proto, stack_check->import,
-            exhausted, 1, &arg_op));
+    MIR_insn_t check = mir_new_call_with_args(em->ctx, stack_check->proto,
+        stack_check->import, exhausted, 1, &arg_op);
+    MIR_insert_insn_before(em->ctx, em->func_item, before, check);
+    em_profile_before_call(em, check, "lambda_stack_is_exhausted",
+        LAMBDA_EXEC_CALL_HELPER);
     MIR_insert_insn_before(em->ctx, em->func_item, before,
         MIR_new_insn(em->ctx, MIR_BT, MIR_new_label_op(em->ctx, overflow),
             MIR_new_reg_op(em->ctx, exhausted)));
+    em_profile_before_call(em, before,
+        MIR_item_name(em->ctx, em->func_item), LAMBDA_EXEC_FRAME_ENTRY);
 }
 
 // Finalize reservation sizes; bound bodies skip binding, not frame reservation.
@@ -2923,6 +2946,8 @@ static inline void em_root_reload_live_values_after_call(MirEmitter* em,
                     (MIR_disp_t)sizeof(uint64_t),
                 em->frame.root_base, 0, 1));
         MIR_insert_insn_after(em->ctx, em->func_item, after, reload);
+        em_profile_before_call(em, reload,
+            MIR_item_name(em->ctx, em->func_item), LAMBDA_EXEC_ROOT_RELOAD);
         after = reload;
     }
 }
@@ -4435,6 +4460,8 @@ static inline void em_emit_unclassified_call(MirEmitter* em,
     em->frame.may_gc_call_count++;
     if (em->before_may_gc_call) em->before_may_gc_call(em->call_owner);
     mir_append_emit_insn(em->ctx, em->func_item, insn);
+    em_profile_before_call(em, insn, name,
+        call_name ? LAMBDA_EXEC_CALL_HELPER : LAMBDA_EXEC_CALL_UNKNOWN);
     if (!em_root_note_call_site(
             &em->frame.gc_call_sites, &em->frame.gc_call_site_count,
             &em->frame.gc_call_site_capacity, insn, JIT_EFFECT_MAY_GC,
@@ -4495,6 +4522,49 @@ static inline MirImportEntry* em_resolve_import(MirEmitter* em,
     if (nargs > 0) mir_prepare_call_args(args, arg_types, nargs);
     return em_ensure_import(em, fn_name, ret_type, nargs,
         nargs ? args : NULL, 1, include_signature);
+}
+
+static inline void em_profile_before_call(MirEmitter* em, MIR_insn_t call,
+        const char* name, uint64_t kind) {
+    if (!em || !em->profile_call_id || !call) return;
+    StrBuf* site = NULL;
+    const char* key = name;
+    if (em->profile_callers && name && kind <= LAMBDA_EXEC_CALL_UNKNOWN &&
+            em->func_item) {
+        const char* caller = MIR_item_name(em->ctx, em->func_item);
+        if (caller) {
+            site = strbuf_new_cap(strlen(caller) + strlen(name) + 5);
+            if (site) {
+                strbuf_append_format(site, "%s -> %s", caller, name);
+                key = site->str;
+            }
+        }
+    }
+    uint64_t id = em->profile_call_id(key, kind);
+    if (site) strbuf_free(site);
+    MIR_type_t arg_type = MIR_T_I64;
+    MirImportEntry* note = em_resolve_import(em,
+        "lambda_exec_profile_note_call", MIR_T_I64, 1, &arg_type, true);
+    if (!note) {
+        log_error("lambda-exec-profile: cannot import diagnostic call");
+        abort();
+    }
+    MIR_op_t arg = MIR_new_uint_op(em->ctx, id);
+    MIR_reg_t ignored = em_new_reg(em, "profile_call", MIR_T_I64);
+    MIR_insn_t mark = mir_new_call_with_args(em->ctx, note->proto,
+        note->import, ignored, 1, &arg);
+    MIR_insert_insn_before(em->ctx, em->func_item, call, mark);
+}
+
+static inline void em_profile_root_stores(MirEmitter* em) {
+    if (!em || !em->profile_call_id || !em->frame.root_base) return;
+    const char* name = MIR_item_name(em->ctx, em->func_item);
+    for (MIR_insn_t insn = DLIST_HEAD(MIR_insn_t, em->func->insns); insn;
+            insn = DLIST_NEXT(MIR_insn_t, insn)) {
+        if (em_is_eager_root_store(insn, em->frame.root_base)) {
+            em_profile_before_call(em, insn, name, LAMBDA_EXEC_ROOT_STORE);
+        }
+    }
 }
 
 static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
@@ -4583,6 +4653,8 @@ static inline MIR_reg_t em_call_with_args_policy(MirEmitter* em,
     } else {
         mir_append_emit_insn(em->ctx, em->func_item, call);
     }
+    em_profile_before_call(em, call, fn_name,
+        indirect_target ? LAMBDA_EXEC_CALL_INDIRECT : LAMBDA_EXEC_CALL_HELPER);
     em_after_resolved_call(em, fn_name, &resolved.call, call, res, ret_type);
     if (refresh_after_gc && em->after_may_gc_call &&
             resolved.call.effects.gc != JIT_EFFECT_NO_GC) {
@@ -4673,10 +4745,12 @@ static inline void em_call_void_with_args(MirEmitter* em,
     MIR_insn_t call = mir_new_call_with_args(em->ctx, ie->proto, ie->import,
         0, nargs, arg_ops);
     mir_append_emit_insn(em->ctx, em->func_item, call);
+    bool may_gc = ie->call.effects.gc != JIT_EFFECT_NO_GC;
     em_after_resolved_call(em, fn_name, &ie->call, call, 0, MIR_T_I64);
-    if (em->after_may_gc_call && ie->call.effects.gc != JIT_EFFECT_NO_GC) {
+    if (em->after_may_gc_call && may_gc) {
         em->after_may_gc_call(em->call_owner);
     }
+    em_profile_before_call(em, call, fn_name, LAMBDA_EXEC_CALL_HELPER);
 }
 
 static inline MIR_type_t em_mir_type_for_rep(ValueRep rep) {
@@ -4839,6 +4913,9 @@ static inline MirCallResult em_call_direct(MirEmitter* em,
             result, nargs, physical_ops);
     }
     mir_append_emit_insn(em->ctx, em->func_item, call);
+    em_profile_before_call(em, call, call_name,
+        variant && variant->entry.kind == FN_ENTRY_NATIVE_BODY
+            ? LAMBDA_EXEC_CALL_RAW : LAMBDA_EXEC_CALL_BOXED);
     // A shape-2 result is withheld from publication here (result operand 0):
     // it may be pending, and publishing writes it to memory. The call-site and
     // exception bookkeeping still runs. Both transports need this.

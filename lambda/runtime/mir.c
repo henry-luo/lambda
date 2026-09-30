@@ -305,7 +305,11 @@ static MIR_context_t jit_init_mode(unsigned int optimize_level,
         // is exactly what hid the shape-4 ret collapse. Level 4 = full detail.
         const char* gen_dbg = getenv("LAMBDA_MIR_GEN_DEBUG");
         if (gen_dbg) {
-            FILE* f = fopen("temp/mir_gen_debug.txt", "w");
+            // A fresh-process code-size census needs every imported module's
+            // lengths, not just the final MIR context's overwritten log.
+            const char* append = getenv("LAMBDA_MIR_GEN_DEBUG_APPEND");
+            FILE* f = fopen("temp/mir_gen_debug.txt",
+                append && append[0] && strcmp(append, "0") != 0 ? "a" : "w");
             if (f) {
                 MIR_gen_set_debug_file(ctx, f);
                 MIR_gen_set_debug_level(ctx, atoi(gen_dbg));

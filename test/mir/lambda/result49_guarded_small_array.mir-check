@@ -2,7 +2,7 @@
   "schema_version": 1,
   "description": "S7.1.1v3, D5.2: guarded fixed reads retain native scalar lanes while a short source replays the checked array declaration.",
   "checks": [
-    {"in_func": "_guarded_pair_#", "expect": ["blt", "dadd", "dsub", "call\tarray_float_new_p, array_float_new"]},
-    {"in_func": "_escaping_pair_#", "expect": ["call\tarray_float_new_p, array_float_new"]}
+    {"in_func": "_guarded_pair_#", "expect": ["blt", "dadd", "dsub", "call\tarray_num_new_uninit_p, array_num_new_uninit"]},
+    {"in_func": "_escaping_pair_#", "expect": ["call\tarray_num_new_uninit_p, array_num_new_uninit"]}
   ]
 }

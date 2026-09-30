@@ -786,24 +786,6 @@ static void lambda_main_mempool_cleanup_once(void) {
     mempool_cleanup();
 }
 
-// Peak resident set for the T0 memory report. macOS reports ru_maxrss in
-// bytes, Linux in kilobytes.
-static double lambda_peak_rss_mb(void) {
-#ifdef _WIN32
-    PROCESS_MEMORY_COUNTERS counters;
-    if (!GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters))) return 0.0;
-    return (double)counters.PeakWorkingSetSize / (1024.0 * 1024.0);
-#else
-    struct rusage usage;
-    if (getrusage(RUSAGE_SELF, &usage) != 0) return 0.0;
-#if defined(__APPLE__)
-    return (double)usage.ru_maxrss / (1024.0 * 1024.0);
-#else
-    return (double)usage.ru_maxrss / 1024.0;
-#endif
-#endif
-}
-
 // No silent caps (R4): the fallback count is always visible, and gates pin it
 // to zero outside the committed exclusion list.
 static void lambda_report_interp_run(void) {
@@ -821,7 +803,7 @@ static void lambda_report_interp_run(void) {
         (unsigned long long)stats->scripts_fallback,
         (unsigned long long)stats->scripts_excluded,
         (unsigned long long)stats->nodes_evaluated,
-        lambda_peak_rss_mb());
+        lambda_process_peak_rss_mb());
     fflush(stderr);
 }
 
@@ -1354,7 +1336,7 @@ static void emit_lambda_compiler_timing(const char* script_path) {
         "\x01" "COMPILER_TIMING schema=1 parse_us=%llu ast_build_us=%llu "
         "bind_us=%llu validate_us=%llu index_us=%llu analysis_us=%llu "
         "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
-        "build_transpile_us=%llu\n",
+        "build_transpile_us=%llu compile_peak_rss_bytes=%llu\n",
         (unsigned long long)timing.parse_us,
         (unsigned long long)timing.ast_build_us,
         (unsigned long long)timing.bind_us,
@@ -1364,7 +1346,8 @@ static void emit_lambda_compiler_timing(const char* script_path) {
         (unsigned long long)timing.mir_lower_us,
         (unsigned long long)timing.module_finalize_us,
         (unsigned long long)timing.link_us,
-        (unsigned long long)timing.build_transpile_us);
+        (unsigned long long)timing.build_transpile_us,
+        (unsigned long long)timing.compile_peak_rss_bytes);
     if (script_path) {
         const char* sample_name = strrchr(script_path, '/');
         sample_name = sample_name ? sample_name + 1 : script_path;
@@ -4417,7 +4400,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
                     printf("\x01" "COMPILER_TIMING schema=1 parse_us=%llu ast_build_us=%llu "
                            "bind_us=%llu validate_us=%llu index_us=%llu analysis_us=%llu "
                            "mir_lower_us=%llu module_finalize_us=%llu link_us=%llu "
-                           "build_transpile_us=%llu\n",
+                           "build_transpile_us=%llu compile_peak_rss_bytes=%llu\n",
                            (unsigned long long)timing.parse_us,
                            (unsigned long long)timing.ast_build_us,
                            (unsigned long long)timing.bind_us,
@@ -4427,7 +4410,8 @@ static int lambda_main_impl(int argc, char *argv[]) {
                            (unsigned long long)timing.mir_lower_us,
                            (unsigned long long)timing.module_finalize_us,
                            (unsigned long long)timing.link_us,
-                           (unsigned long long)timing.build_transpile_us);
+                           (unsigned long long)timing.build_transpile_us,
+                           (unsigned long long)timing.compile_peak_rss_bytes);
                     const char* sample_name = strrchr(script_path, '/');
                     sample_name = sample_name ? sample_name + 1 : script_path;
                     printf("\x01" "MIR_VOLUME schema=1 sample_id=%s test_name=%s modules=%llu functions=%llu insns=%llu\n",
