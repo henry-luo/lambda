@@ -1,0 +1,25 @@
+{
+  "name": "Document editor pages broad property filter matches",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1000},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "package-lock.json"},
+    {"type": "click", "target": {"selector": ".tree-hit-__package-lock_json .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "package-lock.json"},
+    {"type": "click", "target": {"selector": "#property-filter"}},
+    {"type": "type", "target": {"selector": "#property-filter"}, "text": "t"},
+    {"type": "assert_value", "target": {"selector": "#property-filter"}, "equals": "t"},
+    {"type": "assert_count", "target": {"selector": ".property-entry"}, "max": 500},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='packages'] > .property-children > .property-entry"}, "count": 60},
+    {"type": "scroll", "target": {"selector": "#property-preview"}, "dx": 0, "dy": -100},
+    {"type": "scroll", "target": {"selector": "#property-preview"}, "dx": 0, "dy": -100},
+    {"type": "scroll", "target": {"selector": "#property-preview"}, "dx": 0, "dy": -100},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='packages'] > .property-children > .property-more"}},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='packages'] > .property-children > .property-entry"}, "count": 120},
+    {"type": "click", "target": {"selector": "#property-filter"}},
+    {"type": "type", "target": {"selector": "#property-filter"}, "text": "e"},
+    {"type": "assert_value", "target": {"selector": "#property-filter"}, "equals": "te"},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='packages'] > .property-children > .property-entry"}, "max": 60}
+  ]
+}

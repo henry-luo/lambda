@@ -103,6 +103,16 @@ static void store_vcf_structured_property(InputContext& ctx, Map* contact_map,
     ctx.builder.putToMap(lam::gc_borrow(contact_map), key, parsed_item);
 }
 
+static void finish_vcf_contact(InputContext& ctx, List* contacts,
+                               Map* contact, Map* properties, List* entries) {
+    MarkBuilder& builder = ctx.builder;
+    builder.putToMap(lam::gc_borrow(contact), builder.createName("properties"),
+                     {.item = (uint64_t)properties});
+    builder.putToMap(lam::gc_borrow(contact), builder.createName("entries"),
+                     {.item = (uint64_t)entries});
+    array_append((Array*)contacts, {.item = (uint64_t)contact}, ctx.input()->pool);
+}
+
 // Main vCard parsing function
 void parse_vcf(Input* input, const char* vcf_string) {
     if (!vcf_string || !input) return;
@@ -113,20 +123,16 @@ void parse_vcf(Input* input, const char* vcf_string) {
 
     const char* vcf = vcf_string;
 
-    // Initialize contact map
-    Map* contact_map = map_pooled(input->pool);
-    if (!contact_map) {
-        ctx.addError(ctx.tracker.location(), "Failed to allocate memory for contact map");
+    List* contacts = rfc_new_entry_list(input);
+    if (!contacts) {
+        ctx.addError(ctx.tracker.location(), "Failed to allocate contact list");
         return;
     }
-
-    // Initialize properties map to store all raw properties
-    Map* properties_map = map_pooled(input->pool);
-    if (!properties_map) {
-        ctx.addError(ctx.tracker.location(), "Failed to allocate memory for properties map");
-        return;
-    }
-
+    Map* contact_map = NULL;
+    Map* properties_map = NULL;
+    List* entries = NULL;
+    Map* first_contact = NULL;
+    size_t contact_count = 0;
     bool in_vcard = false;
 
     // Parse vCard line by line
@@ -154,6 +160,7 @@ void parse_vcf(Input* input, const char* vcf_string) {
         normalize_property_name(property_name->chars);
 
         // Parse property parameters
+        bool has_parameters = *vcf == ';';
         Map* params_map = map_pooled(input->pool);
         if (params_map) {
             parse_property_parameters(ctx, &vcf, params_map);
@@ -168,13 +175,28 @@ void parse_vcf(Input* input, const char* vcf_string) {
         // Handle vCard start and end
         if (strcmp(property_name->chars, "begin") == 0) {
             if (str_ieq_cstr(property_value->chars, "VCARD")) {
+                if (in_vcard) {
+                    finish_vcf_contact(ctx, contacts, contact_map, properties_map, entries);
+                    contact_count++;
+                    in_vcard = false;
+                }
+                contact_map = map_pooled(input->pool);
+                properties_map = map_pooled(input->pool);
+                entries = rfc_new_entry_list(input);
+                if (!contact_map || !properties_map || !entries) {
+                    ctx.addError(ctx.tracker.location(), "Failed to allocate contact record");
+                    break;
+                }
+                if (!first_contact) first_contact = contact_map;
                 in_vcard = true;
             }
             continue;
         }
 
         if (strcmp(property_name->chars, "end") == 0) {
-            if (str_ieq_cstr(property_value->chars, "VCARD")) {
+            if (in_vcard && str_ieq_cstr(property_value->chars, "VCARD")) {
+                finish_vcf_contact(ctx, contacts, contact_map, properties_map, entries);
+                contact_count++;
                 in_vcard = false;
             }
             continue;
@@ -185,6 +207,8 @@ void parse_vcf(Input* input, const char* vcf_string) {
         // Store raw property in properties map
         Item prop_value = {.item = s2it(property_value)};
         ctx.builder.putToMap(lam::gc_borrow(properties_map), property_name, prop_value);
+        rfc_append_entry(ctx, entries, property_name, prop_value,
+                         has_parameters ? params_map : NULL);
 
         // Handle common properties with special processing
         if (strcmp(property_name->chars, "fn") == 0) {
@@ -251,14 +275,21 @@ void parse_vcf(Input* input, const char* vcf_string) {
         }
     }
 
-    // Store properties map in contact
-    String* properties_key = builder.createName("properties");
-    // containers are direct typed pointers; high-byte tagging corrupts Map* addresses.
-    Item properties_value = {.map = properties_map};
-    ctx.builder.putToMap(lam::gc_borrow(contact_map), properties_key, properties_value);
+    if (in_vcard) {
+        finish_vcf_contact(ctx, contacts, contact_map, properties_map, entries);
+        contact_count++;
+    }
 
-    // Set the contact map as the root of the input
-    input->root = {.map = contact_map};
+    if (contact_count == 1) {
+        // Single-card callers keep their existing named-field view.
+        input->root = {.map = first_contact};
+    } else {
+        Map* result = map_pooled(input->pool);
+        if (!result) return;
+        builder.putToMap(lam::gc_borrow(result), builder.createName("contacts"),
+                         {.item = (uint64_t)contacts});
+        input->root = {.map = result};
+    }
 
     if (ctx.hasErrors()) {
         ctx.logErrors();

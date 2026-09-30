@@ -628,7 +628,7 @@ mail.subject
 
 ### 3.5 vCard (VCF)
 
-Contact cards parse into a map with descriptive keys: `version`, `full_name`, a structured `name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`, `title`, structured `address` maps, `url`, `birthday`, `note`. A property that repeats (two phone numbers) appears as a repeated key, and a file holding several cards is currently flattened into one map — one card per file is the reliable shape.
+One card parses into a map with descriptive keys: `version`, `full_name`, a structured `name` (`family`, `given`, `additional`, `prefix`, `suffix`), `email`, `phone`, `organization`, `title`, structured `address` maps, `url`, `birthday`, and `note`. Its `entries` array preserves every property in source order, including repeated fields, with `name`, `value`, and optional `parameters` fields. Use `entries` to inspect repeated values and parameter types; the `properties` map remains a convenience view. A file with several cards returns `{contacts: [...]}`, with one map per card. The ordered entry and contact arrays use the sequence append of **D2.6.5v3**.
 
 ```lambda
 let contact = input("alice.vcf", 'vcf')^
@@ -636,6 +636,10 @@ contact.full_name      // "Alice Wonderland"
 contact.email          // "alice@example.com"
 contact.phone          // "+1-555-0100"
 contact.name.given     // "Alice"
+
+let cards = input("contacts.vcf", 'vcf')^
+cards.contacts[0].full_name
+[for (entry in cards.contacts[0].entries where entry.name == "email") entry.value]
 ```
 
 ### 3.6 iCalendar (ICS)

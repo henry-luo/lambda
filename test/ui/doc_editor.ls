@@ -140,6 +140,7 @@ fn is_pdf_document(extension) => lower(extension) == "pdf"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
+fn is_csv_document(extension) => lower(extension) == "csv"
 fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
@@ -154,13 +155,14 @@ fn property_format(extension) {
   else if (contains(["yaml", "yml"], ext)) { "yaml" }
   else if (ext == "toml") { "toml" }
   else if (contains(["ics", "ical"], ext)) { "ics" }
+  else if (ext == "vcf") { "vcf" }
   else { null }
 }
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
     is_pdf_document(extension) or is_pgf_document(extension) or is_image_document(extension) or
-    graph_flavor(extension) != null or property_format(extension) != null
+    graph_flavor(extension) != null or property_format(extension) != null or is_csv_document(extension)
 
 // seti private-use glyphs; keep codepoints readable alongside the bundled font.
 let SETI_CLOCK = chr(0xE012)
@@ -272,10 +274,14 @@ fn selected_preview(file) {
 }
 
 fn property_children(value, format) {
-  if (format == "ics" and type(value) == map and type(value["entries"]) == array) {
-    // RFC content lines retain their order and repeated names in the parser's entry list.
+  if (format == "vcf" and type(value) == map and type(value["contacts"]) == array) {
+    [for (index, contact in value["contacts"])
+      {name:"VCARD", value:contact, segment:string(index)}]
+  } else if (contains(["ics", "vcf"], format) and type(value) == map and
+             type(value["entries"]) == array) {
+    // RFC content lines retain order, repeated names, and their parameters.
     [for (index, entry in value["entries"])
-      {name:entry["name"],
+      {name:(if (format == "vcf") upper(entry["name"]) else entry["name"]),
        value:(if (entry["parameters"] != null)
          {value:entry["value"], parameters:entry["parameters"]} else entry["value"]),
        segment:string(index)}]
@@ -290,11 +296,14 @@ fn property_children(value, format) {
 }
 
 fn property_is_container(value) => type(value) == map or type(value) == array
+let PROPERTY_PAGE_SIZE = 60
+fn property_visible_count(path, more_paths) =>
+  PROPERTY_PAGE_SIZE * (1 + len([for (more_path in more_paths where more_path == path) more_path]))
 fn property_hit_class(path) =>
   "property-hit-" ++ replace(replace(replace(path, "/", "_"), ".", "_"), " ", "_")
 
 fn property_matches(value, name, filter_text, format) {
-  if (filter_text == "" or contains(lower(name), lower(filter_text))) { true }
+  if (filter_text == "" or contains(lower(name), filter_text)) { true }
   else if (property_is_container(value)) {
     any([for (child in property_children(value, format))
       property_matches(child.value, child.name, filter_text, format)])
@@ -308,7 +317,18 @@ fn property_value_text(value) {
 }
 
 fn property_summary(value, format) {
-  if (format == "ics" and type(value) == map and type(value["entries"]) == array) {
+  if (contains(["ics", "vcf"], format) and type(value) == map and
+      value["parameters"] != null and value["value"] != null) {
+    property_value_text(value["value"])
+  }
+  else if (format == "vcf" and type(value) == map and type(value["entries"]) == array) {
+    if (value["full_name"] != null) { value["full_name"] }
+    else { string(len(value["entries"])) ++ " fields" }
+  }
+  else if (format == "vcf" and type(value) == map and type(value["contacts"]) == array) {
+    string(len(value["contacts"])) ++ " contacts"
+  }
+  else if (format == "ics" and type(value) == map and type(value["entries"]) == array) {
     let label = value["summary"]
     if (label != null) { label }
     else { string(len(value["entries"])) ++ " entries" }
@@ -316,6 +336,28 @@ fn property_summary(value, format) {
   else if (type(value) == map) { "Object · " ++ string(len(value)) ++ " properties" }
   else if (type(value) == array) { "Array · " ++ string(len(value)) ++ " items" }
   else { property_value_text(value) }
+}
+
+// CSV input returns named maps for header rows and positional arrays otherwise.
+fn csv_columns(rows) {
+  if (type(rows) != array or len(rows) == 0) { [] }
+  else if (type(rows[0]) == map) {
+    [for (key, value in rows[0]) {key:string(key), label:string(key)}]
+  } else if (type(rows[0]) == array) {
+    [for (index, value in rows[0]) {key:index, label:"Column " ++ string(index + 1)}]
+  } else { [] }
+}
+fn csv_cell(row, column) {
+  if (type(row) == map or type(row) == array) { row[column.key] }
+  else { null }
+}
+let CSV_DEFAULT_WIDTH = 150
+let CSV_MIN_WIDTH = 72
+fn csv_width(widths, index) =>
+  if (index < len(widths)) widths[index] else CSV_DEFAULT_WIDTH
+fn csv_resized_widths(widths, gesture, x) {
+  let width = max(CSV_MIN_WIDTH, gesture.width + x - gesture.x);
+  [for (index, previous in widths) if (index == gesture.index) width else previous]
 }
 
 // --------------------------------------------------------------------------
@@ -392,20 +434,69 @@ view <tr> { <tr *[rendered_children(~)]> }
 view <th> { <th *[rendered_children(~)]> }
 view <td> { <td *[rendered_children(~)]> }
 
+// The CSV reader supplies decoded cells, so quoting and tab separators share one view.
+view <csv_preview> {
+  let columns = csv_columns(~.rows)
+  let table_width = sum([for (index, column in columns) csv_width(~.widths, index)]);
+  <section id:"csv-preview", class:"rendered-preview csv-preview"
+  , if (len(columns) == 0) {
+      <p class:"csv-empty", "No rows to display">
+    } else {
+      <table class:"csv-table", style:("width:" ++ string(table_width) ++ "px")
+      , <thead <tr
+          for (index, column in columns) {
+              let width = csv_width(~.widths, index);
+              <th class:"csv-header", style:("width:" ++ string(width) ++ "px")
+              , <span class:"csv-header-label", column.label>
+                <span class:"csv-resize", 'data-csv-column':string(index),
+                  title:("Resize " ++ column.label), "">
+              >
+            }
+          >
+        >
+        <tbody
+        for (row in ~.rows) {
+            <tr
+            for (index, column in columns) {
+                let cell = csv_cell(row, column);
+                <td style:("width:" ++ string(csv_width(~.widths, index)) ++ "px"),
+                  if (cell == null) "" else property_value_text(cell)>
+              }
+            >
+          }
+        >
+      >
+    }
+  >
+}
+on mousedown(evt) {
+  if (evt.button != 0 or not contains(evt.target_class, "csv-resize")) { return }
+  let column_id = dom.get_attribute(evt.target, "data-csv-column")
+  let indices = [for (index, column in csv_columns(~.rows) where string(index) == column_id) index]
+  if (len(indices) == 0) { return }
+  let index = indices[0]
+  emit("csv_resize_start", {index:index, x:evt.x, width:csv_width(~.widths, index)})
+  'prevent-default'
+}
+on mousemove(evt) { emit("csv_resize_move", evt.x) }
+
 // --------------------------------------------------------------------------
 // Structured property inspector
 // --------------------------------------------------------------------------
 
 view <property_node> {
   let expandable = property_is_container(~.value)
-  let matching_children = if (expandable) {
-    [for (child in property_children(~.value, ~.format)
-      where property_matches(child.value, child.name, ~.filter_text, ~.format)) child]
-  } else { [] }
   let is_open = expandable and
     (if (~.filter_text == "") { path_is_open(~.open_paths, ~.path) }
      else { not path_is_open(~.closed_paths, ~.path) })
+  let matching_children = if (is_open) {
+    [for (child in property_children(~.value, ~.format)
+      where property_matches(child.value, child.name, ~.filter_text, ~.format)) child]
+  } else { [] }
+  // Bound mounted rows; broad filters can match thousands of keys at once.
+  let visible_children = take(matching_children, property_visible_count(~.path, ~.more_paths))
   let row_style = "padding-left:" ++ string(~.depth * 18 + 16) ++ "px";
+  let summary = property_summary(~.value, ~.format);
 
   <div class:"property-entry", 'data-property-name':~.name
   , <div class:"property-row", style:row_style
@@ -417,28 +508,38 @@ view <property_node> {
       } else { <span class:"property-spacer", ""> }
       <span class:"property-name", ~.name>
       <span class:(if (expandable) "property-value property-summary" else "property-value"),
-        title:property_summary(~.value, ~.format), property_summary(~.value, ~.format)>
+        title:summary, summary>
     >
     if (is_open and len(matching_children) > 0) {
       <div class:"property-children"
-      , for (child in matching_children)
+      , for (child in visible_children)
           apply(<property_node name:child.name, value:child.value,
             path:(~.path ++ "/" ++ child.segment), depth:(~.depth + 1),
             filter_text:~.filter_text, open_paths:~.open_paths,
-            closed_paths:~.closed_paths, format:~.format>)
+            closed_paths:~.closed_paths, more_paths:~.more_paths, format:~.format>)
+        if (len(matching_children) > len(visible_children)) {
+          <button class:("property-more " ++ property_hit_class(~.path) ++ " property-control"),
+            (if (~.filter_text == "") "Show more properties (" else "Show more matching properties (") ++
+            string(len(matching_children) - len(visible_children)) ++ " remaining)">
+        }
       >
     }
   >
 }
 on click(evt) {
-  if (contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
+  if (contains(evt.target_class, "property-more ") and
+      contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
+    emit("property_more", ~.path)
+  } else if (contains(evt.target_class, "property-toggle ") and
+             contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
     emit("property_toggle", {path:~.path, is_open: is_open})
   }
 }
 
 view <property_inspector> {
   let format = property_format(~.file["extension"])
-  let parsed = input(~.file["file_path"], format) ^ { null };
+  let parsed = ~.parsed
+  let query = lower(~.filter_text);
   <section id:"property-preview", class:"rendered-preview property-preview"
   , <div class:"property-filter-bar"
     , <span class:"property-filter-icon", 'aria-hidden':"true", "⌕">
@@ -460,21 +561,33 @@ view <property_inspector> {
       } else { <p class:"property-message", "No matching properties"> }
     } else {
       let roots = if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
-        else { property_children(parsed, format) }
+        else if (format == "vcf" and type(parsed["contacts"]) != array) {
+          [{name:"VCARD", value:parsed, segment:"card"}]
+        } else { property_children(parsed, format) }
       let matches = [for (child in roots
-        where property_matches(child.value, child.name, ~.filter_text, format)) child]
+        where property_matches(child.value, child.name, query, format)) child]
+      let visible_roots = take(matches, property_visible_count("", ~.more_paths))
       if (len(matches) == 0) {
         <p class:"property-message", "No matching properties">
       } else {
         <div class:"property-list"
-        , for (child in matches)
+        , for (child in visible_roots)
             apply(<property_node name:child.name, value:child.value,
-              path:child.segment, depth:0, filter_text:~.filter_text,
-              open_paths:~.open_paths, closed_paths:~.closed_paths, format:format>)
+              path:child.segment, depth:0, filter_text:query,
+              open_paths:~.open_paths, closed_paths:~.closed_paths,
+              more_paths:~.more_paths, format:format>)
+          if (len(matches) > len(visible_roots)) {
+            <button class:"property-more property-root-more",
+              (if (query == "") "Show more properties (" else "Show more matching properties (") ++
+              string(len(matches) - len(visible_roots)) ++ " remaining)">
+          }
         >
       }
     }
   >
+}
+on click(evt) {
+  if (contains(evt.target_class, "property-root-more")) { emit("property_more", "") }
 }
 
 // --------------------------------------------------------------------------
@@ -557,7 +670,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "JSON, YAML, TOML, and ICS open as property trees. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV opens as a resizable table. JSON, YAML, TOML, ICS, and VCF open as property trees. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -572,8 +685,11 @@ view <document_pane> {
       <div class:"document-content"
       , if (~.preview_mode == "view") {
         if (property_format(~.file["extension"]) != null) {
-          apply(<property_inspector file:~.file, filter_text:~.property_filter,
-            open_paths:~.property_open_paths, closed_paths:~.property_closed_paths>)
+          apply(<property_inspector file:~.file, parsed:~.property_data,
+            filter_text:~.property_filter, open_paths:~.property_open_paths,
+            closed_paths:~.property_closed_paths, more_paths:~.property_more_paths>)
+        } else if (is_csv_document(~.file["extension"])) {
+          apply(<csv_preview rows:~.csv_data, widths:~.csv_widths>)
         } else if (is_image_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
@@ -630,7 +746,7 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_open_paths: [], property_closed_paths: [] {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], csv_data: null, csv_widths: [], csv_resize: null {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
@@ -676,8 +792,9 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
     <div class:"file-panel-footer", if (filter_text == "") "Project root: ." else "Filtering file names">
   >
   apply(<document_pane file:selected_file, preview_mode:preview_mode,
-    property_filter:property_filter, property_open_paths:property_open_paths,
-    property_closed_paths:property_closed_paths>)
+    property_filter:property_filter, property_data:property_data,
+    property_open_paths:property_open_paths, property_closed_paths:property_closed_paths,
+    property_more_paths:property_more_paths, csv_data:csv_data, csv_widths:csv_widths>)
   >
 }
 on click(evt) {
@@ -686,7 +803,10 @@ on click(evt) {
   if (contains(target_class, "tree-row project-root") or
       contains(parent_class, "tree-row project-root")) { root_open = not root_open }
   else if (target_class == "tree-filter-clear") { filter_text = "" }
-  else if (target_class == "property-filter-clear") { property_filter = "" }
+  else if (target_class == "property-filter-clear") {
+    property_filter = ""
+    property_more_paths = []
+  }
 }
 on directory_toggle(entry) {
   let path = entry["path"]
@@ -712,6 +832,7 @@ on input(evt) {
       property_filter = slice(property_filter, 0, caret_pos) ++ character ++
         slice(property_filter, caret_pos, len(property_filter))
       property_closed_paths = []
+      property_more_paths = []
     }
   }
 }
@@ -726,7 +847,7 @@ on keydown(evt) {
       else { null }
     if (next == null) { return }
     if (target_class == "tree-filter") { filter_text = next }
-    else { property_filter = next; property_closed_paths = [] }
+    else { property_filter = next; property_closed_paths = []; property_more_paths = [] }
     // The model owns this edit; a second native edit would desynchronize it.
     return 'prevent-default'
   }
@@ -734,10 +855,17 @@ on keydown(evt) {
 on file_select(entry) {
   selected_file = {file_path: entry["file_path"], name: entry["name"],
     extension: entry["extension"], text_width_px: entry["text_width_px"]}
+  let format = property_format(entry["extension"])
+  // Retain the parsed tree while the user edits the filter or expands nodes.
+  property_data = if (format == null) null else input(entry["file_path"], format) ^ { null }
+  csv_data = if (is_csv_document(entry["extension"])) input(entry["file_path"], 'csv') ^ { null } else null
+  csv_widths = [for (column in csv_columns(csv_data)) CSV_DEFAULT_WIDTH]
+  csv_resize = null
   preview_mode = "view"
   property_filter = ""
   property_open_paths = []
   property_closed_paths = []
+  property_more_paths = []
 }
 on preview_tab(tab) {
   preview_mode = tab
@@ -752,6 +880,19 @@ on property_toggle(entry) {
     if (entry["is_open"]) { property_closed_paths = [*property_closed_paths, path] }
     else { property_closed_paths = [for (closed_path in property_closed_paths where closed_path != path) closed_path] }
   }
+}
+on property_more(path) {
+  property_more_paths = [*property_more_paths, path]
+}
+on csv_resize_start(gesture) { csv_resize = gesture }
+on csv_resize_move(x) {
+  if (csv_resize != null) { csv_widths = csv_resized_widths(csv_widths, csv_resize, x) }
+}
+// A release can land over the file panel after shrinking a wide column.
+on mouseup(evt) {
+  if (csv_resize == null) { return }
+  csv_widths = csv_resized_widths(csv_widths, csv_resize, evt.x)
+  csv_resize = null
 }
 
 // --------------------------------------------------------------------------
@@ -866,6 +1007,26 @@ on property_toggle(entry) {
       .property-summary { color: #6b788b; font-style: italic; }
       .property-message { padding: 18px 22px; color: #6b788b; }
       .property-root-value { padding-left: 32px; }
+      .property-more { display: block; width: 100%; padding: 9px 20px; border: 0;
+                       background: #f3f7fc; color: #195fa8; text-align: left;
+                       font: 600 12px/18px sans-serif; cursor: pointer; }
+      .property-more:hover { background: #e7f0fb; }
+      .csv-preview { padding: 0 0 32px; background: #fff; }
+      .csv-empty { padding: 22px; color: #68778a; }
+      .csv-table { table-layout: fixed; border-collapse: separate; border-spacing: 0;
+                   font: 13px/1.4 'SF Mono', Menlo, Consolas, monospace; color: #263448; }
+      .csv-table th, .csv-table td { box-sizing: border-box; max-width: 0; padding: 9px 14px;
+                                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                                     border-right: 1px solid #e5e9ef; border-bottom: 1px solid #edf0f4; }
+      .csv-table th { position: sticky; top: 0; z-index: 1; padding-right: 20px;
+                      background: #f0f5fb; color: #294e78; font-weight: 650; text-align: left; }
+      .csv-table tbody tr:nth-child(even) { background: #f8fafc; }
+      .csv-table tbody tr:hover { background: #edf5ff; }
+      .csv-header-label { display: block; overflow: hidden; text-overflow: ellipsis; }
+      .csv-resize { position: absolute; top: 0; right: 0; width: 10px; height: 37px;
+                    box-sizing: border-box; border-left: 2px solid #c5d5e8;
+                    cursor: col-resize; user-select: none; }
+      .csv-resize:hover { background: #d2e5fb; border-left-color: #4588d0; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
       .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
