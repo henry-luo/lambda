@@ -1,0 +1,14 @@
+{
+  "html": "test/ui/test_iframe_keyboard_scroll.html",
+  "description": "A press on non-focusable iframe content makes that frame the focused browsing context: PageDown scrolls it through the iframe container, and a press back in the parent returns keys to the parent.",
+  "events": [
+    {"type": "click", "target": {"selector": "#frame", "offset_x": 40, "offset_y": 40}},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#frame"}, "view_scroll_y": 170, "tolerance": 2},
+    {"type": "click", "target": {"selector": "#outside", "offset_x": 5, "offset_y": 5}},
+    {"type": "key_press", "key": "PageDown"},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "#frame"}, "view_scroll_y": 170, "tolerance": 2}
+  ]
+}

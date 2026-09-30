@@ -370,6 +370,7 @@ bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
     dom_document_clear_embedding(embedded);
     embedded->embedding_document = parent;
     embedded->embedding_element_ref = ref;
+    parent->embedded_evaluator_pending = true;
     return true;
 }
 

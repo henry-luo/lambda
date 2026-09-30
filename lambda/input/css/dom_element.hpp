@@ -281,6 +281,13 @@ struct DomDocument {
     // detached iframe alive or follow a recycled node (ES31, D4.5.1v3).
     DomDocument* embedding_document;
     DomNodeRef embedding_element_ref;
+    // The focused browsing context below this document: its iframe element that
+    // the last pointer press landed in (empty when the press was in this document
+    // itself). Keys with no focused element follow this chain, as in browsers.
+    DomNodeRef active_frame_ref;
+    // Set on the parent when a document is embedded; its next behavior-init
+    // phase gives script-less children their package evaluator (S12.1.3).
+    bool embedded_evaluator_pending;
 
     // Native extensions retain runtime-backed values through document resources.
     struct DomDocumentResource* resources;
