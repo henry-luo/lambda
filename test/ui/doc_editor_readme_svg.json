@@ -1,0 +1,15 @@
+{
+  "name": "Document editor renders the README benchmark SVG after metadata CDATA",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1400, "height": 1100},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "README.md"},
+    {"type": "click", "target": {"selector": ".tree-hit-__README_md .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "README.md"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview img[src='test/benchmark/benchmark_history.svg']"}, "count": 1},
+    {"type": "scroll", "target": {"selector": "#rendered-preview"}, "dx": 0, "dy": -35},
+    {"type": "scroll", "target": {"selector": "#rendered-preview"}, "dx": 0, "dy": -78},
+    {"type": "render", "file": "./temp/doc_editor_readme_svg.png"}
+  ]
+}

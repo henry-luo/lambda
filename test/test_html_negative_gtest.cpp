@@ -1527,3 +1527,12 @@ TEST_F(HtmlParserNegativeTest, CornerCaseBracketInText) {
     Element* div = findElementByTag(result, "div");
     EXPECT_TRUE(div != nullptr || get_type_id(result) == LMD_TYPE_ERROR);
 }
+
+TEST_F(HtmlParserNegativeTest, SvgMetadataCdataKeepsFollowingShapes) {
+    Item result = parseHtml(
+        "<svg><metadata><![CDATA[{\"chart\":\"history\"}]]></metadata>"
+        "<rect id=\"plot\" width=\"40\" height=\"20\"/></svg>");
+
+    // A CDATA section must not end tokenization before the visible SVG shapes.
+    EXPECT_NE(findElementByTag(result, "rect"), nullptr);
+}
