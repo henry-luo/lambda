@@ -5544,75 +5544,20 @@ static bool svg_layer_paint_equal(const SvgInitialPaint* a, const SvgInitialPain
 // painter that shares the page surface (ThorVG fills, glyph blits, group
 // opacity composites) assumes an opaque target, so the content is rendered
 // twice, over black and over white, and the exact colour and coverage of each
-// pixel are recovered from the difference. Glyph runs record through the active
-// RenderContext, so its list, clip, transform and dirty state are pointed at the
-// private layer for the duration of the capture.
-static void svg_layer_replay_over(DisplayList* dl, ScratchArena* scratch, uint32_t* pixels,
-                                  int width, int height, float scale, uint32_t fill) {
-    for (size_t i = 0, n = (size_t)width * (size_t)height; i < n; i++) pixels[i] = fill;
-    ImageSurface pass = {};
-    pass.format = IMAGE_FORMAT_UNKNOWN;
-    pass.width = width;
-    pass.height = height;
-    pass.encoded_width = width;
-    pass.encoded_height = height;
-    pass.orientation = 1;
-    pass.has_intrinsic_size = true;
-    pass.pitch = width * 4;
-    pass.pixels = pixels;
-    RdtVector vec = {};
-    rdt_vector_init(&vec, pixels, width, height, width);
-    if (!vec.impl) return;
-    Bound clip = {0.0f, 0.0f, (float)width, (float)height};
-    dl_replay(dl, &vec, &pass, &clip, scratch, scale, nullptr);
-    rdt_vector_destroy(&vec);
-}
-
-// straight RGBA from the black and white passes: coverage is what the white
-// backdrop lost, colour is the black pass scaled back up by that coverage
-static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* over_white,
-                                    uint32_t* out, size_t count) {
-    for (size_t i = 0; i < count; i++) {
-        const uint8_t* b = (const uint8_t*)&over_black[i];
-        const uint8_t* w = (const uint8_t*)&over_white[i];
-        uint32_t lost = (uint32_t)(w[0] - b[0]) + (uint32_t)(w[1] - b[1]) + (uint32_t)(w[2] - b[2]);
-        uint32_t alpha = 255u - (lost + 1u) / 3u;
-        uint8_t* o = (uint8_t*)&out[i];
-        if (alpha == 0) {
-            out[i] = 0;
-            continue;
-        }
-        for (int c = 0; c < 3; c++) {
-            uint32_t value = ((uint32_t)b[c] * 255u + alpha / 2u) / alpha;
-            o[c] = (uint8_t)(value > 255u ? 255u : value);
-        }
-        o[3] = (uint8_t)alpha;
-    }
-}
-
-static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
-                              SvgLayerEntry* entry, Element* svg_elem, DomElement* dom_elem,
-                              float viewport_width, float viewport_height, float scale,
-                              const SvgInitialPaint* paint) {
-    int width = entry->pixel_width;
-    int height = entry->pixel_height;
-    size_t count = (size_t)width * (size_t)height;
-    size_t bytes = count * 4u;
-    if (bytes > SVG_LAYER_MAX_BYTES || registry->cached_bytes + bytes > SVG_LAYER_TOTAL_MAX_BYTES) {
-        return false;
-    }
-    ImageSurface* surface = image_surface_create(width, height);
-    if (!surface) return false;
-    uint32_t* over_black = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
-    uint32_t* over_white = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
+// pixel are recovered from the difference. Each pass records its own display
+// list: serial replay hands owned payloads such as pictures to the backend, so
+// one recorded list cannot be replayed twice. Glyph runs record through the
+// active RenderContext, so its list, clip, transform and dirty state are pointed
+// at the private layer while recording.
+static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomElement* dom_elem,
+                                  float viewport_width, float viewport_height, float scale,
+                                  const SvgInitialPaint* paint, uint32_t* pixels,
+                                  int width, int height, uint32_t backdrop) {
+    for (size_t i = 0, n = (size_t)width * (size_t)height; i < n; i++) pixels[i] = backdrop;
     Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_layer");
     Arena* temp_arena = temp_pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_layer.arena") : nullptr;
-    if (!over_black || !over_white || !temp_arena) {
-        if (temp_arena) mem_arena_destroy(temp_arena);
+    if (!temp_arena) {
         if (temp_pool) mem_pool_destroy(temp_pool);
-        if (over_black) mem_free(over_black);
-        if (over_white) mem_free(over_white);
-        image_surface_destroy(surface);
         return false;
     }
     DisplayList dl = {};
@@ -5657,17 +5602,78 @@ static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
 
     bool ok = dl_validate_or_log(&dl, "render_svg_layer_capture");
     if (ok) {
-        svg_layer_replay_over(&dl, &scratch, over_black, width, height, scale, 0xFF000000u);
-        svg_layer_replay_over(&dl, &scratch, over_white, width, height, scale, 0xFFFFFFFFu);
-        svg_layer_resolve_alpha(over_black, over_white, (uint32_t*)surface->pixels, count);
+        ImageSurface pass = {};
+        pass.format = IMAGE_FORMAT_UNKNOWN;
+        pass.width = width;
+        pass.height = height;
+        pass.encoded_width = width;
+        pass.encoded_height = height;
+        pass.orientation = 1;
+        pass.has_intrinsic_size = true;
+        pass.pitch = width * 4;
+        pass.pixels = pixels;
+        RdtVector vec = {};
+        rdt_vector_init(&vec, pixels, width, height, width);
+        ok = vec.impl != nullptr;
+        if (ok) {
+            Bound clip = {0.0f, 0.0f, (float)width, (float)height};
+            dl_replay(&dl, &vec, &pass, &clip, &scratch, scale, nullptr);
+            rdt_vector_destroy(&vec);
+        }
     }
     scratch_release(&scratch);
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
     mem_arena_destroy(temp_arena);
     mem_pool_destroy(temp_pool);
-    mem_free(over_black);
-    mem_free(over_white);
+    return ok;
+}
+
+// straight RGBA from the black and white passes: coverage is what the white
+// backdrop lost, colour is the black pass scaled back up by that coverage
+static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* over_white,
+                                    uint32_t* out, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        const uint8_t* b = (const uint8_t*)&over_black[i];
+        const uint8_t* w = (const uint8_t*)&over_white[i];
+        uint32_t lost = (uint32_t)(w[0] - b[0]) + (uint32_t)(w[1] - b[1]) + (uint32_t)(w[2] - b[2]);
+        uint32_t alpha = 255u - (lost + 1u) / 3u;
+        uint8_t* o = (uint8_t*)&out[i];
+        if (alpha == 0) {
+            out[i] = 0;
+            continue;
+        }
+        for (int c = 0; c < 3; c++) {
+            uint32_t value = ((uint32_t)b[c] * 255u + alpha / 2u) / alpha;
+            o[c] = (uint8_t)(value > 255u ? 255u : value);
+        }
+        o[3] = (uint8_t)alpha;
+    }
+}
+
+static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
+                              SvgLayerEntry* entry, Element* svg_elem, DomElement* dom_elem,
+                              float viewport_width, float viewport_height, float scale,
+                              const SvgInitialPaint* paint) {
+    int width = entry->pixel_width;
+    int height = entry->pixel_height;
+    size_t count = (size_t)width * (size_t)height;
+    size_t bytes = count * 4u;
+    if (bytes > SVG_LAYER_MAX_BYTES || registry->cached_bytes + bytes > SVG_LAYER_TOTAL_MAX_BYTES) {
+        return false;
+    }
+    ImageSurface* surface = image_surface_create(width, height);
+    if (!surface) return false;
+    uint32_t* over_black = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
+    uint32_t* over_white = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
+    bool ok = over_black && over_white &&
+        svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
+                              paint, over_black, width, height, 0xFF000000u) &&
+        svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
+                              paint, over_white, width, height, 0xFFFFFFFFu);
+    if (ok) svg_layer_resolve_alpha(over_black, over_white, (uint32_t*)surface->pixels, count);
+    if (over_black) mem_free(over_black);
+    if (over_white) mem_free(over_white);
     if (!ok) {
         image_surface_destroy(surface);
         return false;

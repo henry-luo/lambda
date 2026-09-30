@@ -863,15 +863,17 @@ static int virtual_timer_fire_due(double target_ms) {
 }
 
 static int virtual_clock_advance_slice(double target_ms, bool animation_frame) {
+    double slice_start_ms = virtual_clock_ms;
     int progress = virtual_timer_fire_due(target_ms);
     virtual_clock_ms = target_ms;
     js_performance_virtual_clock_set(true, virtual_clock_ms);
 
     if (animation_frame) {
         progress += js_animation_frame_flush(virtual_clock_ms);
-        // CSS animations follow the virtual clock too; a fixed 1/60 s per slice
-        // ran them ahead of script time whenever a slice was not 16.7 ms.
-        if (dom_tick_headless_animation_frame_at(virtual_clock_ms / 1000.0)) progress++;
+        // CSS animations follow the virtual clock too: advance them by this slice's
+        // length; a fixed 1/60 s per slice ran them ahead of script time.
+        double slice_ms = target_ms > slice_start_ms ? target_ms - slice_start_ms : 0.0;
+        if (dom_tick_headless_animation_frame_advance(slice_ms / 1000.0)) progress++;
     }
     js_microtask_flush();
     // rAF and microtasks may queue zero-delay timers at this same timestamp.

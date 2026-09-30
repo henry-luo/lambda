@@ -774,10 +774,10 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     return dom_has_committed_geometry_snapshot(doc);
 }
 
-// now_seconds < 0 advances one nominal 1/60 s frame; otherwise the scheduler is
-// sampled at that absolute time (the virtual clock's ms / 1000, the same base the
-// event simulator ticks with).
-static bool dom_tick_headless_animation_frame_to(double now_seconds) {
+// delta_seconds < 0 advances one nominal 1/60 s frame; otherwise the scheduler
+// advances by exactly that much. A delta, not an absolute time: a scheduler may
+// have been aligned to the host clock, whose epoch differs from the virtual one.
+static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
     dom_commit_headless_layout();
     DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
         ? _js_current_ui_context->document : _js_current_document;
@@ -786,17 +786,16 @@ static bool dom_tick_headless_animation_frame_to(double now_seconds) {
     if (!scheduler || !scheduler->has_active_animations) return false;
     // Batch documents have no native frame clock; advance the same scheduler
     // deterministically so transition events cannot remain queued forever.
-    double now = now_seconds >= 0.0 ? now_seconds : scheduler->current_time + (1.0 / 60.0);
-    if (now < scheduler->current_time) now = scheduler->current_time;
+    double now = scheduler->current_time + (delta_seconds >= 0.0 ? delta_seconds : 1.0 / 60.0);
     return animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
 }
 
 extern "C" bool dom_tick_headless_animation_frame(void) {
-    return dom_tick_headless_animation_frame_to(-1.0);
+    return dom_tick_headless_animation_frame_by(-1.0);
 }
 
-extern "C" bool dom_tick_headless_animation_frame_at(double now_seconds) {
-    return dom_tick_headless_animation_frame_to(now_seconds);
+extern "C" bool dom_tick_headless_animation_frame_advance(double delta_seconds) {
+    return dom_tick_headless_animation_frame_by(delta_seconds);
 }
 
 extern "C" bool dom_commit_headless_layout_checkpoint(void) {
