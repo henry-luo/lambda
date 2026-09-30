@@ -1,0 +1,20 @@
+{
+  "name": "Single JSON property root opens once",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 1600},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "test_simple.json"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_simple_json .tree-label"}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='outer'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "true"},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='a']"}, "count": 1},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='outer'] > .property-row .property-toggle"}},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='a']"}, "count": 0},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "click", "target": {"selector": ".tab-view"}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='outer'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "false"},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='a']"}, "count": 0}
+  ]
+}

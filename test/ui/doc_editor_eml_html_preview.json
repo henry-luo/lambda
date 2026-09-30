@@ -1,0 +1,24 @@
+{
+  "name": "Document editor renders nested HTML email body",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 900, "height": 5000},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "wait", "ms": 50},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "wait", "ms": 50},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_input_html_nested_eml"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_html_nested_eml .tree-label"}},
+    {"type": "wait", "ms": 100},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "html_nested.eml"},
+    {"type": "assert_text", "target": {"selector": ".eml-header-table tr[data-header-name='subject'] td"}, "equals": "Quarterly update"},
+    {"type": "assert_count", "target": {"selector": "#eml-body.eml-html-body h2"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#eml-body h2"}, "equals": "Quarterly update"},
+    {"type": "assert_text", "target": {"selector": "#eml-body p strong"}, "equals": "team"},
+    {"type": "assert_text", "target": {"selector": "#eml-body li"}, "equals": "First item"},
+    {"type": "assert_count", "target": {"selector": "#eml-body pre"}, "count": 0},
+    {"type": "render", "file": "./temp/doc_editor_eml_html_preview.png"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "Content-Type: multipart/mixed"}
+  ]
+}

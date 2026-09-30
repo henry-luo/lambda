@@ -31,6 +31,10 @@
     {"type": "type", "target": {"selector": "#file-filter"}, "text": "simple.vcf"},
     {"type": "click", "target": {"selector": ".tree-hit-__test_input_simple_vcf .tree-label"}},
     {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='VCARD']"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='VCARD'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "true"},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='FN'] > .property-row .property-value"}, "equals": "John Doe"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='VCARD'] > .property-row .property-toggle"}},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='FN']"}, "count": 0},
     {"type": "click", "target": {"selector": ".property-entry[data-property-name='VCARD'] > .property-row .property-toggle"}},
     {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='FN'] > .property-row .property-value"}, "equals": "John Doe"}
   ]

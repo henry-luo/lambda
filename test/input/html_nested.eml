@@ -1,0 +1,20 @@
+From: Updates <updates@example.com>
+To: Reader <reader@example.com>
+Subject: Quarterly update
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: multipart/alternative; boundary="inner"
+
+--inner
+Content-Type: text/plain; charset=UTF-8
+
+Hello team. Read the quarterly update.
+--inner
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<!doctype html><html><head><title>Mail title</title></head><body><h2>Quar=74erly update</h2><p>Hello <strong>team</strong> &amp; friends.</p><ul><li>First item</li></ul></body></html>
+--inner--
+--outer--

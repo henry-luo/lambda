@@ -516,16 +516,19 @@ void parse_eml(Input* input, const char* eml_string) {
             skip_to_newline(&eml);
             continue;
         }
+        if (*eml != ':') {
+            skip_to_newline(&eml);
+            continue;
+        }
 
         // Parse header value
         StringBuf* header_sb = ctx.sb;
         size_t header_value_len = parse_rfc_header_value(header_sb, &eml);
-        String* header_value = header_value_len > 0
-            ? ctx.builder.createString(header_sb->str->chars, header_value_len)
-            : NULL;
+        String* header_value = ctx.builder.createString(
+            header_value_len > 0 ? header_sb->str->chars : "", header_value_len);
         if (!header_value) {
-            skip_to_newline(&eml);
-            continue;
+            ctx.addError("Failed to create EML header value");
+            break;
         }
 
         // Normalize header name to lowercase for consistency

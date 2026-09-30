@@ -137,6 +137,7 @@ fn is_latex_document(extension) {
 }
 
 fn is_pdf_document(extension) => lower(extension) == "pdf"
+fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
@@ -154,6 +155,7 @@ fn property_format(extension) {
   if (ext == "json") { "json" }
   else if (contains(["yaml", "yml"], ext)) { "yaml" }
   else if (ext == "toml") { "toml" }
+  else if (ext == "ini") { "ini" }
   else if (contains(["ics", "ical"], ext)) { "ics" }
   else if (ext == "vcf") { "vcf" }
   else { null }
@@ -161,7 +163,8 @@ fn property_format(extension) {
 
 fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
-    is_pdf_document(extension) or is_pgf_document(extension) or is_image_document(extension) or
+    is_pdf_document(extension) or is_eml_document(extension) or
+    is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null or property_format(extension) != null or is_csv_document(extension)
 
 // seti private-use glyphs; keep codepoints readable alongside the bundled font.
@@ -296,6 +299,20 @@ fn property_children(value, format) {
 }
 
 fn property_is_container(value) => type(value) == map or type(value) == array
+fn property_roots(parsed, format) {
+  if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
+  else if (format == "vcf" and type(parsed["contacts"]) != array) {
+    [{name:"VCARD", value:parsed, segment:"card"}]
+  } else { property_children(parsed, format) }
+}
+fn property_initial_open_paths(parsed, format) {
+  if (not property_is_container(parsed)) { [] }
+  else {
+    let roots = property_roots(parsed, format)
+    // Expand a lone top-level group once, while leaving later toggles in user control.
+    if (len(roots) == 1 and property_is_container(roots[0].value)) [roots[0].segment] else []
+  }
+}
 let PROPERTY_PAGE_SIZE = 60
 fn property_visible_count(path, more_paths) =>
   PROPERTY_PAGE_SIZE * (1 + len([for (more_path in more_paths where more_path == path) more_path]))
@@ -560,10 +577,7 @@ view <property_inspector> {
         >
       } else { <p class:"property-message", "No matching properties"> }
     } else {
-      let roots = if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
-        else if (format == "vcf" and type(parsed["contacts"]) != array) {
-          [{name:"VCARD", value:parsed, segment:"card"}]
-        } else { property_children(parsed, format) }
+      let roots = property_roots(parsed, format)
       let matches = [for (child in roots
         where property_matches(child.value, child.name, query, format)) child]
       let visible_roots = take(matches, property_visible_count("", ~.more_paths))
@@ -588,6 +602,39 @@ view <property_inspector> {
 }
 on click(evt) {
   if (contains(evt.target_class, "property-root-more")) { emit("property_more", "") }
+}
+
+view <eml_preview> {
+  let message = ~.message
+  let headers = if (message != null and type(message["headers"]) == map) message["headers"] else null;
+  let body = if (message == null) null else message["body"];
+  <section id:"eml-preview", class:"rendered-preview eml-preview"
+  , if (message == null) {
+      <p class:"preview-error", "Unable to read selected email">
+    } else {
+      <div class:"eml-message"
+      , if (headers != null) {
+          <table class:"eml-header-table"
+          , <tbody
+              for (header, value in headers) {
+                <tr 'data-header-name':string(header)
+                , <th scope:"row", string(header)>
+                  <td property_value_text(value)>
+                >
+              }
+            >
+          >
+        }
+        // HTML MIME bodies are parsed Mark elements; strings retain plain-text wrapping.
+        if (type(body) == element) {
+          <div id:"eml-body", class:"eml-html-body", apply(body)>
+        } else {
+          <pre id:"eml-body", class:"eml-body",
+            if (body != null) body else "">
+        }
+      >
+    }
+  >
 }
 
 // --------------------------------------------------------------------------
@@ -670,7 +717,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV opens as a resizable table. JSON, YAML, TOML, ICS, and VCF open as property trees. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV opens as a resizable table. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. Email shows its headers and body. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -688,6 +735,8 @@ view <document_pane> {
           apply(<property_inspector file:~.file, parsed:~.property_data,
             filter_text:~.property_filter, open_paths:~.property_open_paths,
             closed_paths:~.property_closed_paths, more_paths:~.property_more_paths>)
+        } else if (is_eml_document(~.file["extension"])) {
+          apply(<eml_preview message:~.eml_data>)
         } else if (is_csv_document(~.file["extension"])) {
           apply(<csv_preview rows:~.csv_data, widths:~.csv_widths>)
         } else if (is_image_document(~.file["extension"])) {
@@ -746,7 +795,7 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], csv_data: null, csv_widths: [], csv_resize: null {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_resize: null {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
@@ -794,7 +843,8 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
   apply(<document_pane file:selected_file, preview_mode:preview_mode,
     property_filter:property_filter, property_data:property_data,
     property_open_paths:property_open_paths, property_closed_paths:property_closed_paths,
-    property_more_paths:property_more_paths, csv_data:csv_data, csv_widths:csv_widths>)
+    property_more_paths:property_more_paths, eml_data:eml_data,
+    csv_data:csv_data, csv_widths:csv_widths>)
   >
 }
 on click(evt) {
@@ -858,12 +908,13 @@ on file_select(entry) {
   let format = property_format(entry["extension"])
   // Retain the parsed tree while the user edits the filter or expands nodes.
   property_data = if (format == null) null else input(entry["file_path"], format) ^ { null }
+  eml_data = if (is_eml_document(entry["extension"])) input(entry["file_path"], 'eml') ^ { null } else null
   csv_data = if (is_csv_document(entry["extension"])) input(entry["file_path"], 'csv') ^ { null } else null
   csv_widths = [for (column in csv_columns(csv_data)) CSV_DEFAULT_WIDTH]
   csv_resize = null
   preview_mode = "view"
   property_filter = ""
-  property_open_paths = []
+  property_open_paths = property_initial_open_paths(property_data, format)
   property_closed_paths = []
   property_more_paths = []
 }
@@ -1007,6 +1058,19 @@ on mouseup(evt) {
       .property-summary { color: #6b788b; font-style: italic; }
       .property-message { padding: 18px 22px; color: #6b788b; }
       .property-root-value { padding-left: 32px; }
+      .eml-preview { background: #fff; color: #263448; }
+      .eml-message { max-width: 900px; min-width: 0; margin: 0 auto; }
+      .eml-header-table { width: 100%; table-layout: fixed; border-collapse: collapse;
+                          font: 13px/1.45 'SF Mono', Menlo, Consolas, monospace; }
+      .eml-header-table tr:nth-child(even) { background: #f7f9fb; }
+      .eml-header-table th, .eml-header-table td { padding: 7px 10px; border-bottom: 1px solid #e8edf3;
+                                                   text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      .eml-header-table th { width: 30%; color: #1268c0; font-weight: 600; }
+      .eml-header-table td { color: #263448; white-space: pre-wrap; }
+      .eml-body { box-sizing: border-box; width: 100%; margin: 22px 0 0;
+                  color: #263448; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace;
+                  white-space: pre-wrap; overflow-wrap: anywhere; }
+      .eml-html-body { margin-top: 22px; overflow-wrap: anywhere; }
       .property-more { display: block; width: 100%; padding: 9px 20px; border: 0;
                        background: #f3f7fc; color: #195fa8; text-align: left;
                        font: 600 12px/18px sans-serif; cursor: pointer; }
