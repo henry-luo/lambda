@@ -126,12 +126,20 @@
       "lambdajs": 0.473667,
       "quickjs": 0.602,
       "nodejs": 0.381375,
-      "python": 1763.242,
+      "python": 0.503,
       "_status": {
-        "mir": "ok"
+        "mir": "ok",
+        "python": "ok"
       },
       "_status_detail": {
         "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 1763.242,
           "status_counts": {
             "ok": 3
           }
@@ -145,12 +153,20 @@
       "lambdajs": 38.173125,
       "quickjs": 1.6,
       "nodejs": 0.834625,
-      "python": 2112.672,
+      "python": 1.355,
       "_status": {
-        "mir": "ok"
+        "mir": "ok",
+        "python": "ok"
       },
       "_status_detail": {
         "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 2112.672,
           "status_counts": {
             "ok": 3
           }
@@ -164,12 +180,20 @@
       "lambdajs": 24.879417,
       "quickjs": 1.087,
       "nodejs": 0.64575,
-      "python": 1142.995,
+      "python": 0.738,
       "_status": {
-        "mir": "ok"
+        "mir": "ok",
+        "python": "ok"
       },
       "_status_detail": {
         "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 1142.995,
           "status_counts": {
             "ok": 3
           }
@@ -183,12 +207,20 @@
       "lambdajs": 70.622833,
       "quickjs": 2.349,
       "nodejs": 1.126167,
-      "python": 1112.589,
+      "python": 1.824,
       "_status": {
-        "mir": "ok"
+        "mir": "ok",
+        "python": "ok"
       },
       "_status_detail": {
         "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 1112.589,
           "status_counts": {
             "ok": 3
           }
@@ -202,12 +234,20 @@
       "lambdajs": 10.404375,
       "quickjs": 0.96,
       "nodejs": 0.569542,
-      "python": 1389.051,
+      "python": 0.835,
       "_status": {
-        "mir": "ok"
+        "mir": "ok",
+        "python": "ok"
       },
       "_status_detail": {
         "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 1389.051,
           "status_counts": {
             "ok": 3
           }
@@ -221,12 +261,20 @@
       "lambdajs": 11.8205,
       "quickjs": 0.921,
       "nodejs": 0.493333,
-      "python": 976.12,
+      "python": 0.613,
       "_status": {
-        "mir": "ok"
+        "mir": "ok",
+        "python": "ok"
       },
       "_status_detail": {
         "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 976.12,
           "status_counts": {
             "ok": 3
           }
@@ -240,12 +288,20 @@
       "lambdajs": 29.787834,
       "quickjs": 2.691,
       "nodejs": 0.654125,
-      "python": 1273.902,
+      "python": 1.329,
       "_status": {
-        "mir": "ok"
+        "mir": "ok",
+        "python": "ok"
       },
       "_status_detail": {
         "mir": {
+          "status_counts": {
+            "ok": 3
+          }
+        },
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 1273.902,
           "status_counts": {
             "ok": 3
           }
@@ -412,7 +468,19 @@
       "lambdajs": 7.278917,
       "quickjs": 10.74,
       "nodejs": 6.324125,
-      "python": 2.032
+      "python": 1.848,
+      "_status": {
+        "python": "ok"
+      },
+      "_status_detail": {
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 2.032,
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "knucleotide": {
       "category": "hashing",
@@ -711,7 +779,19 @@
       "lambdajs": 211.212,
       "quickjs": 95.1,
       "nodejs": 14.288,
-      "python": 1837.1
+      "python": 118.041,
+      "_status": {
+        "python": "ok"
+      },
+      "_status_detail": {
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 1837.1,
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "splay": {
       "category": "data",
@@ -729,7 +809,19 @@
       "lambdajs": 9092.426,
       "quickjs": 323.2,
       "nodejs": 15.394,
-      "python": 184.4
+      "python": 83.048,
+      "_status": {
+        "python": "ok"
+      },
+      "_status_detail": {
+        "python": {
+          "source": "benchmark_results_v50.json",
+          "original_exec_ms": 184.4,
+          "status_counts": {
+            "ok": 3
+          }
+        }
+      }
     },
     "crypto_sha1": {
       "category": "crypto",
@@ -818,6 +910,23 @@
     "typed_variants": true,
     "finished_at": "2026-09-02T12:18:01",
     "legacy_variants": false,
-    "mir_key_source": "untyped <bench>.ls"
+    "mir_key_source": "untyped <bench>.ls",
+    "python_result50_backpatch": {
+      "source": "benchmark_results_v50.json",
+      "source_date": "2026-09-30",
+      "rows": [
+        "awfy/sieve",
+        "awfy/permute",
+        "awfy/queens",
+        "awfy/towers",
+        "awfy/bounce",
+        "awfy/list",
+        "awfy/storage",
+        "beng/fasta",
+        "jetstream/navier_stokes",
+        "jetstream/hashmap"
+      ],
+      "note": "Selected Python timings replace mismatched workloads; other v3 cells retain their existing provenance. See Python_Result50_Backpatch.md."
+    }
   }
 }

@@ -48,13 +48,14 @@ def session_y(layout: dict[str, Any], value: float) -> float:
     return top + fraction * (bottom - top)
 
 
-def contiguous_runs(values: list[object]) -> list[list[tuple[int, float]]]:
+def series_runs(values: list[object], connect_gaps: bool = False) -> list[list[tuple[int, float]]]:
     runs: list[list[tuple[int, float]]] = []
     current: list[tuple[int, float]] = []
     for index, value in enumerate(values):
         if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
             current.append((index, float(value)))
-        elif current:
+        elif current and not connect_gaps:
+            # some series link measured sessions even when intervening results are absent
             runs.append(current)
             current = []
     if current:
@@ -208,7 +209,7 @@ def build_svg(metadata: dict[str, Any]) -> str:
 
     for key, values in series.items():
         style = styles[key]
-        for run in contiguous_runs(values):
+        for run in series_runs(values, style.get("connect_gaps", False)):
             if len(run) < 2:
                 continue
             path = path_data(run, layout, count)

@@ -5,8 +5,10 @@
 **Lambda version:** release build (8.3 MB, stripped, `-O2`)  
 **Node.js:** v22.13.0 (V8 JIT)  
 **QuickJS:** v2025-09-13 (interpreter)  
-**Python:** 3.13.3 (CPython)  
+**Python:** 3.13.3 (original); 3.14.6 (ten Result50 backpatch cells)<br>
 **Methodology:** 3 runs per benchmark, median of self-reported execution time (excludes startup/JIT compilation overhead)
+
+**Python backpatch:** Ten timing cells were replaced with Result50 medians to correct mismatched workloads; see [Python_Result50_Backpatch.md](Python_Result50_Backpatch.md) for original values and reasons. MIR, Node.js, other Python cells, and memory figures retain their original provenance. MIR/Python summaries and the history chart were recalculated.
 
 ---
 
@@ -19,7 +21,7 @@
 | **LambdaJS** | JIT | Lambda's built-in JavaScript JIT |
 | **QuickJS** | Interpreter | Standalone QuickJS JavaScript engine |
 | **Node.js** | JIT | Google V8 JavaScript engine with optimizing JIT |
-| **Python** | Interpreter | CPython 3.13 reference interpreter |
+| **Python** | Interpreter | CPython 3.13 original; CPython 3.14.6 for ten backpatched timing cells |
 
 ---
 
@@ -51,13 +53,13 @@
 
 | Benchmark | Category | MIR | C2MIR | LambdaJS | QuickJS | Node.js | Python | MIR/Node | MIR/Py |
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
-| sieve | micro | 0.055 | 0.051 |  0.77 |  0.60 |  0.38 | 1.76s | 0.15x | 0.000x |
-| permute | micro | 0.066 | 0.065 |    13 |   1.6 |  0.81 | 2.11s | 0.08x | 0.000x |
-| queens | micro |  0.15 |  0.13 |    11 |   1.1 |  0.64 | 1.14s | 0.23x | 0.000x |
-| towers | micro |  0.22 |  0.11 |    23 |   2.3 |   1.1 | 1.11s | 0.20x | 0.000x |
-| bounce | micro |  0.20 |  0.14 |    10 |  0.96 |  0.55 | 1.39s | 0.36x | 0.000x |
-| list | micro | 0.032 |  0.62 |   7.9 |  0.92 |  0.50 |   976 | 0.06x | 0.000x |
-| storage | micro |  0.33 |  0.48 |   6.2 |   2.7 |  0.64 | 1.27s | 0.52x | 0.000x |
+| sieve | micro | 0.055 | 0.051 |  0.77 |  0.60 |  0.38 | 0.503 | 0.15x |  0.11x |
+| permute | micro | 0.066 | 0.065 |    13 |   1.6 |  0.81 | 1.355 | 0.08x |  0.05x |
+| queens | micro |  0.15 |  0.13 |    11 |   1.1 |  0.64 | 0.738 | 0.23x |  0.20x |
+| towers | micro |  0.22 |  0.11 |    23 |   2.3 |   1.1 | 1.824 | 0.20x |  0.12x |
+| bounce | micro |  0.20 |  0.14 |    10 |  0.96 |  0.55 | 0.835 | 0.36x |  0.24x |
+| list | micro | 0.032 |  0.62 |   7.9 |  0.92 |  0.50 | 0.613 | 0.06x |  0.05x |
+| storage | micro |  0.33 |  0.48 |   6.2 |   2.7 |  0.64 | 1.329 | 0.52x |  0.25x |
 | mandelbrot | compute |    31 |    51 |   279 |   888 |    32 |   --- | 0.97x | --- |
 | nbody | compute |    48 |    85 | 2.06s |   167 |   5.6 |   135 | 8.64x | 0.36x |
 | richards | macro |   246 |   212 | 3.31s |   194 |    48 |   168 | 5.16x | 1.46x |
@@ -67,7 +69,7 @@
 | cd | macro |   528 |   603 | 11.66s | 1.06s |    37 |   --- | 14.3x | --- |
 
 **Geometric mean MIR/Node.js: 0.83x** — Lambda faster on 8/14 benchmarks
-**Geometric mean MIR/Python: 0.00x** — Lambda faster on 10/12 benchmarks
+**Geometric mean MIR/Python: 0.22x** — Lambda faster on 10/12 benchmarks
 
 ---
 
@@ -79,7 +81,7 @@
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
 | binarytrees | allocation |   7.5 |   7.7 |   114 |    28 |   4.1 |    10 | 1.81x | 0.72x |
 | fannkuch | permutation |  0.73 |   1.1 |   1.6 |   7.3 |   4.1 |   5.1 | 0.18x | 0.14x |
-| fasta | generation |   1.1 |  0.91 |   3.9 |    11 |   6.2 |   2.0 | 0.19x | 0.57x |
+| fasta | generation |   1.1 |  0.91 |   3.9 |    11 |   6.2 | 1.848 | 0.19x | 0.60x |
 | knucleotide | hashing |   3.1 |   4.0 | 0.088 |   --- |   5.0 |   3.9 | 0.61x | 0.79x |
 | mandelbrot | numeric |   144 |   240 | 2.85s |   698 |    16 | 1.37s | 9.25x | 0.11x |
 | nbody | numeric |    48 |    85 | 1.75s |   155 |   8.1 |   172 | 5.96x | 0.28x |
@@ -144,16 +146,16 @@
 | --------- | -------- | ---: | ----: | -------: | ------: | ------: | -----: | -------: | -----: |
 | nbody | numeric |    48 |    85 | 1.91s |   --- |   5.5 |   146 | 8.64x | 0.33x |
 | cube3d | 3d |    49 |   141 |    22 |   228 |    18 |    46 | 2.76x | 1.08x |
-| navier_stokes | numeric |   815 |   801 |   --- |    95 |    14 | 1.84s | 56.3x | 0.44x |
+| navier_stokes | numeric |   815 |   801 |   --- |    95 |    14 | 118.041 | 56.3x | 6.90x |
 | richards | macro |   256 |   239 |   483 |   --- |   8.3 |   225 | 30.9x | 1.14x |
 | splay | data |   159 |   --- |    48 |   199 |    20 |   326 | 7.77x | 0.49x |
 | deltablue | macro |    19 |    19 |    48 |   --- |    11 |    18 | 1.74x | 1.04x |
-| hashmap | data |    98 |    99 |   --- |   323 |    16 |   184 | 5.98x | 0.53x |
+| hashmap | data |    98 |    99 |   --- |   323 |    16 | 83.048 | 5.98x | 1.18x |
 | crypto_sha1 | crypto |    16 |    20 |   141 |   222 |   9.0 |   321 | 1.82x | 0.05x |
 | raytrace3d | 3d |   376 |   562 |   709 |   170 |    19 |   144 | 20.1x | 2.61x |
 
 **Geometric mean MIR/Node.js: 7.92x** — Lambda slower on 0/9 benchmarks
-**Geometric mean MIR/Python: 0.57x** — Lambda faster on 5/9 benchmarks
+**Geometric mean MIR/Python: 0.84x** — Lambda faster on 3/9 benchmarks
 
 ---
 
@@ -182,15 +184,15 @@
 | Suite | Geo. Mean | Lambda Wins | Python Wins | Total Compared |
 |-------|----------:|:-----------:|:-----------:|:--------------:|
 | R7RS | 0.07x | 9 | 1 | 10 |
-| AWFY | 0.00x | 10 | 2 | 12 |
+| AWFY | 0.22x | 10 | 2 | 12 |
 | BENG | 0.71x | 8 | 2 | 10 |
 | KOSTYA | 0.22x | 5 | 2 | 7 |
 | LARCENY | 0.12x | 11 | 1 | 12 |
-| JetStream | 0.57x | 5 | 4 | 9 |
-| **Overall (raw)** | **0.10x** | **48** | **12** | **60** |
-| **Overall (dedup)** | **0.09x** | **45** | **10** | **55** |
+| JetStream | 0.84x | 3 | 6 | 9 |
+| **Overall (raw)** | **0.24x** | **46** | **14** | **60** |
+| **Overall (dedup)** | **0.23x** | **43** | **12** | **55** |
 
-> Lambda MIR is overwhelmingly faster than CPython across all suites.
+> Mixed-date Python comparison: ten workload-corrected timings come from Result50; other engines and Python rows retain the original session.
 
 ---
 
@@ -505,9 +507,9 @@ on 50 unique benchmarks, winning 26 of 50.
 
 ### 2. Lambda MIR dominates CPython
 
-Across 55 unique benchmarks with Python comparisons, Lambda MIR is **12× faster** (geo mean 0.09x).
-CPython's interpreted execution cannot match JIT-compiled code on compute-intensive tasks.
-Lambda wins on all suites, with particular dominance on tight loops and numeric code (AWFY micro-benchmarks: 1000–30000× faster).
+Across 55 unique benchmarks with Python comparisons, Lambda MIR is **4.3× faster** (geo mean 0.23x). Ten Python cells are from Result50.
+The corrected Python comparison mixes March Lambda/Node timings with ten September Python measurements.
+The seven corrected AWFY microbenchmarks no longer imply a 1000–30000× advantage.
 
 ### 3. Strengths: Micro-benchmarks and numeric code
 
@@ -581,12 +583,12 @@ Key observations:
 
 - **Self-reported exec time** measures only the computation, excluding process startup, JIT compilation warmup, and file I/O.
 - **AWFY JS benchmarks** use the official source from `ref/are-we-fast-yet/benchmarks/JavaScript/`. AWFY Python benchmarks use the official Python port with harness.
-- **AWFY Python micro-benchmarks** (sieve, permute, queens, etc.) show extreme Lambda advantage because CPython interprets tight loops ~10,000× slower than JIT-compiled code.
+- **AWFY Python micro-benchmarks** (sieve, permute, queens, towers, bounce, list, storage) originally repeated the Python work 600–3000 times while Node ran it once; the seven Python timings shown here come from Result50.
 - **AWFY Python** benchmarks use the official Python port with harness. Class names: NBody, DeltaBlue, CD (not capitalize()).
 - **LambdaJS** now passes all AWFY benchmarks including bounce, storage, json, deltablue, havlak, and cd (previously failing due to missing ES6 class features).
 - **QuickJS** fails on ack (R7RS) due to stack overflow on deep recursion.
-- **JetStream** benchmarks run on MIR, C2MIR, LambdaJS, Node.js, and Python (for deltablue, richards, nbody). LambdaJS passes 8/9 benchmarks (hashmap times out). No QuickJS ports.
-- **Python** benchmarks not available for: AWFY/cd, JetStream/cube3d, JetStream/navier_stokes, JetStream/splay, JetStream/hashmap, JetStream/crypto_sha1, JetStream/raytrace3d.
+- **JetStream** `navier_stokes` and `hashmap` Python timings use Result50 workload-corrected measurements; all other timing cells retain their original provenance.
+- **Python** AWFY/mandelbrot and AWFY/cd have no original valid timing in this report; the backpatch does not fill missing rows.
 - All times in **milliseconds** unless noted with 's' suffix (seconds).
 - The `json` AWFY benchmark workload was corrected between R2 and R3 (R2: 0.028ms was a minimal-workload test).
 - **Workload synchronization**: Duplicate benchmark names across suites now use identical heavy workloads synchronized to original JetStream — AWFY/BENG/JetStream mandelbrot N=500, nbody 36000 steps, richards 50×COUNT=1000, deltablue 20×chain(100), Larceny/Kostya primes sieve(1M).
