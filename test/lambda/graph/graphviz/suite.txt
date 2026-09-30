@@ -1,5 +1,5 @@
 {
-  cases: 12,
+  cases: 13,
   results: [{
       id: "canonical",
       valid: true,
@@ -84,6 +84,13 @@
       edges: 1,
       annotations: 0,
       html: [2, 1, 0]
+    }, {
+      id: "fsm",
+      valid: true,
+      nodes: 9,
+      edges: 14,
+      annotations: 0,
+      html: [9, 14, 0]
     }],
   references: [{
       id: "reference-semantics",

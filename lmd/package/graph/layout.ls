@@ -2,6 +2,7 @@
 
 import dagre: .dagre
 import graph_style: .style
+import route_geometry: .route_geometry
 
 pub fn make_options() => dagre.make_options()
 
@@ -290,10 +291,13 @@ fn point_along_route(points, i, remaining) {
 
 fn route_anchor(edge) {
   if (edge == null or len(edge.points) == 0) null
-  else if (len(edge.points) == 1) edge.points[0]
-  // point-count midpoints bias labels toward short segments on bent routes.
-  else point_along_route(edge.points, 1,
-    route_length_at(edge.points, 1, 0.0) / 2.0)
+  else {
+    let points = route_geometry.sample_points(edge);
+    if (len(points) == 1) points[0]
+    // place labels at the drawn spline's arc-length midpoint.
+    else point_along_route(points, 1,
+      route_length_at(points, 1, 0.0) / 2.0)
+  }
 }
 
 fn node_annotation_anchor(label, nodes) {
@@ -388,26 +392,36 @@ fn label_candidates(label, anchor, occupied, gap) {
   let centered = candidate_placement(label, anchor, 0.0, 0.0);
   let rings = [for (ring in 1 to 6,
     candidate in ring_candidates(label, anchor, gap, ring)) candidate];
-  // Keep DOT text clear of the spline while preserving centered Mermaid labels.
+  // A label above a route needs its entire box beyond the stroke, not just its baseline.
   let offset = if (label.placement == "above")
-    candidate_placement(label, anchor, 0.0, 0.0 - label.height / 3.0)
+    candidate_placement(label, anchor, 0.0, 0.0 - label.height / 2.0 - gap)
     else if (label.placement == "right")
       candidate_placement(label, anchor, label.width / 3.0, 0.0)
     else centered;
+  let nearby = if (label.placement == "above") [
+    candidate_placement(label, anchor, 0.0 - label.width / 2.0 - gap,
+      0.0 - label.height / 2.0 - gap),
+    candidate_placement(label, anchor, label.width / 2.0 + gap,
+      0.0 - label.height / 2.0 - gap)
+  ] else [];
   let fallback = outside_candidate(label, anchor, occupied, gap);
   if (label.owner_kind == "node" or label.kind == "center")
-    { [offset, centered, *rings, fallback] }
+    { [offset, *nearby, *(if (label.placement == "above") [] else [centered]),
+        *rings, fallback] }
   else { [*rings, centered, fallback] }
 }
 
-fn edge_route_obstacles(edge, clearance) => if (len(edge.points) < 2) [] else [
-  for (i in 1 to (len(edge.points) - 1),
-    let a = edge.points[i - 1], let b = edge.points[i])
-    {*:placement_box(min([a.x, b.x]) - clearance, min([a.y, b.y]) - clearance,
-      abs(b.x - a.x) + clearance * 2.0,
-      abs(b.y - a.y) + clearance * 2.0),
-      obstacle_kind: "route", owner_id: edge.id}
-]
+fn edge_route_obstacles(edge, clearance) {
+  let points = route_geometry.sample_points(edge);
+  if (len(points) < 2) [] else [
+    for (i in 1 to (len(points) - 1),
+      let a = points[i - 1], let b = points[i])
+      {*:placement_box(min([a.x, b.x]) - clearance, min([a.y, b.y]) - clearance,
+        abs(b.x - a.x) + clearance * 2.0,
+        abs(b.y - a.y) + clearance * 2.0),
+        obstacle_kind: "route", owner_id: edge.id}
+  ]
+}
 
 fn route_obstacles(edges, clearance) => [
   for (edge in edges, box in edge_route_obstacles(edge, clearance)) box
@@ -479,9 +493,27 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
   let cluster_labels = semantic_cluster_labels(children);
   let clusters = semantic_clusters(children, cluster_labels);
   let edges = if (opts != null and opts.edges != null) opts.edges else metadata_edges;
-  let node_sep = float(graph_option(parent, opts, "node_sep", "data-node-sep", 60.0));
-  let rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
-  let edge_sep = float(graph_option(parent, opts, "edge_sep", "data-edge-sep", 10.0));
+  let requested_node_sep = float(graph_option(parent, opts, "node_sep", "data-node-sep", 60.0));
+  let requested_rank_sep = float(graph_option(parent, opts, "rank_sep", "data-rank-sep", 80.0));
+  let center_label_widths = [for (label in edge_labels where label.kind == "center")
+    label.width];
+  // measured DOT labels need rank space in addition to node boxes.
+  let rank_sep = if (attr_or(parent, "data-graph-flavor", null) == "dot" and
+    len(center_label_widths) > 0)
+    max([requested_rank_sep, max(center_label_widths) + 48.0])
+    else requested_rank_sep;
+  let requested_edge_sep = float(graph_option(parent, opts, "edge_sep", "data-edge-sep", 10.0));
+  let center_label_heights = [for (label in edge_labels where label.kind == "center")
+    label.height];
+  // DOT lanes must leave room for the measured labels of nearby edges and loops.
+  let edge_sep = if (attr_or(parent, "data-graph-flavor", null) == "dot" and
+    len(center_label_heights) > 0)
+    max([requested_edge_sep, max(center_label_heights) + 4.0])
+    else requested_edge_sep;
+  let node_sep = if (attr_or(parent, "data-graph-flavor", null) == "dot" and
+    len(center_label_heights) > 0)
+    max([requested_node_sep, edge_sep + max(center_label_heights) + 12.0])
+    else requested_node_sep;
   let direction = string(graph_option(parent, opts, "direction", "data-direction", "TB"));
   let route_mode = string(graph_option(parent, opts, "route_mode", "data-route-mode",
     if (string(graph_option(parent, opts, "use_splines",
@@ -517,6 +549,8 @@ pub fn from_velmts(parent, children, ctx, opts = null) {
     rank_sep: rank_sep,
     edge_sep: edge_sep,
     route_mode: route_mode,
+    loop_side: if (attr_or(parent, "data-graph-flavor", null) == "dot")
+      "top" else "right",
     ordering: graph_option(parent, opts, "ordering", "data-ordering", null),
     new_rank: graph_option(parent, opts, "new_rank", "data-new-rank", false),
     compound: graph_option(parent, opts, "compound", "data-compound", false),
