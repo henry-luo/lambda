@@ -224,8 +224,8 @@ document.getElementById("run-svg-direct-contract").addEventListener("click", () 
       parsed.documentElement.namespaceURI === svgNs &&
       serialized.includes("<rect id=\"svg-direct-rect\"") &&
       serialized.includes("xlink:href=") &&
-      typeof document.execCommand !== "function" &&
-      typeof document.queryCommandSupported !== "function";
+      typeof document.execCommand === "function" &&
+      typeof document.queryCommandSupported === "function";
     state.textContent = JSON.stringify({
       box, groupBox, pathBox, textBox, hit: hit && hit.id,
       overlapCircleHit: overlapCircleHit && overlapCircleHit.id,

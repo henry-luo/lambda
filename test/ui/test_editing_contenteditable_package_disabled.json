@@ -1,6 +1,7 @@
 {
   "name": "Disabled DOM behavior package leaves contenteditable mutation unavailable",
   "html": "test/ui/ce/editable-dom-package-disabled.html",
+  "env": [{"key": "RADIANT_DOM_PKG", "value": "0"}],
   "viewport": {"width": 640, "height": 140},
   "events": [
     {"type": "log", "message": "=== contenteditable_package_disabled ==="},

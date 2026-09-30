@@ -915,6 +915,39 @@ static bool resolve_target(SimEvent* ev, DomDocument* doc, float* out_x, float* 
     return true;
 }
 
+// A selector click must bring a target inside its scrollports before using
+// its painted coordinates; the target can be mounted while fully clipped.
+static bool resolve_click_target(SimEvent* ev, UiContext* uicon,
+                                 float* out_x, float* out_y) {
+    DomDocument* doc = uicon ? uicon->document : nullptr;
+    if (!resolve_target(ev, doc, out_x, out_y)) return false;
+    if (ev && ev->target_selector && doc) {
+        View* elem = find_element_by_selector(doc, ev->target_selector, ev->target_index);
+        if (elem && elem->is_element()) {
+            bool clipped = *out_x < 0.0f || *out_y < 0.0f ||
+                *out_x >= uicon->viewport_width || *out_y >= uicon->viewport_height;
+            for (View* parent = elem->parent; parent && !clipped;
+                 parent = parent->parent) {
+                if (parent->view_type != RDT_VIEW_BLOCK &&
+                    parent->view_type != RDT_VIEW_INLINE_BLOCK &&
+                    parent->view_type != RDT_VIEW_LIST_ITEM) continue;
+                ViewBlock* block = lam::view_require_block(parent);
+                if (!block->scroller || !block->scroll()->pane) continue;
+                float x, y, width, height;
+                view_get_visual_bounds(parent, &x, &y, &width, &height);
+                clipped = *out_x < x || *out_y < y ||
+                    *out_x >= x + width || *out_y >= y + height;
+            }
+            if (clipped || ev->scroll_into_view) {
+                dom_scroll_into_view_if_needed_bridge((void*)elem->as_element());
+                sim_reflow_if_pending(doc, (DocState*)doc->state);
+                return resolve_target(ev, doc, out_x, out_y);
+            }
+        }
+    }
+    return true;
+}
+
 static bool resolve_to_target_position(SimEvent* ev, DomDocument* doc,
                                        float* out_x, float* out_y) {
     if (ev->to_target_selector && doc) {
@@ -1250,6 +1283,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     if (!type_str) {
         return parse_sim_event_fail(ev);
     }
+    ev->scroll_into_view = reader.has("scroll_into_view") &&
+        reader.get("scroll_into_view").asBool();
 
     // Parse event type
     if (strcmp(type_str, "wait") == 0) {
@@ -3796,7 +3831,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_CLICK: {
             float x, y;
-            if (!resolve_target(ev, uicon->document, &x, &y)) break;
+            if (!resolve_click_target(ev, uicon, &x, &y)) break;
             log_info("event_sim: click at (%.2f, %.2f) button=%d", x, y, ev->button);
             sim_mouse_move(uicon, x, y);
             sim_mouse_button(uicon, x, y, ev->button, ev->mods, true);
@@ -3815,7 +3850,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
 
         case SIM_EVENT_DBLCLICK: {
             float x, y;
-            if (!resolve_target(ev, uicon->document, &x, &y)) break;
+            if (!resolve_click_target(ev, uicon, &x, &y)) break;
             // F2: click_count default = 2 (dblclick). 3 = tripleclick.
             int total_clicks = ev->click_count > 0 ? ev->click_count : 2;
             if (total_clicks < 2) total_clicks = 2;
@@ -3890,7 +3925,7 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
                 break;
             }
             float x, y;
-            if (!resolve_target(ev, uicon->document, &x, &y)) break;
+            if (!resolve_click_target(ev, uicon, &x, &y)) break;
             // Focus fixtures historically model pointer focus. Preserve that
             // default so native form controls run their normal mouse path;
             // only widgets that cancel mousedown need programmatic fallback.

@@ -1,7 +1,4 @@
-<doc focus: {
-    target: "#readonly-fld",
-    from_mouse: true
-  }, caret: {
+<doc caret: {
     target: "#readonly-fld",
     offset: 6
   }, hover: "#disabled-fld", render: {
@@ -10,23 +7,23 @@
     rects: 1
   }, editing: {
     active_surface: true
-  }
-  <html flags: ['hover', 'focus-within']
-    <body index: 2, flags: ['hover', 'focus-within']
-      <form index: 3, id: "the-form", flags: ['hover', 'focus-within']
-        <div index: 1
+  },
+  <html flags: ['hover'],
+    <body index: 2, flags: ['hover'],
+      <form index: 3, id: "the-form", flags: ['hover'],
+        <div index: 1,
           <input index: 3, id: "name", flags: ['valid']>>
-        <div index: 3
+        <div index: 3,
           <input index: 3, id: "code", flags: ['valid']>>
-        <div index: 5
+        <div index: 5,
           <input index: 3, id: "pwd", flags: ['valid']>>
-        <div index: 7, flags: ['focus-within']
-          <input index: 3, id: "readonly-fld", flags: ['focus', 'focus-within', 'valid'], form: {
+        <div index: 7,
+          <input index: 3, id: "readonly-fld", flags: ['valid'], form: {
               sel: [6, 6]
             }>>
-        <div index: 9, flags: ['hover']
+        <div index: 9, flags: ['hover'],
           <input index: 3, id: "disabled-fld", flags: ['hover', 'valid'], form: {
               sel: [3, 3]
             }>>
-        <div index: 11
+        <div index: 11,
           <textarea index: 3, id: "bio", flags: ['valid']>>>>>>

@@ -66,6 +66,7 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define js_get_document_object_value radiant_host_api->realm->get_document_object_value
 #define dom_document_proxy_for_doc_bridge radiant_host_api->realm->document_proxy_for_doc_bridge
 #define dom_unwrap_element_impl radiant_host_api->dom_catalog->unwrap_element_impl
+#define dom_import_node_bridge radiant_host_api->dom_catalog->import_node_bridge
 #define dom_initialize_node_wrapper radiant_host_api->realm->initialize_node_wrapper
 // ES45: the property protocol and the ordinal executor cross the API like every
 // other operation. The two property rows are already Item-uniform, so they map
@@ -3447,10 +3448,8 @@ static int radiant_dom_document_operation_active(RadiantDocumentOperation operat
             *out = ItemNull;
             return 1;
         }
-        Item source_item = radiant_dom_node_item(source);
-        Item deep_arg = (Item){.item = b2it((argc >= 2 && js_is_truthy(args[1])) ? 1 : 0)};
-        *out = radiant_dom_element_operation(source_item, JUBE_DOM_CLONE_NODE,
-            &deep_arg, 1);
+        *out = dom_import_node_bridge(doc, source,
+            argc >= 2 && js_is_truthy(args[1]));
         return 1;
     }
 

@@ -202,6 +202,7 @@ struct SimEvent {
     float target_offset_x;       // optional logical offset from element top-left
     float target_offset_y;       // optional logical offset from element top-left
     bool has_target_offset;      // true when offset_x/offset_y were specified
+    bool scroll_into_view;       // for a click obscured inside a scrollport
     char* to_target_selector;    // for mouse_drag: destination CSS selector
     char* to_target_text;        // for mouse_drag: destination text target
     float to_target_offset_x;    // optional logical offset from drag destination top-left

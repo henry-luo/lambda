@@ -351,6 +351,8 @@ on editaction(evt) {
   let target = edit_action_selection(editor, evt)
   if (writes_view_only(session, editor.doc, target, evt.input_type)) {
     status = view_only_status
+    // The status redraw replaces the caret's DOM node even though no edit ran.
+    edit_restore_selection(editor)
     return edit_result.decline(true, false, "view-only", 0)
   }
   // The caret decides (a deletion's target range runs past the part). The
@@ -368,7 +370,11 @@ on selectionchange(evt) {
   if (evt.source_selection != null or evt.source_pos != null) {
     editor = mounted(editor, evt.target, session.format)
     let accepted = edit_accept_dom_selection(editor, evt)
-    if (accepted.changed) { editor = accepted.editor }
+    if (accepted.changed) {
+      editor = accepted.editor
+      // Reactive projection replaces selected nodes after this handler settles.
+      edit_restore_selection(editor)
+    }
   }
 }
 on edit_cmd(req) {
@@ -601,6 +607,17 @@ on keydown(evt) {
 // object, handle, or start point; the release commits one transaction; Escape
 // in between cancels. Without pointer moves the surface shows no preview.
 on mousedown(evt) {
+  if (not is_drawing(session) and evt.source_pos != null) {
+    let rich_surface = dom.get_element_by_id(doc_root(evt.target), "edit-surface")
+    if (rich_surface != null and dom.contains(rich_surface, evt.target)) {
+      let part = view_only_part(session, editor.doc, evt.source_pos.path)
+      if (part != null) {
+        // Native caret placement skips false islands; select their model node.
+        editor = edit_set_selection(editor, node_selection(part))
+        edit_restore_selection(editor)
+      }
+    }
+  }
   if (not is_drawing(session) or dialog != null) { return 'pass' }
   let surface = dom.get_element_by_id(doc_root(evt.target), "edit-surface")
   if (surface == null or not dom.contains(surface, evt.target)) { return 'pass' }

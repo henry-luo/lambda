@@ -14106,6 +14106,10 @@ extern "C" Item dom_scroll_into_view_bridge(void* dom_elem) {
     return dom_scroll_into_view_with_options((DomElement*)dom_elem, nullptr, 0);
 }
 
+extern "C" void dom_scroll_into_view_if_needed_bridge(void* dom_elem) {
+    dom_queue_scroll_into_view((DomElement*)dom_elem, false, true);
+}
+
 extern "C" Item dom_scroll_operation_bridge(Item elem_item,
                                                 JubeDomElementOperation operation,
                                                 Item* args, int argc) {
@@ -14395,10 +14399,8 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
     // node before completing this move; otherwise the same text is linked
     // twice after a retained transaction restore (D5.3.3).
     DomText* relinked = dom_find_text_child(parent, inserted_string);
-    if (text->parent != (DomNode*)parent && !relinked) {
-        log_error("dom_insert_backed_text: missing relinked text wrapper");
-        return false;
-    }
+    // Detached clone parents have no live tree for MarkEditor to relink.
+    // The verified backing child is linked through the DOM chain below.
     if (text->native_string != inserted_string) {
         if (text->owns_native_string()) {
             pool_free(parent->doc->document_pool, text->native_string);
@@ -15083,6 +15085,15 @@ extern "C" Item dom_clone_node_bridge(void* elem_ptr, Item deep_arg, bool has_de
     DomElement* elem = (DomElement*)elem_ptr;
     DomElement* clone = elem ? dom_clone_element_into_document(elem, elem->doc,
         has_deep && js_is_truthy(deep_arg)) : nullptr;
+    return clone ? dom_wrap_element(clone) : ItemNull;
+}
+
+extern "C" Item dom_import_node_bridge(void* doc_ptr, void* elem_ptr, bool deep) {
+    DomDocument* destination = (DomDocument*)doc_ptr;
+    DomElement* source = (DomElement*)elem_ptr;
+    // Import creates destination-owned backing storage; adoption of a source
+    // clone would leave its Mark attributes tied to the foreign document pool.
+    DomElement* clone = dom_clone_element_into_document(source, destination, deep);
     return clone ? dom_wrap_element(clone) : ItemNull;
 }
 

@@ -45,7 +45,7 @@
     report('report', true);
   });
   document.getElementById('unsup').addEventListener('click', function() {
-    report('unsup', document.execCommand('justifyCenter', false, ''));
+    report('unsup', document.execCommand('unsupportedCommand', false, ''));
   });
   document.getElementById('partial-bold').addEventListener('click', function() {
     out.textContent = 'partial:' + document.execCommand('bold', false, '') + '|' + partial.innerHTML;

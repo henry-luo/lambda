@@ -94,6 +94,9 @@ struct UiTestInfo {
     // document before each run, so a Save never writes a committed file.
     bool edit_command;
     char working_copy[256];
+    int env_count;
+    char env_keys[4][64];
+    char env_values[4][256];
     int estimated_wait_ms;   // explicit event waits, used only for launch scheduling
     int explicit_wait_count;
     int assertion_count;
@@ -512,6 +515,55 @@ static bool ui_load_fixture(const std::string& json_path, const UiSuiteSpec& sui
         }
         snprintf(info->working_copy, sizeof(info->working_copy), "%s", copy_path);
     }
+    // Keep fixture settings on the child process so parallel tests cannot
+    // change one another's package or script admission policy.
+    info->env_count = 0;
+    ItemReader environment = root_map.get("env");
+    if (!environment.isNull()) {
+        if (!environment.isArray() && !environment.isList()) {
+            g_ui_discovery_error = "fixture env must be an array: " + json_path;
+            ui_dispose_json_input(pool, input);
+            return false;
+        }
+        ArrayReader entries = environment.asArray();
+        if (entries.length() > 4) {
+            g_ui_discovery_error = "fixture env has too many entries: " + json_path;
+            ui_dispose_json_input(pool, input);
+            return false;
+        }
+        for (int64_t i = 0; i < entries.length(); i++) {
+            ItemReader entry = entries.get(i);
+            if (!entry.isMap()) {
+                g_ui_discovery_error = "fixture env entry must be an object: " + json_path;
+                ui_dispose_json_input(pool, input);
+                return false;
+            }
+            MapReader pair = entry.asMap();
+            ItemReader key_item = pair.get("key");
+            ItemReader value_item = pair.get("value");
+            const char* key = key_item.isString() ? key_item.cstring() : nullptr;
+            const char* value = value_item.isString() ? value_item.cstring() : nullptr;
+            bool valid_key = key && ((key[0] >= 'A' && key[0] <= 'Z') || key[0] == '_');
+            if (valid_key) {
+                for (const char* ch = key + 1; *ch; ch++) {
+                    if (!((*ch >= 'A' && *ch <= 'Z') ||
+                          (*ch >= '0' && *ch <= '9') || *ch == '_')) {
+                        valid_key = false;
+                        break;
+                    }
+                }
+            }
+            if (!valid_key || !value || strlen(key) >= sizeof(info->env_keys[0]) ||
+                    strlen(value) >= sizeof(info->env_values[0])) {
+                g_ui_discovery_error = "fixture env entry has invalid key or value: " + json_path;
+                ui_dispose_json_input(pool, input);
+                return false;
+            }
+            int slot = info->env_count++;
+            snprintf(info->env_keys[slot], sizeof(info->env_keys[slot]), "%s", key);
+            snprintf(info->env_values[slot], sizeof(info->env_values[slot]), "%s", value);
+        }
+    }
     ItemReader assertions = root_map.get("assertions");
     if (!assertions.isNull()) {
         if (!assertions.isArray() && !assertions.isList()) {
@@ -857,6 +909,11 @@ static UiTestResult run_ui_test(const UiTestInfo& info) {
     args[arg_count] = NULL;
     ShellOptions options = {0};
     options.merge_stderr = true;
+    ShellEnvEntry child_env[5] = {};
+    for (int i = 0; i < info.env_count; i++) {
+        child_env[i] = {info.env_keys[i], info.env_values[i]};
+    }
+    if (info.env_count > 0) options.env = child_env;
     // Worker threads must launch argv directly; a shell adds process and quoting overhead.
     ShellResult shell_result = shell_exec(LAMBDA_EXE, args, &options);
     if (shell_result.stdout_buf) {

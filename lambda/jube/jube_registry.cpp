@@ -1017,6 +1017,7 @@ extern "C" Item dom_live_document_get_elements_by_name_bridge(void* doc, Item qu
 extern "C" Item dom_live_element_get_elements_by_tag_name_bridge(void* elem, Item query);
 extern "C" Item dom_live_element_get_elements_by_class_name_bridge(void* elem, Item query);
 extern "C" Item dom_clone_node_bridge(void* elem, Item deep, bool has_deep);
+extern "C" Item dom_import_node_bridge(void* doc, void* elem, bool deep);
 extern "C" Item dom_replace_child_bridge(void* parent, Item new_child, Item old_child);
 extern "C" Item dom_replace_with_bridge(void* node, Item* args, int argc);
 extern "C" Item dom_insert_adjacent_element_bridge(void* elem, Item position, Item new_node);
@@ -5983,6 +5984,12 @@ bool jube_node_core_module_enabled(void) {
 }
 
 void jube_register_builtin_modules(void) {
+    // AST prebuild workers can resolve imports concurrently. Serialize the
+    // cold catalog writes so none can see a count before its slot is filled.
+    static uv_once_t lock_once = UV_ONCE_INIT;
+    static uv_mutex_t registration_lock;
+    uv_once(&lock_once, []() { uv_mutex_init(&registration_lock); });
+    uv_mutex_lock(&registration_lock);
     radiant_jube_register_static();
     // The Lambda-facing face of the same DOM core the radiant module bridges
     // to (ES36); registered after radiant so the dom_node wrappers its
@@ -5993,6 +6000,7 @@ void jube_register_builtin_modules(void) {
         hostobj_demo_jube_register_static();
     }
     jube_load_dynamic_modules_from_env();
+    uv_mutex_unlock(&registration_lock);
 }
 
 int jube_static_module_count(void) {

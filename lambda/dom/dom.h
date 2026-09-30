@@ -169,6 +169,7 @@ void* dom_document_from_item(Item item);
 
 // Clone a Document into an independently owned DOM tree, with optional descendants.
 Item dom_clone_document_bridge(Item document_item, Item deep_arg);
+Item dom_import_node_bridge(void* document, void* element, bool deep);
 
 // The script runner changes this only for the dynamic extent of a classic
 // script evaluation. Returns the previous element for nested evaluations.
@@ -445,6 +446,7 @@ Item js_file_new(Item parts, Item name, Item options);
 /** Activation bridges invoked after the UA tier claims an event. */
 Item dom_focus_method_bridge(void* dom_elem, bool focus);
 Item dom_scroll_into_view_bridge(void* dom_elem);
+void dom_scroll_into_view_if_needed_bridge(void* dom_elem);
 void dom_select_set_selected_index_bridge(void* dom_elem, Item value);
 
 /** dataset expando write, routed from the JS property-set path. */
