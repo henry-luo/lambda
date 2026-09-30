@@ -8169,10 +8169,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 !has_author_display;
             if (alt_text && alt_text[0] != '\0' &&
                 (!has_explicit_dimension ||
-                 (default_inline_alt_fallback && !has_css_width && !has_css_height &&
-                  !block_level_markup_dimensions))) {
-                // Author CSS sizes the failed replaced box; only markup-only
-                // dimensions yield to the browser's inline alt-text fallback.
+                 (default_inline_alt_fallback && !block_level_markup_dimensions))) {
+                // A broken default-inline image renders its alt text even when
+                // CSS width or aspect-ratio had sized the replaced image box.
                 layout_set_broken_image_alt_fallback(lycon, block, false);
             } else {
                 if (block->embed) {
