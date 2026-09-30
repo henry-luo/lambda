@@ -298,6 +298,8 @@ p { margin-bottom: var(--space-md); }
 
 code {
   font-family: var(--font-mono);
+  /* ligatures would draw |> as a triangle and >= as a glyph; show the characters to type */
+  font-variant-ligatures: none;
   font-size: 0.9em;
   background: var(--color-bg-code);
   padding: 0.15em 0.4em;
@@ -307,6 +309,7 @@ code {
 
 pre {
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
   font-size: 0.875rem;
   background: var(--color-bg-code);
   border: 1px solid var(--color-border);

@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../favicon.ico" sizes="48x48">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="manifest" href="../site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Supported Formats &amp; Pipelines — Lambda Script</title>
   <meta name="description" content="Lambda Script parses 20+ formats into a unified tree: Markdown, HTML, JSON, YAML, XML, LaTeX, PDF, CSV, TOML, and more.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -186,13 +191,13 @@
     <!-- How it works -->
     <h2 class="mt-3xl">How Parsing Works</h2>
     <p>In Lambda scripts, load any format with <code>input()</code>:</p>
-<pre><code>let md   = input("readme.md",    'markdown')
-let html = input("page.html",    'html')
-let json = input("data.json",    'json')
-let yaml = input("config.yaml",  'yaml')
-let csv  = input("data.csv",     'csv')
-let tex  = input("paper.tex",    'latex')
-let pdf  = input("report.pdf",   'pdf')</code></pre>
+<pre><code>let md   = input("readme.md",    'markdown')^
+let html = input("page.html",    'html')^
+let json = input("data.json",    'json')^
+let yaml = input("config.yaml",  'yaml')^
+let csv  = input("data.csv",     'csv')^
+let tex  = input("paper.tex",    'latex')^
+let pdf  = input("report.pdf",   'pdf')^</code></pre>
 
     <p>From the CLI, convert directly:</p>
 <pre><code>lambda convert input.json -t yaml -o output.yaml

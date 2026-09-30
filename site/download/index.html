@@ -3,6 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../favicon.ico" sizes="48x48">
+  <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="../apple-touch-icon.png">
+  <link rel="manifest" href="../site.webmanifest">
+  <meta name="theme-color" content="#7c6ef6">
   <title>Download &amp; Install — Lambda Script</title>
   <meta name="description" content="Download Lambda Script for macOS, Linux, or Windows. A 9 MB single binary — unzip and run.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -71,22 +76,22 @@
     <div class="os-panel active" data-os="mac">
       <h3>macOS (Apple Silicon &amp; Intel)</h3>
       <ol style="color: var(--color-text-muted); padding-left: 1.5rem;">
-        <li>Download <code>lambda-macos.zip</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li>Download <code>Lambda_&lt;version&gt;_mac.zip</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
         <li>Unzip to a directory of your choice</li>
         <li>Open Terminal and run:</li>
       </ol>
 <pre><code>cd ~/Downloads/lambda    # or wherever you unzipped
 ./lambda view            # verify it works</code></pre>
-      <p class="text-muted" style="font-size: 0.9rem;">Tip: Add the directory to your PATH for global access: <code>export PATH="$PATH:~/lambda"</code></p>
+      <p class="text-muted" style="font-size: 0.9rem;">Tip: Add the directory to your PATH for global access: <code>export PATH="$PATH:$HOME/lambda"</code></p>
     </div>
 
     <div class="os-panel" data-os="linux">
       <h3>Linux (x86_64)</h3>
       <ol style="color: var(--color-text-muted); padding-left: 1.5rem;">
-        <li>Download <code>lambda-linux.tar.gz</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li>Download <code>Lambda_&lt;version&gt;_linux.zip</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
         <li>Extract and run:</li>
       </ol>
-<pre><code>tar -xzf lambda-linux.tar.gz
+<pre><code>unzip Lambda_*_linux.zip
 cd lambda
 ./lambda view</code></pre>
       <p class="text-muted" style="font-size: 0.9rem;">Tested on Ubuntu 20.04+. Requires basic X11/Wayland for the viewer.</p>
@@ -95,7 +100,7 @@ cd lambda
     <div class="os-panel" data-os="windows">
       <h3>Windows (x86_64)</h3>
       <ol style="color: var(--color-text-muted); padding-left: 1.5rem;">
-        <li>Download <code>lambda-windows.zip</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
+        <li>Download <code>Lambda_&lt;version&gt;_windows.zip</code> from <a href="https://github.com/henry-luo/lambda/releases" target="_blank" rel="noopener">Releases</a></li>
         <li>Unzip to a folder (e.g., <code>C:\lambda</code>)</li>
         <li>Open a terminal (cmd or PowerShell) and run:</li>
       </ol>
@@ -131,7 +136,7 @@ lambda
 # Open the built-in viewer
 lambda view
 
-# Show version / help
+# Show help
 lambda --help</code></pre>
 
     <div class="text-center mt-2xl">

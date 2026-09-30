@@ -247,21 +247,20 @@ for (row in csv where row.age > 25) row
 
 ## Benchmark Results
 
-Lambda's MIR JIT compiler is benchmarked across 6 standard benchmark suites (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream) — 56 unique benchmarks in total — against Node.js (V8 JIT), QuickJS, and CPython.
+[![Lambda benchmark history](test/benchmark/benchmark_history.svg)](test/benchmark/Overall_Result49.md)
 
-| vs. Engine       |        Geo. Mean Ratio | Lambda Wins | Total |
-| ---------------- | ---------------------: | :---------: | :---: |
-| **Node.js (V8)** |              **1.05×** |     28      |  56   |
-| **QuickJS**      | **0.12×** (8× faster)  |     49      |  53   |
-| **CPython 3.13** | **0.08×** (13× faster) |     47      |  55   |
+The latest run (Result49, 2026-09-24) covers 63 benchmarks across six standard suites (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream) plus Text, against Node.js v22.13.0. Ratios are geometric means of JIT-pinned Lambda execution time divided by Node.js time; below 1.0× means Lambda is faster.
 
-> Ratio < 1.0 = Lambda is faster.
+| Lambda MIR JIT vs. Node.js | Geo. Mean Ratio | Lambda Wins | Total |
+| -------------------------- | --------------: | :---------: | :---: |
+| **Typed**                  | **0.63×** (1.6× faster) | 41 | 63 |
+| Untyped                    | 1.13× (13% slower) | 30 | 63 |
 
 **Highlights:**
-- Competitive with Node.js V8 overall. Excels on micro-benchmarks, tight numeric loops and recursive workloads (R7RS: 0.44×, AWFY micro: 0.05–0.30×).
-- **13× faster than CPython** across the board (wins 47/55 benchmarks).
+- Typed MIR JIT averages **1.6× faster than Node.js** across all 63 benchmarks.
+- Strongest typed suite results: BENG at 0.24× and R7RS at 0.31× the Node.js time.
 
-See the [full benchmark report](test/benchmark/Overall_Result4.md) for per-benchmark details, memory profiling, and cross-engine comparisons.
+See the [latest full benchmark report](test/benchmark/Overall_Result49.md) for per-benchmark details, memory profiling, and cross-engine comparisons.
 
 ## Standards Conformance
 
