@@ -1,0 +1,22 @@
+{
+  "name": "Doc editor renders PGF after splash navigation",
+  "html": "test/ui/doc_editor.html",
+  "viewport": {"width": 1280, "height": 1800},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "#splash"}, "count": 0, "assert_timeout": 45000, "assert_interval": 1000},
+    {"type": "assert_count", "target": {"selector": ".doc-editor"}, "count": 1},
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "pgf"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz_diagrama_venn2_pgf .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "diagrama_venn2.pgf"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-picture"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-label"}, "count": 9},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz_serie_coordinate_pgf .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "serie_coordinate.pgf"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-axis"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Number of failed banks"}
+  ]
+}

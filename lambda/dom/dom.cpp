@@ -721,8 +721,10 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     // Native callers (including headless EventSim assertions) can run after
     // the script runtime has released its ambient UI pointer. The document's
     // host context remains the owner of its view tree in either call path.
-    UiContext* uicon = doc && doc->js.host_ui_context
-        ? (UiContext*)doc->js.host_ui_context : _js_current_ui_context;
+    // A worker-loaded document may be queried after its caller's JS state has detached.
+    UiContext* uicon = doc->js.host_ui_context
+        ? (UiContext*)doc->js.host_ui_context
+        : (js_active_runtime_state ? _js_current_ui_context : nullptr);
     if (!uicon || !uicon->headless) {
         return dom_has_committed_geometry_snapshot(doc);
     }

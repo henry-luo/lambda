@@ -42,8 +42,10 @@ let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT)
 
 fn path_is_open(open_paths, path) => contains(open_paths, path) or false
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
-// a non-text parent class errors (S7.9.3): no hit
-fn event_hits_tree_row(evt, hit_class) => contains(evt["target_parent_class"], hit_class ++ " ") or false
+// An empty-space hit targets the row; absent event classes discharge to false (S7.9.2-3).
+fn event_hits_tree_row(evt, hit_class) =>
+  (contains(evt["target_class"], hit_class ++ " ") or
+   contains(evt["target_parent_class"], hit_class ++ " ")) or false
 
 pn reset_document_scroll(target) {
   let root = dom.root_node(target)
@@ -52,6 +54,14 @@ pn reset_document_scroll(target) {
   // The preview element is reused by the reactive render, including its scroll state.
   if (preview != null) { dom.set_scroll_state(preview, 0.0, 0.0) }
   if (source != null) { dom.set_scroll_state(source, 0.0, 0.0) }
+}
+
+fn pgf_text_width_px(target) {
+  let panel = dom.query_selector(dom.root_node(target), ".document-panel")
+  let box = if (panel == null) null else dom.bounding_box(panel)
+  let width = if (box == null) null else box.width
+  // PGFPlots dimensions such as 0.8\textwidth need the current document pane.
+  if ((type(width) == int or type(width) == float) and width > 0) width else null
 }
 
 fn bounded_text_offset(value, offset) {
@@ -143,6 +153,67 @@ fn is_renderable_document(extension) =>
     is_pdf_document(extension) or is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null
 
+// seti private-use glyphs; keep codepoints readable alongside the bundled font.
+let SETI_CLOCK = chr(0xE012)
+let SETI_CONFIG = chr(0xE019)
+let SETI_CSS = chr(0xE01D)
+let SETI_CSV = chr(0xE01E)
+let SETI_DB = chr(0xE022)
+let SETI_HTML = chr(0xE048)
+let SETI_IMAGE = chr(0xE04C)
+let SETI_INFO = chr(0xE04D)
+let SETI_JSON = chr(0xE055)
+let SETI_MARKDOWN = chr(0xE060)
+let SETI_PDF = chr(0xE06D)
+let SETI_PIPELINE = chr(0xE071)
+let SETI_REACT = chr(0xE07D)
+let SETI_SVG = chr(0xE091)
+let SETI_TEX = chr(0xE094)
+let SETI_WORD = chr(0xE0A3)
+let SETI_XML = chr(0xE0A5)
+let SETI_YAML = chr(0xE0A7)
+
+fn file_icon(extension) {
+  let ext = if (extension == null) "" else lower(extension)
+  // seti glyphs identify parsed formats; source-only files retain the plain-text icon.
+  if (ext == "ls") { "λ" }
+  else if (ext == "json") { SETI_JSON }
+  else if (contains(["yaml", "yml"], ext)) { SETI_YAML }
+  else if (contains(["toml", "ini", "properties", "props"], ext)) { SETI_CONFIG }
+  else if (ext == "csv") { SETI_CSV }
+  else if (ext == "xml") { SETI_XML }
+  else if (contains(["db", "sqlite", "sqlite3"], ext)) { SETI_DB }
+  else if (contains(["md", "markdown", "mdown", "mkdn", "mdx", "wiki", "mediawiki",
+                     "rst", "rest", "org", "adoc", "asciidoc", "asc", "textile", "txtl",
+                     "m", "mk", "mark", "typ", "typst"], ext) or
+           ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { SETI_MARKDOWN }
+  else if (contains(["htm", "html"], ext)) { SETI_HTML }
+  else if (ext == "rtf") { SETI_WORD }
+  else if (is_latex_document(ext)) { SETI_TEX }
+  else if (is_pdf_document(ext)) { SETI_PDF }
+  else if (is_pgf_document(ext)) { SETI_SVG }
+  else if (contains(["mmd", "dot", "gv", "d2", "dsl", "structurizr"], ext)) { SETI_PIPELINE }
+  else if (ext == "svg") { SETI_SVG }
+  else if (contains(["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "ico"], ext)) { SETI_IMAGE }
+  else if (ext == "css") { SETI_CSS }
+  else if (ext == "jsx") { SETI_REACT }
+  else if (contains(["vcf", "vcard", "eml"], ext)) { SETI_INFO }
+  else if (contains(["ics", "ical"], ext)) { SETI_CLOCK }
+  else { "▤" }
+}
+
+fn file_icon_color(icon) {
+  if (icon == SETI_JSON) "#cbcb41"
+  else if (icon == SETI_YAML or icon == SETI_IMAGE or icon == SETI_SVG) "#a074c4"
+  else if (icon == SETI_CSV) "#8dc149"
+  else if (icon == SETI_PDF) "#cc3e44"
+  else if (icon == SETI_XML or icon == SETI_PIPELINE) "#e37933"
+  else if (icon == SETI_DB) "#f55385"
+  else if (icon == SETI_CONFIG) "#6d8086"
+  else if (icon == "λ") "#b7a0ff"
+  else "#519aba"
+}
+
 fn selected_source(file) {
   if (file == null) { "" }
   else {
@@ -176,7 +247,9 @@ fn selected_preview(file) {
       // Reuse the parsed TikZ document so PGF fragments render inside the editor runtime.
       let parsed = input(selected_path, {type:"tikz"}) ^ { null }
       if (parsed == null) { <p class:"preview-error", "Unable to read selected PGF"> }
-      else { tikz.render_document(parsed, null) ^ { <p class:"preview-error", "Unable to render selected PGF"> } }
+      else { tikz.render_document(parsed, {text_width_px:file["text_width_px"]}) ^ {
+        <p class:"preview-error", "Unable to render selected PGF: " ++ ^.message>
+      } }
     }
     else if (flavor != null) {
       // The graph document adapter installs Radiant's layout for this inline preview.
@@ -267,7 +340,14 @@ view <td> { <td *[rendered_children(~)]> }
 // Lazy file-tree rows
 // --------------------------------------------------------------------------
 
-view <tree_entry> state is_open: ~.initial_open, children: null {
+view <tree_entry> state children: null {
+  let is_open = ~.initial_open
+  let icon_text = if (~.is_dir) "" else file_icon(~.extension)
+  let icon_class = if (~.is_dir) "tree-icon folder-icon"
+    else if (icon_text == "▤") "tree-icon file-icon default-icon"
+    else if (icon_text == "λ") "tree-icon file-icon lambda-icon"
+    else "tree-icon file-icon seti-icon"
+  let icon_style = if (~.is_dir or icon_text == "▤") "" else "color:" ++ file_icon_color(icon_text)
   let entry_path = child_path(~.parent_path, ~.name)
   let indent = (~.depth * 16) ++ "px"
   let hit_class = tree_hit_class(entry_path)
@@ -289,8 +369,8 @@ view <tree_entry> state is_open: ~.initial_open, children: null {
       } else {
         <span class:"tree-spacer", "">
       }
-      <span class:(if (~.is_dir) "tree-icon folder-icon" else "tree-icon file-icon"),
-        if (~.is_dir) "▣" else "▤">
+      <span class:icon_class, style:icon_style, 'aria-hidden':"true",
+        if (~.is_dir) "▣" else icon_text>
       <span class:"tree-label", ~.name>
     >
     if (~.is_dir and is_open) {
@@ -315,25 +395,17 @@ view <tree_entry> state is_open: ~.initial_open, children: null {
   >
 }
 on click(evt) {
-  let target_class = evt["target_class"]
   let entry_path = child_path(~.parent_path, ~.name)
   let hit_class = tree_hit_class(entry_path)
   let hits_this_row = event_hits_tree_row(evt, hit_class)
-  if (~.is_dir and hits_this_row and
-      (target_class == "tree-toggle" or target_class == "tree-label" or target_class == "folder-icon")) {
-    if (is_open) {
-      is_open = false
-      emit("directory_toggle", {path:entry_path, is_open:false})
-    } else {
-      // Directory input performs a stat for every child, so retain the result
-      // for this row and never repeat that work while it remains mounted.
-      if (children == null) { children = directory_entries(entry_path) }
-      is_open = true
-      emit("directory_toggle", {path:entry_path, is_open:true})
-    }
+  if (~.is_dir and hits_this_row) {
+    // The parent's open-path state drives the render; avoid a second row update.
+    if (not is_open and children == null) { children = directory_entries(entry_path) }
+    emit("directory_toggle", {path:entry_path, is_open:not is_open})
   } else if (not ~.is_dir) {
     if (~.selected_path != entry_path) { reset_document_scroll(evt.target) }
-    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension})
+    emit("file_select", {file_path:entry_path, name:~.name, extension:~.extension,
+      text_width_px:(if (is_pgf_document(~.extension)) pgf_text_width_px(evt.target) else null)})
   }
 }
 
@@ -463,8 +535,11 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
   >
 }
 on click(evt) {
-  if (evt["target_class"] == "root-toggle") { root_open = not root_open }
-  else if (evt["target_class"] == "tree-filter-clear") { filter_text = "" }
+  let target_class = evt["target_class"]
+  let parent_class = evt["target_parent_class"]
+  if (contains(target_class, "tree-row project-root") or
+      contains(parent_class, "tree-row project-root")) { root_open = not root_open }
+  else if (target_class == "tree-filter-clear") { filter_text = "" }
 }
 on directory_toggle(entry) {
   let path = entry["path"]
@@ -499,7 +574,8 @@ on keydown(evt) {
   }
 }
 on file_select(entry) {
-  selected_file = {file_path: entry["file_path"], name: entry["name"], extension: entry["extension"]}
+  selected_file = {file_path: entry["file_path"], name: entry["name"],
+    extension: entry["extension"], text_width_px: entry["text_width_px"]}
   preview_mode = "view"
 }
 on preview_tab(tab) {
@@ -556,7 +632,11 @@ on preview_tab(tab) {
       /* Keep the indentation and icon fixed when a file name overflows. */
       .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
-      .file-icon { color: #9bbdfc; }
+      @font-face { font-family: 'Seti Icons'; src: url('icons/seti.woff') format('woff'); }
+      .file-icon { height: 20px; line-height: 20px; color: #9bbdfc; }
+      .default-icon { font-size: 13px; }
+      .lambda-icon { font-size: 19px; }
+      .seti-icon { font-family: 'Seti Icons'; font-size: 19px; font-weight: normal; }
       /* Hit-tested text spans need their own cursor value in the file tree. */
       .tree-label, .tree-icon, .tree-spacer { cursor: pointer; }
       .tree-label { white-space: nowrap; font-size: 13px; }

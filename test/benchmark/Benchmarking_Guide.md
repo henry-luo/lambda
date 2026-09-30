@@ -1,6 +1,6 @@
 # Lambda Benchmark Guide
 
-This document describes how to prepare, run, and report Lambda benchmarks across 6 canonical suites and an opt-in text-library suite.
+This document describes how to prepare, run, and report Lambda benchmarks across six historical suites and the text-library suite.
 
 **Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py --typed` from the project root (a variant flag is required — see [Choosing the Lambda variant](#choosing-the-lambda-variant-required-in-time-mode)). It refuses to run on battery power or against a debug build, rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON. Afterwards, archive the binary into `test/benchmark/exe/` (§5).
 
@@ -23,14 +23,17 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 | **Kostya** | `kostya/` | 7 | [kostya/benchmarks](https://github.com/kostya/benchmarks) | Community: brainfuck, matmul, base64, JSON |
 | **Larceny** | `larceny/` | 12 | [Larceny/Gabriel](https://www.larcenists.org/) | Gabriel suite: search, symbolic, allocation |
 | **JetStream** | `jetstream/` | 9 | [JetStream](https://browserbench.org/JetStream/) | SunSpider/Octane classics: n-body, deltablue, richards, splay |
-| **Text libraries** (opt-in) | `text/` | 7 | Embedded JS library sources and AST fixture | fast-diff, microdiff, hyphen, Prettier AST, search, merge, and log-pipeline workloads |
+| **Text libraries** | `text/` | 7 | Embedded JS library sources and AST fixture | fast-diff, microdiff, hyphen, Prettier AST, search, merge, and log-pipeline workloads |
 
-**Total: 62 benchmarks**
+**Total: 69 declared suite entries.** The runner keeps 63 report rows after
+deduplicating shared workloads across suites.
 
-Each benchmark has a Lambda script (`.ls`), a JavaScript equivalent (`.js`), and where available a Python equivalent (`.py`).
-The text-library suite runs with `-s text` and has Lambda untyped/typed ports,
-native C2MIR ports, and JavaScript fixtures. It remains opt-in because these
-three library-shaped workloads are not part of the six historical suites.
+Each registered benchmark has a Lambda script (`.ls`), a JavaScript equivalent
+(`.js`), a Go port (`go/cmd/<suite>/<name>/`), and a Python port (`python/`,
+`jetstream/<name>.py`, or `text/python/`). The text-library suite runs with
+`-s text` when selected alone and is included in the default report population.
+Its Go and Python ports use the same fixture data,
+round counts, algorithms, and checksums as the checked-in Node scripts.
 
 ### File naming
 
@@ -54,6 +57,7 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 | **LambdaJS**   | `lambdajs` | JIT         | `./lambda.exe js script.js`          |
 | **QuickJS**    | `quickjs`  | Interpreter | `qjs --std -m wrapper.js`            |
 | **Node.js**    | `nodejs`   | JIT (V8)    | `node script.js`                     |
+| **Go**         | `go`       | Native      | `python3 test/benchmark/run_go_benchmarks.py` |
 | **Python**     | `python`   | Interpreter | `python3 script.py`                  |
 
 - **MIR Direct**: Lambda → MIR IR → native. Default compiler path, lowest startup.
@@ -67,7 +71,7 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
   purpose, set `LAMBDA_BENCH_NODE_VERSION=<version>`; once that version is the series
   baseline, bump `PINNED_NODE_VERSION` and note it in the result doc.
 - **QuickJS**: Lightweight interpreter. Needs a polyfill wrapper (auto-generated).
-- **Python**: CPython interpreter. AWFY benchmarks use the official AWFY Python harness.
+- **Python**: CPython interpreter. AWFY benchmarks use the official AWFY Python harness with iteration counts read from each checked-in Node wrapper.
 
 ### QuickJS wrapper
 
@@ -93,7 +97,10 @@ AWFY JS benchmarks use `require()` to load official source from `ref/are-we-fast
 
 ### JetStream standardized wrappers
 
-JetStream reference JS files expose a `Benchmark` class, but the per-file `runIteration()` count is not uniform. The standardized benchmark path does **not** time `new Benchmark().runIteration()` directly. For LambdaJS, QuickJS, and Node.js, `run_benchmarks.py` detects the underlying benchmark function from `runIteration()` and emits an explicit x8 timing wrapper:
+JetStream reference JS files expose a `Benchmark` class, but the per-file
+`runIteration()` count is not uniform. The standardized benchmark path detects
+the underlying function and its own loop count, then times one `runIteration()`
+worth of work. For example, a file with eight calls uses this wrapper:
 
 ```javascript
 var _t0 = performance.now();
@@ -102,7 +109,10 @@ var _t1 = performance.now();
 console.log("__TIMING__:" + (_t1 - _t0).toFixed(3));
 ```
 
-This keeps the JS-engine JetStream workload comparable across LambdaJS, QuickJS, and Node.js and matches the older Result7-style workload. Non-JetStream suites use the checked-in timing loop/load in each benchmark file; do not change those ad hoc for a report run.
+The counts range from one to 50 across the registered JetStream files. Go and
+Python use those same per-file counts. `navier_stokes` times one frame and
+finishes the later frames after timing to check its checksum. Non-JetStream
+suites use the checked-in timing loop/load in each benchmark file.
 
 ---
 
@@ -605,7 +615,7 @@ Reads the selected benchmark JSON and writes a chosen `Overall_ResultN.md` with:
 - A single overall metric for current runner snapshots, because known duplicate workloads are filtered before execution
 - Legacy deduplicated/raw overall metrics when reporting historical JSON files without runner policy metadata
 - A Notable Results section with missing timings, largest LambdaJS/Node.js ratios, and LambdaJS wins
-- The standardized JetStream x8 workload note
+- The standardized JetStream per-file `runIteration()` workload note
 
 `gen_result3.py` and `gen_result_doc.py` are historical generators for older report formats. Do not use them for new checked-in result snapshots.
 
@@ -635,12 +645,11 @@ prepare scripts  →  run benchmarks  →  report
 - **Timeout**: 120 seconds per run (configurable via `-t`). MIR-vs-C mode auto-raises to 300s.
 - **QuickJS wrappers** are auto-generated in `temp/` and not committed.
 - **AWFY Python harness**: AWFY Python benchmarks run via the official AWFY `harness.py` with per-benchmark class name mapping and iteration counts.
-- **JetStream JS wrappers**: Auto-generated in `temp/` for LambdaJS, QuickJS, and Node.js. The standardized report path runs the detected benchmark function x8 instead of using per-file `Benchmark.runIteration()` counts.
+- **JetStream JS wrappers**: Auto-generated in `temp/` for LambdaJS, QuickJS, and Node.js. The standardized report path uses each file's own `Benchmark.runIteration()` count.
 - **Known engine limitations**:
   - LambdaJS: No `require()`, no `fs`, limited ES6 class support (fails some AWFY).
   - QuickJS: No `fs` module (fails BENG file-reading benchmarks), stack overflow on deep recursion (fails `ack`).
   - MIR: Some `.ls` benchmarks fail due to runtime issues (recorded as `---` in results).
-  - Python: Not all suites have Python ports. JetStream has Python for deltablue, richards, nbody only.
 
 ---
 

@@ -22,6 +22,10 @@
     {"type": "click", "target": {"selector": ".tab-source"}},
     {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "\\begin{tikzpicture}"},
     {"type": "click", "target": {"selector": ".tab-view"}},
-    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-axis"}, "count": 2}
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-axis"}, "count": 2},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_tikz_serie_coordinate_pgf .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "serie_coordinate.pgf"},
+    {"type": "assert_count", "target": {"selector": "#rendered-preview .tikz-axis"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": "#rendered-preview"}, "contains": "Number of failed banks"}
   ]
 }

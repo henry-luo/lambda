@@ -10754,6 +10754,11 @@ static bool navigation_async_commit(AsyncScriptNavigation* job) {
     log_debug("navigation-async: completed target=%s iframe=%d status=%d loaded=%p live=%d",
               url_get_href(job->target), job->iframe, job->status,
               (void*)loaded, live);
+    if (live) {
+        // The worker cannot own the UI context; bind it before Lambda DOM handlers read geometry.
+        loaded->js.host_ui_context = uicon;
+        loaded->js.host_driven_loop = uicon->async_script_navigation;
+    }
     if (live && job->iframe) {
         DomNode* node = dom_node_ref_validate(source, job->iframe_ref);
         DomElement* iframe = node && node->is_element() ? node->as_element() : nullptr;
