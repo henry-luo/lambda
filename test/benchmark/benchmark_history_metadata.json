@@ -44,7 +44,8 @@
     "Result46",
     "Result47",
     "Result48",
-    "Result49"
+    "Result49",
+    "Result50"
   ],
   "omitted_sessions": [
     "Result5",
@@ -83,7 +84,7 @@
     {
       "label": "Sep 26",
       "start": "Result36",
-      "end": "Result49"
+      "end": "Result50"
     }
   ],
   "series": {
@@ -130,7 +131,8 @@
       1.2,
       1.26,
       1.07,
-      1.13
+      1.13,
+      1.05
     ],
     "Lambda typed": [
       null,
@@ -175,7 +177,8 @@
       0.75,
       0.71,
       0.63,
-      0.63
+      0.63,
+      0.54
     ],
     "LambdaJS": [
       null,
@@ -220,7 +223,8 @@
       10.0,
       9.73,
       8.65,
-      7.80
+      7.8,
+      7.43
     ],
     "QuickJS": [
       null,
@@ -265,13 +269,14 @@
       6.83,
       null,
       7.2,
-      null
+      null,
+      7.24
     ],
     "Python": [
       null,
       null,
-      13.1,
-      13.1,
+      4.86,
+      4.86,
       null,
       null,
       null,
@@ -310,7 +315,8 @@
       null,
       null,
       null,
-      null
+      null,
+      5.02
     ],
     "Go": [
       null,
@@ -355,7 +361,8 @@
       null,
       null,
       null,
-      null
+      null,
+      0.31
     ],
     "Node.js": [
       1,
@@ -400,7 +407,8 @@
       1,
       1,
       1,
-      1
+      1,
+      1.0
     ],
     "C2MIR": [
       null,
@@ -445,19 +453,20 @@
       0.18,
       0.2,
       0.2,
-      0.20
+      0.2,
+      0.2
     ]
   },
   "sources": {
     "Result1": "Overall_Result1.md (MIR Direct/C2MIR experiment report)",
     "Result2": "Overall_Result2.md (Overall raw for Lambda typed/QuickJS; LambdaJS geo recomputed from displayed timing tables)",
-    "Result3": "Overall_Result3.md (MIR Overall dedup; LambdaJS and Python geo means recomputed from displayed timing tables)",
-    "Result4": "Overall_Result4.md (MIR Overall dedup; LambdaJS and Python geo means recomputed from displayed timing tables)",
-    "Result9_to_49": "Overall_Result9.md through Overall_Result49.md (first Part 1 Overall row: JIT-pinned self-reported execution time)"
+    "Result3": "Overall_Result3.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md",
+    "Result4": "Overall_Result4.md timing tables (Python/Node best-time dedup); ten mismatched-workload Python cells sourced from benchmark_results_v50.json, documented in Python_Result50_Backpatch.md",
+    "Result9_to_50": "Overall_Result9.md through Overall_Result50.md (first Part 1 Overall row: JIT-pinned self-reported execution time)"
   },
-  "interpretation": "Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4; Go is reported in Result18. Node.js is the 1.0x reference line. Results39-40 are omitted because they were measured against Node.js v24.7.0 instead of v22.13.0 and are not comparable. Result41 onward covers 63 rows (four text rows added); Result45 omits C2MIR; Result47 omits QuickJS; Result48 restores QuickJS; Result49 omits QuickJS.",
+  "interpretation": "Single-MIR sessions without a typed/untyped split are plotted as Lambda typed. Results5-8 are partial tests and are omitted from the axis. The C2MIR series begins at Result18 because Results2-4 use Lambda scripts through the C2MIR transpiler, while Result18 onward reports native C benchmark ports. Python is reported in Results3-4 and Result50; Go is reported in Results18 and Result50. Node.js is the 1.0x reference line. Results39-40 are omitted because they were measured against Node.js v24.7.0 instead of v22.13.0 and are not comparable. Result41 onward covers 63 rows (four text rows added); Result45 omits C2MIR; Result47 omits QuickJS; Result48 restores QuickJS; Result49 omits QuickJS; Result50 includes QuickJS, Python, and Go across all 63 rows.",
   "title": "Lambda Benchmark History",
-  "description": "Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result49, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.",
+  "description": "Line chart of benchmark-session geometric means relative to Node.js from Result1 through Result50, omitting partial Results5 through Result8 and the Node.js v24 Results39-40 from the x-axis; session creation months are shown above the plot. The vertical axis is logarithmic from 0.1x to 100x. Values below 1x are faster than Node.js. Single-MIR sessions before Result16 are assigned to the Lambda typed series, and missing common-engine measurements are gaps.",
   "session_dates": {
     "Result1": "2026-02-21",
     "Result2": "2026-03-07",
@@ -501,7 +510,8 @@
     "Result46": "2026-09-17",
     "Result47": "2026-09-18",
     "Result48": "2026-09-22",
-    "Result49": "2026-09-24"
+    "Result49": "2026-09-24",
+    "Result50": "2026-09-30"
   },
   "layout": {
     "width": 1360,
@@ -589,16 +599,21 @@
     "QuickJS": {
       "color": "#fbbd00",
       "stroke_width": 3,
+      "connect_gaps": true,
       "show_points": true
     },
     "Python": {
       "color": "#c026d3",
       "stroke_width": 3,
+      "connect_gaps": true,
+      "dasharray": "1 6",
       "show_points": true
     },
     "Go": {
       "color": "#0891b2",
       "stroke_width": 3,
+      "connect_gaps": true,
+      "dasharray": "1 6",
       "show_points": true
     },
     "Node.js": {
@@ -628,7 +643,7 @@
     },
     "QuickJS": {
       "x": 850,
-      "y": 363
+      "y": 347
     },
     "Python": {
       "x": 205,
@@ -684,8 +699,8 @@
   "notes": [
     "Results5–8 were partial tests and are omitted from the x-axis.",
     "Results39–40 are omitted: they were measured against Node.js v24.7.0 (all other sessions use v22.13.0), thus not comparable.",
-    "Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. Missing common-engine measurements are intentionally shown as gaps.",
+    "Single-MIR sessions without a typed/untyped split are assigned to Lambda typed. QuickJS joins measured points; dotted Python/Go lines bridge missing sessions.",
     "C2MIR starts at Result18: earlier C2MIR values were Lambda scripts through the transpiler; later values are native C benchmark ports.",
-    "Python: Results3–4; Go: Result18. Dividers mark the typed split, native-C2MIR transition, and the 63-row suite (Result41+)."
+    "R3–4 Python dots include ten Result50 workload fixes; other cells retain March timings. Go R18 used 56 rows."
   ]
 }
