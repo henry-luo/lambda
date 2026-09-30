@@ -8,14 +8,19 @@
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
            color: #edf4ff; background: #07162a; }
+    /* Keep a laid-out editor document loading behind the splash. */
+    #editor-frame { position: absolute; inset: 0; width: 100%; height: 100%;
+                    border: 0; visibility: hidden; pointer-events: none; }
     #splash { position: absolute; inset: 0; overflow: hidden;
-              background: linear-gradient(145deg, #071427, #102d50); }
-    #flow-art { position: absolute; inset: 0; width: 100%; height: 100%; }
+              background: linear-gradient(135deg, #051325 0%, #0a2846 52%, #081d37 100%); }
+    #ribbon-art, #flow-art { position: absolute; inset: 0; width: 100%; height: 100%;
+                             pointer-events: none; }
+    @font-face { font-family: 'Seti Icons'; src: url('icons/seti.woff') format('woff'); }
     .brand { position: absolute; top: 9%; left: 0; width: 100%;
              color: #edf4ff; font-size: 54px; font-weight: 500;
              letter-spacing: .14em; text-align: center; }
     .brand-mark { color: #8bb8ff; font-size: 70px; font-weight: 300;
-                  vertical-align: middle; }
+                  vertical-align: baseline; position: relative; top: 5px; }
     .message { position: absolute; top: 77%; left: 0; width: 100%;
                padding: 0 20px; text-align: center; }
     h1 { margin: 0; color: #dce8fb; font-size: 29px;
@@ -41,43 +46,92 @@
   </style>
 </head>
 <body>
+  <iframe id="editor-frame" title="Editor preload"
+          aria-hidden="true" tabindex="-1"></iframe>
   <main id="splash" role="status" aria-live="polite">
+    <svg id="ribbon-art" viewBox="0 0 1280 850" preserveAspectRatio="none"
+         aria-hidden="true">
+      <g id="ribbon-wash" pointer-events="none"/>
+      <g id="ribbon-background" fill="none" stroke-width="1" pointer-events="none"/>
+    </svg>
     <svg id="flow-art" viewBox="0 0 1280 850" preserveAspectRatio="xMidYMid meet"
          aria-hidden="true">
-      <circle cx="640" cy="415" r="225" fill="#3c6bad" opacity=".07"/>
-      <circle cx="640" cy="415" r="168" fill="#447cc8" opacity=".07"/>
-      <path d="M328 285 C438 285 460 390 554 405
-               M296 415 C422 415 466 415 548 415
-               M328 545 C438 545 460 440 554 425
-               M726 405 C820 390 842 285 952 285
-               M732 415 C814 415 858 415 984 415
-               M726 425 C820 440 842 545 952 545"
-            fill="none" stroke="#5687ca" stroke-width="1.5" opacity=".55"/>
-      <circle cx="640" cy="415" r="112" fill="#122f55" stroke="#547eb8" stroke-width="1"/>
-      <circle cx="640" cy="415" r="90" fill="#183c68" stroke="#8bb7f3" stroke-width="1.5"/>
-      <circle cx="640" cy="415" r="69" fill="#204675" stroke="#aecbff" stroke-width="1"/>
-      <text x="640" y="438" text-anchor="middle" fill="#f0f6ff" font-size="70" font-weight="300">λ</text>
-      <g fill="#132e4f" stroke="#5d88bd" stroke-width="1.5">
-        <circle cx="300" cy="285" r="35"/><circle cx="268" cy="415" r="35"/>
-        <circle cx="300" cy="545" r="35"/><circle cx="980" cy="285" r="35"/>
-        <circle cx="1012" cy="415" r="35"/><circle cx="980" cy="545" r="35"/>
+      <defs>
+        <radialGradient id="core-glow"><stop offset="0" stop-color="#3182cf" stop-opacity=".38"/>
+          <stop offset=".55" stop-color="#2266a7" stop-opacity=".13"/>
+          <stop offset="1" stop-color="#2266a7" stop-opacity="0"/></radialGradient>
+      </defs>
+      <circle cx="640" cy="415" r="330" fill="url(#core-glow)"/>
+      <g fill="#7db7e0" opacity=".33">
+        <circle cx="418" cy="242" r="2"/><circle cx="438" cy="242" r="2"/><circle cx="458" cy="242" r="2"/>
+        <circle cx="418" cy="262" r="2"/><circle cx="438" cy="262" r="2"/><circle cx="458" cy="262" r="2"/>
+        <circle cx="822" cy="570" r="2"/><circle cx="842" cy="570" r="2"/><circle cx="862" cy="570" r="2"/>
+        <circle cx="822" cy="590" r="2"/><circle cx="842" cy="590" r="2"/><circle cx="862" cy="590" r="2"/>
       </g>
-      <g fill="none" stroke="#a7c9fa" stroke-width="2.5" stroke-linecap="round">
-        <path d="M284 277 H316 M284 285 H309 M284 293 H313"/>
-        <path d="M257 406 L248 415 L257 424 M279 406 L288 415 L279 424"/>
-        <path d="M286 533 H314 V557 H286 Z M300 533 V557 M286 545 H314"/>
-        <path d="M966 278 H994 M966 286 H988 M966 294 H992"/>
-        <path d="M996 429 L1006 416 L1015 422 L1027 402"/>
-        <path d="M964 555 V543 M974 555 V532 M984 555 V538 M994 555 V526"/>
+      <circle cx="640" cy="415" r="175" fill="none" stroke="#6f9cd2" stroke-width="1" opacity=".16"/>
+      <circle cx="640" cy="415" r="145" fill="none" stroke="#83b7ee" stroke-width="1" opacity=".16"/>
+      <g fill="none" stroke-width="2" stroke-linecap="round">
+        <path id="route-0" d="M237 265 C390 226 443 352 550 390" stroke="#55b5c3" opacity=".7"/>
+        <path id="route-1" d="M206 430 C360 412 434 427 543 415" stroke="#55b5c3" opacity=".7"/>
+        <path id="route-2" d="M261 582 C393 603 439 486 550 440" stroke="#55b5c3" opacity=".7"/>
+        <path id="route-3" d="M347 327 C441 325 482 374 548 400" stroke="#55b5c3" opacity=".43"/>
+        <path id="route-4" d="M341 516 C448 516 480 466 549 430" stroke="#55b5c3" opacity=".43"/>
+        <path id="route-5" d="M732 390 C840 348 885 218 1016 235" stroke="#a8a7f0" opacity=".7"/>
+        <path id="route-6" d="M737 415 C850 435 943 400 1049 415" stroke="#a8a7f0" opacity=".7"/>
+        <path id="route-7" d="M730 440 C836 489 882 592 993 575" stroke="#a8a7f0" opacity=".7"/>
+        <path id="route-8" d="M732 400 C801 345 841 274 892 285" stroke="#a8a7f0" opacity=".43"/>
+        <path id="route-9" d="M731 430 C791 466 824 542 870 540" stroke="#a8a7f0" opacity=".43"/>
       </g>
-      <g fill="#9fc4ff">
-        <circle cx="550" cy="415" r="3"/><circle cx="730" cy="415" r="3"/>
-        <circle cx="441" cy="355" r="2"/><circle cx="839" cy="475" r="2"/>
+      <g id="flow-particles" fill="#a7f5ed" stroke="#e0fff9" stroke-width=".6">
+        <rect id="particle-0" width="7" height="7" rx="1"/><rect id="particle-1" width="6" height="6" rx="1"/>
+        <rect id="particle-2" width="7" height="7" rx="1"/><rect id="particle-3" width="5" height="5" rx="1"/>
+        <rect id="particle-4" width="6" height="6" rx="1"/>
       </g>
+      <g fill="#bcbaff" stroke="#f0eaff" stroke-width=".6">
+        <rect id="particle-5" width="7" height="7" rx="1"/><rect id="particle-6" width="6" height="6" rx="1"/>
+        <rect id="particle-7" width="7" height="7" rx="1"/><rect id="particle-8" width="5" height="5" rx="1"/>
+        <rect id="particle-9" width="6" height="6" rx="1"/>
+      </g>
+      <!-- The output badges deliberately use a different stagger from the inputs. -->
+      <g stroke-width="1.7">
+        <rect x="183" y="238" width="54" height="54" rx="13" fill="#414429" stroke="#b9b84c"/>
+        <rect x="281" y="294" width="66" height="66" rx="17" fill="#19455a" stroke="#66c4e3"/>
+        <rect x="124" y="389" width="82" height="82" rx="19" fill="#4b342f" stroke="#e88d5d"/>
+        <rect x="283" y="487" width="58" height="58" rx="14" fill="#2b4936" stroke="#9bd56a"/>
+        <rect x="191" y="547" width="70" height="70" rx="17" fill="#23465a" stroke="#75c9e7"/>
+      </g>
+      <g stroke-width="1.7">
+        <rect x="1016" y="206" width="58" height="58" rx="14" fill="#4b2d43" stroke="#ef7890"/>
+        <rect x="892" y="252" width="66" height="66" rx="16" fill="#42365e" stroke="#c59cf1"/>
+        <rect x="1049" y="374" width="82" height="82" rx="19" fill="#29466b" stroke="#86b9f4"/>
+        <rect x="870" y="510" width="60" height="60" rx="15" fill="#4d3d30" stroke="#ebb46b"/>
+        <rect x="993" y="538" width="74" height="74" rx="18" fill="#473453" stroke="#daa4ee"/>
+      </g>
+      <g font-family="Seti Icons" font-size="44" text-anchor="middle">
+        <g>
+          <text x="210" y="285" fill="#f6e252">&#xE055;</text>
+          <text x="314" y="347" fill="#6bd5f8">&#xE060;</text>
+          <text x="165" y="453" fill="#ff9b62" font-size="50">&#xE048;</text>
+          <text x="312" y="536" fill="#b2ed6e">&#xE01E;</text>
+          <text x="226" y="602" fill="#8bdbf8">&#xE094;</text>
+        </g>
+        <g>
+          <text x="1045" y="255" fill="#ff7791">&#xE06D;</text>
+          <text x="925" y="305" fill="#daa9ff">&#xE091;</text>
+          <text x="1090" y="438" fill="#8bc4ff" font-size="50">&#xE0A3;</text>
+          <text x="900" y="560" fill="#ffc272">&#xE0A5;</text>
+          <text x="1030" y="595" fill="#eeaff9">&#xE0A7;</text>
+        </g>
+      </g>
+      <circle cx="640" cy="415" r="119" fill="#0b2948" stroke="#6697d0" stroke-width="1.5"/>
+      <circle cx="640" cy="415" r="99" fill="#123b65" stroke="#8fc4f5" stroke-width="2"/>
+      <circle cx="640" cy="415" r="76" fill="#1b517b" stroke="#c1ddff" stroke-width="1.5"/>
+      <circle cx="640" cy="415" r="66" fill="none" stroke="#78b6ea" stroke-width="1" opacity=".35"/>
+      <text x="640" y="440" text-anchor="middle" fill="#f2f8ff" font-size="75" font-weight="300">λ</text>
     </svg>
     <div class="brand"><span class="brand-mark">λ</span> LAMBDA</div>
     <div class="message">
-      <h1>One data model, <span>Many doc workflows</span></h1>
+      <h1>One data model &nbsp;&nbsp;<span>Many doc workflows</span></h1>
       <div class="loader" aria-label="Loading editor">
         <span aria-hidden="true"></span><span aria-hidden="true"></span>
         <span aria-hidden="true"></span>
@@ -85,11 +139,148 @@
     </div>
   </main>
   <script>
+    var ribbonPalette = window.location.hash === '#waves=blue' ? 'blue' : 'color';
+    var ribbonColors = ribbonPalette === 'color' ? [
+      [72, 193, 232], [112, 134, 225], [183, 103, 210], [237, 94, 151],
+      [250, 137, 102], [248, 202, 91], [105, 207, 150]
+    ] : [
+      [53, 123, 203], [68, 160, 225], [96, 195, 239], [103, 164, 231],
+      [79, 130, 214], [83, 174, 230], [100, 203, 228]
+    ];
+    function ribbonColor(position) {
+      var scaled = position * (ribbonColors.length - 1);
+      var index = Math.min(ribbonColors.length - 2, Math.floor(scaled));
+      var mix = scaled - index;
+      var a = ribbonColors[index];
+      var b = ribbonColors[index + 1];
+      return 'rgb(' + Math.round(a[0] + (b[0] - a[0]) * mix) + ',' +
+        Math.round(a[1] + (b[1] - a[1]) * mix) + ',' +
+        Math.round(a[2] + (b[2] - a[2]) * mix) + ')';
+    }
+    function ribbonPulse(u, peak, width) {
+      var distance = (u - peak) / width;
+      return Math.exp(-distance * distance);
+    }
+    function ribbonY(u, strand, family, wash) {
+      var envelope = Math.sin(Math.PI * u);
+      var rise = Math.max(0, Math.min(1, (u - .55) / .45));
+      var fan = rise * rise * (3 - 2 * rise);
+      var center = family === 0 ?
+        450 + 22 * u - 67 * Math.sin(2 * Math.PI * u) +
+          53 * Math.sin(4 * Math.PI * u - .3) * envelope -
+          160 * ribbonPulse(u, .82, .13) + 100 * ribbonPulse(u, .96, .08) - 75 * fan :
+        490 - 18 * u + 65 * Math.sin(2.6 * Math.PI * u + .3) * envelope +
+          120 * ribbonPulse(u, .80, .15) - 135 * ribbonPulse(u, .96, .09) - 42 * fan;
+      var spread = family === 0 ?
+        88 + 70 * envelope * envelope + 330 * fan :
+        72 + 64 * envelope * envelope + 265 * fan;
+      var twist = wash ? 0 : (family === 0 ? 67 : 59) * envelope *
+        Math.sin((family === 0 ? 3.2 : 4.3) * Math.PI * u + strand * 2.8);
+      return center + (strand - .5) * spread + twist;
+    }
+    function ribbonPoint(u, strand, family, firstX, lastX, wash) {
+      return (firstX + (lastX - firstX) * u).toFixed(1) + ' ' +
+        ribbonY(u, strand, family, wash).toFixed(1);
+    }
+    function drawRibbonWash(family, firstX, lastX, opacity) {
+      var group = document.getElementById('ribbon-wash');
+      var svgNs = 'http://www.w3.org/2000/svg';
+      for (var segment = 0; segment < 24; segment++) {
+        var pathData = '';
+        for (var point = 0; point <= 12; point++) {
+          var u = (segment + point / 12) / 24;
+          pathData += (point === 0 ? 'M' : ' L') +
+            ribbonPoint(u, 0, family, firstX, lastX, true);
+        }
+        for (var point = 12; point >= 0; point--) {
+          var u = (segment + point / 12) / 24;
+          pathData += ' L' + ribbonPoint(u, 1, family, firstX, lastX, true);
+        }
+        var path = document.createElementNS(svgNs, 'path');
+        path.setAttribute('d', pathData + ' Z');
+        path.setAttribute('fill', ribbonColor((segment + .5) / 24));
+        path.setAttribute('opacity', opacity);
+        group.appendChild(path);
+      }
+    }
+    function drawRibbon(family, count, firstX, lastX, opacity) {
+      var group = document.getElementById('ribbon-background');
+      var svgNs = 'http://www.w3.org/2000/svg';
+      for (var strandIndex = 0; strandIndex < count; strandIndex++) {
+        var strand = strandIndex / (count - 1);
+        for (var segment = 0; segment < 8; segment++) {
+          var pathData = '';
+          for (var point = 0; point <= 24; point++) {
+            var u = (segment + point / 24) / 8;
+            pathData += (point === 0 ? 'M' : ' L') +
+              ribbonPoint(u, strand, family, firstX, lastX, false);
+          }
+          var path = document.createElementNS(svgNs, 'path');
+          path.setAttribute('d', pathData);
+          path.setAttribute('stroke', ribbonColor((segment + .5) / 8));
+          path.setAttribute('opacity', opacity);
+          group.appendChild(path);
+        }
+      }
+    }
+    // The wash follows the strand envelope; the strands twist and fan outward at the right edge.
+    drawRibbonWash(0, -20, 1300, ribbonPalette === 'color' ? '.13' : '.08');
+    drawRibbonWash(1, -20, 1300, ribbonPalette === 'color' ? '.08' : '.05');
+    drawRibbon(0, 34, -20, 1300, ribbonPalette === 'color' ? '.43' : '.33');
+    drawRibbon(1, 18, -20, 1300, ribbonPalette === 'color' ? '.28' : '.21');
+    // Sample the same cubic curves used by the visible routes, so each square stays on its line.
+    var flowRoutes = [];
+    for (var routeIndex = 0; routeIndex < 10; routeIndex++) {
+      var route = document.getElementById('route-' + routeIndex);
+      var particle = document.getElementById('particle-' + routeIndex);
+      flowRoutes.push({
+        points: route.getAttribute('d').match(/\d+/g).map(Number),
+        particle: particle,
+        size: Number(particle.getAttribute('width'))
+      });
+    }
+    var flowStart = null;
+    var flowTimer = 0;
+    function animateFlow() {
+      var now = performance.now();
+      if (flowStart === null) flowStart = now;
+      var elapsed = now - flowStart;
+      for (var i = 0; i < flowRoutes.length; i++) {
+        var item = flowRoutes[i];
+        var p = item.points;
+        // Each pair enters through an input route, then leaves through its output route.
+        var wave = (elapsed / 2000 + (i % 5) * .18) % 1;
+        var active = i < 5 ? wave < .5 : wave >= .5;
+        item.particle.setAttribute('opacity', active ? '1' : '0');
+        if (!active) continue;
+        var t = i < 5 ? wave * 2 : (wave - .5) * 2;
+        var u = 1 - t;
+        var x = u * u * u * p[0] + 3 * u * u * t * p[2] +
+                3 * u * t * t * p[4] + t * t * t * p[6];
+        var y = u * u * u * p[1] + 3 * u * u * t * p[3] +
+                3 * u * t * t * p[5] + t * t * t * p[7];
+        item.particle.setAttribute('x', Math.round(x - item.size / 2));
+        item.particle.setAttribute('y', Math.round(y - item.size / 2));
+      }
+      // The flow settles before the handoff; no animation timer crosses document teardown.
+      if (elapsed < 2200) flowTimer = setTimeout(animateFlow, 50);
+    }
+    function stopFlow() {
+      if (flowTimer) clearTimeout(flowTimer);
+      flowTimer = 0;
+    }
+    window.addEventListener('pagehide', stopFlow);
     // Let the splash paint before starting the asynchronous editor navigation.
     window.addEventListener('load', function () {
+      animateFlow();
+      // Start the hidden preload after the splash's first paint.
       setTimeout(function () {
+        document.getElementById('editor-frame').src = 'doc_editor.ls';
+      }, 100);
+      setTimeout(function () {
+        stopFlow();
         window.location.assign('doc_editor.ls');
-      }, 1000);
+      }, 3000);
     });
   </script>
 </body>
