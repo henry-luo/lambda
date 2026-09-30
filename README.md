@@ -15,6 +15,8 @@ Lambda is designed for two things at once:
 1) an expressive functional language for transforming data and documents, and
 2) an end-to-end [document pipeline](doc/Lambda_Doc_Pipeline.md) (parse → validate/transform → layout → render/view).
 
+[![Lambda and Radiant document pipeline](doc/img/lambda-radiant-pipeline.svg)](doc/Lambda_Doc_Pipeline.md)
+
 Internally, Lambda treats documents as structured data. Different input formats (Markdown, Wiki, HTML/XML, JSON/YAML/TOML/CSV, LaTeX, PDF, …) are parsed into a unified Lambda/Mark node tree, transformed with Lambda scripts, validated with schemas, and then rendered via the Radiant HTML/CSS/SVG/JS layout engine.
 
 > Note: Lambda Script is still evolving — syntax/semantics and implementation details may change.
