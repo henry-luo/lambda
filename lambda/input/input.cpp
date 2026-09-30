@@ -1178,6 +1178,7 @@ static void parse_mdx_input(Input* input, const char* source) {
 static const MimeParserMapping MIME_PARSER_MAPPINGS[] = {
     {"application/json", "json"},
     {"text/csv", "csv"},
+    {"text/tab-separated-values", "tsv"},
     {"application/xml", "xml"},
     {"text/html", "html"},
     {"text/markdown", "markdown"},
@@ -1225,6 +1226,7 @@ static const MarkupFlavorMapping MARKUP_FLAVOR_MAPPINGS[] = {
 static const InputParserMapping INPUT_PARSER_MAPPINGS[] = {
     {"json", parse_json},
     {"csv", parse_csv},
+    {"tsv", parse_tsv},
     {"ini", parse_ini},
     {"properties", parse_properties},
     {"toml", parse_toml},

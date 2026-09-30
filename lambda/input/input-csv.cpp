@@ -3,8 +3,73 @@
 #include "../io/mark_builder.hpp"
 #include "../../lib/str.h"
 #include "../../lib/stringbuf.h"
+#include <ctype.h>
 
 using namespace lambda;
+
+static bool is_table_separator(char ch, char separator) {
+    return separator == ' ' ? ch == ' ' || ch == '\t' : ch == separator;
+}
+
+static void skip_table_separator(const char** cursor, char separator) {
+    if (separator == ' ') {
+        while (**cursor == ' ' || **cursor == '\t') (*cursor)++;
+    } else if (**cursor == separator) {
+        (*cursor)++;
+    }
+}
+
+static const char* next_table_line(const char* line) {
+    while (*line && *line != '\r' && *line != '\n') line++;
+    if (*line == '\r') line++;
+    if (*line == '\n') line++;
+    return line;
+}
+
+static int whitespace_field_count(const char* line) {
+    int count = 0;
+    bool in_field = false;
+    while (*line && *line != '\r' && *line != '\n') {
+        if (*line == ' ' || *line == '\t') in_field = false;
+        else if (!in_field) { count++; in_field = true; }
+        line++;
+    }
+    return count;
+}
+
+static int tab_field_count(const char* line) {
+    int count = 1;
+    while (*line && *line != '\r' && *line != '\n') {
+        if (*line == '\t') count++;
+        line++;
+    }
+    return count;
+}
+
+static bool identifier_header_line(const char* line) {
+    while (*line && *line != '\r' && *line != '\n') {
+        while (*line == ' ' || *line == '\t') line++;
+        if (*line == '\r' || *line == '\n' || !*line) break;
+        if (!isalpha((unsigned char)*line) && *line != '_') return false;
+        do {
+            if (!isalnum((unsigned char)*line) && *line != '_') return false;
+            line++;
+        } while (*line && *line != '\r' && *line != '\n' && *line != ' ' && *line != '\t');
+    }
+    return true;
+}
+
+static bool data_line_has_non_identifier_field(const char* line, char separator) {
+    bool field_start = true;
+    while (*line && *line != '\r' && *line != '\n') {
+        if (is_table_separator(*line, separator)) { field_start = true; line++; continue; }
+        if ((field_start && !isalpha((unsigned char)*line) && *line != '_') ||
+            (!isalnum((unsigned char)*line) && *line != '_')) return true;
+        field_start = false;
+        line++;
+    }
+    return false;
+}
 
 // Helper: detect separator character (comma or tab)
 char detect_csv_separator(const char* csv_string) {
@@ -51,7 +116,7 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
         // line break or the end -- created in one copy, with no scratch buffer
         const char* start = *csv;
         const char* end = start;
-        while (*end && *end != separator && *end != '\n' && *end != '\r') end++;
+        while (*end && !is_table_separator(*end, separator) && *end != '\n' && *end != '\r') end++;
         *csv = end;
         if (end > start) return ctx->builder.createString(start, (size_t)(end - start));
         return nullptr;  // empty string maps to null
@@ -91,8 +156,8 @@ String* parse_csv_field(InputContext* ctx, const char **csv, char separator, int
     return nullptr;  // empty string maps to null
 }
 
-// CSV parser
-void parse_csv(Input* input, const char* csv_string) {
+// CSV and TSV share field construction; TSV alone accepts comment preambles.
+static void parse_delimited(Input* input, const char* csv_string, bool tsv_mode) {
     if (!csv_string || !*csv_string) {
         input->root = {.item = ITEM_NULL};
         return;
@@ -100,19 +165,51 @@ void parse_csv(Input* input, const char* csv_string) {
 
     InputContext ctx(input, csv_string, strlen(csv_string));
 
-    // Detect separator and header
-    char separator = detect_csv_separator(csv_string);
-    bool has_header = is_header_line(csv_string, separator);
+    const char* csv = csv_string;
+    const char* commented_header = nullptr;
+    int line_num = 1;
+    if (tsv_mode) {
+        // A comment directly above the data can supply column names.
+        while (*csv) {
+            const char* first = csv;
+            while (*first == ' ' || *first == '\t') first++;
+            if (*first == '#') {
+                first++;
+                while (*first == ' ' || *first == '\t') first++;
+                commented_header = (*first && *first != '\r' && *first != '\n') ? first : nullptr;
+            } else if (*first == '\r' || *first == '\n') {
+                commented_header = nullptr;
+            } else {
+                break;
+            }
+            csv = next_table_line(csv);
+            line_num++;
+        }
+    }
+
+    // A few .tsv reports use whitespace fields and a commented header.
+    bool whitespace_table = tsv_mode && commented_header && tab_field_count(csv) == 1 &&
+        whitespace_field_count(commented_header) > 1 &&
+        whitespace_field_count(commented_header) == whitespace_field_count(csv) &&
+        identifier_header_line(commented_header) &&
+        data_line_has_non_identifier_field(csv, ' ');
+    char separator = tsv_mode ? (whitespace_table ? ' ' : '\t') : detect_csv_separator(csv_string);
+    int header_columns = commented_header ?
+        (separator == ' ' ? whitespace_field_count(commented_header) : tab_field_count(commented_header)) : 0;
+    int data_columns = separator == ' ' ? whitespace_field_count(csv) : tab_field_count(csv);
+    bool commented_columns = tsv_mode && commented_header && header_columns > 1 &&
+        header_columns == data_columns && identifier_header_line(commented_header) &&
+        data_line_has_non_identifier_field(csv, separator);
+    bool has_header = commented_columns || is_header_line(csv, separator);
+    const char* header_cursor = commented_columns ? commented_header : csv;
 
     if (separator == '\t') {
         ctx.addNote("Detected tab-separated values (TSV)");
     }
 
-    const char *csv = csv_string;
     Array *headers = NULL;
     ArrayBuilder rows_builder = ctx.builder.array();
     int expected_columns = 0;
-    int line_num = 1;
 
     // Parse header row if present
     if (has_header) {
@@ -123,8 +220,8 @@ void parse_csv(Input* input, const char* csv_string) {
         }
 
         int field_num = 0;
-        while (*csv && *csv != '\n' && *csv != '\r') {
-            String *field = parse_csv_field(&ctx, &csv, separator, line_num, field_num);
+        while (*header_cursor && *header_cursor != '\n' && *header_cursor != '\r') {
+            String *field = parse_csv_field(&ctx, &header_cursor, separator, line_num, field_num);
 
             // Check for duplicate headers
             if (field) {
@@ -144,22 +241,32 @@ void parse_csv(Input* input, const char* csv_string) {
             Item item = field ? (Item){.item = s2it(field)} : (Item){.item = ITEM_NULL};
             array_append(headers, item, input->pool);
             field_num++;
-            if (*csv == separator) csv++;
+            skip_table_separator(&header_cursor, separator);
         }
 
 
         expected_columns = headers->length;
-        ctx.addNote("CSV has %d columns with headers", expected_columns);
+        ctx.addNote("%s has %d columns with headers", tsv_mode ? "TSV" : "CSV", expected_columns);
 
         // Skip newline after header
-        if (*csv == '\r') csv++;
-        if (*csv == '\n') csv++;
-        line_num++;
+        if (!commented_columns) {
+            csv = next_table_line(header_cursor);
+            line_num++;
+        }
     }
 
     // Parse data rows
     int row_count = 0;
     while (*csv) {
+        if (tsv_mode) {
+            const char* first = csv;
+            while (*first == ' ' || *first == '\t') first++;
+            if (*first == '#') {
+                csv = next_table_line(csv);
+                line_num++;
+                continue;
+            }
+        }
         // Skip empty lines
         if (*csv == '\r' || *csv == '\n') {
             if (*csv == '\r') csv++;
@@ -197,7 +304,7 @@ void parse_csv(Input* input, const char* csv_string) {
                 }
 
                 field_index++;
-                if (*csv == separator) csv++;
+                skip_table_separator(&csv, separator);
             }
 
             // Check for missing fields
@@ -225,7 +332,7 @@ void parse_csv(Input* input, const char* csv_string) {
                 }
 
                 field_index++;
-                if (*csv == separator) csv++;
+                skip_table_separator(&csv, separator);
             }
 
             // Set expected columns from first data row
@@ -252,8 +359,17 @@ void parse_csv(Input* input, const char* csv_string) {
     Item rows = rows_builder.final();
     input->root = rows;
 
-    ctx.addNote("CSV parsed: %d rows, %d columns", row_count, expected_columns);
+    ctx.addNote("%s parsed: %d rows, %d columns", tsv_mode ? "TSV" : "CSV",
+                row_count, expected_columns);
 
     // Log any errors that occurred
     ctx.logErrors();
+}
+
+void parse_csv(Input* input, const char* csv_string) {
+    parse_delimited(input, csv_string, false);
+}
+
+void parse_tsv(Input* input, const char* tsv_string) {
+    parse_delimited(input, tsv_string, true);
 }
