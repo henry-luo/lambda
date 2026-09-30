@@ -6598,17 +6598,14 @@ static Item interp_runtime_function_worker_call(void* opaque) {
 Item interp_call_runtime_function_large_stack(Runtime* runtime, Function* function,
         const Item* args, int argc, InterpLargeStackThreadHook worker_enter,
         InterpLargeStackThreadHook worker_leave, void* worker_context) {
+    EvalContext* eval_context = NULL;
 #ifndef _WIN32
-    EvalContext* eval_context = runtime ? runtime_get_eval_context(runtime) : NULL;
+    eval_context = runtime ? runtime_get_eval_context(runtime) : NULL;
+#endif
     InterpRuntimeFunctionCall call = {runtime, function, args, argc, worker_enter,
         worker_leave, worker_context};
+    // Windows runs inline, keeping worker_enter before the callback's context lookup.
     return interp_run_on_large_stack(eval_context, interp_runtime_function_worker_call, &call);
-#else
-    if (worker_enter) worker_enter(worker_context);
-    Item result = interp_call_runtime_function_direct(runtime, function, args, argc);
-    if (worker_leave) worker_leave(worker_context);
-    return result;
-#endif
 }
 
 // const accepts only literal scalar syntax. The same eval_expr walker still
