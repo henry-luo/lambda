@@ -607,6 +607,7 @@ on click(evt) {
 view <eml_preview> {
   let message = ~.message
   let headers = if (message != null and type(message["headers"]) == map) message["headers"] else null;
+  let body = if (message == null) null else message["body"];
   <section id:"eml-preview", class:"rendered-preview eml-preview"
   , if (message == null) {
       <p class:"preview-error", "Unable to read selected email">
@@ -624,8 +625,13 @@ view <eml_preview> {
             >
           >
         }
-        <pre id:"eml-body", class:"eml-body",
-          if (message["body"] != null) message["body"] else "">
+        // HTML MIME bodies are parsed Mark elements; strings retain plain-text wrapping.
+        if (type(body) == element) {
+          <div id:"eml-body", class:"eml-html-body", apply(body)>
+        } else {
+          <pre id:"eml-body", class:"eml-body",
+            if (body != null) body else "">
+        }
       >
     }
   >
@@ -1064,6 +1070,7 @@ on mouseup(evt) {
       .eml-body { box-sizing: border-box; width: 100%; margin: 22px 0 0;
                   color: #263448; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace;
                   white-space: pre-wrap; overflow-wrap: anywhere; }
+      .eml-html-body { margin-top: 22px; overflow-wrap: anywhere; }
       .property-more { display: block; width: 100%; padding: 9px 20px; border: 0;
                        background: #f3f7fc; color: #195fa8; text-align: left;
                        font: 600 12px/18px sans-serif; cursor: pointer; }
