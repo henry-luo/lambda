@@ -1,0 +1,22 @@
+{
+  "name": "Document editor calm splash variant restyles the page and fades into the editor",
+  "html": "test/ui/doc_editor_calm.html",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "assert_count", "target": {"selector": "html.calm"}, "count": 1,
+     "assert_timeout": 5000, "assert_interval": 100},
+    {"type": "assert_visible", "target": {"selector": "#splash"}, "visible": true},
+    {"type": "assert_visible", "target": {"selector": "#vignette"}, "visible": true},
+    {"type": "assert_text", "target": {"selector": ".message h1"},
+     "equals": "One data model, many document workflows."},
+    {"type": "assert_count", "target": {"selector": "#editor-frame[src='doc_editor.ls']"},
+     "count": 1, "assert_timeout": 1000},
+    {"type": "wait", "ms": 2500},
+    {"type": "assert_count", "target": {"selector": "#splash"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "html.leaving"}, "count": 1,
+     "assert_timeout": 2000, "assert_interval": 50},
+    {"type": "assert_count", "target": {"selector": "#splash"}, "count": 0,
+     "assert_timeout": 45000, "assert_interval": 1000},
+    {"type": "assert_count", "target": {"selector": ".doc-editor"}, "count": 1}
+  ]
+}

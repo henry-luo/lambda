@@ -6,6 +6,8 @@
 //
 // Run:
 //   ./lambda.exe view test/ui/doc_editor.html
+// Restrained splash variant:
+//   ./lambda.exe view test/ui/doc_editor_calm.html
 // Direct view without the startup splash:
 //   ./lambda.exe view test/ui/doc_editor.ls
 // Headless smoke:
