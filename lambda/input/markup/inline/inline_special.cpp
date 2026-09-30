@@ -14,66 +14,11 @@
  */
 #include "inline_common.hpp"
 #include <cstring>
+#include "lib/emoji_shortcodes.h"
 #include "lib/str.h"
 
 namespace lambda {
 namespace markup {
-
-// ============================================================================
-// Emoji Shortcode Mapping Table
-// ============================================================================
-
-struct EmojiEntry {
-    const char* shortcode;
-    const char* emoji;
-};
-
-// Common emoji mappings
-static const EmojiEntry emoji_map[] = {
-    {":smile:", "😄"},
-    {":grinning:", "😀"},
-    {":laughing:", "😆"},
-    {":heart:", "❤️"},
-    {":+1:", "👍"},
-    {":thumbsup:", "👍"},
-    {":thumbsdown:", "👎"},
-    {":star:", "⭐"},
-    {":fire:", "🔥"},
-    {":rocket:", "🚀"},
-    {":warning:", "⚠️"},
-    {":check:", "✓"},
-    {":x:", "✗"},
-    {":info:", "ℹ️"},
-    {":question:", "❓"},
-    {":exclamation:", "❗"},
-    {":eyes:", "👀"},
-    {":wave:", "👋"},
-    {":clap:", "👏"},
-    {":muscle:", "💪"},
-    {":thinking:", "🤔"},
-    {":sunglasses:", "😎"},
-    {":tada:", "🎉"},
-    {":sparkles:", "✨"},
-    {":coffee:", "☕"},
-    {":beer:", "🍺"},
-    {":pizza:", "🍕"},
-    {":bug:", "🐛"},
-    {":memo:", "📝"},
-    {":bulb:", "💡"},
-    {":zap:", "⚡"},
-    {":lock:", "🔒"},
-    {":key:", "🔑"},
-    {":gear:", "⚙️"},
-    {":link:", "🔗"},
-    {":hammer:", "🔨"},
-    {":wrench:", "🔧"},
-    {":package:", "📦"},
-    {":calendar:", "📅"},
-    {":clock:", "🕐"},
-    {":hourglass:", "⏳"},
-    {":100:", "💯"},
-    {nullptr, nullptr}  // Sentinel
-};
 
 /**
  * parse_strikethrough - Parse strikethrough text
@@ -299,36 +244,16 @@ Item parse_emoji_shortcode(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_UNDEFINED};
     }
 
-    // Extract shortcode name
     size_t name_len = pos - name_start;
+    // Only create a Symbol when the shared renderer can resolve its name.
+    if (!emoji_shortcode_lookup(name_start, name_len)) {
+        return Item{.item = ITEM_UNDEFINED};
+    }
+
+    // Extract shortcode name
     char* shortcode_name = mem_strndup(name_start, name_len, MEM_CAT_INPUT_MARKUP);
     if (!shortcode_name) {
         return Item{.item = ITEM_ERROR};
-    }
-
-    // Build full shortcode with colons for lookup
-    char* full_shortcode = mem_join3(":", 1, shortcode_name, name_len, ":", 1,
-                                     MEM_CAT_INPUT_MARKUP);
-    if (!full_shortcode) {
-        mem_free(shortcode_name);
-        return Item{.item = ITEM_ERROR};
-    }
-
-    // Look up emoji in table
-    const char* emoji_char = nullptr;
-    for (int i = 0; emoji_map[i].shortcode; i++) {
-        if (strcmp(full_shortcode, emoji_map[i].shortcode) == 0) {
-            emoji_char = emoji_map[i].emoji;
-            break;
-        }
-    }
-
-    mem_free(full_shortcode);
-
-    if (!emoji_char) {
-        // Unknown emoji shortcode
-        mem_free(shortcode_name);
-        return Item{.item = ITEM_UNDEFINED};
     }
 
     // Create Symbol with the shortcode name

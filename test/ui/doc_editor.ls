@@ -141,7 +141,7 @@ fn is_eml_document(extension) => lower(extension) == "eml"
 fn is_pgf_document(extension) => lower(extension) == "pgf"
 fn is_image_document(extension) => contains(["png", "jpg", "jpeg", "gif", "svg"], lower(extension)) or false
 fn is_raster_document(extension) => is_image_document(extension) and lower(extension) != "svg"
-fn is_csv_document(extension) => lower(extension) == "csv"
+fn is_table_document(extension) => contains(["csv", "tsv"], lower(extension)) or false
 fn graph_flavor(extension) {
   let ext = lower(extension)
   if (ext == "mmd") { "mermaid" }
@@ -165,7 +165,7 @@ fn is_renderable_document(extension) =>
   document_format(extension) != null or is_latex_document(extension) or
     is_pdf_document(extension) or is_eml_document(extension) or
     is_pgf_document(extension) or is_image_document(extension) or
-    graph_flavor(extension) != null or property_format(extension) != null or is_csv_document(extension)
+    graph_flavor(extension) != null or property_format(extension) != null or is_table_document(extension)
 
 // seti private-use glyphs; keep codepoints readable alongside the bundled font.
 let SETI_CLOCK = chr(0xE012)
@@ -194,7 +194,7 @@ fn file_icon(extension) {
   else if (ext == "json") { SETI_JSON }
   else if (contains(["yaml", "yml"], ext)) { SETI_YAML }
   else if (contains(["toml", "ini", "properties", "props"], ext)) { SETI_CONFIG }
-  else if (ext == "csv") { SETI_CSV }
+  else if (is_table_document(ext)) { SETI_CSV }
   else if (ext == "xml") { SETI_XML }
   else if (contains(["db", "sqlite", "sqlite3"], ext)) { SETI_DB }
   else if (contains(["md", "markdown", "mdown", "mkdn", "mdx", "wiki", "mediawiki",
@@ -370,6 +370,7 @@ fn csv_cell(row, column) {
 }
 let CSV_DEFAULT_WIDTH = 150
 let CSV_MIN_WIDTH = 72
+let CSV_PAGE_SIZE = 200
 fn csv_width(widths, index) =>
   if (index < len(widths)) widths[index] else CSV_DEFAULT_WIDTH
 fn csv_resized_widths(widths, gesture, x) {
@@ -454,6 +455,9 @@ view <td> { <td *[rendered_children(~)]> }
 // The CSV reader supplies decoded cells, so quoting and tab separators share one view.
 view <csv_preview> {
   let columns = csv_columns(~.rows)
+  // Mount a bounded number of rows so large timing tables remain interactive.
+  let row_count = if (type(~.rows) == array) len(~.rows) else 0
+  let visible_rows = if (row_count == 0) [] else take(~.rows, ~.visible_rows)
   let table_width = sum([for (index, column in columns) csv_width(~.widths, index)]);
   <section id:"csv-preview", class:"rendered-preview csv-preview"
   , if (len(columns) == 0) {
@@ -472,7 +476,7 @@ view <csv_preview> {
           >
         >
         <tbody
-        for (row in ~.rows) {
+        for (row in visible_rows) {
             <tr
             for (index, column in columns) {
                 let cell = csv_cell(row, column);
@@ -483,8 +487,15 @@ view <csv_preview> {
           }
         >
       >
+      if (row_count > len(visible_rows)) {
+        <button class:"csv-more", "Show more rows (" ++
+          string(row_count - len(visible_rows)) ++ " remaining)">
+      }
     }
   >
+}
+on click(evt) {
+  if (contains(evt.target_class, "csv-more")) { emit("csv_more_rows", null) }
 }
 on mousedown(evt) {
   if (evt.button != 0 or not contains(evt.target_class, "csv-resize")) { return }
@@ -604,6 +615,12 @@ on click(evt) {
   if (contains(evt.target_class, "property-root-more")) { emit("property_more", "") }
 }
 
+fn eml_html_root(body) {
+  // HTML5 returns #document; enter at html so the editor's element views run.
+  let roots = [for (child in content(body) where type(child) == element and name(child) == 'html') child]
+  if (len(roots) > 0) roots[0] else body
+}
+
 view <eml_preview> {
   let message = ~.message
   let headers = if (message != null and type(message["headers"]) == map) message["headers"] else null;
@@ -627,7 +644,7 @@ view <eml_preview> {
         }
         // HTML MIME bodies are parsed Mark elements; strings retain plain-text wrapping.
         if (type(body) == element) {
-          <div id:"eml-body", class:"eml-html-body", apply(body)>
+          <div id:"eml-body", class:"eml-html-body", apply(eml_html_root(body))>
         } else {
           <pre id:"eml-body", class:"eml-body",
             if (body != null) body else "">
@@ -717,7 +734,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV opens as a resizable table. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. Email shows its headers and body. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. Email shows its headers and body. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -737,8 +754,9 @@ view <document_pane> {
             closed_paths:~.property_closed_paths, more_paths:~.property_more_paths>)
         } else if (is_eml_document(~.file["extension"])) {
           apply(<eml_preview message:~.eml_data>)
-        } else if (is_csv_document(~.file["extension"])) {
-          apply(<csv_preview rows:~.csv_data, widths:~.csv_widths>)
+        } else if (is_table_document(~.file["extension"])) {
+          apply(<csv_preview rows:~.csv_data, widths:~.csv_widths,
+            visible_rows:~.csv_visible_rows>)
         } else if (is_image_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"image-preview", class:"rendered-preview image-preview", apply(preview)>
@@ -795,7 +813,7 @@ on click(evt) {
 // Project browser application
 // --------------------------------------------------------------------------
 
-edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_resize: null {
+edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", selected_file: null, preview_mode: "view", property_filter: "", property_data: null, property_open_paths: [], property_closed_paths: [], property_more_paths: [], eml_data: null, csv_data: null, csv_widths: [], csv_visible_rows: CSV_PAGE_SIZE, csv_resize: null {
   let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
 
   <div class:"doc-editor"
@@ -844,7 +862,7 @@ edit <doc_editor_app> state root_open: true, open_paths: [], filter_text: "", se
     property_filter:property_filter, property_data:property_data,
     property_open_paths:property_open_paths, property_closed_paths:property_closed_paths,
     property_more_paths:property_more_paths, eml_data:eml_data,
-    csv_data:csv_data, csv_widths:csv_widths>)
+    csv_data:csv_data, csv_widths:csv_widths, csv_visible_rows:csv_visible_rows>)
   >
 }
 on click(evt) {
@@ -909,8 +927,10 @@ on file_select(entry) {
   // Retain the parsed tree while the user edits the filter or expands nodes.
   property_data = if (format == null) null else input(entry["file_path"], format) ^ { null }
   eml_data = if (is_eml_document(entry["extension"])) input(entry["file_path"], 'eml') ^ { null } else null
-  csv_data = if (is_csv_document(entry["extension"])) input(entry["file_path"], 'csv') ^ { null } else null
+  csv_data = if (is_table_document(entry["extension"]))
+    input(entry["file_path"], lower(entry["extension"])) ^ { null } else null
   csv_widths = [for (column in csv_columns(csv_data)) CSV_DEFAULT_WIDTH]
+  csv_visible_rows = CSV_PAGE_SIZE
   csv_resize = null
   preview_mode = "view"
   property_filter = ""
@@ -936,6 +956,7 @@ on property_more(path) {
   property_more_paths = [*property_more_paths, path]
 }
 on csv_resize_start(gesture) { csv_resize = gesture }
+on csv_more_rows(_) { csv_visible_rows = csv_visible_rows + CSV_PAGE_SIZE }
 on csv_resize_move(x) {
   if (csv_resize != null) { csv_widths = csv_resized_widths(csv_widths, csv_resize, x) }
 }
@@ -1091,6 +1112,10 @@ on mouseup(evt) {
                     box-sizing: border-box; border-left: 2px solid #c5d5e8;
                     cursor: col-resize; user-select: none; }
       .csv-resize:hover { background: #d2e5fb; border-left-color: #4588d0; }
+      .csv-more { display: block; width: 100%; padding: 10px 18px; border: 0;
+                  background: #f3f7fc; color: #195fa8; text-align: left;
+                  font: 600 12px/18px sans-serif; cursor: pointer; }
+      .csv-more:hover { background: #e7f0fb; }
       .image-preview { display: flex; align-items: center; justify-content: center; }
       .image-preview img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
       .document-preview { min-width: 0; min-height: 0; flex: 1; width: 100%; border: 0; display: block; background: #fff; }
@@ -1106,6 +1131,11 @@ on mouseup(evt) {
       .document-body h1, .latex-output h1 { margin: .2em 0 .65em; font-size: 2em; }
       .document-body h2, .latex-output h2 { margin: 1.45em 0 .55em; font-size: 1.55em; }
       .document-body h3, .latex-output h3 { margin: 1.3em 0 .45em; font-size: 1.25em; }
+      /* Email is read inside the editor pane, so use a tighter type scale than full documents. */
+      .eml-html-body .document-body { font-size: 14px; line-height: 1.55; }
+      .eml-html-body .document-body h1 { margin: .8em 0 .45em; font-size: 21px; }
+      .eml-html-body .document-body h2 { margin: 1.2em 0 .4em; font-size: 17px; }
+      .eml-html-body .document-body h3 { margin: 1em 0 .35em; font-size: 15px; }
       .document-body p, .latex-output p { margin: .75em 0; }
       .document-body ul, .document-body ol, .latex-output ul, .latex-output ol { padding-left: 1.5em; }
       .document-body blockquote, .latex-output blockquote { margin: 1em 0; padding: .15em 1em;

@@ -18,6 +18,7 @@ void parse_json(Input* input, const char* json_string);
 Item parse_json_to_item(Input* input, const char* json_string);
 Item parse_json_to_item_strict(Input* input, const char* json_string, bool* ok);
 void parse_csv(Input* input, const char* csv_string);
+void parse_tsv(Input* input, const char* tsv_string);
 void parse_ini(Input* input, const char* ini_string);
 void parse_properties(Input* input, const char* prop_string);
 void parse_toml(Input* input, const char* toml_string);
