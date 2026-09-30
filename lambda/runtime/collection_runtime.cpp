@@ -411,6 +411,15 @@ void array_push_verbatim(Array* arr, Item item) {
     array_append_one(arr, item);
 }
 
+static void bind_spread_fragment_range(Item fragment, List* parent, int64_t first_child_index) {
+    int64_t child_count = parent->length - first_child_index;
+    if (first_child_index <= INT_MAX && child_count <= INT_MAX) {
+        // A spread fragment has no node in the tree; retain its concrete range.
+        render_map_bind_fragment_parent(fragment, {.array = parent},
+                                        (int)first_child_index, (int)child_count);
+    }
+}
+
 void list_push(List* list, Item item) {
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_NULL) return;
@@ -434,13 +443,7 @@ void list_push(List* list, Item item) {
                 list_push(list, array_item_read((Array*)nested, i));
             }
             list = rooted_list.get();
-            int64_t child_count = list->length - first_child_index;
-            if (first_child_index <= INT_MAX && child_count <= INT_MAX) {
-                // Content lists are flattened into the parent, so preserve
-                // their concrete range for template retransform replacement.
-                render_map_bind_fragment_parent(rooted_source.get(), {.array = list},
-                                                (int)first_child_index, (int)child_count);
-            }
+            bind_spread_fragment_range(rooted_source.get(), list, first_child_index);
             return;
         }
     }
@@ -553,6 +556,7 @@ void list_push_spread(List* list, Item item) {
             RootFrame roots(2);
             Rooted<List*> rooted_list(roots, list);
             Rooted<Item> rooted_source(roots, item);
+            int64_t first_child_index = list->length;
             for (int64_t i = 0; i < arr->length; i++) {
                 list = rooted_list.get();
                 arr = rooted_source.get().array;
@@ -561,6 +565,8 @@ void list_push_spread(List* list, Item item) {
                 cow_capture_value(element);
                 list_push(list, element);
             }
+            bind_spread_fragment_range(rooted_source.get(), rooted_list.get(),
+                                       first_child_index);
             return;
         }
     }

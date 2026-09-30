@@ -7,7 +7,8 @@
     {"type": "mouse_down", "target": {"selector": "#auto-area", "offset_x": 4, "offset_y": 8}, "button": 0},
     {"type": "mouse_move", "target": {"selector": "#auto-area", "offset_x": 170, "offset_y": 54}},
     {"type": "advance_time", "ms": 128, "steps": 4},
+    {"type": "assert_form_selection", "target": {"selector": "#auto-area"}, "start": 0, "end": 23},
     {"type": "mouse_up", "target": {"selector": "#auto-area", "offset_x": 170, "offset_y": 54}, "button": 0},
-    {"type": "assert_form_selection", "target": {"selector": "#auto-area"}, "start": 0, "end": 23}
+    {"type": "assert_form_selection", "target": {"selector": "#auto-area"}, "start": 0, "end": 26}
   ]
 }

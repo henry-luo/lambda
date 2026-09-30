@@ -12,7 +12,7 @@
   }, editing: {
     active_surface: true
   },
-  <html flags: ['hover', 'focus-within'],
+  <html index: 1, flags: ['hover', 'focus-within'],
     <body index: 2, flags: ['hover', 'focus-within'],
       <div index: 5, flags: ['hover'],
         <input index: 3, id: "email", flags: ['hover', 'valid'], form: {

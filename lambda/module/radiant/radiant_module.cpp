@@ -3880,7 +3880,7 @@ RADIANT_PROVIDE_ENGINE_1(value_at_focus, fn_radiant_value_at_focus)
 extern "C" bool radiant_author_template_event_live(const char* event_name);
 extern "C" void radiant_dispatch_author_template_participant(void* dom_node, Item event,
                                                              const char* event_name);
-extern "C" void radiant_dom_reset_wrapper_cache(void);
+extern "C" void radiant_dom_reset_wrapper_cache_current_heap(void);
 extern "C" bool radiant_dom_exec_command(void* document, const char* command, const char* value);
 struct RadiantHistoryTraversal;
 extern "C" bool radiant_history_initialize(DomDocument* document);
@@ -3903,7 +3903,7 @@ extern "C" void dom_engine_dispatch_author_template_participant(void* d, Item e,
 extern "C" DocState* dom_engine_document_ensure_state(DomDocument* d, const char* o) {
     return radiant_document_ensure_state(d, o);
 }
-extern "C" void dom_engine_reset_wrapper_cache(void) { radiant_dom_reset_wrapper_cache(); }
+extern "C" void dom_engine_reset_wrapper_cache(void) { radiant_dom_reset_wrapper_cache_current_heap(); }
 extern "C" bool dom_engine_exec_command(void* d, const char* c, const char* v) {
     return radiant_dom_exec_command(d, c, v);
 }

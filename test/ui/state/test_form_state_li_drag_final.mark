@@ -4,7 +4,7 @@
   }, selection: {
     anchor: {
       node: "html.body.2.div.3.ul.3.li.1",
-      offset: 5
+      offset: 6
     },
     focus: {
       node: "html.body.2.div.3.ul.3.li.7",
@@ -17,42 +17,47 @@
     rects: 1
   }, editing: {
     pointer_selecting: true
-  }
-  <html flags: ['hover', 'active']
-    <body index: 2, flags: ['hover', 'active']
-      <div index: 3, flags: ['hover', 'active']
-        <ul index: 3, flags: ['hover', 'active']
+  },
+  <html flags: ['hover', 'active'],
+    <body index: 2, flags: ['hover', 'active'],
+      <div index: 3, flags: ['hover', 'active'],
+        <ul index: 3, flags: ['hover', 'active'],
           <li index: 1, flags: ['active']>
           <li index: 7, flags: ['hover']>>>
-      <div index: 23
-        <div index: 5
-          <input index: 1, flags: ['valid']>
-          <input index: 3, flags: ['valid']>
-          <textarea index: 5, flags: ['valid']>>>
-      <div index: 27
-        <div index: 5
-          <input index: 5, flags: ['valid']>>>
-      <div index: 31
-        <div index: 5
-          <div index: 1
-            <input index: 3, flags: ['valid']>>
-          <div index: 5
-            <div index: 3
-              <input index: 3, flags: ['valid']>>>>>
-      <div index: 35
-        <div index: 5
-          <div index: 3
-            <input index: 1, flags: ['valid']>
-            <input index: 3, flags: ['valid']>>>>
-      <div index: 39
-        <div index: 5
-          <input index: 1, flags: ['valid']>
-          <input index: 3, flags: ['valid']>>>
-      <div index: 47
-        <div index: 5
-          <textarea index: 1, flags: ['valid']>>>
-      <div index: 51
-        <div index: 5
-          <input index: 1, flags: ['valid']>
-          <input index: 3, flags: ['valid']>
-          <input index: 5, flags: ['valid']>>>>>>
+      <div index: 23,
+        <div index: 5,
+          <input index: 1, flags: ['placeholder-shown', 'valid']>
+          <input index: 3, flags: ['placeholder-shown', 'valid']>
+          <textarea index: 5, flags: ['placeholder-shown', 'valid']>>>
+      <div index: 27,
+        <div index: 5,
+          <input index: 5, flags: ['placeholder-shown', 'valid']>>>
+      <div index: 31,
+        <div index: 5,
+          <div index: 1,
+            <input index: 3, flags: ['placeholder-shown', 'valid']>>
+          <div index: 5,
+            <div index: 3,
+              <input index: 3, flags: ['placeholder-shown', 'valid']>>>>>
+      <div index: 35,
+        <div index: 5,
+          <div index: 3,
+            <input index: 1, flags: ['placeholder-shown', 'valid']>
+            <input index: 3, flags: ['placeholder-shown', 'valid']>>>>
+      <div index: 39,
+        <div index: 5,
+          <input index: 1, flags: ['placeholder-shown', 'valid']>
+          <input index: 3, flags: ['placeholder-shown', 'valid']>>>
+      <div index: 47,
+        <div index: 5,
+          <textarea index: 1, flags: ['valid'], form: {
+              value: "This is a multi-line textarea.\nYou can select text here using Shift+Arrow keys.\nTry Home and End keys to jump to line boundaries.\nCtrl+A or Cmd+A selects all text.",
+              sel: [163, 163]
+            }>>>
+      <div index: 51,
+        <div index: 5,
+          <input index: 1, flags: ['placeholder-shown', 'valid']>
+          <input index: 3, flags: ['placeholder-shown', 'valid']>
+          <input index: 5, flags: ['valid'], form: {
+              sel: [6, 6]
+            }>>>>>>

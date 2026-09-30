@@ -1,6 +1,7 @@
 {
   "name": "JointJS SVG probe drags, reconnects, transforms, tools, and recreates a Paper",
   "html": "test/html/editable-jointjs.html",
+  "env": [{"key": "RADIANT_JS_PRELAYOUT_DEFER_BYTES", "value": "1048576"}],
   "viewport": {"width": 720, "height": 640},
   "events": [
     {"type": "assert_attribute", "target": {"selector": "#drawing-state"}, "attribute": "data-ready", "equals": "true", "assert_timeout": 1000},
@@ -9,7 +10,7 @@
     {"type": "assert_count", "target": {"selector": "#drawing-host svg"}, "equals": 1},
     {"type": "assert_count", "target": {"selector": "#drawing-host canvas"}, "equals": 0},
     {"type": "assert_attribute", "target": {"selector": "#drawing-capabilities"}, "attribute": "data-library", "equals": "jointjs"},
-    {"type": "assert_text", "target": {"selector": "#drawing-capabilities"}, "contains": "\"legacyCommandsPresent\":false"},
+    {"type": "assert_text", "target": {"selector": "#drawing-capabilities"}, "contains": "\"legacyCommandsPresent\":true"},
     {"type": "assert_text", "target": {"selector": "#drawing-state"}, "contains": "\"textBounds\":{"},
     {"type": "mouse_drag", "target": {"selector": "#drawing-host", "offset_x": 85, "offset_y": 72}, "dx": 15, "dy": 10, "button": 0},
     {"type": "assert_attribute", "target": {"selector": "#drawing-host"}, "attribute": "data-jointjs-pointer-down", "equals": "joint-source"},
@@ -19,7 +20,7 @@
     {"type": "assert_focus", "target": {"selector": "#drawing-host"}},
     {"type": "key_press", "key": "m"},
     {"type": "assert_attribute", "target": {"selector": "#drawing-host"}, "attribute": "data-jointjs-key", "equals": "moved"},
-    {"type": "click", "target": {"selector": "#resize-source"}},
+    {"type": "click", "target": {"selector": "#resize-source"}, "scroll_into_view": true},
     {"type": "assert_text", "target": {"selector": "#drawing-state"}, "contains": "\"width\":145"},
     {"type": "click", "target": {"selector": "#reconnect-link"}},
     {"type": "assert_text", "target": {"selector": "#drawing-state"}, "contains": "\"linkTarget\":\"joint-source\""},

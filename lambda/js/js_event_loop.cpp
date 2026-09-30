@@ -182,6 +182,9 @@ static void js_drain_async_queue(RuntimeJobQueue* queue,
 }
 
 extern "C" Item js_microtask_flush_result(void) {
+    // The shared uv loop can pump while an iframe navigation has no bound JS
+    // realm; its drain callback must not access the retired realm's queues.
+    if (!js_active_runtime_state || !js_runtime_state.event_loop) return ItemNull;
     RootFrame roots(1);
     Rooted<Item> first_error_root(roots, ItemNull);
     int safety = 0;
@@ -449,11 +452,13 @@ static bool timer_runtime_enter(JsTimerHandle* th, JsTimerRuntimeScope* scope) {
     memset(scope, 0, sizeof(JsTimerRuntimeScope));
     scope->saved_doc = dom_get_document();
     if (!th->runtime_context || !th->runtime_heap || !th->runtime_name_pool ||
-            !eval_context_matches(th->runtime_context) ||
-            !js_runtime_state_thread_matches(th->runtime_context)) {
-        // Timer ownership is a routing check. A loop callback cannot borrow a
-        // different evaluator and restore the previous one afterward.
-        log_error("js-timer-runtime: callback arrived on non-owner thread");
+            ((!eval_context_matches(th->runtime_context) ||
+              !js_runtime_state_thread_matches(th->runtime_context)) &&
+             !js_runtime_context_enter_turn(th->runtime_context->runtime,
+                                            th->runtime_context))) {
+        // A shared uv loop may fire an iframe timer while its parent is bound.
+        // Enter the timer's retained realm at this quiescent task boundary.
+        log_error("js-timer-runtime: could not bind callback owner");
         return false;
     }
     if (th->runtime_doc) {
@@ -548,6 +553,11 @@ static void timer_abandon_all_without_uv(const char* reason_prefix) {
 
 static void timer_fire_cb(uv_timer_t *handle) {
     JsTimerHandle *th = (JsTimerHandle *)handle->data;
+    JsTimerRuntimeScope scope;
+    if (!timer_runtime_enter(th, &scope)) {
+        log_error("event_loop: timer fired without captured JS runtime");
+        return;
+    }
     timer_progress_generation++;
     bool close_after_fire = th && !th->is_interval;
     // D5.3/D5.4.3: the timer callback may collect before the saved async
@@ -558,29 +568,24 @@ static void timer_fire_cb(uv_timer_t *handle) {
         previous_resource_root, ItemNull,
         previous_domain_root, ItemNull,
         arguments_root, th ? th->job.arguments : ItemNull);
-    JsTimerRuntimeScope scope;
-    if (timer_runtime_enter(th, &scope)) {
-        JsEventLoopCallbackScope callback_scope;
-        previous_resource_root.set(js_async_hooks_enter_resource(th->job.context.resource));
-        previous_domain_root.set(js_domain_set_stack(th->job.context.domain));
-        if (js_is_callable(th->job.callback)) {
-            if (get_type_id(arguments_root.get()) == LMD_TYPE_ARRAY &&
-                    arguments_root.get().array->length > 0) {
-                Array* args = arguments_root.get().array;
-                callback_result_root.set(js_als_context_call_args(
-                    th->job.context.als_context, th->job.callback, ItemNull,
-                    args->items, args->length));
-            } else {
-                callback_result_root.set(js_als_context_call(th->job.context.als_context,
-                    th->job.callback, ItemNull, ItemNull, 0));
-            }
+    JsEventLoopCallbackScope callback_scope;
+    previous_resource_root.set(js_async_hooks_enter_resource(th->job.context.resource));
+    previous_domain_root.set(js_domain_set_stack(th->job.context.domain));
+    if (js_is_callable(th->job.callback)) {
+        if (get_type_id(arguments_root.get()) == LMD_TYPE_ARRAY &&
+                arguments_root.get().array->length > 0) {
+            Array* args = arguments_root.get().array;
+            callback_result_root.set(js_als_context_call_args(
+                th->job.context.als_context, th->job.callback, ItemNull,
+                args->items, args->length));
+        } else {
+            callback_result_root.set(js_als_context_call(th->job.context.als_context,
+                th->job.callback, ItemNull, ItemNull, 0));
         }
-        js_domain_restore_stack(previous_domain_root.get());
-        js_async_hooks_restore_resource(previous_resource_root.get());
-        timer_runtime_exit(&scope);
-    } else {
-        log_error("event_loop: timer fired without captured JS runtime");
     }
+    js_domain_restore_stack(previous_domain_root.get());
+    js_async_hooks_restore_resource(previous_resource_root.get());
+    timer_runtime_exit(&scope);
     if (th && th->is_interval && item_is_error(callback_result_root.get()) && !th->closing) {
         // An interval callback that throws before its clearInterval call can
         // otherwise re-enter forever and starve the drain watchdog.

@@ -575,6 +575,7 @@ DOM_RAW(get_foreign_doc, host, void*, (Item item), dom_get_foreign_doc, DOM_F_NA
 DOM_RAW(get_selection, selection, Item, (void), dom_get_selection, DOM_F_NATIVE)
 DOM_RAW(get_ui_context, host, void*, (void), dom_get_ui_context, DOM_F_NATIVE)
 DOM_RAW(has_committed_geometry_snapshot, geometry, bool, (void* doc), dom_has_committed_geometry_snapshot, DOM_F_NATIVE)
+DOM_RAW(import_node_bridge, tree, Item, (void* doc, void* elem, bool deep), dom_import_node_bridge, DOM_F_NATIVE)
 DOM_RAW(location_navigate_bridge, navigation, Item, (void* doc, Item next_url, bool replace), dom_location_navigate_bridge, DOM_F_NATIVE)
 DOM_RAW(navigate_submit_target, navigation, bool, (const char* target_name, const char* url), dom_navigate_submit_target, DOM_F_NATIVE)
 DOM_RAW(notify_mutation, notify, void, (int kind, void* target, void* parent), jube_host_dom_notify_mutation, DOM_F_NATIVE)

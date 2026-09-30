@@ -10,6 +10,7 @@
 #define LAMBDA_UV_LOOP_H
 
 #include <uv.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -24,6 +25,8 @@ int  lambda_uv_run(void);        // run until no active handles/requests
 void lambda_uv_stop(void);       // stop loop (from signal handler etc.)
 void lambda_uv_cleanup(void);    // close all handles, free loop
 void lambda_uv_abandon(void);    // free an unsafe loop without walking handles
+void lambda_uv_set_host_owned(bool owned);
+bool lambda_uv_is_host_owned(void);
 
 // JS task integration — called at event-loop phase checkpoints
 void lambda_uv_set_microtask_drain(void (*drain_fn)(void));
