@@ -2308,6 +2308,20 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
     }
 
+    // 'demo' is an alias for 'view test/ui/doc_viewer.html' (the bundled document
+    // viewer with its startup splash); rewrite argv before publishing it so every later stage, including
+    // sys.proc.self.argv, sees the canonical view command.
+    if (argc >= 2 && strcmp(argv[1], "demo") == 0) {
+        char** demo_argv = (char**)mem_alloc(sizeof(char*) * (argc + 2), MEM_CAT_SYSTEM);
+        demo_argv[0] = argv[0];
+        demo_argv[1] = (char*)"view";
+        demo_argv[2] = (char*)"test/ui/doc_viewer.html";
+        for (int i = 2; i < argc; i++) demo_argv[i + 1] = argv[i];
+        argc++;
+        demo_argv[argc] = NULL;
+        argv = demo_argv;
+    }
+
     // publish the compacted vector so sys.proc.self.argv uses its live count.
     sysinfo_set_argv(argc, argv);
 
@@ -3837,7 +3851,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("\nDescription:\n");
             printf("  The 'view' command opens a document in an interactive window.\n");
             printf("  Supports multiple document formats with full rendering and styling.\n");
-            printf("  If no file is specified, opens test/html/index.html by default.\n");
+            printf("  If no file is specified, opens the document viewer (test/ui/doc_viewer.ls).\n");
             printf("\nSupported Formats:\n");
             printf("  .pdf       Portable Document Format\n");
             printf("  .html      HyperText Markup Language\n");
@@ -3868,7 +3882,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             printf("  --event-result <file.json> Write a machine-readable event result\n");
             printf("  --view-key <key>           Structurizr view key (default: first declared view)\n");
             printf("\nExamples:\n");
-            printf("  %s view                          # View default HTML (test/html/index.html)\n", argv[0]);
+            printf("  %s view                          # Open the document viewer (test/ui/doc_viewer.ls)\n", argv[0]);
             printf("  %s view document.pdf             # View PDF in window\n", argv[0]);
             printf("  %s view page.html                # View HTML document\n", argv[0]);
             printf("  %s view README.md                # View markdown with GitHub styling\n", argv[0]);
@@ -3905,9 +3919,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
         event_sim_set_result_path(launch.event_result);
 
-        // Default to test/html/index.html if no file specified (like radiant.exe)
+        // default to the document viewer when no file is specified
         if (filename == NULL) {
-            filename = "test/html/index.html";
+            filename = "test/ui/doc_viewer.ls";
             log_info("No file specified, using default: %s", filename);
         }
 

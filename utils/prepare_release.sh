@@ -22,15 +22,9 @@ mkdir -p ./release
 # Step 1: Copy the runtime asset tree (packages, schemas, stylesheets, fonts).
 cp -r ./lmd ./release/lmd
 
-# Step 2c: Copy live-demo.html and referenced files
-# Copy live-demo.html
+# Step 2c: Copy sample documents for the demo viewer to browse
+# Copy layout sample HTML files from test/html/
 mkdir -p ./release/test/html
-cp ./test/html/live-demo.html ./release/test/html/
-
-# Copy demo.html as index.html
-cp ./test/html/demo.html ./release/test/html/index.html
-
-# Copy HTML files from test/html/ referenced by live-demo.html
 for file in flex.html grid.html table.html table_simple.html box.html position.html; do
     if [ -f "./test/html/$file" ]; then
         cp "./test/html/$file" ./release/test/html/
@@ -51,11 +45,64 @@ for file in tiger.svg sample1.png; do
     fi
 done
 
-# Copy test/input/ files referenced by live-demo.html
+# Copy test/input/ sample documents
 mkdir -p ./release/test/input
 for file in comprehensive_test.md latex-showcase.tex test.xml test-xml.css raw_commands_test.pdf more_test.yaml; do
     if [ -f "./test/input/$file" ]; then
         cp "./test/input/$file" ./release/test/input/
+    fi
+done
+
+# Step 2d: Bundle the document viewer ('lambda demo' opens test/ui/doc_viewer.html,
+# a bare 'lambda view' opens test/ui/doc_viewer.ls). Both load the Seti icon font
+# from test/ui/icons/; the script loads KaTeX CSS from ../../lmd/ (copied in Step 1).
+mkdir -p ./release/test/ui/icons
+cp ./test/ui/doc_viewer.ls ./test/ui/doc_viewer.html ./release/test/ui/
+cp ./test/ui/icons/seti.woff ./test/ui/icons/SETI_LICENSE.txt ./release/test/ui/icons/
+
+# Step 2e: Bundle one representative (most comprehensive) sample per supported input
+# format, so the demo viewer has something to browse for each type.
+input_samples=(
+    test.json                       # json
+    test.csv                        # csv
+    test_tab.tsv                    # tsv
+    test.ini                        # ini
+    test.properties                 # properties
+    test.toml                       # toml
+    more_test.yaml                  # yaml
+    more_test.xml                   # xml
+    more_test.html                  # html
+    comprehensive_test.md           # markdown
+    complex.mdx                     # mdx
+    comprehensive_test.rst          # reStructuredText
+    comprehensive_test.adoc         # asciidoc
+    comprehensive_test.textile      # textile
+    test.wiki                       # wiki
+    test.org                        # org
+    test.man                        # man (troff)
+    test.rtf                        # rtf
+    latex-showcase.tex              # latex
+    tikz/reg_components.pgf         # tikz / pgf
+    complete_css_grammar.css        # css
+    nested.jsx                      # jsx
+    sample.mk                       # mark
+    html_nested.eml                 # eml
+    contacts.vcf                    # vcard
+    calendar.ics                    # icalendar
+    invoicesample.pdf               # pdf
+    test_graph.mmd                  # mermaid graph
+    system_design.d2                # d2 graph
+    go-package.dot                  # graphviz dot graph
+    test_rdb_full.db                # sqlite database
+    sample1.jpg                     # image
+    test.txt                        # plain text
+)
+for file in "${input_samples[@]}"; do
+    if [ -f "./test/input/$file" ]; then
+        mkdir -p "./release/test/input/$(dirname "$file")"
+        cp "./test/input/$file" "./release/test/input/$file"
+    else
+        echo "Warning: input sample test/input/$file not found; skipped"
     fi
 done
 
@@ -65,7 +112,7 @@ if [ -f "./test/lambda/complex_iot_report_html.ls" ]; then
     cp "./test/lambda/complex_iot_report_html.ls" ./release/test/lambda/
 fi
 
-# Copy test/lambda/chart/ files referenced by live-demo.html
+# Copy test/lambda/chart/ chart demos
 mkdir -p ./release/test/lambda/chart
 for file in chart_dashboard_demo.ls dashboard_demo.json \
             test_bar_chart.ls bar_chart.json \

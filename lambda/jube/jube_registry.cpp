@@ -69,7 +69,8 @@
 typedef struct JubeStaticModuleEntry {
     const JubeModuleDef* module;
     uint32_t activation_state;
-    EvalContext* activating_context;
+    // valid only while ACTIVATING: the thread running init, for cycle detection
+    uv_thread_t activating_thread;
     ArrayList* attached_sessions;
     void* dynamic_handle;
 } JubeStaticModuleEntry;
@@ -4671,8 +4672,12 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
     JubeStaticModuleEntry* entry = jube_module_entry(module);
     if (!entry) return false;
     jube_runtime_session_lock_acquire();
+    uv_thread_t self = uv_thread_self();
     while (entry->activation_state == JUBE_MODULE_ACTIVATING) {
-        if (entry->activating_context == context) {
+        // a cycle is re-entry on the activating thread. Comparing EvalContexts
+        // misfired: parallel AST prebuild workers all have a NULL context, so a
+        // worker racing another's activation took it for a cycle (E216).
+        if (uv_thread_equal(&entry->activating_thread, &self)) {
             jube_runtime_session_lock_release();
             log_error("JUBE_REG: cyclic activation of module '%s'", module->name);
             return false;
@@ -4693,13 +4698,12 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
     // Descriptor registration is intentionally callback-free. This single
     // transition protects every import/global/language/type activation path.
     entry->activation_state = JUBE_MODULE_ACTIVATING;
-    entry->activating_context = context;
+    entry->activating_thread = self;
     jube_runtime_session_lock_release();
 
     if (!jube_activate_module_dependencies(module)) {
         jube_runtime_session_lock_acquire();
         entry->activation_state = JUBE_MODULE_FAILED;
-        entry->activating_context = NULL;
         uv_cond_broadcast(&jube_runtime_activation_cond);
         jube_runtime_session_lock_release();
         return false;
@@ -4708,7 +4712,6 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
     if (shared_primitives && jube_node_shared_primitives_init() != 0) {
         jube_runtime_session_lock_acquire();
         entry->activation_state = JUBE_MODULE_FAILED;
-        entry->activating_context = NULL;
         uv_cond_broadcast(&jube_runtime_activation_cond);
         jube_runtime_session_lock_release();
         return false;
@@ -4721,7 +4724,6 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
             if (shared_primitives) jube_node_shared_primitives_shutdown();
             jube_runtime_session_lock_acquire();
             entry->activation_state = JUBE_MODULE_FAILED;
-            entry->activating_context = NULL;
             uv_cond_broadcast(&jube_runtime_activation_cond);
             jube_runtime_session_lock_release();
             return false;
@@ -4734,7 +4736,6 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
         jube_interface_remove_module(module);
         jube_runtime_session_lock_acquire();
         entry->activation_state = JUBE_MODULE_FAILED;
-        entry->activating_context = NULL;
         uv_cond_broadcast(&jube_runtime_activation_cond);
         jube_runtime_session_lock_release();
         return false;
@@ -4742,7 +4743,6 @@ static bool jube_activate_module_descriptor(const JubeModuleDef* module) {
 
     jube_runtime_session_lock_acquire();
     entry->activation_state = JUBE_MODULE_ACTIVE;
-    entry->activating_context = NULL;
     uv_cond_broadcast(&jube_runtime_activation_cond);
     jube_runtime_session_lock_release();
     log_info("JUBE_REG: activated module '%s' version '%s'", module->name,
