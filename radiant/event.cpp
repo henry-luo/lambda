@@ -3539,11 +3539,9 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
     // The loader has settled js_has_dom_realm before a direct event can claim
     // a script-less document's evaluator through radiant_document_ensure_evaluator().
     Runtime* rt = dom_document_script_runtime(doc);
-    if (!rt && doc->js_has_dom_realm && context && context->runtime) {
-        // A synchronous JS bridge may execute before the loader retains the
-        // document realm. The current evaluator can load the package for this
-        // call. A script-less parent must claim its own runtime rather than
-        // borrowing the runtime of an iframe that will later be destroyed.
+    if (!rt && context && context->runtime && context->runtime->dom_doc == doc) {
+        // A load-time script may click before the loader publishes its realm.
+        // Its active runtime already belongs to this document.
         rt = context->runtime;
     }
     if (!rt) {
@@ -3569,7 +3567,9 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // focus target, the body remains available on an unfocused static page,
         // which is exactly where PageDown needs to load package policy first.
         DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
+        // Script clicks can precede layout, when controls have no form role yet.
         bool package_governs = te && (te->form_control() ||
+            target_inside_click_control(target) ||
             te == radiant_document_body_element(doc));
         if (!package_governs && target) {
             EditingSurface governed_surface;

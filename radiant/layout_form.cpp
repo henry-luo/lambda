@@ -303,7 +303,8 @@ float layout_text_input_content_width(LayoutContext* lycon, ViewBlock* block,
             } else {
                 float average_metric = font_get_text_control_avg_char_width(
                     font_box_handle(&temp_font));
-                float average_char_w = average_metric;
+                // Blink rounds the face metric before applying the HTML size count.
+                float average_char_w = average_metric > 0.0f ? roundf(average_metric) : 0.0f;
                 if (average_char_w <= 0.0f) {
                     GlyphInfo zero_glyph = font_get_glyph(font_box_handle(&temp_font), '0');
                     average_char_w = zero_glyph.advance_x;

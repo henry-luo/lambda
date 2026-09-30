@@ -13,4 +13,5 @@
   <case id: 'annotations', source: 'annotations.dot'>
   <case id: 'route-classes', source: 'route_classes.dot'>
   <case id: 'default-render', source: 'default_render.dot'>
+  <case id: 'fsm', source: 'fsm.dot'>
 >

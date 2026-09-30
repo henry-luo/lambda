@@ -7,6 +7,7 @@ pub fn make_options() {
     node_sep: 60.0,
     rank_sep: 80.0,
     edge_sep: 10.0,
+    loop_side: "right",
     use_splines: false,
     max_iterations: 8
   };
@@ -209,6 +210,7 @@ fn normalize_graph(input, opts) {
       edge_sep: float(opt(opts, "edge_sep", opt(input, "edge_sep", 10.0))),
       route_mode: normalize_route_mode(
         opt(opts, "route_mode", opt(input, "route_mode", null)), use_splines),
+      loop_side: string(opt(opts, "loop_side", opt(input, "loop_side", "right"))),
       ordering: normalize_ordering(opt(opts, "ordering", opt(input, "ordering", null))),
       new_rank: edge_bool(opt(opts, "new_rank", opt(input, "new_rank", false)), false),
       compound: edge_bool(opt(opts, "compound", opt(input, "compound", false)), false),
@@ -560,6 +562,22 @@ fn position_nodes(layers, opts, clusters) {
     result
   }
 }
+
+fn feedback_adjusted_nodes(nodes, edges, opts) => [
+  for (node in nodes,
+    let targets = [for (edge in edges,
+      let target = find_node(nodes, edge.to)
+      where edge.from == node.id and target != null and target.rank < node.rank)
+      target],
+    let peers = [for (peer in nodes where peer.rank == node.rank) peer],
+    let span = if (len(targets) > 0)
+      max([for (target in targets) node.rank - target.rank]) else 0,
+    let offset = min([opts.node_sep / 2.0, opts.edge_sep * 3.0]))
+    // singleton feedback ranks can move without changing their layer order.
+    if (len(peers) == 1 and span > 0) {*:node,
+      x: node.x + (if (span > 1) 0.0 - offset else offset)}
+    else node
+]
 
 fn oriented_node(node, direction) {
   let tx = if (direction == "LR") node.y
@@ -1098,28 +1116,77 @@ fn lane_waypoint(start, finish, offset, vertical_rank_axis) {
   point
 }
 
-fn self_loop_points(node, edge_sep, sibling_index, from_port = null, to_port = null,
+fn self_loop_points(node, edge_sep, sibling_index, top_loop,
+    from_port = null, to_port = null,
     from_compass = null, to_compass = null) {
   let half_w = node.width / 2.0;
   let half_h = node.height / 2.0;
-  let spread = max([10.0, half_h / 2.0]);
+  let spread = max([10.0, (if (top_loop) half_w else half_h) / 2.0]);
   // sibling rank keeps loop geometry independent of unrelated edge source order.
-  let loop_gap = max([20.0, edge_sep * float(sibling_index + 2)]);
-  // Named loop ports are authoritative; unported loops retain the historical anchors.
+  let loop_gap = max([20.0,
+    edge_sep * float(sibling_index + (if (top_loop) 1 else 2))]);
+  let outer_x = node.x + half_w + loop_gap;
+  let outer_y = node.y - half_h - loop_gap;
+  // on DOT LR graphs, loops use the open cross-axis side; named ports still control anchors.
   let start = if (from_port == null and from_compass == null)
-    {x: node.x + half_w, y: node.y - spread}
-    else clip_node(node, node.x + half_w + loop_gap, node.y - spread,
+    if (not top_loop) {x: node.x + half_w, y: node.y - spread}
+    else {x: node.x - spread, y: node.y - half_h}
+    else clip_node(node,
+      if (not top_loop) outer_x else node.x - spread,
+      if (not top_loop) node.y - spread else outer_y,
       from_port, from_compass);
   let finish = if (to_port == null and to_compass == null)
-    {x: node.x + half_w, y: node.y + spread}
-    else clip_node(node, node.x + half_w + loop_gap, node.y + spread,
+    if (not top_loop) {x: node.x + half_w, y: node.y + spread}
+    else {x: node.x + spread, y: node.y - half_h}
+    else clip_node(node,
+      if (not top_loop) outer_x else node.x + spread,
+      if (not top_loop) node.y + spread else outer_y,
       to_port, to_compass);
   simplify_route([
     start,
-    {x: node.x + half_w + loop_gap, y: start.y},
-    {x: node.x + half_w + loop_gap, y: finish.y},
+    if (not top_loop) {x: outer_x, y: start.y}
+      else {x: start.x, y: outer_y},
+    if (not top_loop) {x: outer_x, y: finish.y}
+      else {x: finish.x, y: outer_y},
     finish
   ])
+}
+
+fn route_cross_center(node, vertical_rank_axis) =>
+  if (vertical_rank_axis) node.x else node.y
+
+fn route_cross_half(node, vertical_rank_axis) =>
+  (if (vertical_rank_axis) node.width else node.height) / 2.0
+
+fn feedback_lane_offset(edge, from_node, to_node, nodes, edges,
+    edge_sep, vertical_rank_axis) {
+  let span = from_node.rank - to_node.rank;
+  let upper_side = span > 1;
+  let from_axis = route_cross_center(from_node, vertical_rank_axis);
+  let to_axis = route_cross_center(to_node, vertical_rank_axis);
+  let corridor_half = max([route_cross_half(from_node, vertical_rank_axis),
+    route_cross_half(to_node, vertical_rank_axis)]) + edge_sep;
+  // other nodes in an endpoint rank matter only when their boxes meet this edge's corridor.
+  let spanned = [for (node in nodes,
+    let axis = route_cross_center(node, vertical_rank_axis),
+    let half = route_cross_half(node, vertical_rank_axis)
+    where node.rank >= to_node.rank and node.rank <= from_node.rank and
+      axis + half >= min([from_axis, to_axis]) - corridor_half and
+      axis - half <= max([from_axis, to_axis]) + corridor_half) node];
+  let nearer = [for (candidate in edges,
+    let target = find_node(nodes, candidate.to)
+    where candidate.from == edge.from and candidate.to != edge.to and
+      target != null and target.rank > to_node.rank and
+      target.rank < from_node.rank) candidate];
+  let clearance = edge_sep * float(len(nearer) + 2);
+  let lane = if (upper_side)
+    min([for (node in spanned)
+      route_cross_center(node, vertical_rank_axis) -
+        route_cross_half(node, vertical_rank_axis)]) - clearance
+    else max([for (node in spanned)
+      route_cross_center(node, vertical_rank_axis) +
+        route_cross_half(node, vertical_rank_axis)]) + clearance;
+  lane - (from_axis + to_axis) / 2.0
 }
 
 fn parallel_edges(edge, edges) => [
@@ -1162,7 +1229,8 @@ fn lane_route_points(from_node, to_node, offset, vertical_rank_axis,
   }
 }
 
-fn routing_obstacles(nodes, clusters, from_node, to_node, margin) {
+fn routing_obstacles(nodes, clusters, from_node, to_node, margin,
+    edges, edge_sep, top_loop) {
   let endpoint_cluster_ids = [
     for (cluster in cluster_chain(from_node.group, clusters, [])) cluster.id,
     for (cluster in cluster_chain(to_node.group, clusters, [])) cluster.id
@@ -1171,6 +1239,20 @@ fn routing_obstacles(nodes, clusters, from_node, to_node, margin) {
     for (node in nodes where node.id != from_node.id and node.id != to_node.id)
       routing_rect(node.x - node.width / 2.0, node.y - node.height / 2.0,
         node.width, node.height, margin),
+    // other edges must route around visible loops, not only their owner boxes.
+    for (edge in edges,
+      let node = find_node(nodes, edge.from),
+      let sibling = parallel_info(edge, edges),
+      let points = if (node != null and edge.from == edge.to)
+        self_loop_points(node, edge_sep, sibling.index, top_loop,
+          edge.from_port, edge.to_port, edge.from_compass, edge.to_compass) else []
+      where node != null and edge.from == edge.to and
+        node.id != from_node.id and node.id != to_node.id and len(points) > 0)
+      routing_rect(min([for (point in points) point.x]),
+        min([for (point in points) point.y]),
+        max([for (point in points) point.x]) - min([for (point in points) point.x]),
+        max([for (point in points) point.y]) - min([for (point in points) point.y]),
+        margin),
     for (cluster in clusters where not contains(endpoint_cluster_ids, cluster.id))
       routing_rect(cluster.x, cluster.y, cluster.width, cluster.height, margin)
   ]
@@ -1185,6 +1267,7 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
     let explicit_tail = if (opts.compound) find_cluster(clusters, edge.tail_cluster) else null;
     let explicit_head = if (opts.compound) find_cluster(clusters, edge.head_cluster) else null;
     let vertical_rank_axis = not (opts.direction == "LR" or opts.direction == "RL");
+    let top_loop = not vertical_rank_axis and opts.loop_side == "top";
     let from_target = if (route_mode == "orthogonal" and explicit_tail == null and
         automatic_endpoint(edge.from_port, edge.from_compass))
       rank_axis_target(from_node, to_node, vertical_rank_axis)
@@ -1204,8 +1287,11 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
     let parallel = parallel_info(edge, edges);
     let lane_offset = (float(parallel.index) - float(parallel.count - 1) / 2.0) * opts.edge_sep;
     let backtracks_rank = from_node.rank >= to_node.rank;
-    let back_lane_offset = max([opts.edge_sep * 2.0,
-      max([from_node.height, to_node.height]) / 2.0 + opts.edge_sep]) + lane_offset;
+    // feedback lanes clear boxes in the traversed corridor and separate return fanout.
+    let back_lane_offset = if (backtracks_rank and edge.from != edge.to)
+      feedback_lane_offset(edge, from_node, to_node,
+        nodes, edges, opts.edge_sep, vertical_rank_axis) + lane_offset
+      else 0.0;
     let crossings = compound_crossings(from_node, to_node, clusters,
       if (explicit_tail != null) explicit_tail.id else null,
       if (explicit_head != null) explicit_head.id else null);
@@ -1220,17 +1306,24 @@ fn route_edge(edge, nodes, clusters, edges, opts) {
     let has_compound = explicit_tail != null or explicit_head != null or
       len(crossings.source) > 0 or len(crossings.target) > 0;
     let obstacles = routing_obstacles(nodes, clusters, from_node, to_node,
-      max([4.0, opts.edge_sep / 2.0]));
+      max([4.0, opts.edge_sep / 2.0]), edges, opts.edge_sep,
+      top_loop);
     let base_points = if (route_mode == "none") []
       else if (edge.from == edge.to)
       self_loop_points(from_node, opts.edge_sep, parallel.index,
+        top_loop,
         edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
       else if (route_mode == "line") [start, finish]
       // A feedback edge needs its own lane: a direct route would paint over the
       // forward edge that established the rank relation.
       else if (backtracks_rank)
-        lane_route_points(from_node, to_node, back_lane_offset, vertical_rank_axis,
-          edge.from_port, edge.to_port, edge.from_compass, edge.to_compass)
+        // a clear long return can connect directly; short returns need a lane
+        // to stay distinct from their forward partner.
+        if (from_node.rank - to_node.rank > 1 and
+            not route_hits_obstacle([start, finish], obstacles)) [start, finish]
+        else lane_route_points(from_node, to_node, back_lane_offset,
+          vertical_rank_axis, edge.from_port, edge.to_port,
+          edge.from_compass, edge.to_compass)
       else if (has_compound)
         if (route_mode == "orthogonal")
           orthogonal_waypoints(compound_points, vertical_rank_axis)
@@ -1322,7 +1415,11 @@ pub fn layout(input, opts = null) {
     graph.clusters);
   // Crossing reduction may reverse Graphviz's authored in/out edge sequence.
   let layers = enforce_ordering(crossed, ranked, graph.edges, graph.options.ordering);
-  let canonical_nodes = position_nodes(layers, graph.options, graph.clusters);
+  let positioned_nodes = position_nodes(layers, graph.options, graph.clusters);
+  let canonical_nodes = if (graph.options.loop_side == "top" and
+    horizontal_rank_direction(graph.options.direction))
+    feedback_adjusted_nodes(positioned_nodes, graph.edges, graph.options)
+    else positioned_nodes;
   let routed_nodes = orient_nodes(canonical_nodes, graph.options.direction);
   let routed_clusters = compute_clusters(graph.clusters, routed_nodes);
   let routed_edges = [for (edge in graph.edges,

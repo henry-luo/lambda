@@ -2324,6 +2324,20 @@ direct `line` segments, emits waypoint paths for `polyline` and `orthogonal`,
 and produces deterministic quadratic/cubic paths for `curved`. The retained
 `route_classes.ls` fixture covers aliases, diagnostics, routing, and SVG paint.
 
+For LR/RL graphs, unported self-loops use the upper cross-axis side. Singleton
+feedback ranks shift to separate short and long return paths; a long return
+uses a direct route when it clears the intermediate boxes. Other returns use
+lanes that clear the endpoint corridor and separate fanout, and routes avoid
+loop outlines. DOT's measured center labels raise the minimum rank gap when
+the declared gap would crowd the text. The `fsm.ls`
+fixture covers these route relationships and label spacing without requiring
+Graphviz control-point equality (Stage 3 §19.9).
+DOT's measured label height also sets route and node clearance. Labels use the
+arc-length midpoint and sampled geometry of the same spline emitted by the
+paint layer, so diagonal bounding boxes do not displace nearby loop labels.
+Circular nodes use equal-axis sizing and centered inline layout; terminal
+quadratic segments retain a defined tangent for SVG arrowheads.
+
 Graph and node `ordering=in|out` now lower into canonical IR and semantic HTML.
 After barycentric crossing reduction, the layered engine reapplies each
 authored incoming or outgoing edge sequence, so optimization cannot reverse a
