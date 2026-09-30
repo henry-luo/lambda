@@ -1692,7 +1692,7 @@ fn render_extended_arrow_label(node, context) {
 
 fn make_padded_svg_body_box(svg_name) {
     let h = svg_body_height(svg_name)
-    let el = raw_html(padded_svg_body_markup(svg_name))
+    let el = padded_svg_body_element(svg_name)
     {
         element: el,
         height: h / 2.0 + 0.166,
@@ -1712,9 +1712,13 @@ fn make_padded_svg_label_box(svg_name) {
     let unscaled_d = h / 2.0 - 0.166
     let scaled_h = unscaled_h * 0.7
     let scaled_d = unscaled_d * 0.7
-    let el = raw_html("<span style=\"height:" ++ util.fmt_ml_em((unscaled_h + unscaled_d) * 0.7) ++
-        ";display:inline-block;font-size: 70%\"><span style=\"position:relative\">" ++
-        padded_svg_body_markup(svg_name) ++ "</span></span>")
+    let style_text = "height:" ++ util.fmt_ml_em((unscaled_h + unscaled_d) * 0.7) ++
+        ";display:inline-block;font-size: 70%"
+    let markup = "<span style=\"" ++ style_text ++ "\"><span style=\"position:relative\">" ++
+        padded_svg_body_markup(svg_name) ++ "</span></span>"
+    let el = <span style: style_text, math_raw_markup: markup,
+        <span style: "position:relative", padded_svg_body_element(svg_name)>
+    >
     {
         element: el,
         height: scaled_h,
@@ -1734,6 +1738,15 @@ fn padded_svg_body_markup(svg_name) {
     "<span class=\"lm_nulldelimiter lm_close\" style=\"width:0.12em\"></span>"
 }
 
+fn padded_svg_body_element(svg_name) {
+    // The live tree carries SVG nodes while its metadata retains exact markup output.
+    <span math_raw_markup: padded_svg_body_markup(svg_name),
+        <span class: css.classes([css.NULLDELIMITER, css.OPEN]), style: "width:0.12em">
+        <span svg_body_element(svg_name)>
+        <span class: css.classes([css.NULLDELIMITER, css.CLOSE]), style: "width:0.12em">
+    >
+}
+
 fn null_delimiter_box(side_class) {
     box.ml_box(<span class: css.classes([css.NULLDELIMITER, side_class]), style: "width:0.12em">,
         0.0, 0.0, 0.12, "mopen")
@@ -1741,7 +1754,7 @@ fn null_delimiter_box(side_class) {
 
 fn make_svg_body_box(svg_name) {
     let h = svg_body_height(svg_name)
-    let el = raw_html(svg_body_markup(svg_name))
+    let el = svg_body_element(svg_name)
     box.ml_box_full(el, h / 2.0 + 0.166, h / 2.0 - 0.166,
         svg_body_min_width(svg_name), "ord", 0.0, 0.0, 0.0)
 }
@@ -1752,27 +1765,44 @@ fn svg_body_height(svg_name) {
 }
 
 fn svg_body_min_width(svg_name) {
-    if (svg_name == "longrightarrow" or svg_name == "longleftarrow") 1.469
-    else 0.888
+    svg_body_width_units(svg_name) / 1000.0
 }
+
+fn svg_body_width_units(svg_name) =>
+    if (svg_name == "longrightarrow" or svg_name == "longleftarrow") 1469 else 888
 
 fn svg_body_markup(svg_name) {
-    let align = if (svg_name == "longleftarrow") "xMinYMin" else "xMaxYMin"
-    let path = if (svg_name == "longleftarrow") svg_leftarrow_path() else svg_rightarrow_path()
     "<span style=\"display:inline-block;height:0.522em;min-width:" ++ svg_body_min_width(svg_name) ++
     "em;\"><span class=\"slice-1-of-1\" style=height:0.522em><svg width=400em height=0.522em viewBox=\"0 0 400000 522\" preserveAspectRatio=\"" ++
-    align ++ " slice\"><path fill=\"currentcolor\" d=\"" ++ path ++ "\"></path></svg></span></span>"
+    svg_body_align(svg_name) ++ " slice\"><path fill=\"currentcolor\" d=\"" ++ svg_body_path(svg_name) ++ "\"></path></svg></span></span>"
 }
 
-fn raw_html(s) {
-    replace(replace(s, "<", "\u{E000}"), ">", "\u{E001}")
+fn svg_body_element(svg_name) {
+    let svg_width = svg_body_width_units(svg_name)
+    // A native SVG uses the same path geometry at its actual width.
+    let viewbox = "0 0 " ++ string(svg_width) ++ " 522";
+    <svg xmlns: "http://www.w3.org/2000/svg", width: svg_body_min_width(svg_name) ++ "em",
+         height: "0.522em", viewBox: viewbox, preserveAspectRatio: "none",
+         style: "display:inline-block;vertical-align:middle", math_raw_markup: svg_body_markup(svg_name),
+        <path fill: "currentcolor", d: svg_body_live_path(svg_name)>
+    >
 }
 
-fn svg_rightarrow_path() =>
-    "M0 241v40h399891c-47.3 35.3-84 78-110 128\n-16.7 32-27.7 63.7-33 95 0 1.3-.2 2.7-.5 4-.3 1.3-.5 2.3-.5 3 0 7.3 6.7 11 20\n 11 8 0 13.2-.8 15.5-2.5 2.3-1.7 4.2-5.5 5.5-11.5 2-13.3 5.7-27 11-41 14.7-44.7\n 39-84.5 73-119.5s73.7-60.2 119-75.5c6-2 9-5.7 9-11s-3-9-9-11c-45.3-15.3-85\n-40.5-119-75.5s-58.3-74.8-73-119.5c-4.7-14-8.3-27.3-11-40-1.3-6.7-3.2-10.8-5.5\n-12.5-2.3-1.7-7.5-2.5-15.5-2.5-14 0-21 3.7-21 11 0 2 2 10.3 6 25 20.7 83.3 67\n 151.7 139 205zm0 0v40h399900v-40z"
+fn svg_body_align(svg_name) =>
+    if (svg_name == "longleftarrow") "xMinYMin" else "xMaxYMin"
 
-fn svg_leftarrow_path() =>
-    "M400000 241H110l3-3c68.7-52.7 113.7-120\n 135-202 4-14.7 6-23 6-25 0-7.3-7-11-21-11-8 0-13.2.8-15.5 2.5-2.3 1.7-4.2 5.8\n-5.5 12.5-1.3 4.7-2.7 10.3-4 17-12 48.7-34.8 92-68.5 130S65.3 228.3 18 247\nc-10 4-16 7.7-18 11 0 8.7 6 14.3 18 17 47.3 18.7 87.8 47 121.5 85S196 441.3 208\n 490c.7 2 1.3 5 2 9s1.2 6.7 1.5 8c.3 1.3 1 3.3 2 6s2.2 4.5 3.5 5.5c1.3 1 3.3\n 1.8 6 2.5s6 1 10 1c14 0 21-3.7 21-11 0-2-2-10.3-6-25-20-79.3-65-146.7-135-202\n l-3-3h399890zM100 241v40h399900v-40z"
+fn svg_body_path(svg_name) =>
+    if (svg_name == "longleftarrow") svg_leftarrow_path(400000) else svg_rightarrow_path(400000)
+
+fn svg_body_live_path(svg_name) =>
+    if (svg_name == "longleftarrow") svg_leftarrow_path(svg_body_width_units(svg_name))
+    else svg_rightarrow_path(svg_body_width_units(svg_name))
+
+fn svg_rightarrow_path(width) =>
+    "M0 241v40h" ++ string(width - 109) ++ "c-47.3 35.3-84 78-110 128\n-16.7 32-27.7 63.7-33 95 0 1.3-.2 2.7-.5 4-.3 1.3-.5 2.3-.5 3 0 7.3 6.7 11 20\n 11 8 0 13.2-.8 15.5-2.5 2.3-1.7 4.2-5.5 5.5-11.5 2-13.3 5.7-27 11-41 14.7-44.7\n 39-84.5 73-119.5s73.7-60.2 119-75.5c6-2 9-5.7 9-11s-3-9-9-11c-45.3-15.3-85\n-40.5-119-75.5s-58.3-74.8-73-119.5c-4.7-14-8.3-27.3-11-40-1.3-6.7-3.2-10.8-5.5\n-12.5-2.3-1.7-7.5-2.5-15.5-2.5-14 0-21 3.7-21 11 0 2 2 10.3 6 25 20.7 83.3 67\n 151.7 139 205zm0 0v40h" ++ string(width - 100) ++ "v-40z"
+
+fn svg_leftarrow_path(width) =>
+    "M" ++ string(width) ++ " 241H110l3-3c68.7-52.7 113.7-120\n 135-202 4-14.7 6-23 6-25 0-7.3-7-11-21-11-8 0-13.2.8-15.5 2.5-2.3 1.7-4.2 5.8\n-5.5 12.5-1.3 4.7-2.7 10.3-4 17-12 48.7-34.8 92-68.5 130S65.3 228.3 18 247\nc-10 4-16 7.7-18 11 0 8.7 6 14.3 18 17 47.3 18.7 87.8 47 121.5 85S196 441.3 208\n 490c.7 2 1.3 5 2 9s1.2 6.7 1.5 8c.3 1.3 1 3.3 2 6s2.2 4.5 3.5 5.5c1.3 1 3.3\n 1.8 6 2.5s6 1 10 1c14 0 21-3.7 21-11 0-2-2-10.3-6-25-20-79.3-65-146.7-135-202\n l-3-3h" ++ string(width - 110) ++ "zM100 241v40h" ++ string(width - 100) ++ "v-40z"
 
 fn is_svg_accent(accent_key) {
     accent_key == "widehat" or accent_key == "widetilde"

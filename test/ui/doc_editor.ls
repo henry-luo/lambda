@@ -604,6 +604,12 @@ on click(evt) {
   if (contains(evt.target_class, "property-root-more")) { emit("property_more", "") }
 }
 
+fn eml_html_root(body) {
+  // HTML5 returns #document; enter at html so the editor's element views run.
+  let roots = [for (child in content(body) where type(child) == element and name(child) == 'html') child]
+  if (len(roots) > 0) roots[0] else body
+}
+
 view <eml_preview> {
   let message = ~.message
   let headers = if (message != null and type(message["headers"]) == map) message["headers"] else null;
@@ -627,7 +633,7 @@ view <eml_preview> {
         }
         // HTML MIME bodies are parsed Mark elements; strings retain plain-text wrapping.
         if (type(body) == element) {
-          <div id:"eml-body", class:"eml-html-body", apply(body)>
+          <div id:"eml-body", class:"eml-html-body", apply(eml_html_root(body))>
         } else {
           <pre id:"eml-body", class:"eml-body",
             if (body != null) body else "">
@@ -1106,6 +1112,11 @@ on mouseup(evt) {
       .document-body h1, .latex-output h1 { margin: .2em 0 .65em; font-size: 2em; }
       .document-body h2, .latex-output h2 { margin: 1.45em 0 .55em; font-size: 1.55em; }
       .document-body h3, .latex-output h3 { margin: 1.3em 0 .45em; font-size: 1.25em; }
+      /* Email is read inside the editor pane, so use a tighter type scale than full documents. */
+      .eml-html-body .document-body { font-size: 14px; line-height: 1.55; }
+      .eml-html-body .document-body h1 { margin: .8em 0 .45em; font-size: 21px; }
+      .eml-html-body .document-body h2 { margin: 1.2em 0 .4em; font-size: 17px; }
+      .eml-html-body .document-body h3 { margin: 1em 0 .35em; font-size: 15px; }
       .document-body p, .latex-output p { margin: .75em 0; }
       .document-body ul, .document-body ol, .latex-output ul, .latex-output ol { padding-left: 1.5em; }
       .document-body blockquote, .latex-output blockquote { margin: 1em 0; padding: .15em 1em;

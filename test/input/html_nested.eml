@@ -1,20 +1,83 @@
-From: Updates <updates@example.com>
-To: Reader <reader@example.com>
-Subject: Quarterly update
+From: Mira Chen <dispatch@northstar.example>
+To: Observatory Volunteers <crew@northstar.example>
+Subject: Field Notes: a new map for darker skies
+Date: Tue, 15 Sep 2026 18:30:00 +0000
 MIME-Version: 1.0
-Content-Type: multipart/mixed; boundary="outer"
+Content-Type: multipart/mixed; boundary="field-notes-outer"
 
---outer
-Content-Type: multipart/alternative; boundary="inner"
+--field-notes-outer
+Content-Type: multipart/alternative; boundary="field-notes-inner"
 
---inner
+--field-notes-inner
 Content-Type: text/plain; charset=UTF-8
 
-Hello team. Read the quarterly update.
---inner
+Field Notes / Issue 07
+A new map for darker skies
+
+Our September observing guide is ready. Join us for a meteor watch on Friday,
+then explore the three new deep-sky routes with the Northstar crew.
+
+Clear skies,
+Mira
+--field-notes-inner
 Content-Type: text/html; charset=UTF-8
 Content-Transfer-Encoding: quoted-printable
 
-<!doctype html><html><head><title>Mail title</title></head><body><h2>Quar=74erly update</h2><p>Hello <strong>team</strong> &amp; friends.</p><ul><li>First item</li></ul></body></html>
---inner--
---outer--
+<!doctype html>
+<html>
+<head><title>Field Notes | Issue 07</title></head>
+<body>
+<div class=3D"mail-shell" style=3D"background:#f1f5fa;padding:24px;border-r=
+adius:10px">
+  <div class=3D"mail-hero" style=3D"background:#18304a;color:#ffffff;paddin=
+g:26px 30px;border-radius:8px">
+    <div style=3D"color:#8ee5d4;font-size:11px;font-weight:700;letter-spaci=
+ng:2px">NORTHSTAR OBSERVATORY / FIELD NOTES 07</div>
+    <div style=3D"color:#ffffff;font-size:20px;font-weight:700;line-height:=
+1.2;margin-top:12px">A new map for darker skies</div>
+    <div style=3D"color:#c8d8e8;font-size:13px;margin-top:12px">September 2=
+026 - a dispatch from the night shift</div>
+  </div>
+  <div class=3D"mail-content" style=3D"background:#ffffff;padding:24px 30px=
+">
+    <p>Hi night-sky crew,</p>
+    <p>The September atlas is live. We have charted three easy routes throu=
+gh the autumn sky, from bright planets to the faint glow of the Andromeda g=
+alaxy.</p>
+    <h2>Watch the sky</h2>
+    <p>Bring a warm layer and your curiosity. The best viewing starts after=
+ 9:30 pm, when the park lights dim and the eastern horizon clears.</p>
+    <table>
+      <thead><tr><th>Friday, 18 Sep</th><th>What to look for</th></tr></the=
+ad>
+      <tbody>
+        <tr><td>9:30 pm</td><td>Meteor watch from the north lawn</td></tr>
+        <tr><td>10:15 pm</td><td>Guided tour of the new atlas routes</td></=
+tr>
+        <tr><td>11:00 pm</td><td>Hot cocoa and telescope Q&amp;A</td></tr>
+      </tbody>
+    </table>
+    <h2>Three small discoveries</h2>
+    <ul>
+      <li><strong>Find the Summer Triangle</strong> before it slips west.</=
+li>
+      <li>Trace a path from Cassiopeia to <em>Andromeda</em>.</li>
+      <li>Look for Jupiter's moons through the east telescope.</li>
+    </ul>
+    <blockquote>"The sky is not the limit. It is the invitation."</blockquo=
+te>
+    <div class=3D"mail-callout" style=3D"background:#eaf5f2;padding:16px 20=
+px;border-left:4px solid #2a9d8f">
+      <strong>New to stargazing?</strong> Start with the <a href=3D"https:/=
+/northstar.example/atlas">September observing guide</a> and follow the firs=
+t route at your own pace.
+    </div>
+    <p>Clear skies,<br><strong>Mira</strong><br>Northstar Observatory</p>
+  </div>
+  <div style=3D"color:#62758b;font-size:11px;padding:14px 30px">You receive=
+d this note because you joined the Northstar observing crew.</div>
+</div>
+</body>
+</html>
+--field-notes-inner--
+--field-notes-outer--

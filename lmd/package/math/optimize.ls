@@ -6,6 +6,7 @@ fn can_merge(a, b) {
     else if (len(content(a)) != 1 or len(content(b)) != 1) false
     else if (not (a[0] is string) or not (b[0] is string)) false
     else a.math_data_attrs == null and b.math_data_attrs == null and
+        a.math_raw_markup == null and b.math_raw_markup == null and
         a.class == b.class and a.style == null and b.style == null
 }
 
@@ -51,7 +52,7 @@ fn build_merged(el) {
          let items = [for (j in 0 to (len(merged) - 1)) merged[j]],
          // Preserve renderer metadata while rebuilding coalesced spans.
          <span class: el.class, style: el.style, id: el.id, math_data_attrs: el.math_data_attrs,
-             math_raw_relation: el.math_raw_relation,
+             math_raw_relation: el.math_raw_relation, math_raw_markup: el.math_raw_markup,
              for (c in items) c
          >)
 }
