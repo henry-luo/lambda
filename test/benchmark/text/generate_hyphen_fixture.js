@@ -9,9 +9,15 @@ const jsonPath = path.join(textDir, "hyphen_patterns.json");
 const headerPath = path.join(textDir, "c2mir", "hyphen_patterns_data.h");
 const lambdaPath = path.join(textDir, "../hyphen_tables.ls");
 const flatPath = path.join(textDir, "hyphen_tables.json");
+const casesPath = path.join(textDir, "hyphen_cases.json");
 const source = fs.readFileSync(sourcePath, "utf8");
 const fixtureStart = source.indexOf("var hyphen_cases = [");
 if (fixtureStart < 0) throw new Error("missing hyphen benchmark fixture marker");
+const casesEnd = source.indexOf("\n];", fixtureStart);
+if (casesEnd < 0) throw new Error("missing hyphen benchmark fixture end");
+const casesLiteral = source.slice(source.indexOf("[", fixtureStart), casesEnd + 2);
+const cases = JSON.parse(casesLiteral);
+fs.writeFileSync(casesPath, JSON.stringify(cases) + "\n");
 
 // Indirect eval runs the pattern prologue at global scope, so its `var`
 // declarations land on globalThis -- the fixture body after the marker is
@@ -156,7 +162,7 @@ const lambda = [
   "}",
   "",
   "pub pn load_hyphen_tables() HyphenTables {",
-  '    return input("test/benchmark/text/hyphen_tables.json", {type: "json"})',
+  '    return input("test/benchmark/text/hyphen_tables.json", {type: "json"})^',
   "}",
   "",
 ].join("\n");

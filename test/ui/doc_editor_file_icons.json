@@ -1,0 +1,25 @@
+{
+  "name": "Doc editor file tree distinguishes Lambda formats and plain text",
+  "html": "test/ui/doc_editor.ls",
+  "viewport": {"width": 1280, "height": 5000},
+  "events": [
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__AGENTS_md .file-icon"}, "equals": "\uE060"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__Makefile .file-icon"}, "equals": "▤"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_input_test_yaml .file-icon"}, "equals": "\uE0A7"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_input_test_toml .file-icon"}, "equals": "\uE019"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_input_test_csv .file-icon"}, "equals": "\uE01E"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_csv .file-icon"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "test.csv"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_input_test_xml .file-icon"}, "equals": "\uE0A5"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_input_advanced_test_pdf .file-icon"}, "equals": "\uE06D"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_input_simple_diagram_d2 .file-icon"}, "equals": "\uE071"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_input_sample1_jpg .file-icon"}, "equals": "\uE04C"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_ui_doc_editor_ls .file-icon"}, "equals": "λ"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_ui_doc_editor_html .file-icon"}, "equals": "\uE048"},
+    {"type": "assert_text", "target": {"selector": ".tree-hit-__test_ui_doc_editor_splash_json .file-icon"}, "equals": "\uE055"}
+  ]
+}

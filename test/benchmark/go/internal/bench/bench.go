@@ -2599,24 +2599,83 @@ func jetstreamRSA() bool {
 	return true
 }
 
+type jetstreamHashEntry struct {
+	key, value int
+	next       *jetstreamHashEntry
+}
+
+type jetstreamHashTable struct {
+	buckets   []*jetstreamHashEntry
+	size      int
+	threshold int
+}
+
+func newJetstreamHashTable() *jetstreamHashTable {
+	// hash-map.js allocates new Array(this.capacity), where capacity is unset.
+	// The resulting single bucket grows when the first entry crosses threshold 0.
+	return &jetstreamHashTable{buckets: make([]*jetstreamHashEntry, 1)}
+}
+
+func (table *jetstreamHashTable) put(key, value int) {
+	bucket := key & (len(table.buckets) - 1)
+	for entry := table.buckets[bucket]; entry != nil; entry = entry.next {
+		if entry.key == key {
+			entry.value = value
+			return
+		}
+	}
+	table.buckets[bucket] = &jetstreamHashEntry{key: key, value: value, next: table.buckets[bucket]}
+	table.size++
+	if table.size > table.threshold {
+		grown := make([]*jetstreamHashEntry, len(table.buckets)*2)
+		for _, entry := range table.buckets {
+			for entry != nil {
+				next := entry.next
+				index := entry.key & (len(grown) - 1)
+				entry.next = grown[index]
+				grown[index] = entry
+				entry = next
+			}
+		}
+		table.buckets = grown
+		table.threshold = len(grown) * 3 / 4
+	}
+}
+
+func (table *jetstreamHashTable) get(key int) (int, bool) {
+	bucket := key & (len(table.buckets) - 1)
+	for entry := table.buckets[bucket]; entry != nil; entry = entry.next {
+		if entry.key == key {
+			return entry.value, true
+		}
+	}
+	return 0, false
+}
+
 func jetstreamHashMap() bool {
 	const count = 90000
-	values := make(map[int]int, count)
+	table := newJetstreamHashTable()
 	for key := 0; key < count; key++ {
-		values[key] = 42
+		table.put(key, 42)
 	}
 	total := 0
 	for repeat := 0; repeat < 5; repeat++ {
 		for key := 0; key < count; key++ {
-			total += values[key]
+			value, found := table.get(key)
+			if !found {
+				return false
+			}
+			total += value
 		}
 	}
 	keyTotal, valueTotal := 0, 0
-	for key, value := range values {
-		keyTotal += key
-		valueTotal += value
+	for _, head := range table.buckets {
+		for entry := head; entry != nil; entry = entry.next {
+			keyTotal += entry.key
+			valueTotal += entry.value
+		}
 	}
-	return total == 42*count*5 && keyTotal == count*(count-1)/2 && valueTotal == 42*count
+	return table.size == count && total == 42*count*5 && keyTotal == count*(count-1)/2 && valueTotal == 42*count
 }
 
 func jetstreamNBody() bool {
@@ -3000,11 +3059,13 @@ func navierAddPoints(density, horizontal, vertical []float64) {
 	}
 }
 
-func jetstreamNavierStokes() int {
+func jetstreamNavierStokes() (int, float64) {
 	density, priorDensity := make([]float64, navierSize), make([]float64, navierSize)
 	horizontal, priorHorizontal := make([]float64, navierSize), make([]float64, navierSize)
 	vertical, priorVertical := make([]float64, navierSize), make([]float64, navierSize)
 	framesTillAdd, framesBetween := 0, 5
+	started := time.Now()
+	firstFrameMs := 0.0
 	for frame := 0; frame < 15; frame++ {
 		for index := range density {
 			priorDensity[index], priorHorizontal[index], priorVertical[index] = 0, 0, 0
@@ -3017,12 +3078,16 @@ func jetstreamNavierStokes() int {
 		}
 		navierVelocityStep(horizontal, vertical, priorHorizontal, priorVertical, .1, 20)
 		navierDensityStep(density, priorDensity, horizontal, vertical, .1, 20)
+		if frame == 0 {
+			// Node times one update; finish the checksum frames after that boundary.
+			firstFrameMs = float64(time.Since(started).Nanoseconds()) / 1e6
+		}
 	}
 	result := 0
 	for index := 7000; index < 7100; index++ {
 		result += int(density[index] * 10)
 	}
-	return result
+	return result, firstFrameMs
 }
 
 type matrix4 [16]float64
@@ -3381,9 +3446,10 @@ func runJetStream(name string) bool {
 		fmt.Printf("splay: %s\n", pass(ok))
 		return ok
 	case "navier_stokes":
-		result := jetstreamNavierStokes()
+		result, firstFrameMs := jetstreamNavierStokes()
 		ok = result == 77
 		fmt.Printf("navier-stokes: %s (checksum=%d)\n", pass(ok), result)
+		fmt.Printf("__TIMING__:%.6f\n", firstFrameMs)
 		return ok
 	case "cube3d":
 		ok = jetstreamCube3D()
@@ -3417,7 +3483,9 @@ func runJetStream(name string) bool {
 func Run(suite, name string) bool {
 	started := time.Now()
 	ok := dispatch(suite, name)
-	fmt.Printf("__TIMING__:%.6f\n", float64(time.Since(started).Nanoseconds())/1e6)
+	if (suite != "jetstream" || name != "navier_stokes") && suite != "text" {
+		fmt.Printf("__TIMING__:%.6f\n", float64(time.Since(started).Nanoseconds())/1e6)
+	}
 	return ok
 }
 
@@ -3435,6 +3503,8 @@ func dispatch(suite, name string) bool {
 		return runBENG(name)
 	case "jetstream":
 		return runJetStream(name)
+	case "text":
+		return runText(name)
 	case "cow_document_edit":
 		return runCOWDocumentEdit()
 	default:

@@ -153,6 +153,67 @@ fn is_renderable_document(extension) =>
     is_pdf_document(extension) or is_pgf_document(extension) or is_image_document(extension) or
     graph_flavor(extension) != null
 
+// seti private-use glyphs; keep codepoints readable alongside the bundled font.
+let SETI_CLOCK = chr(0xE012)
+let SETI_CONFIG = chr(0xE019)
+let SETI_CSS = chr(0xE01D)
+let SETI_CSV = chr(0xE01E)
+let SETI_DB = chr(0xE022)
+let SETI_HTML = chr(0xE048)
+let SETI_IMAGE = chr(0xE04C)
+let SETI_INFO = chr(0xE04D)
+let SETI_JSON = chr(0xE055)
+let SETI_MARKDOWN = chr(0xE060)
+let SETI_PDF = chr(0xE06D)
+let SETI_PIPELINE = chr(0xE071)
+let SETI_REACT = chr(0xE07D)
+let SETI_SVG = chr(0xE091)
+let SETI_TEX = chr(0xE094)
+let SETI_WORD = chr(0xE0A3)
+let SETI_XML = chr(0xE0A5)
+let SETI_YAML = chr(0xE0A7)
+
+fn file_icon(extension) {
+  let ext = if (extension == null) "" else lower(extension)
+  // seti glyphs identify parsed formats; source-only files retain the plain-text icon.
+  if (ext == "ls") { "λ" }
+  else if (ext == "json") { SETI_JSON }
+  else if (contains(["yaml", "yml"], ext)) { SETI_YAML }
+  else if (contains(["toml", "ini", "properties", "props"], ext)) { SETI_CONFIG }
+  else if (ext == "csv") { SETI_CSV }
+  else if (ext == "xml") { SETI_XML }
+  else if (contains(["db", "sqlite", "sqlite3"], ext)) { SETI_DB }
+  else if (contains(["md", "markdown", "mdown", "mkdn", "mdx", "wiki", "mediawiki",
+                     "rst", "rest", "org", "adoc", "asciidoc", "asc", "textile", "txtl",
+                     "m", "mk", "mark", "typ", "typst"], ext) or
+           ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { SETI_MARKDOWN }
+  else if (contains(["htm", "html"], ext)) { SETI_HTML }
+  else if (ext == "rtf") { SETI_WORD }
+  else if (is_latex_document(ext)) { SETI_TEX }
+  else if (is_pdf_document(ext)) { SETI_PDF }
+  else if (is_pgf_document(ext)) { SETI_SVG }
+  else if (contains(["mmd", "dot", "gv", "d2", "dsl", "structurizr"], ext)) { SETI_PIPELINE }
+  else if (ext == "svg") { SETI_SVG }
+  else if (contains(["png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "webp", "ico"], ext)) { SETI_IMAGE }
+  else if (ext == "css") { SETI_CSS }
+  else if (ext == "jsx") { SETI_REACT }
+  else if (contains(["vcf", "vcard", "eml"], ext)) { SETI_INFO }
+  else if (contains(["ics", "ical"], ext)) { SETI_CLOCK }
+  else { "▤" }
+}
+
+fn file_icon_color(icon) {
+  if (icon == SETI_JSON) "#cbcb41"
+  else if (icon == SETI_YAML or icon == SETI_IMAGE or icon == SETI_SVG) "#a074c4"
+  else if (icon == SETI_CSV) "#8dc149"
+  else if (icon == SETI_PDF) "#cc3e44"
+  else if (icon == SETI_XML or icon == SETI_PIPELINE) "#e37933"
+  else if (icon == SETI_DB) "#f55385"
+  else if (icon == SETI_CONFIG) "#6d8086"
+  else if (icon == "λ") "#b7a0ff"
+  else "#519aba"
+}
+
 fn selected_source(file) {
   if (file == null) { "" }
   else {
@@ -281,6 +342,12 @@ view <td> { <td *[rendered_children(~)]> }
 
 view <tree_entry> state children: null {
   let is_open = ~.initial_open
+  let icon_text = if (~.is_dir) "" else file_icon(~.extension)
+  let icon_class = if (~.is_dir) "tree-icon folder-icon"
+    else if (icon_text == "▤") "tree-icon file-icon default-icon"
+    else if (icon_text == "λ") "tree-icon file-icon lambda-icon"
+    else "tree-icon file-icon seti-icon"
+  let icon_style = if (~.is_dir or icon_text == "▤") "" else "color:" ++ file_icon_color(icon_text)
   let entry_path = child_path(~.parent_path, ~.name)
   let indent = (~.depth * 16) ++ "px"
   let hit_class = tree_hit_class(entry_path)
@@ -302,8 +369,8 @@ view <tree_entry> state children: null {
       } else {
         <span class:"tree-spacer", "">
       }
-      <span class:(if (~.is_dir) "tree-icon folder-icon" else "tree-icon file-icon"),
-        if (~.is_dir) "▣" else "▤">
+      <span class:icon_class, style:icon_style, 'aria-hidden':"true",
+        if (~.is_dir) "▣" else icon_text>
       <span class:"tree-label", ~.name>
     >
     if (~.is_dir and is_open) {
@@ -565,7 +632,11 @@ on preview_tab(tab) {
       /* Keep the indentation and icon fixed when a file name overflows. */
       .tree-toggle, .root-toggle, .tree-spacer, .tree-icon { flex-shrink: 0; }
       .folder-icon { color: #e5bb62; }
-      .file-icon { color: #9bbdfc; }
+      @font-face { font-family: 'Seti Icons'; src: url('icons/seti.woff') format('woff'); }
+      .file-icon { height: 20px; line-height: 20px; color: #9bbdfc; }
+      .default-icon { font-size: 13px; }
+      .lambda-icon { font-size: 19px; }
+      .seti-icon { font-family: 'Seti Icons'; font-size: 19px; font-weight: normal; }
       /* Hit-tested text spans need their own cursor value in the file tree. */
       .tree-label, .tree-icon, .tree-spacer { cursor: pointer; }
       .tree-label { white-space: nowrap; font-size: 13px; }

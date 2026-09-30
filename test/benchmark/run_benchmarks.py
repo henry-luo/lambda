@@ -185,16 +185,16 @@ LARCENY = [
     ("ray",        "numeric",    "test/benchmark/larceny/ray.ls",       "test/benchmark/larceny/ray.js",        "test/benchmark/larceny/python/ray.py"),
 ]
 
-# Text-library workloads are opt-in through `-s text`. Each has a Lambda port
-# (plus a typed variant) and a native C2MIR reference alongside the JS fixture.
+# Text-library workloads are included by default and selectable with `-s text`.
+# Each has Lambda, C2MIR, Go, Python, and Node implementations.
 TEXT = [
-    ("fast_diff", "text-diff", "test/benchmark/text/fast_diff.ls", "test/benchmark/text/fast_diff.js", None),
-    ("microdiff", "data-diff", "test/benchmark/text/microdiff.ls", "test/benchmark/text/microdiff.js", None),
-    ("hyphen", "hyphenation", "test/benchmark/text/hyphen.ls", "test/benchmark/text/hyphen.js", None),
-    ("prettier_ast", "formatting", "test/benchmark/text/prettier_ast.ls", "test/benchmark/text/prettier_ast.js", None),
-    ("text_search", "search", "test/benchmark/text/text_search.ls", "test/benchmark/text/text_search.js", None),
-    ("three_way_merge", "merge", "test/benchmark/text/three_way_merge.ls", "test/benchmark/text/three_way_merge.js", None),
-    ("log_pipeline", "log-processing", "test/benchmark/text/log_pipeline.ls", "test/benchmark/text/log_pipeline.js", None),
+    ("fast_diff", "text-diff", "test/benchmark/text/fast_diff.ls", "test/benchmark/text/fast_diff.js", "test/benchmark/text/python/fast_diff.py"),
+    ("microdiff", "data-diff", "test/benchmark/text/microdiff.ls", "test/benchmark/text/microdiff.js", "test/benchmark/text/python/microdiff.py"),
+    ("hyphen", "hyphenation", "test/benchmark/text/hyphen.ls", "test/benchmark/text/hyphen.js", "test/benchmark/text/python/hyphen.py"),
+    ("prettier_ast", "formatting", "test/benchmark/text/prettier_ast.ls", "test/benchmark/text/prettier_ast.js", "test/benchmark/text/python/prettier_ast.py"),
+    ("text_search", "search", "test/benchmark/text/text_search.ls", "test/benchmark/text/text_search.js", "test/benchmark/text/python/text_search.py"),
+    ("three_way_merge", "merge", "test/benchmark/text/three_way_merge.ls", "test/benchmark/text/three_way_merge.js", "test/benchmark/text/python/three_way_merge.py"),
+    ("log_pipeline", "log-processing", "test/benchmark/text/log_pipeline.ls", "test/benchmark/text/log_pipeline.js", "test/benchmark/text/python/log_pipeline.py"),
 ]
 
 JETSTREAM_LS = [
@@ -222,9 +222,15 @@ JETSTREAM_NODE = {
 }
 
 JETSTREAM_PY = {
+    "nbody": "test/benchmark/jetstream/nbody.py",
+    "cube3d": "test/benchmark/jetstream/cube3d.py",
+    "navier_stokes": "test/benchmark/jetstream/navier_stokes.py",
+    "richards": "test/benchmark/jetstream/richards.py",
+    "splay": "test/benchmark/jetstream/splay.py",
     "deltablue": "test/benchmark/jetstream/deltablue.py",
-    "richards":  "test/benchmark/jetstream/richards.py",
-    "nbody":     "test/benchmark/jetstream/nbody.py",
+    "hashmap": "test/benchmark/jetstream/hashmap.py",
+    "crypto_sha1": "test/benchmark/jetstream/crypto_sha1.py",
+    "raytrace3d": "test/benchmark/jetstream/raytrace3d.py",
 }
 
 JETSTREAM_LJS = {
@@ -285,14 +291,6 @@ function require(name) {
     throw new Error('QuickJS benchmark wrapper does not provide module: ' + name);
 }
 """
-
-# AWFY Python harness config: int = inner_iterations, tuple = (num_iterations, inner_iterations)
-AWFY_PY_CONFIG = {
-    "sieve": 3000, "permute": 1500, "queens": 1500, "towers": 600,
-    "bounce": 1500, "list": 1500, "storage": 1000,
-    "mandelbrot": 500, "nbody": 36000, "richards": 50,
-    "json": 1, "deltablue": (20, 100), "havlak": 1, "cd": 1,
-}
 
 # AWFY Python class names (for benchmarks where capitalize() doesn't produce the right name)
 AWFY_PY_CLASSNAME = {
@@ -980,13 +978,26 @@ def time_run_benchmark(cmd, num_runs, timeout_s):
             detail)
 
 
+def awfy_node_iterations(bench_name):
+    """Read the inner and outer counts from the checked-in Node wrapper."""
+    entry = next((row for row in AWFY if row[0] == bench_name), None)
+    if entry is None:
+        raise ValueError(f"Unknown AWFY benchmark: {bench_name}")
+    with open(entry[3]) as source_file:
+        source = source_file.read()
+    match = re.search(
+        r"\brunAWFY\(\s*['\"][^'\"]+['\"]\s*,\s*require\(\s*['\"][^'\"]+['\"]\s*\)"
+        r"\s*(?:,\s*(\d+))?\s*(?:,\s*(\d+))?\s*\)", source)
+    if match is None:
+        raise ValueError(f"Cannot read AWFY workload from {entry[3]}")
+    inner = int(match.group(1)) if match.group(1) else 1
+    outer = int(match.group(2)) if match.group(2) else 1
+    return outer, inner
+
+
 def time_run_awfy_python(bench_name, num_runs, timeout_s):
     """Run AWFY Python benchmark via harness. Returns (wall_ms, exec_ms, success)."""
-    cfg = AWFY_PY_CONFIG.get(bench_name, 1)
-    if isinstance(cfg, tuple):
-        num_iter, inner = cfg
-    else:
-        num_iter, inner = 1, cfg
+    num_iter, inner = awfy_node_iterations(bench_name)
     py_dir = "test/benchmark/awfy/python"
     class_name = AWFY_PY_CLASSNAME.get(bench_name, bench_name.capitalize())
     cmd = f"cd {py_dir} && {PYTHON_EXE} harness.py {class_name} {num_iter} {inner}"
@@ -1484,12 +1495,8 @@ def mem_measure_n(cmd, num_runs, timeout_s):
 
 
 def mem_make_awfy_python_cmd(bench_name):
-    """Build the command for AWFY Python harness (memory mode uses 1 iter for large benchmarks)."""
-    cfg = AWFY_PY_CONFIG.get(bench_name, 1)
-    if isinstance(cfg, tuple):
-        num_iter, inner = cfg
-    else:
-        num_iter, inner = 1, cfg
+    """Build the AWFY Python command with the same workload as Node."""
+    num_iter, inner = awfy_node_iterations(bench_name)
     py_dir = "test/benchmark/awfy/python"
     class_name = AWFY_PY_CLASSNAME.get(bench_name, bench_name.capitalize())
     return f"cd {py_dir} && {PYTHON_EXE} harness.py {class_name} {num_iter} {inner}"
