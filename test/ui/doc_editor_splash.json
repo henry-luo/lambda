@@ -17,7 +17,7 @@
      "property": "opacity", "equals": "0.8", "animated": true, "tolerance": 0.2},
     {"type": "wait", "ms": 500},
     {"type": "assert_count", "target": {"selector": "#splash"}, "count": 1},
-    {"type": "wait", "ms": 1500},
+    {"type": "wait", "ms": 600},
     {"type": "assert_count", "target": {"selector": "#splash"}, "count": 1},
     {"type": "assert_count", "target": {"selector": "#splash"}, "count": 0, "assert_timeout": 45000, "assert_interval": 1000},
     {"type": "assert_count", "target": {"selector": ".doc-editor"}, "count": 1},

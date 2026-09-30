@@ -185,11 +185,13 @@ struct DomDocumentServices {
     void* node_registry;       // external generations, pins, and detached candidates
     void* style_epoch_manager; // versioned canonical specified-style pools
     void* canvas_registry;     // document-owned HTMLCanvasElement backing surfaces
+    void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
         keyframe_registry(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
-        style_epoch_manager(nullptr), canvas_registry(nullptr) {}
+        style_epoch_manager(nullptr), canvas_registry(nullptr),
+        svg_layer_registry(nullptr) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
@@ -694,6 +696,9 @@ struct DomElement : DomNode {
 
     // HTML/CSS style related
     NameId tag_id;               // Generated markup identity; custom tags use NAME_ID_NONE.
+    // Bumped by dom_mutation_notify on every mutation at or under an <svg> root, so the
+    // painter can tell an unchanged inline SVG (reusable raster layer) from a changed one.
+    uint32_t svg_layer_generation;
     const char* id;              // Element ID attribute (cached)
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes

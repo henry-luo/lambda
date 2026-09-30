@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Document Editor</title>
+  <title>Document Viewer</title>
   <style>
     * { box-sizing: border-box; }
     html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
@@ -11,16 +11,38 @@
     /* Keep a laid-out editor document loading behind the splash. */
     #editor-frame { position: absolute; inset: 0; width: 100%; height: 100%;
                     border: 0; visibility: hidden; pointer-events: none; }
-    #splash { position: absolute; inset: 0; overflow: hidden;
-              background: linear-gradient(135deg, #051325 0%, #0a2846 52%, #081d37 100%); }
-    #ribbon-art, #flow-art { position: absolute; inset: 0; width: 100%; height: 100%;
-                             pointer-events: none; }
+    /* The page gradient lives in the ribbon layer (#page-bg) so the viewer can serve it
+       from the cached raster; the CSS colour only backs the very first paint. */
+    #splash { position: absolute; inset: 0; overflow: hidden; background: #081d37; }
+    /* Each layer is its own <svg>: the viewer rasterises an unchanged inline SVG once and
+       blits it afterwards, so static art and per-frame art never share an element. Motion
+       on a static layer is a CSS translate, which folds into the blit offset. */
+    .layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    /* Two strand groups drift against each other: the bright family in front, the dim one
+       behind. A drifting layer is 5% larger than the page on every side (its viewBox grows
+       to match, so the art keeps its scale), otherwise the slide would expose its clipped edge. */
+    .strands { left: -5%; top: -5%; width: 110%; height: 110%;
+               animation-timing-function: ease-in-out; animation-iteration-count: infinite;
+               animation-direction: alternate; }
+    /* Every motion on the page divides one 12 s loop (strands 12 s, flow 2.4 s, route sway
+       3/4/6 s, loader 1.2 s), so a recording of any 12 s window loops without a jump.
+       The back group runs a quarter cycle behind so the two never move in step. */
+    #strands-front { animation-name: weave-front; animation-duration: 6s; }
+    #strands-back { animation-name: weave-back; animation-duration: 6s; animation-delay: -3s; }
+    @keyframes weave-front { from { transform: translate(6px, -10px); } to { transform: translate(-12px, 10px); } }
+    @keyframes weave-back { from { transform: translate(-6px, 8px); } to { transform: translate(10px, -8px); } }
     @font-face { font-family: 'Seti Icons'; src: url('icons/seti.woff') format('woff'); }
-    .brand { position: absolute; top: 9%; left: 0; width: 100%;
-             color: #edf4ff; font-size: 54px; font-weight: 500;
-             letter-spacing: .14em; text-align: center; }
-    .brand-mark { color: #8bb8ff; font-size: 70px; font-weight: 300;
-                  vertical-align: baseline; position: relative; top: 5px; }
+    .brand { position: absolute; top: 10%; left: 0; width: 100%; padding-left: .3em;
+             color: #f3f7ff; font-size: 40px; font-weight: 400;
+             letter-spacing: .3em; text-align: center; }
+    .brand-mark { color: #9fc4ff; font-size: 46px; font-weight: 400;
+                  vertical-align: baseline; position: relative; top: 3px; }
+    /* the brand and tagline rise in on a stagger */
+    .brand, .message { animation-name: rise; animation-duration: .9s;
+                       animation-timing-function: ease-out; animation-fill-mode: both; }
+    .message { animation-delay: .25s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); }
+                      to { opacity: 1; transform: translateY(0); } }
     .message { position: absolute; top: 77%; left: 0; width: 100%;
                padding: 0 20px; text-align: center; }
     h1 { margin: 0; color: #dce8fb; font-size: 29px;
@@ -46,26 +68,13 @@
                     transition-property: opacity; transition-duration: .38s;
                     transition-timing-function: ease-out; }
     .leaving #splash { opacity: 0; }
-    .calm #ribbon-art { animation-name: drift; animation-duration: 16s;
-                        animation-timing-function: ease-in-out;
-                        animation-iteration-count: infinite; animation-direction: alternate; }
-    @keyframes drift { from { transform: translateX(0); } to { transform: translateX(-16px); } }
-    .calm .brand { top: 10%; padding-left: .3em; font-size: 40px; font-weight: 400;
-                   letter-spacing: .3em; color: #f3f7ff; }
-    .calm .brand-mark { font-size: 46px; font-weight: 400; color: #9fc4ff; top: 3px; }
     .calm h1 { font-size: 24px; font-weight: 300; letter-spacing: .01em; color: #c3d6ef; }
     .calm h1 span { color: #c3d6ef; font-weight: 300; }
     .calm .loader { margin-top: 30px; gap: 8px; }
     .calm .loader span { width: 6px; height: 6px; background: #7fa9e0; }
-    .calm .brand, .calm .message { animation-name: rise; animation-duration: .9s;
-                                   animation-timing-function: ease-out;
-                                   animation-fill-mode: both; }
-    .calm .message { animation-delay: .25s; }
-    @keyframes rise { from { opacity: 0; transform: translateY(10px); }
-                      to { opacity: 1; transform: translateY(0); } }
     @media (max-width: 620px) {
-      .brand { top: 13%; font-size: 34px; }
-      .brand-mark { font-size: 46px; }
+      .brand { top: 13%; font-size: 30px; }
+      .brand-mark { font-size: 36px; }
       .message { top: 72%; }
       h1 { font-size: 23px; }
     }
@@ -75,12 +84,23 @@
   <iframe id="editor-frame" title="Editor preload"
           aria-hidden="true" tabindex="-1"></iframe>
   <main id="splash" role="status" aria-live="polite">
-    <svg id="ribbon-art" viewBox="0 0 1280 850" preserveAspectRatio="none"
+    <svg id="ribbon-art" class="layer" viewBox="0 0 1280 850" preserveAspectRatio="none"
          aria-hidden="true">
+      <defs>
+        <!-- the CSS 135deg gradient line for a 1280x850 box, in user units -->
+        <linearGradient id="page-bg" gradientUnits="userSpaceOnUse"
+                        x1="108" y1="-107" x2="1172" y2="957">
+          <stop offset="0" stop-color="#051325"/><stop offset=".52" stop-color="#0a2846"/>
+          <stop offset="1" stop-color="#081d37"/></linearGradient>
+      </defs>
+      <rect id="page-bg-rect" x="-20" y="-20" width="1320" height="890" fill="url(#page-bg)"/>
       <g id="ribbon-wash" pointer-events="none"/>
-      <g id="ribbon-background" fill="none" stroke-width="1" pointer-events="none"/>
     </svg>
-    <svg id="flow-art" viewBox="0 0 1280 850" preserveAspectRatio="xMidYMid meet"
+    <svg id="strands-back" class="layer strands" viewBox="-64 -42.5 1408 935" preserveAspectRatio="none"
+         aria-hidden="true"><g fill="none" stroke-width="1" pointer-events="none"/></svg>
+    <svg id="strands-front" class="layer strands" viewBox="-64 -42.5 1408 935" preserveAspectRatio="none"
+         aria-hidden="true"><g fill="none" stroke-width="1" pointer-events="none"/></svg>
+    <svg id="flow-under" class="layer" viewBox="0 0 1280 850" preserveAspectRatio="xMidYMid meet"
          aria-hidden="true">
       <defs>
         <radialGradient id="core-glow"><stop offset="0" stop-color="#3182cf" stop-opacity=".38"/>
@@ -96,6 +116,10 @@
       </g>
       <circle id="guide-ring-0" cx="640" cy="415" r="175" fill="none" stroke="#6f9cd2" stroke-width="1" opacity=".16"/>
       <circle id="guide-ring-1" cx="640" cy="415" r="145" fill="none" stroke="#83b7ee" stroke-width="1" opacity=".16"/>
+    </svg>
+    <!-- the only layer that changes every frame: routes, their pulses and the squares -->
+    <svg id="flow-art" class="layer" viewBox="0 0 1280 850" preserveAspectRatio="xMidYMid meet"
+         aria-hidden="true">
       <g fill="none" stroke-width="2" stroke-linecap="round">
         <path id="route-0" d="M237 265 C390 226 443 352 550 390" stroke="#55b5c3" opacity=".7"/>
         <path id="route-1" d="M206 430 C360 412 434 427 543 415" stroke="#55b5c3" opacity=".7"/>
@@ -118,6 +142,9 @@
         <rect id="particle-7" width="7" height="7" rx="1"/><rect id="particle-8" width="5" height="5" rx="1"/>
         <rect id="particle-9" width="6" height="6" rx="1"/>
       </g>
+    </svg>
+    <svg id="flow-over" class="layer" viewBox="0 0 1280 850" preserveAspectRatio="xMidYMid meet"
+         aria-hidden="true">
       <!-- The output badges deliberately use a different stagger from the inputs. -->
       <g id="input-tiles" stroke-width="1.7">
         <rect x="183" y="238" width="54" height="54" rx="13" fill="#414429" stroke="#b9b84c"/>
@@ -171,7 +198,11 @@
     // keeps the splash up with no preload or handoff: set it here while iterating on the art.
     var splashFlags = window.location.hash || '';
     var calmStyle = splashFlags.indexOf('calm') >= 0;
-    var holdSplash = splashFlags.indexOf('hold') >= 0;
+    // The splash hands off to the editor SPLASH_HANDOFF_MS after load; set splashHandoff
+    // to false (or use `#hold`) to keep it up for design review.
+    var splashHandoff = true;
+    var SPLASH_HANDOFF_MS = 2000;
+    var holdSplash = !splashHandoff || splashFlags.indexOf('hold') >= 0;
     var ribbonPalette = splashFlags.indexOf('waves=blue') >= 0 ? 'blue' :
       calmStyle ? 'calm' : 'color';
     var ribbonPalettes = {
@@ -218,7 +249,11 @@
         72 + 64 * envelope * envelope + 265 * fan;
       var twist = wash ? 0 : (family === 0 ? 67 : 59) * envelope *
         Math.sin((family === 0 ? 3.2 : 4.3) * Math.PI * u + strand * 2.8);
-      return center + (strand - .5) * spread + twist;
+      // Where the ribbon fans out on the right, strands are spaced exponentially: dense at
+      // the top, widening downwards. On the left (fan = 0) they stay evenly spaced.
+      var warped = (Math.exp(2.4 * strand) - 1) / (Math.exp(2.4) - 1);
+      var position = strand + (warped - strand) * fan;
+      return center + (position - .5) * spread + twist;
     }
     function ribbonPoint(u, strand, family, firstX, lastX, wash) {
       return (firstX + (lastX - firstX) * u).toFixed(1) + ' ' +
@@ -245,15 +280,16 @@
         group.appendChild(path);
       }
     }
+    // Family 0 is the front strand group, family 1 the back one.
     function drawRibbon(family, count, firstX, lastX, opacity) {
-      var group = document.getElementById('ribbon-background');
       var svgNs = 'http://www.w3.org/2000/svg';
+      var group = document.getElementById(family === 0 ? 'strands-front' : 'strands-back').firstElementChild;
       for (var strandIndex = 0; strandIndex < count; strandIndex++) {
         var strand = strandIndex / (count - 1);
         for (var segment = 0; segment < 8; segment++) {
           var pathData = '';
           for (var point = 0; point <= 24; point++) {
-            var u = (segment + point / 24) / 8;
+            var u = -.07 + 1.14 * (segment + point / 24) / 8;
             pathData += (point === 0 ? 'M' : ' L') +
               ribbonPoint(u, strand, family, firstX, lastX, false);
           }
@@ -278,26 +314,105 @@
     function setAttributes(element, attributes) {
       for (var name in attributes) element.setAttribute(name, attributes[name]);
     }
+    // Hand-placed tile centres: staggered distances and sizes so the two sides do not mirror.
+    // Routes are generated from these, so moving a tile keeps its line attached.
+    var inputTiles = [
+      { x: 232, y: 196, size: 60 }, { x: 398, y: 318, size: 58 }, { x: 104, y: 372, size: 72 },
+      { x: 352, y: 520, size: 62 }, { x: 186, y: 592, size: 66 }
+    ];
+    // Output tiles fan out exponentially: row k sits at top + span * (e^(a*k/4) - 1) / (e^a - 1),
+    // so the upper routes bunch together and the gaps widen downwards. x stays irregular.
+    var outputRows = (function () {
+      var top = 204, span = 392, a = 1.25, rows = [];
+      for (var k = 0; k < 5; k++) rows.push(Math.round(top + span * (Math.exp(a * k / 4) - 1) / (Math.exp(a) - 1)));
+      return rows;
+    })();
+    var outputTiles = [
+      { x: 1118, y: outputRows[0], size: 58 }, { x: 902, y: outputRows[1], size: 64 },
+      { x: 1052, y: outputRows[2], size: 62 }, { x: 1172, y: outputRows[3], size: 70 },
+      { x: 948, y: outputRows[4], size: 66 }
+    ];
+    // route index -> tile index (outer tiles get the brighter lines, as before)
+    var routeTiles = [0, 2, 4, 1, 3];
+    var coreEnds = [[550, 390], [543, 415], [550, 440], [548, 400], [549, 430]];
+    // right-side routes leave the core in the same order as their tiles, also denser at the top
+    var outputCoreY = [388, 396, 407, 422, 442];
+    // sway: [dy1, dy2] nudges the two control points, which is how the lines animate
+    function routeGeometry(tile, isInput, coreEnd, sway) {
+      var startX = isInput ? tile.x + tile.size / 2 + 2 : tile.x - tile.size / 2 - 2;
+      var endX = isInput ? coreEnd[0] : 1280 - coreEnd[0];
+      var span = endX - startX;
+      var lift = tile.y - coreEnd[1];
+      // an S-curve that first overshoots away from the core, like the original hand-drawn lines;
+      // short routes get proportionally less overshoot and sway so they cannot hook back
+      var reach = Math.max(0, Math.min(1, (Math.abs(span) - 90) / 320));
+      var points = [Math.round(startX), tile.y,
+        Math.round(startX + span * .48), Math.round(tile.y + (lift * .28 + sway[0]) * reach),
+        Math.round(endX - span * .3), Math.round(coreEnd[1] + lift * .1 + sway[1] * reach),
+        Math.round(endX), coreEnd[1]];
+      return { points: points, d: 'M' + points[0] + ' ' + points[1] + ' C' + points[2] + ' ' +
+        points[3] + ' ' + points[4] + ' ' + points[5] + ' ' + points[6] + ' ' + points[7] };
+    }
+    // Output routes run core -> tile, so the squares travel outwards along them. The curve
+    // leaves the core flat and turns late, which is what makes the fan open up towards the tiles.
+    function outputRouteGeometry(tile, coreY, sway) {
+      var x0 = 740, y0 = coreY;
+      var x1 = tile.x - tile.size / 2 - 2, y1 = tile.y;
+      var dx = x1 - x0;
+      var points = [x0, y0,
+        Math.round(x0 + dx * .45), Math.round(y0 + sway[0] * .5),
+        Math.round(x1 - dx * .42), Math.round(y1 + sway[1]),
+        Math.round(x1), y1];
+      return { points: points, d: 'M' + points[0] + ' ' + points[1] + ' C' + points[2] + ' ' +
+        points[3] + ' ' + points[4] + ' ' + points[5] + ' ' + points[6] + ' ' + points[7] };
+    }
+    function routeAt(r, sway) {
+      var tileIndex = routeTiles[r % 5];
+      if (r >= 5) return outputRouteGeometry(outputTiles[tileIndex], outputCoreY[tileIndex], sway);
+      return routeGeometry(inputTiles[tileIndex], true, coreEnds[r % 5], sway);
+    }
+    function layoutTiles() {
+      var tiles = document.querySelectorAll('#input-tiles rect, #output-tiles rect');
+      for (var i = 0; i < tiles.length; i++) {
+        var tile = i < 5 ? inputTiles[i] : outputTiles[i - 5];
+        setAttributes(tiles[i], { x: tile.x - tile.size / 2, y: tile.y - tile.size / 2,
+                                  width: tile.size, height: tile.size });
+      }
+      for (var r = 0; r < 10; r++) {
+        document.getElementById('route-' + r).setAttribute('d', routeAt(r, [0, 0]).d);
+      }
+    }
     // Restyle the inline SVG from script: page stylesheets do not reach inline SVG content.
-    function applyCalmStyle() {
-      document.documentElement.className = 'calm';
+    // Every tile keeps its centre and size but takes a glass fill; the border keeps the
+    // tile's own colour unless a single tint is given, in which case the icon takes it too.
+    // glyph code point -> [dx, dy] in em that moves its ink box onto the tile centre
+    var iconNudge = {
+      0xE055: [-0.016, 0.073], 0xE060: [0.004, 0.090], 0xE048: [0, 0.088],
+      0xE01E: [-0.015, 0.078], 0xE094: [-0.004, 0.103], 0xE06D: [0.004, 0.110],
+      0xE091: [-0.011, 0.094], 0xE0A3: [-0.008, 0.084], 0xE0A5: [0.007, 0.082],
+      0xE0A7: [0.007, 0.081]
+    };
+    function applyGlassTiles(tint) {
       var tiles = document.querySelectorAll('#input-tiles rect, #output-tiles rect');
       var icons = document.querySelectorAll('#input-icons text, #output-icons text');
       for (var i = 0; i < tiles.length; i++) {
-        // keep each tile's centre, but give every tile one size, one glass fill and one icon tint
-        var centerX = Number(tiles[i].getAttribute('x')) + Number(tiles[i].getAttribute('width')) / 2;
-        var centerY = Number(tiles[i].getAttribute('y')) + Number(tiles[i].getAttribute('height')) / 2;
-        setAttributes(tiles[i], { x: centerX - 31, y: centerY - 31, width: 62, height: 62, rx: 15,
-          fill: 'rgba(255,255,255,0.09)', stroke: 'rgba(170,204,245,0.5)', 'stroke-width': 1 });
-        setAttributes(icons[i], { x: centerX, y: centerY + 15, 'font-size': 36, fill: '#c2dafb' });
+        var size = Number(tiles[i].getAttribute('width'));
+        var centerX = Number(tiles[i].getAttribute('x')) + size / 2;
+        var centerY = Number(tiles[i].getAttribute('y')) + size / 2;
+        var fontSize = Math.round(size * .56);
+        // a light white glass: a milky fill with a brighter rim
+        setAttributes(tiles[i], { rx: Math.round(size * .24),
+          fill: 'rgba(255,255,255,0.17)', 'stroke-width': 1.2, 'stroke-opacity': tint ? 1 : .75,
+          stroke: tint || tiles[i].getAttribute('stroke') });
+        // Seti glyphs do not share one visual centre; the nudge is measured per glyph in em
+        var nudge = iconNudge[icons[i].textContent.charCodeAt(0)] || [0, 0];
+        setAttributes(icons[i], { x: (centerX + nudge[0] * fontSize).toFixed(1),
+          y: (centerY + fontSize * .42 + nudge[1] * fontSize).toFixed(1), 'font-size': fontSize });
+        if (tint) icons[i].setAttribute('fill', '#c2dafb');
       }
-      for (var r = 0; r < 10; r++) {
-        setAttributes(document.getElementById('route-' + r),
-          { stroke: '#8fbcee', 'stroke-width': 1.5, opacity: r % 5 < 3 ? '.6' : '.34' });
-        setAttributes(document.getElementById('particle-' + r),
-          { fill: '#d6e8ff', stroke: 'none', width: 5, height: 5 });
-      }
-      // one thin guide ring, one filled disc and one hairline halo instead of the stacked rings
+    }
+    // one thin guide ring, one filled disc and one hairline halo instead of the stacked rings
+    function applyLightCore() {
       setAttributes(document.getElementById('guide-ring-0'), { r: 168, opacity: '.18' });
       setAttributes(document.getElementById('guide-ring-1'), { opacity: '0' });
       setAttributes(document.getElementById('core-outer'), { opacity: '0' });
@@ -306,33 +421,63 @@
         { r: 100, fill: '#0f3358', stroke: 'rgba(160,200,245,0.75)', 'stroke-width': 1.2 });
       setAttributes(document.getElementById('core-ring'), { r: 116, stroke: '#8fb8e8', opacity: '.38' });
       setAttributes(document.getElementById('core-mark'), { 'font-size': 92, y: 447 });
+    }
+    function applyCalmStyle() {
+      document.documentElement.className = 'calm';
+      document.getElementById('page-bg-rect').setAttribute('opacity', '0');
+      applyGlassTiles('rgba(170,204,245,0.5)');
+      for (var r = 0; r < 10; r++) {
+        setAttributes(document.getElementById('route-' + r),
+          { stroke: '#8fbcee', 'stroke-width': 1.5, opacity: r % 5 < 3 ? '.6' : '.34' });
+        setAttributes(document.getElementById('particle-' + r),
+          { fill: '#d6e8ff', stroke: 'none', width: 5, height: 5 });
+      }
       document.querySelector('.message h1').textContent = 'One data model, many document workflows.';
     }
-    if (calmStyle) applyCalmStyle();
+    layoutTiles();
+    applyLightCore();
+    if (calmStyle) applyCalmStyle(); else applyGlassTiles(null);
     // Sample the same cubic curves used by the visible routes, so each square stays on its line.
+    // Each route also gets a brighter overlay whose single dash is driven along the curve by
+    // stroke-dashoffset, so the line itself lights up behind the travelling square.
     var flowRoutes = [];
     for (var routeIndex = 0; routeIndex < 10; routeIndex++) {
       var route = document.getElementById('route-' + routeIndex);
       var particle = document.getElementById('particle-' + routeIndex);
-      flowRoutes.push({
-        points: route.getAttribute('d').match(/\d+/g).map(Number),
-        particle: particle,
-        size: Number(particle.getAttribute('width'))
-      });
+      var points = routeAt(routeIndex, [0, 0]).points;
+      var chord = Math.sqrt(Math.pow(points[6] - points[0], 2) + Math.pow(points[7] - points[1], 2));
+      var pulse = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      setAttributes(pulse, { d: route.getAttribute('d'), fill: 'none', 'stroke-width': 2.2,
+        'stroke-linecap': 'round', stroke: calmStyle ? '#e4f1ff' : routeIndex < 5 ? '#c8f6ff' : '#e6e0ff',
+        'stroke-dasharray': '44 900', 'stroke-dashoffset': 944, opacity: '0' });
+      route.parentNode.appendChild(pulse);
+      flowRoutes.push({ route: route, points: points, particle: particle, pulse: pulse,
+                        length: chord * 1.08, size: Number(particle.getAttribute('width')) });
     }
     var flowStart = null;
     var flowTimer = 0;
+    var flowUsesFrames = !!window.requestAnimationFrame;
     function animateFlow() {
       var now = performance.now();
       if (flowStart === null) flowStart = now;
       var elapsed = now - flowStart;
+      // The lines themselves sway: each route's control points drift on their own 5-7s cycles.
+      var swayPhase = elapsed / 1000;
       for (var i = 0; i < flowRoutes.length; i++) {
         var item = flowRoutes[i];
+        // sway periods divide the 12 s loop
+        var geometry = routeAt(i, [22 * Math.sin(swayPhase * (2 * Math.PI / [3, 4, 6][i % 3]) + i),
+                                   14 * Math.sin(swayPhase * (2 * Math.PI / [4, 6, 3, 4][i % 4]) + i * 1.3)]);
+        item.points = geometry.points;
+        item.route.setAttribute('d', geometry.d);
+        item.pulse.setAttribute('d', geometry.d);
         var p = item.points;
         // Each pair enters through an input route, then leaves through its output route.
-        var wave = (elapsed / 2000 + (i % 5) * .18) % 1;
+        // 2.4 s per in-and-out cycle: five cycles per 12 s loop
+        var wave = (elapsed / 2400 + (i % 5) * .18) % 1;
         var active = i < 5 ? wave < .5 : wave >= .5;
         item.particle.setAttribute('opacity', active ? '1' : '0');
+        item.pulse.setAttribute('opacity', active ? '.85' : '0');
         if (!active) continue;
         var t = i < 5 ? wave * 2 : (wave - .5) * 2;
         var u = 1 - t;
@@ -342,15 +487,16 @@
                 3 * u * t * t * p[5] + t * t * t * p[7];
         item.particle.setAttribute('x', Math.round(x - item.size / 2));
         item.particle.setAttribute('y', Math.round(y - item.size / 2));
+        // the dash tail ends at the square: pattern period 944, dash 44, head at t * length
+        var head = Math.max(0, t * item.length - 44);
+        item.pulse.setAttribute('stroke-dashoffset', Math.round(944 - head));
       }
       // The flow settles before the handoff; no animation timer crosses document teardown.
-      if (elapsed >= 2200) return;
-      // the calm variant rides the frame clock; the original keeps its 50ms cadence
-      flowTimer = calmStyle && window.requestAnimationFrame ?
-        requestAnimationFrame(animateFlow) : setTimeout(animateFlow, 50);
+      if (!holdSplash && elapsed >= SPLASH_HANDOFF_MS + 200) return;
+      flowTimer = flowUsesFrames ? requestAnimationFrame(animateFlow) : setTimeout(animateFlow, 50);
     }
     function stopFlow() {
-      if (flowTimer && calmStyle && window.cancelAnimationFrame) cancelAnimationFrame(flowTimer);
+      if (flowTimer && flowUsesFrames) cancelAnimationFrame(flowTimer);
       else if (flowTimer) clearTimeout(flowTimer);
       flowTimer = 0;
     }
@@ -370,7 +516,7 @@
       setTimeout(function () {
         document.getElementById('editor-frame').src = 'doc_editor.ls';
       }, 100);
-      setTimeout(leaveSplash, 3000);
+      setTimeout(leaveSplash, SPLASH_HANDOFF_MS);
     });
   </script>
 </body>

@@ -864,7 +864,9 @@ static int virtual_clock_advance_slice(double target_ms, bool animation_frame) {
 
     if (animation_frame) {
         progress += js_animation_frame_flush(virtual_clock_ms);
-        if (dom_tick_headless_animation_frame()) progress++;
+        // CSS animations follow the virtual clock too; a fixed 1/60 s per slice
+        // ran them ahead of script time whenever a slice was not 16.7 ms.
+        if (dom_tick_headless_animation_frame_at(virtual_clock_ms / 1000.0)) progress++;
     }
     js_microtask_flush();
     // rAF and microtasks may queue zero-delay timers at this same timestamp.
@@ -1330,9 +1332,12 @@ extern "C" void js_event_loop_attach_lambda_scheduler(void) {
 
 extern "C" void js_event_loop_init(void) {
     js_event_loop_attach_lambda_scheduler();
-    if (timer_handle_count > 0) {
-        // Timers belong to the active document realm. Nested script entries in
-        // a static capture must retain them until the document load boundary.
+    if (timer_handle_count > 0 || runtime_job_queue_size(&animation_frame_queue) > 0) {
+        // Timers and pending animation-frame callbacks belong to the active
+        // document realm. Nested script entries in a static capture must retain
+        // them until the document load boundary: the synthetic lifecycle scripts
+        // (`<window-pageshow>`) run as outermost turns right after `load`, and a
+        // frame requested by the load handler must not be wiped by their init.
         event_loop_shutting_down = false;
         return;
     }

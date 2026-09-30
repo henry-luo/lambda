@@ -5441,6 +5441,315 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 }
 
 // ============================================================================
+// Inline SVG raster layer cache
+// ============================================================================
+// An inline <svg> whose subtree has not changed since its last paint is
+// rasterised once into a document-owned offscreen surface and drawn as one
+// image on the following frames, instead of re-walking its DOM, re-parsing
+// every path and re-rasterising every shape. The DOM bumps
+// DomElement::svg_layer_generation on any mutation under the root. A layer is
+// captured only on the second consecutive paint of identical content, so an
+// SVG that changes every frame never pays for a capture it would not reuse.
+
+struct SvgLayerEntry {
+    DomElement* element;
+    uint32_t node_id;               // guards against a recycled element address
+    uint32_t generation;            // svg_layer_generation last painted
+    int pixel_width, pixel_height;  // layer size in physical pixels
+    float scale;
+    SvgInitialPaint paint;          // inherited paint is part of the rendered content
+    ImageSurface* surface;          // null until the content was painted twice unchanged
+    SvgLayerEntry* next;
+};
+
+struct SvgLayerRegistry {
+    SvgLayerEntry* entries;
+    size_t cached_bytes;
+};
+
+static const size_t SVG_LAYER_MAX_BYTES = (size_t)48 << 20;         // one layer
+static const size_t SVG_LAYER_TOTAL_MAX_BYTES = (size_t)256 << 20;  // per document
+
+enum SvgLayerMode { SVG_LAYER_MODE_ON = 0, SVG_LAYER_MODE_OFF, SVG_LAYER_MODE_EAGER };
+
+// RADIANT_SVG_LAYER=off disables the cache; =eager captures on the first paint so a
+// one-frame `lambda render` exercises the layer path and can be diffed against `off`.
+static SvgLayerMode svg_layer_mode(void) {
+    static int mode = -1;
+    if (mode < 0) {
+        const char* env = getenv("RADIANT_SVG_LAYER");
+        mode = SVG_LAYER_MODE_ON;
+        if (env && strcmp(env, "off") == 0) mode = SVG_LAYER_MODE_OFF;
+        else if (env && strcmp(env, "eager") == 0) mode = SVG_LAYER_MODE_EAGER;
+    }
+    return (SvgLayerMode)mode;
+}
+
+static void svg_layer_entry_release_surface(SvgLayerRegistry* registry, SvgLayerEntry* entry) {
+    if (!entry->surface) return;
+    registry->cached_bytes -= (size_t)entry->surface->pitch * (size_t)entry->surface->height;
+    image_surface_destroy(entry->surface);
+    entry->surface = nullptr;
+}
+
+static void svg_layer_registry_destroy(void* data) {
+    SvgLayerRegistry* registry = (SvgLayerRegistry*)data;
+    if (!registry) return;
+    SvgLayerEntry* entry = registry->entries;
+    while (entry) {
+        SvgLayerEntry* next = entry->next;
+        svg_layer_entry_release_surface(registry, entry);
+        mem_free(entry);
+        entry = next;
+    }
+    mem_free(registry);
+}
+
+static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) {
+    if (!document) return nullptr;
+    SvgLayerRegistry* registry = (SvgLayerRegistry*)document->services.svg_layer_registry;
+    if (registry) return registry;
+    registry = (SvgLayerRegistry*)mem_calloc(1, sizeof(SvgLayerRegistry), MEM_CAT_LAYOUT);
+    if (!registry) return nullptr;
+    if (!dom_document_add_resource(document, registry, svg_layer_registry_destroy)) {
+        mem_free(registry);
+        return nullptr;
+    }
+    document->services.svg_layer_registry = registry;
+    return registry;
+}
+
+static SvgLayerEntry* svg_layer_entry_for_element(SvgLayerRegistry* registry, DomElement* element) {
+    for (SvgLayerEntry* entry = registry->entries; entry; entry = entry->next) {
+        if (entry->element == element) return entry;
+    }
+    SvgLayerEntry* entry = (SvgLayerEntry*)mem_calloc(1, sizeof(SvgLayerEntry), MEM_CAT_LAYOUT);
+    if (!entry) return nullptr;
+    entry->element = element;
+    entry->next = registry->entries;
+    registry->entries = entry;
+    return entry;
+}
+
+static bool svg_layer_paint_equal(const SvgInitialPaint* a, const SvgInitialPaint* b) {
+    return a->current_color.c == b->current_color.c &&
+           a->has_fill_color == b->has_fill_color && a->fill_none == b->fill_none &&
+           (!a->has_fill_color || a->fill_color.c == b->fill_color.c) &&
+           a->has_stroke_color == b->has_stroke_color && a->stroke_none == b->stroke_none &&
+           (!a->has_stroke_color || a->stroke_color.c == b->stroke_color.c) &&
+           a->stroke_width == b->stroke_width;
+}
+
+// Rasterise the SVG at the layer origin into a straight-alpha surface. Every
+// painter that shares the page surface (ThorVG fills, glyph blits, group
+// opacity composites) assumes an opaque target, so the content is rendered
+// twice, over black and over white, and the exact colour and coverage of each
+// pixel are recovered from the difference. Glyph runs record through the active
+// RenderContext, so its list, clip, transform and dirty state are pointed at the
+// private layer for the duration of the capture.
+static void svg_layer_replay_over(DisplayList* dl, ScratchArena* scratch, uint32_t* pixels,
+                                  int width, int height, float scale, uint32_t fill) {
+    for (size_t i = 0, n = (size_t)width * (size_t)height; i < n; i++) pixels[i] = fill;
+    ImageSurface pass = {};
+    pass.format = IMAGE_FORMAT_UNKNOWN;
+    pass.width = width;
+    pass.height = height;
+    pass.encoded_width = width;
+    pass.encoded_height = height;
+    pass.orientation = 1;
+    pass.has_intrinsic_size = true;
+    pass.pitch = width * 4;
+    pass.pixels = pixels;
+    RdtVector vec = {};
+    rdt_vector_init(&vec, pixels, width, height, width);
+    if (!vec.impl) return;
+    Bound clip = {0.0f, 0.0f, (float)width, (float)height};
+    dl_replay(dl, &vec, &pass, &clip, scratch, scale, nullptr);
+    rdt_vector_destroy(&vec);
+}
+
+// straight RGBA from the black and white passes: coverage is what the white
+// backdrop lost, colour is the black pass scaled back up by that coverage
+static void svg_layer_resolve_alpha(const uint32_t* over_black, const uint32_t* over_white,
+                                    uint32_t* out, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        const uint8_t* b = (const uint8_t*)&over_black[i];
+        const uint8_t* w = (const uint8_t*)&over_white[i];
+        uint32_t lost = (uint32_t)(w[0] - b[0]) + (uint32_t)(w[1] - b[1]) + (uint32_t)(w[2] - b[2]);
+        uint32_t alpha = 255u - (lost + 1u) / 3u;
+        uint8_t* o = (uint8_t*)&out[i];
+        if (alpha == 0) {
+            out[i] = 0;
+            continue;
+        }
+        for (int c = 0; c < 3; c++) {
+            uint32_t value = ((uint32_t)b[c] * 255u + alpha / 2u) / alpha;
+            o[c] = (uint8_t)(value > 255u ? 255u : value);
+        }
+        o[3] = (uint8_t)alpha;
+    }
+}
+
+static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
+                              SvgLayerEntry* entry, Element* svg_elem, DomElement* dom_elem,
+                              float viewport_width, float viewport_height, float scale,
+                              const SvgInitialPaint* paint) {
+    int width = entry->pixel_width;
+    int height = entry->pixel_height;
+    size_t count = (size_t)width * (size_t)height;
+    size_t bytes = count * 4u;
+    if (bytes > SVG_LAYER_MAX_BYTES || registry->cached_bytes + bytes > SVG_LAYER_TOTAL_MAX_BYTES) {
+        return false;
+    }
+    ImageSurface* surface = image_surface_create(width, height);
+    if (!surface) return false;
+    uint32_t* over_black = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
+    uint32_t* over_white = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
+    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_layer");
+    Arena* temp_arena = temp_pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_layer.arena") : nullptr;
+    if (!over_black || !over_white || !temp_arena) {
+        if (temp_arena) mem_arena_destroy(temp_arena);
+        if (temp_pool) mem_pool_destroy(temp_pool);
+        if (over_black) mem_free(over_black);
+        if (over_white) mem_free(over_white);
+        image_surface_destroy(surface);
+        return false;
+    }
+    DisplayList dl = {};
+    PaintList paint_list = {};
+    ScratchArena scratch = {};
+    dl_init(&dl, temp_arena);
+    paint_list_init(&paint_list, temp_arena);
+    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_layer.scratch");
+
+    DisplayList* saved_dl = rdcon->dl;
+    PaintList* saved_paint_list = rdcon->paint_list;
+    Bound saved_clip = rdcon->block.clip;
+    RdtMatrix saved_transform = rdcon->transform;
+    bool saved_has_transform = rdcon->has_transform;
+    DirtyTracker* saved_dirty_tracker = rdcon->dirty_tracker;
+    bool saved_has_dirty_union = rdcon->has_dirty_union;
+    rdcon->dl = &dl;
+    rdcon->paint_list = &paint_list;
+    rdcon->block.clip = {0.0f, 0.0f, (float)width, (float)height};
+    rdcon->has_transform = false;
+    rdcon->dirty_tracker = nullptr;
+    rdcon->has_dirty_union = false;
+
+    RdtMatrix base_transform = { scale, 0.0f, 0.0f, 0.0f, scale, 0.0f, 0.0f, 0.0f, 1.0f };
+    FontContext* font_ctx = rdcon->ui_context ? rdcon->ui_context->font_ctx : nullptr;
+    render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
+                               rdcon->ui_context->document->document_pool, scale,
+                               font_ctx, &base_transform, &dl, &paint->current_color,
+                               paint->has_fill_color ? &paint->fill_color : nullptr,
+                               nullptr, 1.0f, paint->fill_none,
+                               paint->has_stroke_color ? &paint->stroke_color : nullptr,
+                               paint->stroke_none, paint->stroke_width,
+                               &paint_list, &scratch, render_svg_reference_scope(dom_elem));
+
+    rdcon->dl = saved_dl;
+    rdcon->paint_list = saved_paint_list;
+    rdcon->block.clip = saved_clip;
+    rdcon->transform = saved_transform;
+    rdcon->has_transform = saved_has_transform;
+    rdcon->dirty_tracker = saved_dirty_tracker;
+    rdcon->has_dirty_union = saved_has_dirty_union;
+
+    bool ok = dl_validate_or_log(&dl, "render_svg_layer_capture");
+    if (ok) {
+        svg_layer_replay_over(&dl, &scratch, over_black, width, height, scale, 0xFF000000u);
+        svg_layer_replay_over(&dl, &scratch, over_white, width, height, scale, 0xFFFFFFFFu);
+        svg_layer_resolve_alpha(over_black, over_white, (uint32_t*)surface->pixels, count);
+    }
+    scratch_release(&scratch);
+    paint_list_destroy(&paint_list);
+    dl_destroy(&dl);
+    mem_arena_destroy(temp_arena);
+    mem_pool_destroy(temp_pool);
+    mem_free(over_black);
+    mem_free(over_white);
+    if (!ok) {
+        image_surface_destroy(surface);
+        return false;
+    }
+    entry->surface = surface;
+    registry->cached_bytes += bytes;
+    log_debug("svg-layer: captured %dx%d layer for <svg> node=%u generation=%u", width, height,
+              dom_elem->DomNode::id, entry->generation);
+    return true;
+}
+
+// A layer is blitted by the CPU painter, which has no transform: a pure
+// translation (the common CSS drift on a decorative layer) folds into the
+// destination, anything else disqualifies the layer.
+static bool svg_layer_transform_offset(const RenderContext* rdcon, float* dx, float* dy) {
+    *dx = 0.0f;
+    *dy = 0.0f;
+    if (!rdcon->has_transform) return true;
+    const RdtMatrix* m = &rdcon->transform;
+    if (fabsf(m->e11 - 1.0f) > 0.0005f || fabsf(m->e22 - 1.0f) > 0.0005f ||
+        fabsf(m->e12) > 0.0005f || fabsf(m->e21) > 0.0005f) {
+        return false;
+    }
+    *dx = m->e13;
+    *dy = m->e23;
+    return true;
+}
+
+// Paint the SVG from its cached layer when its content is unchanged. Returns
+// false when the caller must record the SVG directly: the first paint of new
+// content (which also arms the capture), a layer that is too large, or a
+// transform the blit cannot express.
+static bool svg_layer_paint(RenderContext* rdcon, DomElement* dom_elem, Element* svg_elem,
+                            const Rect* content_rect, float viewport_width,
+                            float viewport_height, float scale, const SvgInitialPaint* paint) {
+    SvgLayerMode mode = svg_layer_mode();
+    if (mode == SVG_LAYER_MODE_OFF || !rdcon->ui_context || !rdcon->ui_context->document) {
+        return false;
+    }
+    float offset_x, offset_y;
+    if (!svg_layer_transform_offset(rdcon, &offset_x, &offset_y)) return false;
+    int width = (int)lroundf(content_rect->width);   // INT_CAST_OK: layer pixel size
+    int height = (int)lroundf(content_rect->height); // INT_CAST_OK: layer pixel size
+    if (width <= 0 || height <= 0 || (size_t)width * (size_t)height * 4u > SVG_LAYER_MAX_BYTES) {
+        return false;
+    }
+    SvgLayerRegistry* registry = svg_layer_registry_for_document(rdcon->ui_context->document);
+    SvgLayerEntry* entry = registry ? svg_layer_entry_for_element(registry, dom_elem) : nullptr;
+    if (!entry) return false;
+
+    uint32_t generation = dom_elem->svg_layer_generation;
+    uint32_t node_id = dom_elem->DomNode::id;
+    bool unchanged = entry->node_id == node_id && entry->generation == generation &&
+                     entry->pixel_width == width && entry->pixel_height == height &&
+                     entry->scale == scale && svg_layer_paint_equal(&entry->paint, paint);
+    if (!unchanged) {
+        svg_layer_entry_release_surface(registry, entry);
+        entry->node_id = node_id;
+        entry->generation = generation;
+        entry->pixel_width = width;
+        entry->pixel_height = height;
+        entry->scale = scale;
+        entry->paint = *paint;
+        if (mode != SVG_LAYER_MODE_EAGER) return false;
+    }
+    if (!entry->surface &&
+        !svg_layer_capture(rdcon, registry, entry, svg_elem, dom_elem,
+                           viewport_width, viewport_height, scale, paint)) {
+        return false;
+    }
+    ImageSurface* surface = entry->surface;
+    // whole device pixels, so the blit copies samples instead of resampling
+    Rect dst = { roundf(content_rect->x + offset_x), roundf(content_rect->y + offset_y),
+                 (float)surface->width, (float)surface->height };
+    Bound clip = view_geometry_intersect_bound_rect(rdcon->block.clip, dst);
+    render_painter_blit_surface_scaled(rdcon, surface, nullptr, rdcon->ui_context->surface,
+                                       &dst, &clip, SCALE_MODE_NEAREST, rdcon->clip_shapes,
+                                       rdcon->clip_shape_depth, 255);
+    return true;
+}
+
+// ============================================================================
 // Render Inline SVG
 // ============================================================================
 
@@ -5519,16 +5828,20 @@ void render_inline_svg(RenderContext* rdcon, ViewBlock* view) {
     render_svg_initial_paint(view, rdcon->color, &initial_paint);
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
-    render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
-                               rdcon->ui_context->document->document_pool, scale,
-                               font_ctx, &base_transform, rdcon->dl,
-                               &initial_paint.current_color,
-                               initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
-                               nullptr, 1.0f, initial_paint.fill_none,
-                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
-                               initial_paint.stroke_none, initial_paint.stroke_width,
-                               rdcon->paint_list, &rdcon->scratch,
-                               render_svg_reference_scope(dom_elem));
+    // unchanged content comes from its cached raster layer; otherwise record directly
+    if (!svg_layer_paint(rdcon, dom_elem, svg_elem, &content_rect, viewport_width,
+                         viewport_height, scale, &initial_paint)) {
+        render_svg_to_display_list(svg_elem, viewport_width, viewport_height,
+                                   rdcon->ui_context->document->document_pool, scale,
+                                   font_ctx, &base_transform, rdcon->dl,
+                                   &initial_paint.current_color,
+                                   initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
+                                   nullptr, 1.0f, initial_paint.fill_none,
+                                   initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
+                                   initial_paint.stroke_none, initial_paint.stroke_width,
+                                   rdcon->paint_list, &rdcon->scratch,
+                                   render_svg_reference_scope(dom_elem));
+    }
     g_svg_active_rdcon = saved_svg_rdcon;
 
     if (has_content_clip) {

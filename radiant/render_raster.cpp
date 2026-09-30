@@ -152,6 +152,39 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
             (float)(right - left - 1), (float)(bottom - top - 1));
 
     int y_off = dst->tile_offset_y;
+    // 1:1 copy of a whole-pixel-aligned source (cached layers, canvases): integer
+    // source-over per row instead of per-pixel float sampling
+    if (scale_mode == SCALE_MODE_NEAREST && !need_shape_clip && opacity == 255 &&
+        x_ratio == 1.0f && y_ratio == 1.0f &&
+        dst_rect->x == floorf(dst_rect->x) && dst_rect->y == floorf(dst_rect->y) &&
+        src_rect->x == floorf(src_rect->x) && src_rect->y == floorf(src_rect->y)) {
+        int dx0 = (int)dst_rect->x;       // INT_CAST_OK: whole-pixel destination origin
+        int dy0 = (int)dst_rect->y;       // INT_CAST_OK: whole-pixel destination origin
+        int sx0 = (int)src_rect->x;       // INT_CAST_OK: whole-pixel source origin
+        int sy0 = (int)src_rect->y;       // INT_CAST_OK: whole-pixel source origin
+        for (int i = top; i < bottom; i++) {
+            int sy = sy0 + (i - dy0);
+            if (sy < 0 || sy >= src_h) continue;
+            const uint32_t* src_row = (const uint32_t*)((const uint8_t*)src->pixels + (size_t)sy * src->pitch);
+            uint32_t* dst_row = (uint32_t*)((uint8_t*)dst->pixels + (size_t)(i - y_off) * dst->pitch);
+            for (int j = left; j < right; j++) {
+                int sx = sx0 + (j - dx0);
+                if (sx < 0 || sx >= src_w) continue;
+                uint32_t source = src_row[sx];
+                uint32_t sa = source >> 24;
+                // cached layers are mostly clear or solid: skip or copy those outright
+                if (sa == 0) continue;
+                if (sa == 255) { dst_row[j] = source | 0xFF000000u; continue; }
+                uint32_t destination = dst_row[j];
+                uint32_t inv = 255u - sa;
+                dst_row[j] = 0xFF000000u |
+                    (((source & 0xFFu) * sa + (destination & 0xFFu) * inv) / 255u) |
+                    ((((source >> 8) & 0xFFu) * sa + ((destination >> 8) & 0xFFu) * inv) / 255u) << 8 |
+                    ((((source >> 16) & 0xFFu) * sa + ((destination >> 16) & 0xFFu) * inv) / 255u) << 16;
+            }
+        }
+        return;
+    }
     for (int i = top; i < bottom; i++) {
         int row_left = left;
         int row_right = right;

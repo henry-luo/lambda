@@ -851,12 +851,35 @@ static void resolve_inset_sides(LayoutContext* lycon, ViewSpan* span, CssBoxSide
     }
 }
 
-static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const CssValue* value) {
+static CssPropertyCode inset_side_property(CssBoxSide side) {
+    switch (side) {
+        case CSS_BOX_SIDE_TOP: return CSS_PROPERTY_TOP;
+        case CSS_BOX_SIDE_RIGHT: return CSS_PROPERTY_RIGHT;
+        case CSS_BOX_SIDE_BOTTOM: return CSS_PROPERTY_BOTTOM;
+        default: return CSS_PROPERTY_LEFT;
+    }
+}
+
+// `inset` is kept as its own declaration rather than expanded at parse time, so
+// it must compete with top/right/bottom/left in the cascade: a side whose
+// longhand declaration outranks the shorthand keeps the longhand's value.
+static bool inset_longhand_overrides_shorthand(LayoutContext* lycon, CssBoxSide side,
+                                               const CssDeclaration* shorthand) {
+    DomElement* elem = lam::dom_require<DOM_NODE_ELEMENT>(lycon->view);
+    if (!shorthand || !elem || !elem->specified_style) return false;
+    CssDeclaration* longhand = style_tree_get_declaration(elem->specified_style,
+                                                          inset_side_property(side));
+    return longhand && css_declaration_cascade_compare(longhand, shorthand) > 0;
+}
+
+static void resolve_inset_shorthand(LayoutContext* lycon, ViewSpan* span, const CssValue* value,
+                                    const CssDeclaration* decl) {
     PositionProp* position = ensure_span_position(lycon, span);
     CssQuadValues values;
     if (!values.expand(value)) return;
     for (int i = 0; i < 4; i++) {
         CssBoxSide side = (CssBoxSide)i;
+        if (inset_longhand_overrides_shorthand(lycon, side, decl)) continue;
         if (values.side[i]->type == CSS_VALUE_TYPE_KEYWORD) {
             set_inset_side_auto(position, side);
         } else {
@@ -7874,7 +7897,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
         case CSS_PROPERTY_INSET:
-            resolve_inset_shorthand(lycon, span, value);
+            resolve_inset_shorthand(lycon, span, value, decl);
             break;
         case CSS_PROPERTY_INSET_INLINE:
         case CSS_PROPERTY_INSET_INLINE_START:
@@ -7892,6 +7915,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_LEFT:
         case CSS_PROPERTY_RIGHT:
         case CSS_PROPERTY_BOTTOM:
+            // a later or more specific `inset` wins over this side
+            if (shorthand_overrides_longhand(lycon, CSS_PROPERTY_INSET, decl)) break;
             resolve_inset_sides(lycon, span, radiant_css_box_side(prop_id), radiant_css_box_side(prop_id),
                                 prop_id, value, true);
             break;

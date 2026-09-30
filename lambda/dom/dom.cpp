@@ -631,6 +631,17 @@ extern "C" __attribute__((weak)) bool dom_edit_transaction_defer_mutation(
 
 // Helper: increment DOM mutation counter on current document and record the
 // mutation shape for future incremental cascade/layout decisions.
+// An inline <svg> is painted from a cached raster while its subtree is unchanged
+// (render_svg_inline.cpp). Any mutation at or below an <svg> root, including the
+// removal side of a move (reached through `parent`), advances that root's generation.
+static void dom_svg_layer_note_mutation(DomNode* node) {
+    for (DomNode* cur = node; cur; cur = cur->parent) {
+        if (cur->is_element() && cur->as_element()->tag() == MARKUP_NAME_SVG) {
+            cur->as_element()->svg_layer_generation++;
+        }
+    }
+}
+
 static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_UNKNOWN,
                                           DomNode* target = nullptr,
                                           DomNode* parent = nullptr,
@@ -648,6 +659,8 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     doc->js.mutation_count++;
     doc->js.mutation_sequence++;
     doc->mutation_epoch++;
+    dom_svg_layer_note_mutation(target);
+    if (parent && (!target || parent != target->parent)) dom_svg_layer_note_mutation(parent);
     dom_record_inline_stylesheet_mutation(doc, kind, target, parent);
 
     bool has_pending_structural_record = false;
@@ -761,7 +774,10 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     return dom_has_committed_geometry_snapshot(doc);
 }
 
-extern "C" bool dom_tick_headless_animation_frame(void) {
+// now_seconds < 0 advances one nominal 1/60 s frame; otherwise the scheduler is
+// sampled at that absolute time (the virtual clock's ms / 1000, the same base the
+// event simulator ticks with).
+static bool dom_tick_headless_animation_frame_to(double now_seconds) {
     dom_commit_headless_layout();
     DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
         ? _js_current_ui_context->document : _js_current_document;
@@ -770,8 +786,17 @@ extern "C" bool dom_tick_headless_animation_frame(void) {
     if (!scheduler || !scheduler->has_active_animations) return false;
     // Batch documents have no native frame clock; advance the same scheduler
     // deterministically so transition events cannot remain queued forever.
-    double now = scheduler->current_time + (1.0 / 60.0);
+    double now = now_seconds >= 0.0 ? now_seconds : scheduler->current_time + (1.0 / 60.0);
+    if (now < scheduler->current_time) now = scheduler->current_time;
     return animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
+}
+
+extern "C" bool dom_tick_headless_animation_frame(void) {
+    return dom_tick_headless_animation_frame_to(-1.0);
+}
+
+extern "C" bool dom_tick_headless_animation_frame_at(double now_seconds) {
+    return dom_tick_headless_animation_frame_to(now_seconds);
 }
 
 extern "C" bool dom_commit_headless_layout_checkpoint(void) {

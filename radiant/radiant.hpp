@@ -201,6 +201,8 @@ void script_runner_set_static_headless_snapshot(bool snapshot);
 // Pump callbacks against the retained document runtime between host input turns.
 bool radiant_pump_js_event_loop(struct UiContext* uicon, int wait_ms);
 bool radiant_advance_js_event_loop(struct UiContext* uicon, double delta_ms, int frame_steps);
+// true when the document's own JS realm uses a virtual clock; *now_ms gets its time
+bool radiant_document_virtual_clock(struct UiContext* uicon, double* now_ms);
 void script_runner_set_execute_external_scripts(bool execute);
 struct JsMirLeaseSession;
 void script_runner_set_js_mir_lease_session(JsMirLeaseSession* session);

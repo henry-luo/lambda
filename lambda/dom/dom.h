@@ -105,6 +105,8 @@ bool dom_commit_headless_layout(void);
 
 /** Advance the active document's CSS animation scheduler by one headless frame. */
 bool dom_tick_headless_animation_frame(void);
+// sample CSS animations at an absolute time instead of one nominal 1/60 s step
+bool dom_tick_headless_animation_frame_at(double now_seconds);
 
 /** Commit pending DOM mutations at a one-shot headless rendering checkpoint. */
 bool dom_commit_headless_layout_checkpoint(void);

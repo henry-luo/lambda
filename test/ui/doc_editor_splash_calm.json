@@ -11,7 +11,7 @@
      "equals": "One data model, many document workflows."},
     {"type": "assert_count", "target": {"selector": "#editor-frame[src='doc_editor.ls']"},
      "count": 1, "assert_timeout": 1000},
-    {"type": "wait", "ms": 2500},
+    {"type": "wait", "ms": 1500},
     {"type": "assert_count", "target": {"selector": "#splash"}, "count": 1},
     {"type": "assert_count", "target": {"selector": "html.leaving"}, "count": 1,
      "assert_timeout": 2000, "assert_interval": 50},

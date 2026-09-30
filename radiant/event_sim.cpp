@@ -5168,10 +5168,10 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             int steps = ev->advance_steps > 0 ? ev->advance_steps : ev->wait_ms / 16;
             if (steps < 1) steps = 1;
             float step_ms = ms / (float)steps;
-            bool virtual_clock = js_event_loop_virtual_clock_enabled();
-            double base_time = virtual_clock
-                ? js_event_loop_virtual_clock_now_ms() / 1000.0
-                : sched->current_time;
+            // ask the document's own realm: the thread-active one may be an iframe's
+            double virtual_now_ms = 0.0;
+            bool virtual_clock = radiant_document_virtual_clock(uicon, &virtual_now_ms);
+            double base_time = virtual_clock ? virtual_now_ms / 1000.0 : sched->current_time;
             log_info("event_sim: advance_time %.1fms in %d steps (%.2fms each)", ms, steps, step_ms);
             if (virtual_clock) {
                 radiant_advance_js_event_loop(uicon, (double)ms, steps);

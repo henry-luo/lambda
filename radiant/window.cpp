@@ -149,6 +149,25 @@ static bool radiant_service_js_event_loop(UiContext* uicon, RadiantJsLoopAction 
     return radiant_commit_async_document_loads(uicon) || navigated || pumped;
 }
 
+// Whether the document's own JS realm runs on a virtual clock. The flag lives in
+// that realm's event-loop state, so it must be read from the document's runtime:
+// the thread-active realm may belong to another document (e.g. an iframe whose
+// scripts ran last), which has its own clock setting.
+bool radiant_document_virtual_clock(UiContext* uicon, double* now_ms) {
+    if (now_ms) *now_ms = 0.0;
+    DomDocument* doc = uicon ? uicon->document : nullptr;
+    Runtime* runtime = doc ? doc->js.runtime : nullptr;
+    if (!runtime) {
+        // no document realm: the thread's loop is the only clock there is
+        if (now_ms && js_event_loop_virtual_clock_enabled()) *now_ms = js_event_loop_virtual_clock_now_ms();
+        return js_event_loop_virtual_clock_enabled();
+    }
+    JsRuntimeState* state = js_runtime_state_for(runtime_get_eval_context(runtime));
+    if (!state || !state->event_loop || !state->event_loop->virtual_clock_enabled) return false;
+    if (now_ms) *now_ms = state->event_loop->virtual_clock_ms;
+    return true;
+}
+
 bool radiant_pump_js_event_loop(UiContext* uicon, int wait_ms) {
     return radiant_service_js_event_loop(uicon, RADIANT_JS_LOOP_PUMP,
                                          wait_ms, 0.0, 0);
@@ -1661,7 +1680,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                         if (retry_wait_ms > 50) retry_wait_ms = 50;
                         uv_sleep((unsigned int)retry_wait_ms);
                     }
-                    if (js_event_loop_virtual_clock_enabled()) {
+                    if (radiant_document_virtual_clock(&ui_context, nullptr)) {
                         radiant_advance_js_event_loop(&ui_context,
                                                       (double)retry_wait_ms, 0);
                     } else {
