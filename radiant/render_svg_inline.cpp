@@ -5878,6 +5878,8 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
     Pool* pool = (rdcon->ui_context && rdcon->ui_context->document)
         ? rdcon->ui_context->document->document_pool : nullptr;
     Color current_color = rdcon->color;
+    // generated SVG layers must retain the ancestor overflow clip during paint.
+    RenderClipScope clip_scope = render_clip_push_rect_scope(rdcon, &rdcon->block.clip);
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
     g_svg_active_rdcon = rdcon;
     render_svg_to_display_list(svg_element, viewport_width, viewport_height,
@@ -5886,4 +5888,5 @@ void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
                                nullptr, true, -1.0f, rdcon->paint_list,
                                &rdcon->scratch, nullptr);
     g_svg_active_rdcon = saved_svg_rdcon;
+    render_clip_pop_scope(rdcon, &clip_scope);
 }

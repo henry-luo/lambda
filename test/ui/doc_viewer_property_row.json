@@ -1,0 +1,21 @@
+{
+  "name": "Doc viewer toggles expandable property rows across their cells",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_property_tree_ics .tree-label"}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "false"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-name"}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "true"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='UID'] > .property-row .property-value"}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "true"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-value"}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "false"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row", "offset_x": 6, "offset_y": 15}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "true"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-toggle"}},
+    {"type": "assert_attribute", "target": {"selector": ".property-entry[data-property-name='VEVENT'] > .property-row .property-toggle"}, "attribute": "aria-expanded", "equals": "false"}
+  ]
+}

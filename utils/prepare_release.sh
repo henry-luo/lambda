@@ -53,6 +53,10 @@ for file in comprehensive_test.md latex-showcase.tex test.xml test-xml.css raw_c
     fi
 done
 
+# Bundle every comprehensive sample and TikZ document for the demo viewer.
+cp ./test/input/comprehensive* ./release/test/input/
+cp -R ./test/input/tikz ./release/test/input/
+
 # Step 2d: Bundle the document viewer ('lambda demo' opens test/ui/doc_viewer.html,
 # a bare 'lambda view' opens test/ui/doc_viewer.ls). Both load the Seti icon font
 # from test/ui/icons/; the script loads KaTeX CSS from ../../lmd/ (copied in Step 1).
@@ -91,6 +95,8 @@ input_samples=(
     calendar.ics                    # icalendar
     invoicesample.pdf               # pdf
     test_graph.mmd                  # mermaid graph
+    sequence_diagram.mmd            # mermaid sequence diagrams
+    sequence_diagram2.mmd
     system_design.d2                # d2 graph
     go-package.dot                  # graphviz dot graph
     test_rdb_full.db                # sqlite database

@@ -3695,6 +3695,8 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
 
     CssStylesheet* xml_stylesheets[1] = {external_stylesheet};
     store_document_stylesheets(dom_doc, xml_stylesheets, 1, nullptr, 0, pool);
+    // Later CSSOM reads recascade XML nodes and need the loader's stylesheet engine.
+    dom_doc->services.cached_css_engine = css_engine;
 
     layout_apply_css_stylesheets(dom_doc, html_elem, xml_stylesheets, 1, pool, css_engine);
 

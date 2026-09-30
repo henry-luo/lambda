@@ -45,7 +45,7 @@ let PROJECT_ENTRIES = directory_entries(PROJECT_ROOT)
 fn path_is_open(open_paths, path) => contains(open_paths, path) or false
 fn tree_hit_class(path) => "tree-hit-" ++ replace(replace(path, "/", "_"), ".", "_")
 // An empty-space hit targets the row; absent event classes discharge to false (S7.9.2-3).
-fn event_hits_tree_row(evt, hit_class) =>
+fn event_hits_row(evt, hit_class) =>
   (contains(evt["target_class"], hit_class ++ " ") or
    contains(evt["target_parent_class"], hit_class ++ " ")) or false
 
@@ -162,6 +162,7 @@ fn graph_flavor(extension) {
 fn property_format(extension) {
   let ext = lower(extension)
   if (ext == "json") { "json" }
+  else if (ext == "xml") { "xml" }
   else if (contains(["yaml", "yml"], ext)) { "yaml" }
   else if (ext == "toml") { "toml" }
   else if (ext == "ini") { "ini" }
@@ -271,6 +272,16 @@ fn selected_source(file) {
   }
 }
 
+fn xml_has_stylesheet(parsed) {
+  if (parsed == null) { false }
+  else {
+    // The parser preserves the stylesheet processing instruction as a document child.
+    any([for (child in content(parsed) where type(child) == element and
+      string(name(child)) == "?xml-stylesheet" and len(content(child)) > 0)
+      contains(content(child)[0], "href=")])
+  }
+}
+
 fn selected_preview(file) {
   if (file == null) { null }
   else {
@@ -312,7 +323,16 @@ fn selected_preview(file) {
 }
 
 fn property_children(value, format) {
-  if (format == "properties" and type(value) == map) {
+  if (format == "xml" and type(value) == element) {
+    // XML attributes precede content; numbered segments distinguish repeated sibling tags.
+    let attrs = [for (key, child at map(value)) {name:"@" ++ string(key), value:child}]
+    let attr_rows = [for (index, attr in attrs)
+      {name:attr.name, value:attr.value, segment:"a" ++ string(index)}]
+    let child_rows = [for (index, child in content(value))
+      {name:(if (type(child) == element) string(name(child)) else "#text"),
+       value:child, segment:"c" ++ string(index)}]
+    attr_rows ++ child_rows
+  } else if (format == "properties" and type(value) == map) {
     [for (index, child in value.props) {name:child.name, value:child.value, segment:string(index)}]
   } else if (format == "vcf" and type(value) == map and type(value["contacts"]) == array) {
     [for (index, contact in value["contacts"])
@@ -335,9 +355,20 @@ fn property_children(value, format) {
   } else { [] }
 }
 
-fn property_is_container(value) => type(value) == map or type(value) == array
+fn property_is_container(value) =>
+  type(value) == map or type(value) == array or
+    (type(value) == element and
+      (len(map(value)) > 0 or any([for (child in content(value)) type(child) == element])))
 fn property_roots(parsed, format) {
-  if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
+  if (format == "xml") {
+    // The XML reader wraps the document and its processing instructions in <document>.
+    [for (index, child in content(parsed)
+      where type(child) == element and
+        not starts_with(string(name(child)), "?") and
+        not starts_with(string(name(child)), "!"))
+      {name:string(name(child)), value:child, segment:string(index)}]
+  }
+  else if (format == "ics") { [{name:"VCALENDAR", value:parsed, segment:"calendar"}] }
   else if (format == "vcf" and type(parsed["contacts"]) != array) {
     [{name:"VCARD", value:parsed, segment:"card"}]
   } else { property_children(parsed, format) }
@@ -371,7 +402,21 @@ fn property_value_text(value) {
 }
 
 fn property_summary(value, format) {
-  if (format == "properties" and type(value) == map) {
+  if (format == "xml" and type(value) == element) {
+    let children = content(value)
+    let attrs = len(map(value))
+    let text = if (len(children) == 1 and type(children[0]) == string) children[0] else null
+    let detail = if (text != null) text
+      else if (len(children) > 0) string(len(children)) ++
+        (if (len(children) == 1) " node" else " nodes")
+      else ""
+    let attr_detail = if (attrs == 0) "" else string(attrs) ++
+      (if (attrs == 1) " attribute" else " attributes")
+    if (detail == "") { if (attr_detail == "") "Empty element" else attr_detail }
+    else if (attr_detail == "") { detail }
+    else { detail ++ " · " ++ attr_detail }
+  }
+  else if (format == "properties" and type(value) == map) {
     let count = string(len(value.props)) ++ " properties"
     if (value.has_own) { property_value_text(value.own) ++ " · " ++ count } else { count }
   }
@@ -555,6 +600,9 @@ on mousemove(evt) { emit("csv_resize_move", evt.x) }
 
 view <property_node> {
   let expandable = property_is_container(~.value)
+  let hit_class = property_hit_class(~.path)
+  let row_class = if (expandable) hit_class ++ " property-row property-expandable"
+    else "property-row"
   let is_open = expandable and
     (if (~.filter_text == "") { path_is_open(~.open_paths, ~.path) }
      else { not path_is_open(~.closed_paths, ~.path) })
@@ -568,9 +616,9 @@ view <property_node> {
   let summary = property_summary(~.value, ~.format);
 
   <div class:"property-entry", 'data-property-name':~.name
-  , <div class:"property-row", style:row_style
+  , <div class:row_class, style:row_style
     , if (expandable) {
-        <button class:("property-toggle " ++ property_hit_class(~.path) ++ " property-control"),
+        <button class:("property-toggle " ++ hit_class ++ " property-control"),
           'aria-label':((if (is_open) "Collapse " else "Expand ") ++ ~.name),
           'aria-expanded':(if (is_open) "true" else "false"),
           if (is_open) "▾" else "▸">
@@ -587,7 +635,7 @@ view <property_node> {
             filter_text:~.filter_text, open_paths:~.open_paths,
             closed_paths:~.closed_paths, more_paths:~.more_paths, format:~.format>)
         if (len(matching_children) > len(visible_children)) {
-          <button class:("property-more " ++ property_hit_class(~.path) ++ " property-control"),
+          <button class:("property-more " ++ hit_class ++ " property-control"),
             (if (~.filter_text == "") "Show more properties (" else "Show more matching properties (") ++
             string(len(matching_children) - len(visible_children)) ++ " remaining)">
         }
@@ -599,8 +647,7 @@ on click(evt) {
   if (contains(evt.target_class, "property-more ") and
       contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
     emit("property_more", ~.path)
-  } else if (contains(evt.target_class, "property-toggle ") and
-             contains(evt.target_class, property_hit_class(~.path) ++ " ")) {
+  } else if (expandable and event_hits_row(evt, hit_class)) {
     emit("property_toggle", {path:~.path, is_open: is_open})
   }
 }
@@ -756,7 +803,7 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
 on click(evt) {
   let entry_path = child_path(~.parent_path, ~.name)
   let hit_class = tree_hit_class(entry_path)
-  let hits_this_row = event_hits_tree_row(evt, hit_class)
+  let hits_this_row = event_hits_row(evt, hit_class)
   if (~.is_dir and hits_this_row) {
     // A directory changes only its own subtree on a toggle.
     if (not is_open and children == null) { children = directory_entries(entry_path) }
@@ -776,7 +823,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. Email shows its headers and body. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -790,7 +837,12 @@ view <document_pane> {
       >
       <div class:"document-content"
       , if (~.preview_mode == "view") {
-        if (property_format(~.file["extension"]) != null) {
+        if (property_format(~.file["extension"]) == "xml" and
+            ~.file["xml_stylesheet"]) {
+          // The file loader resolves the PI's href and applies its CSS in this frame.
+          <iframe id:"xml-preview", class:"document-preview",
+            src:absolute_file_path(~.file["file_path"])>
+        } else if (property_format(~.file["extension"]) != null) {
           apply(<property_inspector file:~.file, parsed:~.property_data,
             filter_text:~.property_filter, open_paths:~.property_open_paths,
             closed_paths:~.property_closed_paths, more_paths:~.property_more_paths>)
@@ -988,11 +1040,12 @@ on keydown(evt) {
   }
 }
 on document_select(entry) {
-  selected_file = {file_path: entry["file_path"], name: entry["name"],
-    extension: entry["extension"], text_width_px: entry["text_width_px"]}
   let format = property_format(entry["extension"])
   // Retain the parsed tree while the user edits the filter or expands nodes.
   let parsed = if (format == null) null else input(entry["file_path"], format) ^ { null }
+  selected_file = {file_path: entry["file_path"], name: entry["name"],
+    extension: entry["extension"], text_width_px: entry["text_width_px"],
+    xml_stylesheet: (if (format == "xml") xml_has_stylesheet(parsed) else false)}
   property_data = if (format == "properties") properties_tree(parsed) else parsed
   eml_data = if (is_eml_document(entry["extension"])) input(entry["file_path"], 'eml') ^ { null } else null
   csv_data = if (is_table_document(entry["extension"]))
@@ -1134,6 +1187,7 @@ on mouseup(evt) {
                                cursor: pointer; font-size: 20px; }
       .property-row { display: flex; min-height: 30px; align-items: baseline; gap: 8px;
                       padding: 5px 18px 5px 0; border-bottom: 1px solid #f0f2f5; }
+      .property-expandable { cursor: pointer; }
       .property-entry:nth-child(even) > .property-row { background: #f7f9fb; }
       .property-row:hover { background: #edf4ff !important; }
       .property-toggle, .property-spacer { flex: 0 0 16px; width: 16px; height: 18px;

@@ -1,0 +1,28 @@
+{
+  "name": "Doc viewer shows XML nodes or the declared stylesheet",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 1200},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_markup_xml .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#property-preview"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='root']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='item']"}, "count": 1},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='item'] > .property-row .property-toggle"}},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='@name'] > .property-row .property-value"}, "equals": "gamma"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "<root><item name=\"gamma\""},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_xml .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#xml-preview"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": "#property-preview"}, "count": 0},
+    {"type": "switch_frame", "selector": "#xml-preview"},
+    {"type": "assert_text", "target": {"selector": "bookstore > header > title"}, "equals": "Sam's Bookstore"},
+    {"type": "assert_style", "target": {"selector": "bookstore > header > title"}, "property": "font-size", "equals": "36px"},
+    {"type": "switch_frame"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "<?xml-stylesheet type=\"text/css\" href=\"test/input/test-xml.css\"?>"},
+    {"type": "click", "target": {"selector": ".tab-view"}},
+    {"type": "assert_count", "target": {"selector": "#xml-preview"}, "count": 1}
+  ]
+}
