@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Document Editor</title>
+  <style> html, body { margin: 0; height: 100%; background: #061630; } </style>
+</head>
+<body>
+  <script>
+    // The CLI takes a file path, not a URL, so this launcher hands the `#calm`
+    // flag to the shared splash page: ./lambda.exe view test/ui/doc_editor_calm.html
+    window.addEventListener('load', function () {
+      window.location.replace('doc_editor.html#calm');
+    });
+  </script>
+</body>
+</html>
