@@ -76,5 +76,5 @@ let html_edges = direct(coupled_html, "edge")
     [for (edge in html_edges) [edge["data-edge-id"], edge["data-style-declarations"],
       edge["data-stroke"], edge["data-stroke-width"], edge["data-dash-array"]]]
   ],
-  html: [string(name(html)), html.class, len(html)]
+  html: [string(name(html)), html.class, html["data-graph-flavor"], len(content(html))]
 }
