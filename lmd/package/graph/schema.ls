@@ -46,7 +46,8 @@ fn graph_spec() => {
   children: ["meta", "styles", "defs", "constraints", "node", "edge", "subgraph",
     "style-rule", "class-assignment", "style-assignment", "interaction", "annotation",
     "edge-property", "front-matter", "init", "properties", "dot-attr-statement",
-    "dot-assignment", "dot-edge-statement", "diagnostics", "diagnostic"],
+    "dot-assignment", "dot-edge-statement", "sequence-block",
+    "diagnostics", "diagnostic"],
   open_children: false, scalar_children: false
 }
 
@@ -158,7 +159,12 @@ fn constraint_spec() => {
 }
 
 fn metadata_spec(value_tag) {
-  if (value_tag == "style-rule") {
+  if (value_tag == "sequence-block") {
+    {attrs: [*common_attrs(), attr("kind", "text", true, ["loop"]),
+      attr("phase", "text", true, ["start", "end"]), attr("label", "text")],
+      children: [], open_children: false, scalar_children: false}
+  }
+  else if (value_tag == "style-rule") {
     {attrs: [*common_attrs(), attr("class", "text", true),
       attr("declarations", "text", true)], children: [], open_children: false,
       scalar_children: false}
