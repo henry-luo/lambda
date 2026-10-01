@@ -52,6 +52,7 @@
  *     {"type": "set_device_scale", "scale": 2.0},
  *     {"type": "navigate", "url": "test/ui/page2.html"},
  *     {"type": "assert_rect", "target": {"selector": "#box"}, "x": 0, "y": 0, "width": 200, "height": 100, "tolerance": 2},
+ *     {"type": "assert_rect", "target": {"selector": "#box"}, "relative_to": "#container", "x": 10, "y": 20},
  *     {"type": "assert_style", "target": {"selector": "h1"}, "property": "font-size", "equals": "32px"},
  *     {"type": "assert_position", "element_a": {"selector": "#header"}, "element_b": {"selector": "#content"}, "relation": "above"},
  *     {"type": "assert_element_at", "x": 100, "y": 50, "expected_selector": "#header"},
@@ -230,6 +231,7 @@ struct SimEvent {
     char* option_value;          // for select_option: match by value attribute
     char* option_label;          // for select_option: match by visible text
     // Phase 5: assert_rect fields
+    char* rect_relative_to;                     // optional selector whose origin offsets x/y; size stays absolute
     float expected_rect_x, expected_rect_y;     // expected position
     float expected_rect_w, expected_rect_h;     // expected size
     float rect_tolerance;                       // allowed deviation (default 1px)

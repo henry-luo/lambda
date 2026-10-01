@@ -16,6 +16,12 @@
     {"type": "assert_rect", "target": {"selector": "#box1"},
      "width": 100, "height": 100, "tolerance": 2},
 
+    {"type": "log", "message": "--- assert_rect: relative origins preserve absolute sizes ---"},
+    {"type": "assert_rect", "target": {"selector": "#box1"},
+     "relative_to": "#content", "x": 25, "y": 25, "width": 100, "height": 100, "tolerance": 2},
+    {"type": "assert_rect", "target": {"selector": "#content"},
+     "relative_to": "#box1", "x": -25, "y": -25, "tolerance": 2},
+
     {"type": "log", "message": "--- assert_style: header font properties ---"},
     {"type": "assert_style", "target": {"selector": "#header"},
      "property": "font-size", "equals": "24px"},

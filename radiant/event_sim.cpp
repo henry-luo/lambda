@@ -1243,6 +1243,7 @@ static void sim_event_free_owned_fields(SimEvent* ev) {
     if (ev->option_value) mem_free(ev->option_value);
     if (ev->option_label) mem_free(ev->option_label);
     if (ev->state_name) mem_free(ev->state_name);
+    if (ev->rect_relative_to) mem_free(ev->rect_relative_to);
     if (ev->style_property) mem_free(ev->style_property);
     if (ev->element_a_selector) mem_free(ev->element_a_selector);
     if (ev->element_a_text) mem_free(ev->element_a_text);
@@ -1666,6 +1667,8 @@ static SimEvent* parse_sim_event(EventSimContext* ctx, MapReader& reader) {
     else if (strcmp(type_str, "assert_rect") == 0) {
         ev->type = SIM_EVENT_ASSERT_RECT;
         parse_target(reader, ev);
+        const char* relative_to = reader.get("relative_to").cstring();
+        if (relative_to) ev->rect_relative_to = mem_strdup(relative_to, MEM_CAT_LAYOUT);
         static const SimEventFloatField rect_fields[] = {
             {"x", &SimEvent::has_rect_x, &SimEvent::expected_rect_x},
             {"y", &SimEvent::has_rect_y, &SimEvent::expected_rect_y},
@@ -4652,6 +4655,20 @@ static void process_sim_event(EventSimContext* ctx, SimEvent* ev, UiContext* uic
             sim_reflow_if_pending(doc, state);
             float ax, ay, aw, ah;
             get_element_rect_abs(elem, &ax, &ay, &aw, &ah);
+            if (ev->rect_relative_to) {
+                View* reference = find_element_by_selector(doc, ev->rect_relative_to);
+                if (!reference) {
+                    log_error("event_sim: assert_rect FAIL - relative_to element '%s' not found",
+                        ev->rect_relative_to);
+                    sim_record_assertion(ctx, false);
+                    break;
+                }
+                float rx, ry, rw, rh;
+                get_element_rect_abs(reference, &rx, &ry, &rw, &rh);
+                // compare origins in the same coordinate space without changing the size oracle.
+                ax -= rx;
+                ay -= ry;
+            }
             float tol = ev->rect_tolerance;
             bool passed = true;
             if (ev->has_rect_x) passed &= sim_float_matches("assert_rect", "x",
