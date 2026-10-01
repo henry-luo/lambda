@@ -55,11 +55,11 @@ static bool parse_bitmap_size(const uint8_t* data, CblcBitmapSize* out) {
     out->index_subtable_array_offset = rd32(data + 0);
     out->index_tables_size           = rd32(data + 4);
     out->number_of_index_subtables   = rd32(data + 8);
-    // skip hori metrics (12 bytes at offset 12) and vert metrics (12 bytes at offset 24)
-    out->start_glyph_index = rd16(data + 36);
-    out->end_glyph_index   = rd16(data + 38);
-    out->ppem_x            = data[40];
-    out->ppem_y            = data[41];
+    // colorRef occupies bytes 12–15 before the horizontal and vertical metrics.
+    out->start_glyph_index = rd16(data + 40);
+    out->end_glyph_index   = rd16(data + 42);
+    out->ppem_x            = data[44];
+    out->ppem_y            = data[45];
     return true;
 }
 

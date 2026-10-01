@@ -972,7 +972,8 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
         && ctx->cached_emoji_size_px == style->size_px
         && ctx->cached_emoji_physical_size == physical_size
         && ctx->cached_emoji_weight == style->weight
-        && ctx->cached_emoji_slant == style->slant) {
+        && ctx->cached_emoji_slant == style->slant
+        && font_has_codepoint(ctx->cached_emoji_handle, codepoint)) {
         emoji_handle = ctx->cached_emoji_handle;
         handle_from_cache = true;
     } else {
@@ -984,17 +985,26 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
                 style->size_px, physical_size,
                 style->weight, style->slant);
             mem_free(font_path);
-            if (emoji_handle) {
-                // release old cached handle and store new one
-                if (ctx->cached_emoji_handle)
-                    font_handle_release(ctx->cached_emoji_handle);
-                font_handle_retain(emoji_handle);
-                ctx->cached_emoji_handle = emoji_handle;
-                ctx->cached_emoji_size_px = style->size_px;
-                ctx->cached_emoji_physical_size = physical_size;
-                ctx->cached_emoji_weight = style->weight;
-                ctx->cached_emoji_slant = style->slant;
+            if (emoji_handle && !font_has_codepoint(emoji_handle, codepoint)) {
+                font_handle_release(emoji_handle);
+                emoji_handle = NULL;
             }
+        }
+        if (!emoji_handle) {
+            // Linux has no platform emoji lookup; use configured emoji families
+            // through the same database as normal font fallback.
+            emoji_handle = font_find_emoji_fallback(ctx, style, codepoint);
+        }
+        if (emoji_handle) {
+            // the cached alias keeps this face alive after the lookup ref ends
+            if (ctx->cached_emoji_handle)
+                font_handle_release(ctx->cached_emoji_handle);
+            font_handle_retain(emoji_handle);
+            ctx->cached_emoji_handle = emoji_handle;
+            ctx->cached_emoji_size_px = style->size_px;
+            ctx->cached_emoji_physical_size = physical_size;
+            ctx->cached_emoji_weight = style->weight;
+            ctx->cached_emoji_slant = style->slant;
         }
     }
 

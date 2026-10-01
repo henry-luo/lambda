@@ -11,6 +11,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <thorvg_capi.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +27,7 @@
 #include "../lib/arena.h"
 #include "../lib/font/font_colr.h"
 #include "../lib/font/font_tables.h"
+#include "../lib/font/font_internal.h"
 
 // Forward declarations
 extern "C" {
@@ -522,4 +524,52 @@ TEST(FontColorTest, ColrV1CompatibilityLayersKeepPaletteColors) {
 
     data[3] = 0; // v1 without compatibility records cannot use this renderer
     EXPECT_FALSE(colr_has_glyph(&tables, 0x1234));
+}
+
+TEST_F(EntityResolutionTest, EmojiFallbackProducesColorBitmap) {
+#if defined(__linux__)
+    // The standalone font test needs the same ThorVG engine initialization as Radiant.
+    ASSERT_EQ(tvg_engine_init(0), TVG_RESULT_SUCCESS);
+#endif
+    FontContextConfig cfg = {};
+    cfg.pixel_ratio = 1.0f;
+    FontContext* ctx = font_context_create(&cfg);
+    ASSERT_NE(ctx, nullptr);
+    ASSERT_TRUE(font_context_scan(ctx));
+
+    FontDatabaseCriteria criteria = {};
+    strncpy(criteria.family_name, "Noto Color Emoji", sizeof(criteria.family_name) - 1);
+    FontDatabaseResult match = font_database_find_best_match_internal(ctx->database, &criteria);
+    if (!match.font || !match.exact_family_match) {
+        font_context_destroy(ctx);
+#if defined(__linux__)
+        tvg_engine_term();
+#endif
+        GTEST_SKIP() << "Noto Color Emoji is not installed";
+    }
+
+    FontStyleDesc style = {};
+    style.family = "sans-serif";
+    style.size_px = 16.0f;
+    style.weight = FONT_WEIGHT_NORMAL;
+    style.slant = FONT_SLANT_NORMAL;
+    FontHandle* text_face = font_resolve(ctx, &style);
+    ASSERT_NE(text_face, nullptr);
+
+    // Emoji glyphs must have decoded color pixels, not just an advance width.
+    uint32_t codepoints[] = {0x1F600u, 0x1F44Du};
+    for (uint32_t codepoint : codepoints) {
+        LoadedGlyph* glyph = font_load_glyph_emoji(text_face, &style, codepoint, true);
+        ASSERT_NE(glyph, nullptr);
+        EXPECT_EQ(glyph->bitmap.pixel_mode, GLYPH_PIXEL_BGRA);
+        EXPECT_NE(glyph->bitmap.buffer, nullptr);
+        EXPECT_GT(glyph->bitmap.width, 0);
+        EXPECT_GT(glyph->bitmap.height, 0);
+    }
+
+    font_handle_release(text_face);
+    font_context_destroy(ctx);
+#if defined(__linux__)
+    tvg_engine_term();
+#endif
 }
