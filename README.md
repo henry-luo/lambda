@@ -264,12 +264,13 @@ See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for p
 
 ## Standards Conformance
 
-| Standard | Pass Rate | Details |
-|----------|----------:|---------|
-| **HTML5** (html5lib/WPT) | **100%** | 1,560+ test cases from 63 html5lib test files |
-| **CSS 2.1** (W3C test suite) | **98.2%** | 1,788 / 1,821 baseline tests passing |
-| **CommonMark** | **100%** | 662 / 662 specification tests passing |
-| **YAML 1.2** (official test suite) | **100%** | 231 / 231 tests passing |
+| Standard | Result | Details |
+|----------|-------:|---------|
+| **ECMAScript** (TC39 test262, ES2024 scope) | **40,261 passing, 0 failing** | of 42,889 tests; 2,628 skipped as ES2025+ or out of scope ([details](doc/JS_DOM_Support.md#conformance)) |
+| **HTML5 parsing** (html5lib tree construction) | **364 / 364** | the 7 html5lib test files the suite runs, of 53 |
+| **CSS layout** (WPT and framework suites, compared with Chrome) | **1,874 full + 1,403 partial passes** of 3,302 | the 15 gated suites, including Bootstrap 20 / 20 and Tailwind 70 / 70 ([details](doc/HTML_CSS_SVG_Support.md#1-conformance-summary)) |
+| **CommonMark** | **655 / 655** | specification examples; GFM tables, task lists and strikethrough add 22 / 22 |
+| **YAML 1.2** (yaml-test-suite) | **276 / 276** | cases with an expected JSON result |
 
 ## Documentation
 
