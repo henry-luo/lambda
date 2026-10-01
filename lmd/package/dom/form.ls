@@ -573,8 +573,6 @@ on textinputfallback(evt) { caret.text_input_fallback(~, evt) }
 on keyintent(evt) { keymap.resolve(~, evt) }
 // ESO48: runs only after keydown, caret, and activation have all declined.
 on scrollkey(evt) { scroll.navigate(~, evt) }
-// ES33: public wheel cancellation settles before this one package decision.
-on scrollwheel(evt) { scroll.wheel(evt) }
 // ES33: native reports only the scrollbar hit part; scroll.ls selects paging
 // or a thumb drag without bringing layout geometry into the package.
 on scrollbarpress(evt) { scroll.scrollbar_press(evt) }
@@ -595,3 +593,8 @@ on designmode(evt) { design_mode.set_mode(~, evt.data) }
 on compositionstart(evt)  { ime.begin(~) }
 on compositionupdate(evt) { ime.update(~, evt, null) }
 on compositionend(evt)    { ime.end(~) }
+
+// ES33: wheel defaults follow the hit target after public cancellation; XML
+// documents have no body ancestor to carry this handler.
+view any {}
+on scrollwheel(evt) { scroll.wheel(evt) }

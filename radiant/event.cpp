@@ -600,6 +600,12 @@ DomElement* radiant_document_body_element(DomDocument* doc) {
     return dom_document_body_element(doc);
 }
 
+static DomElement* radiant_document_policy_root_element(DomDocument* doc) {
+    DomElement* body = radiant_document_body_element(doc);
+    // XML documents have no body; their root still owns document-wide defaults.
+    return body ? body : (doc ? doc->root : nullptr);
+}
+
 static void restore_embedded_document_scroll_model(DomDocument* doc) {
     if (!doc || !doc->view_tree || !doc->view_tree->root ||
         doc->view_tree->root->view_type != RDT_VIEW_BLOCK) {
@@ -3563,14 +3569,13 @@ static bool radiant_dom_package_ensure(DomDocument* doc, View* target = nullptr)
         // page with no form control anywhere would otherwise never load the
         // package and would lose caret navigation entirely once the native rich
         // handler was deleted.
-        // ESO48 uses that same body template for document scrolling. Unlike a
-        // focus target, the body remains available on an unfocused static page,
-        // which is exactly where PageDown needs to load package policy first.
+        // ESO48 also needs document scrolling on an unfocused static page;
+        // XML uses its root element where HTML uses body.
         DomElement* te = target && target->is_element() ? target->as_element() : nullptr;
         // Script clicks can precede layout, when controls have no form role yet.
         bool package_governs = te && (te->form_control() ||
             target_inside_click_control(target) ||
-            te == radiant_document_body_element(doc));
+            te == radiant_document_policy_root_element(doc));
         if (!package_governs && target) {
             EditingSurface governed_surface;
             package_governs = editing_surface_from_target(target, &governed_surface) &&
@@ -4311,15 +4316,15 @@ extern "C" bool radiant_dispatch_behavior_caret_key(EventContext* evcon, View* t
     return dispatch_behavior_handler(evcon, target, "caretkey", intent, nullptr);
 }
 
-// S12.1.3: document-wide policy starts at the body so a first interaction with
-// static text, a tabindex widget, or a scrollbar can install the package even
-// when the innermost hit has no behavior template of its own.
+// S12.1.3: document-wide policy starts at the body (or an XML document root)
+// so a first interaction can install the package even when the innermost hit
+// has no behavior template of its own.
 static bool dispatch_behavior_document_policy(EventContext* evcon, View* target,
                                               const char* event_name,
                                               const InputIntent* intent = nullptr) {
     DomDocument* doc = event_context_target_document(evcon);
-    DomElement* body = radiant_document_body_element(doc);
-    if (!body || !radiant_dom_package_ensure(doc, static_cast<View*>(body))) {
+    DomElement* policy_root = radiant_document_policy_root_element(doc);
+    if (!policy_root || !radiant_dom_package_ensure(doc, static_cast<View*>(policy_root))) {
         return false;
     }
     return dispatch_behavior_handler(evcon, target, event_name, intent, nullptr);
