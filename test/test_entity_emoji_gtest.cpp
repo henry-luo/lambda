@@ -24,6 +24,8 @@
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/arena.h"
+#include "../lib/font/font_colr.h"
+#include "../lib/font/font_tables.h"
 
 // Forward declarations
 extern "C" {
@@ -477,4 +479,47 @@ TEST_F(EntityEmojiIntegrationTest, XmlEntityHandling) {
     EXPECT_GT(output->len, 0);
 
     printf("XML entity output: %s\n", output->chars);
+}
+
+TEST(FontColorTest, ColrV1CompatibilityLayersKeepPaletteColors) {
+    // COLR v1 may carry v0 records so older rasterizers can still draw color.
+    uint8_t data[62] = {};
+    data[1] = 1;                  // COLR version 1
+    data[3] = 1;                  // one v0 BaseGlyph record
+    data[7] = 34;                 // BaseGlyph records start after the v1 header
+    data[11] = 40;                // Layer records follow the base record
+    data[13] = 1;                 // one layer
+    data[34] = 0x12; data[35] = 0x34; // base glyph
+    data[39] = 1;                 // one layer for the base glyph
+    data[40] = 0x23; data[41] = 0x45; // layer glyph
+
+    data[47] = 1;                 // CPAL: one entry per palette
+    data[49] = 1;                 // one palette
+    data[51] = 1;                 // one color record
+    data[55] = 14;                // color records offset from CPAL start
+    data[58] = 0x33; data[59] = 0x22; data[60] = 0x11; data[61] = 0xFF;
+
+    FontTableDir dirs[2] = {};
+    dirs[0].tag = FONT_TAG('C', 'O', 'L', 'R');
+    dirs[0].length = 44;
+    dirs[1].tag = FONT_TAG('C', 'P', 'A', 'L');
+    dirs[1].offset = 44;
+    dirs[1].length = 18;
+    FontTables tables = {};
+    tables.data = data;
+    tables.data_len = sizeof(data);
+    tables.dirs = dirs;
+    tables.num_tables = 2;
+
+    ASSERT_TRUE(colr_has_glyph(&tables, 0x1234));
+    ColrLayer layer = {};
+    ASSERT_EQ(colr_get_layers(&tables, 0x1234, &layer, 1), 1);
+    EXPECT_EQ(layer.glyph_id, 0x2345);
+    EXPECT_EQ(layer.r, 0x11);
+    EXPECT_EQ(layer.g, 0x22);
+    EXPECT_EQ(layer.b, 0x33);
+    EXPECT_EQ(layer.a, 0xFF);
+
+    data[3] = 0; // v1 without compatibility records cannot use this renderer
+    EXPECT_FALSE(colr_has_glyph(&tables, 0x1234));
 }

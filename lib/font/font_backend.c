@@ -7,6 +7,8 @@
  */
 
 #include "font_internal.h"
+#include "font_cbdt.h"
+#include "font_colr.h"
 
 bool font_backend_create(FontHandle* handle, const uint8_t* data, size_t len,
                          int face_index, FontWeight weight, FontSlant slant) {
@@ -150,6 +152,20 @@ GlyphBitmap* font_backend_render(FontHandle* handle, uint32_t codepoint,
 #else
 #ifdef LAMBDA_HAS_DWRITE
     if (handle->backend_kind == FONT_BACKEND_DWRITE && handle->platform_font_ref) {
+        // DirectWrite's alpha texture loses color tables; use the shared color rasterizer.
+        if (mode == GLYPH_RENDER_NORMAL && handle->tvg_raster_ctx && handle->tables &&
+            (cbdt_has_table(handle->tables) || colr_has_table(handle->tables))) {
+            GlyphInfo color_info = {0};
+            if (font_rasterize_tvg_metrics(handle->tables, codepoint,
+                                           handle->size_px, handle->bitmap_scale,
+                                           &color_info) && color_info.is_color) {
+                GlyphBitmap* color_bmp = font_rasterize_tvg_render(
+                    handle->tvg_raster_ctx, handle->tables, codepoint,
+                    handle->size_px, handle->bitmap_scale, pixel_ratio,
+                    0.0f, arena);
+                if (color_bmp) return color_bmp;
+            }
+        }
         GlyphBitmap* dwrite_bmp = font_backend_dwrite_render(handle->platform_font_ref,
                                                              codepoint, mode,
                                                              handle->bitmap_scale,
