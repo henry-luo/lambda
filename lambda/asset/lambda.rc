@@ -1,0 +1,9 @@
+// Windows resources for lambda.exe.
+//
+// Explorer shows the first icon group in the executable, and GLFW registers its
+// window class with the icon named GLFW_ICON, so this one entry serves both the
+// file icon and the title-bar / taskbar icon of Radiant windows.
+//
+// The path is relative to the repository root, which the build passes to the
+// resource compiler as an include directory.
+GLFW_ICON ICON "lambda/asset/lambda.ico"
