@@ -103,13 +103,10 @@ const sized_float_suffix = choice('f16', 'f32', 'f64');
 // `++`, `**`, and every word operator) carry no guard, so they are free to
 // open a line (S16.2.2).
 //
-// `in_element` drops the symbol relationals entirely: inside an element, `<`
-// and `>` are not operators at all, they delimit (S16.5.1 / §5.10).
+// `in_element` drops symbol relationals from exposed element expressions;
+// explicit delimiters restore them (S16.5.1v2 / §5.10).
 function binary_rules($, in_element) {
-  const operand = in_element
-    ? choice($.primary_expr, $.unary_expr, $.not_expr,
-        alias($.element_binary_expr, $.binary_expr))
-    : $._expr;
+  const operand = in_element ? $._element_expr : $._expr;
   const mk = (operator, precedence, assoc, right = operand) => wrap(assoc)(precedence, seq(
     field('left', operand), field('operator', operator), field('right', right),
   ));
@@ -158,6 +155,19 @@ function binary_rules($, in_element) {
     );
   }
   return rules;
+}
+
+function if_open_rule($, body) {
+  return prec.right(1, choice(
+    seq('if', '(', field('cond', $._expr), ')', field('then', body),
+      optional(seq('else', field('else', body)))),
+    seq('if', $._not_paren, field('cond', $._expr), field('then', $._braced),
+      'else', field('else', body)),
+  ));
+}
+
+function for_open_rule($, body) {
+  return prec.right(seq('for', '(', $._loop_head, ')', field('then', body)));
 }
 
 function type_operators($, type_expr) {
@@ -334,7 +344,7 @@ module.exports = grammar({
     // A new statement starts here: emitted only before a start-only token,
     // which is disjoint from every guarded operator above.
     $._stmt_boundary,
-    // S16.5.1: the element-scope variant, where `<` starts a child item.
+    // S16.5.1v2: the exposed element variant, where `<` starts a child item.
     $._elem_stmt_boundary,
     // The next token is not `(`: gates bare `if`/`while` heads (S16.6.2) and
     // the bare `apply` statement (§7.7).
@@ -710,9 +720,8 @@ module.exports = grammar({
 
     _attr_list: $ => seq($.attr, repeat(seq(',', $.attr))),
 
-    // S16.5.1: element interiors use the relational-free expression tier, so
-    // `>` is unconditionally the terminator and `<` unconditionally opens a
-    // child. Parentheses remain islands: `(a > b)` re-enters the full grammar.
+    // S16.5.1v2: exposed element expressions exclude angle comparisons.
+    // Delimited operands and control heads use the full grammar.
     element_content: $ => seq(
       $._element_statement,
       repeat(seq(choice(';', $._elem_stmt_boundary), $._element_statement)),
@@ -721,10 +730,6 @@ module.exports = grammar({
     _element_statement: $ => choice(
       $._declaration,
       $._element_expr,
-      $.if_expr,
-      $.for_expr,
-      $.while_expr,
-      $.match_expr,
       $.assign_stam,
       $.return_stam,
       $.apply_stam,
@@ -737,7 +742,16 @@ module.exports = grammar({
       $.unary_expr,
       $.not_expr,
       alias($.element_binary_expr, $.binary_expr),
+      alias($.element_if_expr, $.if_expr),
+      alias($.element_for_expr, $.for_expr),
+      $.while_expr,
+      $.match_expr,
     ),
+
+    element_if_expr: $ => choice($._if_closed, $._element_if_open),
+    _element_if_open: $ => if_open_rule($, $._element_expr),
+    element_for_expr: $ => choice($._for_closed, $._element_for_open),
+    _element_for_open: $ => for_open_rule($, $._element_expr),
 
     // ============================ Expressions =============================
 
@@ -1097,12 +1111,7 @@ module.exports = grammar({
     // `if (a) if b { } else …` the trailing `else` may close either `if`.
     // S16.6.3 binds it to the NEAREST one, which is this rule taking it, so
     // `_if_open` outranks `_if_closed`.
-    _if_open: $ => prec.right(1, choice(
-      seq('if', '(', field('cond', $._expr), ')', field('then', $._expr_body),
-        optional(seq('else', field('else', $._expr_body)))),
-      seq('if', $._not_paren, field('cond', $._expr), field('then', $._braced),
-        'else', field('else', $._expr_body)),
-    )),
+    _if_open: $ => if_open_rule($, $._expr_body),
 
     // `while` is procedural-only and always discards its body value, so its
     // body is structurally a block — a map there would be dead (§5.9v3).
@@ -1196,8 +1205,7 @@ module.exports = grammar({
     // an identifier, so `(` after `for` is unambiguously the paren spelling.
     for_expr: $ => choice($._for_closed, $._for_open),
     _for_closed: $ => seq('for', $._loop_head, field('then', $._braced)),
-    _for_open: $ => prec.right(seq('for', '(', $._loop_head, ')',
-      field('then', $._expr_body))),
+    _for_open: $ => for_open_rule($, $._expr_body),
 
     break_stam: _ => 'break',
     continue_stam: _ => 'continue',

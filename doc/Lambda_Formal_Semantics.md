@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 52.0.0 (2026-09-30)
+**Spec version:** 53.0.0 (2026-10-01)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -2185,14 +2185,19 @@ below by its section.
 
 ### S16.5 Element scope
 
-- **S16.5.1*** Inside an element — attribute values and bare content
-  expressions — `< > <= >=` **are not operators.** `>` always terminates the
-  element, `<` always opens a child. A comparison there is written as a
-  parenthesized island (`attr: (a > b)`), inside which the full expression
-  grammar returns, or with the keyword operators, which are element-wise by
-  S10.2.2 and agree with the symbol forms on scalars only. Removing the
-  reading, rather than ranking two readings, is what keeps S16.1.1 true at
-  the markup boundary. [Design_Syntax §5.10]
+- **S16.5.1v2*** In an exposed element attribute value or bare content
+  expression, `< > <= >=` **are not operators**: `>` closes that element and
+  `<` opens a child. Other comparisons remain available. Every explicitly
+  delimited subexpression — parentheses, call/index arguments, arrays, maps,
+  and braced bodies — uses the full expression grammar within its delimiter.
+  A control head whose body is braced (`if`, `for`, `while`, or `match`) also
+  uses the full grammar through the opening `{`; a parenthesized control head
+  uses the full grammar through `)`. An unbraced `if`/`for` body and `else`
+  body, or an unparenthesized `that` predicate, remain exposed and exclude
+  the four angle operators. Parenthesize an exposed comparison
+  (`attr: (a > b)`) or use the keyword operators, which are element-wise by
+  S10.2.2 and agree with the symbol forms on scalars only. This keeps the
+  markup boundary unambiguous under S16.1.1. [Design_Syntax §5.10]
 
 ### S16.6 Control forms
 
