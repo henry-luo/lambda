@@ -5,17 +5,17 @@
   "events": [
     {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
     {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_validator_test_data"},
-     "y": 1871, "tolerance": 2},
-    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
-    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui_doc_viewer_ls"}, "count": 1},
+     "y": 1703, "tolerance": 2},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_layout_data"}, "count": 1},
     {"type": "assert_position", "element_a": {"selector": ".tree-hit-__test_validator_test_data"},
-     "element_b": {"selector": ".tree-hit-__test_ui"}, "relation": "below", "gap": 10000},
-    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
-    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui_doc_viewer_ls"}, "count": 0},
+     "element_b": {"selector": ".tree-hit-__test_layout"}, "relation": "below", "gap": 800},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_layout_data"}, "count": 0},
     {"type": "assert_rect", "target": {"selector": ".tree-hit-__test_validator_test_data"},
-     "y": 1871, "tolerance": 2},
-    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+     "y": 1703, "tolerance": 2},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout .tree-label"}},
     {"type": "assert_position", "element_a": {"selector": ".tree-hit-__test_validator_test_data"},
-     "element_b": {"selector": ".tree-hit-__test_ui"}, "relation": "below", "gap": 10000}
+     "element_b": {"selector": ".tree-hit-__test_layout"}, "relation": "below", "gap": 800}
   ]
 }

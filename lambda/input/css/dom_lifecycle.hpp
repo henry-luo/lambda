@@ -40,7 +40,10 @@ typedef struct DomLifecycleStats {
     uint64_t rejected_pinned;
     uint64_t rejected_attached;
     uint64_t stale_ref_rejections;
+    uint64_t retirement_edge_visits;
+    uint64_t recycled_nodes;
     size_t retired_primary_bytes;
+    size_t pending_primary_bytes;
 } DomLifecycleStats;
 
 bool dom_lifecycle_init(DomDocument* doc);
@@ -64,6 +67,10 @@ void dom_node_schedule_detached(DomDocument* doc, DomNode* root);
 void dom_node_cancel_detached(DomDocument* doc, DomNode* root);
 void dom_js_mutation_records_reset(DomDocument* doc);
 size_t dom_retire_sweep(DomDocument* doc);
+// Hosted windows defer sweeps until the event loop reaches a quiescent point.
+bool dom_retire_set_deferred(bool enabled);
+bool dom_retire_idle(uint64_t budget_us);
+void dom_retire_begin_destroy(DomDocument* doc);
 void dom_lifecycle_release_unattached_form_props(DomDocument* doc);
 void dom_lifecycle_release_all_form_props(DomDocument* doc);
 void dom_lifecycle_get_stats(DomDocument* doc, DomLifecycleStats* out);

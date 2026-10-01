@@ -1,12 +1,10 @@
 #include "input.hpp"
 #include "../../lib/str.h"
 #include "../io/mark_builder.hpp"
+#include "../core/mark_reader.hpp"
 #include "input-context.hpp"
 #include "input-utils.hpp"
 #include "source_tracker.hpp"
-extern "C" {
-#include "../../lib/strview.h"
-}
 
 using namespace lambda;
 
@@ -16,6 +14,7 @@ static const int TOML_MAX_DEPTH = 512;
 static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int depth = 0);
 static Array* parse_array(InputContext& ctx, const char **toml, int *line_num, int depth = 0);
 static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_num, int depth = 0);
+static bool parse_dotted_key(InputContext& ctx, const char **toml, Map** owner, String** key);
 static String* parse_bare_key(InputContext& ctx, const char **toml);
 static String* parse_quoted_key(InputContext& ctx, const char **toml);
 static String* parse_literal_key(InputContext& ctx, const char **toml);
@@ -322,6 +321,32 @@ static Item parse_number(InputContext& ctx, const char **toml) {
     const char *start = *toml;
     SourceLocation num_loc = tracker.location();
 
+    // date and time tokens start with digits too; parse them before decimal numbers.
+    if ((str_char_is_digit(start[0]) && str_char_is_digit(start[1]) && start[2] == ':') ||
+        (str_char_is_digit(start[0]) && str_char_is_digit(start[1]) &&
+         str_char_is_digit(start[2]) && str_char_is_digit(start[3]) &&
+         start[4] == '-' && str_char_is_digit(start[5]) &&
+         str_char_is_digit(start[6]) && start[7] == '-')) {
+        const char* end = start;
+        while (*end && *end != ',' && *end != ']' && *end != '}' &&
+               *end != '#' && *end != '\r' && *end != '\n' &&
+               *end != ' ' && *end != '\t') end++;
+        size_t length = (size_t)(end - start);
+        char* token = (char*)pool_calloc(ctx.input()->pool, length + 1);
+        if (!token) return {.item = ITEM_ERROR};
+        memcpy(token, start, length);
+        char* parsed_end = NULL;
+        DateTime* datetime = datetime_parse(ctx.input()->pool, token,
+                                            DATETIME_PARSE_LAMBDA, &parsed_end);
+        if (!datetime || parsed_end != token + length) {
+            ctx.addError(num_loc, "Invalid TOML date or time");
+            return {.item = ITEM_ERROR};
+        }
+        *toml = end;
+        tracker.advance(length);
+        return ctx.builder.createDateTime(*datetime);
+    }
+
     // Handle special float values
     if (strncmp(*toml, "inf", 3) == 0) {
         *toml += 3;
@@ -446,7 +471,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
 
     (*toml)++; // skip '{'
     tracker.advance(1);
-    skip_tab_pace(toml);
+    skip_tab_pace_and_comments(toml, line_num);
 
     if (**toml == '}') { // empty table
         (*toml)++;
@@ -455,8 +480,9 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
     }
 
     while (**toml) {
-        String* key = parse_key(ctx, toml);
-        if (!key) {
+        Map* owner = mp;
+        String* key = NULL;
+        if (!parse_dotted_key(ctx, toml, &owner, &key)) {
             return NULL;
         }
 
@@ -473,9 +499,9 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
             return NULL;
         }
 
-        ctx.builder.putToMap(lam::gc_borrow(mp), key, value);
+        ctx.builder.putToMap(lam::gc_borrow(owner), key, value);
 
-        skip_tab_pace(toml);
+        skip_tab_pace_and_comments(toml, line_num);
         if (**toml == '}') {
             (*toml)++;
             tracker.advance(1);
@@ -486,7 +512,7 @@ static Map* parse_inline_table(InputContext& ctx, const char **toml, int *line_n
         }
         (*toml)++;
         tracker.advance(1);
-        skip_tab_pace(toml);
+        skip_tab_pace_and_comments(toml, line_num);
     }
     return mp;
 }
@@ -590,133 +616,67 @@ static Item parse_value(InputContext& ctx, const char **toml, int *line_num, int
             ctx.addError(value_loc, "Unexpected character '%c' (0x%02X)", **toml, (unsigned char)**toml);
             return {.item = ITEM_ERROR};
     }
-}// Helper function to create string key from C string
-static String* create_string_key(InputContext& ctx, const char* key_str) {
-    MarkBuilder& builder = ctx.builder;
-    StringBuf* sb = ctx.sb;
-    stringbuf_reset(sb);
-
-    int len = strlen(key_str);
-    stringbuf_append_str_n(sb, key_str, (size_t)len);
-
-    String* key = builder.createName(sb->str->chars, sb->length);
-    return key;
 }
 
-static String* create_string_key_view(InputContext& ctx, const StrView* key_view) {
-    if (!key_view) return NULL;
-    MarkBuilder& builder = ctx.builder;
-    return builder.createName(key_view->str, key_view->length);
-}
-
-// Helper function to find or create a section in the root map
-static Map* find_or_create_section(InputContext& ctx, Map* root_map, const char* section_name) {
-    Input* input = ctx.input();
-    String* key = create_string_key(ctx, section_name);
-    if (!key) return NULL;
-
-    // Look for existing section in root map
-    ShapeEntry* entry = ((TypeMap*)root_map->type)->shape;
-    while (entry) {
-        if (entry->name->length == key->len &&
-            strncmp(entry->name->str, key->chars, key->len) == 0) {
-            // Found existing section
-            void* field_ptr = (char*)root_map->data + entry->byte_offset;
-            return *(Map**)field_ptr;
-        }
-        entry = typemap_next_field((TypeMap*)root_map->type, entry);
+static Map* toml_child_map(InputContext& ctx, Map* parent, String* key) {
+    Item existing = MapReader(parent).get(key->chars).item();
+    TypeId type_id = get_type_id(existing);
+    if (type_id == LMD_TYPE_MAP) return existing.map;
+    if (type_id == LMD_TYPE_ARRAY && existing.array->length > 0) {
+        Item last = ArrayReader(existing.array).get(existing.array->length - 1).item();
+        if (get_type_id(last) == LMD_TYPE_MAP) return last.map;
     }
+    if (type_id != LMD_TYPE_NULL) return NULL;
 
-    // Create new section
-    Map* section_map = map_pooled(input->pool);
-    if (!section_map) return NULL;
-
-    // Add section to root map
-    ctx.builder.putToMap(lam::gc_borrow(root_map), key, {.item = (uint64_t)section_map});
-
-    return section_map;
+    Map* child = map_pooled(ctx.input()->pool);
+    if (child) ctx.builder.putToMap(lam::gc_borrow(parent), key, {.item = (uint64_t)child});
+    return child;
 }
 
-// Helper function to handle nested sections (like "database.credentials")
-static Map* handle_nested_section(InputContext& ctx, Map* root_map, const char* section_path) {
-    Input* input = ctx.input();
-    if (!section_path) return NULL;
-
-    StrView section_view = strview_from_cstr(section_path);
-    StrViewSplitIter iter;
-    StrView part;
-    strview_split_init(&iter, section_view, '.');
-    if (!strview_split_next(&iter, &part) || part.length == 0) return NULL;
-
-    // Get or create the first level section
-    char* first_part = strview_dup_with_pool(&part, input->pool);
-    if (!first_part) return NULL;
-    Map* current_map = find_or_create_section(ctx, root_map, first_part);
-    if (!current_map) return NULL;
-
-    // If there's no remaining path, return the current section
-    if (iter.finished) return current_map;
-
-    // Handle nested parts
-    TypeMap* current_map_type = (TypeMap*)current_map->type;
-
-    while (strview_split_next(&iter, &part)) {
-        if (part.length == 0) return NULL;
-        String* key = create_string_key_view(ctx, &part);
-        if (!key) return NULL;
-
-        // Look for existing nested table in current map
-        Map* nested_map = NULL;
-        ShapeEntry* entry = current_map_type->shape;
-        while (entry) {
-            if (entry->name->length == key->len &&
-                strncmp(entry->name->str, key->chars, key->len) == 0) {
-                // Found existing entry
-                void* field_ptr = (char*)current_map->data + entry->byte_offset;
-                nested_map = *(Map**)field_ptr;
-                break;
-            }
-            entry = typemap_next_field(current_map_type, entry);
-        }
-
-        if (!nested_map) {
-            // Create new nested table
-            nested_map = map_pooled(input->pool);
-            if (!nested_map) return NULL;
-
-            ctx.builder.putToMap(lam::gc_borrow(current_map), key, {.item = (uint64_t)nested_map});
-        }
-
-        current_map = nested_map;
-        current_map_type = (TypeMap*)nested_map->type;
+// a dotted key adds its intermediate tables to the current table.
+static bool parse_dotted_key(InputContext& ctx, const char **toml, Map** owner, String** key) {
+    *key = parse_key(ctx, toml);
+    if (!*key) return false;
+    skip_tab_pace(toml);
+    while (**toml == '.') {
+        (*toml)++;
+        skip_tab_pace(toml);
+        *owner = toml_child_map(ctx, *owner, *key);
+        if (!*owner) return false;
+        *key = parse_key(ctx, toml);
+        if (!*key) return false;
+        skip_tab_pace(toml);
     }
-
-    return current_map;
+    return true;
 }
 
-static bool parse_table_header(const char **toml, char *table_name, int *line_num) {
-    if (**toml != '[') return false;
-    (*toml)++; // skip '['
-
+static Map* parse_table_header(InputContext& ctx, const char **toml, Map* root) {
+    bool array_table = (*toml)[1] == '[';
+    *toml += array_table ? 2 : 1;
     skip_tab_pace(toml);
 
-    int i = 0;
-    while (**toml && **toml != ']' && i < 255) {
-        if (**toml == ' ' || **toml == '\t') {
-            skip_tab_pace(toml);
-            continue;
-        }
-        table_name[i++] = **toml;
-        (*toml)++;
-    }
-    table_name[i] = '\0';
+    Map* parent = root;
+    String* key = NULL;
+    if (!parse_dotted_key(ctx, toml, &parent, &key)) return NULL;
+    if (**toml != ']' || (array_table && (*toml)[1] != ']')) return NULL;
+    *toml += array_table ? 2 : 1;
 
-    if (i == 0 || **toml != ']') {
-        return false;
-    }
-    (*toml)++; // skip ']'
+    if (!array_table) return toml_child_map(ctx, parent, key);
 
-    return true;
+    Item existing = MapReader(parent).get(key->chars).item();
+    Array* tables = NULL;
+    if (get_type_id(existing) == LMD_TYPE_NULL) {
+        tables = array_pooled(ctx.input()->pool);
+        if (!tables) return NULL;
+        ctx.builder.putToMap(lam::gc_borrow(parent), key, {.item = (uint64_t)tables});
+    } else if (get_type_id(existing) == LMD_TYPE_ARRAY) {
+        tables = existing.array;
+    } else {
+        return NULL;
+    }
+    Map* table = map_pooled(ctx.input()->pool);
+    if (table) array_append(tables, {.item = (uint64_t)table}, ctx.input()->pool);
+    return table;
 }
 
 void parse_toml(Input* input, const char* toml_string) {
@@ -742,33 +702,21 @@ void parse_toml(Input* input, const char* toml_string) {
 
         // Check for table header
         if (*toml == '[') {
-            // Check for array of tables [[...]] which we don't support yet
-            if (*(toml + 1) == '[') {
-                ctx.addWarning(ctx.tracker.location(), "Array of tables [[...]] not yet supported");
-                skip_line(&toml, &line_num);
-                continue;
-            }
-
-            char table_name[256];
-            if (parse_table_header(&toml, table_name, &line_num)) {
-                // Handle sections using the new refactored function
-                Map* section_map = handle_nested_section(ctx, root_map, table_name);
-                if (section_map) {
-                    current_table = section_map;
-                }
-                skip_line(&toml, &line_num);
-                continue;
-            } else {
+            Map* section_map = parse_table_header(ctx, &toml, root_map);
+            if (!section_map) {
                 ctx.addError(ctx.tracker.location(), "Invalid table header");
-                skip_line(&toml, &line_num);
-                continue;
+            } else {
+                current_table = section_map;
             }
+            skip_line(&toml, &line_num);
+            continue;
         }
 
         // Parse key-value pair
         SourceLocation key_loc = ctx.tracker.location();
-        String* key = parse_key(ctx, &toml);
-        if (!key) {
+        Map* owner = current_table;
+        String* key = NULL;
+        if (!parse_dotted_key(ctx, &toml, &owner, &key)) {
             ctx.addError(key_loc, "Invalid or empty key");
             skip_line(&toml, &line_num);
             continue;
@@ -789,7 +737,7 @@ void parse_toml(Input* input, const char* toml_string) {
             continue;
         }
 
-        ctx.builder.putToMap(lam::gc_borrow(current_table), key, value);
+        ctx.builder.putToMap(lam::gc_borrow(owner), key, value);
 
         skip_line(&toml, &line_num);
     }

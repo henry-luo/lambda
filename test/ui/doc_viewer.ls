@@ -110,20 +110,24 @@ fn erase_forwards(value, evt) {
   else { value }
 }
 
-fn entry_is_visible(entry) {
+fn entry_is_visible(entry, parent_path) {
   let entry_name = lower(entry["name"])
   // Hide implementation artefacts without preventing normal source browsing:
   // dot entries, build/release output directories, and *.exe binaries.
   not starts_with(entry_name, ".") and
+    // The shipped POSIX executable has no extension, and browsing the viewer's
+    // own UI sources recursively creates another viewer inside this preview.
+    not (parent_path == "." and entry_name == "lambda") and
+    not (parent_path == "./test" and entry_name == "ui") and
     (not entry["is_dir"] or
       (not starts_with(entry_name, "build") and not starts_with(entry_name, "release"))) and
     (entry["is_dir"] or not ends_with(entry_name, ".exe"))
 }
 
-fn entry_matches_filter(entry, filter_text) {
+fn entry_matches_filter(entry, parent_path, filter_text) {
   // Directories remain visible so a search result can be reached by expanding
   // its ancestry; the filter itself applies to file names.
-  entry_is_visible(entry) and
+  entry_is_visible(entry, parent_path) and
     (entry["is_dir"] or filter_text == "" or contains(lower(entry["name"]), lower(filter_text)))
 }
 
@@ -764,7 +768,7 @@ view <tree_entry> state children: null, is_open: ~.initial_open {
   }
   let matching_children = if (~.is_dir and is_open) {
     let current_children = if (children == null) { directory_entries(entry_path) } else { children };
-    [for (child in current_children where entry_matches_filter(child, ~.filter_text)) child]
+    [for (child in current_children where entry_matches_filter(child, entry_path, ~.filter_text)) child]
   } else { [] };
 
   <div class:"tree-entry", 'data-tree-path':entry_path,
@@ -913,7 +917,7 @@ on click(evt) {
 // --------------------------------------------------------------------------
 
 edit <project_tree> state root_open: true, open_paths: [], filter_text: "", selected_path: "" {
-  let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, filter_text)) entry];
+  let matching_root_entries = [for (entry in PROJECT_ENTRIES where entry_matches_filter(entry, PROJECT_ROOT, filter_text)) entry];
 
   <aside class:"file-panel"
     , <div class:"file-panel-header"

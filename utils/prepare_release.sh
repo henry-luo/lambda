@@ -57,6 +57,12 @@ done
 cp ./test/input/comprehensive* ./release/test/input/
 cp -R ./test/input/tikz ./release/test/input/
 
+# Copy PDF samples browsed by the demo viewer.
+mkdir -p ./release/test/pdf
+for file in PrinceCatalogue.pdf somatosensory.pdf flyer.pdf Get_Started_With_Smallpdf.pdf drylab.pdf; do
+    cp "./test/pdf/$file" "./release/test/pdf/$file"
+done
+
 # Step 2d: Bundle the document viewer ('lambda demo' opens test/ui/doc_viewer.html,
 # a bare 'lambda view' opens test/ui/doc_viewer.ls). Both load the Seti icon font
 # from test/ui/icons/; the script loads KaTeX CSS from ../../lmd/ (copied in Step 1).

@@ -796,7 +796,9 @@ static void view_teardown_visit_node(ViewTree* tree,
             // subtree; only that element releases and frees it, exactly once.
             // Freeing it here double-freed the owner's prop, freed families the
             // view pool never allocated, and could free a live ancestor's font.
-            if (flags & VIEW_TEARDOWN_RESET_IN_PLACE) {
+            if (flags & (VIEW_TEARDOWN_RESET_IN_PLACE | VIEW_TEARDOWN_FREE_POOL)) {
+                // Retired text fragments must rejoin the pool's reusable list
+                // before clearing the node's only pointer to their storage.
                 view_teardown_reset_text(tree, text);
             }
             if (flags & VIEW_TEARDOWN_CLEAR_POINTERS) {

@@ -440,6 +440,7 @@ void free_document(DomDocument* doc) {
         if (js_runtime_state_for(state_owner) &&
                 !js_runtime_state_init(state_owner)) return;
     }
+    dom_retire_begin_destroy(doc);
     radiant_document_destroy_state(doc);
 
     // JS mutation records can retain detached controls with heap-owned props.

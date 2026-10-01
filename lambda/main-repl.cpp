@@ -145,16 +145,13 @@ void print_help() {
     printf("Lambda Script Runtime v0.3 (alpha)\n");
     printf("Usage:\n");
     printf("  lambda                       - Start REPL mode (default)\n");
-    printf("  lambda [script.ls]           - Run a script file\n");
-    printf("  lambda --max-errors N [script.ls]   - Set max type errors before stopping (default: 10)\n");
-    printf("  lambda --no-drain [script.ls]       - Return without draining spawned tasks\n");
-    printf("  lambda --optimize=N [script.ls]     - Set MIR optimization level (0-3, default: 2)\n");
+    printf("  lambda <script.ls>           - Run a script file\n");
     printf("  lambda run <script.ls>              - Run script with main function execution\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
     printf("  lambda render <input.html> -o <output.svg|pdf|png|jpg>  - Render HTML to SVG/PDF/PNG/JPEG\n");
-    printf("  lambda view [file.pdf|file.html]  - Open PDF or HTML document in viewer (default: test/ui/doc_viewer.ls)\n");
+    printf("  lambda view <file.pdf|file.html>  - Open PDF or HTML document in viewer (default: test/ui/doc_viewer.ls)\n");
     printf("  lambda edit <file.md|file.html|file.svg>  - Open a document in the editing application\n");
     printf("  lambda demo                  - Open the bundled document viewer demo (test/ui/doc_viewer.html)\n");
     printf("  lambda fetch <url> [-o file]  - Fetch HTTP/HTTPS resource\n");
@@ -170,8 +167,7 @@ void print_help() {
     printf("  --mem-dump[=PATH]            - On exit, write the memory-context snapshot as JSON\n");
     printf("                                 (default: ./temp/mem_snapshot.json) and log a MEMCTX leak report\n");
     printf("\nScript Commands:\n");
-    printf("  run <script>                 - Execute script with run_main enabled\n");
-    printf("                               - This automatically runs the main function if defined\n");
+    printf("  run <script>                 - Runs the main() procedure if defined\n");
     printf("\nREPL Commands:\n");
     printf("  quit, q, exit        - Exit REPL\n");
     printf("  help, h              - Show help\n");

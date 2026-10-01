@@ -25,6 +25,7 @@
 #include "../lambda/network/enhanced_file_cache.h"
 #include "../lambda/network/network_downloader.h"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../lambda/js/js_event_loop.h"
 #include "../lambda/dom/dom.h"
 #include "../lambda/js/js_runtime.h"
@@ -1295,6 +1296,10 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                    bool enable_event_log,
                                                    bool enable_state_dump,
                                                    UiAppMode app_mode) {
+    struct DeferredRetirement {
+        bool previous = dom_retire_set_deferred(true);
+        ~DeferredRetirement() { dom_retire_set_deferred(previous); }
+    } deferred_retirement;
     log_init_wrapper();
     ViewPhaseTiming phase_timing = {};
     phase_timing.total_start_ns = time_now_ns();
@@ -1671,6 +1676,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                     continue;
                 }
                 bool running = event_sim_update(sim_ctx, &ui_context, window, current_time);
+                dom_retire_idle(2000);
                 if (!running) break;
                 // Tick the JS event loop between sim events so deferred callbacks
                 // (setTimeout/queueMicrotask-scheduled work, e.g. the coalesced
@@ -1854,6 +1860,9 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
                                                      editing_animation_active,
                                                      sim_ctx, sim_start_time,
                                                      uv_loop);
+        // Reclaim retired storage after painting, between input batches.
+        // Pending work wakes again promptly without running a busy idle loop.
+        if (dom_retire_idle(2000) && wait_timeout > 0.001) wait_timeout = 0.001;
         if (wait_timeout > 0.0) {
             glfwWaitEventsTimeout(wait_timeout);
         }

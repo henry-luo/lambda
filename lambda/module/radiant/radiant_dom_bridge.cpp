@@ -16,6 +16,8 @@
 #include "../../dom/dom_core.h"
 #include "../../js/js_runtime.h"
 #include "../../runtime/heap_api.h"
+#include "../../runtime/render_map.h"
+#include "../../runtime/transpiler.hpp"
 #include "../../../radiant/view.hpp"
 #include "../../../radiant/radiant.hpp"
 #include "../../../radiant/render.hpp"
@@ -982,6 +984,13 @@ static void radiant_dom_weak_wrapper_cleared(uint64_t*, void* context) {
     // callbacks; the owner document is needed for one post-batch DOM sweep.
     entry->next_sweep = s_radiant_dom_wrapper_sweep;
     s_radiant_dom_wrapper_sweep = entry;
+}
+
+void dom_retire_release_render_result(DomDocument* doc, Item result) {
+    Runtime* runtime = dom_document_script_runtime(doc);
+    // Embedded-document cleanup can change the ambient runtime; use the
+    // retiring document's capsule without switching an evaluator (D5.4.1).
+    if (runtime) render_map_forget_retired_result(runtime_get_eval_context(runtime), result);
 }
 
 extern "C" void gc_weak_slots_processed(void) {

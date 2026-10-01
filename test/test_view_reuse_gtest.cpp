@@ -6,6 +6,9 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_style_node.hpp"
+#include "../lambda/io/mark_builder.hpp"
+
+DomElement* build_dom_tree_from_element(Element*, DomDocument*, DomElement*);
 
 class ViewReuseTest : public ::testing::Test {
 protected:
@@ -197,6 +200,69 @@ TEST_F(DomRetirementTest, PinnedDescendantBlocksBottomUpSubtreeRetirement) {
     EXPECT_EQ(dom_retire_sweep(&doc), 2u);
 }
 
+TEST_F(DomRetirementTest, UnregisteredLayoutBoxDoesNotRetainAuthoredSubtree) {
+    DomElement* parent = root();
+    DomElement* branch = element("branch");
+    DomElement* generated = DomElement::create_in(doc.document_pool);
+    ASSERT_NE(generated, nullptr);
+    ASSERT_TRUE(generated->is_synthetic());
+    ASSERT_TRUE(attach(parent, branch));
+    ASSERT_TRUE(attach(branch, generated));
+    DomNodeRef ref = dom_node_ref(branch);
+
+    ASSERT_TRUE(parent->remove_child(branch));
+    EXPECT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
+}
+
+TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
+    DomElement* parent = root();
+    DomElement* branch = element("branch");
+    ASSERT_TRUE(attach(parent, branch));
+    for (int i = 0; i < 1024; i++) {
+        ASSERT_TRUE(attach(branch, element("leaf")));
+    }
+    DomElement* retained = element("retained");
+    ASSERT_TRUE(attach(parent, retained));
+
+    // A backing-tree edit can leave raw edges in a surviving wrapper.
+    retained->first_child = branch->first_child;
+    retained->last_child = branch->last_child;
+    ASSERT_TRUE(parent->remove_child(branch));
+    retained->prev_sibling = branch;
+    EXPECT_EQ(dom_retire_sweep(&doc), 1025u);
+    EXPECT_EQ(retained->first_child, nullptr);
+    EXPECT_EQ(retained->last_child, nullptr);
+    EXPECT_EQ(retained->prev_sibling, nullptr);
+    EXPECT_EQ(parent->first_child, retained);
+    EXPECT_EQ(parent->last_child, retained);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.retirement_edge_visits, stats.registered_nodes);
+}
+
+TEST_F(DomRetirementTest, ConsumedMutationRecordsReleaseDetachedSubtree) {
+    DomElement* parent = root();
+    DomElement* branch = element("branch");
+    DomElement* leaf = element("leaf");
+    ASSERT_TRUE(attach(parent, branch));
+    ASSERT_TRUE(attach(branch, leaf));
+    DomNodeRef ref = dom_node_ref(leaf);
+    ASSERT_TRUE(dom_node_pin(&doc, ref, DOM_NODE_PIN_RECONCILE));
+    doc.js.mutation_record_count = 1;
+    doc.js.mutation_records[0].target = leaf;
+    doc.js.mutation_records[0].target_id = ref.expected_id;
+    ASSERT_TRUE(parent->remove_child(branch));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+
+    dom_js_mutation_records_reset(&doc);
+    EXPECT_EQ(doc.js.mutation_record_count, 0);
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.retired_nodes, 2u);
+}
+
 TEST_F(DomRetirementTest, GeneratedTextPayloadIsFreedWithItsNode) {
     DomElement* parent = root();
     DomText* text = DomText::create_copy("before", 6, parent);
@@ -213,6 +279,63 @@ TEST_F(DomRetirementTest, GeneratedTextPayloadIsFreedWithItsNode) {
     PoolStats after = {};
     pool_get_detailed_stats(doc.document_pool, &after);
     EXPECT_GT(after.free_count, before.free_count);
+}
+
+struct DeferredDomRetirementScope {
+    bool previous = dom_retire_set_deferred(true);
+    ~DeferredDomRetirementScope() { dom_retire_set_deferred(previous); }
+};
+
+TEST_F(DomRetirementTest, DeferredRetirementWaitsForIdleAndRecyclesLater) {
+    DeferredDomRetirementScope deferred;
+    DomElement* parent = root();
+    DomElement* child = element("child");
+    ASSERT_TRUE(attach(parent, child));
+    DomNodeRef ref = dom_node_ref(child);
+    ASSERT_TRUE(parent->remove_child(child));
+    EXPECT_EQ(dom_retire_sweep(&doc), 0u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), child);
+
+    // A zero recycle budget still commits logical retirement at the safe point.
+    EXPECT_TRUE(dom_retire_idle(0));
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), nullptr);
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_GT(stats.pending_primary_bytes, 0u);
+    EXPECT_EQ(stats.recycled_nodes, 0u);
+    EXPECT_FALSE(dom_retire_idle(UINT64_MAX));
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.pending_primary_bytes, 0u);
+    EXPECT_EQ(stats.recycled_nodes, 1u);
+}
+
+TEST_F(DomRetirementTest, ReattachedNodeSurvivesDeferredSweep) {
+    DeferredDomRetirementScope deferred;
+    DomElement* parent = root();
+    DomElement* child = element("child");
+    ASSERT_TRUE(attach(parent, child));
+    DomNodeRef ref = dom_node_ref(child);
+    ASSERT_TRUE(parent->remove_child(child));
+    dom_retire_sweep(&doc);
+    ASSERT_TRUE(attach(parent, child));
+    EXPECT_FALSE(dom_retire_idle(UINT64_MAX));
+    EXPECT_EQ(dom_node_ref_validate(&doc, ref), child);
+}
+
+TEST_F(DomRetirementTest, DestroyDiscardsQueuedArenaRecycling) {
+    DeferredDomRetirementScope deferred;
+    DomElement* parent = root();
+    DomElement* child = element("child");
+    ASSERT_TRUE(attach(parent, child));
+    ASSERT_TRUE(parent->remove_child(child));
+    dom_retire_sweep(&doc);
+    EXPECT_TRUE(dom_retire_idle(0));
+    dom_retire_begin_destroy(&doc);
+    EXPECT_FALSE(dom_retire_idle(UINT64_MAX));
+    DomLifecycleStats stats = {};
+    dom_lifecycle_get_stats(&doc, &stats);
+    EXPECT_EQ(stats.pending_primary_bytes, 0u);
+    EXPECT_EQ(stats.recycled_nodes, 0u);
 }
 
 TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
@@ -235,6 +358,9 @@ TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
     FontProp* owned = (FontProp*)tree.alloc_prop(sizeof(FontProp));
     parent->font = owned;
     text->font = owned;
+    TextRect* rect = tree.alloc_text_rect();
+    ASSERT_NE(rect, nullptr);
+    text->rect = rect;
 
     ASSERT_TRUE(parent->remove_child(span));
     EXPECT_EQ(dom_retire_sweep(&doc), 2u);
@@ -242,6 +368,7 @@ TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
     // live parent's font dangling
     EXPECT_TRUE(pool_owns(tree.prop_pool, owned));
     EXPECT_EQ(parent->font, owned);
+    EXPECT_EQ(tree.alloc_text_rect(), rect);
 
     parent->font = nullptr;
     doc.view_tree = nullptr;
@@ -357,6 +484,40 @@ TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
     doc.destroy();
     arena_destroy(input_arena);
     pool_destroy(input_pool);
+}
+
+TEST(DomRetirementOwnerArenaTest, FlattenedArrayTextIsRegisteredAndRetired) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool, nullptr);
+    ASSERT_NE(input, nullptr);
+    input->ui_mode = true;
+    DomDocument doc;
+    ASSERT_TRUE(doc.init(input));
+    MarkBuilder builder(input);
+    Item first = {.item = s2it(builder.createDomTextString("first", 5))};
+    Item second = {.item = s2it(builder.createDomTextString("second", 6))};
+    Item nested = builder.array().append(second).final();
+    Item children = builder.array().append(first).append(nested).final();
+    Item branch_source = builder.element("branch").child(children).final();
+    Item root_source = builder.element("root").child(branch_source).final();
+    doc.root = build_dom_tree_from_element(root_source.element, &doc, nullptr);
+    ASSERT_NE(doc.root, nullptr);
+    DomElement* branch = doc.root->first_child->as_element();
+    DomNode* first_node = branch->first_child;
+    DomNode* second_node = first_node->next_sibling;
+    ASSERT_NE(second_node, nullptr);
+    DomNodeRef first_ref = dom_node_ref(first_node);
+    DomNodeRef second_ref = dom_node_ref(second_node);
+    EXPECT_EQ(dom_node_ref_validate(&doc, first_ref), first_node);
+    EXPECT_EQ(dom_node_ref_validate(&doc, second_ref), second_node);
+
+    ASSERT_TRUE(static_cast<DomNode*>(doc.root)->remove_child(branch));
+    EXPECT_EQ(dom_retire_sweep(&doc), 3u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, first_ref), nullptr);
+    EXPECT_EQ(dom_node_ref_validate(&doc, second_ref), nullptr);
+    doc.destroy();
+    pool_destroy(pool);
 }
 
 class StyleEpochTest : public ::testing::Test {

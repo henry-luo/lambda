@@ -1,0 +1,24 @@
+{
+  "name": "Document viewer opens TOML tables, dates, and dotted keys",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_test_toml .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "test.toml"},
+    {"type": "assert_count", "target": {"selector": ".property-message.preview-error"}, "count": 0},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='title'] > .property-row .property-value"}, "equals": "Test TOML Configuration"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='database'] > .property-row"}},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='server'] > .property-row .property-value"}, "equals": "192.168.1.1"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='products'] > .property-row"}},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='0']"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".property-entry[data-property-name='1']"}, "count": 1},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='1'] > .property-row"}},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='name'] > .property-row .property-value"}, "equals": "Orange"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='site'] > .property-row"}},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='google.com'] > .property-row .property-value"}, "equals": "true"},
+    {"type": "click", "target": {"selector": ".property-entry[data-property-name='comprehensive'] > .property-row"}},
+    {"type": "assert_text", "target": {"selector": ".property-entry[data-property-name='date_only'] > .property-row .property-value"}, "contains": "1979-05-27"}
+  ]
+}

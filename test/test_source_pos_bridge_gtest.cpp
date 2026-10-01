@@ -478,6 +478,8 @@ TEST_F(SourcePosBridgeRoundTrip, SourcePosToDomTextUsesRecordedAncestor) {
     // follow the remaining child path to restore the editor caret.
     source_pos_bridge_reset();
     render_map_reset();
+    // Reset also clears the source root used to validate an empty source path.
+    render_map_set_source_doc_root(root_item);
     render_map_record(root_item, tref, root_item, Item{0}, 0);
     render_map_record_path(root_item, tref, nullptr, 0);
 
@@ -770,4 +772,57 @@ TEST(RenderMapRetransform, EveryDirtyEntryRunsOnceDespiteInserts) {
 
     render_map_reset();
     test_template_registry = nullptr;
+}
+
+TEST(RenderMapRetransform, ForgetsRetiredResultsBeforeTheirAddressesAreReused) {
+    render_map_destroy();
+    Input* input = InputManager::create_input(nullptr);
+    MarkBuilder builder(input);
+    Item old_leaf = builder.element("span").text("old").final();
+    Item old_page = builder.element("section").child(old_leaf).final();
+    Item new_page = builder.element("section").text("new").final();
+    Item root = builder.element("main").child(new_page).final();
+    Item old_source = synthetic_bridge_item(1);
+    Item new_source = synthetic_bridge_item(2);
+    render_map_record(old_source, "old", old_page, ItemNull, -1);
+    render_map_record(new_source, "new", new_page, root, 0);
+    render_map_set_doc_root(root);
+
+    render_map_forget_retired_result(context, old_leaf);
+    render_map_forget_retired_result(context, old_page);
+    EXPECT_EQ(get_type_id(render_map_get_result(old_source, "old")), LMD_TYPE_NULL);
+    RenderMapLookup lookup = {};
+    EXPECT_FALSE(render_map_reverse_lookup(old_leaf, &lookup));
+    ASSERT_TRUE(render_map_reverse_lookup(new_page, &lookup));
+    EXPECT_EQ(lookup.source_item.item, new_source.item);
+
+    // Reusing a retired address must install the new owner's nested route.
+    Item reused_page = builder.element("article").child(old_leaf).final();
+    render_map_record(new_source, "reused", reused_page, ItemNull, -1);
+    ASSERT_TRUE(render_map_reverse_lookup(old_leaf, &lookup));
+    EXPECT_EQ(lookup.source_item.item, new_source.item);
+    render_map_destroy();
+}
+
+TEST(RenderMapRetransform, RetiringOldResultPreservesReplacementAndLiveFragments) {
+    render_map_destroy();
+    Input* input = InputManager::create_input(nullptr);
+    MarkBuilder builder(input);
+    Item old_leaf = builder.element("span").text("old").final();
+    Item leaf = builder.element("span").text("live").final();
+    Item fragment = builder.array().append(leaf).final();
+    Item empty = builder.array().final();
+    Item root = builder.element("main").child(leaf).final();
+    Item source = synthetic_bridge_item(1);
+    render_map_record(source, "fragment", old_leaf, root, 0);
+    render_map_record(source, "fragment", fragment, root, 0);
+    render_map_record(source, "empty", empty, ItemNull, -1);
+    render_map_bind_fragment_parent(empty, root, 1, 0);
+    render_map_forget_retired_result(context, old_leaf);
+    EXPECT_EQ(render_map_get_result(source, "fragment").item, fragment.item);
+    EXPECT_EQ(render_map_get_result(source, "empty").item, empty.item);
+    RenderMapLookup lookup = {};
+    EXPECT_FALSE(render_map_reverse_lookup(old_leaf, &lookup));
+    EXPECT_TRUE(render_map_reverse_lookup(leaf, &lookup));
+    render_map_destroy();
 }

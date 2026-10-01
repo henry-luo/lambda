@@ -5,6 +5,7 @@
 #include "../../lambda-data.hpp"
 #include "../../../lib/arena.h"
 #include "../../../lib/log.h"
+#include "../../../lib/time_util.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -19,11 +20,13 @@ typedef struct DomNodeRecord {
     bool recyclable;
     bool candidate;
     bool current_owner;
+    bool retiring;
     size_t primary_size;
     Element* backing_source;
     uint32_t pins[DOM_NODE_PIN_REASON_COUNT];
     struct DomNodeRecord* bucket_next;
     struct DomNodeRecord* all_next;
+    struct DomNodeRecord* retire_next;
 } DomNodeRecord;
 
 typedef struct DomNodeRegistry {
@@ -31,8 +34,38 @@ typedef struct DomNodeRegistry {
     size_t bucket_count;
     size_t record_count;
     DomNodeRecord* all_records;
+    DomDocument* document;
+    DomNodeRecord* pending_free;
+    struct DomNodeRegistry* queue_prev;
+    struct DomNodeRegistry* queue_next;
+    bool queued;
+    bool sweep_requested;
+    bool destroying;
     DomLifecycleStats stats;
 } DomNodeRegistry;
+
+static thread_local bool dom_retirement_deferred;
+static thread_local DomNodeRegistry* dom_retirement_queue;
+static thread_local DomNodeRegistry* dom_retirement_queue_tail;
+
+static void dom_retire_dequeue(DomNodeRegistry* registry) {
+    if (!registry || !registry->queued) return;
+    if (registry->queue_prev) registry->queue_prev->queue_next = registry->queue_next;
+    else dom_retirement_queue = registry->queue_next;
+    if (registry->queue_next) registry->queue_next->queue_prev = registry->queue_prev;
+    else dom_retirement_queue_tail = registry->queue_prev;
+    registry->queue_prev = registry->queue_next = nullptr;
+    registry->queued = false;
+}
+
+static void dom_retire_enqueue(DomNodeRegistry* registry) {
+    if (registry->queued || registry->destroying) return;
+    registry->queue_prev = dom_retirement_queue_tail;
+    if (dom_retirement_queue_tail) dom_retirement_queue_tail->queue_next = registry;
+    else dom_retirement_queue = registry;
+    dom_retirement_queue_tail = registry;
+    registry->queued = true;
+}
 
 // DOM-only unit targets do not link the Radiant view teardown implementation.
 __attribute__((weak)) void view_tree_release_retired_subtree(ViewTree*, DomNode*) {}
@@ -41,6 +74,7 @@ __attribute__((weak)) void view_tree_prepare_detached_subtree(DomNode*) {}
 __attribute__((weak)) void view_pool_release_detached_form_props(DomNode*) {}
 __attribute__((weak)) void form_control_release_prop(DomElement*) {}
 __attribute__((weak)) void dom_range_refresh_lifecycle_pins(DomDocument*) {}
+__attribute__((weak)) void dom_retire_release_render_result(DomDocument*, Item) {}
 extern "C" __attribute__((weak)) void dom_expando_attachment_changed(
     DomDocument*, DomNode*, bool) {}
 
@@ -119,6 +153,7 @@ bool dom_lifecycle_init(DomDocument* doc) {
     DomNodeRegistry* registry = (DomNodeRegistry*)pool_calloc(
         doc->document_pool, sizeof(DomNodeRegistry));
     if (!registry) return false;
+    registry->document = doc;
     doc->services.node_registry = registry;
     if (!dom_registry_resize(doc, 256)) {
         doc->services.node_registry = nullptr;
@@ -130,6 +165,7 @@ bool dom_lifecycle_init(DomDocument* doc) {
 
 void dom_lifecycle_destroy(DomDocument* doc) {
     if (!doc) return;
+    dom_retire_dequeue(dom_registry(doc));
     // Registry records are document-pool allocations and disappear in the
     // immediately following pool destruction; clearing the owner blocks any
     // teardown callback from validating already-destroyed arena storage.
@@ -385,6 +421,11 @@ void dom_node_cancel_detached(DomDocument* doc, DomNode* root) {
 
 static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
                                    DomNodeRecord** blocked) {
+    // Layout-only nodes need not be in the script DOM registry. Their view
+    // owner releases them; they must not keep an authored subtree alive.
+    if (node && node->is_element() && node->as_element()->is_synthetic()) {
+        return true;
+    }
     DomNodeRegistry* registry = dom_registry(doc);
     DomNodeRecord* record = dom_record_find(registry, node);
     // A retired descendant can remain in a detached parent's old sibling
@@ -393,11 +434,6 @@ static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
         !record->primary_size || record->id != node->id) {
         if (blocked) *blocked = record;
         return false;
-    }
-    if (node->is_element() && node->as_element()->is_synthetic()) {
-        // Layout-only pseudo nodes are linked into the retained view tree, not
-        // the script DOM; keep their addresses stable for the next layout pass.
-        return true;
     }
     for (int reason = 0; reason < DOM_NODE_PIN_REASON_COUNT; reason++) {
         if (record->pins[reason]) {
@@ -414,44 +450,63 @@ static bool dom_subtree_can_retire(DomDocument* doc, DomNode* node,
     return true;
 }
 
-static DomNode* dom_live_sibling(DomNodeRegistry* registry, DomNode* node) {
-    DomNodeRecord* record = dom_record_find(registry, node);
-    return record && record->state != DOM_NODE_RETIRED ? node : nullptr;
+static DomNode* dom_retire_resolve_edge(DomNodeRegistry* registry, DomNode* node,
+                                       bool forward) {
+    DomNode* live = node;
+    while (live) {
+        DomNodeRecord* record = dom_record_find(registry, live);
+        if (!record || !record->retiring) break;
+        live = forward ? live->next_sibling : live->prev_sibling;
+    }
+    // Compress shared stale chains before any node storage is reclaimed.
+    while (node != live) {
+        DomNode*& edge = forward ? node->next_sibling : node->prev_sibling;
+        DomNode* next = edge;
+        edge = live;
+        node = next;
+    }
+    return live;
 }
 
-static void dom_retire_unlink_inbound_edges(DomNodeRegistry* registry, DomNode* node) {
-    DomNode* previous = dom_live_sibling(registry, node->prev_sibling);
-    DomNode* next = dom_live_sibling(registry, node->next_sibling);
+static void dom_retire_unlink_inbound_edges(DomNodeRegistry* registry) {
     for (DomNodeRecord* record = registry->all_records; record;
          record = record->all_next) {
-        if (record->state == DOM_NODE_RETIRED || record->address == node) continue;
+        registry->stats.retirement_edge_visits++;
+        if (record->state == DOM_NODE_RETIRED) continue;
         DomNode* other = record->address;
-        if (other->next_sibling == node) other->next_sibling = next;
-        if (other->prev_sibling == node) other->prev_sibling = previous;
+        other->next_sibling = dom_retire_resolve_edge(registry, other->next_sibling, true);
+        other->prev_sibling = dom_retire_resolve_edge(registry, other->prev_sibling, false);
         if (other->is_element()) {
             DomElement* element = other->as_element();
-            if (element->first_child == node) element->first_child = next;
-            if (element->last_child == node) element->last_child = previous;
+            element->first_child = dom_retire_resolve_edge(registry, element->first_child, true);
+            element->last_child = dom_retire_resolve_edge(registry, element->last_child, false);
         }
     }
-    // MarkEditor may replace its backing chain before unlinking the old DOM
-    // wrapper. Remove every surviving inbound raw edge before poisoning it.
-    node->parent = nullptr;
-    node->prev_sibling = nullptr;
-    node->next_sibling = nullptr;
 }
 
-static size_t dom_retire_subtree(DomDocument* doc, DomNode* node) {
+static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
+                                 DomNodeRecord** pending) {
     if (node && node->is_element() && node->as_element()->is_synthetic()) {
         return 0;
     }
     DomNodeRegistry* registry = dom_registry(doc);
+    DomNodeRecord* record = dom_record_find(registry, node);
+    // Only a fat node recycles its Lambda result identity. Ordinary DOM
+    // wrappers borrow parser values that remain valid after wrapper retirement.
+    Item result = ItemNull;
+    if (node->is_element() && record->backing_source == dom_element_to_element(node->as_element())) {
+        result.element = record->backing_source;
+    } else if (node->is_text() && node->as_text()->native_string ==
+               (String*)(node->as_text() + 1)) {
+        result.item = s2it(node->as_text()->native_string);
+    }
+    if (result.item != ItemNull.item) dom_retire_release_render_result(doc, result);
     size_t retired = 0;
     if (node->is_element()) {
         DomNode* child = node->as_element()->first_child;
         while (child) {
             DomNode* next = child->next_sibling;
-            retired += dom_retire_subtree(doc, child);
+            retired += dom_retire_subtree(doc, child, pending);
             child = next;
         }
         dom_element_release_retired_storage(node->as_element());
@@ -459,21 +514,18 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node) {
         dom_text_release_retired_storage(doc, node->as_text());
     }
 
-    DomNodeRecord* record = dom_record_find(registry, node);
-    dom_retire_unlink_inbound_edges(registry, node);
     size_t primary_size = record->primary_size;
     record->candidate = false;
     record->state = DOM_NODE_RETIRED;
+    record->retiring = true;
+    record->retire_next = *pending;
+    *pending = record;
     registry->stats.retired_nodes++;
     registry->stats.retired_primary_bytes += primary_size;
-    // The live generation disappears from the registry before its bytes enter
-    // the generic recycler, so stale refs never inspect a repurposed header.
-    memset(node, 0xdd, primary_size);
-    arena_free(record->primary_arena, node, primary_size);
     return retired + 1u;
 }
 
-size_t dom_retire_sweep(DomDocument* doc) {
+static size_t dom_retire_collect(DomDocument* doc) {
     DomNodeRegistry* registry = dom_registry(doc);
     if (!registry || !doc->node_arena) return 0;
     // Range endpoints mutate through many DOM-spec algorithms. Recomputing
@@ -481,6 +533,7 @@ size_t dom_retire_sweep(DomDocument* doc) {
     // without allowing a missed setter to expose a detached live endpoint.
     dom_range_refresh_lifecycle_pins(doc);
     size_t retired = 0;
+    DomNodeRecord* pending = nullptr;
     for (DomNodeRecord* record = registry->all_records; record;) {
         DomNodeRecord* next = record->all_next;
         if (record->candidate && record->state == DOM_NODE_DETACHED_CANDIDATE) {
@@ -508,7 +561,7 @@ size_t dom_retire_sweep(DomDocument* doc) {
                     if (doc->view_tree) {
                         view_tree_release_retired_subtree(doc->view_tree, root);
                     }
-                    retired += dom_retire_subtree(doc, root);
+                    retired += dom_retire_subtree(doc, root, &pending);
                 } else {
                     registry->stats.rejected_pinned++;
                 }
@@ -516,7 +569,86 @@ size_t dom_retire_sweep(DomDocument* doc) {
         }
         record = next;
     }
+    if (pending) {
+        // MarkEditor can leave raw inbound edges outside a detached subtree.
+        // Repair all of them once per batch, while sibling chains remain live.
+        dom_retire_unlink_inbound_edges(registry);
+        while (pending) {
+            DomNodeRecord* record = pending;
+            pending = record->retire_next;
+            record->retire_next = nullptr;
+            record->retiring = false;
+            if (!registry->destroying) {
+                record->retire_next = registry->pending_free;
+                registry->pending_free = record;
+                registry->stats.pending_primary_bytes += record->primary_size;
+            }
+        }
+    }
     return retired;
+}
+
+static void dom_retire_recycle_one(DomNodeRegistry* registry) {
+    DomNodeRecord* record = registry->pending_free;
+    registry->pending_free = record->retire_next;
+    record->retire_next = nullptr;
+    // Edges and generation refs are invalidated before a slot becomes reusable.
+    memset(record->address, 0xdd, record->primary_size);
+    arena_free(record->primary_arena, record->address, record->primary_size);
+    registry->stats.pending_primary_bytes -= record->primary_size;
+    registry->stats.recycled_nodes++;
+}
+
+size_t dom_retire_sweep(DomDocument* doc) {
+    DomNodeRegistry* registry = dom_registry(doc);
+    if (!registry) return 0;
+    if (dom_retirement_deferred && !registry->destroying) {
+        registry->sweep_requested = true;
+        dom_retire_enqueue(registry);
+        return 0;
+    }
+    size_t retired = dom_retire_collect(doc);
+    while (registry->pending_free) dom_retire_recycle_one(registry);
+    return retired;
+}
+
+bool dom_retire_set_deferred(bool enabled) {
+    bool previous = dom_retirement_deferred;
+    dom_retirement_deferred = enabled;
+    return previous;
+}
+
+bool dom_retire_idle(uint64_t budget_us) {
+    uint64_t start = time_now_us();
+    while (dom_retirement_queue) {
+        DomNodeRegistry* registry = dom_retirement_queue;
+        dom_retire_dequeue(registry);
+        if (registry->sweep_requested) {
+            registry->sweep_requested = false;
+            dom_retire_collect(registry->document);
+        }
+        // Arena allocation and recycling stay on their owning thread (D4.1.4v4).
+        // Yield between frees so coalescing a large retired page cannot block
+        // the next input event until the entire page has been recycled.
+        while (registry->pending_free && time_now_us() - start < budget_us) {
+            dom_retire_recycle_one(registry);
+        }
+        if (registry->pending_free || registry->sweep_requested) dom_retire_enqueue(registry);
+        if (time_now_us() - start >= budget_us) break;
+    }
+    return dom_retirement_queue != nullptr;
+}
+
+void dom_retire_begin_destroy(DomDocument* doc) {
+    DomNodeRegistry* registry = dom_registry(doc);
+    if (!registry) return;
+    dom_retire_dequeue(registry);
+    registry->destroying = true;
+    registry->sweep_requested = false;
+    // The owning arenas are about to be destroyed wholesale. Recycling their
+    // individual slots here adds coalescing work without saving any memory.
+    registry->pending_free = nullptr;
+    registry->stats.pending_primary_bytes = 0;
 }
 
 static bool dom_node_is_attached_to_document(DomNodeRegistry* registry,

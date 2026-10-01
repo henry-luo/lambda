@@ -113,6 +113,11 @@ static DomText* dom_text_from_fat_string(DomDocument* doc, String* string_value)
     if (!dom_document_owns_node_storage(doc, candidate)) return nullptr;
     if (candidate->node_type != DOM_NODE_TEXT) return nullptr;
     if (candidate->native_string != string_value) return nullptr;
+    // Every adopted fat string needs a lifecycle record, including strings
+    // flattened from arrays and text introduced by MarkEditor mutations.
+    if (!candidate->id) candidate->id = dom_document_alloc_node_id(doc);
+    size_t primary_size = sizeof(DomText) + sizeof(String) + candidate->length + 1;
+    if (!dom_node_registry_register(doc, candidate, primary_size, true)) return nullptr;
     return candidate;
 }
 
@@ -269,6 +274,7 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement) {
 }
 
 void DomDocument::destroy() {
+    dom_retire_begin_destroy(this);
     float ext_rate = services.element_count
         ? 100.0f * (float)services.ext_allocations / (float)services.element_count
         : 0.0f;
@@ -3785,15 +3791,6 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     if (candidate) {
                         text_node = candidate;
                         text_node->parent = dom_elem;
-                        if (!text_node->id) {
-                            text_node->id = dom_document_alloc_node_id(doc);
-                        }
-                        size_t primary_size = sizeof(DomText) + sizeof(String) +
-                                              text_node->length + 1;
-                        if (!dom_node_registry_register(doc, text_node,
-                                                       primary_size, true)) {
-                            text_node = nullptr;
-                        }
                     } else {
                         text_node = DomText::create(text_str, dom_elem);
                     }

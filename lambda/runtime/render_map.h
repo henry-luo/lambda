@@ -101,6 +101,10 @@ bool render_map_reverse_lookup(Item result_node, RenderMapLookup* out);
 void render_map_set_doc_root(Item root);
 Item render_map_get_doc_root(void);
 
+// Drop mappings for replaced results before their DOM storage can be reused.
+struct EvalContext;
+void render_map_forget_retired_result(struct EvalContext* owner, Item result);
+
 // ============================================================================
 // R7 step 3c — source-document path tracking for the editor bridge.
 //

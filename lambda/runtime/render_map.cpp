@@ -211,6 +211,26 @@ static const char* render_map_template_ref(const RenderMapEntry& entry) {
 typedef TypedHashMap<RenderMapEntry,
     HashMapIdentity2KeyOps<RenderMapEntry, render_map_source_item, render_map_template_ref>> RenderMap;
 
+void render_map_forget_retired_result(EvalContext* owner, Item result) {
+    if (!owner || !result.item) return;
+    RenderMapState* state = (RenderMapState*)context_capsule(owner, CONTEXT_CAPSULE_RENDER_MAP);
+    if (!state || !state->reverse_map) return;
+    ReverseMapEntry query = {};
+    query.result_item_bits = result.item;
+    const ReverseMapEntry* found = ReverseMap::get(state->reverse_map, query);
+    if (!found) return;
+    RenderMapEntry forward_query = {};
+    forward_query.key = found->key;
+    RenderMapEntry* forward = state->render_map
+        ? RenderMap::get(state->render_map, forward_query) : nullptr;
+    // Retransformation can already have published the replacement under the
+    // same key. Retirement removes only the old result's identities.
+    if (forward && forward->result_node.item == result.item) {
+        RenderMap::erase(state->render_map, forward_query);
+    }
+    ReverseMap::erase(state->reverse_map, query);
+}
+
 // ============================================================================
 // Ensure map exists (lazy creation)
 // ============================================================================
