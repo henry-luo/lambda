@@ -194,7 +194,7 @@
       "name": "js_hoisted_modvar_write_through",
       "script": "test/mir/js/hoisted_modvar_write_through.js",
       "language": "js",
-      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. 2026-09-29: +5 Darwin debug instructions route a coercing binary helper's ERROR Item to the lexical catch (S1.11, D8.4.3v2); emitted-MIR diff showed one tag test and branch, no additional root slots.",
+      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. 2026-09-29: +5 Darwin debug instructions route a coercing binary helper's ERROR Item to the lexical catch (S1.11, D8.4.3v2); emitted-MIR diff showed one tag test and branch, no additional root slots. 2026-10-01: Linux debug emits the same five instructions; the finalized MIR diff against the 2026-09-28 Linux artifact shows the ERROR-tag test and branch, with the existing frame budgets unchanged (D8.6.1).",
       "budgets": {
         "default": {
           "module_insns": 507,
@@ -251,7 +251,7 @@
           ]
         },
         "linux-debug-v3": {
-          "module_insns": 345,
+          "module_insns": 350,
           "functions": {
             "js_main": {
               "insns": 87
