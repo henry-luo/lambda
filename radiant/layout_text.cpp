@@ -3894,7 +3894,10 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     bool text_autospace_bidi_unsupported = layout_text_contains_rtl_codepoint(
         (const char*)text_start, (size_t)(text_end - text_start));
     bool is_word_start = true;  // Track word boundaries for capitalize
-    int layout_text_iterations = 0;  // guard against infinite goto loops
+    // re-entering for each preserved newline is valid; guard only retries that
+    // fail to consume more of this text node.
+    const unsigned char* furthest_text = str;
+    int stalled_iterations = 0;
     float soft_hyphen_leading_width = 0.0f;
     // CSS Text 3 §6.2: Resolve lang for CJ class behavior.
     const char* lang = resolve_lang(text_node);
@@ -3943,8 +3946,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         if (skip_collapsible_text_edge(lycon, text_node, &str, collapse_newlines,
                                         !text_view, &had_leading_space)) return;
     }
-    if (++layout_text_iterations > 500) {
-        log_error("layout_text: exceeded 500 iterations, aborting text layout");
+    if (str > furthest_text) {
+        furthest_text = str;
+        stalled_iterations = 0;
+    } else if (++stalled_iterations > 500) {
+        log_error("layout_text stalled: exceeded 500 retries without consuming text at byte %zu/%zu",
+                  (size_t)(str - text_start), (size_t)(text_end - text_start));
         return;
     }
     // CSS Text 3 §5.2: Only wrap at allowed break points (soft wrap opportunities).
