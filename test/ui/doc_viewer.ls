@@ -136,6 +136,7 @@ fn document_format(extension) {
   else if (contains(["adoc", "asciidoc", "asc"], ext)) { "asciidoc" }
   else if (ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { "man" }
   else if (ext == "textile") { "textile" }
+  else if (ext == "rtf") { "rtf" }
   else if (contains(["htm", "html"], ext)) { "html" }
   else { null }
 }
@@ -492,7 +493,7 @@ view <h3> { <h3 id:~.id, *[rendered_children(~)]> }
 view <h4> { <h4 id:~.id, *[rendered_children(~)]> }
 view <h5> { <h5 id:~.id, *[rendered_children(~)]> }
 view <h6> { <h6 id:~.id, *[rendered_children(~)]> }
-view <p> { <p *[rendered_children(~)]> }
+view <p> { <p style:~.style, *[rendered_children(~)]> }
 view <div> { <div class:~.class, style:~.style, *[rendered_children(~)]> }
 view <nav> { <nav class:~.class, *[rendered_children(~)]> }
 view <dl> { <dl *[rendered_children(~)]> }
@@ -823,7 +824,7 @@ view <document_pane> {
       , <div class:"empty-preview-icon", "▤">
         <h1 "Open a file">
         <p "Choose a file from the project tree to inspect it.">
-        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. Markdown, HTML, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
+        <p class:"empty-preview-note", "CSV and TSV open as resizable tables. JSON, YAML, TOML, INI, ICS, and VCF open as property trees. XML opens as a node tree or with its declared stylesheet. Email shows its headers and body. Markdown, HTML, RTF, LaTeX, PDF, diagrams, and images open as rendered documents; other files open as source.">
       >
     >
   } else if (is_renderable_document(~.file["extension"])) {
@@ -857,6 +858,10 @@ view <document_pane> {
         } else if (is_pdf_document(~.file["extension"])) {
           let preview = selected_preview(~.file);
           <section id:"pdf-preview", class:"rendered-preview pdf-preview",
+            apply(preview)>
+        } else if (document_format(~.file["extension"]) == "rtf") {
+          let preview = selected_preview(~.file);
+          <section id:"rtf-preview", class:"rendered-preview rtf-preview",
             apply(preview)>
         } else if (document_format(~.file["extension"]) == "html") {
           // defer optional document transforms until their file is selected.
@@ -1174,6 +1179,10 @@ on mouseup(evt) {
       .source-preview { min-height: 100%; margin: 0; padding: 26px 30px;
                         color: #293545; font: 13px/1.55 'SF Mono', Menlo, Consolas, monospace; white-space: pre; }
       .rendered-preview { min-height: 0; flex: 1; overflow: auto; padding: 30px clamp(24px, 6vw, 80px) 60px; }
+      .rtf-preview { background: #eef1f5; }
+      .rtf-preview .document-body { box-sizing: border-box; min-height: 100%; padding: 42px 52px;
+                                    background: #fff; box-shadow: 0 2px 14px #d9dee7; }
+      .rtf-preview .document-body p { margin: 0 0 .85em; white-space: pre-wrap; }
       .property-preview { padding: 0 0 40px; background: #fff; color: #263448;
                           font: 13px/1.4 'SF Mono', Menlo, Consolas, monospace; }
       .property-filter-bar { position: sticky; top: 0; z-index: 1; height: 44px; display: flex;
