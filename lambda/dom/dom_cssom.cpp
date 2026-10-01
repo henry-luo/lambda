@@ -55,7 +55,12 @@ static void js_cssom_notify_stylesheet_mutation(CssStylesheet* stylesheet = null
         ? stylesheet->owner_element->doc : (DomDocument*)dom_get_document();
     style_epoch_mark_global_change(doc);
     DomElement* owner = stylesheet ? stylesheet->owner_element : nullptr;
-    dom_notify_mutation(DOM_JS_MUTATION_STYLE, owner, owner ? owner->parent : nullptr);
+    // A rule declaration has no stylesheet back pointer. Invalidate the whole
+    // document when its owner is unknown so every matched element recascades.
+    if (owner) dom_notify_mutation(DOM_JS_MUTATION_STYLE, owner, owner->parent);
+    else if (doc && doc->root) {
+        dom_notify_mutation(DOM_JS_MUTATION_UNKNOWN, doc->root, nullptr);
+    }
 }
 
 // =============================================================================

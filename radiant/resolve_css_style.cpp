@@ -4986,6 +4986,13 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
             // otherwise use the inherited value. E.g.:
             if (prop_id == CSS_PROPERTY_TEXT_ALIGN) {
                 DomElement* cur_elem = lam::dom_require_element(lycon->view);
+                if (cur_elem && cur_elem->tag() == MARKUP_NAME_TABLE &&
+                    inheritance_span->blk &&
+                    inheritance_span->block()->text_align == CSS_VALUE_START) {
+                    // The table UA start value wins over an inherited ancestor
+                    // alignment; an authored table declaration is applied later.
+                    continue;
+                }
                 if (cur_elem && cur_elem->tag_name && strcmp(cur_elem->tag_name, "th") == 0) {
                     bool inherited_is_noninitial = false;
                     for (DomElement* p = dom_parent_element(dom_elem);

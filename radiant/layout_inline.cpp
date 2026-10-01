@@ -2856,7 +2856,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->line.start_view = layout_inline_fragment_root(static_cast<View*>(span));
             lycon->line.has_phantom_inline_fragment = true;
         }
-        contribute_inline_strut(lycon, elmt, span);
+        // An empty undecorated inline supplies no line box by itself, but its
+        // font strut still contributes beside other inline content on that line.
+        if (had_children || has_inline_axis_decoration ||
+            !lycon->line.is_line_start || has_following_content(elmt, true)) {
+            contribute_inline_strut(lycon, elmt, span);
+        }
         // CSS 2.1 §9.4.2: An inline element with non-zero margins, borders, or
         // CSS Inline 3 §2.1: An inline element with ANY non-zero inline-axis
         if (has_inline_axis_decoration) {

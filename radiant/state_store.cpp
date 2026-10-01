@@ -2424,38 +2424,28 @@ static bool view_state_view_is_connected(DomDocument* doc, View* view) {
     return false;
 }
 
-static View* view_state_entry_resolve_owner(DocState* state, const ViewStateEntry* entry) {
-    if (!state || !entry || !state->owner_store ||
-        !state->owner_store->document || entry->view_id == 0) {
-        return NULL;
-    }
-    DomDocument* doc = state->owner_store->document;
-    if (entry->owner_id == entry->view_id && entry->owner_address) {
-        // D4.5.1v3: validate the weak owner before reading a possibly reused arena slot.
-        DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
-        DomNode* owner = dom_node_ref_validate(doc, owner_ref);
-        if (owner && owner->id == entry->view_id) return static_cast<View*>(owner);
-    }
-    return NULL;
-}
-
 View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry) {
     if (!state || !entry || !state->owner_store ||
         !state->owner_store->document || entry->view_id == 0) {
         return NULL;
     }
     DomDocument* doc = state->owner_store->document;
-    View* owner = view_state_entry_resolve_owner(state, entry);
-    if (owner) {
-        // layout may wrap the DOM root in a synthetic view; connection is
-        // established by reaching doc->root anywhere on the parent path.
-        if (view_state_view_is_connected(doc, owner)) return owner;
-        // A registered detached form control retains its value and history until retirement.
-        if (entry->kind == VIEW_STATE_FORM_CONTROL && owner->is_element()) {
-            DomElement* elem = lam::dom_require_element(owner);
-            if (elem && elem->form) return owner;
+    if (entry->owner_id == entry->view_id && entry->owner_address) {
+        // D4.5.1v3: a registry-valid owner can still be detached before retirement.
+        DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
+        DomNode* owner = dom_node_ref_validate(doc, owner_ref);
+        if (owner && owner->id == entry->view_id) {
+            // A detached form control remains usable through its JS node and
+            // keeps its ViewState value until the document retires the node.
+            if (entry->kind == VIEW_STATE_FORM_CONTROL && owner->is_element()) {
+                DomElement* element = lam::dom_require_element(owner);
+                if (element && element->form) return static_cast<View*>(owner);
+            }
+            // layout may wrap the DOM root in a synthetic view; connection is
+            // established by reaching doc->root anywhere on the parent path.
+            return view_state_view_is_connected(doc, static_cast<View*>(owner))
+                ? static_cast<View*>(owner) : NULL;
         }
-        return NULL;
     }
 
     DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;

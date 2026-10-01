@@ -933,6 +933,25 @@ TEST_F(CssParserUnitTest, FontFace_ParsesUnicodeRangeList) {
     css_font_face_descriptor_free(descriptor);
 }
 
+TEST_F(CssParserUnitTest, FontFace_RulePreservesUnicodeRangeTokenSpacing) {
+    auto parser = CreateParser();
+    CssRule* rule = parser.ParseRule(
+        "@font-face { font-family: Subset; src: url(subset.woff2); "
+        "unicode-range: U+3000-30FF, U+4E00-9FFF; }");
+
+    ASSERT_NE(rule, nullptr);
+    ASSERT_EQ(rule->type, CSS_RULE_FONT_FACE);
+    CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
+        rule->data.generic_rule.content, nullptr);
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_EQ(descriptor->unicode_range_count, 2);
+    EXPECT_EQ(descriptor->unicode_ranges[0].start_codepoint, 0x3000u);
+    EXPECT_EQ(descriptor->unicode_ranges[0].end_codepoint, 0x30FFu);
+    EXPECT_EQ(descriptor->unicode_ranges[1].start_codepoint, 0x4E00u);
+    EXPECT_EQ(descriptor->unicode_ranges[1].end_codepoint, 0x9FFFu);
+    css_font_face_descriptor_free(descriptor);
+}
+
 TEST_F(CssParserUnitTest, FontFace_RejectsSpacedUnicodeRangeTokens) {
     CssFontFaceDescriptor* descriptor = css_parse_font_face_content(
         "{ font-family: Subset; src: url(subset.woff2); "

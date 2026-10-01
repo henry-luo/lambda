@@ -4211,19 +4211,6 @@ static bool table_fixup_is_outer_anonymous_table(DomElement* element) {
         strcmp(element->tag_name, "::anon-table") == 0;
 }
 
-static DomNode* table_first_fixup_source_node(DomElement* fixup) {
-    if (!fixup) return nullptr;
-    for (DomNode* child = fixup->first_child; child; child = child->next_sibling) {
-        if (child->is_element() && child->as_element()->is_table_fixup()) {
-            DomNode* source = table_first_fixup_source_node(child->as_element());
-            if (source) return source;
-            continue;
-        }
-        return child;
-    }
-    return nullptr;
-}
-
 static void unwrap_anonymous_table_fixup(DomElement* fixup, DomElement* parent,
                                          DomNode* before) {
     if (!fixup || !parent) return;
@@ -4249,22 +4236,13 @@ static void unwrap_anonymous_table_fixup(DomElement* fixup, DomElement* parent,
 
 void layout_unwrap_anonymous_table_fixups_for_dom_mutation(DomElement* parent) {
     if (!parent) return;
-    bool saw_outer_table_run = false;
     for (DomNode* child = parent->first_child; child; ) {
         DomNode* next = child->next_sibling;
         if (child->is_element() && child->as_element()->is_table_fixup()) {
             DomElement* fixup = child->as_element();
-            if (table_fixup_is_outer_anonymous_table(fixup)) {
-                if (saw_outer_table_run) {
-                    // An earlier layout pass had a distinct source run here;
-                    // retain that boundary while the wrappers are rebuilt.
-                    DomNode* source = table_first_fixup_source_node(fixup);
-                    if (source) source->set_table_fixup_run_boundary(true);
-                }
-                saw_outer_table_run = true;
-            }
             // Anonymous table boxes are layout-only and cannot become DOM
-            // mutation state; reflow recreates CSS Tables 3 §2.2 fixups.
+            // mutation state; reflow must recompute current source runs rather
+            // than retain partitions made while a cell was display:none.
             unwrap_anonymous_table_fixup(fixup, parent, next);
         }
         child = next;
@@ -6373,6 +6351,8 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
     float float_run_min = 0.0f;   // Widest float in the current run
     bool has_inline_content = false;  // Track if we have any inline content
     bool prev_ended_with_space = false;  // Track whitespace between text nodes
+    bool prev_end_space_measured = false;
+    bool pending_whitespace_only = false;
     // CSS 2.1 §16.1: text-indent applies to the first formatted line of a block
     // Percentage text-indent cannot be resolved during intrinsic measurement
     // (circular dependency with table width), so only fixed lengths are used.
@@ -6400,7 +6380,7 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 if (collapse_ws) {
                     if (is_all_whitespace((const char*)text, text_len)) {
                         // Whitespace-only text contributes a space between adjacent text nodes
-                        prev_ended_with_space = true;
+                        pending_whitespace_only = true;
                         continue; // Skip whitespace-only text nodes
                     }
                     size_t normalized_len = layout_normalize_collapsible_whitespace(
@@ -6414,13 +6394,19 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                     CSS_VALUE_NORMAL, cell_overflow_wrap, CSS_VALUE_NORMAL);
                 float text_max = (float)widths.max_content;  // PCW (max-content)
                 float text_min = (float)widths.min_content;  // MCW (min-content)
-                if (collapse_ws && has_inline_content && (prev_ended_with_space || original_has_leading_ws) && lycon->font.style) {
+                // Text normalization trims its edge spaces, while an inline
+                // child's intrinsic width already includes its trailing space.
+                if (collapse_ws && has_inline_content && !prev_end_space_measured &&
+                    (pending_whitespace_only || prev_ended_with_space ||
+                     original_has_leading_ws) && lycon->font.style) {
                     inline_run_max += lycon->font.style->space_width;
                 }
                 inline_run_max += text_max;
                 has_inline_content = true;
                 if (text_min > min_width) min_width = text_min;
                 prev_ended_with_space = original_has_trailing_ws;
+                prev_end_space_measured = false;
+                pending_whitespace_only = false;
             }
         }
         else if (child->is_element()) {
@@ -6431,6 +6417,9 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
             if (layout_element_is_abs_or_fixed(child_elem)) continue;
             // This properly handles explicit CSS widths (with border/padding),
             DisplayValue child_display = resolve_display_value(child);
+            // CSS Tables 3 §2.2 removes display:none boxes before measuring a
+            // cell's inline run; script nodes cannot create a line break here.
+            if (layout_display_is_none(child_display)) continue;
             bool child_is_replaced = child_display.inner == RDT_DISPLAY_REPLACED;
             if (!child_elem->styles_resolved() &&
                 child_is_replaced &&
@@ -6474,10 +6463,13 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 table_intrinsic_flush_inline_run(
                     &inline_run_max, &float_run_max, &float_run_min, &max_width, &min_width,
                     &has_inline_content, &prev_ended_with_space);
+                prev_end_space_measured = false;
+                pending_whitespace_only = false;
             } else if (is_inline) {
-                // CSS 2.1: Account for whitespace between inline elements.
                 bool starts_with_ws = layout_element_edge_has_whitespace(child, false);
-                if (collapse_ws && has_inline_content && (prev_ended_with_space || starts_with_ws) && lycon->font.style) {
+                if (collapse_ws && has_inline_content && !prev_end_space_measured &&
+                    !starts_with_ws && (pending_whitespace_only || prev_ended_with_space) &&
+                    lycon->font.style) {
                     inline_run_max += lycon->font.style->space_width;
                 }
                 // CSS 2.1: inline element horizontal margins contribute to line box width
@@ -6501,11 +6493,15 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 if (child_min < 0) child_min = 0;
                 has_inline_content = true;
                 prev_ended_with_space = layout_element_edge_has_whitespace(child, true);
+                prev_end_space_measured = prev_ended_with_space;
+                pending_whitespace_only = false;
             } else {
                 if (!child_is_float) {
                     table_intrinsic_flush_inline_run(
                         &inline_run_max, &float_run_max, &float_run_min, &max_width, &min_width,
                         &has_inline_content, &prev_ended_with_space);
+                    prev_end_space_measured = false;
+                    pending_whitespace_only = false;
                 }
                 float margin_h = table_intrinsic_child_horizontal_margin(
                     lycon, child_elem, true);
@@ -7681,6 +7677,19 @@ static bool table_child_requires_anonymous_fixup(DomNode* node) {
         !layout_element_is_replaced(node->as_element());
 }
 
+static bool table_nonrendering_separator_has_whitespace(DomNode* node) {
+    if (!node || !node->is_element() ||
+        !layout_display_is_none(resolve_display_value(node))) return false;
+    NameId tag = node->as_element()->tag();
+    if (tag != MARKUP_NAME_SCRIPT && tag != MARKUP_NAME_STYLE) return false;
+    DomNode* before = node->prev_sibling;
+    DomNode* after = node->next_sibling;
+    return (before && before->is_text() &&
+            !layout_dom_text_has_non_whitespace(before->as_text())) ||
+           (after && after->is_text() &&
+            !layout_dom_text_has_non_whitespace(after->as_text()));
+}
+
 bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
     if (!lycon || !parent || !parent->first_child) return false;
     // display:contents has no independent formatting context; its flattened
@@ -7723,14 +7732,11 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
         DomNode* run_end = child;
         while (run_end->next_sibling) {
             DomNode* next = run_end->next_sibling;
-            if (next->has_table_fixup_run_boundary()) {
-                // A script removed the authored separator after a provisional
-                // pass; recreate each previously distinct anonymous table run.
-                next->set_table_fixup_run_boundary(false);
-                break;
-            }
             if (next->is_element()) {
                 if (table_child_requires_anonymous_fixup(next)) {
+                    run_end = next;
+                } else if (table_nonrendering_separator_has_whitespace(next)) {
+                    // The ignored node cannot leave whitespace between cell boxes.
                     run_end = next;
                 } else {
                     break;
@@ -7741,9 +7747,15 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
                 if (!layout_dom_text_has_non_whitespace(next->as_text())) {
                     run_end = next;  // absorb trailing whitespace
                     DomNode* after_text = next->next_sibling;
-                    while (after_text && after_text->is_text() &&
-                           !layout_dom_text_has_non_whitespace(after_text->as_text())) {
-                        after_text = after_text->next_sibling;
+                    while (after_text) {
+                        if (after_text->is_text() &&
+                            !layout_dom_text_has_non_whitespace(after_text->as_text())) {
+                            after_text = after_text->next_sibling;
+                        } else if (table_nonrendering_separator_has_whitespace(after_text)) {
+                            after_text = after_text->next_sibling;
+                        } else {
+                            break;
+                        }
                     }
                     if (after_text && after_text->is_element()) {
                         if (table_child_requires_anonymous_fixup(after_text)) {

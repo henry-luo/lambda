@@ -2914,6 +2914,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             int prefix_end = pos;
 
             if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                int opening_brace = pos;
                 pos++; // consume '{'
                 int content_start = pos; // Content starts after '{'
 
@@ -2928,6 +2929,18 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                     pos++;
                 }
                 int content_end = pos - 1; // Content ends before '}'
+
+                if (rule->type == CSS_RULE_FONT_FACE && brace_depth == 0 &&
+                    tokens[opening_brace].start && tokens[content_end].start) {
+                    // Descriptor values such as U+3000-30FF require the original
+                    // token spacing; the generic formatter inserts invalid spaces.
+                    const char* raw_start = tokens[opening_brace].start;
+                    const char* raw_end = tokens[content_end].start + tokens[content_end].length;
+                    rule->data.generic_rule.content = pool_dup_n(
+                        pool, raw_start, (size_t)(raw_end - raw_start));
+                    *out_rule = rule;
+                    return pos - start_pos;
+                }
 
                 // Build content string: prefix + { + content + }
                 size_t content_length = 0;

@@ -3621,9 +3621,14 @@ capture-layout:
 # Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN] [update=1]
 # Note: test parameter now accepts filename with or without .html/.htm extension
 # Example: make test-layout test=baseline_301_simple_margin
+# Node resolves imports from test/layout's real path when it is a symlink.
 test-layout:
 	@echo "🎨 Running Lambda CSS Layout Engine Tests"
 	@echo "=========================================="
+	@if ! npm ls --prefix test/layout --omit=dev --depth=0 >/dev/null 2>&1; then \
+		echo "📦 Installing layout test dependencies..."; \
+		npm ci --prefix test/layout --no-audit --no-fund; \
+	fi
 	@STALE_FILE=""; \
 	if [ ! -x "$(LAMBDA_EXE)" ]; then \
 		echo "🔧 $(LAMBDA_EXE) missing; building before layout tests"; \

@@ -5454,6 +5454,13 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     sizes.min_content = max(sizes.min_content, inline_min_sum);
                     inline_min_sum = 0.0f;
                 }
+                // CSS Text 3 §4.1.1 collapses adjacent edge spaces across
+                // inline descendants into one advance in the max-content run.
+                if (inline_run_ends_with_collapsible_space &&
+                    intrinsic_node_has_collapsible_space_at_edge(child, false)) {
+                    inline_max_sum -= min(inline_max_sum,
+                        intrinsic_collapsed_space_width(lycon));
+                }
                 inline_max_sum += child_sizes.max_content;
                 inline_run_ends_with_collapsible_space =
                     child_sizes.max_content > 0.0f && intrinsic_node_has_collapsible_space_at_edge(child, true);
