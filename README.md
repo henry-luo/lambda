@@ -247,20 +247,20 @@ for (row in csv where row.age > 25) row
 
 ## Benchmark Results
 
-[![Lambda benchmark history](test/benchmark/benchmark_history.svg)](test/benchmark/Overall_Result49.md)
+[![Lambda benchmark history](test/benchmark/benchmark_history.svg)](test/benchmark/Overall_Result50.md)
 
-The latest run (Result49, 2026-09-24) covers 63 benchmarks across six standard suites (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream) plus Text, against Node.js v22.13.0. Ratios are geometric means of JIT-pinned Lambda execution time divided by Node.js time; below 1.0× means Lambda is faster.
+The latest run (Result50, 2026-09-30) covers 63 benchmarks across six standard suites (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream) plus Text, against Node.js v22.13.0. Ratios are geometric means of JIT-pinned Lambda execution time divided by Node.js time; below 1.0× means Lambda is faster.
 
 | Lambda MIR JIT vs. Node.js | Geo. Mean Ratio | Lambda Wins | Total |
 | -------------------------- | --------------: | :---------: | :---: |
-| **Typed**                  | **0.63×** (1.6× faster) | 41 | 63 |
-| Untyped                    | 1.13× (13% slower) | 30 | 63 |
+| **Typed**                  | **0.54×** (1.8× faster) | 42 | 63 |
+| Untyped                    | 1.05× (5% slower) | 32 | 63 |
 
 **Highlights:**
-- Typed MIR JIT averages **1.6× faster than Node.js** across all 63 benchmarks.
-- Strongest typed suite results: BENG at 0.24× and R7RS at 0.31× the Node.js time.
+- Typed MIR JIT averages **1.8× faster than Node.js** across all 63 benchmarks.
+- Strongest typed suite results: BENG at 0.17× and R7RS at 0.29× the Node.js time.
 
-See the [latest full benchmark report](test/benchmark/Overall_Result49.md) for per-benchmark details, memory profiling, and cross-engine comparisons.
+See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for per-benchmark details, memory profiling, and cross-engine comparisons.
 
 ## Standards Conformance
 
