@@ -5,6 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(pwd)"
+source "$SCRIPT_DIR/utils/setup_thorvg.sh"
 DEPS_DIR="win-native-deps"
 
 # Detect MSYS2 environment
@@ -872,7 +873,7 @@ build_thorvg() {
     echo "Building ThorVG v1.0-pre34 for Windows native..."
 
     # Check if already built and verify no GL symbols
-    if [ -f "$DEPS_DIR/lib/libthorvg.a" ]; then
+    if thorvg_archive_has_lottie "$DEPS_DIR/lib/libthorvg.a"; then
         if [ -f "$DEPS_DIR/include/thorvg.h" ]; then
             # Verify no GL symbols (which cause conflicts with system OpenGL)
             if ! nm "$DEPS_DIR/lib/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
@@ -948,7 +949,7 @@ build_thorvg() {
             --buildtype=plain \
             --default-library=static \
             -Dengines=sw \
-            -Dloaders=svg,ttf \
+            -Dloaders=svg,ttf,lottie \
             -Dsavers= \
             -Dbindings=capi \
             -Dtools= \
@@ -979,7 +980,8 @@ build_thorvg() {
         # Verify installation
         if [ -f "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" ] && [ -f "$SCRIPT_DIR/$DEPS_DIR/include/thorvg.h" ]; then
             # Verify text API is available
-            if nm "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" | grep -q "tvg_text_new"; then
+            if nm "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" | grep -q "tvg_text_new" &&
+                thorvg_archive_has_lottie "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a"; then
                 # Verify no GL symbols
                 if ! nm "$SCRIPT_DIR/$DEPS_DIR/lib/libthorvg.a" | grep -q "glClearColor"; then
                     echo "✅ ThorVG v1.0-pre34 built and installed successfully"
@@ -993,7 +995,7 @@ build_thorvg() {
                     return 1
                 fi
             else
-                echo "❌ ThorVG text API not available (C API binding may have failed)"
+                    echo "❌ ThorVG text API or Lottie loader not available"
                 cd - > /dev/null
                 return 1
             fi
@@ -1023,7 +1025,7 @@ fi
 # Build ThorVG for vector graphics rendering
 echo ""
 echo "Setting up ThorVG (vector graphics library)..."
-if [ -f "$DEPS_DIR/lib/libthorvg.a" ]; then
+if thorvg_archive_has_lottie "$DEPS_DIR/lib/libthorvg.a"; then
     echo "ThorVG already available"
 else
     if ! build_thorvg; then
