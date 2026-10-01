@@ -22,10 +22,11 @@ static inline int get_cpu_count() {
 static inline int get_cpu_count() { return (int)sysconf(_SC_NPROCESSORS_ONLN); }
 #endif
 
-// Global mutex to serialize ThorVG canvas operations across worker threads.
-// ThorVG's internal state (global mpool, loader sharing counts, etc.) is not
-// fully thread-safe for concurrent canvas operations from multiple threads.
-// Thread-safety: each worker has its own thread-local ThorVG canvas and scratch arena
+// ThorVG's shared raster state can be touched by distinct tile canvases, so a
+// worker must keep canvas setup and replay in one serialized operation.
+static pthread_mutex_t s_thorvg_tile_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// Each worker retains its own ThorVG canvas and scratch arena between jobs.
 
 // ============================================================================
 // TileGrid
@@ -196,6 +197,9 @@ static void* worker_thread_fn(void* arg) {
         TileJob* job = &pool->jobs[job_idx];
         Tile* tile = job->tile;
 
+        // ThorVG rasterization uses shared internal state even with separate canvases.
+        pthread_mutex_lock(&s_thorvg_tile_mutex);
+
         // initialise thread-local resources on first use
         worker_init_local(tile);
 
@@ -217,6 +221,7 @@ static void* worker_thread_fn(void* arg) {
                        &tl_worker.scratch,
                        tile->x, tile->y, tile->w, tile->h,
                        job->raster_scale);
+        pthread_mutex_unlock(&s_thorvg_tile_mutex);
 
         // signal completion
         pthread_mutex_lock(&pool->mutex);
@@ -228,7 +233,9 @@ static void* worker_thread_fn(void* arg) {
     }
 
     // cleanup thread-local resources
+    pthread_mutex_lock(&s_thorvg_tile_mutex);
     tl_worker.destroy();
+    pthread_mutex_unlock(&s_thorvg_tile_mutex);
 
     return nullptr;
 }
