@@ -259,10 +259,6 @@ The latest run (Result50, 2026-09-30) covers 63 benchmarks across six standard s
 | **Typed**                  | **0.54×** (1.8× faster) | 42 | 63 |
 | Untyped                    | 1.05× (5% slower) | 32 | 63 |
 
-**Highlights:**
-- Typed MIR JIT averages **1.8× faster than Node.js** across all 63 benchmarks.
-- Strongest typed suite results: BENG at 0.17× and R7RS at 0.29× the Node.js time.
-
 See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for per-benchmark details, memory profiling, and cross-engine comparisons.
 
 ## Standards Conformance
@@ -281,6 +277,7 @@ See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for p
 
 | Document                                            | Description                                         |
 | --------------------------------------------------- | --------------------------------------------------- |
+| [Document Pipeline](doc/Lambda_Doc_Pipeline.md)     | The Mark data model and the convert/validate/render/view/edit workflows |
 | [Tutorial](doc/tutorial/README.md)                  | Ten chapters from installation to a reactive app, with checked examples |
 | [Cheatsheet](doc/Lambda_Cheatsheet.md)              | Quick reference for syntax and common patterns      |
 | [Lambda Reference](doc/Lambda_Reference.md)         | Language overview, the documentation index, modules, and examples |
@@ -289,21 +286,20 @@ See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for p
 | [Type System](doc/Lambda_Type.md)                   | Types, unions, object types, constraints, string patterns |
 | [Expressions & Statements](doc/Lambda_Expr_Stam.md) | Operators, pipes, queries, control flow, and comprehensions |
 | [Functions](doc/Lambda_Func.md)                     | Function declarations, closures, and procedures     |
+| [String Patterns](doc/Lambda_String_Pattern.md)     | The pattern language inside `\(…)` and pattern-aware string functions |
+| [Reactive UI](doc/Reactive_UI.md)                   | `view`/`edit` templates, `apply()` and event handlers |
 | [Procedural Programming](doc/Lambda_Procedural.md)  | `var`, assignment, value semantics, I/O, `main()`, concurrency |
 | [Error Handling](doc/Lambda_Error_Handling.md)      | `raise`, `T^E`, postfix `^`, the `^ { }` handler, error codes |
-| [String Patterns](doc/Lambda_String_Pattern.md)     | The pattern language inside `\(…)` and pattern-aware string functions |
 | [Modules](doc/Lambda_Modules.md)                    | Imports, `pub` exports, built-in, package and JavaScript modules |
 | [Concurrency](doc/Lambda_Concurrency.md)            | Tasks, mailboxes, `select`, timeouts and cancellation |
 | [System Functions](doc/Lambda_Sys_Func.md)          | Built-in functions (math, string, collection, I/O, concurrency) |
 | [Packages](doc/Lambda_Packages.md)                  | Libraries written in Lambda that ship with the runtime (math, chart, graph, LaTeX, PDF, …) |
 | [CLI Reference](doc/Lambda_CLI.md)                  | Commands, flags, and usage for the Lambda CLI       |
 | [Validator Guide](doc/Lambda_Validator.md)    | Schema-based validation with `lambda validate`      |
-| [Document Pipeline](doc/Lambda_Doc_Pipeline.md)     | The Mark data model and the convert/validate/render/view/edit workflows |
 | [Markup & Data Format Support](doc/Markup_Formats_Support.md) | Supported input and output formats and how they map to Lambda/Mark |
 | [Doc Schema](doc/Doc_Schema.md)                     | Schema for lightweight markup (Markdown, Wiki, RST) |
 | [HTML, CSS and SVG Support](doc/HTML_CSS_SVG_Support.md) | What the Radiant layout and rendering engine supports |
 | [Math Support](doc/Math_Support.md)                 | LaTeX and ASCII math input and rendering            |
-| [Reactive UI](doc/Reactive_UI.md)                   | `view`/`edit` templates, `apply()` and event handlers |
 | [Formal Semantics](doc/Lambda_Formal_Semantics.md)  | Normative semantics specification — S-numbered rulings; the semantic authority when docs or implementation disagree |
 
 ### Developer Documentation
@@ -316,7 +312,7 @@ See the [latest full benchmark report](test/benchmark/Overall_Result50.md) for p
 | [C+ Coding Convention](doc/dev/C_Plus_Convention.md)  | C/C++ coding convention                                                                |
 | [Lambda Core Runtime Design](doc/dev/lambda/LR_00_Overview.md) | Detailed design of the core runtime — compilation pipeline, value & type model, the MIR-Direct transpiler, MIR JIT, memory & GC, builtins, error handling, Mark API, and the procedural runtime |
 | [Radiant Engine Design](doc/dev/radiant/RAD_00_Overview.md) | Detailed design of the HTML/CSS layout, rendering, and interaction engine — view/DOM model, CSS resolution, layout (block/inline/flex/grid/table), rendering pipeline, SVG, events, editing, state, shell, JS scripting, and media/webview (index to the RAD_01–RAD_22 set) |
-| [LambdaJS Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
+| [JS and DOM Support](doc/JS_DOM_Support.md)             | Experimental JavaScript JIT engine and browser DOM — supported features and benchmarks |
 | [LambdaJS Runtime Design](doc/dev/js/JS_00_Overview.md) | Detailed design of the embedded JavaScript engine — compilation pipeline, value model, runtime, standard library, RegExp, async/modules, DOM, and Node.js compatibility |
 
 ## Platform Support
