@@ -67,7 +67,7 @@ open it at full size.
 <td width="33%" align="center"><a href="img/demo/latex.png"><img src="img/demo/latex.png" alt="LaTeX"></a><br><sub><b>LaTeX</b> — <code>.tex</code> with a table of contents</sub></td>
 </tr>
 <tr>
-<td width="33%" align="center"><a href="img/demo/pdf.png"><img src="img/demo/pdf.png" alt="PDF"></a><br><sub><b>PDF</b> — Get_Started_With_Smallpdf.pdf converted to HTML</sub></td>
+<td width="33%" align="center"><a href="img/demo/pdf.png"><img src="img/demo/pdf.png" alt="PDF"></a><br><sub><b>PDF</b> — sample PDF converted to HTML</sub></td>
 <td width="33%" align="center"><a href="img/demo/eml.png"><img src="img/demo/eml.png" alt="Email"></a><br><sub><b>Email</b> — <code>.eml</code> headers and HTML body</sub></td>
 <td width="33%" align="center"><a href="img/demo/tikz.png"><img src="img/demo/tikz.png" alt="TikZ / PGF"></a><br><sub><b>TikZ / PGF</b> — PGFPlots log-axis plot</sub></td>
 </tr>

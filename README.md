@@ -26,16 +26,19 @@ Internally, Lambda treats documents as structured data. Different input formats 
 ## Demo
 
 <p align="center">
-  <img src="doc/img/demo.png" width="49%" />
-  <img src="doc/img/demo2.png" width="49%" />
+  <img src="doc/img/demo/splash.png" width="49%" />
+  <img src="doc/img/demo/pdf.png" width="49%" />
 </p>
 <p align="center">
   <img src="doc/img/demo3.png" width="80%" />
 </p>
+<p align="center">
+  See all supported document types in the <a href="doc/demo.md">demo gallery</a>.
+</p>
 
 **Try it:** download the Lambda binary from the [Releases](https://github.com/henry-luo/lambda/releases) page, unzip, and run:
 ```bash
-lambda view
+lambda demo
 ```
 
 ## Features
