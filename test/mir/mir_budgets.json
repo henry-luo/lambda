@@ -74,7 +74,7 @@
       "name": "lambda_scalar_home_tail_forward",
       "script": "test/mir/lambda/scalar_home_tail_forward.ls",
       "language": "lambda",
-      "description": "v2 tail-home forwarding and v3 pair forwarding, including the recursive body's root reservation and v5 i64 int arithmetic admission. T22's S5.1.2 poison-correct int comparison adds the reviewed slow conversion edge for the recursive `n <= 0` condition while reducing the frame's roots and safepoints. The v3 caller frame owns no scalar home. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). LR12-11 (2026-09-17): +3 in main -- `accumulate` may return its untyped `acc`, so the call site share-marks the (possibly container) result (S9.1.2); one call, one root, one safepoint. Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 201->208; deltablue2 -12%, prettier_ast2 -14%. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Common-overhead P4 (2026-09-30): a guarded context-local JIT module-state hint keeps the logical-unit lookup on the cold cross-module arm (D5.4.3, D8.5.1v2). The reviewed entry-guard growth is bounded here; Windows deltas mirror the same platform-independent MIR insertion and await a native Windows ratchet run. Common-overhead P3 (2026-09-30): the checked cross-unit module lookup now stores its resolved context slab as the next-call hint (D5.4.3); the added cold-path MOV accounts for this reviewed MIR growth, while the hot same-unit arm avoids repeat lookups.",
+      "description": "v2 tail-home forwarding and v3 pair forwarding, including the recursive body's root reservation and v5 i64 int arithmetic admission. T22's S5.1.2 poison-correct int comparison adds the reviewed slow conversion edge for the recursive `n <= 0` condition while reducing the frame's roots and safepoints. The v3 caller frame owns no scalar home. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). LR12-11 (2026-09-17): +3 in main -- `accumulate` may return its untyped `acc`, so the call site share-marks the (possibly container) result (S9.1.2); one call, one root, one safepoint. Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 201->208; deltablue2 -12%, prettier_ast2 -14%. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Common-overhead P4 (2026-09-30): a guarded context-local JIT module-state hint keeps the logical-unit lookup on the cold cross-module arm (D5.4.3, D8.5.1v2). The reviewed entry-guard growth is bounded here; Windows debug-v3 counts were measured on 2026-10-01 and pinned without slack (D8.6.1). Common-overhead P3 (2026-09-30): the checked cross-unit module lookup now stores its resolved context slab as the next-call hint (D5.4.3); the added cold-path MOV accounts for this reviewed MIR growth, while the hot same-unit arm avoids repeat lookups.",
       "budgets": {
         "default": {
           "module_insns": 266,
@@ -114,6 +114,36 @@
             },
             "main": {
               "insns": 52
+            }
+          },
+          "frames": [
+            {
+              "name": "_accumulate_#",
+              "occurrence": 0,
+              "roots": 5,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 4
+            },
+            {
+              "name": "main",
+              "roots": 2,
+              "root_stores": 0,
+              "scalar_homes": 0,
+              "number_scratch": 0,
+              "safepoints": 2
+            }
+          ]
+        },
+        "windows-debug-v3": {
+          "module_insns": 234,
+          "functions": {
+            "_accumulate_#": {
+              "insns": 97
+            },
+            "main": {
+              "insns": 53
             }
           },
           "frames": [
@@ -194,7 +224,7 @@
       "name": "js_hoisted_modvar_write_through",
       "script": "test/mir/js/hoisted_modvar_write_through.js",
       "language": "js",
-      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. 2026-09-29: +5 Darwin debug instructions route a coercing binary helper's ERROR Item to the lexical catch (S1.11, D8.4.3v2); emitted-MIR diff showed one tag test and branch, no additional root slots. 2026-10-01: Linux debug emits the same five instructions; the finalized MIR diff against the 2026-09-28 Linux artifact shows the ERROR-tag test and branch, with the existing frame budgets unchanged (D8.6.1).",
+      "description": "Nested closures over an IIFE scope: the shape most exposed to rooting bloat, including merged Item error-tag branches. Tune4 re-baseline: dynamic closure and console calls use rooted argument spans and per-callee entries; js_main itself shrank by two instructions (D6.2.2v2, D5.4.3). Darwin debug v3 also uses the profile-enabled numeric helper imports in the ordinary debug host. JS2 tasks 3/4 reviewed Darwin growth (D8.6.1): net +13 instructions for source-call depth accounting after removal of redundant scalar adoption; one cold RangeError safepoint in _js_anon1_#, no additional root stores. Call flatten P4 reviewed growth (JC18, D8.4.1v2): +10 instructions per dynamic call site for the inline callee-layout guard that selects the stored invoke entry or js_call before one indirect call; no additional safepoints or root stores. Retired public wrappers shrink module_insns elsewhere. 2026-09-29: +5 Darwin debug instructions route a coercing binary helper's ERROR Item to the lexical catch (S1.11, D8.4.3v2); emitted-MIR diff showed one tag test and branch, no additional root slots. 2026-10-01: Linux debug emits the same five instructions; the finalized MIR diff against the 2026-09-28 Linux artifact shows the ERROR-tag test and branch, with the existing frame budgets unchanged (D8.6.1). Windows debug-v3 measured the same +5 module instructions on 2026-10-01 (D8.6.1).",
       "budgets": {
         "default": {
           "module_insns": 507,
@@ -278,7 +308,7 @@
           ]
         },
         "windows-debug-v3": {
-          "module_insns": 344,
+          "module_insns": 349,
           "functions": {
             "js_main": {
               "insns": 87
@@ -310,13 +340,13 @@
       "name": "lambda_corpus_closure",
       "script": "test/lambda/closure.ls",
       "language": "lambda",
-      "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Re-baseline 2026-09-18 (-9 net): S12.1.1v2 checks an `fn`-context dynamic call whose callee colour is not statically `fn`; every such site here called a closure returned by a factory, and a functional block whose one value item is a function now takes that function's signature (`ast_content_single_value`), so the factories return `fn`, no site needs the check, and the typed returns also trim the calls' boxed handling. Common-overhead P4 (2026-09-30): a guarded context-local JIT module-state hint keeps the logical-unit lookup on the cold cross-module arm (D5.4.3, D8.5.1v2). The reviewed entry-guard growth is bounded here; Windows deltas mirror the same platform-independent MIR insertion and await a native Windows ratchet run. Common-overhead P3 (2026-09-30): the checked cross-unit module lookup now stores its resolved context slab as the next-call hint (D5.4.3); the added cold-path MOV accounts for this reviewed MIR growth, while the hot same-unit arm avoids repeat lookups.",
+      "description": "Picked closure-heavy corpus script, including reviewed Phase 3 public-wrapper dispatch guards and clean-return firewalls. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Re-baseline 2026-09-18 (-9 net): S12.1.1v2 checks an `fn`-context dynamic call whose callee colour is not statically `fn`; every such site here called a closure returned by a factory, and a functional block whose one value item is a function now takes that function's signature (`ast_content_single_value`), so the factories return `fn`, no site needs the check, and the typed returns also trim the calls' boxed handling. Common-overhead P4 (2026-09-30): a guarded context-local JIT module-state hint keeps the logical-unit lookup on the cold cross-module arm (D5.4.3, D8.5.1v2). The reviewed entry-guard growth is bounded here; Windows debug-v3 counts were measured on 2026-10-01 and pinned without slack (D8.6.1). Common-overhead P3 (2026-09-30): the checked cross-unit module lookup now stores its resolved context slab as the next-call hint (D5.4.3); the added cold-path MOV accounts for this reviewed MIR growth, while the hot same-unit arm avoids repeat lookups.",
       "budgets": {
         "default": {
           "module_insns": 2350
         },
         "windows-debug-v3": {
-          "module_insns": 2364
+          "module_insns": 2365
         }
       }
     },
@@ -388,7 +418,7 @@
       "name": "lambda_tune4_typed_array_guard",
       "script": "test/mir/lambda/typed_array_guard.ls",
       "language": "lambda",
-      "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 1172->1196; deltablue2 -12%, prettier_ast2 -14%. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Re-baseline 2026-09-27 (+14 module, +12 guarded_store, +1 number_scratch; LR12-24 TE-17 I3): `guarded_store` writes `a[i]`, and a failed store returns its error from the function (S7.7.6), so the D6.1.3 fixed point marks it defect-capable. Its int return now carries the error lane beside the value (shape 4), whose epilogue spills the native result to the scratch slot, and `main` tests the lane after the call.",
+      "description": "Re-baseline 2026-09-14 (+10 module, Tune27 T27-9): a literal-bounded loop whose dense scan proves a typed-array root now takes the finite plan (entry guard + generic sibling) like a binding-bounded one; the literal bound needs no range guard or fact of its own. Typed numeric-array load guards plus the Tune13 in-place procedure-parameter write guard and checked representation fallback. v5 re-baseline: native int values use the i64 lane and each arithmetic site admits its result to the int53 band. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-12: `dense_int_sum`/`dense_int_linear_sum` now emit each finite-induction loop twice -- a fast arm under the entry-range guard plus the generic sibling (D2.2.2, D8.3.1, transpile_while). Gross growth was +112; a loop nested in a cold arm now lowers once instead of splitting again, which returns 60 of it (4 body copies -> 3 here, and linear rather than 2^depth in nesting), for a reviewed net +52. Re-baseline 2026-09-13 (-20 module, Tune27 T27-9): the int fast arm now also band-tests an operand the result cannot exonerate (two sentinels wrap into the band, and a sentinel times zero is 0 -- S4.1.2 indeterminate forms that must give nan), but branch-only band guards are one add plus one fused compare-and-branch instead of GE/LE/AND/BF, a net shrink. Re-baseline 2026-09-14 (-19 module): literal system-call arguments fold to constant Items at the ABI boundary again. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 1172->1196; deltablue2 -12%, prettier_ast2 -14%. Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Re-baseline 2026-09-27 (+14 module, +12 guarded_store, +1 number_scratch; LR12-24 TE-17 I3): `guarded_store` writes `a[i]`, and a failed store returns its error from the function (S7.7.6), so the D6.1.3 fixed point marks it defect-capable. Its int return now carries the error lane beside the value (shape 4), whose epilogue spills the native result to the scratch slot, and `main` tests the lane after the call. Windows debug-v3 measured +4 module instructions with smaller guarded functions and one fewer safepoint on 2026-10-01 (D8.6.1).",
       "budgets": {
         "default": {
           "module_insns": 1234,
@@ -420,13 +450,13 @@
           ]
         },
         "windows-debug-v3": {
-          "module_insns": 1223,
+          "module_insns": 1227,
           "functions": {
             "_guarded_load_#": {
-              "insns": 58
+              "insns": 57
             },
             "_guarded_store_#": {
-              "insns": 113
+              "insns": 111
             }
           },
           "frames": [
@@ -444,7 +474,7 @@
               "root_stores": 0,
               "scalar_homes": 0,
               "number_scratch": 1,
-              "safepoints": 4
+              "safepoints": 3
             }
           ]
         }
@@ -454,7 +484,7 @@
       "name": "lambda_tune4_callsite_inference",
       "script": "test/mir/lambda/callsite_inference.ls",
       "language": "lambda",
-      "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-13 (-6 module, -3 in each gap function, Tune27 T27-9): the `hi - lo` fast arm now also band-tests one operand, because two int sentinels can wrap into the band (S4.1.2 requires nan for inf - inf); branch-only band guards became one add plus one fused compare-and-branch, a net shrink. Growth 2026-09-16 (+8 module, Tune28 T28-8): the CW29 write oracle now looks inside `return`, so `return f(a, b)` through a function value counts as a possible write of `a`/`b` (an unknown callee may write in place) and apply2 snapshots them at entry, as a bare `f(a, b)` statement already did (S9.1.3). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off).",
+      "description": "Tune4 M2 closed-call parameter narrowing plus the escaped-callee generic guardrail, v5 i64 int admission, and reviewed Phase 3 return-firewall growth. Growth 2026-08-03: string/symbol/name joined the `any \\\\ error` parameter group (formal semantics 7.7), so each call site emits an error check on its boxed argument. Re-baseline 2026-09-13 (-6 module, -3 in each gap function, Tune27 T27-9): the `hi - lo` fast arm now also band-tests one operand, because two int sentinels can wrap into the band (S4.1.2 requires nan for inf - inf); branch-only band guards became one add plus one fused compare-and-branch, a net shrink. Growth 2026-09-16 (+8 module, Tune28 T28-8): the CW29 write oracle now looks inside `return`, so `return f(a, b)` through a function value counts as a possible write of `a`/`b` (an unknown callee may write in place) and apply2 snapshots them at entry, as a bare `f(a, b)` statement already did (S9.1.3). Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Re-baseline 2026-09-18 (Tune30, measured as NOT attributable to LR12-24: identical with the defect scan toggled off). Windows debug-v3 measured eight additional module instructions on 2026-10-01; the gap bodies and frame shape stay unchanged (D8.6.1).",
       "budgets": {
         "default": {
           "module_insns": 609,
@@ -486,7 +516,7 @@
           ]
         },
         "windows-debug-v3": {
-          "module_insns": 609,
+          "module_insns": 617,
           "functions": {
             "_closed_gap_#": {
               "insns": 65
@@ -696,7 +726,7 @@
       "name": "lambda_corpus_deltablue",
       "script": "test/benchmark/jetstream/deltablue2.ls",
       "language": "lambda",
-      "description": "Tune27 G9: the 41-member typed deltablue image; its auto-tier wall is ~80% compile, so module size is the cost users see. Re-baseline 2026-09-16 (-176 module, -29 choose_method, Tune28 \u00a79.7): a record receiver whose binding is proven non-null no longer emits the null-sentinel arm of the field-read guard. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Re-baseline 2026-09-17 (+96 module, +173 choose_method, Tune29 T29-1): a plain bool field store from a proven bool now takes the typed path store's inline arm with a checked cold arm instead of one generic call; jetstream deltablue2 25.4 -> 23.9 ms. Re-baseline 2026-09-17 (-16 module, -12 choose_method, Tune29 T29-3): int operators test only operands that may be null, and a literal divisor needs no band or zero test. Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 8555->8804; deltablue2 -12%, prettier_ast2 -14%. LR12-24/TE-15 re-baseline 2026-09-18: a body that originates a defect at a declaration or reassignment boundary (TE-18 cases 1 and 7) now returns its error beside a native value lane (shape 4) instead of republishing the error Item's bits as a number. Measured cost on this probe with the feature toggled off: module_insns 8773->8998 (+225, +2.6%), _constraint_choose_method_# 1701->1744 (+43). TE-15 names the may_defect call-graph fixed point (D6.1.3) as what buys this back. T27-4 key span re-baseline 2026-09-22 (+55 module, +41 choose_method): the 18 three-key map-root stores (`p.constraints[ci].direction = v`) hand their keys to lambda_map_path_set_checked_keys through the stack span rather than in registers; the same change removes the three-key cap and every per-store heap path array for longer paths. deltablue2 23.6 -> 22.6 ms (release, x5, loaded host). Re-baseline 2026-09-22 (+260 module, +41 choose_method): a checked boundary against a trusted record contract (optionally nullable) now tests null / the exact shape word inline and calls lambda_type_check only on a miss, the same MAP_CONTRACT_EXACT_TRUSTED admission the runtime would make. deltablue2 23.4 -> 20.8 ms (release, x5). List fixes P3 (2026-09-23): +139 module -- the inline list test at each slot store (S2.5.6); see the prettier_ast row. Re-baseline 2026-09-27 (+217 module; LR12-24 TE-17 I3): planner_add_var, planner_add_constraint and the constraint helpers store into their arrays, a store can fail (S7.7.6), so their results are `int | error` joins. The growth is the error tests where projection_test, chain_test and benchmark bind or combine those results; equality and integer arithmetic over a join stay native. Result49 (2026-09-29): +67 module for packed-boolean typed path stores, adjacent writing-handle reuse, and exact terminal-shape guards after dynamic sibling reification (D4.4.4v4, D3.2.4v4). Common-overhead P4 (2026-09-29): module 9859->10087 (+228 net), choose_method 1829->1659 (-170); guarded raw stores for aligned leaves in records that also pack bools expand several write sites, but the same-source JetStream DeltaBlue release pilot improved 0.8869x in 9/9 pairs. Checked COW fallbacks remain in the emitted MIR (D4.4.4v4, S9.1.2). Common-overhead P1 (2026-09-30): audited NO_GC binding share marks move root publication to later actual safepoints (D5.3.2, S9.1.2); module 10087->10091, choose_method 1659->1696, with fewer executed root stores/reloads and no established DeltaBlue timing change. Common-overhead P4 (2026-09-30): a guarded context-local JIT module-state hint keeps the logical-unit lookup on the cold cross-module arm (D5.4.3, D8.5.1v2). The reviewed entry-guard growth is bounded here; Windows deltas mirror the same platform-independent MIR insertion and await a native Windows ratchet run. Common-overhead P2/P4 (2026-09-30): the certified nullable-map array read adds a guarded Item-slot arm (S7.1.1v3, D3.3.3v3); module 10119->10124 (+5), choose_method 1696->1684 (-12). The 17-pair DeltaBlue release control was 1.0034x with equal output, while Richards was 0.8921x after 1.94M fn_index calls were removed. Common-overhead P3 (2026-09-30): the checked cross-unit module lookup now stores its resolved context slab as the next-call hint (D5.4.3); the added cold-path MOV accounts for this reviewed MIR growth, while the hot same-unit arm avoids repeat lookups.",
+      "description": "Tune27 G9: the 41-member typed deltablue image; its auto-tier wall is ~80% compile, so module size is the cost users see. Re-baseline 2026-09-16 (-176 module, -29 choose_method, Tune28 \u00a79.7): a record receiver whose binding is proven non-null no longer emits the null-sentinel arm of the field-read guard. Re-baseline 2026-09-17 (Tune28 T28-7 emission diet: literal returns keep the native lane, proven indices into fixed-length locals, raw int equality against an in-band operand, one-call cold boxing, jump-to-next-label removal). Re-baseline 2026-09-17 (+96 module, +173 choose_method, Tune29 T29-1): a plain bool field store from a proven bool now takes the typed path store's inline arm with a checked cold arm instead of one generic call; jetstream deltablue2 25.4 -> 23.9 ms. Re-baseline 2026-09-17 (-16 module, -12 choose_method, Tune29 T29-3): int operators test only operands that may be null, and a literal divisor needs no band or zero test. Tune29 \u00a718 boxed-scalar admission (2026-09-17): a boxed value against a plain int/bool/string contract tests its tag inline and calls lambda_type_check only on a miss -- module_insns lambda_script 8555->8804; deltablue2 -12%, prettier_ast2 -14%. LR12-24/TE-15 re-baseline 2026-09-18: a body that originates a defect at a declaration or reassignment boundary (TE-18 cases 1 and 7) now returns its error beside a native value lane (shape 4) instead of republishing the error Item's bits as a number. Measured cost on this probe with the feature toggled off: module_insns 8773->8998 (+225, +2.6%), _constraint_choose_method_# 1701->1744 (+43). TE-15 names the may_defect call-graph fixed point (D6.1.3) as what buys this back. T27-4 key span re-baseline 2026-09-22 (+55 module, +41 choose_method): the 18 three-key map-root stores (`p.constraints[ci].direction = v`) hand their keys to lambda_map_path_set_checked_keys through the stack span rather than in registers; the same change removes the three-key cap and every per-store heap path array for longer paths. deltablue2 23.6 -> 22.6 ms (release, x5, loaded host). Re-baseline 2026-09-22 (+260 module, +41 choose_method): a checked boundary against a trusted record contract (optionally nullable) now tests null / the exact shape word inline and calls lambda_type_check only on a miss, the same MAP_CONTRACT_EXACT_TRUSTED admission the runtime would make. deltablue2 23.4 -> 20.8 ms (release, x5). List fixes P3 (2026-09-23): +139 module -- the inline list test at each slot store (S2.5.6); see the prettier_ast row. Re-baseline 2026-09-27 (+217 module; LR12-24 TE-17 I3): planner_add_var, planner_add_constraint and the constraint helpers store into their arrays, a store can fail (S7.7.6), so their results are `int | error` joins. The growth is the error tests where projection_test, chain_test and benchmark bind or combine those results; equality and integer arithmetic over a join stay native. Result49 (2026-09-29): +67 module for packed-boolean typed path stores, adjacent writing-handle reuse, and exact terminal-shape guards after dynamic sibling reification (D4.4.4v4, D3.2.4v4). Common-overhead P4 (2026-09-29): module 9859->10087 (+228 net), choose_method 1829->1659 (-170); guarded raw stores for aligned leaves in records that also pack bools expand several write sites, but the same-source JetStream DeltaBlue release pilot improved 0.8869x in 9/9 pairs. Checked COW fallbacks remain in the emitted MIR (D4.4.4v4, S9.1.2). Common-overhead P1 (2026-09-30): audited NO_GC binding share marks move root publication to later actual safepoints (D5.3.2, S9.1.2); module 10087->10091, choose_method 1659->1696, with fewer executed root stores/reloads and no established DeltaBlue timing change. Common-overhead P4 (2026-09-30): a guarded context-local JIT module-state hint keeps the logical-unit lookup on the cold cross-module arm (D5.4.3, D8.5.1v2). The reviewed entry-guard growth is bounded here; Windows debug-v3 counts were measured on 2026-10-01 and pinned without slack (D8.6.1). Common-overhead P2/P4 (2026-09-30): the certified nullable-map array read adds a guarded Item-slot arm (S7.1.1v3, D3.3.3v3); module 10119->10124 (+5), choose_method 1696->1684 (-12). The 17-pair DeltaBlue release control was 1.0034x with equal output, while Richards was 0.8921x after 1.94M fn_index calls were removed. Common-overhead P3 (2026-09-30): the checked cross-unit module lookup now stores its resolved context slab as the next-call hint (D5.4.3); the added cold-path MOV accounts for this reviewed MIR growth, while the hot same-unit arm avoids repeat lookups.",
       "budgets": {
         "default": {
           "module_insns": 10128,
@@ -707,10 +737,10 @@
           }
         },
         "windows-debug-v3": {
-          "module_insns": 9869,
+          "module_insns": 10188,
           "functions": {
             "_constraint_choose_method_#": {
-              "insns": 1831
+              "insns": 1686
             }
           }
         }

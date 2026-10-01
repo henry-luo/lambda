@@ -1276,6 +1276,8 @@ TEST(LambdaOptAdmission, CowSiteCensusMatchesAggregateAndIsOptIn) {
     EXPECT_GT(copies, 0u);
     EXPECT_GT(jit_copies, 0u);
 
+    // Windows cannot remove the census file while this reader still holds it open.
+    sites.close();
     FixtureRun disabled = run_fixture("cow_sites", "jit", source, true);
     ASSERT_TRUE(disabled.ok);
     EXPECT_EQ(disabled.std_out, enabled.std_out);
