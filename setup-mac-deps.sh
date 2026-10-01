@@ -6,6 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(pwd)"
+source "$SCRIPT_DIR/utils/setup_thorvg.sh"
 # Install dependencies to system locations that build_lambda_config.json expects
 SYSTEM_PREFIX="/usr/local"
 MACOS_DEPLOYMENT_TARGET="${LAMBDA_MACOS_DEPLOYMENT_TARGET:-${MACOSX_DEPLOYMENT_TARGET:-15.0}}"
@@ -299,7 +300,7 @@ build_thorvg_v1_0_pre34_for_mac() {
     cd "$SCRIPT_DIR"
 
     # Check if already built in mac-deps and verify headers
-    if [ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ]; then
+    if thorvg_archive_has_lottie "mac-deps/thorvg/build-mac/src/libthorvg.a"; then
         if [ -f "mac-deps/thorvg/inc/thorvg.h" ]; then
             # Verify no GL symbols (which cause conflicts with system OpenGL)
             if ! nm "mac-deps/thorvg/build-mac/src/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
@@ -404,7 +405,7 @@ build_thorvg_v1_0_pre34_for_mac() {
             --buildtype=plain \
             --default-library=static \
             -Dengines=sw \
-            -Dloaders=svg,ttf,png,jpg \
+            -Dloaders=svg,ttf,png,jpg,lottie \
             -Dsavers= \
             -Dbindings=capi \
             -Dtools= \
@@ -424,7 +425,8 @@ build_thorvg_v1_0_pre34_for_mac() {
                 # Verify build
                 if [ -f "build-mac/src/libthorvg.a" ] && [ -f "inc/thorvg.h" ]; then
                     # Verify text API is available
-                    if nm "build-mac/src/libthorvg.a" | grep -q "tvg_text_new"; then
+                    if nm "build-mac/src/libthorvg.a" | grep -q "tvg_text_new" &&
+                        thorvg_archive_has_lottie "build-mac/src/libthorvg.a"; then
                         # Verify no GL symbols
                         if ! nm "build-mac/src/libthorvg.a" | grep -q "glClearColor"; then
                             echo "✅ ThorVG v1.0-pre34 built successfully"
@@ -439,7 +441,7 @@ build_thorvg_v1_0_pre34_for_mac() {
                             return 1
                         fi
                     else
-                        echo "❌ ThorVG text API not available (C API binding may have failed)"
+                        echo "❌ ThorVG text API or Lottie loader not available"
                         cd - > /dev/null
                         return 1
                     fi
@@ -1006,7 +1008,7 @@ fi
 echo "Setting up ThorVG ..."
 
 # Check if ThorVG v1.0-pre34 is already properly built in mac-deps
-if [ -f "mac-deps/thorvg/build-mac/src/libthorvg.a" ]; then
+if thorvg_archive_has_lottie "mac-deps/thorvg/build-mac/src/libthorvg.a"; then
     # Verify it's the correct version by checking if we can find the repository with the right tag
     if [ -d "mac-deps/thorvg" ]; then
         cd "mac-deps/thorvg"

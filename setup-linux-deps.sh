@@ -5,6 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(pwd)"
+source "$SCRIPT_DIR/utils/setup_thorvg.sh"
 # Install dependencies to system locations that build_lambda_config.json expects
 SYSTEM_PREFIX="/usr/local"
 
@@ -664,7 +665,7 @@ build_thorvg_v1_0_pre34_for_linux() {
         --buildtype=plain \
         --default-library=static \
         -Dengines=sw \
-        -Dloaders=svg,ttf,png,jpg \
+        -Dloaders=svg,ttf,png,jpg,lottie \
         -Dsavers= \
         -Dbindings=capi \
         -Dtools= \
@@ -693,7 +694,8 @@ build_thorvg_v1_0_pre34_for_linux() {
     sudo cp "src/bindings/capi/thorvg_capi.h" "$SYSTEM_PREFIX/include/thorvg_capi.h"
 
     # Verify installation and API
-    if nm "$LIB_DIR/libthorvg.a" 2>/dev/null | grep -q "tvg_text_set_size"; then
+    if nm "$LIB_DIR/libthorvg.a" 2>/dev/null | grep -q "tvg_text_set_size" &&
+        thorvg_archive_has_lottie "$LIB_DIR/libthorvg.a"; then
         if ! nm "$LIB_DIR/libthorvg.a" 2>/dev/null | grep -q "glClearColor"; then
             echo "✅ ThorVG v1.0-pre34 installed to $LIB_DIR"
             echo "   - tvg_text_set_size: ✓ Available"
@@ -704,7 +706,7 @@ build_thorvg_v1_0_pre34_for_linux() {
             echo "❌ ThorVG library has unexpected GL symbols"
         fi
     else
-        echo "❌ ThorVG text API missing from built library"
+        echo "❌ ThorVG text API or Lottie loader missing from built library"
     fi
 
     return 1
@@ -1003,10 +1005,11 @@ fi
 # Check if already installed with the correct pre34 API (tvg_text_set_size is pre34-specific)
 thorvg_needs_rebuild=true
 if [ -f "$THORVG_LIB_INSTALL" ] && is_elf_archive "$THORVG_LIB_INSTALL"; then
-    if nm "$THORVG_LIB_INSTALL" 2>/dev/null | grep -q "tvg_text_set_size"; then
+    if nm "$THORVG_LIB_INSTALL" 2>/dev/null | grep -q "tvg_text_set_size" &&
+        thorvg_archive_has_lottie "$THORVG_LIB_INSTALL"; then
         thorvg_needs_rebuild=false
     else
-        echo "ThorVG installed but API mismatch (not v1.0-pre34), rebuilding..."
+        echo "ThorVG installed but required API or Lottie loader missing, rebuilding..."
     fi
 fi
 
