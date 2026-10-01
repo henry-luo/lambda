@@ -4552,6 +4552,9 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
     } else {
         layout_html_doc(uicon, doc, false);
     }
+    // replaced template nodes remain registry-valid until retirement; reconcile
+    // their hover, focus, and view state while their ownership is still readable.
+    if (state) state_store_prune_after_reflow(state);
     auto t_layout = time_now_ns();
 
     if (state) {

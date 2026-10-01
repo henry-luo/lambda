@@ -1,0 +1,24 @@
+{
+  "name": "Doc viewer retires interaction state after reactive directory changes",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui_doc_viewer_ls"}, "count": 1},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui_doc_viewer_ls .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "doc_viewer.ls"},
+    {"type": "click", "target": {"selector": ".tab-source"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui_doc_viewer_ls"}, "count": 0},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_ui .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__test_ui"}, "count": 0},
+    {"type": "click", "target": {"selector": ".tree-hit-__doc .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__doc_Lambda_Cheatsheet_md .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__doc_Lambda_Data_md .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__doc_Lambda_Cheatsheet_md .tree-label"}},
+    {"type": "assert_count", "target": {"selector": ".tree-hit-__doc_Lambda_Cheatsheet_md.selected"}, "count": 1},
+    {"type": "assert_event_log", "contains": "\"valid\":false", "max": 0}
+  ]
+}

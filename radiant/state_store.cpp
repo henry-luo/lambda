@@ -2416,6 +2416,14 @@ static uint32_t view_state_resolve_id(View* view) {
     return 0;
 }
 
+static bool view_state_view_is_connected(DomDocument* doc, View* view) {
+    if (!doc || !doc->root || !view) return false;
+    for (DomNode* node = static_cast<DomNode*>(view); node; node = node->parent) {
+        if (node == doc->root) return true;
+    }
+    return false;
+}
+
 View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry) {
     if (!state || !entry || !state->owner_store ||
         !state->owner_store->document || entry->view_id == 0) {
@@ -2423,11 +2431,15 @@ View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry
     }
     DomDocument* doc = state->owner_store->document;
     if (entry->owner_id == entry->view_id && entry->owner_address) {
-        // D4.5.1v3: validate the stable lifecycle identity before falling
-        // back to a tree walk, including for document-owned detached nodes.
+        // D4.5.1v3: a registry-valid owner can still be detached before retirement.
         DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
         DomNode* owner = dom_node_ref_validate(doc, owner_ref);
-        if (owner && owner->id == entry->view_id) return static_cast<View*>(owner);
+        if (owner && owner->id == entry->view_id) {
+            // layout may wrap the DOM root in a synthetic view; connection is
+            // established by reaching doc->root anywhere on the parent path.
+            return view_state_view_is_connected(doc, static_cast<View*>(owner))
+                ? static_cast<View*>(owner) : NULL;
+        }
     }
 
     DomNode* root = doc->root ? static_cast<DomNode*>(doc->root) : NULL;
@@ -2805,7 +2817,9 @@ static uint32_t view_state_sync_interaction_flag_path(DocState* state, DomNode* 
         ViewState* view_state = entry ? entry->state : NULL;
         if (!view_state) continue;
 
-        View* live_view = view_tree_find_live_id(root, entry->view_id);
+        // registry owners resolve through their live parent chain without a
+        // whole-document ID search for every hover-state entry.
+        View* live_view = view_state_entry_resolve_view(state, entry);
         bool expected = target && live_view &&
             view_state_target_path_contains(target, live_view);
         if (strcmp(name, "hover") == 0) {
@@ -3747,6 +3761,10 @@ static void view_state_assign_flag(ViewState* state, ViewStateFlagKind flag, boo
 static void view_state_set_flag_internal(DocState* state, View* view, ViewStateFlagKind flag,
                                          bool value, const char* transition_name,
                                          const char* assertion_name, bool assert_after_mutation) {
+    // event callbacks may replace the target before the remaining pointer
+    // phases finish; only live views may acquire interaction flags.
+    DomDocument* doc = state && state->owner_store ? state->owner_store->document : NULL;
+    if (value && !view_state_view_is_connected(doc, view)) return;
     ViewState* view_state = view_state_get(state, view);
     if (!view_state && !value) return;
     if (!view_state) view_state = view_state_get_or_create(state, view, VIEW_STATE_BASE);
@@ -3820,7 +3838,7 @@ static uint32_t view_state_sync_focus_flag(DocState* state, DomNode* root,
     while (hashmap_iter(state->view_state_map, &iter, &item)) {
         ViewStateEntry* entry = (ViewStateEntry*)item;
         if (!entry || !entry->state) continue;
-        View* live_view = view_tree_find_live_id(root, entry->view_id);
+        View* live_view = view_state_entry_resolve_view(state, entry);
         bool expected = live_view == focused;
         if (expected) found_focused_view = true;
         if ((entry->state->flags.focused != 0) == expected) continue;
@@ -3848,6 +3866,10 @@ static void doc_state_set_interaction_target(DocState* state, View* target,
                                              const char* transition_name,
                                              const char* assertion_name) {
     if (!state) return;
+    DomDocument* doc = state->owner_store ? state->owner_store->document : NULL;
+    // reactive replacement can detach the event target before a later pointer
+    // phase; never create interaction state for its retired subtree.
+    if (target && !view_state_view_is_connected(doc, target)) target = NULL;
     View* old_target = *target_slot;
     if (old_target == target) return;
 
@@ -7776,6 +7798,8 @@ static bool focus_accepts_target(View* view, bool programmatic) {
 static void focus_set_internal(DocState* state, View* view, bool from_keyboard,
                                bool programmatic) {
     if (!state) return;
+    DomDocument* doc = state->owner_store ? state->owner_store->document : NULL;
+    if (view && !view_state_view_is_connected(doc, view)) return;
     if (!focus_accepts_target(view, programmatic)) return;
 
     if (state->transition_depth == 0) {

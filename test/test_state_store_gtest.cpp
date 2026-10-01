@@ -7,6 +7,7 @@ extern "C" {
 #include "../lib/test_utils.h"
 
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/dom_lifecycle.hpp"
 #include "../radiant/event.hpp"
 #include "../radiant/view.hpp"
 
@@ -97,6 +98,89 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveViewStateAndDropsOrph
     EXPECT_EQ(doc_state->hover_target, static_cast<View*>(live));
 
     EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
+}
+
+TEST_F(StateStoreDomMutationTest, DetachedRegisteredViewStopsResolvingBeforeRetirement) {
+    DocState* doc_state = state();
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
+
+    doc_state_set_hover_target(doc_state, static_cast<View*>(orphan));
+    ViewStateEntry query = {.view_id = static_cast<DomNode*>(orphan)->id,
+        .kind = VIEW_STATE_BASE};
+    const ViewStateEntry* entry = static_cast<const ViewStateEntry*>(
+        hashmap_get(doc_state->view_state_map, &query));
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(view_state_entry_resolve_view(doc_state, entry), static_cast<View*>(orphan));
+    DomElement* layout_wrapper = make_element();
+    root->parent = layout_wrapper;
+    EXPECT_EQ(view_state_entry_resolve_view(doc_state, entry), static_cast<View*>(orphan));
+    root->parent = nullptr;
+    delete layout_wrapper;
+
+    ASSERT_TRUE(root->remove_child(orphan));
+    // a detached node remains registry-valid until retirement, but is no longer a live view.
+    EXPECT_EQ(view_state_entry_resolve_view(doc_state, entry), nullptr);
+    EXPECT_GT(state_store_prune_after_reflow(doc_state), 0u);
+    EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
+    EXPECT_EQ(doc_state->hover_target, nullptr);
+    EXPECT_FALSE(state_get_bool(doc_state, root, STATE_HOVER));
+    EXPECT_TRUE(radiant_state_validate_interaction(doc_state, nullptr));
+
+    doc_state->active_cascade_depth++;
+    doc_state_set_hover_target(doc_state, static_cast<View*>(orphan));
+    doc_state->active_cascade_depth--;
+    EXPECT_EQ(doc_state->hover_target, nullptr);
+    EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
+
+    orphan->tag_name = "button";
+    orphan->tag_id = MARKUP_NAME_BUTTON;
+    doc_state->active_cascade_depth++;
+    focus_set_programmatic(doc_state, static_cast<View*>(orphan));
+    doc_state->active_cascade_depth--;
+    EXPECT_EQ(focus_get(doc_state), nullptr);
+    EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
+}
+
+TEST_F(StateStoreDomMutationTest, DetachedPointerPhasesDoNotRecreatePrunedState) {
+    DocState* doc_state = state();
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
+
+    orphan->tag_name = "button";
+    orphan->tag_id = MARKUP_NAME_BUTTON;
+    doc_state_set_hover_target(doc_state, static_cast<View*>(orphan));
+    doc_state_set_active_target(doc_state, static_cast<View*>(orphan));
+    ASSERT_NE(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
+
+    ASSERT_TRUE(root->remove_child(orphan));
+    ASSERT_GT(state_store_prune_after_reflow(doc_state), 0u);
+    ASSERT_EQ(doc_state->hover_target, nullptr);
+    ASSERT_EQ(doc_state->active_target, nullptr);
+
+    const size_t state_count = hashmap_count(doc_state->view_state_map);
+    const uint64_t version = doc_state->version;
+
+    // later pointer phases still hold the detached target after reactive replacement.
+    doc_state->active_cascade_depth++;
+    for (size_t phase = 0; phase < 8; phase++) {
+        view_state_set_hovered(doc_state, static_cast<View*>(orphan), true);
+        view_state_set_active(doc_state, static_cast<View*>(orphan), true);
+        view_state_set_focused(doc_state, static_cast<View*>(orphan), true);
+        doc_state_set_hover_target(doc_state, static_cast<View*>(orphan));
+        doc_state_set_active_target(doc_state, static_cast<View*>(orphan));
+        focus_set_programmatic(doc_state, static_cast<View*>(orphan));
+
+        EXPECT_EQ(hashmap_count(doc_state->view_state_map), state_count);
+        EXPECT_EQ(doc_state->version, version);
+        EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
+        EXPECT_EQ(doc_state->hover_target, nullptr);
+        EXPECT_EQ(doc_state->active_target, nullptr);
+        EXPECT_EQ(focus_get(doc_state), nullptr);
+    }
+    doc_state->active_cascade_depth--;
+    EXPECT_TRUE(radiant_state_validate_interaction(doc_state, nullptr));
+    EXPECT_EQ(state_store_prune_after_reflow(doc_state), 0u);
 }
 
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) {
