@@ -57,6 +57,22 @@ struct ReductionMetadataRecorder {
     int assignment_count;
 };
 
+struct ElementAngleRecorder {
+    int greater_comparisons;
+    int elements;
+};
+
+static LambdaParseValue record_element_angles(void* context,
+        const LambdaParseReduction* reduction) {
+    ElementAngleRecorder* recorder = (ElementAngleRecorder*)context;
+    if (reduction->kind == LAMBDA_REDUCE_BINARY &&
+            reduction->detail_token.kind == LAMBDA_TOK_GT) {
+        recorder->greater_comparisons++;
+    }
+    if (reduction->kind == LAMBDA_REDUCE_ELEMENT) recorder->elements++;
+    return 0;
+}
+
 static LambdaParseValue record_parser_seam(void* context,
         const LambdaParseReduction* reduction) {
     ParserSeamRecorder* recorder = (ParserSeamRecorder*)context;
@@ -324,6 +340,33 @@ TEST(LambdaRdParserPoc, ParsesElementAttributesAndContentBoundary) {
     LambdaParseError error = {};
     EXPECT_EQ(lambda_rd_parse_source(source, strlen(source), NULL, NULL,
         NULL, &error), LAMBDA_PARSE_OK) << (error.message ? error.message : "");
+}
+
+TEST(LambdaRdParserPoc, KeepsAngleComparisonsInsideDelimitedElementExpressions) {
+    struct Case { const char* source; int comparisons; int elements; };
+    const Case cases[] = {
+        {"<x a: if (1 > 0) 2>", 1, 1},
+        {"<x a: if 1 > 0 { 2 > 1 }>", 2, 1},
+        {"<x if 1 > 0 { 2 }>", 1, 1},
+        {"<x a: if (true) 1 else if 2 > 1 { 3 }>", 1, 1},
+        {"<x a: if (false) 1 else (2 > 1)>", 1, 1},
+        {"<x a: for (v in [1, 2] where v > 1) v>", 1, 1},
+        {"<x a: for v in [1, 2] where v > 1 { v }>", 1, 1},
+        {"<x a: match 1 > 0 { case bool: 2 > 1 }>", 2, 1},
+        {"<x a: 1 that (~ > 0)>", 1, 1},
+        {"<x a: [1 > 0, {key: 2 > 1}.key]>", 2, 1},
+        {"<x a: string(1 > 0)>", 1, 1},
+    };
+    LambdaParseSink sink = {record_element_angles};
+    for (const Case& sample : cases) {
+        LambdaParseError error = {};
+        ElementAngleRecorder recorder = {};
+        EXPECT_EQ(lambda_rd_parse_source(sample.source, strlen(sample.source),
+            &sink, &recorder, NULL, &error), LAMBDA_PARSE_OK)
+            << sample.source << ": " << (error.message ? error.message : "");
+        EXPECT_EQ(recorder.greater_comparisons, sample.comparisons) << sample.source;
+        EXPECT_EQ(recorder.elements, sample.elements) << sample.source;
+    }
 }
 
 TEST(LambdaRdParserPoc, ParsesQualifiedAttributesAndDirectElementContent) {

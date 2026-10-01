@@ -32,7 +32,7 @@ expression continuation in Lambda surface syntax.
 authority.** Cite `S16.#` in discussion and downstream docs, not this
 document's section numbers. Map: §3.1 → S16.1.1, §3.2 → S16.1.2–S16.1.3v2 +
 S16.2.1, §3.3 → S16.2.2v2–S16.2.3v3 + S16.2.5, §3.4/§7.15 → S16.2.4v3, §3.6 →
-S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1,
+S16.2.6, §3.8 → S16.3.1, §5.9 → S16.4.1v2–S16.4.3, §5.10 → S16.5.1v2,
 §5.1–§5.6 → S16.6.1–S16.6.5, §7.1–§7.2 → S16.8.1–S16.8.2, §7.3–§7.5 →
 S16.8.3, §7.9 → S16.8.4, §7.12 → S16.8.5, §7.10 → S16.8.6, §7.8 → S16.8.7,
 §7.13 → S16.8.8, §7.6 → S16.9.1, §7.7 → S16.9.2, §7.11 → S16.9.3, §7.15 →
@@ -1151,20 +1151,26 @@ comparison gets a silently restructured document — a silent meaning
 change, with comparisons still nominally legal. Prioritizing between two
 legal readings is still guessing; it is just guessing consistently.
 
-**Option 3 — inside element scope, `<` `>` `<=` `>=` are not operators at
-all (ADOPTED).** Not "comparison loses" but "comparison in this scope does
-not exist": `>` always closes the current element, `<` always opens a child
-element, and the four symbol relationals are simply absent from the
-operator set within `< ... >` (attribute values and bare content
-expressions alike). With one reading removed rather than deprioritized,
-the close-priority question never arises — the same move the design makes
-everywhere else (§3.1, refuse to guess by construction).
+**Option 3 — in exposed element expressions, `<` `>` `<=` `>=` are not
+operators (ADOPTED; S16.5.1v2).** `>` closes the current element and `<`
+opens a child. The four symbol relationals are absent from bare attribute
+values and bare content expressions. A delimited subexpression owns its
+interior, so it restores the full expression grammar. Other comparisons stay
+available. The closing boundary does not compete with an exposed comparison.
 
 Escapes, where a comparison is genuinely wanted inside an element:
 
-- **Parentheses are grammar islands**: inside `( )` the full expression
-  grammar returns, symbol relationals included — `attr: (a > b)`. This is
-  the general escape and matches current attribute behavior.
+- **Every explicit delimiter is a grammar island**: parentheses, call/index
+  arguments, arrays, maps, and braced bodies use the full expression grammar
+  inside their delimiters. Thus `attr: (a > b)`, `attr: f(a > b)` and
+  `attr: [a > b]` admit symbol relationals. An arrow's unbraced body is
+  outside its parameter parentheses and inherits the exposed restriction.
+- **Control heads have a known end**: `if (cond) expr` and
+  `for (binding) expr` use full grammar in the head, then the exposed grammar
+  in the unbraced body. Bare heads followed by a braced body also admit full
+  comparisons (`if a > b { ... }`, `for x in xs where x > 0 { ... }`);
+  `while` and `match` follow the same braced-head rule. The `else` arm and a
+  `that` predicate inherit the exposed grammar unless explicitly delimited.
 - **The word operators `lt gt le ge` (and `eq ne`) remain available bare**
   — but note they are **not synonyms** for the symbol forms. Confirmed in
   the implementation and by probe (2026-08-21): the word operators map to
@@ -1178,11 +1184,11 @@ Escapes, where a comparison is genuinely wanted inside an element:
   collection operands the two families genuinely differ, and parentheses
   are the escape that preserves symbol semantics.
 
-Cost accounting versus the status quo: attributes already work this way —
-`binary_expr($, in_attr)` excludes the symbol relationals, and this
-collision is *why* that flag exists — so the only tightening is extending
-the same exclusion to bare content expressions (today they use full
-`_expr`). The ruling also **simplifies decided point 13**: the
+Cost accounting versus the original status quo: the exposed attribute tier
+already excluded symbol relationals, and the content tier needed the same
+restriction. S16.5.1v2 makes explicit that delimiters and control heads
+restore the full grammar; their operands do not see the element closer.
+The ruling also **simplifies decided point 13**: the
 trailing-style carve-out for relational `>` inside element content
 (`a >` ⏎ `b`) assumed bare comparisons exist there; they no longer do, so
 inside element scope `>` is the terminator unconditionally, and the §3.3

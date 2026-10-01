@@ -16,7 +16,6 @@ typedef struct LambdaRdParser {
     LambdaParseStatus status;
     uint32_t depth;
     uint32_t stop_at_element_close;
-    uint32_t stop_at_element_attribute_close;
     LambdaTokenKind prev_kind;
     uint32_t procedural_depth;
     bool last_statement_self_delimiting;
@@ -587,6 +586,25 @@ static bool parser_parse_expression_value(LambdaRdParser* parser, int min_bp, La
     return parser->status == LAMBDA_PARSE_OK;
 }
 
+// S16.5.1v2: a delimiter owns its interior, so the enclosing element cannot
+// close on an angle comparison inside it.
+static uint32_t parser_enter_delimited_expression(LambdaRdParser* parser) {
+    uint32_t saved = parser->stop_at_element_close;
+    parser->stop_at_element_close = 0;
+    return saved;
+}
+
+static void parser_leave_delimited_expression(LambdaRdParser* parser, uint32_t saved) {
+    parser->stop_at_element_close = saved;
+}
+
+static bool parser_parse_delimited_expression_value(LambdaRdParser* parser, int min_bp, LambdaParseValue* value_out) {
+    uint32_t saved = parser_enter_delimited_expression(parser);
+    bool parsed = parser_parse_expression_value(parser, min_bp, value_out);
+    parser_leave_delimited_expression(parser, saved);
+    return parsed;
+}
+
 static bool parser_parse_scoped_expression(LambdaRdParser* parser, uint32_t procedural_depth, LambdaParseValue* value_out) {
     uint32_t saved_depth = parser->procedural_depth;
     parser->procedural_depth = procedural_depth;
@@ -676,8 +694,11 @@ static bool parser_parse_braced(LambdaRdParser* parser, LambdaToken marker, Lamb
     bool opened = open_message ? parser_expect_message(parser, LAMBDA_TOK_LBRACE, open_message) : parser_accept(parser, LAMBDA_TOK_LBRACE);
     if (!opened) return false;
     if (begin_form != LAMBDA_REDUCTION_FORM_NONE) parser_context(parser, begin_form, marker.span, marker);
+    uint32_t saved = parser_enter_delimited_expression(parser);
     LambdaParseValue value = parse_content(parser, LAMBDA_TOK_RBRACE);
-    if (!parser_expect_message(parser, LAMBDA_TOK_RBRACE, close_message)) return false;
+    bool closed = parser_expect_message(parser, LAMBDA_TOK_RBRACE, close_message);
+    parser_leave_delimited_expression(parser, saved);
+    if (!closed) return false;
     if (end_form != LAMBDA_REDUCTION_FORM_NONE) parser_context(parser, end_form, marker.span, marker);
     if (value_out) *value_out = value;
     return parser->status == LAMBDA_PARSE_OK;
@@ -1105,9 +1126,7 @@ static LambdaParseValue parse_element_into(LambdaRdParser* parser, ParserGrowBuf
             parser_advance(parser);
         }
         parser->stop_at_element_close++;
-        parser->stop_at_element_attribute_close++;
         LambdaParseValue value = parse_expression(parser, 0);
-        parser->stop_at_element_attribute_close--;
         parser->stop_at_element_close--;
         if (parser->status != LAMBDA_PARSE_OK) return 0;
         SourceSpan attribute_span = {attribute_name.span.start_byte, parser->current.span.start_byte};
@@ -1274,7 +1293,7 @@ static bool parser_parse_arrow_body(LambdaRdParser* parser, LambdaParseValue* va
     return parser_parse_scoped_expression(parser, 0, value_out);
 }
 
-static LambdaParseValue parse_group_or_arrow_into(LambdaRdParser* parser, ParserGrowBuffer* children) {
+static LambdaParseValue parse_group_or_arrow_into(LambdaRdParser* parser, ParserGrowBuffer* children, uint32_t outer_element_scope) {
     LambdaToken first = parser->current;
     parser_advance(parser);
     parser_context(parser, LAMBDA_REDUCTION_FORM_GROUP_BEGIN, first.span, first);
@@ -1288,6 +1307,8 @@ static LambdaParseValue parse_group_or_arrow_into(LambdaRdParser* parser, Parser
         for (uint32_t i = 0; i < signature.return_count; i++) {
             if (!parser_push_child(parser, children, signature.return_types[i])) return 0;
         }
+        // the arrow body follows the closing `)` and belongs to the outer scope.
+        parser_leave_delimited_expression(parser, outer_element_scope);
         LambdaParseValue body = 0;
         if (!parser_parse_arrow_body(parser, &body)) return 0;
         if (!parser_push_child(parser, children, body)) return 0;
@@ -1316,7 +1337,9 @@ static LambdaParseValue parse_group_or_arrow_into(LambdaRdParser* parser, Parser
 static LambdaParseValue parse_group_or_arrow(LambdaRdParser* parser) {
     LambdaParseValue inline_children[64];
     ParserGrowBuffer children = parser_grow_buffer(inline_children, 64, sizeof(LambdaParseValue));
-    LambdaParseValue group = parse_group_or_arrow_into(parser, &children);
+    uint32_t saved = parser_enter_delimited_expression(parser);
+    LambdaParseValue group = parse_group_or_arrow_into(parser, &children, saved);
+    parser_leave_delimited_expression(parser, saved);
     parser_grow_release(&children);
     return group;
 }
@@ -1406,7 +1429,8 @@ static bool parser_parse_control_body(LambdaRdParser* parser, LambdaToken marker
 
 static bool parser_parse_condition(LambdaRdParser* parser, const char* close_message, LambdaParseValue* value_out) {
     bool parenthesized = parser_accept(parser, LAMBDA_TOK_LPAREN);
-    if (!parser_parse_expression_value(parser, 0, value_out)) return false;
+    // both the parenthesized head and a bare head before `{` have a known end.
+    if (!parser_parse_delimited_expression_value(parser, 0, value_out)) return false;
     return !parenthesized || parser_expect_message(parser, LAMBDA_TOK_RPAREN, close_message);
 }
 
@@ -1594,7 +1618,9 @@ static LambdaParseValue parse_for_expression(LambdaRdParser* parser) {
     // the header owns `where`; bracket it so the retired-filter diagnostic below
     // does not fire on a legal `for (x in items where cond)` clause.
     parser->for_header_depth++;
+    uint32_t saved = parser_enter_delimited_expression(parser);
     bool header_ok = parser_parse_for_header(parser, first, &clauses);
+    parser_leave_delimited_expression(parser, saved);
     parser->for_header_depth--;
     if (!header_ok) return 0;
     if (parenthesized && !parser_expect(parser, LAMBDA_TOK_RPAREN)) return 0;
@@ -1609,7 +1635,7 @@ static LambdaParseValue parse_for_expression(LambdaRdParser* parser) {
     return result;
 }
 
-static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
+static LambdaParseValue parse_match_expression_into(LambdaRdParser* parser) {
     LambdaToken first = parser->current;
     LambdaParseValue arms = 0;
     uint32_t arm_count = 0;
@@ -1654,6 +1680,14 @@ static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
     if (!parser_expect(parser, LAMBDA_TOK_RBRACE)) return 0;
     LambdaParseValue children[2] = {scrutinee, arms};
     return parser_reduce(parser, LAMBDA_REDUCE_MATCH, (SourceSpan){first.span.start_byte, parser->current.span.start_byte}, children, 2);
+}
+
+static LambdaParseValue parse_match_expression(LambdaRdParser* parser) {
+    // the arm list's `{}` also delimits its colon bodies and the scrutinee.
+    uint32_t saved = parser_enter_delimited_expression(parser);
+    LambdaParseValue result = parse_match_expression_into(parser);
+    parser_leave_delimited_expression(parser, saved);
+    return result;
 }
 
 static LambdaParseValue parse_while_statement(LambdaRdParser* parser) {
@@ -1747,21 +1781,19 @@ static LambdaParseValue parse_prefix(LambdaRdParser* parser) {
         parser_advance(parser);
         value = parser_reduce_token(parser, LAMBDA_REDUCE_ATOM, LAMBDA_REDUCTION_FORM_TOKEN, first.span, first, NULL, 0);
     } else if (first.kind == LAMBDA_TOK_LPAREN) {
-        uint32_t saved_close = parser->stop_at_element_close;
-        uint32_t saved_attr_close = parser->stop_at_element_attribute_close;
-        parser->stop_at_element_close = 0;
-        parser->stop_at_element_attribute_close = 0;
         value = parse_group_or_arrow(parser);
-        parser->stop_at_element_close = saved_close;
-        parser->stop_at_element_attribute_close = saved_attr_close;
     } else if (first.kind == LAMBDA_TOK_LBRACKET) {
+        uint32_t saved = parser_enter_delimited_expression(parser);
         value = parse_array(parser);
+        parser_leave_delimited_expression(parser, saved);
     } else if (first.kind == LAMBDA_TOK_LBRACE) {
+        uint32_t saved = parser_enter_delimited_expression(parser);
         if (braced_expression_is_map(parser) || parser->next.kind == LAMBDA_TOK_RBRACE) {
             value = parse_map(parser);
         } else {
-            if (!parser_parse_plain_braced(parser, error_block_body_open, error_block_body_close, &value)) return 0;
+            (void)parser_parse_plain_braced(parser, error_block_body_open, error_block_body_close, &value);
         }
+        parser_leave_delimited_expression(parser, saved);
     } else if (first.kind == LAMBDA_TOK_LT) {
         value = parse_element(parser);
     } else if (first.kind == LAMBDA_TOK_PATH_REL || first.kind == LAMBDA_TOK_SLASH) {
@@ -1849,7 +1881,10 @@ static bool parser_parse_postfix_delimited_into(LambdaRdParser* parser, ParserGr
     LambdaTokenKind closer = call ? LAMBDA_TOK_RPAREN : LAMBDA_TOK_RBRACKET;
     LambdaParseItemFn parse_item = call ? parse_call_argument : parser_parse_expression_item;
     if (!parser_accept(parser, call ? LAMBDA_TOK_LPAREN : LAMBDA_TOK_LBRACKET)) return false;
-    if (!parser_parse_expression_list(parser, closer, children, call, parse_item)) return false;
+    uint32_t saved = parser_enter_delimited_expression(parser);
+    bool parsed = parser_parse_expression_list(parser, closer, children, call, parse_item);
+    parser_leave_delimited_expression(parser, saved);
+    if (!parsed) return false;
     SourceSpan span = {left_start_byte, parser->current.span.start_byte};
     if (call) {
         uint32_t flags = parser->pipe_rhs_depth == parser->expression_depth && !parser->pipe_rhs_has_current
@@ -2048,7 +2083,8 @@ static LambdaParseValue parse_expression(LambdaRdParser* parser, int min_bp) {
 static bool if_starts_block_statement(const LambdaRdParser* parser) {
     LambdaRdParser probe = parser_probe(parser);
     parser_advance(&probe);
-    (void)parse_expression(&probe, 0);
+    LambdaParseValue ignored;
+    (void)parser_parse_delimited_expression_value(&probe, 0, &ignored);
     return probe.status == LAMBDA_PARSE_OK && probe.current.kind == LAMBDA_TOK_LBRACE;
 }
 
@@ -2334,7 +2370,8 @@ static LambdaParseValue parse_var_statement(LambdaRdParser* parser) {
 static bool if_statement_body_is_map(const LambdaRdParser* parser) {
     LambdaRdParser probe = parser_probe(parser);
     parser_advance(&probe);
-    (void)parse_expression(&probe, 0);
+    LambdaParseValue ignored;
+    (void)parser_parse_delimited_expression_value(&probe, 0, &ignored);
     if (probe.status != LAMBDA_PARSE_OK) return false;
     return control_body_brace_is_map(&probe);
 }
@@ -2346,7 +2383,7 @@ static LambdaParseValue parse_if_statement(LambdaRdParser* parser) {
     }
     parser_advance(parser);
     LambdaParseValue condition;
-    if (!parser_parse_expression_value(parser, 0, &condition)) return 0;
+    if (!parser_parse_delimited_expression_value(parser, 0, &condition)) return 0;
     LambdaParseValue body = 0;
     if (!parser_parse_braced(parser, first, LAMBDA_REDUCTION_FORM_IF_BRANCH_BEGIN,
             LAMBDA_REDUCTION_FORM_IF_BRANCH_END, NULL, error_if_body_close, &body)) return 0;

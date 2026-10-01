@@ -258,6 +258,30 @@ TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebu
     delete original_prop;
 }
 
+TEST_F(StateStoreDomMutationTest, DetachedTextControlRetainsValueAcrossPrune) {
+    DocState* doc_state = state();
+    ASSERT_NE(doc_state, nullptr);
+    ASSERT_TRUE(dom_lifecycle_init(&doc));
+    ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
+
+    FormControlProp* form = new FormControlProp{};
+    form->control_type = FORM_CONTROL_TEXT;
+    orphan->form = form;
+    ASSERT_TRUE(root->remove_child(orphan));
+    ASSERT_TRUE(form_control_store_text_value(doc_state, static_cast<View*>(orphan),
+                                              "detached", 8, 8));
+
+    ViewState* value_state = view_state_get(doc_state, static_cast<View*>(orphan));
+    ASSERT_NE(value_state, nullptr);
+    state_store_prune_after_reflow(doc_state);
+    EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), value_state);
+    EXPECT_EQ(form->current_value, value_state->data.form.current_value);
+    EXPECT_STREQ(form->current_value, "detached");
+
+    orphan->form = nullptr;
+    delete form;
+}
+
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsDragWhenOnlyDropTargetRemoved) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);

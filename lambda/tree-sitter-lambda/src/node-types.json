@@ -397,6 +397,18 @@
             "named": true
           },
           {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
+            "type": "match_expr",
+            "named": true
+          },
+          {
             "type": "not_expr",
             "named": true
           },
@@ -410,6 +422,10 @@
           },
           {
             "type": "unary_type",
+            "named": true
+          },
+          {
+            "type": "while_expr",
             "named": true
           }
         ]
@@ -439,11 +455,23 @@
             "named": true
           },
           {
+            "type": "for_expr",
+            "named": true
+          },
+          {
+            "type": "if_expr",
+            "named": true
+          },
+          {
             "type": "imaginary",
             "named": true
           },
           {
             "type": "integer",
+            "named": true
+          },
+          {
+            "type": "match_expr",
             "named": true
           },
           {
@@ -476,6 +504,10 @@
           },
           {
             "type": "unary_expr",
+            "named": true
+          },
+          {
+            "type": "while_expr",
             "named": true
           }
         ]
@@ -2507,7 +2539,7 @@
     "fields": {
       "declare": {
         "multiple": true,
-        "required": true,
+        "required": false,
         "types": [
           {
             "type": "loop_expr",
