@@ -4,8 +4,25 @@
     {
       "name": "editor-dom",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "test/editor-js", "run", "dev:page-dom"],
+      "runtimeArgs": [
+        "--prefix",
+        "test/editor-js",
+        "run",
+        "dev:page-dom"
+      ],
       "port": 5191
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8731",
+        "--directory",
+        "site"
+      ],
+      "port": 8731
     }
   ]
 }

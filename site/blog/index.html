@@ -46,8 +46,28 @@
 <section class="doc-content">
   <div class="container-narrow">
 
-    <!-- Featured post -->
+    <!-- Release notes -->
     <article class="card" style="padding: var(--space-2xl);">
+      <span class="card-tag blue">Release Notes</span>
+      <h2 style="margin-top: var(--space-sm);">Lambda Script 0.3 Alpha</h2>
+      <p class="text-dim" style="font-size: 0.85rem; margin-bottom: var(--space-md);">October 2026</p>
+      <p>Lambda Script 0.3 is the first alpha release since 0.2 in March. Highlights:</p>
+      <ul>
+        <li><strong>Faster JIT.</strong> MIR Direct is now the only back end. Across 63 benchmarks, typed Lambda code runs 1.8× faster than Node.js V8 by geomean (0.54×), and untyped code is roughly on par (1.05×).</li>
+        <li><strong>Document editing.</strong> <code>lambda edit</code> opens Markdown, HTML, and SVG documents in an editor and saves them back to the file.</li>
+        <li><strong>Reactive UI.</strong> <code>view</code>/<code>edit</code> templates, <code>apply()</code>, and event handlers for building interactive apps in Lambda.</li>
+        <li><strong>Concurrency.</strong> Tasks, mailboxes, <code>select</code>, timeouts, and cancellation.</li>
+        <li><strong>String patterns.</strong> A pattern language inside <code>\(…)</code>, used by <code>find</code>, <code>replace</code>, and <code>split</code>.</li>
+        <li><strong>More diagrams.</strong> Structurizr C4 workspaces and TikZ/PGF pictures join Mermaid, D2, and GraphViz in <code>render</code> and <code>view</code>.</li>
+        <li><strong>JavaScript engine.</strong> The experimental LambdaJS engine passes 40,261 test262 tests with 0 failures.</li>
+        <li><strong>Standards.</strong> CommonMark 655/655, YAML 1.2 276/276, and html5lib tree construction 364/364.</li>
+      </ul>
+      <p>There is also a new ten-chapter <a href="https://github.com/henry-luo/lambda/blob/master/doc/tutorial/README.md" target="_blank" rel="noopener">tutorial</a>, from installation to a reactive app. This is an alpha: expect rough edges, and please <a href="https://github.com/henry-luo/lambda/issues" target="_blank" rel="noopener">report issues</a>.</p>
+      <p><a href="../download/">Download 0.3 alpha →</a></p>
+    </article>
+
+    <!-- Featured post -->
+    <article class="card mt-3xl" style="padding: var(--space-2xl);">
       <span class="card-tag green">Featured</span>
       <h2 style="margin-top: var(--space-sm);">Why Lambda Script: Documents as Data</h2>
       <p class="text-dim" style="font-size: 0.85rem; margin-bottom: var(--space-md);">April 2026</p>

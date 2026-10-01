@@ -116,11 +116,13 @@ type User = {
 
     <h2>Step 6: Render and View Documents</h2>
     <p>Open any supported document in the native viewer:</p>
-<pre><code>$ lambda view                   # opens demo page
+<pre><code>$ lambda view                   # opens the document viewer
 $ lambda view page.html         # open an HTML file
 $ lambda view readme.md         # render Markdown
 $ lambda view diagram.mmd       # render a Mermaid diagram
 $ lambda view https://example.com</code></pre>
+    <p>Edit Markdown, HTML, or SVG and save it back to the file:</p>
+<pre><code>$ lambda edit readme.md</code></pre>
 
     <p>Render to image or PDF:</p>
 <pre><code>$ lambda render page.html -o output.svg
