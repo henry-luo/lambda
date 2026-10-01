@@ -1,48 +1,19 @@
 # Lambda Demo — Document Viewer
 
-The Lambda demo is a document viewer written in Lambda. It is a reactive Lambda
-UI ([`test/ui/doc_viewer.ls`](../test/ui/doc_viewer.ls)) that runs on the Radiant
-HTML/CSS layout engine. It lists the files of a project in a tree and shows the
-selected file as a rendered document, a property tree, a table or its source.
-Every format is parsed into the same Lambda/Mark data model and rendered by the
-same engine.
-
 ## Running the demo
 
 From the root of a Lambda checkout or of an unzipped release:
 
 ```bash
-./lambda.exe demo
-```
-
-`demo` is short for `lambda view test/ui/doc_viewer.html`. It opens a window
-with the animated startup splash. The splash loads the viewer in the background
-and hands over to it after about two seconds.
-
-To skip the splash and open the viewer directly:
-
-```bash
-./lambda.exe view
-```
-
-With no file argument, `view` opens `test/ui/doc_viewer.ls`. The file tree is
-rooted at the current working directory, so run the command from the folder you
-want to browse.
-
-To open a single document in its own window, without the file browser:
-
-```bash
-./lambda.exe view README.md
+./lambda demo
 ```
 
 ## Viewer features
 
 - **Project tree.** Folders load only when you open them, so large worktrees open
   quickly. Folders are listed before files, and each file has an icon for its
-  type. Dot files, `build*`/`release*` output folders and `*.exe` binaries are
-  hidden.
-- **File-name filter.** Type in the filter box to narrow the tree to matching
-  file names. Opened folders stay open. Press `Esc` or click ✕ to clear it.
+  type.
+
 - **View / Source tabs.** A file that can be rendered opens in the **View** tab.
   **Source** shows the raw text of the same file. Any other file (Lambda scripts,
   C++, logs, …) opens as plain source.
@@ -68,9 +39,6 @@ To open a single document in its own window, without the file browser:
   bodies inside multipart messages are rendered.
 - **Tables.** CSV and TSV files open as tables. You can drag a column edge to
   resize the column, and long files load more rows on request.
-- **Scripted testing.** The whole UI can be driven headlessly with
-  `--event-file` scripts (clicks, typing, assertions, `render` to PNG). The
-  snapshots below were captured that way.
 
 ## Snapshots
 
@@ -99,13 +67,13 @@ open it at full size.
 <td width="33%" align="center"><a href="img/demo/latex.png"><img src="img/demo/latex.png" alt="LaTeX"></a><br><sub><b>LaTeX</b> — <code>.tex</code> with a table of contents</sub></td>
 </tr>
 <tr>
-<td width="33%" align="center"><a href="img/demo/pdf.png"><img src="img/demo/pdf.png" alt="PDF"></a><br><sub><b>PDF</b> — converted to HTML</sub></td>
+<td width="33%" align="center"><a href="img/demo/pdf.png"><img src="img/demo/pdf.png" alt="PDF"></a><br><sub><b>PDF</b> — Get_Started_With_Smallpdf.pdf converted to HTML</sub></td>
 <td width="33%" align="center"><a href="img/demo/eml.png"><img src="img/demo/eml.png" alt="Email"></a><br><sub><b>Email</b> — <code>.eml</code> headers and HTML body</sub></td>
 <td width="33%" align="center"><a href="img/demo/tikz.png"><img src="img/demo/tikz.png" alt="TikZ / PGF"></a><br><sub><b>TikZ / PGF</b> — PGFPlots log-axis plot</sub></td>
 </tr>
 <tr>
-<td width="33%" align="center"><a href="img/demo/mermaid.png"><img src="img/demo/mermaid.png" alt="Mermaid"></a><br><sub><b>Mermaid</b> — <code>.mmd</code> flowchart</sub></td>
-<td width="33%" align="center"><a href="img/demo/dot.png"><img src="img/demo/dot.png" alt="Graphviz DOT"></a><br><sub><b>Graphviz</b> — <code>.dot</code> with clusters and styled edges</sub></td>
+<td width="33%" align="center"><a href="img/demo/mermaid.png"><img src="img/demo/mermaid.png" alt="Mermaid"></a><br><sub><b>Mermaid</b> — <code>.mmd</code> sequence diagram</sub></td>
+<td width="33%" align="center"><a href="img/demo/dot.png"><img src="img/demo/dot.png" alt="Graphviz DOT"></a><br><sub><b>Graphviz</b> — <code>.dot</code> Go package dependency graph</sub></td>
 <td width="33%" align="center"><a href="img/demo/d2.png"><img src="img/demo/d2.png" alt="D2"></a><br><sub><b>D2</b> — <code>.d2</code> system diagram</sub></td>
 </tr>
 <tr>
