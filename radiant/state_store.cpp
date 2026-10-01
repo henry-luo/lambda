@@ -2435,6 +2435,12 @@ View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry
         DomNodeRef owner_ref = { static_cast<DomNode*>(entry->owner_address), entry->owner_id };
         DomNode* owner = dom_node_ref_validate(doc, owner_ref);
         if (owner && owner->id == entry->view_id) {
+            // A detached form control remains usable through its JS node and
+            // keeps its ViewState value until the document retires the node.
+            if (entry->kind == VIEW_STATE_FORM_CONTROL && owner->is_element()) {
+                DomElement* element = lam::dom_require_element(owner);
+                if (element && element->form) return static_cast<View*>(owner);
+            }
             // layout may wrap the DOM root in a synthetic view; connection is
             // established by reaching doc->root anywhere on the parent path.
             return view_state_view_is_connected(doc, static_cast<View*>(owner))

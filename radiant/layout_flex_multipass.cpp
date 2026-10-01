@@ -679,6 +679,9 @@ static void layout_flex_abs_prepare_child(LayoutContext* lycon, ViewBlock* conta
     for (LayoutAxis axis : layout_axes()) {
         LayoutAxisRefs refs(child, axis);
         bool horizontal = axis == LAYOUT_AXIS_X;
+        // The block axis keeps its content-sized auto dimension; the later
+        // static-position pass centers it after its children are laid out.
+        if (!layout_axis_is_inline_for_block(child, axis)) continue;
         if (refs.has_any_inset() || !layout_css_size_is_automatic(child, horizontal)) {
             continue;
         }

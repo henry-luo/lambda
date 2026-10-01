@@ -1032,7 +1032,11 @@ static bool multicol_relayout_auto_height_spanner_flow(
     lycon->block.advance_y += default_summary_line;
     layout_block_inner_content(lycon, spanner);
 
-    float used_content_height = lycon->block.advance_y;
+    // setup_inline includes the block-start decoration in advance_y; the
+    // border-box conversion below adds that decoration back exactly once.
+    float block_start_decoration = layout_axis_decoration_start(
+        spanner->boundary(), LAYOUT_AXIS_Y);
+    float used_content_height = lycon->block.advance_y - block_start_decoration;
     if (used_content_height < 0.0f) used_content_height = 0.0f;
     spanner->content_width = content.width;
     spanner->content_height = used_content_height;
@@ -8684,7 +8688,8 @@ static int multicol_simulate_column_count(
     float* item_content_heights,
     float* item_margin_before,
     float* item_margin_after,
-    float* item_line_advances
+    float* item_line_advances,
+    int orphans
 ) {
     if (item_count <= 0 || target_height <= 0) return 1;
 
@@ -8704,7 +8709,12 @@ static int multicol_simulate_column_count(
             float line_advance = item_line_advances ? item_line_advances[item_index] : 0.0f;
             if (line_advance <= 0.0f) return available;
             // Breaks inside text blocks occur after a complete line box.
-            return floorf(available / line_advance) * line_advance;
+            float fitted = floorf(available / line_advance) * line_advance;
+            // Match placement's orphans rule: a partial first fragment cannot
+            // keep fewer lines than the element requires at its block start.
+            if (item_content_heights[item_index] > fitted + 0.5f &&
+                fitted < orphans * line_advance - 0.5f) return 0.0f;
+            return fitted;
         };
         for (int i = 0; i < item_count; i++) {
             if (break_before[i] && has_item) {
@@ -9027,7 +9037,9 @@ static float multicol_balanced_target_search(
             item_heights, item_can_fragment, break_before, break_after, item_count,
             column_count, mid,
             item_content_heights, item_margin_before, item_margin_after,
-            item_line_advances);
+            item_line_advances,
+            block->blk && block->block()->orphans > 0
+                ? block->block()->orphans : 2);
         if (fragments <= column_count) {
             best = mid;
             upper = mid;

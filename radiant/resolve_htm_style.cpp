@@ -703,27 +703,9 @@ static void apply_html_table_cell_defaults(LayoutContext* lycon, DomNode* cell_n
     }
 
     BlockProp* block_prop = block->ensure_block(lycon);
-    bool cell_is_rtl = false;
-    for (DomElement* current = cell; current;) {
-        CssEnum specified_direction = layout_specified_keyword(
-            current, CSS_PROPERTY_DIRECTION, CSS_VALUE__UNDEF);
-        const char* dir = current->get_attribute("dir");
-        if (specified_direction == CSS_VALUE_RTL ||
-            (dir && str_ieq_cstr(dir, "rtl"))) {
-            cell_is_rtl = true;
-            break;
-        }
-        if (specified_direction == CSS_VALUE_LTR ||
-            (dir && str_ieq_cstr(dir, "ltr"))) {
-            break;
-        }
-        DomNode* parent = current->parent;
-        current = parent && parent->is_element() ? parent->as_element() : nullptr;
-    }
-    // CSS Text initial 'start' alignment follows the cell's direction; retain
-    // the established LTR HTML geometry while correcting RTL table cells.
-    block_prop->text_align = is_header ? CSS_VALUE_CENTER :
-        (cell_is_rtl ? CSS_VALUE_START : CSS_VALUE_LEFT);
+    // A plain td inherits text-align through the CSS resolver; a physical
+    // left default would suppress the table's computed end alignment.
+    block_prop->text_align = is_header ? CSS_VALUE_CENTER : CSS_VALUE_START;
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_X);
     apply_table_cell_dimension_attribute(cell, block, LAYOUT_AXIS_Y);
 
@@ -1302,6 +1284,9 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
     case MARKUP_NAME_TABLE: {
         // HTML UA default: border-spacing: 2px (CSS spec default is 0, but HTML tables use 2px)
         // This is applied at the TableProp level in layout_table.cpp, not here in block props
+        // A table resets inherited alignment from wrappers such as <center>;
+        // descendants can still inherit an authored alignment on the table.
+        block->ensure_block(lycon)->text_align = CSS_VALUE_START;
 
         apply_html_table_dimension_attribute(lycon, elmt, block, LAYOUT_AXIS_X);
         apply_html_table_dimension_attribute(lycon, elmt, block, LAYOUT_AXIS_Y);
