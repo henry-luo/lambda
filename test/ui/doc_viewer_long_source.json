@@ -1,0 +1,25 @@
+{
+  "name": "Document viewer lays out a long source file after navigation",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 900},
+  "events": [
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_milligram_css .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "milligram.css"},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "sourceMappingURL=milligram.css.map"},
+    {"type": "scroll", "target": {"selector": ".source-tab-panel"}, "dx": 0, "dy": -10000},
+    {"type": "render_pending"},
+    {"type": "assert_pixel", "x": 400, "y": 862, "search_radius": 14,
+      "max_r": 140, "max_g": 140, "max_b": 160},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_mermaid_shapes_test_md .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "mermaid_shapes_test.md"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_input_milligram_css .tree-label"}},
+    {"type": "assert_text", "target": {"selector": ".document-name"}, "equals": "milligram.css"},
+    {"type": "assert_text", "target": {"selector": "#source-preview"}, "contains": "sourceMappingURL=milligram.css.map"},
+    {"type": "scroll", "target": {"selector": ".source-tab-panel"}, "dx": 0, "dy": -10000},
+    {"type": "render_pending"},
+    {"type": "assert_pixel", "x": 400, "y": 862, "search_radius": 14,
+      "max_r": 140, "max_g": 140, "max_b": 160}
+  ]
+}
