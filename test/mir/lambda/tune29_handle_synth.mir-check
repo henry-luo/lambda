@@ -5,7 +5,7 @@
     {
       "in_func": "_step_#",
       "count": {
-        "1535": 1,
+        "and\t{{r}}, {{r}}, 1535": 1,
         "call\tcow_place_leaf_fixed": 1,
         "call\tlambda_map_path_set_checked_keys": 2
       },
@@ -17,7 +17,7 @@
     {
       "in_func": "_reset_#",
       "count": {
-        "1535": 2
+        "and\t{{r}}, {{r}}, 1535": 2
       },
       "forbid": [
         "call\tcow_place_leaf_fixed"

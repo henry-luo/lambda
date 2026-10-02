@@ -1064,7 +1064,14 @@ struct Container {
     uint8_t cow_state;
     uint8_t ctor_reserved_mask_lo;
     uint8_t ctor_reserved_mask_hi;
-    uint8_t reserved_state;
+    union {
+        uint8_t reserved_state;
+        struct {
+            uint8_t reserved_state_low:2;
+            uint8_t is_virtual:1; // output List extension; independent of list kind
+            uint8_t reserved_state_high:5;
+        };
+    };
 };
 
 LAMBDA_STATIC_ASSERT(offsetof(Container, type_id) == LAMBDA_GC_OFF_CONTAINER_TYPE_ID,
@@ -1095,6 +1102,14 @@ LAMBDA_STATIC_ASSERT(offsetof(Container, reserved_state) == 7,
 // intrusive lifetime record. This bit makes finalization owner-directed;
 // it must never be set on a native-lane array.
 #define CONTAINER_STATE_JS_RUNTIME_ITEMS ((uint8_t)(1u << 1))
+#define CONTAINER_STATE_VIRTUAL_LIST ((uint8_t)(1u << 2))
+
+static inline bool container_is_virtual_list(const struct Container* c) {
+    // Native array lanes use the whole state byte for their lane contract.
+    return c && (c->type_id == LMD_TYPE_ELEMENT ||
+        (c->type_id == LMD_TYPE_ARRAY && !(c->array_flags & CONTAINER_ARRAY_FLAG_NATIVE_LANE))) &&
+        (c->reserved_state & CONTAINER_STATE_VIRTUAL_LIST) != 0;
+}
 
 static inline bool container_is_strict_arguments(const Container* c) {
     return c && (c->reserved_state & CONTAINER_STATE_STRICT_ARGUMENTS) != 0;
@@ -2674,6 +2689,7 @@ extern "C" {
     Element* elmt(int64_t type_index);
     Element* elmt_with_tl(int64_t type_index, void* type_list_ptr);
     Element* elmt_with_type(struct TypeElmt* elmt_type);
+    void elmt_content_begin(Element* element);
     Object* object(int64_t type_index);
     Object* object_with_data(int64_t type_index);
     Object* object_with_tl(int64_t type_index, void* type_list_ptr);

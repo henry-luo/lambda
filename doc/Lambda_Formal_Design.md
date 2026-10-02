@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 17.0.0 (2026-10-02)
+**Spec version:** 18.0.0 (2026-10-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -442,6 +442,19 @@ language-visible counterparts are the semantics spec's SI ledger.
   JS-properties slot (D2.6.6v2), which frees exactly one such bit. The
   header is public ABI for MIR and the GC; the asserts are the enforcement.
   [OB22]
+
+- **D2.6.12v2*** **Virtual output lists carry their builder.** A PDF file's
+  content destination extends the existing List prefix (through Element)
+  with a builder pointer. Its `is_virtual` representation flag dispatches
+  content append to that builder instead of an Item array; it is independent
+  of the `is_spreadable` kind bit. Normal lists keep their existing storage.
+  A common builder interface admits future destinations. No output context
+  or allocator context is installed or changed. Finish and ownership follow
+  the extended destination. The PDFBuilder's MVP object encoder reads borrowed
+  map/array storage and writes bytes directly, retaining no source Item edges;
+  document construction stays in Lambda. Producer forwarding and the remaining
+  lifecycle and observation contracts are tracked in DO32/SO48.
+  [PDF_Output §5.4–§5.6]
 
 ### D2.7 The scalar-GC invariant
 
@@ -2336,6 +2349,13 @@ slice; no formal semantic ruling or document semver changes.
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 | D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
 
+**D2.6.12v2 — MVP with dictionaries, 2026-10-02.** Interpreter/MIR file
+construction selects `VirtualOutputElement`/`PDFBuilder`; raw byte appends,
+dictionary encoding, and `output` are implemented.
+The builder owns no Item edges and is released by the existing GC external
+payload hook. Producer-return lists and retained-content contracts remain DO32.
+[Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
+
 ## Appendix B — Open Design Issues (DO#)
 
 Numbered `DO#` (design-open); each links to its record.
@@ -2545,6 +2565,13 @@ Numbered `DO#` (design-open); each links to its record.
   eager tier's time by right.
 - **DO31** Whether an object declaration may name an element tag — `type <B> { x: int; string* }`, B being both the type name and the tag — and how a hierarchy's tags would relate. Deferred 2026-09-25: a nominal name is the type's name only and is never matched against a tag (D2.6.6v3); a tag is enforced by a structural element pattern, `type e = <tag …>`. [Type_Object OB23]
 
+- **DO32** Virtual PDF output follow-up: producer destination forwarding,
+  retained-file representation (SO48), structured encoder placement, byte
+  accounting, expression rollback, and phase-2 native helpers. The MVP uses
+  builder-owned bytes with precise wrapper lifetime, and does not promise
+  elimination of producer-return lists or migration of Radiant export.
+  [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
+
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |
@@ -2553,6 +2580,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.1 | Item_Boxing §0–§8 (R7–R10, W1–W3) | `Lambda_Design_Item_Boxing.md` |
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
+| D2.6.12v2 | PDF virtual-list and dictionary MVP | `Lambda_Design_PDF_Output.md` §5.4–§5.6 |
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
 | D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |

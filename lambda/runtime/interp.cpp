@@ -3916,6 +3916,7 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
         }
     }
 
+    elmt_content_begin((Element*)(uintptr_t)acc.get().item);
     if (node->content) {
         // AstElementNode::content is the list wrapper, not its first child.
         // Evaluating that wrapper once collapses a multi-child element to its
@@ -3930,12 +3931,9 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
             if (!owner) return ItemError;
             list_push_spread((List*)owner, value);
         }
-        list_end((List*)(uintptr_t)acc.get().item);
-    } else if (node->item) {
-        // Attributes but no content still closes the element's content frame.
-        list_end((List*)(uintptr_t)acc.get().item);
     }
-    return acc.get();
+    // A virtual file's finish can fail even though its element was allocated.
+    return list_end((List*)(uintptr_t)acc.get().item);
 }
 
 // ---------------------------------------------------------------------------

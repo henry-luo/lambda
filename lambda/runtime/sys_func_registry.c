@@ -1523,6 +1523,7 @@ JitImport jit_runtime_imports[] = {
     {"map_literal_spread", FPTR(map_literal_spread)},
     {"elmt", FPTR(elmt)},
     {"elmt_with_tl", FPTR(elmt_with_tl)},
+    {"elmt_content_begin", FPTR(elmt_content_begin)},
     {"elmt_literal_begin", FPTR(elmt_literal_begin)},
     {"elmt_fill", FPTR(elmt_fill)},
     {"elmt_get", FPTR(elmt_get)},

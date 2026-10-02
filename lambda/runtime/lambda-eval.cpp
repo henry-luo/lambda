@@ -1,3 +1,4 @@
+#include "../io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include "lambda-number-types.hpp"
 #include "lambda-number-runtime.hpp"
@@ -9905,6 +9906,7 @@ static Item clone_mutable_map(Item src_item, MutableCloneContext* clone_ctx) {
 static Item clone_mutable_element(Item src_item, MutableCloneContext* clone_ctx) {
     Element* src = src_item.element;
     if (!src || !src->type) return ItemNull;
+    if (container_is_virtual_list(src)) return ItemError;
     TypeMap* source_type = mutable_shape_type(LMD_TYPE_ELEMENT, (Type*)src->type);
     Item existing;
     if (mutable_clone_lookup(clone_ctx, src, &existing)) return existing;
@@ -10796,6 +10798,9 @@ void lambda_direct_field_store_image(Item owner, int64_t byte_offset, Item list)
 Item cow_prepare_write(Item old) {
     Container* container = cow_item_container(old);
     if (!container) return old;
+    // The MVP file has no mutable child storage; do not detach a truncated
+    // base-sized copy or share an active native builder through COW.
+    if (container_is_virtual_list(container)) return ItemError;
     if (!container->is_static && !container->is_immortal &&
             (container->cow_state & COW_STATE_SHARED) == 0) {
         if (cow_profile_enabled()) {
@@ -12495,7 +12500,9 @@ static void map_rebuild_for_type_change(void** type_slot, void** data_slot, int*
     // keeping both unpublished owners exact through the data allocation.
     RootFrame roots(2);
     Rooted<Container*> rooted_container(roots, container);
-    Rooted<Item> rooted_value(roots, new_value);
+    // a borrowed scalar may point inside the old data buffer that GC moves.
+    uint64_t value_home = 0;
+    Rooted<Item> rooted_value(roots, lambda_item_adopt_scalar_home(new_value, &value_home));
 
     void* new_data = container_rebuild_data_alloc(container, new_byte_size);
     if (!new_data) {

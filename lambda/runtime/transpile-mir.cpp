@@ -3,6 +3,7 @@
 #include "lambda-number-types.hpp"
 #include "re2_wrapper.hpp"
 #include "../io/mark_builder.hpp"
+#include "../io/mark_output_builder.hpp"
 #include "safety_analyzer.hpp"
 #include "module_registry.h"
 #include "template_registry.h"
@@ -25610,6 +25611,14 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
             MIR_T_P, MIR_new_reg_op(mt->ctx, el), ai, attr_ops);
     }
 
+    bool file_destination = is_file_element_type(type);
+    MIR_reg_t finished = 0;
+    if (file_destination) {
+        // Select after attributes; a virtual file must preserve finish errors.
+        el = load_gc_root_slot(mt, el_root, "file_live");
+        emit_call_void_1(mt, "elmt_content_begin", MIR_T_P, MIR_new_reg_op(mt->ctx, el));
+    }
+
     // Fill content if present. The count comes from the literal's own content
     // node: an element type carries no per-literal count (D3.4.3v3).
     AstListNode* content_node = (AstListNode*)elmt_node->content;
@@ -25618,7 +25627,7 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
     if (literal_content_count) {
         AstNode* content_item = content_node->item;
 
-        if (literal_content_count < 10) {
+        if (literal_content_count < 10 && !file_destination) {
             // Use list_fill(el, count, val1, val2, ...) for small content
             // Count content items
             int content_count = em_linked_node_count(content_item);
@@ -25646,7 +25655,7 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
             el = load_gc_root_slot(mt, el_root, "el_live");
 
             // list_fill(el, count, items...) — returns Item
-            emit_vararg_call_2(mt, "list_fill", MIR_T_I64, 1,
+            finished = emit_vararg_call_2(mt, "list_fill", MIR_T_I64, 1,
                 MIR_T_P, MIR_new_reg_op(mt->ctx, el),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, content_count),
                 ci, content_ops);
@@ -25664,19 +25673,19 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
                 content_item = content_item->next;
             }
             el = load_gc_root_slot(mt, el_root, "el_live");
-            emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
+            finished = emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }
     } else {
         // No content
-        if (elmt_node->item) {
+        if (elmt_node->item || file_destination) {
             // Has attributes but no content — call list_end to finalize frame
             el = load_gc_root_slot(mt, el_root, "el_live");
-            emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
+            finished = emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }
         // else: no attrs and no content — element is just a bare pointer,
     }
 
-    return load_gc_root_slot(mt, el_root, "el_rv");
+    return file_destination ? finished : load_gc_root_slot(mt, el_root, "el_rv");
 }
 
 // ============================================================================
@@ -37025,7 +37034,8 @@ static MirValue transpile_map(MirTranspiler* mt, AstMapNode* map) {
 
 static MirValue transpile_element(MirTranspiler* mt, AstElementNode* element) {
     return mir_value_from_reg(mt, (AstNode*)element,
-        emit_element_storage(mt, element), VALUE_REP_RAW_GC_POINTER,
+        emit_element_storage(mt, element),
+        is_file_element_type((TypeElmt*)element->type) ? VALUE_REP_ITEM : VALUE_REP_RAW_GC_POINTER,
         ((AstNode*)element)->type);
 }
 

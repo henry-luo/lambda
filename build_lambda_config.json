@@ -4867,6 +4867,9 @@
           {
             "source": "test/test_lambda_errors_gtest.cpp",
             "name": "Lambda Error System Tests",
+            "additional_sources": [
+              "test/test_pdf_builder_gtest.cpp"
+            ],
             "dependencies": [
               "lambda-rt",
               "node-core",
