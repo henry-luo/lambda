@@ -120,6 +120,11 @@ struct InterpFrame {
     // procedural (S12.1.3), so its blocks yield their last value (S2.5.3)
     // exactly as MIR's `in_proc` handler functions do.
     bool                proc_handler;
+    // D8.1.1v14: the top-level handoff loop now executing in this activation
+    // (back-edges of its nested loops count toward it), and the definition's
+    // promotion cell, looked up once rather than at every back-edge.
+    const struct AstLoopControlNode* handoff_loop;
+    struct FnPromotionCell* promotion_cell;
 };
 
 // True while a break/continue/return/error-skip is unwinding this activation:

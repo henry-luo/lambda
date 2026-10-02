@@ -1,10 +1,10 @@
 # Lambda Implementation Plan: AST Interpreter Tuning, Round 2
 
 **Date:** 2026-10-02
-**Status:** PROPOSED — analysis and plan only; nothing in this document is
-implemented. Loop-head handoff, its threshold and the retirement of the
-first-entry trigger were ruled by the user on 2026-10-02 (§4) and are recorded
-as **D8.1.1v14** (spec 16.0.0) and AI23.
+**Status:** IN PROGRESS — Items 1–3 implemented and Items 5–6 partly, on
+branch `worktree-interp-tune2` (§12); Item 4 not started. Loop-head handoff,
+its threshold and the retirement of the first-entry trigger were ruled by the
+user on 2026-10-02 (§4) and are recorded as **D8.1.1v14** and AI23.
 **Source baseline:** `c886322fd` (source reading and profile attribution);
 archived release executable `test/benchmark/exe/lambda-v50-a9489bc329`
 (timings). `interp.cpp` differs by 11 lines between the two.
@@ -795,10 +795,136 @@ capture are in `temp/interp_perf/` (`cpu.sh`, `prof.sh`, `agg.py`,
 
 | Item | Status |
 |---|---|
-| 1 Loop-head handoff | Ruled 2026-10-02 and recorded as D8.1.1v14 / AI23 (Phase 1.0 done); Phases 1.1–1.7 not started |
-| 2 Lazy boundary diagnostics | Proposed |
-| 3 Contract plan | Proposed |
-| 4 Planned call sites, direct entry | Proposed |
-| 5 Walker hot path | Proposed |
-| 6 Static path writes | Proposed |
+| 1 Loop-head handoff | Implemented 2026-10-02 (§12.2), narrower than the §6 plan; Phase 1.1 census not done |
+| 2 Lazy boundary diagnostics | Implemented 2026-10-02 (§12.1) |
+| 3 Contract plan | Implemented 2026-10-02 as a tag fast path, not a stored plan (§12.1) |
+| 4 Planned call sites, direct entry | Not started |
+| 5 Walker hot path | Partial: binder-walk gate and one-block `var` scratch (§12.3) |
+| 6 Static path writes | Partial: key array sized once; key-span form not used (§12.3) |
 | 7 Guarded scalar operations | Conditional on a reprofile |
+
+## 12. Implementation record (2026-10-02)
+
+Branch `worktree-interp-tune2`, based on `800ff396d`. Timings are user+system
+CPU of the debug configuration (`-O3 -g`), minimum of 3 interleaved runs on a
+machine with load average 20–60, so only ratios are meaningful. Correctness
+gates are differentials over the 1,092 golden-tested scripts under
+`test/lambda`, run with `temp/edits/diffrun.py` (not tracked).
+
+### 12.1 Items 2 and 3 — commit `a20db7803`
+
+- `LambdaBoundary` (lambda.h) carries a label's parts; `lambda_type_check_lazy`
+  formats it only on failure. T0's declaration, assignment and argument sites
+  pass descriptors; the parameter loops stop recomputing indices.
+- `unwrap_simple_type_type` delegates to `type_field_unwrap_simple_decl`. Under
+  `type_id == LMD_TYPE_TYPE` only the four meta-types are compact globals, so
+  the ~35-compare `is_global_simple_type` chain was redundant; it was 7.9% of
+  T0 time on `mandelbrot2` after Item 2.
+- Item 3 became a tag fast path in `interp_coerce_declared_binding`: a plain
+  `int`, `float` or `string` contract admits a value of its own kind
+  unchanged, which is what admission computes (an int Item is int53 by
+  construction). With the unwrap fix, classification is three pointer
+  compares, so the stored per-binding plan of §6 was not needed.
+- Interpreter CPU against the baseline: `ack2` 0.59×, `mandelbrot2` 0.47×,
+  `matmul2` 0.60×, `richards2` 0.65×, `ack` 0.54×, `mandelbrot` 0.79×.
+- Gates: interpreter and JIT corpus differentials 1,092/1,092 identical; the
+  29 goldens that pin boundary texts identical in both tiers.
+
+### 12.2 Item 1 — loop-head handoff
+
+**Shape changed from the §6 plan.** §6 entered a second lowering of the whole
+definition at an interior loop label. An inventory of the transpiler's flow
+facts ruled that out: facts proven only at one program point (counter sign,
+a descending-sum accumulator interval with no runtime guard), loops lowered
+in several copies (fast and generic siblings, nested copies inheriting outer
+guards), and root write-back that requires every GC register to be defined on
+the new entry path. The implementation instead synthesizes the continuation
+as its own procedure, whose parameters are the live-in locals. Entering it
+through its `_b` wrapper gives each live-in the admission an unknown caller's
+argument gets, with the slow body on a shape miss.
+
+- **Eligibility.** A `while` that is a direct statement of a `pn` body, at
+  most 8 per body (`interp_handoff_ordinal`, frame-plan pass). Back-edges of
+  its nested loops, including fast integer loops, count toward it. The
+  definition must have no captures, binders, variadic or suspension state,
+  the block's last value expression may not precede the loop, at most 16
+  live-ins, and the continuation must pass `interp_satellite_refusal`.
+  Anything else pins the loop to T0 with a logged reason. A loop nested in an
+  `if`, or a `for`, is never a handoff loop.
+- **Continuation.** `interp_build_loop_continuation`: the body's statements
+  from the loop onward (shared nodes, not copied), parameters reusing the
+  live-ins' binding entries so the shared identifiers already name them, a
+  copied signature returning boxed `any` (T0's epilogue keeps the declared
+  return check), a fresh zeroed analysis record, and
+  `AstFuncNode::is_loop_continuation`. Its nodes live in a pool the image
+  owns.
+- **MIR changes for continuations only.** Parameters are snapshot-marked at
+  entry and treated as owners (`cow_owned`), since a live-in container may be
+  shared with other T0 bindings. An untyped parameter passed to an untyped
+  `var` parameter stays boxed and rooted, the rule declarations already
+  follow.
+- **Handoff.** At a head test of the handoff loop, if its continuation is
+  published and the frame is at a statement boundary (no scratch, signal,
+  method receiver, binder slots, view bindings or marked `var` parameter),
+  T0 calls the continuation's `_b` entry with the live-in slots. A
+  definition's own `var` parameters travel as CW33 homes pointing at the T0
+  frame slots. T0 then signals `RETURNED` with the result.
+- **Publication.** Loop jobs use the existing worker queue; a finished image
+  is adopted at interpreted function entries and every 256 back-edges of the
+  queued loop.
+- **Retired:** the v7 loop-owner first-entry trigger and the per-definition
+  back-edge marking. `LAMBDA_JIT_BACKEDGE` defaults to 10,000.
+- **Not done from §6:** the Phase 1.1 census, and carrying the definition's
+  own boxed entry in the loop-triggered image (it still promotes by its call
+  and self-tail thresholds).
+
+Measured under default AUTO against the baseline: `mandelbrot2` 12.04 →
+0.10 s, `matmul2` 6.33 → 0.11 s, `levenshtein2` 0.60 → 0.14 s, `pnpoly2`
+0.20 → 0.09 s, `nbody2` 0.21 → 0.17 s, `deltablue2` 0.83 → 0.78 s;
+`richards2` and `ack2` unchanged. Eager JIT on the same binary:
+`mandelbrot2` 0.06 s, `matmul2` 0.05 s.
+
+**Gates.** AUTO corpus differential against the baseline 1,092/1,092
+identical. Stress differential (`LAMBDA_JIT_BACKEDGE=1
+LAMBDA_SATELLITE_SYNC=1`, every eligible loop hands off at its second head
+test) against the interpreter: 1,091/1,092, the exception being pre-existing
+(defect 3 below). New regression `test/lambda/proc/interp_loop_handoff.ls`
+covers aliasing, `return`/`break`/`continue`, a `var` parameter, the block
+value and repeated activations; it matches under `interp`, `jit` and the
+stress mode, and the log confirms each function handed off.
+
+**Defects found by the stress differential:**
+
+1. Fixed — an alias of a live-in container (`keep = c`) skipped its COW mark,
+   so a later write showed through the alias (`cow_flow_join`). Continuation
+   parameters are now owners.
+2. Pre-existing on eager JIT, fixed for continuations only — an untyped
+   parameter that the body uses arithmetically and passes to an untyped `var`
+   parameter gets a native lane with no CW33 home, and the callee's writes
+   are lost (`pn f(x) { x = x + 10; bump(x) ... }` returns 160 on `jit`
+   against 166 on `interp`). Applying the declaration rule in the callee's own
+   lowering is not a general fix: direct native callers choose the argument
+   lane elsewhere, and the result became `inf`. It belongs in the shared
+   parameter inference.
+3. Pre-existing — `tune23_record_constructor.ls` aborts under
+   `LAMBDA_SATELLITE_SYNC=1` alone, on the baseline binary too ("mir-value:
+   unavailable representation transition 1 -> 2 in `_forward_column_150`").
+   Default AUTO and eager JIT pass.
+
+### 12.3 Items 5 and 6, partial
+
+- Binder-contract walks are skipped when the frame has no binder slots: a
+  binder or bound reference only occurs in a generic function's own
+  contracts, and with no slots the environment is NULL, so the general path
+  reaches the same checker. It was 5.5% of `richards2`.
+- `InterpBorrowedScratch` makes one allocation instead of three per `var`
+  call.
+- Nested-path key arrays are sized once (`array_reserve_append_slots`). A
+  key-span `cow_path_set` was not used: `richards2`'s writes take the typed-map
+  arm, whose span form needs a compiler-resolved leaf contract T0 lacks.
+- Interpreter CPU against the Item 1 binary: `richards2` 0.85×,
+  `deltablue2` 0.92×, `ack2` 0.97×, `nbody2` 0.99×.
+- Deferred: recording a procedure block's last value expression in the plan
+  (4.1% of `richards2`). `AstListNode` would need a new field, and nodes are
+  morphed in place between kinds, so a smaller node becoming a list would be
+  read past its allocation.

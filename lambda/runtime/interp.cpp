@@ -28,6 +28,7 @@
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/memtrack.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/atomic.h"
 #include "../../lib/thread_pool.h"
 #include "../../lib/url.h"
@@ -76,6 +77,11 @@ typedef struct InterpSatelliteJob {
     Runtime* runtime;
     Script* script;
     const AstFuncNode* def;
+    // D8.1.1v14: when set, the worker compiles this loop continuation of
+    // `def` instead of `def`, and publication fills def's loop entry. The job
+    // owns the continuation's node pool until an image adopts it.
+    AstFuncNode* continuation;
+    Pool* continuation_pool;
     InterpSatelliteQueue* queue;
     uint64_t generation;
     uint32_t sequence;
@@ -106,6 +112,7 @@ static void interp_satellite_pool_init_once(void) {
 static void interp_satellite_job_destroy(InterpSatelliteJob* job) {
     if (!job) return;
     interp_satellite_image_destroy(job->image);
+    if (job->continuation_pool) pool_destroy(job->continuation_pool);
     mem_free(job);
 }
 
@@ -178,8 +185,9 @@ static void interp_satellite_compile_job(void* opaque) {
     pthread_mutex_unlock(&queue->mutex);
 
     InterpSatelliteImage* image = NULL;
+    const AstFuncNode* target = job->continuation ? job->continuation : job->def;
     bool compiled = !retired_before_compile && job->runtime && compile_ast_function_satellite_snapshot(
-        job->runtime, job->script, job->def, job->sequence,
+        job->runtime, job->script, target, job->sequence,
         interp_satellite_compile_cancelled, &queue->cancel_requested, &image);
     pthread_mutex_lock(&queue->mutex);
     bool retired = queue->retiring || job->generation != queue->generation;
@@ -201,7 +209,8 @@ static void interp_satellite_compile_job(void* opaque) {
 }
 
 static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
-        const AstFuncNode* def, FnPromotionCell* cell) {
+        const AstFuncNode* def, FnPromotionCell* cell,
+        AstFuncNode* continuation = NULL, Pool* continuation_pool = NULL) {
     if (!runtime || !script || !def || !cell) return false;
     // Initialize the shared resolver before private MIR contexts read it.
     ensure_jit_imports_initialized();
@@ -215,10 +224,16 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     job->runtime = runtime;
     job->script = script;
     job->def = def;
+    job->continuation = continuation;
     job->queue = queue;
 
+    // a continuation is keyed by the loop state, not the definition's entry
+    // state: the definition may itself be compiled while an older activation
+    // is still interpreting its loop
     pthread_mutex_lock(&queue->mutex);
-    if (queue->retiring || cell->state != FN_PROMOTION_INTERP) {
+    if (queue->retiring || (continuation
+            ? cell->loop_state != FN_LOOP_HANDOFF_NONE
+            : cell->state != FN_PROMOTION_INTERP)) {
         pthread_mutex_unlock(&queue->mutex);
         mem_free(job);
         return false;
@@ -226,21 +241,35 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
     job->generation = queue->generation;
     job->sequence = ++queue->next_sequence;
     queue->pending++;
-    cell->state = FN_PROMOTION_QUEUED;
+    if (continuation) {
+        cell->loop_state = FN_LOOP_HANDOFF_QUEUED;
+    } else {
+        cell->state = FN_PROMOTION_QUEUED;
+    }
     pthread_mutex_unlock(&queue->mutex);
+    // ownership transfers only once the job can no longer be refused above
+    job->continuation_pool = continuation_pool;
 
     if (!tp_submit_priority(g_interp_satellite_pool, interp_satellite_compile_job,
             job, TP_PRIORITY_LOW)) {
         pthread_mutex_lock(&queue->mutex);
         if (queue->pending > 0) queue->pending--;
-        if (cell->state == FN_PROMOTION_QUEUED) cell->state = FN_PROMOTION_INTERP;
+        if (continuation) {
+            if (cell->loop_state == FN_LOOP_HANDOFF_QUEUED) {
+                cell->loop_state = FN_LOOP_HANDOFF_NONE;
+            }
+        } else if (cell->state == FN_PROMOTION_QUEUED) {
+            cell->state = FN_PROMOTION_INTERP;
+        }
         if (queue->pending == 0) pthread_cond_broadcast(&queue->idle);
         pthread_mutex_unlock(&queue->mutex);
+        job->continuation_pool = NULL;  // the caller still owns it on refusal
         mem_free(job);
         return false;
     }
-    log_notice("interp-tier: queued satellite function='%s' image=%u pool_workers=%d",
-        def->name ? def->name->chars : "<anonymous>", (unsigned)job->sequence,
+    log_notice("interp-tier: queued satellite function='%s'%s image=%u pool_workers=%d",
+        def->name ? def->name->chars : "<anonymous>",
+        continuation ? " loop-continuation" : "", (unsigned)job->sequence,
         tp_thread_count(g_interp_satellite_pool));
     return true;
 }
@@ -274,6 +303,35 @@ static bool interp_satellite_publish_image(Script* script,
     return true;
 }
 
+// D8.1.1v14: a continuation image binds to its module state like any image,
+// but publishes to the definition's loop entry rather than to its Function;
+// the running activation takes it at its next handoff-loop head test.
+static void interp_loop_continuation_publish(Script* script, InterpSatelliteJob* job,
+        FnPromotionCell* cell) {
+    bool published = job->image && cell &&
+        cell->loop_state == FN_LOOP_HANDOFF_QUEUED &&
+        cell->loop_continuation == job->continuation &&
+        interp_satellite_image_prepare(script, job->image) &&
+        interp_satellite_image_retain(script, job->image);
+    if (!published) {
+        if (cell && cell->loop_state == FN_LOOP_HANDOFF_QUEUED) {
+            cell->loop_state = FN_LOOP_HANDOFF_PINNED;
+        }
+        log_error("interp-tier: loop continuation of '%s' failed; loop stays T0",
+            job->def->name ? job->def->name->chars : "<anonymous>");
+        return;
+    }
+    // the Script now owns the image, which owns the synthesized nodes
+    job->image->continuation_pool = job->continuation_pool;
+    job->continuation_pool = NULL;
+    cell->loop_entry = job->image->target_entry;
+    cell->loop_state = FN_LOOP_HANDOFF_READY;
+    job->image = NULL;
+    log_notice("interp-tier: published loop continuation function='%s' loop=%u image=%u",
+        job->def->name ? job->def->name->chars : "<anonymous>",
+        (unsigned)cell->loop_ordinal, (unsigned)job->sequence);
+}
+
 static void interp_satellite_publish_ready(Script* script) {
     InterpSatelliteQueue* queue = script ? script->interp_satellite_queue : NULL;
     if (!queue) return;
@@ -285,6 +343,11 @@ static void interp_satellite_publish_ready(Script* script) {
         if (!job) return;
 
         FnPromotionCell* cell = interp_promotion_cell(script, job->def);
+        if (job->continuation) {
+            interp_loop_continuation_publish(script, job, cell);
+            interp_satellite_job_destroy(job);
+            continue;
+        }
         bool published = job->image && cell &&
             cell->state == FN_PROMOTION_QUEUED &&
             interp_satellite_publish_image(script, job->image);
@@ -667,6 +730,9 @@ static bool interp_take_list_item_position(InterpFrame* f, AstNode* producer) {
     return item_position;
 }
 static void interp_note_backedge(InterpFrame* frame);
+static void interp_note_backedges(InterpFrame* frame, uint64_t trips);
+static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item* out);
+static FnPromotionCell* interp_frame_cell(InterpFrame* frame);
 static bool interp_note_tail_call(InterpFrame* frame);
 static bool interp_tail_handoff_candidate(const InterpFrame* frame);
 static bool interp_promote_function_from_tail(Function* fn);
@@ -1078,7 +1144,10 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
             (plain == &TYPE_STRING && value_type == LMD_TYPE_STRING)) {
         return value;
     }
-    if (f && interp_type_uses_binder(declared_type)) {
+    // A binder or bound reference only occurs in the contracts of a function
+    // that declares binder slots; without them the env is NULL and the general
+    // path below reaches the same checker, so skip the recursive type walk.
+    if (f && f->binder_count && interp_type_uses_binder(declared_type)) {
         Scratch source_root(f);
         source_root.set(value);
         return lambda_type_check_lazy(source_root.get(), declared_type,
@@ -1135,7 +1204,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     }
     Type* contract = parameter_type && parameter_type->contract_type
         ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
-    if (f && interp_type_uses_binder(contract)) {
+    if (f && f->binder_count && interp_type_uses_binder(contract)) {
         Scratch source_root(f);
         source_root.set(value);
         return lambda_type_check_lazy(source_root.get(), contract, f->binder_env,
@@ -1791,6 +1860,9 @@ static bool interp_borrow_place_leaf(InterpFrame* f, AstNode* arg, Item* leaf,
 
     Scratch path_slot(f);
     path_slot.set(interp_ptr_item(array_plain()));
+    // the key count is static: size the rooted array once, not per push
+    if (!array_reserve_append_slots((Array*)(uintptr_t)path_slot.get().item,
+            place.count)) return false;
     for (int seg = 0; seg < place.count; seg++) {
         Scratch key_slot(f);
         key_slot.set(interp_eval_cow_path_key(f, place.segment[seg],
@@ -1895,7 +1967,10 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             parameter = f->fn->param;
             for (int i = 0; i < (int)params && parameter;
                     i++, parameter = (AstNamedNode*)((AstNode*)parameter)->next) {
-                if (interp_parameter_is_binder_site(parameter) != (pass == 0)) continue;
+                // only a signature with binder slots has binder sites
+                bool binder_site = f->binder_count &&
+                    interp_parameter_is_binder_site(parameter);
+                if (binder_site != (pass == 0)) continue;
                 Item source = (Item){.item = words[i]};
                 LambdaBoundary boundary = interp_parameter_boundary(f->fn,
                     f->fn && f->fn->name ? f->fn->name->chars : NULL, i);
@@ -3966,6 +4041,31 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
 // Mirrors transpile_content's split: declarations bind, side-effect statements
 // run for effect, and the value expressions form the block's result — one
 // value passes through, several accumulate into a list.
+// A procedural block's value is its LAST value expression; every earlier one,
+// and every declaration, loop and side-effect statement, runs as a statement.
+// Returns that item (NULL when the block has none) and the three counts.
+static AstNode* interp_proc_block_last_value(AstListNode* list_node,
+        int* value_count, int* decl_count, int* stam_count) {
+    AstNode* last_executable = NULL;
+    for (AstNode* scan = list_node->item; scan; scan = scan->next) {
+        if (!is_declaration_node(scan->node_type)) last_executable = scan;
+    }
+    AstNode* last_value = NULL;
+    for (AstNode* item = list_node->item; item; item = item->next) {
+        if (is_declaration_node(item->node_type)) { (*decl_count)++; continue; }
+        if (is_side_effect_stam(item->node_type) ||
+                is_proc_flow_side_effect_node(item, last_executable) ||
+                item->node_type == AST_NODE_LOOP ||
+                ast_for_discards_result(item)) {
+            (*stam_count)++;
+            continue;
+        }
+        (*value_count)++;
+        last_value = item;
+    }
+    return last_value;
+}
+
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
     // A functional block is a list producer (S2.5.3): sequence append, finished
     // in its position's mode (S2.5.5v2). The script root (the only caller that
@@ -3993,22 +4093,8 @@ static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_func
     int value_count = 0, decl_count = 0, stam_count = 0;
     AstNode* last_value = NULL;
     if (is_proc) {
-        AstNode* last_executable = NULL;
-        for (AstNode* scan = list_node->item; scan; scan = scan->next) {
-            if (!is_declaration_node(scan->node_type)) last_executable = scan;
-        }
-        for (AstNode* item = list_node->item; item; item = item->next) {
-            if (is_declaration_node(item->node_type)) { decl_count++; continue; }
-            if (is_side_effect_stam(item->node_type) ||
-                    is_proc_flow_side_effect_node(item, last_executable) ||
-                    item->node_type == AST_NODE_LOOP ||
-                    ast_for_discards_result(item)) {
-                stam_count++;
-                continue;
-            }
-            value_count++;
-            last_value = item;
-        }
+        last_value = interp_proc_block_last_value(list_node, &value_count,
+            &decl_count, &stam_count);
     } else {
         for (AstNode* item = list_node->item; item; item = item->next) {
             if (is_declaration_node(item->node_type)) { decl_count++; continue; }
@@ -4732,7 +4818,7 @@ static bool interp_fast_int_linear_operand_same(const InterpFastIntOperand* left
 }
 
 static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
-        const InterpFastIntCache* cache, Item* result) {
+        const InterpFastIntCache* cache, Item* result, uint64_t* trips) {
     if (!frame || !loop || !cache || !result ||
             loop->cond->node_type != AST_NODE_BINARY ||
             loop->body->node_type != AST_NODE_CONTENT) return false;
@@ -4830,6 +4916,7 @@ static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
                     frame->slots[accumulator->target->slot] = i2it((int64_t)next);
                 }
                 frame->slots[cond_left.entry->slot] = i2it((int64_t)remainder);
+                *trips += iterations > (__int128)UINT32_MAX ? UINT32_MAX : (uint64_t)iterations;
                 *result = ItemNull;
                 return true;
             }
@@ -4857,10 +4944,52 @@ static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
         for (int i = 0; i < op_count; i++) {
             frame->slots[ops[i].target->slot] = i2it(next_values[i]);
         }
+        (*trips)++;
     }
     *result = ItemNull;
     return true;
 }
+
+// D8.1.1v14: makes a numbered top-level loop the activation's handoff loop
+// for the loop statement's extent; nested loops leave the frame's loop as is.
+class InterpHandoffLoopScope {
+    InterpFrame* frame_;
+    const AstLoopControlNode* saved_;
+    bool active_;
+
+public:
+    InterpHandoffLoopScope(InterpFrame* frame, const AstLoopControlNode* loop)
+            : frame_(frame), saved_(frame->handoff_loop), active_(false) {
+        if (!loop->interp_handoff_ordinal || !frame->fn ||
+                lambda_tier_selected() != LAMBDA_TIER_AUTO) return;
+        if (!interp_frame_cell(frame)) return;
+        frame->handoff_loop = loop;
+        active_ = true;
+    }
+    ~InterpHandoffLoopScope() { frame_->handoff_loop = saved_; }
+    bool active() const { return active_; }
+
+    InterpHandoffLoopScope(const InterpHandoffLoopScope&) = delete;
+    InterpHandoffLoopScope& operator=(const InterpHandoffLoopScope&) = delete;
+};
+
+// Credits a fast integer loop's iterations to the enclosing handoff loop. The
+// handoff loop itself is excluded: run whole by the fast path it never reaches
+// a head test, so a continuation compiled for it could not be entered.
+class InterpBackedgeTally {
+    InterpFrame* frame_;
+    bool enabled_;
+
+public:
+    uint64_t trips;
+    InterpBackedgeTally(InterpFrame* frame, const AstLoopControlNode* loop)
+            : frame_(frame), enabled_(frame->handoff_loop &&
+                frame->handoff_loop != loop), trips(0) {}
+    ~InterpBackedgeTally() { if (enabled_) interp_note_backedges(frame_, trips); }
+
+    InterpBackedgeTally(const InterpBackedgeTally&) = delete;
+    InterpBackedgeTally& operator=(const InterpBackedgeTally&) = delete;
+};
 
 static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
         Item* result) {
@@ -4870,7 +4999,9 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
     InterpFastIntCache cache = {};
     if (!interp_fast_int_cache_fill(&cache, frame, loop->cond) ||
             !interp_fast_int_cache_fill(&cache, frame, loop->body)) return false;
-    if (interp_fast_int_linear_while(frame, loop, &cache, result)) return true;
+    // its iterations are back-edges of the enclosing handoff loop (D8.1.1v14)
+    InterpBackedgeTally tally(frame, loop);
+    if (interp_fast_int_linear_while(frame, loop, &cache, result, &tally.trips)) return true;
     // LR12-23: the slots one iteration may write, so a mid-body bail hands the
     // ordinary evaluator the state the iteration STARTED with. Without this
     // the abandoned iteration's committed statements ran a second time.
@@ -4895,6 +5026,7 @@ static bool interp_fast_int_while(InterpFrame* frame, AstWhileNode* loop,
             }
             return false;
         }
+        tally.trips++;
     }
     *result = ItemNull;
     return true;
@@ -5522,6 +5654,10 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
 
             Scratch path_slot(f);
             path_slot.set(interp_ptr_item(array_plain()));
+            // path segments plus the terminal key: one sizing of the rooted
+            // array instead of a growth step per pushed key
+            if (!array_reserve_append_slots((Array*)(uintptr_t)path_slot.get().item,
+                    path.count + 1)) return ItemError;
             for (int i = 0; i < path.count; i++) {
                 Scratch key_slot(f);
                 key_slot.set(interp_eval_cow_path_key(f, path.segment[i],
@@ -5714,11 +5850,24 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
     case AST_NODE_LOOP: {
         AstLoopControlNode* loop = (AstLoopControlNode*)node;
         bool test_first = loop->form != LOOP_FORM_DO_WHILE;
+        // D8.1.1v14: a numbered top-level loop of this activation's body owns
+        // the back-edges of its subtree and is where the activation may leave
+        InterpHandoffLoopScope handoff_scope(f, loop);
         if (test_first) {
             Item fast_result = ItemNull;
             if (interp_fast_int_while(f, loop, &fast_result)) return fast_result;
         }
         for (;;) {
+            if (handoff_scope.active()) {
+                FnPromotionCell* cell = f->promotion_cell;
+                Item handed = ItemNull;
+                if (cell && cell->loop_state == FN_LOOP_HANDOFF_READY &&
+                        cell->loop_ordinal == loop->interp_handoff_ordinal &&
+                        interp_try_loop_handoff(f, cell, &handed)) {
+                    interp_signal(f, EvalSignal::RETURNED, handed);
+                    return handed;
+                }
+            }
             if (test_first) {
                 Item cond = eval_expr(f, loop->cond);
                 if (interp_frame_pending(f)) break;
@@ -5858,15 +6007,413 @@ static InterpState* interp_current_state(void);
 // general loop counters belong to the active definition, but promotion is
 // deferred until its next entry: only a direct self-tail boundary has the
 // entry-equivalent state needed for a safe T1 handoff (D8.1.1v5).
-static void interp_note_backedge(InterpFrame* frame) {
-    if (!frame || !frame->fn || lambda_tier_selected() != LAMBDA_TIER_AUTO ||
-            !frame->fn->analysis) return;
-    FnPromotionCell* cell = interp_promotion_cell(frame->module, frame->fn);
-    if (!cell) return;
-    if (cell->state == FN_PROMOTION_INTERP && cell->backedge_count != UINT32_MAX) {
-        cell->backedge_count++;
+// ---------------------------------------------------------------------------
+// D8.1.1v14 loop-head handoff
+// ---------------------------------------------------------------------------
+// A `while` that is a direct statement of a `pn` body (numbered by the frame
+// plan) counts the back-edges of its whole subtree. When it reaches
+// LAMBDA_JIT_BACKEDGE, the statements from that loop to the end of the body
+// are compiled as a synthesized procedure -- the continuation -- whose
+// parameters are the activation's live-in locals. Once published, the running
+// activation enters it at the loop's next head test, where T0's whole live
+// state is those named slots, and returns its result as if by `return`.
+// Entering through the boxed `_b` wrapper gives every live-in the admission an
+// unknown caller's argument gets, so no fact of the code before the loop is
+// assumed. Handoff is one-way.
+
+static uint32_t interp_jit_backedge_threshold(void);
+static bool interp_satellite_sync_enabled(void);
+
+static FnPromotionCell* interp_frame_cell(InterpFrame* frame) {
+    if (!frame->promotion_cell && frame->fn && frame->fn->analysis) {
+        frame->promotion_cell = interp_promotion_cell(frame->module, frame->fn);
+    }
+    return frame->promotion_cell;
+}
+
+typedef struct InterpLiveInScan {
+    ArrayList* inner;   // NameEntry* declared inside the continuation
+    ArrayList* used;    // NameEntry* read or written inside it
+    bool ok;
+} InterpLiveInScan;
+
+static void interp_live_in_add_scope(ArrayList* list, NameScope* scope) {
+    for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
+        arraylist_append(list, entry);
     }
 }
+
+// Mirrors the bindings plan_walk assigns slots to, so a binding the
+// continuation declares itself is never mistaken for a live-in.
+static void interp_live_in_visit(AstNode* node, void* opaque) {
+    InterpLiveInScan* scan = (InterpLiveInScan*)opaque;
+    if (!node || !scan->ok) return;
+    switch (node->node_type) {
+    case AST_NODE_FUNC: case AST_NODE_FUNC_EXPR: case AST_NODE_PROC:
+    case AST_NODE_ARROW_FUNC: case AST_NODE_VIEW:
+        scan->ok = false;   // a nested activation has no continuation contract
+        return;
+    case AST_NODE_IDENT:
+        if (((AstIdentNode*)node)->entry) {
+            arraylist_append(scan->used, ((AstIdentNode*)node)->entry);
+        }
+        break;
+    case AST_NODE_ASSIGN_STAM:
+        if (((AstAssignStamNode*)node)->target_entry) {
+            arraylist_append(scan->used, ((AstAssignStamNode*)node)->target_entry);
+        }
+        break;
+    case AST_NODE_VARIABLE_DECLARATOR:
+        arraylist_append(scan->inner, ((AstDeclaratorNode*)node)->entry);
+        break;
+    case AST_NODE_LIST: case AST_NODE_CONTENT:
+        interp_live_in_add_scope(scan->inner, ((AstListNode*)node)->vars);
+        break;
+    case AST_NODE_FOR_EXPR:
+        interp_live_in_add_scope(scan->inner, ((AstForNode*)node)->vars);
+        break;
+    case AST_NODE_LOOP:
+        interp_live_in_add_scope(scan->inner, ((AstWhileNode*)node)->vars);
+        break;
+    case AST_NODE_BLOCK:
+        interp_live_in_add_scope(scan->inner, ((AstBlockNode*)node)->vars);
+        break;
+    case AST_NODE_GROUP_CLAUSE:
+        arraylist_append(scan->inner, ((AstGroupClause*)node)->entry);
+        break;
+    default:
+        break;
+    }
+    interp_visit_children(node, interp_live_in_visit, opaque);
+}
+
+static bool interp_entry_listed(ArrayList* list, const NameEntry* entry) {
+    for (int i = 0; i < list->length; i++) {
+        if (list->data[i] == entry) return true;
+    }
+    return false;
+}
+
+// The frame-slot bindings the continuation reads or writes but does not
+// declare, in slot order. Module bindings stay in the shared slab.
+static const char* interp_loop_live_ins(InterpFrame* frame, AstNode* first,
+        NameEntry** live, int* live_count) {
+    InterpLiveInScan scan = {arraylist_new(16), arraylist_new(32), true};
+    const char* why = NULL;
+    *live_count = 0;
+    if (!scan.inner || !scan.used) why = "out-of-memory";
+    for (AstNode* item = first; !why && item && scan.ok; item = item->next) {
+        interp_live_in_visit(item, &scan);
+    }
+    if (!why && !scan.ok) why = "nested-definition";
+    for (int i = 0; !why && i < scan.used->length; i++) {
+        NameEntry* entry = (NameEntry*)scan.used->data[i];
+        if (!entry || !entry->storage_assigned) continue;   // type/pattern names
+        if (entry->binding_storage == BINDING_STORAGE_MODULE) continue;
+        if (entry->binding_storage != BINDING_STORAGE_REGISTER) { why = "binding-storage"; break; }
+        if (interp_entry_listed(scan.inner, entry)) continue;
+        if (entry->slot < 0 || (uint32_t)entry->slot >= frame->scratch_base) {
+            why = "binding-slot";
+            break;
+        }
+        bool seen = false;
+        for (int k = 0; k < *live_count; k++) seen = seen || live[k] == entry;
+        if (seen) continue;
+        if (*live_count >= LAMBDA_MAX_FUNCTION_ARGS) { why = "live-in-count"; break; }
+        // insertion by slot keeps the parameter order deterministic
+        int at = *live_count;
+        while (at > 0 && live[at - 1]->slot > entry->slot) {
+            live[at] = live[at - 1];
+            at--;
+        }
+        live[at] = entry;
+        (*live_count)++;
+    }
+    if (scan.inner) arraylist_free(scan.inner);
+    if (scan.used) arraylist_free(scan.used);
+    return why;
+}
+
+static String* interp_pool_string(Pool* pool, const char* prefix, size_t prefix_len,
+        const char* suffix) {
+    size_t suffix_len = strlen(suffix);
+    String* text = (String*)pool_calloc(pool, sizeof(String) + prefix_len + suffix_len + 1);
+    if (!text) return NULL;
+    memcpy(text->chars, prefix, prefix_len);
+    memcpy(text->chars + prefix_len, suffix, suffix_len);
+    text->len = (uint32_t)(prefix_len + suffix_len);
+    return text;
+}
+
+// The synthesized procedure: `def`'s body from `loop` onward, over the
+// live-ins as parameters. Its nodes reference -- never modify -- the shared
+// AST; only the wrapper nodes, signature and analysis record are new. The
+// parameters reuse the live-ins' own binding entries, so every identifier in
+// the shared statements already names its parameter.
+static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
+        AstLoopControlNode* loop, NameEntry* const* live, int count) {
+    AstListNode* source_body = (AstListNode*)ast_unwrap_primary(def->body);
+    AstListNode* body = (AstListNode*)pool_calloc(pool, sizeof(AstListNode));
+    TypeFunc* signature = (TypeFunc*)alloc_type(pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
+    FnAnalysis* analysis = (FnAnalysis*)pool_calloc(pool, sizeof(FnAnalysis));
+    AstFuncNode* continuation = (AstFuncNode*)pool_calloc(pool, sizeof(AstFuncNode));
+    if (!body || !signature || !analysis || !continuation) return NULL;
+    *body = *source_body;
+    body->item = (AstNode*)loop;
+
+    AstNamedNode* first_param = NULL;
+    AstNamedNode* last_param = NULL;
+    TypeParam* last_type = NULL;
+    for (int i = 0; i < count; i++) {
+        NameEntry* entry = live[i];
+        AstNamedNode* param = (AstNamedNode*)pool_calloc(pool, sizeof(AstNamedNode));
+        if (!param) return NULL;
+        param->node_type = AST_NODE_PARAM;
+        param->name = entry->name;
+        param->entry = entry;
+        param->source_span = entry->node ? entry->node->source_span : loop->source_span;
+        AstNamedNode* source_param = NULL;
+        for (AstNamedNode* p = def->param; p; p = (AstNamedNode*)((AstNode*)p)->next) {
+            if (p->entry == entry) { source_param = p; break; }
+        }
+        TypeParam* type = NULL;
+        if (source_param && lambda_type_param(((AstNode*)source_param)->type)) {
+            // the definition's own parameter keeps its contract and `var`-ness;
+            // it already holds a value, so it is no longer optional
+            type = alloc_type_param(pool, NULL);
+            if (!type) return NULL;
+            *type = *(TypeParam*)((AstNode*)source_param)->type;
+            type->next = NULL;
+            type->is_optional = false;
+            type->default_value = NULL;
+            param->declared_type = source_param->declared_type;
+        } else {
+            // a local's declared contract, or an explicit `any`: an untyped
+            // local may hold an error value, which TYPE_ANY_NO_ERROR rejects
+            Type* declared = entry->declared_type;
+            type = alloc_type_param(pool, declared ? declared : &TYPE_ANY);
+            if (!type) return NULL;
+            apply_param_contract(type, declared ? declared : &TYPE_ANY, true);
+            param->declared_type = declared;
+        }
+        ((AstNode*)param)->type = type;
+        if (last_param) {
+            ((AstNode*)last_param)->next = (AstNode*)param;
+            last_type->next = type;
+        } else {
+            first_param = param;
+            signature->param = type;
+        }
+        last_param = param;
+        last_type = type;
+    }
+
+    // The definition's T0 epilogue still checks its declared return contract,
+    // so the continuation returns a plain boxed Item.
+    TypeFunc* source_signature = (TypeFunc*)((AstNode*)def)->type;
+    *signature = *source_signature;
+    signature->param = first_param ? (TypeParam*)((AstNode*)first_param)->type : NULL;
+    signature->param_count = count;
+    signature->required_param_count = count;
+    signature->returned = &TYPE_ANY;
+    signature->inferred_return = NULL;
+    signature->return_contract = NULL;
+    signature->has_explicit_return_contract = false;
+    signature->is_variadic = false;
+    signature->binder_count = 0;
+    signature->binders = NULL;
+
+    analysis->param_count = count;
+    analysis->param_types = count > 0
+        ? (FnParamTypeInfo*)pool_calloc(pool, sizeof(FnParamTypeInfo) * (size_t)count)
+        : NULL;
+    if (count > 0 && !analysis->param_types) return NULL;
+
+    *continuation = *def;
+    ((AstNode*)continuation)->node_type = AST_NODE_PROC;
+    ((AstNode*)continuation)->type = signature;
+    ((AstNode*)continuation)->next = NULL;
+    // the loop's offset keeps the MIR symbol distinct from the definition's
+    ((AstNode*)continuation)->source_span = loop->source_span;
+    continuation->name = def->name
+        ? interp_pool_string(pool, def->name->chars, def->name->len, "__loop")
+        : interp_pool_string(pool, "f", 1, "__loop");
+    continuation->entry = NULL;
+    continuation->param = first_param;
+    continuation->body = (AstNode*)body;
+    continuation->captures = NULL;
+    continuation->analysis = analysis;
+    continuation->declared_return_type = NULL;
+    continuation->is_loop_continuation = true;
+    return continuation->name ? continuation : NULL;
+}
+
+static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* loop,
+        FnPromotionCell* cell) {
+    AstFuncNode* def = (AstFuncNode*)frame->fn;
+    InterpState* st = frame->st;
+    TypeFunc* signature = (TypeFunc*)((AstNode*)def)->type;
+    AstListNode* body = (AstListNode*)ast_unwrap_primary(def->body);
+    NameEntry* live[LAMBDA_MAX_FUNCTION_ARGS];
+    int live_count = 0;
+    Pool* pool = NULL;
+    AstFuncNode* continuation = NULL;
+    const char* why = NULL;
+    cell->loop_state = FN_LOOP_HANDOFF_PINNED;   // until the job is queued
+
+    if (!st || !st->runtime || st->runtime->ui_mode) {
+        why = "runtime";
+    } else if (def->captures || def->is_generator || def->is_async ||
+            def->analysis->may_await || def->analysis->needs_task_context) {
+        why = "activation-kind";
+    } else if (!signature || signature->type_id != LMD_TYPE_FUNC ||
+            signature->binder_count > 0 || signature->is_variadic) {
+        why = "signature";
+    } else {
+        // The continuation's block value must be the definition's: the last
+        // value expression of the body may not precede the loop.
+        int values = 0, decls = 0, stams = 0;
+        AstNode* last_value = interp_proc_block_last_value(body, &values, &decls, &stams);
+        bool value_after_loop = last_value == NULL;
+        for (AstNode* item = (AstNode*)loop; item && !value_after_loop; item = item->next) {
+            value_after_loop = item == last_value;
+        }
+        if (!value_after_loop) why = "block-value";
+    }
+    if (!why) why = interp_loop_live_ins(frame, (AstNode*)loop, live, &live_count);
+    if (!why) {
+        pool = mem_pool_create(NULL, MEM_ROLE_CODE, "interp.loop.continuation");
+        continuation = pool ? interp_build_loop_continuation(pool, def, loop, live,
+            live_count) : NULL;
+        NameEntry** saved = pool ? (NameEntry**)pool_calloc(pool,
+            sizeof(NameEntry*) * (size_t)(live_count > 0 ? live_count : 1)) : NULL;
+        if (!continuation || !saved) {
+            why = "out-of-memory";
+        } else {
+            memcpy(saved, live, sizeof(NameEntry*) * (size_t)live_count);
+            cell->loop_live_ins = saved;
+            why = interp_satellite_refusal(continuation);
+        }
+    }
+    if (why) {
+        log_notice("interp-tier: loop handoff pinned function='%s' loop=%u reason=%s",
+            def->name ? def->name->chars : "<anonymous>",
+            (unsigned)loop->interp_handoff_ordinal, why);
+        cell->loop_live_ins = NULL;
+        if (pool) pool_destroy(pool);
+        return;
+    }
+
+    cell->loop_ordinal = loop->interp_handoff_ordinal;
+    cell->loop_continuation = continuation;
+    cell->loop_live_in_count = (uint8_t)live_count;
+    cell->loop_state = FN_LOOP_HANDOFF_NONE;   // the enqueue claims it
+    if (!interp_satellite_enqueue(st->runtime, frame->module, def, cell,
+            continuation, pool)) {
+        cell->loop_state = FN_LOOP_HANDOFF_PINNED;
+        cell->loop_continuation = NULL;
+        cell->loop_live_ins = NULL;
+        pool_destroy(pool);
+        log_error("interp-tier: loop continuation queue failed function='%s'",
+            def->name ? def->name->chars : "<anonymous>");
+        return;
+    }
+    if (interp_satellite_sync_enabled()) {
+        // test hook: publish at the trigger, so handoff happens deterministically
+        InterpSatelliteQueue* queue = frame->module->interp_satellite_queue;
+        pthread_mutex_lock(&queue->mutex);
+        interp_satellite_wait_idle_locked(queue);
+        pthread_mutex_unlock(&queue->mutex);
+        interp_satellite_publish_ready(frame->module);
+    }
+}
+
+static void interp_note_backedges(InterpFrame* frame, uint64_t trips) {
+    AstLoopControlNode* loop = frame ? (AstLoopControlNode*)frame->handoff_loop : NULL;
+    if (!loop || trips == 0) return;
+    FnPromotionCell* cell = interp_frame_cell(frame);
+    if (!cell) return;
+    uint32_t* count = &cell->loop_backedges[loop->interp_handoff_ordinal - 1];
+    uint64_t before = *count;
+    uint64_t after = before + trips;
+    *count = after > UINT32_MAX ? UINT32_MAX : (uint32_t)after;
+    if (cell->loop_state == FN_LOOP_HANDOFF_NONE) {
+        if (after >= interp_jit_backedge_threshold()) {
+            interp_queue_loop_handoff(frame, loop, cell);
+        }
+    } else if (cell->loop_state == FN_LOOP_HANDOFF_QUEUED &&
+            (before >> 8) != (after >> 8)) {
+        // a back-edge is a statement boundary of this activation: adopt any
+        // finished image here rather than only at the next function entry
+        interp_satellite_publish_ready(frame->module);
+    }
+}
+
+static void interp_note_backedge(InterpFrame* frame) {
+    interp_note_backedges(frame, 1);
+}
+
+// Enter the published continuation at this head test of its loop. Returns
+// false, leaving the activation in T0, unless the frame is at a statement
+// boundary with no implicit context or partially published `var` state.
+static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item* out) {
+    if (f->scratch_top != f->scratch_base || interp_frame_pending(f) ||
+            f->st->mode != EvalMode::RUNTIME || f->var_marked_mask || f->method ||
+            f->binder_count || f->proc_handler || f->st->view_bindings ||
+            !cell->loop_entry || !cell->loop_continuation) {
+        return false;
+    }
+    const AstFuncNode* continuation = cell->loop_continuation;
+    int argc = cell->loop_live_in_count;
+    // the argument words and the Function are rooted across the allocation
+    // and the call (D5.3.3)
+    RootSpan roots((size_t)argc + 1);
+    uint64_t* words = roots.words();
+    if (!words) return false;
+    for (int i = 0; i < argc; i++) {
+        words[i] = f->slots[cell->loop_live_ins[i]->slot];
+    }
+    Function* fn = to_closure_named(NULL, argc, NULL, continuation->name->chars);
+    if (!fn) return false;
+    words[argc] = (uint64_t)(uintptr_t)fn;
+    fn->entry_abi = FN_ENTRY_ABI_LAMBDA_INTERPRETED;
+    fn->def = continuation;
+    fn->def_module = f->module;
+    fn->runtime_context = (Context*)context;
+    lambda_function_set_type(fn, ((AstNode*)continuation)->type);
+    lambda_function_publish_boxed_entry(fn, continuation, cell->loop_entry);
+
+    // A definition's own `var` parameter re-borrows the caller's prepared
+    // root: its CW33 home is this frame's slot, which the continuation's
+    // epilogue updates, so this activation's epilogue publishes it on.
+    Context* transport = (Context*)f->st->ctx;
+    bool borrowed = false;
+    for (int i = 0; i < argc; i++) {
+        NameEntry* entry = cell->loop_live_ins[i];
+        if (!entry->is_var_param) continue;
+        transport->mir_var_homes[i] = &f->slots[entry->slot];
+        borrowed = true;
+    }
+    if (!cell->loop_entered) {
+        // once per definition: later activations enter silently
+        cell->loop_entered = true;
+        log_notice("interp-tier: loop handoff function='%s' loop=%u live_ins=%d",
+            continuation->name->chars, (unsigned)cell->loop_ordinal, argc);
+    }
+    List args = {};
+    args.length = argc;
+    args.items = (Item*)(void*)words;
+    uint64_t result_home = 0;
+    Item result = borrowed
+        ? fn_call_borrowed_into(fn, argc ? &args : NULL, &result_home)
+        : fn_call_into(fn, argc ? &args : NULL, &result_home);
+    if (borrowed) {
+        for (int i = 0; i < argc; i++) transport->mir_var_homes[i] = NULL;
+    }
+    *out = result;
+    return true;
+}
+
 
 // a direct self-tail boundary starts a semantically fresh activation even
 // though TCO reuses the frame. It is the only active-frame point whose live
@@ -5966,25 +6513,19 @@ public:
     explicit InterpBorrowedScratch(bool needed)
             : values(NULL), scalar_types(NULL), scalar_payloads(NULL) {
         if (!needed) return;
-        values = (Item*)mem_calloc(LAMBDA_MAX_FUNCTION_ARGS, sizeof(Item), MEM_CAT_EVAL);
-        scalar_types = (TypeId*)mem_calloc(LAMBDA_MAX_FUNCTION_ARGS,
-            sizeof(TypeId), MEM_CAT_EVAL);
-        scalar_payloads = (uint64_t*)mem_calloc(LAMBDA_MAX_FUNCTION_ARGS,
-            sizeof(uint64_t), MEM_CAT_EVAL);
-        if (!values || !scalar_types || !scalar_payloads) {
-            mem_free(values);
-            mem_free(scalar_types);
-            mem_free(scalar_payloads);
-            values = NULL;
-            scalar_types = NULL;
-            scalar_payloads = NULL;
-        }
+        // one block for all three arrays: a `var` call paid three
+        // allocations per activation (8-byte arrays first keep alignment)
+        size_t words = LAMBDA_MAX_FUNCTION_ARGS * (sizeof(Item) + sizeof(uint64_t));
+        uint8_t* block = (uint8_t*)mem_calloc(1,
+            words + LAMBDA_MAX_FUNCTION_ARGS * sizeof(TypeId), MEM_CAT_EVAL);
+        if (!block) return;
+        values = (Item*)(void*)block;
+        scalar_payloads = (uint64_t*)(void*)(block + LAMBDA_MAX_FUNCTION_ARGS * sizeof(Item));
+        scalar_types = (TypeId*)(void*)(block + words);
     }
 
     ~InterpBorrowedScratch() {
-        mem_free(values);
-        mem_free(scalar_types);
-        mem_free(scalar_payloads);
+        mem_free(values);   // the block's base
     }
 
     bool valid(bool needed) const {
@@ -6129,7 +6670,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
-            if (!interp_parameter_is_binder_site(p)) continue;
+            if (!frame->binder_count || !interp_parameter_is_binder_site(p)) continue;
             LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
@@ -6152,7 +6693,7 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
             parameter_index++;
-            if (interp_parameter_is_binder_site(p)) continue;
+            if (frame->binder_count && interp_parameter_is_binder_site(p)) continue;
             LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
                 parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
@@ -6945,8 +7486,10 @@ static uint32_t interp_jit_threshold(void) {
     return interp_promotion_threshold("LAMBDA_JIT_THRESHOLD", 5);
 }
 
+// back-edges of one handoff loop's subtree before its continuation compiles;
+// the user set 10000 on 2026-10-02 (D8.1.1v14, Interp Tune2 §4.3)
 static uint32_t interp_jit_backedge_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_JIT_BACKEDGE", 1024);
+    return interp_promotion_threshold("LAMBDA_JIT_BACKEDGE", 10000);
 }
 
 // `LAMBDA_SATELLITE_SYNC=1` publishes each satellite at the promotion that
@@ -7195,31 +7738,6 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
     return true;
 }
 
-// D8.1.1v7: does this body own a loop statement (not counting nested
-// definitions, which promote on their own)?
-static void interp_loop_scan_visit(AstNode* node, void* opaque) {
-    bool* found = (bool*)opaque;
-    if (!node || *found) return;
-    switch (node->node_type) {
-    case AST_NODE_LOOP: case AST_NODE_FOR_EXPR:
-    case AST_NODE_FOR_OF_STAM: case AST_NODE_FOR_IN_STAM:
-        *found = true;
-        return;
-    case AST_NODE_FUNC: case AST_NODE_PROC: case AST_NODE_FUNC_EXPR:
-    case AST_NODE_ARROW_FUNC:
-        return;
-    default:
-        interp_visit_children(node, interp_loop_scan_visit, opaque);
-        return;
-    }
-}
-
-static bool interp_body_has_loop(AstNode* body) {
-    bool found = false;
-    interp_loop_scan_visit(body, &found);
-    return found;
-}
-
 static bool interp_promote_function(Function* fn, bool count_entry) {
     if (!fn || fn->entry_abi != FN_ENTRY_ABI_LAMBDA_INTERPRETED ||
             lambda_tier_selected() != LAMBDA_TIER_AUTO) {
@@ -7263,17 +7781,10 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         return false;
     }
     if (count_entry && cell->call_count != UINT32_MAX) cell->call_count++;
-    if (cell->loop_bodied == 0) {
-        cell->loop_bodied = def->body && interp_body_has_loop(def->body) ? 2 : 1;
-    }
-    // D8.1.1v7: a loop-bodied procedure is hot by construction at its first
-    // entry -- a once-called `main` that owns the workload's loop (mandelbrot,
-    // matmul, navier_stokes: 50-150x Node end-to-end) never reached the entry
-    // threshold, and back-edge promotion only takes effect at the NEXT entry.
-    bool loop_first_entry = cell->loop_bodied == 2 && count_entry;
-    if (!loop_first_entry &&
-            cell->call_count < interp_jit_threshold() &&
-            cell->backedge_count < interp_jit_backedge_threshold() &&
+    // D8.1.1v14: entries and self-tail edges promote a definition; a hot loop
+    // instead hands its running activation off at the loop head, so owning a
+    // loop no longer promotes at the first entry (the retired v7 trigger).
+    if (cell->call_count < interp_jit_threshold() &&
             cell->tail_edge_count < interp_jit_threshold()) return false;
     if (interp_whole_script_poc_enabled()) {
         if (interp_whole_script_compile(st, script, fn)) return true;

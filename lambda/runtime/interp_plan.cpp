@@ -1711,6 +1711,26 @@ static void plan_finish(PlanCtx* pc) {
     plan->planned = true;
 }
 
+// D8.1.1v14: a `while` that is a direct statement of a `pn` body can hand the
+// running activation to compiled code at its head test. There T0's whole live
+// state is the frame's named slots, and the statements from the loop to the
+// end of the body form a function of them (the continuation). Nested loops
+// are not numbered: their back-edges count toward the enclosing handoff loop.
+static void plan_mark_handoff_loops(AstFuncNode* fn) {
+    if (((AstNode*)fn)->node_type != AST_NODE_PROC) return;
+    AstNode* body = ast_unwrap_primary(fn->body);
+    if (!body || (body->node_type != AST_NODE_CONTENT &&
+            body->node_type != AST_NODE_LIST)) return;
+    uint8_t ordinal = 0;
+    for (AstNode* item = ((AstListNode*)body)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_LOOP) continue;
+        AstLoopControlNode* loop = (AstLoopControlNode*)item;
+        if (loop->form != LOOP_FORM_WHILE) continue;
+        if (ordinal >= INTERP_HANDOFF_LOOP_MAX) break;
+        loop->interp_handoff_ordinal = ++ordinal;
+    }
+}
+
 // Enter a nested function definition: a fresh plan, a fresh slot space.
 static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     if (!fn || !fn->body) return;
@@ -1746,6 +1766,7 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     pc.param_count = (uint32_t)param_index;
 
     plan_walk(fn->body, &pc);
+    plan_mark_handoff_loops(fn);
     // should_use_tco is lowering's own eligibility test (named, not a closure,
     // has a tail-recursive call), so both tiers turn the same functions into
     // loops and a deep tail recursion cannot overflow in only one of them (R8).

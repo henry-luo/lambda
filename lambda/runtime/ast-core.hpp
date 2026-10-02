@@ -1008,6 +1008,9 @@ typedef struct AstLoopControlNode : AstNode {
     AstNode *update;
     AstNode *body;
     NameScope *vars;
+    // D8.1.1v14: 1-based handoff ordinal of a `while` that is a direct
+    // statement of a `pn` body (frame-plan pass); 0 = never a handoff loop
+    uint8_t interp_handoff_ordinal;
 } AstLoopControlNode;
 
 typedef AstLoopControlNode AstForStmtNode;
@@ -1411,6 +1414,10 @@ typedef struct AstFuncNode : AstNode {
     bool is_that_predicate;
     // T29-1: number of synthesized place-handle slots in this body
     uint16_t place_handle_count;
+    // D8.1.1v14: a synthesized loop continuation, whose parameters are the
+    // live-in locals of a T0 activation. They arrive from another binding's
+    // ownership, so each is snapshot-marked at entry like a written param.
+    bool is_loop_continuation;
     Type* declared_return_type;
 } AstFuncNode;
 
@@ -1709,20 +1716,34 @@ typedef enum FnPromotionState {
     FN_PROMOTION_PINNED_INTERP,
 } FnPromotionState;
 
+// D8.1.1v14 loop-head handoff: the top-level `while` loops of a `pn` body that
+// a running activation may leave at, numbered 1.. by the frame-plan pass.
+enum { INTERP_HANDOFF_LOOP_MAX = 8 };
+
+typedef enum FnLoopHandoffState : uint8_t {
+    FN_LOOP_HANDOFF_NONE,
+    FN_LOOP_HANDOFF_QUEUED,     // continuation image building on a worker
+    FN_LOOP_HANDOFF_READY,      // loop_entry published; next head test enters it
+    FN_LOOP_HANDOFF_PINNED,     // ineligible or failed: the loop stays T0
+} FnLoopHandoffState;
+
 typedef struct FnPromotionCell {
     FnPromotionState state;
     uint32_t call_count;
-    uint32_t backedge_count;
-    // self-tail edges are eligible for entry-equivalent handoff, unlike a
-    // general loop backedge which has no native frame materialization point
-    // (D8.1.1v5).
+    // self-tail edges are eligible for entry-equivalent handoff (D8.1.1v5)
     uint32_t tail_edge_count;
     void* boxed_entry;
-    // D8.1.1v7: 0 = not yet scanned, 1 = no loop statement in the body,
-    // 2 = the body owns a loop, so the definition promotes at its FIRST entry
-    // (a once-called `main` whose loop is the whole workload never reached
-    // the entry threshold and there is no loop-entry OSR).
-    uint8_t loop_bodied;
+    // D8.1.1v14: back-edges of each handoff loop, counted over the loop's
+    // whole subtree and accumulated across activations. The first loop to
+    // reach LAMBDA_JIT_BACKEDGE owns the one continuation of this definition.
+    uint32_t loop_backedges[INTERP_HANDOFF_LOOP_MAX];
+    FnLoopHandoffState loop_state;
+    uint8_t loop_ordinal;               // handoff loop of the continuation
+    void* loop_entry;                   // continuation `_b` entry
+    const struct AstFuncNode* loop_continuation;
+    NameEntry* const* loop_live_ins;    // continuation parameters, in order
+    uint8_t loop_live_in_count;
+    bool loop_entered;                  // first handoff logged
 } FnPromotionCell;
 
 // Native JS bodies can either expose a numeric lane or retain an Item result

@@ -42979,6 +42979,22 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // made the ownership of inferred types depend on compilation order.
     if (fn_node->body) {
         infer_param_types_batched(mt, fn_node, is_proc_fn, resolved_param_types, user_param_count);
+        // D8.1.1v14: a continuation parameter is a T0 local, which the
+        // declaration rule (T21-3b) keeps boxed and rooted when the body
+        // passes it to an untyped `var` parameter -- its CW33 home needs a
+        // root slot, and an inferred native lane loses every write back. Only
+        // a continuation's own lowering changes: it has no native callers,
+        // whose raw argument lanes would otherwise disagree with this body.
+        int scan_index = 0;
+        for (AstNamedNode* p = fn_node->param; fn_node->is_loop_continuation &&
+                p && scan_index < user_param_count;
+                p = (AstNamedNode*)((AstNode*)p)->next, scan_index++) {
+            if (!p->declared_type && p->entry &&
+                    mir_is_native_scalar_value_type(resolved_param_types[scan_index]) &&
+                    mir_binding_borrowed_as_var_argument(fn_node->body, p->entry)) {
+                resolved_param_types[scan_index] = LMD_TYPE_ANY;
+            }
+        }
     }
     mir_store_param_types(mt, fn_node, resolved_param_types, user_param_count);
     FnParamTypeInfo saved_raw_variant_params[LAMBDA_MAX_FUNCTION_ARGS] = {};
@@ -43770,7 +43786,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     mt->var_param_home_contracts[pi] = mir_named_contract(param);
                     }
                 }
-                if (param->entry && param->entry->cow_param_mutated &&
+                if (param->entry && (param->entry->cow_param_mutated ||
+                        fn_node->is_loop_continuation) &&
                         !native_param->is_var_param) {
                     // A plain parameter is an activation-local snapshot even
                     // on the native witness edge. Publish the boundary now,
@@ -43783,6 +43800,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     emit_call_1(mt, mir_cow_site_import("cow_mark_shared", "cow_mark_shared_profiled"), MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_param));
                     native_param->cow_marked = true;
+                    if (fn_node->is_loop_continuation) native_param->cow_owned = true;
                 }
             }
             log_debug("mir: native param '%s' registered directly, mir_type=%d", pname, mtype);
@@ -43869,9 +43887,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             if (param_var) {
                 param_var->full_type = param->declared_type;
             }
+            // A loop continuation's parameters are a T0 activation's locals:
+            // their containers may be shared with other T0 bindings, so they
+            // take the same entry snapshot (D8.1.1v14).
             if (param_var && fn_as_node->node_type == AST_NODE_PROC &&
                     (!declared_param || !declared_param->is_var_param) &&
-                    param->entry && param->entry->cow_param_mutated) {
+                    param->entry && (param->entry->cow_param_mutated ||
+                        fn_node->is_loop_continuation)) {
                 // CW29/S9.1.3 (gated): this plain param's body writes through
                 // it, so the activation snapshots it -- one share-mark at
                 // entry; the first write detaches a private copy. Non-mutating
@@ -43881,6 +43903,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 emit_call_1(mt, mir_cow_site_import("cow_mark_shared", "cow_mark_shared_profiled"), MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_param));
                 param_var->cow_marked = true;
+                // its history is unknown here, so an alias of it is an
+                // ownership boundary, as for a declared owner (S9.1.2)
+                if (fn_node->is_loop_continuation) param_var->cow_owned = true;
             }
             if (param_var && declared_param && declared_param->is_var_param) {
                 // A caller can detach the root before this var borrow while
@@ -47944,6 +47969,7 @@ void interp_satellite_image_destroy(InterpSatelliteImage* image) {
     if (image->compiler_type_list) arraylist_free(image->compiler_type_list);
     if (image->compiler_name_pool) name_pool_release(image->compiler_name_pool);
     if (image->compiler_pool) pool_destroy(image->compiler_pool);
+    if (image->continuation_pool) pool_destroy(image->continuation_pool);
     mem_free(image);
 }
 

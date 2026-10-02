@@ -5699,9 +5699,13 @@ void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* decl
     param_type->is_var_param = was_var_param;
     param_type->default_value = default_value;
 
-    Type* parameter_contract = parameter_contract_for_declared(tp, declared,
-        was_optional, default_value);
-    set_param_contract(param_type, parameter_contract, true);
+    apply_param_contract(param_type, parameter_contract_for_declared(tp, declared,
+        was_optional, default_value), true);
+}
+
+void apply_param_contract(TypeParam* param_type, Type* parameter_contract,
+        bool is_explicit) {
+    set_param_contract(param_type, parameter_contract, is_explicit);
 
     // For complex types (TypeBinary, TypeUnary) and named map/object types,
     // store pointer to full type so downstream code can reach the extended
