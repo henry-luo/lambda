@@ -32,6 +32,16 @@ template<class T> struct KindIsVoid { static const bool value = false; };
 template<> struct KindIsVoid<void> { static const bool value = true; };
 template<> struct KindIsVoid<const void> { static const bool value = true; };
 
+template<bool B, class R = void> struct KindEnableIf {};
+template<class R> struct KindEnableIf<true, R> { typedef R type; };
+
+// U* converts implicitly to T* (same type, added const, or derived to base)
+template<class U, class T> struct KindUpcast {
+    static char test(T*);
+    static long test(...);
+    static const bool value = sizeof(test((U*)nullptr)) == sizeof(char);
+};
+
 // Shared body for the dereferenceable kinds. Each kind is its own type, so a
 // value of one kind never converts to another.
 #define LAM_MEM_KIND_POINTER_BODY(Kind)                                              \
@@ -43,14 +53,25 @@ template<> struct KindIsVoid<const void> { static const bool value = true; };
     Kind& operator=(decltype(nullptr)) { p_ = nullptr; return *this; }               \
     T* get() const { return p_; }                                                    \
     T* operator->() const { return p_; }                                             \
-    operator T*() const { return p_; }
+    operator T*() const { return p_; }                                               \
+    /* explicit casts read like casts of the raw pointer, e.g.                   */  \
+    /* (DomElement*)node->parent; the kind constrains writes, not reads          */  \
+    template<class U> explicit operator U*() const { return (U*)p_; }
+
+// Same kind, derived to base: Up<DomElement> -> Up<DomNode>. Not for OwnArr,
+// where the element type sets the stride.
+#define LAM_MEM_KIND_UPCAST(Kind)                                                    \
+    template<class U, class = typename KindEnableIf<KindUpcast<U, T>::value>::type>  \
+    constexpr Kind(Kind<U> o) : p_(o.p_) {}
 
 template<class T> struct Up {
     LAM_MEM_KIND_POINTER_BODY(Up)
+    LAM_MEM_KIND_UPCAST(Up)
 };
 
 template<class T> struct Own {
     LAM_MEM_KIND_POINTER_BODY(Own)
+    LAM_MEM_KIND_UPCAST(Own)
     // a non-owning view of the owned target, for passing down or linking back
     Up<T> borrow() const { return Up<T>(p_); }
 };
@@ -62,13 +83,22 @@ template<class T> struct OwnArr {
 
 template<class T> struct Counted {
     LAM_MEM_KIND_POINTER_BODY(Counted)
+    LAM_MEM_KIND_UPCAST(Counted)
 };
 
 template<class T> struct Foreign {
     LAM_MEM_KIND_POINTER_BODY(Foreign)
+    LAM_MEM_KIND_UPCAST(Foreign)
 };
 
 #undef LAM_MEM_KIND_POINTER_BODY
+#undef LAM_MEM_KIND_UPCAST
+
+// Kind constructors with the target type deduced, for write sites:
+// child->parent = lam::up(element) declares the store as an outliving link.
+template<class T> constexpr Up<T> up(T* p) { return Up<T>(p); }
+template<class T> constexpr Own<T> own(T* p) { return Own<T>(p); }
+template<class T> constexpr Counted<T> counted(T* p) { return Counted<T>(p); }
 
 // Slot reference: valid only through lookup in the owning slot table, which
 // compares generations and returns null for a recycled slot.

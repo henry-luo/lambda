@@ -2072,8 +2072,8 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,
         if (element->doc->view_tree) {
             element->ensure_embed(element->doc->view_tree);
         } else if (element->doc->document_pool) {
-            element->embed = (EmbedProp*)pool_calloc(
-                element->doc->document_pool, sizeof(EmbedProp));
+            element->embed = lam::own((EmbedProp*)pool_calloc(
+                element->doc->document_pool, sizeof(EmbedProp)));
             if (element->embed) *element->embed = EMBED_PROP_DEFAULT;
         }
     }

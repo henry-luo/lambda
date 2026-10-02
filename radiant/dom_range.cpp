@@ -1299,7 +1299,7 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
         MarkEditor editor(doc->input, EDIT_MODE_INLINE);
         Item inserted = editor.dom_insert_child(
             {.element = parent_backing}, (int)(original_index + 1),
-            {.item = s2it(right->native_string)});
+            {.item = s2it(right->native_string.get())});
         if (get_type_id(inserted) != LMD_TYPE_ELEMENT ||
             inserted.element != parent_backing) {
             dom_node_schedule_detached(doc, static_cast<DomNode*>(right));
@@ -1308,8 +1308,8 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
         }
         String* inserted_string = parent_backing->items[original_index + 1].get_string();
         if (inserted_string) {
-            right->native_string = inserted_string;
-            right->text = inserted_string->chars;
+            right->native_string = lam::up(inserted_string);
+            right->text = lam::up(inserted_string->chars);
             right->length = inserted_string->len;
         }
         if (!dom_text_replace_backed_string(original, left_str)) {

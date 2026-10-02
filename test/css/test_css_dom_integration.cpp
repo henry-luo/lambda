@@ -2287,8 +2287,8 @@ TEST_F(DomIntegrationTest, MixedTree_ElementWithTextChild) {
 //     DomText* text = dom_text_create(pool, "Hello World");
 
     // Manually link text node as child
-    text->parent = div;
-    div->first_child = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
 
     EXPECT_EQ(text->parent, div);
     EXPECT_EQ(div->first_child, (void*)text);
@@ -2305,8 +2305,8 @@ TEST_F(DomIntegrationTest, MixedTree_ElementWithCommentChild) {
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", " TODO: Add content ");
 
     // Manually link comment node as child
-    comment->parent = div;
-    div->first_child = comment;
+    comment->parent = lam::up(div);
+    div->first_child = lam::own(comment);
 
     EXPECT_EQ(comment->parent, div);
     EXPECT_EQ(div->first_child, (void*)comment);
@@ -2325,13 +2325,13 @@ TEST_F(DomIntegrationTest, MixedTree_ElementTextElement) {
     // Manually link children
     div->append_child(span1);
 
-    text->parent = div;
-    span1->next_sibling = text;
-    text->prev_sibling = span1;
+    text->parent = lam::up(div);
+    span1->next_sibling = lam::own(text);
+    text->prev_sibling = lam::up(span1);
 
-    span2->parent = div;
-    text->next_sibling = span2;
-    span2->prev_sibling = text;
+    span2->parent = lam::up(div);
+    text->next_sibling = lam::own(span2);
+    span2->prev_sibling = lam::up(text);
 
     // dom_element_count_child_elements only counts DomElement* children (2 spans), not text nodes
     EXPECT_EQ(div->count_child_elements(), 2);
@@ -2353,20 +2353,20 @@ TEST_F(DomIntegrationTest, MixedTree_AllNodeTypes) {
 //     DomText* text2 = dom_text_create(pool, "Text after");
 
     // Manually link all children
-    comment->parent = div;
-    div->first_child = comment;
+    comment->parent = lam::up(div);
+    div->first_child = lam::own(comment);
 
-    text1->parent = div;
-    comment->next_sibling = text1;
-    text1->prev_sibling = comment;
+    text1->parent = lam::up(div);
+    comment->next_sibling = lam::own(text1);
+    text1->prev_sibling = lam::up(comment);
 
-    span->parent = div;
-    text1->next_sibling = span;
-    span->prev_sibling = text1;
+    span->parent = lam::up(div);
+    text1->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text1);
 
-    text2->parent = div;
-    span->next_sibling = text2;
-    text2->prev_sibling = span;
+    text2->parent = lam::up(div);
+    span->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(span);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees (it casts
     // first_child to DomElement* and reads next_sibling at wrong offset for DomText/DomComment).
@@ -2397,16 +2397,16 @@ TEST_F(DomIntegrationTest, MixedTree_NavigateSiblings) {
 //     DomText* text2 = dom_text_create(pool, "Second");
 
     // Manually link children
-    text1->parent = parent;
-    parent->first_child = text1;
+    text1->parent = lam::up(parent);
+    parent->first_child = lam::own(text1);
 
-    elem->parent = parent;
-    text1->next_sibling = elem;
-    elem->prev_sibling = text1;
+    elem->parent = lam::up(parent);
+    text1->next_sibling = lam::own(elem);
+    elem->prev_sibling = lam::up(text1);
 
-    text2->parent = parent;
-    elem->next_sibling = text2;
-    text2->prev_sibling = elem;
+    text2->parent = lam::up(parent);
+    elem->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(elem);
 
     // Forward navigation
     EXPECT_EQ(text1->next_sibling, (void*)elem);
@@ -2429,18 +2429,18 @@ TEST_F(DomIntegrationTest, MixedTree_RemoveTextNode) {
 //     DomElement* span = create_element_with_backing("span");
 
     // Manually link text and span as children
-    text->parent = div;
-    div->first_child = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
 
-    span->parent = div;
-    text->next_sibling = span;
-    span->prev_sibling = text;
+    span->parent = lam::up(div);
+    text->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text);
 
     // dom_element_count_child_elements only counts DomElement* children (1 span)
     EXPECT_EQ(div->count_child_elements(), 1);
 
     // Remove the text node manually
-    div->first_child = span;
+    div->first_child = lam::own(span);
     span->prev_sibling = nullptr;
     text->parent = nullptr;
     text->next_sibling = nullptr;
@@ -2462,10 +2462,10 @@ TEST_F(DomIntegrationTest, MixedTree_InsertTextBefore) {
     div->append_child(span);
 
     // Then manually insert text before span
-    text->parent = div;
-    div->first_child = text;
-    text->next_sibling = span;
-    span->prev_sibling = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
+    text->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text);
 
     EXPECT_EQ(div->first_child, (void*)text);
     EXPECT_EQ(text->next_sibling, (void*)span);
@@ -2482,16 +2482,16 @@ TEST_F(DomIntegrationTest, MixedTree_MultipleTextNodes) {
 //     DomText* text3 = dom_text_create(pool, "third.");
 
     // Manually link all text nodes
-    text1->parent = p;
-    p->first_child = text1;
+    text1->parent = lam::up(p);
+    p->first_child = lam::own(text1);
 
-    text2->parent = p;
-    text1->next_sibling = text2;
-    text2->prev_sibling = text1;
+    text2->parent = lam::up(p);
+    text1->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(text1);
 
-    text3->parent = p;
-    text2->next_sibling = text3;
-    text3->prev_sibling = text2;
+    text3->parent = lam::up(p);
+    text2->next_sibling = lam::own(text3);
+    text3->prev_sibling = lam::up(text2);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't test it
     EXPECT_EQ(text1->next_sibling, (void*)text2);
@@ -2511,20 +2511,20 @@ TEST_F(DomIntegrationTest, MixedTree_NestedWithText) {
 //     DomText* text2 = dom_text_create(pool, "Text2");
 
     // Link text1, span, text2 to div
-    text1->parent = div;
-    div->first_child = text1;
+    text1->parent = lam::up(div);
+    div->first_child = lam::own(text1);
 
-    span->parent = div;
-    text1->next_sibling = span;
-    span->prev_sibling = text1;
+    span->parent = lam::up(div);
+    text1->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text1);
 
     // Link inner_text to span
-    inner_text->parent = span;
-    span->first_child = inner_text;
+    inner_text->parent = lam::up(span);
+    span->first_child = lam::own(inner_text);
 
-    text2->parent = div;
-    span->next_sibling = text2;
-    text2->prev_sibling = span;
+    text2->parent = lam::up(div);
+    span->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(span);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't test it
     EXPECT_EQ(div->count_child_elements(), 1);  // Only counts elements correctly
@@ -2547,21 +2547,21 @@ TEST_F(DomIntegrationTest, MixedTree_CommentsBetweenElements) {
     // Link all nodes as children of div
     div->append_child(h1);
 
-    comment1->parent = div;
-    h1->next_sibling = comment1;
-    comment1->prev_sibling = h1;
+    comment1->parent = lam::up(div);
+    h1->next_sibling = lam::own(comment1);
+    comment1->prev_sibling = lam::up(h1);
 
-    p1->parent = div;
-    comment1->next_sibling = p1;
-    p1->prev_sibling = comment1;
+    p1->parent = lam::up(div);
+    comment1->next_sibling = lam::own(p1);
+    p1->prev_sibling = lam::up(comment1);
 
-    comment2->parent = div;
-    p1->next_sibling = comment2;
-    comment2->prev_sibling = p1;
+    comment2->parent = lam::up(div);
+    p1->next_sibling = lam::own(comment2);
+    comment2->prev_sibling = lam::up(p1);
 
-    p2->parent = div;
-    comment2->next_sibling = p2;
-    p2->prev_sibling = comment2;
+    p2->parent = lam::up(div);
+    comment2->next_sibling = lam::own(p2);
+    p2->prev_sibling = lam::up(comment2);
 
     // dom_element_count_child_elements only counts DomElement* children (h1, p1, p2 = 3 elements)
     EXPECT_EQ(div->count_child_elements(), 3);
@@ -2638,16 +2638,16 @@ TEST_F(DomIntegrationTest, Memory_MixedTreeCleanup) {
 //     DomElement* span = create_element_with_backing("span");
 
     // Manually link nodes
-    text->parent = div;
-    div->first_child = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
 
-    comment->parent = div;
-    text->next_sibling = comment;
-    comment->prev_sibling = text;
+    comment->parent = lam::up(div);
+    text->next_sibling = lam::own(comment);
+    comment->prev_sibling = lam::up(text);
 
-    span->parent = div;
-    comment->next_sibling = span;
-    span->prev_sibling = comment;
+    span->parent = lam::up(div);
+    comment->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(comment);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't use it
 }

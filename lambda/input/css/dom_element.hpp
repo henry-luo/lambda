@@ -688,6 +688,9 @@ struct DomElement : DomNode {
 
     // Resolved props point into the shorter-lived view pool by unified-tree design;
     // every relayout resets and rebuilds them before consumers may read the tree.
+    // The element owns each prop it points to (Own<T>). font, in_line, blk and
+    // specified_style stay raw: they may point at a prop shared with another
+    // element or interned in a canonical table.
     // === Embedded Lambda Element (at known offset from DomNode base) ===
     // In UI mode, this IS the Lambda Element. Otherwise, data is copied from the
     // original Element during create(). MarkEditor operates on
@@ -695,28 +698,28 @@ struct DomElement : DomNode {
     Element elmt;
 
     // Basic element information
-    const char* tag_name;        // Element tag name (cached string)
+    lam::Up<const char> tag_name;   // Element tag name (cached string)
 
     // Tree structure (only elements can have children)
-    DomNode* first_child;        // First child node (Element, Text, or Comment)
-    DomNode* last_child;         // Last child node
+    lam::Own<DomNode> first_child;  // First child node (Element, Text, or Comment); owns the sibling chain
+    lam::Up<DomNode> last_child;    // Last child node
 
     // HTML/CSS style related
     NameId tag_id;               // Generated markup identity; custom tags use NAME_ID_NONE.
     // Bumped by dom_mutation_notify on every mutation at or under an <svg> root, so the
     // painter can tell an unchanged inline SVG (reusable raster layer) from a changed one.
     uint32_t svg_layer_generation;
-    const char* id;              // Element ID attribute (cached)
+    lam::Up<const char> id;      // Element ID attribute (cached)
     const char** class_names;    // Array of class names (cached)
     int class_count;             // Number of classes
     StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
-    DomElementExt* ext;          // rare DOM/view state, allocated lazily from doc pool
+    lam::Own<DomElementExt> ext; // rare DOM/view state, allocated lazily from doc pool
     // we do not store computed_style;
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
     uint32_t elmt_flags;         // compact element state; use the accessors below
     // document reference (provides Arena and Input*)
-    DomDocument* doc;            // Parent document (provides arena and input)
+    lam::Up<DomDocument> doc;    // Parent document (provides arena and input)
 
     // CSS custom properties (CSS variables)
     struct CssCustomProp* css_variables;  // Hashmap of --var-name: value
@@ -726,7 +729,7 @@ struct DomElement : DomNode {
 
     // span properties
     FontProp* font;  // font style
-    BoundaryProp* bound;  // block boundary properties
+    lam::Own<BoundaryProp> bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
 
     // CSS Text soft hyphen fragments can contribute to an inline element's
@@ -763,31 +766,31 @@ struct DomElement : DomNode {
     // Reads must enter through the tagged accessors below; direct members are
     // reserved for mutation after the corresponding tag has been established.
     union {
-        FlexItemProp* fi;
-        GridItemProp* gi;
+        lam::Own<FlexItemProp> fi;
+        lam::Own<GridItemProp> gi;
     };
-    TableProp* tb;  // table specific properties
-    TableCellProp* td;  // table cell specific properties
-    FormControlProp* form;  // form control properties
+    lam::Own<TableProp> tb;  // table specific properties
+    lam::Own<TableCellProp> td;  // table cell specific properties
+    lam::Own<FormControlProp> form;  // form control properties
 
     // block properties
     float content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
-    ScrollProp* scroller;  // handles overflow
+    lam::Own<ScrollProp> scroller;  // handles overflow
     // block content related properties for flexbox, image, iframe
-    EmbedProp* embed;
+    lam::Own<EmbedProp> embed;
     // positioning properties for CSS positioning
-    PositionProp* position;
+    lam::Own<PositionProp> position;
     // CSS transform properties
-    TransformProp* transform;
+    lam::Own<TransformProp> transform;
     // CSS filter and transition state live in the doc-pool extension so the
     // table/form metadata can remain independent without growing this object.
     // pseudo-element content and layout state (::before/::after)
-    PseudoContentProp* pseudo;
+    lam::Own<PseudoContentProp> pseudo;
     // vector path for PDF/SVG curve rendering
     // Layout cache for avoiding redundant layout computations (Taffy-inspired)
     // Stores up to 9 measurement results + 1 final layout result
-    radiant::LayoutCache* layout_cache;
+    lam::Own<radiant::LayoutCache> layout_cache;
 
     bool flag(DomElementFlag value) const { return (elmt_flags & value) != 0; }
     void set_flag(DomElementFlag value, bool enabled) {
@@ -989,7 +992,7 @@ struct DomElement : DomNode {
 
     DomElementExt* ensure_ext() {
         if (!ext && doc && doc->document_pool) {
-            ext = (DomElementExt*)pool_calloc(doc->document_pool, sizeof(DomElementExt));
+            ext = lam::own((DomElementExt*)pool_calloc(doc->document_pool, sizeof(DomElementExt)));
             if (ext) doc->services.ext_allocations++;
         }
         return ext;
@@ -1118,6 +1121,10 @@ struct DomElement : DomNode {
 
 };
 
+LAM_NODE_OF(DomElement, NodeDocument);
+LAM_NODE_OF(DomElementExt, NodeDocument);
+LAM_NODE_OF(DomDocument, NodeDocument);
+
 // A node is connected only while its parent chain reaches the owning root.
 inline bool dom_element_is_connected(const DomElement* element) {
     if (!element || !element->doc || !element->doc->root) return false;
@@ -1227,8 +1234,7 @@ inline DomNode* dom_element_to_node(DomElement* de) { return static_cast<DomNode
 inline DomElement* node_to_dom_element(DomNode* dn) { return static_cast<DomElement*>(dn); }
 
 inline void dom_element_retain_tag_name(DomElement* element, lam::PoolPtr<const char> tag_name) {
-    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->tag_name);
-    field.set(tag_name);
+    element->tag_name = lam::up(tag_name.get());
 }
 
 inline void dom_element_retain_tag_name(DomElement* element, lam::PoolPtr<char> tag_name) {
@@ -1236,8 +1242,7 @@ inline void dom_element_retain_tag_name(DomElement* element, lam::PoolPtr<char> 
 }
 
 inline void dom_element_retain_id(DomElement* element, lam::PoolPtr<const char> id) {
-    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->id);
-    field.set(id);
+    element->id = lam::up(id.get());
 }
 
 inline void dom_element_retain_id(DomElement* element, lam::PoolPtr<char> id) {
@@ -1245,8 +1250,7 @@ inline void dom_element_retain_id(DomElement* element, lam::PoolPtr<char> id) {
 }
 
 inline void dom_element_clear_id(DomElement* element) {
-    lam::PersistentFieldRef<const char, lam::PoolDomain> field(element->id);
-    field.clear();
+    element->id = nullptr;
 }
 
 inline void dom_element_retain_class_names(DomElement* element, lam::PoolPtr<const char*> class_names) {

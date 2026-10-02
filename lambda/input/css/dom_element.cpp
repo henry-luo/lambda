@@ -491,7 +491,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
 
     static_cast<DomNode*>(element)->id = retained_id ? retained_id : dom_document_alloc_node_id(doc);
     element->node_type = DOM_NODE_ELEMENT;
-    element->doc = doc;
+    element->doc = lam::up(doc);
 
     // A null backing marks layout-only nodes; their embedded storage must never
     // be mistaken for a member of the Lambda tree.
@@ -2402,24 +2402,24 @@ bool DomElement::insert_before(DomElement* new_child, DomElement* reference_chil
     dom_node_cancel_detached(parent->doc, new_child);
 
     // Set parent relationship
-    new_child->parent = parent;
+    new_child->parent = lam::up(parent);
 
     // Insert before reference child
-    new_child->next_sibling = reference_child;
+    new_child->next_sibling = lam::own(reference_child);
     new_child->prev_sibling = reference_child->prev_sibling;
 
     if (reference_child->prev_sibling) {
-        reference_child->prev_sibling->next_sibling = new_child;
+        reference_child->prev_sibling->next_sibling = lam::own(new_child);
     } else {
         // Reference child was first child
-        parent->first_child = new_child;
+        parent->first_child = lam::own(new_child);
     }
 
-    reference_child->prev_sibling = new_child;
+    reference_child->prev_sibling = lam::up(new_child);
 
     // If inserting before first child, update last_child if needed
     if (!new_child->next_sibling) {
-        parent->last_child = new_child;
+        parent->last_child = lam::up(new_child);
     }
 
     // Invalidate new child's computed values
@@ -2436,20 +2436,20 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
     dom_node_cancel_detached(parent->doc, new_child);
 
     // splice new_child into old_child's position in the linked list
-    new_child->parent = parent;
+    new_child->parent = lam::up(parent);
     new_child->prev_sibling = old_child->prev_sibling;
     new_child->next_sibling = old_child->next_sibling;
 
     if (old_child->prev_sibling) {
-        old_child->prev_sibling->next_sibling = new_child;
+        old_child->prev_sibling->next_sibling = lam::own(new_child);
     } else {
-        parent->first_child = new_child;
+        parent->first_child = lam::own(new_child);
     }
 
     if (old_child->next_sibling) {
-        old_child->next_sibling->prev_sibling = new_child;
+        old_child->next_sibling->prev_sibling = lam::up(new_child);
     } else {
-        parent->last_child = new_child;
+        parent->last_child = lam::up(new_child);
     }
 
     old_child->parent = nullptr;
@@ -2701,7 +2701,7 @@ DomText* DomText::create(String* native_string, DomElement* parent_element) {
 
     DomText* text_node = create_detached(native_string, parent_element->doc);
     if (!text_node) return nullptr;
-    text_node->parent = parent_element;
+    text_node->parent = lam::up(parent_element);
 
     log_debug("DomText::create: created backed text node, text='%s'", native_string->chars);
     return text_node;
@@ -2711,7 +2711,7 @@ DomText* DomText::create_copy(const char* text, size_t len,
                               DomElement* parent_element) {
     if (!parent_element || !parent_element->doc || (!text && len)) return nullptr;
     DomText* text_node = create_detached_copy(parent_element->doc, text, len);
-    if (text_node) text_node->parent = parent_element;
+    if (text_node) text_node->parent = lam::up(parent_element);
     return text_node;
 }
 
@@ -2733,8 +2733,8 @@ DomText* DomText::create_detached(String* native_string, DomDocument* doc) {
     }
 
     text_node->id = dom_document_alloc_node_id(doc);
-    text_node->native_string = native_string;
-    text_node->text = native_string->chars;
+    text_node->native_string = lam::up(native_string);
+    text_node->text = lam::up(native_string->chars);
     text_node->length = native_string->len;
 
     if (!dom_node_registry_register(doc, text_node, sizeof(DomText), true)) {
@@ -2757,8 +2757,8 @@ bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
         // one must reclaim it immediately instead of waiting for document exit.
         pool_free(doc->document_pool, text_node->native_string);
     }
-    text_node->native_string = string;
-    text_node->text = string->chars;
+    text_node->native_string = lam::up(string);
+    text_node->text = lam::up(string->chars);
     text_node->length = string->len;
     text_node->set_owns_native_string(true);
     return true;
@@ -2810,8 +2810,8 @@ DomText* DomText::create_symbol(const char* name, size_t len,
     }
 
     text_node->id = dom_document_alloc_node_id(parent_element->doc);
-    text_node->parent = parent_element;
-    text_node->text = name;
+    text_node->parent = lam::up(parent_element);
+    text_node->text = lam::up(name);
     text_node->length = len;
     text_node->set_symbol(true);
 
@@ -2833,8 +2833,8 @@ DomText* DomText::create_in(Arena* arena, size_t inline_string_length) {
     text_node->node_type = DOM_NODE_TEXT;
     String* string = dom_text_to_string(text_node);
     string->len = (uint32_t)inline_string_length;
-    text_node->native_string = string;
-    text_node->text = string->chars;
+    text_node->native_string = lam::up(string);
+    text_node->text = lam::up(string->chars);
     text_node->length = inline_string_length;
     return text_node;
 }
@@ -2916,18 +2916,18 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
             // a Text data mutation must retain its existing DOM node identity.
             // Replace that transient wrapper in the live chain before exposing
             // the new backing string, so later removal cannot use stale links.
-            text_node->parent = parent;
-            text_node->prev_sibling = prev;
-            text_node->next_sibling = next;
+            text_node->parent = lam::up(parent);
+            text_node->prev_sibling = lam::up(prev);
+            text_node->next_sibling = lam::own(next);
             if (prev) {
-                prev->next_sibling = text_node;
+                prev->next_sibling = lam::own(text_node);
             } else {
-                parent->first_child = text_node;
+                parent->first_child = lam::own(text_node);
             }
             if (next) {
-                next->prev_sibling = text_node;
+                next->prev_sibling = lam::up(text_node);
             } else {
-                parent->last_child = text_node;
+                parent->last_child = lam::up(text_node);
             }
             replacement->parent = nullptr;
             replacement->prev_sibling = nullptr;
@@ -2936,12 +2936,12 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     }
 
     // Update text_node fields to point to new String (backward compat for callers)
-    text_node->native_string = new_string_item.get_string();
+    text_node->native_string = lam::up(new_string_item.get_string());
     if (!text_node->native_string) {
         log_error("dom_text_set_content: replacement string disappeared");
         return false;
     }
-    text_node->text = text_node->native_string->chars;
+    text_node->text = lam::up(text_node->native_string->chars);
     text_node->length = text_node->native_string->len;
 
     if (result.element != dom_element_to_element(parent)) {
@@ -3161,7 +3161,7 @@ DomComment* DomComment::create(Element* native_element, DomElement* parent_eleme
 
     DomComment* comment_node = create_detached(native_element, parent_element->doc);
     if (!comment_node) return nullptr;
-    comment_node->parent = parent_element;
+    comment_node->parent = lam::up(parent_element);
     log_debug("DomComment::create: attached comment (tag=%s, content='%s')",
               comment_node->tag_name, comment_node->content);
     return comment_node;
@@ -3203,15 +3203,15 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
 
     comment_node->id = dom_document_alloc_node_id(doc);
     comment_node->node_type = node_type;
-    comment_node->native_element = native_element;
-    comment_node->tag_name = tag_name;  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
+    comment_node->native_element = lam::up(native_element);
+    comment_node->tag_name = lam::up(tag_name);  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
 
     if (native_element->length > 0) {
         Item first_item = native_element->items[0];
         if (get_type_id(first_item) == LMD_TYPE_STRING) {
             String* content_str = first_item.get_string();
             if (content_str) {
-                comment_node->content = content_str->chars;
+                comment_node->content = lam::up(content_str->chars);
                 comment_node->length = content_str->len;
             }
         }
@@ -3225,13 +3225,13 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
             if (data_string) data_attr = data_string->chars;
         }
         if (data_attr) {
-            comment_node->content = data_attr;
+            comment_node->content = lam::up(data_attr);
             comment_node->length = strlen(data_attr);
         }
     }
 
     if (!comment_node->content) {
-        comment_node->content = "";
+        comment_node->content = lam::up("");
     }
 
     if (!dom_node_registry_register(doc, comment_node, sizeof(DomComment), true)) {
@@ -3335,13 +3335,13 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     }
 
     // Update DomComment to point to new String
-    comment_node->native_element = result.element;
+    comment_node->native_element = lam::up(result.element);
     String* new_string = new_string_item.get_string();
     if (!new_string) {
         log_error("dom_comment_set_content: replacement string disappeared");
         return false;
     }
-    comment_node->content = new_string->chars;
+    comment_node->content = lam::up(new_string->chars);
     comment_node->length = new_string->len;
     log_debug("dom_comment_set_content: updated content to '%s'", new_content);
     return true;
@@ -3790,7 +3790,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     DomText* candidate = dom_text_from_fat_string(doc, text_str);
                     if (candidate) {
                         text_node = candidate;
-                        text_node->parent = dom_elem;
+                        text_node->parent = lam::up(dom_elem);
                     } else {
                         text_node = DomText::create(text_str, dom_elem);
                     }
@@ -3839,7 +3839,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                 DomText* candidate = dom_text_from_fat_string(doc, text_str);
                                 if (candidate) {
                                     text_node = candidate;
-                                    text_node->parent = dom_elem;
+                                    text_node->parent = lam::up(dom_elem);
                                 } else {
                                     text_node = DomText::create(text_str, dom_elem);
                                 }
@@ -3875,7 +3875,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                             DomText* candidate = dom_text_from_fat_string(doc, s);
                                             if (candidate) {
                                                 tn = candidate;
-                                                tn->parent = dom_elem;
+                                                tn->parent = lam::up(dom_elem);
                                             } else {
                                                 tn = DomText::create(s, dom_elem);
                                             }

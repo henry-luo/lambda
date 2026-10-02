@@ -3688,13 +3688,13 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    html_elem->first_child = static_cast<DomNode*>(body_elem);
-    html_elem->last_child = static_cast<DomNode*>(body_elem);
-    body_elem->parent = static_cast<DomNode*>(html_elem);
+    html_elem->first_child = lam::own(static_cast<DomNode*>(body_elem));
+    html_elem->last_child = lam::up(static_cast<DomNode*>(body_elem));
+    body_elem->parent = lam::up(static_cast<DomNode*>(html_elem));
 
-    body_elem->first_child = static_cast<DomNode*>(xml_dom);
-    body_elem->last_child = static_cast<DomNode*>(xml_dom);
-    xml_dom->parent = static_cast<DomNode*>(body_elem);
+    body_elem->first_child = lam::own(static_cast<DomNode*>(xml_dom));
+    body_elem->last_child = lam::up(static_cast<DomNode*>(xml_dom));
+    xml_dom->parent = lam::up(static_cast<DomNode*>(body_elem));
 
 
     dom_doc->root = html_elem;
@@ -4509,18 +4509,18 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
 
         if (new_dom == old_dom) {
-            new_dom->parent = parent_dom;
-            new_dom->prev_sibling = old_previous;
-            new_dom->next_sibling = old_next;
+            new_dom->parent = lam::up(parent_dom);
+            new_dom->prev_sibling = lam::up(old_previous);
+            new_dom->next_sibling = lam::own(old_next);
             if (old_previous) {
-                old_previous->next_sibling = static_cast<DomNode*>(new_dom);
+                old_previous->next_sibling = lam::own(static_cast<DomNode*>(new_dom));
             } else {
-                parent_dom->first_child = static_cast<DomNode*>(new_dom);
+                parent_dom->first_child = lam::own(static_cast<DomNode*>(new_dom));
             }
             if (old_next) {
-                old_next->prev_sibling = static_cast<DomNode*>(new_dom);
+                old_next->prev_sibling = lam::up(static_cast<DomNode*>(new_dom));
             } else {
-                parent_dom->last_child = static_cast<DomNode*>(new_dom);
+                parent_dom->last_child = lam::up(static_cast<DomNode*>(new_dom));
             }
         } else {
             // Rebase live Range endpoints before the old subtree is detached;

@@ -418,13 +418,13 @@ protected:
         DomElement* e = new DomElement{};
         e->node_type = DOM_NODE_ELEMENT;
         e->set_synthetic(true);
-        e->doc = &doc_storage;
+        e->doc = lam::up(&doc_storage);
         return e;
     }
     DomText* make_text(const char* s, size_t len) {
         DomText* t = new DomText{};
         t->node_type = DOM_NODE_TEXT;
-        t->text = s;
+        t->text = lam::up(s);
         t->length = len;
         return t;
     }

@@ -1948,7 +1948,7 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
     if (dt) {
         head_node = (DomNode*)dt;
         tail_node = (DomNode*)dt;
-        ((DomNode*)dt)->parent = (DomNode*)stub;
+        ((DomNode*)dt)->parent = lam::up((DomNode*)stub);
     }
     if (doc->root) {
         if (tail_node) {
@@ -1957,7 +1957,7 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
             // could be affected. Only forward traversals (used by
             // dom_node_boundary_length and compareDocumentPosition for the
             // stub) need the link.
-            tail_node->next_sibling = (DomNode*)doc->root;
+            tail_node->next_sibling = lam::own((DomNode*)doc->root);
         } else {
             head_node = (DomNode*)doc->root;
         }
@@ -1965,14 +1965,14 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
         // document IS the parent of the documentElement). Only set when
         // currently null so we don't override real tree relationships.
         if (!((DomNode*)doc->root)->parent) {
-            ((DomNode*)doc->root)->parent = (DomNode*)stub;
+            ((DomNode*)doc->root)->parent = lam::up((DomNode*)stub);
         }
         DomNode* c = (DomNode*)doc->root;
         while (c->next_sibling) c = c->next_sibling;
         tail_node = c;
     }
-    ((DomElement*)stub)->first_child = head_node;
-    ((DomElement*)stub)->last_child  = tail_node;
+    ((DomElement*)stub)->first_child = lam::own(head_node);
+    ((DomElement*)stub)->last_child  = lam::up(tail_node);
     doc->js.doc_node = stub;
     return stub;
 }
@@ -3211,7 +3211,7 @@ static bool dom_rebind_subtree_document(DomNode* node,
     if (!node->is_element()) return true;
 
     DomElement* elem = node->as_element();
-    elem->doc = destination;
+    elem->doc = lam::up(destination);
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         if (!dom_rebind_subtree_document(child, source, destination)) return false;
     }
@@ -3450,15 +3450,15 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
             if (!s) continue;
             DomText* tn = dom_text_create(s, body);
             if (tn) {
-                tn->parent = body;
+                tn->parent = lam::up(body);
                 if (!body->first_child) {
-                    body->first_child = tn;
-                    body->last_child = tn;
+                    body->first_child = lam::own(tn);
+                    body->last_child = lam::up(tn);
                 } else {
                     DomNode* last = body->last_child;
-                    last->next_sibling = tn;
-                    tn->prev_sibling = last;
-                    body->last_child = tn;
+                    last->next_sibling = lam::own(tn);
+                    tn->prev_sibling = lam::up(last);
+                    body->last_child = lam::up(tn);
                 }
             }
         }
@@ -8030,9 +8030,9 @@ extern "C" Item dom_text_control_set_default_value_bridge(void* dom_elem, Item v
         if (*s) {
             DomText* tn = DomText::create_copy(s, strlen(s), elem);
             if (tn) {
-                tn->parent = elem;
-                elem->first_child = tn;
-                elem->last_child = tn;
+                tn->parent = lam::up(elem);
+                elem->first_child = lam::own(tn);
+                elem->last_child = lam::up(tn);
                 dom_post_insert((DomNode*)elem, (DomNode*)tn);
             }
         }
@@ -8517,15 +8517,15 @@ extern "C" void dom_select_set_length_bridge(void* dom_elem, Item value) {
             Element* nat = nat_item.element;
             DomElement* opt = dom_element_create(doc, "option", nat);
             if (!opt) break;
-            opt->parent = elem;
+            opt->parent = lam::up(elem);
             if (!elem->first_child) {
-                elem->first_child = opt;
-                elem->last_child = opt;
+                elem->first_child = lam::own(opt);
+                elem->last_child = lam::up(opt);
             } else {
                 DomNode* last = elem->last_child;
-                last->next_sibling = opt;
-                opt->prev_sibling = last;
-                elem->last_child = opt;
+                last->next_sibling = lam::own(opt);
+                opt->prev_sibling = lam::up(last);
+                elem->last_child = lam::up(opt);
             }
         }
     } else if (new_len < cur) {
@@ -8584,9 +8584,9 @@ extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
     elem->last_child = nullptr;
     DomText* tn = DomText::create_copy(sv, strlen(sv), elem);
     if (tn) {
-        tn->parent = elem;
-        elem->first_child = tn;
-        elem->last_child = tn;
+        tn->parent = lam::up(elem);
+        elem->first_child = lam::own(tn);
+        elem->last_child = lam::up(tn);
     }
     // option.text replaces children, so publish a structural mutation instead of an attribute record.
     dom_mutation_notify();
@@ -11321,7 +11321,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (elem->doc && elem->doc->document_pool) {
             size_t len = strlen(id_str);
             char* id_copy = pool_dup_n(elem->doc->document_pool, id_str, len);
-            elem->id = id_copy;
+            elem->id = lam::up(id_copy);
             elem->set_attribute("id", id_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("dom_set_property: set id='%s' on <%s>",
@@ -14377,7 +14377,7 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         }
         // static Mark text is invalidated when unlinked, but appendChild must
         // carry the original backing item through a move before relinking it.
-        if (!text->native_string) text->native_string = native_string;
+        if (!text->native_string) text->native_string = lam::up(native_string);
     }
 
     int64_t insert_index = dom_element_to_element(parent)->length;
@@ -14431,8 +14431,8 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         if (text->owns_native_string()) {
             pool_free(parent->doc->document_pool, text->native_string);
         }
-        text->native_string = inserted_string;
-        text->text = inserted_string->chars;
+        text->native_string = lam::up(inserted_string);
+        text->text = lam::up(inserted_string->chars);
         text->length = inserted_string->len;
         text->set_owns_native_string(false);
     }
@@ -14704,22 +14704,22 @@ static bool dom_replace_document_element(DomElement* old_root,
             link_prev = current;
         }
         if (link_prev) {
-            link_prev->next_sibling = (DomNode*)replacement;
+            link_prev->next_sibling = lam::own((DomNode*)replacement);
         } else {
-            parent->first_child = (DomNode*)replacement;
+            parent->first_child = lam::own((DomNode*)replacement);
         }
         if (old_next) {
-            old_next->prev_sibling = (DomNode*)replacement;
+            old_next->prev_sibling = lam::up((DomNode*)replacement);
         } else {
-            parent->last_child = (DomNode*)replacement;
+            parent->last_child = lam::up((DomNode*)replacement);
         }
     }
     dom_node_cancel_detached(doc, (DomNode*)replacement);
-    replacement->parent = old_parent;
+    replacement->parent = lam::up(old_parent);
     // Document proxies intentionally keep the documentElement's prev link
     // null even when a synthetic doctype precedes it.
     replacement->prev_sibling = old_root->prev_sibling;
-    replacement->next_sibling = old_next;
+    replacement->next_sibling = lam::own(old_next);
     old_root->parent = nullptr;
     old_root->prev_sibling = nullptr;
     old_root->next_sibling = nullptr;
@@ -15230,7 +15230,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
                     return ItemNull;
                 }
             }
-            if (!new_text->native_string) new_text->native_string = replacement_string;
+            if (!new_text->native_string) new_text->native_string = lam::up(replacement_string);
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
             MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
@@ -17795,9 +17795,9 @@ extern "C" Item dom_option_ctor(Item text_arg, Item value_arg, Item def_sel_arg,
         if (t && *t) {
             DomText* tn = DomText::create_copy(t, strlen(t), opt);
             if (tn) {
-                tn->parent = opt;
-                opt->first_child = tn;
-                opt->last_child = tn;
+                tn->parent = lam::up(opt);
+                opt->first_child = lam::own(tn);
+                opt->last_child = lam::up(tn);
             }
         }
     }

@@ -1011,16 +1011,16 @@ static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_i
     DomNode* next_block_first_child = next_block->first_child;
 
     for (DomNode* child = first_run_in_child; child; child = child->next_sibling) {
-        child->parent = next_block;
+        child->parent = lam::up(next_block);
     }
 
     if (next_block_first_child) {
-        last_run_in_child->next_sibling = next_block_first_child;
-        next_block_first_child->prev_sibling = last_run_in_child;
+        last_run_in_child->next_sibling = lam::own(next_block_first_child);
+        next_block_first_child->prev_sibling = lam::up(last_run_in_child);
     } else {
-        next_block->last_child = last_run_in_child;
+        next_block->last_child = lam::up(last_run_in_child);
     }
-    next_block->first_child = first_run_in_child;
+    next_block->first_child = lam::own(first_run_in_child);
     first_run_in_child->prev_sibling = nullptr;
 
     run_in->first_child = nullptr;
@@ -3751,8 +3751,8 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
             // counter/list-item context come from the slot insertion point;
             // restore the light-DOM parent after this synchronous layout call.
             child->parent = slot->parent;
-            child->prev_sibling = layout_slot_assigned_sibling(slot, child, false);
-            child->next_sibling = layout_slot_assigned_sibling(slot, child, true);
+            child->prev_sibling = lam::up(layout_slot_assigned_sibling(slot, child, false));
+            child->next_sibling = lam::own(layout_slot_assigned_sibling(slot, child, true));
             layout_flow_node(lycon, child);
             float projection_x = 0.0f;
             float projection_y = 0.0f;
@@ -3780,9 +3780,9 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
                 // point before restoring the DOM parent.
                 layout_shift_view_tree_geometry((View*)child, projection_x, projection_y);
             }
-            child->parent = dom_parent;
-            child->prev_sibling = dom_prev;
-            child->next_sibling = dom_next;
+            child->parent = lam::up(dom_parent);
+            child->prev_sibling = lam::up(dom_prev);
+            child->next_sibling = lam::own(dom_next);
         }
     }
     if (!has_assigned_nodes) {
@@ -3950,31 +3950,31 @@ static void layout_move_display_contents_pseudo_to_edge(
     if (!found) return;
     if ((before && parent->first_child == static_cast<DomNode*>(pseudo)) ||
         (!before && last == static_cast<DomNode*>(pseudo))) {
-        parent->last_child = last;
+        parent->last_child = lam::up(last);
         return;
     }
 
     DomNode* next = pseudo->next_sibling;
-    if (found_previous) found_previous->next_sibling = next;
-    else parent->first_child = next;
-    if (next) next->prev_sibling = found_previous;
+    if (found_previous) found_previous->next_sibling = lam::own(next);
+    else parent->first_child = lam::own(next);
+    if (next) next->prev_sibling = lam::up(found_previous);
     if (last == static_cast<DomNode*>(pseudo)) last = found_previous;
 
     if (before) {
         DomNode* old_first = parent->first_child;
         pseudo->prev_sibling = nullptr;
-        pseudo->next_sibling = old_first;
-        if (old_first) old_first->prev_sibling = pseudo;
+        pseudo->next_sibling = lam::own(old_first);
+        if (old_first) old_first->prev_sibling = lam::up(pseudo);
         else last = static_cast<DomNode*>(pseudo);
-        parent->first_child = pseudo;
+        parent->first_child = lam::own(pseudo);
     } else {
-        pseudo->prev_sibling = last;
+        pseudo->prev_sibling = lam::up(last);
         pseudo->next_sibling = nullptr;
-        if (last) last->next_sibling = pseudo;
-        else parent->first_child = pseudo;
+        if (last) last->next_sibling = lam::own(pseudo);
+        else parent->first_child = lam::own(pseudo);
         last = static_cast<DomNode*>(pseudo);
     }
-    parent->last_child = last;
+    parent->last_child = lam::up(last);
 }
 
 static bool layout_node_is_hidden_by_closed_details(DomNode* node) {

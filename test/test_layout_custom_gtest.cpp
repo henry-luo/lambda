@@ -90,7 +90,7 @@ protected:
         ASSERT_NE(block, nullptr);
         block->node_type = DOM_NODE_ELEMENT;
         block->set_synthetic(true);
-        block->tag_name = tag;
+        block->tag_name = lam::up(tag);
         block->tag_id = DomNode::tag_name_to_id(tag);
         block->view_type = RDT_VIEW_BLOCK;
         block->width = width;
@@ -102,7 +102,7 @@ protected:
     void init_parent(ViewBlock* parent, float width, float height) {
         init_block(parent, "div", width, height);
         // Cold element extensions require the document pool used in production.
-        parent->doc = &doc;
+        parent->doc = lam::up(&doc);
         parent->blk = &parent_blk;
     }
 };
@@ -249,7 +249,7 @@ TEST_F(CustomLayoutTest, FlexEmbedImageDoesNotBecomeLinkIntrinsicSize) {
 
     init_block(&link, "a", 0.0f, 0.0f);
     link.display = {CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false};
-    link.embed = &embed;
+    link.embed = lam::own(&embed);
     link.embed->img = &image;
 
     EXPECT_FALSE(layout_replaced_image_surface_contributes(&link));

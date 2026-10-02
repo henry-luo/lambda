@@ -3,11 +3,13 @@
 
 #include <string.h>
 
-template <typename Prop>
-static Prop* ensure_view_prop(Pool* pool, Prop*& storage, const Prop& defaults) {
+// Field is the element's prop field: a raw Prop* or a lam::Own<Prop>.
+template <typename Prop, typename Field>
+static Prop* ensure_view_prop(Pool* pool, Field& storage, const Prop& defaults) {
     if (!storage && pool) {
-        storage = (Prop*)pool_calloc(pool, sizeof(Prop));
-        memcpy(storage, &defaults, sizeof(Prop));
+        Prop* fresh = (Prop*)pool_calloc(pool, sizeof(Prop));
+        if (fresh) memcpy(fresh, &defaults, sizeof(Prop));
+        storage = Field(fresh);
     }
     return storage;
 }

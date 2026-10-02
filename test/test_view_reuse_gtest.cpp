@@ -229,7 +229,7 @@ TEST_F(DomRetirementTest, RetirementRepairsStaleEdgesOnceForTheWholeBatch) {
     retained->first_child = branch->first_child;
     retained->last_child = branch->last_child;
     ASSERT_TRUE(parent->remove_child(branch));
-    retained->prev_sibling = branch;
+    retained->prev_sibling = lam::up(branch);
     EXPECT_EQ(dom_retire_sweep(&doc), 1025u);
     EXPECT_EQ(retained->first_child, nullptr);
     EXPECT_EQ(retained->last_child, nullptr);
@@ -360,7 +360,7 @@ TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
     text->font = owned;
     TextRect* rect = tree.alloc_text_rect();
     ASSERT_NE(rect, nullptr);
-    text->rect = rect;
+    text->rect = lam::own(rect);
 
     ASSERT_TRUE(parent->remove_child(span));
     EXPECT_EQ(dom_retire_sweep(&doc), 2u);

@@ -503,7 +503,7 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
             // Match element type
             if (simple_selector->value) {
                 // safety check for NULL or invalid tag_name
-                if (!element->tag_name || (uintptr_t)element->tag_name < 0x1000) {
+                if (!element->tag_name || (uintptr_t)element->tag_name.get() < 0x1000) {
                     log_error("Invalid tag_name pointer in element: %p", element->tag_name);
                     return false;
                 }

@@ -262,8 +262,8 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     // direct text run; keeping it pass-local avoids changing the DOM/render tree.
     item->node_type = DOM_NODE_ELEMENT;
     item->view_type = RDT_VIEW_BLOCK;
-    item->parent = (DomNode*)container;
-    item->tag_name = "anonymous-flex-item";
+    item->parent = lam::up((DomNode*)container);
+    item->tag_name = lam::up("anonymous-flex-item");
     item->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false};
     item->ensure_block(lycon);
     item->ensure_boundary(lycon);
@@ -446,7 +446,7 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
             rect->height = item->height;
             rect->length = (int)text_node->length; // INT_CAST_OK: text rectangle source length
             rect->line_number = lycon->block.line_number;
-            text->rect = rect;
+            text->rect = lam::own(rect);
             layout_set_view_geometry(text, rect->x, rect->y,
                                      rect->width, rect->height);
             lycon->line.advance_x += space_width;

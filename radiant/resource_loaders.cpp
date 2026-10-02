@@ -322,10 +322,10 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         } else if (img_element->doc && img_element->doc->document_pool) {
             // An async decode can finish before the first ViewTree exists; use
             // the document pool only at that lifetime seam and seed CSS initials.
-            img_element->embed = (EmbedProp*)pool_calloc(img_element->doc->document_pool, sizeof(EmbedProp));
+            img_element->embed = lam::own((EmbedProp*)pool_calloc(img_element->doc->document_pool, sizeof(EmbedProp)));
             if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
         } else {
-            img_element->embed = (EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_NETWORK);
+            img_element->embed = lam::own((EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_NETWORK));
             if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
         }
         if (!img_element->embed) {

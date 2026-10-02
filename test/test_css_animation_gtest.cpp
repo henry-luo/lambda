@@ -36,7 +36,7 @@ TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
     DomElement element = {};
     element.node_type = DOM_NODE_ELEMENT;
     element.set_synthetic(true);
-    element.doc = &doc;
+    element.doc = lam::up(&doc);
     element.set_styles_resolved(true);
     doc.root = &element;
     for (size_t i = 0; i < count; i++) {
@@ -59,7 +59,7 @@ TEST(CssPropTable, DirtyMutationDoesNotConsumePendingLayout) {
     element.set_synthetic(true);
     InlineProp in_line = INLINE_PROP_DEFAULT;
     in_line.opacity = 1.0f;
-    element.doc = &doc;
+    element.doc = lam::up(&doc);
     element.in_line = &in_line;
     element.set_styles_resolved(true);
     doc.root = &element;
@@ -79,7 +79,7 @@ TEST(CssPropTable, VisibilityUsesRenderEnumNames) {
     element.node_type = DOM_NODE_ELEMENT;
     element.set_synthetic(true);
     InlineProp in_line = INLINE_PROP_DEFAULT;
-    element.doc = &doc;
+    element.doc = lam::up(&doc);
     element.in_line = &in_line;
     element.set_styles_resolved(true);
     doc.root = &element;
@@ -379,7 +379,7 @@ protected:
         memset(mock, 0, sizeof(*mock));
         DomElement* element = (DomElement*)mock->buf;
         element->node_type = DOM_NODE_ELEMENT;
-        element->doc = &doc;
+        element->doc = lam::up(&doc);
         ((ViewSpan*)element)->in_line = &mock->in_line;
         return element;
     }
@@ -470,7 +470,7 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
-    element->transform = &transform;
+    element->transform = lam::own(&transform);
 
     TransformFunction keyframe_function = {};
     keyframe_function.type = TRANSFORM_TRANSLATEX;

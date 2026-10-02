@@ -275,7 +275,7 @@ LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* elem
             uint32_t generation = lycon->doc && lycon->doc->view_tree
                 ? lycon->doc->view_tree->layout_generation : 0;
             layout_cache_init(cache, generation);
-            element->layout_cache = cache;
+            element->layout_cache = lam::own(cache);
             if (element->doc) element->doc->services.layout_cache_allocations++;
         }
     }

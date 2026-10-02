@@ -1049,17 +1049,17 @@ static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_q
 
 static void pseudo_append_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return;
-    child->parent = parent;
+    child->parent = lam::up(parent);
     child->next_sibling = nullptr;
     if (!parent->first_child) {
         child->prev_sibling = nullptr;
-        parent->first_child = child;
-        parent->last_child = child;
+        parent->first_child = lam::own(child);
+        parent->last_child = lam::up(child);
         return;
     }
     child->prev_sibling = parent->last_child;
-    parent->last_child->next_sibling = child;
-    parent->last_child = child;
+    parent->last_child->next_sibling = lam::own(child);
+    parent->last_child = lam::up(child);
 }
 
 static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) {
@@ -1486,7 +1486,7 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     if (!lycon || !parent) return nullptr;
     DomElement* pseudo_elem = DomElement::create(parent->doc, is_before ? "::before" : "::after", nullptr);
     if (!pseudo_elem) return nullptr;
-    pseudo_elem->parent = parent;
+    pseudo_elem->parent = lam::up(parent);
     pseudo_elem->first_child = nullptr;
     pseudo_elem->last_child = nullptr;
     pseudo_elem->next_sibling = nullptr;
@@ -1757,23 +1757,23 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     if (!fl_text) return;
     DomText* fl_text_node = lam::pool_alloc_dom_text(pool);
     if (!fl_text_node) return;
-    fl_text_node->parent = fl_elem;
-    fl_text_node->text = fl_text;
+    fl_text_node->parent = lam::up(fl_elem);
+    fl_text_node->text = lam::up(fl_text);
     fl_text_node->length = first_letter_length;
-    fl_elem->first_child = fl_text_node;
+    fl_elem->first_child = lam::own(fl_text_node);
     int skip = ws_offset + boundary;
-    text_node->text = text_node->text + skip;
+    text_node->text = lam::up(text_node->text + skip);
     text_node->length = text_node->length > (size_t)skip ? text_node->length - skip : 0;
     DomNode* text_parent = text_node->parent;
-    fl_elem->parent = text_parent;
-    fl_elem->next_sibling = text_node;
+    fl_elem->parent = lam::up(text_parent);
+    fl_elem->next_sibling = lam::own(text_node);
     fl_elem->prev_sibling = text_node->prev_sibling;
     if (text_node->prev_sibling) {
-        text_node->prev_sibling->next_sibling = fl_elem;
+        text_node->prev_sibling->next_sibling = lam::own(fl_elem);
     } else if (text_parent && text_parent->is_element()) {
-        lam::dom_require<DOM_NODE_ELEMENT>(text_parent)->first_child = fl_elem;
+        lam::dom_require<DOM_NODE_ELEMENT>(text_parent)->first_child = lam::own(fl_elem);
     }
-    text_node->prev_sibling = fl_elem;
+    text_node->prev_sibling = lam::up(fl_elem);
 }
 
 static View* margin_collapse_last_in_flow_child(ViewBlock* block) {
@@ -5249,26 +5249,26 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
             // A DOM child replacement can unlink a generated node, then retain
             // its pseudo record for incremental layout. Reinsertion restores
             // the direct-child ownership required by later reset/teardown.
-            pseudo->parent = parent;
-            if (!pseudo->next_sibling) parent->last_child = pseudo;
+            pseudo->parent = lam::up(parent);
+            if (!pseudo->next_sibling) parent->last_child = lam::up(pseudo);
             return;
         }
         if (dom_subtree_contains_node(c, static_cast<DomNode*>(pseudo))) return;
     }
-    pseudo->parent = parent;
+    pseudo->parent = lam::up(parent);
     if (is_before) {
         DomNode* old_first = parent->first_child;
-        pseudo->next_sibling = old_first;
+        pseudo->next_sibling = lam::own(old_first);
         pseudo->prev_sibling = nullptr;
         if (old_first) {
-            old_first->prev_sibling = pseudo;
+            old_first->prev_sibling = lam::up(pseudo);
         } else {
-            parent->last_child = pseudo;
+            parent->last_child = lam::up(pseudo);
         }
-        parent->first_child = pseudo;
+        parent->first_child = lam::own(pseudo);
     } else {
         if (!parent->first_child) {
-            parent->first_child = pseudo;
+            parent->first_child = lam::own(pseudo);
             pseudo->prev_sibling = nullptr;
             pseudo->next_sibling = nullptr;
         } else {
@@ -5276,11 +5276,11 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
             while (last->next_sibling) {
                 last = last->next_sibling;
             }
-            last->next_sibling = pseudo;
-            pseudo->prev_sibling = last;
+            last->next_sibling = lam::own(pseudo);
+            pseudo->prev_sibling = lam::up(last);
             pseudo->next_sibling = nullptr;
         }
-        parent->last_child = pseudo;
+        parent->last_child = lam::up(pseudo);
     }
 }
 
@@ -5294,10 +5294,10 @@ static void remove_pseudo_from_dom(DomElement* parent, DomElement* pseudo) {
             continue;
         }
         DomNode* next = child->next_sibling;
-        if (previous) previous->next_sibling = next;
-        else parent->first_child = next;
-        if (next) next->prev_sibling = previous;
-        if (parent->last_child == child) parent->last_child = previous;
+        if (previous) previous->next_sibling = lam::own(next);
+        else parent->first_child = lam::own(next);
+        if (next) next->prev_sibling = lam::up(previous);
+        if (parent->last_child == child) parent->last_child = lam::up(previous);
         child->parent = nullptr;
         child->prev_sibling = nullptr;
         child->next_sibling = nullptr;
@@ -5323,7 +5323,7 @@ static void layout_restore_first_letter_source_text(DomElement* pseudo) {
     if (!text || !text->native_string) return;
     // ::first-letter advances its continuation into the backing string;
     // resetting the layout epoch must restore the authored text before retrying.
-    text->text = text->native_string->chars;
+    text->text = lam::up(text->native_string->chars);
     text->length = text->native_string->len;
 }
 
@@ -5400,13 +5400,13 @@ static void insert_pseudo_into_rendered_tree(DomElement* element,
     insert_pseudo_into_dom(shadow_root, pseudo, is_before);
     // Physical placement is in the shadow tree, while the host remains the
     // pseudo's CSS inheritance and counter owner.
-    pseudo->parent = element;
+    pseudo->parent = lam::up(element);
 }
 
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker, bool create_first_letter) {
     if (!lycon || !block || !block->is_element()) return;
-    block->pseudo = alloc_pseudo_content_prop(lycon, block);
+    block->pseudo = lam::own(alloc_pseudo_content_prop(lycon, block));
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
         if (block->pseudo->before) {

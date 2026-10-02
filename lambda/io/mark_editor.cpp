@@ -330,15 +330,15 @@ void MarkEditor::dom_relink_children(Element* parent_elem) {
     DomNode* prev = nullptr;
     for (int i = 0; i < arraylist_length(relinked_nodes); i++) {
         DomNode* node = (DomNode*)arraylist_get(relinked_nodes, i);
-        node->parent = parent;
-        node->prev_sibling = prev;
+        node->parent = lam::up(parent);
+        node->prev_sibling = lam::up(prev);
         node->next_sibling = nullptr;
         if (prev) {
-            prev->next_sibling = node;
+            prev->next_sibling = lam::own(node);
         } else {
-            parent->first_child = node;
+            parent->first_child = lam::own(node);
         }
-        parent->last_child = node;
+        parent->last_child = lam::up(node);
         prev = node;
     }
     arraylist_free(old_nodes);

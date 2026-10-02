@@ -4053,7 +4053,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
 
     TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
     if (!text_view->rect) {
-        text_view->rect = rect;
+        text_view->rect = lam::own(rect);
     } else {
         TextRect* last_rect = text_view->rect;
         while (last_rect && last_rect->next) { last_rect = last_rect->next; }

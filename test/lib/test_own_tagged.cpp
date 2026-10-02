@@ -283,6 +283,28 @@ TEST(MemoryKinds, ZeroFilledStructIsNullAndCopiesBitwise) {
     EXPECT_FALSE(copy.image.is_null());
 }
 
+struct KindDerivedProp : KindProp { float height; };
+
+// same-kind upcast is implicit; downcast and cross-kind stay rejected
+static_assert(CanAssign<lam::Up<KindProp>, lam::Up<KindDerivedProp>>::value, "Up<Derived> -> Up<Base>");
+static_assert(CanAssign<lam::Own<KindProp>, lam::Own<KindDerivedProp>>::value, "Own<Derived> -> Own<Base>");
+static_assert(!CanAssign<lam::Up<KindDerivedProp>, lam::Up<KindProp>>::value, "no implicit downcast");
+static_assert(!CanAssign<lam::Own<KindProp>, lam::Up<KindDerivedProp>>::value, "upcast keeps the kind");
+static_assert(!CanAssign<lam::OwnArr<KindProp>, lam::OwnArr<KindDerivedProp>>::value, "OwnArr stride is fixed");
+
+TEST(MemoryKinds, DeducingFactoriesAndExplicitCasts) {
+    KindDerivedProp derived = {};
+    derived.width = 2.0f;
+    KindNode node = {};
+    node.prop = lam::own(&derived);           // Own<KindDerivedProp> -> Own<KindProp>
+    lam::Up<const KindProp> view = lam::up(&derived);
+    EXPECT_EQ(node.prop.get(), static_cast<KindProp*>(&derived));
+    EXPECT_FLOAT_EQ(view->width, 2.0f);
+    // an explicit cast reads like a cast of the raw pointer
+    KindDerivedProp* back = (KindDerivedProp*)node.prop;
+    EXPECT_EQ(back, &derived);
+}
+
 // ---------------------------------------------------------------------------
 // Slot table, typed pool, always-on checks, saturating conversion
 // ---------------------------------------------------------------------------

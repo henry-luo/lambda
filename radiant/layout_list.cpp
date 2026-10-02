@@ -486,7 +486,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
     DomElement* marker_elem = DomElement::create(parent_elem->doc, "::marker", nullptr);
     if (!marker_elem) return nullptr;
 
-    marker_elem->parent = parent_elem;
+    marker_elem->parent = lam::up(parent_elem);
 
     MarkerProp* marker_prop = (MarkerProp*)alloc_prop(lycon, sizeof(MarkerProp));
     memset(marker_prop, 0, sizeof(MarkerProp));
@@ -670,7 +670,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                             marker_style == CSS_VALUE_DISCLOSURE_OPEN);
 
     if (!block->pseudo) {
-        block->pseudo = (PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp));
+        block->pseudo = lam::own((PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp)));
         memset(block->pseudo, 0, sizeof(PseudoContentProp));
     }
 
