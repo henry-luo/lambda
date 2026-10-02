@@ -10,7 +10,7 @@ native reference.
 |---|---|
 | Upstream | https://github.com/vnmakarov/mir |
 | Commit | `99c65079038f3ba9242ef646f308c266cfd7a8e5` (2024-08-29) |
-| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch` |
+| Local patches | `patches/mir-rotr.patch`, `patches/mir-alloca-branch-fix.patch`, `patches/mir-release-func-ir.patch`, `patches/mir-spilled-reg-bounds.patch`, `patches/mir-self-phi-copy.patch` |
 
 **The patches under `patches/` are already applied to the source here.** They
 are kept as the record of our delta versus upstream, so a future re-sync can
@@ -118,6 +118,21 @@ Touches only `mir-gen.c`. Regression coverage comes from the existing
 `tune27_float_literal_nullable` MIR emission and forced-GC fixtures, the
 `Tune27FixturesAgreeOnEveryTier` parity test, and `larceny_ray2` in the Lambda
 script corpus (D8.6.2–D8.6.3).
+
+### `mir-self-phi-copy.patch` — keep self-only phis until unreachable cleanup
+
+When GVN removes entry edges to an unreachable loop, a phi may be left with
+only its own back-edge value. The ordinary two-operand-phi copy rule then
+redirects the phi's users to that same phi and frees it, leaving dangling SSA
+definitions. On the `navier_stokes` compiler input, a later branch reads the
+freed `bb_insn`; ASAN reports a heap-use-after-free in `gvn_modify`.
+
+The patch excludes a self-referential phi from copy substitution. Such a phi
+has no distinct replacement definition; the existing unreachable-code cleanup
+removes its loop. Other phi copies continue to optimize normally. The focused
+standalone MIR replay and the Navier–Stokes release/ASAN runs cover this case.
+The diagnostic and original ASAN trace are preserved under
+`temp/tune32-phase2/` (D8.6.2–D8.6.3).
 
 ## Not vendored: the NULL-label workaround
 
