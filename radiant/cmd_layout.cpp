@@ -3033,7 +3033,7 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
             layout_detach_materialized_pseudo_content_for_layout_reset(
                 doc->root->as_element());
         }
-        doc->view_tree->init();
+        doc->view_tree->init((MemContext*)doc->services.mem_ctx);
     }
     doc->lambda_runtime = runtime;
 }

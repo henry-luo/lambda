@@ -2685,6 +2685,9 @@ typedef struct CanonicalPropStats {
 struct ViewTree {
     Pool* prop_pool;       // Mutable element-owned view props; survives retained reflow.
     Arena* canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
+    // The owning document's memory context (borrowed); every allocator below is
+    // registered under it, so the view tree is a subtree of its document.
+    struct MemContext* mem_ctx;
     Arena* scratch_arena;  // Layout-pass scratch; never owns retained props.
     // Layout-pass data that is not stack-shaped (counter state, generated
     // content strings); reset when the pass ends.
@@ -2708,7 +2711,7 @@ struct ViewTree {
     uint32_t layout_generation; // Advances at each retained full-layout boundary.
     int sticky_box_count;       // sticky boxes the last layout pass solved; scrolls re-solve them
 #ifdef __cplusplus
-    void init();
+    void init(struct MemContext* owner);
     void reset_retained();
     void destroy();
     void* alloc_prop(size_t size);

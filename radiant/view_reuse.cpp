@@ -159,7 +159,7 @@ static InlineProp* canonical_inline_find_or_create(ViewTree* tree,
 void view_tree_canonical_init(ViewTree* tree) {
     if (!tree || !tree->prop_pool) return;
     tree->canonical_prop_arena = mem_arena_create(
-        NULL, MEM_ROLE_VIEW, "view_tree.canonical_prop_arena");
+        tree->mem_ctx, MEM_ROLE_VIEW, "view_tree.canonical_prop_arena");
     tree->inline_canonical_buckets = nullptr;
     tree->inline_canonical_bucket_count = 0;
     tree->inline_canonical_count = 0;
