@@ -3,20 +3,20 @@
 pn main() {
     // Test 1: output() with map data (formatted as Lambda/Mark)
     let data = {name: "Lambda", version: 1, features: ["pipe", "file"]};
-    let result1 = output(data, "./temp/lambda_test_pipe.mk")^;
+    let result1 = output(data, "./temp/lambda_test_pipe.mark")^;
     print("Test 1 - write map bytes: ");
     print(result1);
     print("\n");
     
     // Test 2: append mode
     let more_data = {timestamp: t'2026-02-06', count: 42};
-    let result2 = output(more_data, "./temp/lambda_test_pipe.mk", {mode: "append"})^;
+    let result2 = output(more_data, "./temp/lambda_test_pipe.mark", {mode: "append"})^;
     print("Test 2 - append map bytes: ");
     print(result2);
     print("\n");
     
     // Verify by reading back
-    let content = input("./temp/lambda_test_pipe.mk", "text")^;
+    let content = input("./temp/lambda_test_pipe.mark", "text")^;
     print("Pipe file content:\n");
     print(content);
     
@@ -33,34 +33,34 @@ pn main() {
     
     // Test 4: with symbol as target filename (write to cwd)
     let simple = {test: "symbol target"};
-    output(simple, 'lambda_test_symbol.mk')^;
-    let symbol_content = input("./lambda_test_symbol.mk", "text")^;
+    output(simple, 'lambda_test_symbol.mark')^;
+    let symbol_content = input("./lambda_test_symbol.mark", "text")^;
     print("Symbol target content:\n");
     print(symbol_content);
     
     // Test 5: scalar formatted as Mark
-    output(42, "./temp/lambda_test_scalar.mk")^;
-    let scalar_content = input("./temp/lambda_test_scalar.mk", "text")^;
+    output(42, "./temp/lambda_test_scalar.mark")^;
+    let scalar_content = input("./temp/lambda_test_scalar.mark", "text")^;
     print("Scalar file content:\n");
     print(scalar_content);
     
     // Test 6: output() with options map - write mode (default)
     let data6 = {mode: "write", test: 6};
-    let result6 = output(data6, "./temp/lambda_test_output_opts.mk", {})^;
+    let result6 = output(data6, "./temp/lambda_test_output_opts.mark", {})^;
     print("Test 6 - output with empty opts bytes: ");
     print(result6);
     print("\n");
-    let content6 = input("./temp/lambda_test_output_opts.mk", "text")^;
+    let content6 = input("./temp/lambda_test_output_opts.mark", "text")^;
     print("Output opts write content:\n");
     print(content6);
     
     // Test 7: output() with options map - append mode
     let data7 = {mode: "append", test: 7};
-    let result7 = output(data7, "./temp/lambda_test_output_opts.mk", {mode: "append"})^;
+    let result7 = output(data7, "./temp/lambda_test_output_opts.mark", {mode: "append"})^;
     print("Test 7 - output append bytes: ");
     print(result7);
     print("\n");
-    let content7 = input("./temp/lambda_test_output_opts.mk", "text")^;
+    let content7 = input("./temp/lambda_test_output_opts.mark", "text")^;
     print("Output after append:\n");
     print(content7);
     
@@ -77,16 +77,16 @@ pn main() {
     
     // Test 9: output() with atomic option
     let data9 = {atomic: true, test: 9};
-    let result9 = output(data9, "./temp/lambda_test_atomic.mk", {atomic: true})^;
+    let result9 = output(data9, "./temp/lambda_test_atomic.mark", {atomic: true})^;
     print("Test 9 - atomic write bytes: ");
     print(result9);
     print("\n");
-    let content9 = input("./temp/lambda_test_atomic.mk", "text")^;
+    let content9 = input("./temp/lambda_test_atomic.mark", "text")^;
     print("Atomic write content:\n");
     print(content9);
     
     // Clean up symbol target file
-    io.delete('lambda_test_symbol.mk')^;
+    io.delete('lambda_test_symbol.mark')^;
 
     print("done")
 }

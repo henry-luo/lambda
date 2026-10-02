@@ -1038,6 +1038,9 @@ explicit-format spelling, and `exists(p)` the probe that forces nothing.
 
 **Supported Input Formats**: `json`, `xml`, `html`, `yaml`, `toml`, `ini`, `properties`, `csv`, `markdown`, `rst`, `asciidoc`, `wiki`, `org`, `textile`, `man`, `latex`, `typst`, `mark`, `rtf`, `pdf`, `eml`, `ics`, `vcf`, `css`, `math`, `graph`, `text` — see [Markup_Formats_Support.md](Markup_Formats_Support.md) for the tree each one produces and the `{type, flavor}` option form.
 
+Mark auto-detection uses only `.mark` (D2.9.1); `input(target, 'mark')`
+accepts any filename regardless of its extension (D2.9.2).
+
 | Format | Description | Example |
 |--------|-------------|---------|
 | JSON | JavaScript Object Notation | `input(/.'data.json', 'json')` |
@@ -1220,6 +1223,7 @@ pn save_data() {
 | `xml` | `.xml` | XML format |
 | `html` | `.html`, `.htm` | HTML format |
 | `markdown` | `.md` | Markdown format |
+| `mark` | `.mark` | Mark Notation (D2.9.1) |
 | `text` | `.txt` | Plain text |
 | `toml` | `.toml` | TOML format |
 | `ini` | `.ini` | INI configuration format |

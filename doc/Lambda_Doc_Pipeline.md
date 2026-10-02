@@ -59,6 +59,10 @@ The command surface is small and maps directly onto the diagram:
 
 The Mark tree is the runtime form of **Mark Notation**, a notation designed to hold *both* object data and markup in one data model. JSON gives it maps and arrays; HTML and XML give it elements. A stable subset of the literal syntax is formalized and released separately as [Mark Notation](https://github.com/henry-luo/mark); Lambda Script uses the same literals as its native data syntax, so a document and a program are written in one language.
 
+Mark files use **`.mark` as their sole canonical extension** (D2.9.1).
+Explicit `mark` input accepts any filename (D2.9.2), for example
+`input("data.payload", 'mark')^`; `.m` and `.mk` are not automatic aliases.
+
 ```lambda
 let report = <doc
     <meta title: "Quarterly report", date: t'2026-09-01'>

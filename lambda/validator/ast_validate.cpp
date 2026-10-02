@@ -551,7 +551,8 @@ ValidationResult* exec_validation(int argc, char* argv[]) {
                 input_format = "man";
             } else if (str_ieq_const(ext, ext_len, ".textile") || str_ieq_const(ext, ext_len, ".txtl")) {
                 input_format = "textile";
-            } else if (str_ieq_const(ext, ext_len, ".m") || str_ieq_const(ext, ext_len, ".mk") || str_ieq_const(ext, ext_len, ".mark")) {
+            } else if (str_ieq_const(ext, ext_len, ".mark")) {
+                // D2.9.1: validator detection uses the same sole Mark extension as input().
                 input_format = "mark";
             }
             // If no recognized extension, keep as nullptr for Lambda format

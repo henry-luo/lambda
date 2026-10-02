@@ -1,4 +1,4 @@
-let m = input('./test/input/example.m', 'mark')^
+let m = input('./test/input/example.mark', 'mark')^
 m
 
 "All tests completed!"

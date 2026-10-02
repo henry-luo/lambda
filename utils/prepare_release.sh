@@ -95,7 +95,7 @@ input_samples=(
     tikz/reg_components.pgf         # tikz / pgf
     complete_css_grammar.css        # css
     nested.jsx                      # jsx
-    sample.mk                       # mark
+    sample.mark                       # mark
     html_nested.eml                 # eml
     contacts.vcf                    # vcard
     calendar.ics                    # icalendar
