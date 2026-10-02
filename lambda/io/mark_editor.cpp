@@ -1195,323 +1195,136 @@ bool MarkEditor::reserve_children(List* list, int64_t dense_length) {
     return list_grow_io(list, needed, pool_, arena_);
 }
 
-Item MarkEditor::elmt_insert_child(Item element, int index, Item child,
-                                   bool preserve_dom_child) {
-    if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {
-        log_error("elmt_insert_child: not an element");
-        return ItemError;
-    }
+Item MarkEditor::import_child(Item child) {
+    if (builder_->is_in_arena(child) ||
+        (ui_mode_ && mark_editor_should_preserve_ui_dom_child(child))) return child;
+    return builder_->deep_copy(child);
+}
 
+bool MarkEditor::prepare_child_edit(Item element, int64_t index, int64_t delete_count,
+                                    int64_t count, Item* children, Array* edited) {
+    if (get_type_id(element) != LMD_TYPE_ELEMENT || !element.element) {
+        log_error("mark_editor_child_edit: not an element");
+        return false;
+    }
     Element* elmt = element.element;
-
-    // Normalize index (-1 means append)
-    if (index < 0) {
-        index = elmt->length;
+    if (index < 0 && delete_count == 0) index = elmt->length;
+    if (index < 0 || index > elmt->length || delete_count < 0 ||
+        delete_count > elmt->length - index || count < 0 || (count > 0 && !children)) {
+        log_error("mark_editor_child_edit: invalid child range");
+        return false;
     }
-    if (index > elmt->length) {
-        log_error("elmt_insert_child: index out of bounds");
+
+    // stage positional slots before normalizing; array_append owns wide-scalar tails.
+    edited->type_id = LMD_TYPE_ARRAY;
+    auto append = [&](Item child) {
+        int64_t previous_length = edited->length;
+        ::array_append(edited, child, pool_, arena_);
+        return edited->length == previous_length + 1;
+    };
+    for (int64_t i = 0; i < index; i++) {
+        if (!append(elmt->items[i])) return false;
+    }
+    for (int64_t i = 0; i < count; i++) {
+        if (!append(children[i])) return false;
+    }
+    for (int64_t i = index + delete_count; i < elmt->length; i++) {
+        if (!append(elmt->items[i])) return false;
+    }
+    return true;
+}
+
+Item MarkEditor::publish_child_edit(Element* old_elmt, const Array* edited) {
+    Element* target = old_elmt;
+    if (mode_ == EDIT_MODE_IMMUTABLE) {
+        target = (Element*)arena_alloc(arena_, sizeof(Element));
+        if (!target) return ItemError;
+        memcpy(target, old_elmt, sizeof(Element));
+
+        // content edits retain the shared type and own the copied attribute buffer.
+        TypeElmt* type = (TypeElmt*)old_elmt->type;
+        if (type->byte_size > 0) {
+            target->data = pool_calloc(pool_, type->byte_size);
+            if (!target->data) return ItemError;
+            memcpy(target->data, old_elmt->data, type->byte_size);
+            target->data_cap = type->byte_size;
+        }
+    }
+    target->items = edited->items;
+    target->length = edited->length;
+    target->capacity = edited->capacity;
+    target->extra = edited->extra;
+    if (mode_ == EDIT_MODE_INLINE && ui_mode_) dom_relink_children(target);
+    return {.element = target};
+}
+
+Item MarkEditor::elmt_edit_children(Item element, int64_t index, int64_t delete_count,
+                                    int64_t count, Item* children) {
+    Array imported = {};
+    imported.type_id = LMD_TYPE_ARRAY;
+    for (int64_t i = 0; i < count; i++) {
+        ::array_append(&imported, import_child(children[i]), pool_, arena_);
+        if (imported.length != i + 1) return ItemError;
+    }
+    Array edited = {};
+    if (!prepare_child_edit(element, index, delete_count, count, imported.items, &edited)) {
         return ItemError;
     }
 
-    // Ensure child is in target arena (deep copy if external)
-    bool child_in_arena = builder_->is_in_arena(child);
-    // Detached DOM documents can use a non-UI Input while retaining live
-    // DomElement wrappers, which must not be copied into plain Mark storage.
-    bool preserve_ui_dom_child = (ui_mode_ || preserve_dom_child) &&
-        mark_editor_should_preserve_ui_dom_child(child);
-    if (!child_in_arena && !preserve_ui_dom_child) {
-        log_debug("elmt_insert_child: child not in arena, deep copying");
-        child = builder_->deep_copy(child);
+    // S2.6.5: every edit rebuilds content, including strings joined by a deletion.
+    List normalized = {};
+    normalized.type_id = LMD_TYPE_ELEMENT;
+    for (int64_t i = 0; i < edited.length; i++) {
+        list_push_with_owner(&normalized, edited.items[i], pool_, arena_, ui_mode_);
     }
+    return publish_child_edit(element.element, &normalized);
+}
 
-    if (mode_ == EDIT_MODE_INLINE) {
-        // Inline mode - resize and insert in-place
-        int64_t new_length = elmt->length + 1;
-
-        // Always a fresh buffer -- never arena_realloc, which frees the old one
-        // to the arena free-list where a new DomElement could overwrite a
-        // still-referenced items buffer.
-        if (!reserve_children((List*)elmt, new_length)) {
-            log_error("elmt_insert_child: children growth failed");
-            return ItemError;
-        }
-
-        // Shift children to make space
-        for (int64_t i = elmt->length; i > index; i--) {
-            elmt->items[i] = elmt->items[i - 1];
-        }
-
-        // Insert new child
-        elmt->items[index] = child;
-        elmt->length = new_length;
-
-        // Sync DOM linked list if ui_mode
-        if (ui_mode_) dom_relink_children(elmt);
-
-        return {.element = elmt};
-
-    } else {
-        // Immutable mode - create new element with new children array
-        int64_t new_length = elmt->length + 1;
-        Item* new_items = (Item*)arena_alloc(arena_, new_length * sizeof(Item));
-        if (!new_items) return ItemError;
-
-        // Copy children before insertion point
-        for (int64_t i = 0; i < index; i++) {
-            new_items[i] = elmt->items[i];
-        }
-
-        // Insert new child
-        new_items[index] = child;
-
-        // Copy children after insertion point
-        for (int64_t i = index; i < elmt->length; i++) {
-            new_items[i + 1] = elmt->items[i];
-        }
-
-        return elmt_copy_with_new_children(elmt, new_items, new_length);
-    }
+Item MarkEditor::elmt_insert_child(Item element, int index, Item child) {
+    return elmt_edit_children(element, index, 0, 1, &child);
 }
 
 Item MarkEditor::elmt_insert_children(Item element, int index, int count, Item* children) {
-    if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {
-        log_error("elmt_insert_children: not an element");
-        return ItemError;
-    }
-
-    if (count <= 0 || !children) {
-        log_warn("elmt_insert_children: invalid arguments");
-        return element;
-    }
-
-    Element* elmt = element.element;
-
-    // Normalize index
-    if (index < 0) {
-        index = elmt->length;
-    }
-    if (index > elmt->length) {
-        log_error("elmt_insert_children: index out of bounds");
-        return ItemError;
-    }
-
-    // Deep copy external children
-    Item* copied_children = (Item*)arena_alloc(arena_, count * sizeof(Item));
-    if (!copied_children) return ItemError;
-
-    for (int i = 0; i < count; i++) {
-        if (!builder_->is_in_arena(children[i])) {
-            log_debug("elmt_insert_children: child %d not in arena, deep copying", i);
-            copied_children[i] = builder_->deep_copy(children[i]);
-        } else {
-            copied_children[i] = children[i];
-        }
-    }
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        int64_t new_length = elmt->length + count;
-
-        if (!reserve_children((List*)elmt, new_length)) {
-            log_error("elmt_insert_children: children growth failed");
-            return ItemError;
-        }
-
-        // Shift existing children
-        for (int64_t i = elmt->length - 1; i >= index; i--) {
-            elmt->items[i + count] = elmt->items[i];
-        }
-
-        // Insert new children (use copied versions)
-        for (int i = 0; i < count; i++) {
-            elmt->items[index + i] = copied_children[i];
-        }
-
-        elmt->length = new_length;
-
-        // Sync DOM linked list if ui_mode
-        if (ui_mode_) dom_relink_children(elmt);
-
-        return {.element = elmt};
-
-    } else {
-        int64_t new_length = elmt->length + count;
-        Item* new_items = (Item*)arena_alloc(arena_, new_length * sizeof(Item));
-        if (!new_items) return ItemError;
-
-        // Copy before
-        for (int64_t i = 0; i < index; i++) {
-            new_items[i] = elmt->items[i];
-        }
-
-        // Insert new (use copied versions)
-        for (int i = 0; i < count; i++) {
-            new_items[index + i] = copied_children[i];
-        }
-
-        // Copy after
-        for (int64_t i = index; i < elmt->length; i++) {
-            new_items[i + count] = elmt->items[i];
-        }
-
-        return elmt_copy_with_new_children(elmt, new_items, new_length);
-    }
+    if (count <= 0 || !children) return element;
+    return elmt_edit_children(element, index, 0, count, children);
 }
 
 Item MarkEditor::elmt_delete_child(Item element, int index) {
-    if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {
-        log_error("elmt_delete_child: not an element");
-        return ItemError;
-    }
-
-    Element* elmt = element.element;
-
-    if (index < 0 || index >= elmt->length) {
-        log_error("elmt_delete_child: index out of bounds");
-        return ItemError;
-    }
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        // Shift children down
-        for (int64_t i = index; i < elmt->length - 1; i++) {
-            elmt->items[i] = elmt->items[i + 1];
-        }
-
-        elmt->length--;
-
-        // Sync DOM linked list if ui_mode
-        if (ui_mode_) dom_relink_children(elmt);
-
-        return {.element = elmt};
-
-    } else {
-        int64_t new_length = elmt->length - 1;
-        Item* new_items = nullptr;
-
-        if (new_length > 0) {
-            new_items = (Item*)arena_alloc(arena_, new_length * sizeof(Item));
-            if (!new_items) return ItemError;
-
-            // Copy before
-            for (int64_t i = 0; i < index; i++) {
-                new_items[i] = elmt->items[i];
-            }
-
-            // Copy after
-            for (int64_t i = index + 1; i < elmt->length; i++) {
-                new_items[i - 1] = elmt->items[i];
-            }
-        }
-
-        return elmt_copy_with_new_children(elmt, new_items, new_length);
-    }
+    return elmt_edit_children(element, index, 1, 0, nullptr);
 }
 
 Item MarkEditor::elmt_delete_children(Item element, int start, int end) {
-    if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {
-        log_error("elmt_delete_children: not an element");
-        return ItemError;
-    }
-
-    Element* elmt = element.element;
-
-    if (start < 0 || end > elmt->length || start >= end) {
-        log_error("elmt_delete_children: invalid range");
-        return ItemError;
-    }
-
-    int delete_count = end - start;
-    int64_t new_length = elmt->length - delete_count;
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        // Shift children down
-        for (int64_t i = start; i < elmt->length - delete_count; i++) {
-            elmt->items[i] = elmt->items[i + delete_count];
-        }
-
-        elmt->length = new_length;
-
-        // Sync DOM linked list if ui_mode
-        if (ui_mode_) dom_relink_children(elmt);
-
-        return {.element = elmt};
-
-    } else {
-        Item* new_items = nullptr;
-
-        if (new_length > 0) {
-            new_items = (Item*)arena_alloc(arena_, new_length * sizeof(Item));
-            if (!new_items) return ItemError;
-
-            // Copy before
-            for (int64_t i = 0; i < start; i++) {
-                new_items[i] = elmt->items[i];
-            }
-
-            // Copy after
-            for (int64_t i = end; i < elmt->length; i++) {
-                new_items[i - delete_count] = elmt->items[i];
-            }
-        }
-
-        return elmt_copy_with_new_children(elmt, new_items, new_length);
-    }
+    if (start >= end) return ItemError;
+    return elmt_edit_children(element, start, (int64_t)end - start, 0, nullptr);
 }
 
-Item MarkEditor::elmt_replace_child(Item element, int index, Item new_child) {
-    if (!element.element || element.element->type_id != LMD_TYPE_ELEMENT) {
-        log_error("elmt_replace_child: not an element");
-        return ItemError;
-    }
-
-    Element* elmt = element.element;
-
-    if (index < 0 || index >= elmt->length) {
-        log_error("elmt_replace_child: index out of bounds");
-        return ItemError;
-    }
-
-    if (mode_ == EDIT_MODE_INLINE) {
-        elmt->items[index] = new_child;
-        // Sync DOM linked list if ui_mode
-        if (ui_mode_) dom_relink_children(elmt);
-        return {.element = elmt};
-    } else {
-        Item* new_items = (Item*)arena_alloc(arena_, elmt->length * sizeof(Item));
-        if (!new_items) return ItemError;
-
-        memcpy(new_items, elmt->items, elmt->length * sizeof(Item));
-        new_items[index] = new_child;
-
-        return elmt_copy_with_new_children(elmt, new_items, elmt->length);
-    }
+Item MarkEditor::elmt_replace_child(Item element, int index, Item child) {
+    return elmt_edit_children(element, index, 1, 1, &child);
 }
 
-Item MarkEditor::elmt_copy_with_new_children(Element* old_elmt, Item* new_children, int64_t new_length) {
-    // Create new element structure
-    Element* new_elmt = (Element*)arena_alloc(arena_, sizeof(Element));
-    if (!new_elmt) return ItemError;
-
-    memcpy(new_elmt, old_elmt, sizeof(Element));
-
-    // Set new children
-    new_elmt->items = new_children;
-    new_elmt->length = new_length;
-    new_elmt->capacity = new_length;
-
-    // Only the content changed, so the copy keeps the old element's type (the
-    // memcpy above): an element type carries no content count (D3.4.3v3), and
-    // attribute edits always take a fresh TypeElmt, so nothing writes it.
-    TypeElmt* old_type = (TypeElmt*)old_elmt->type;
-
-    // Copy attribute data (if any)
-    if (old_type->byte_size > 0) {
-        new_elmt->data = pool_calloc(pool_, old_type->byte_size);
-        if (!new_elmt->data) return ItemError;
-        memcpy(new_elmt->data, old_elmt->data, old_type->byte_size);
-        new_elmt->data_cap = old_type->byte_size;
+Item MarkEditor::dom_edit_child(Item element, int64_t index, int64_t delete_count, Item* child) {
+    Item imported;
+    if (child) {
+        // detached documents still own live wrappers even when their Input is non-UI.
+        imported = builder_->is_in_arena(*child) || mark_editor_should_preserve_ui_dom_child(*child)
+            ? *child : import_child(*child);
     }
+    Array edited = {};
+    if (!prepare_child_edit(element, index, delete_count, child ? 1 : 0,
+                            child ? &imported : nullptr, &edited)) return ItemError;
+    return publish_child_edit(element.element, &edited);
+}
 
-    return {.element = new_elmt};
+Item MarkEditor::dom_insert_child(Item element, int index, Item child) {
+    return dom_edit_child(element, index, 0, &child);
+}
+
+Item MarkEditor::dom_delete_child(Item element, int index) {
+    return dom_edit_child(element, index, 1, nullptr);
+}
+
+Item MarkEditor::dom_replace_child(Item element, int index, Item child) {
+    return dom_edit_child(element, index, 1, &child);
 }
 
 Item MarkEditor::elmt_rename(Item element, const char* new_tag_name) {
@@ -1587,9 +1400,11 @@ Item MarkEditor::array_set(Item array, int64_t index, Item value) {
 Item MarkEditor::array_insert(Item array, int64_t index, Item value) {
     TypeId array_type = get_type_id(array);
 
-    if (array_type == LMD_TYPE_ARRAY || array_type == LMD_TYPE_ELEMENT) {
-        // All these types share the same memory layout for items/length/capacity
-        Array* arr = array.array;  // Works for List and Element too since they share layout
+    if (array_type == LMD_TYPE_ELEMENT) {
+        return elmt_edit_children(array, index, 0, 1, &value);
+    }
+    if (array_type == LMD_TYPE_ARRAY) {
+        Array* arr = array.array;
 
         if (index < 0) index = arr->length;
         if (index > arr->length) {

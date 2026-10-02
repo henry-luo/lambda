@@ -27,6 +27,7 @@ import delims: .atoms.delimiters
 // context: rendering context (style, font, color, etc.)
 pub fn render_node(node, context) {
     if (node is string) render_text(node, context)
+    else if (node is array) render_group(node, context)
     else if (node == null) box.text_box("", null, "ord")
     else if (not (node is element)) box.text_box(string(node), null, "ord")
     else dispatch_element(node, context)
@@ -2908,11 +2909,12 @@ fn render_frac_like(node, context) {
 
 // render all children of a node
 fn render_children(node, context) {
-    let n = len(node)
+    let children = util.content_items(node)
+    let n = len(children)
     if (n == 0) {
         []
     } else {
-        render_children_scan(node, context, 0, [])
+        render_children_scan(children, context, 0, [])
     }
 }
 
@@ -3362,14 +3364,11 @@ fn render_color_switch_tail(node, context, i) {
 fn color_switch_text(node) {
     if (node is string) string(node)
     else if (node is element and name(node) == 'raw_math_text') string(node.value)
-    else if (node is element) color_switch_children_text(node, 0, "")
+    else if (node is element or node is array) util.children_text(node, color_switch_text)
     else ""
 }
 
-fn color_switch_children_text(node, i, acc) {
-    if (i >= len(node)) acc
-    else color_switch_children_text(node, i + 1, acc ++ color_switch_text(node[i]))
-}
+
 
 fn is_colorbox_sibling_sequence(node, i) {
     if (i + 1 >= len(node)) false
@@ -3646,14 +3645,14 @@ fn plain_text(node) {
     // Preserve that spelling when a renderer needs a source-like text view.
     else if (node is element and (name(node) == 'operator' or name(node) == 'relation' or
         name(node) == 'punctuation' or name(node) == 'raw_math_text')) get_text(node)
-    else if (node is element) plain_text_element(node, 0, "")
+    else if (node is array) util.children_text(node, plain_text)
+    else if (node is element) plain_text_element(node)
     else string(node)
 }
 
-fn plain_text_element(node, i, acc) {
-    if (i >= len(node))
-        if (acc != "") acc else plain_text_value(node)
-    else plain_text_element(node, i + 1, acc ++ plain_text(node[i]))
+fn plain_text_element(node) {
+    let text = util.children_text(node, plain_text)
+    if (text != "") text else plain_text_value(node)
 }
 
 fn plain_text_value(node) {

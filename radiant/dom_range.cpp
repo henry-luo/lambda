@@ -1297,7 +1297,7 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
     bool sync_backing = original_index >= 0 && doc->input && parent_backing;
     if (sync_backing) {
         MarkEditor editor(doc->input, EDIT_MODE_INLINE);
-        Item inserted = editor.elmt_insert_child(
+        Item inserted = editor.dom_insert_child(
             {.element = parent_backing}, (int)(original_index + 1),
             {.item = s2it(right->native_string)});
         if (get_type_id(inserted) != LMD_TYPE_ELEMENT ||
@@ -1314,7 +1314,7 @@ DomText* dom_text_split_at(DocState* state, DomText* original, uint32_t offset) 
         }
         if (!dom_text_replace_backed_string(original, left_str)) {
             MarkEditor rollback(doc->input, EDIT_MODE_INLINE);
-            rollback.elmt_delete_child({.element = parent_backing},
+            rollback.dom_delete_child({.element = parent_backing},
                                         (int)(original_index + 1));
             dom_node_schedule_detached(doc, static_cast<DomNode*>(right));
             pool_free(doc->document_pool, left_str);

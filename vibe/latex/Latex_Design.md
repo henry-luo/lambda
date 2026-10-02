@@ -594,9 +594,12 @@ log_error("Parse failed at line %d: %s", line, msg);
 ```
 
 **CLI Debugging**:
+
+Mark dump filenames use the sole canonical `.mark` extension (D2.9.1).
+
 ```bash
 # Dump parsed LaTeX AST
-./lambda.exe convert test.tex -f latex -t mark /tmp/test.mk
+./lambda.exe convert test.tex -f latex -t mark -o ./temp/test.mark
 
 # View document model
 ./lambda.exe convert test.tex -f latex -t json /tmp/test.json

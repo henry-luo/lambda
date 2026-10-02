@@ -192,9 +192,11 @@ diff /tmp/ref_chars.txt /tmp/out_chars.txt
 
 Use the Lambda CLI to dump the parsed AST for debugging:
 
+Mark dump filenames use the sole canonical `.mark` extension (D2.9.1).
+
 ```bash
 # Convert LaTeX to Mark format (Lambda's AST representation)
-./lambda.exe convert test.tex -f latex -t mark /tmp/test.mk
+./lambda.exe convert test.tex -f latex -t mark -o ./temp/test.mark
 
 # Example output structure:
 # (document
@@ -208,7 +210,7 @@ Use the Lambda CLI to dump the parsed AST for debugging:
 
 ```bash
 # Parse and dump AST
-./lambda.exe convert input.tex -f latex -t mark output.mk
+./lambda.exe convert input.tex -f latex -t mark -o output.mark
 
 # Generate DVI with verbose output
 ./lambda.exe render input.tex -o output.dvi 2>&1 | tee render.log

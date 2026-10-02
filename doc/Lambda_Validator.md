@@ -181,7 +181,10 @@ For near-miss field names the report suggests the closest declared field.
 
 ### Input Formats
 
-Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`/`.mk`/`.m`. Others take `-f`: `latex`, `rtf`, `pdf`, `text`.
+Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`. Others take `-f`: `latex`, `rtf`, `pdf`, `text`.
+
+Mark auto-detection recognizes only `.mark` (D2.9.1); explicit `-f mark`
+accepts any filename (D2.9.2).
 
 ### Built-in Schemas
 

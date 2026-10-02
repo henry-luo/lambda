@@ -1,5 +1,41 @@
 # LaTeX Parser Enhancement Plan
 
+## Current command content contract (2026-10-02)
+
+**Spec linkage:** S2.6.1v2, S2.6.3, S2.6.4 and D2.6.5v4.
+All parser-owned elements merge adjacent strings through the content append.
+Consecutive string arguments of a command are collected in a non-spreading
+array child: `\definecolor{accent}{HTML}{FF8000}` produces
+`<definecolor ["accent", "HTML", "FF8000"]>`. A single string argument stays a
+string; optional groups and non-string content break runs. Text fragments
+inside one argument normalize before argument runs are collected.
+
+The LaTeX package uses `util.command_args` to expose these array entries at
+positional read sites (analysis, rendering, colors, boxes and macro calls).
+Text extraction recursively reads arrays, and the LaTeX formatter emits each
+array entry as a separate braced argument. MarkBuilder retains ordinary
+arrays verbatim while normalizing element content; no format flag controls
+merging.
+
+The unused Tree-sitter-era `latex/normalize.ls` phase, its import and the
+unused reconstruction helper `util.rebuild_with_children` are retired. The
+direct parser supplies normalized content; the package reads the current
+argument model without an AST cleanup pass.
+
+Math content uses the same array representation for consecutive text atoms,
+including groups and delimiter bodies. The math package unpacks these token
+runs when rendering sequences and extracting text; the math formatters read
+them as logical atom sequences. Thus `2x` keeps a numeric atom and a variable
+atom without storing adjacent strings under an element.
+
+Verification: `make test-lambda-baseline` passes 6,151/6,151 tests, including
+921/921 MathLive cases and the LaTeX argument-array and math token-array
+regressions. The MarkBuilder and deep-copy suites pass 121/121 tests; the new
+script regressions also match their goldens with both JIT and interpreter
+tiers pinned.
+
+The plan below records the earlier parser work.
+
 ## Executive Summary
 
 This document outlines a comprehensive plan to enhance Lambda's `input-latex.cpp` parser to become a **general-purpose LaTeX parser** that combines features from both:

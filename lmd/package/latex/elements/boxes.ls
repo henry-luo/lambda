@@ -114,12 +114,13 @@ fn parse_brack_args(el) {
 
 // for \parbox[pos]{width}{content}: extract optional [pos] from brack_groups
 fn parse_parbox_args(el) {
-    let n = len(el)
-    let brack_groups = collect_brack_groups(el, 0, n, [])
+    let args = util.command_args(el)
+    let n = len(args)
+    let brack_groups = collect_brack_groups(args, 0, n, [])
     let brack_count = len(brack_groups)
     let pos = if (brack_count > 0) trim(util.text_of(brack_groups[0])) else null
     // width comes from first non-brack child (handled by caller via content_items)
-    let width = find_first_non_brack_text(el, 0, n)
+    let width = find_first_non_brack_text(args, 0, n)
     {width: width, pos: pos}
 }
 

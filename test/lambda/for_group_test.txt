@@ -18,7 +18,7 @@
     n: 1
   }, {
     value: null,
-    n: 2
+    n: 0
   }]
 {
   year: 2024,
@@ -37,8 +37,8 @@
 }
 {
   length: 2,
-  n: 2,
-  first: "bb"
+  n: 1,
+  first: "bbcc"
 }
 {
   length: 3,

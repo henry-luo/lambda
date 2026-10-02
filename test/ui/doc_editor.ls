@@ -227,7 +227,7 @@ fn file_icon(extension) {
   else if (contains(["db", "sqlite", "sqlite3"], ext)) { SETI_DB }
   else if (contains(["md", "markdown", "mdown", "mkdn", "mdx", "wiki", "mediawiki",
                      "rst", "rest", "org", "adoc", "asciidoc", "asc", "textile", "txtl",
-                     "m", "mk", "mark", "typ", "typst"], ext) or
+                     "mark", "typ", "typst"], ext) or
            ext == "man" or contains(["1", "2", "3", "4", "5", "6", "7", "8", "9", "1m", "3p"], ext)) { SETI_MARKDOWN }
   else if (contains(["htm", "html"], ext)) { SETI_HTML }
   else if (ext == "rtf") { SETI_WORD }

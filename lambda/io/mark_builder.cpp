@@ -497,18 +497,8 @@ ElementBuilder& ElementBuilder::attr(String* key, bool value) {
 //------------------------------------------------------------------------------
 
 ElementBuilder& ElementBuilder::child(Item item) {
-    if (builder_->ui_mode()) {
-        // ui_mode: convert plain String to fat [DomText][String][chars] for unified DOM tree
-        auto str_item = lam::as<LMD_TYPE_STRING>(item);
-        String* s = str_item ? str_item.ptr() : nullptr;
-        if (s && s->len > 0) {
-            String* fat_s = builder_->createDomTextString(s->chars, s->len);
-            if (fat_s) {
-                item = (Item){.item = s2it(fat_s)};
-            }
-        }
-    }
-    array_append((Array*)elmt_, item, builder_->pool(), builder_->arena());
+    // S2.6.4: strings merge in content; arrays retain argument boundaries.
+    list_push_with_owner((List*)elmt_, item, builder_->pool(), builder_->arena(), builder_->ui_mode());
     return *this;
 }
 

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 14.1.0 (2026-09-29)
+**Spec version:** 15.0.0 (2026-10-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -335,7 +335,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
   no raw scalar Item: each is an inline, destination-owned `TypedItem` slot
   under D2.5.2v3. [SF15]
-- **D2.6.5v3** **The append discipline follows the destination: content,
+- **D2.6.5v4** **The append discipline follows the destination: content,
   sequence, or slot.** Three runtime appends exist and they are not
   interchangeable. The **content** append (`list_push()`) applies S2.6's
   normalization — a `null` or `""` is dropped, a list is spliced in, a string
@@ -352,17 +352,18 @@ language-visible counterparts are the semantics spec's SI ledger.
   value's kind at run time, never by the syntax around it (S1.6): the one
   list flag is the kind bit.
   The split is **content versus collection**, never per format: every input
-  parser must yield normalized element content (S2.6.1). MarkBuilder appends
-  with `array_append` and never normalizes, which is why LaTeX holds
-  consecutive strings today — a **transitional deviation**, to be retired by
-  carrying such runs in non-merging items (e.g. `<cmd ["a", "b"]>`) — while
-  the markup family calls `list_push` and merges them. The choice belongs at
-  the **append site**, which is local and cannot
-  leak. It must not be re-expressed as ambient state: a process-wide
-  "suppress merging" flag stays suspended across every allocation in the
-  interval and leaks on any early return that forgets to restore it. Such a
-  flag existed on `EvalContext`/`InputAllocationContext` and was retired once
-  the append-site split made it dead.* [LR09-R3]
+  parser yields normalized element content (S2.6.1v2). MarkBuilder's element
+  child append uses the owner-aware content append; collection append APIs
+  also dispatch element destinations to content normalization, so none can
+  preserve adjacent element strings. MarkEditor child writes rebuild through
+  the same content append in both edit modes (S2.6.5); web DOM node operations
+  have explicit positional-node APIs. LaTeX commands carry consecutive string
+  arguments in one array child, `<cmd ["a", "b"]>`, and their consumers read
+  the array entries as positional arguments. Arrays remain non-spreading
+  values (S2.6.3). The choice belongs at the destination and append site,
+  never ambient state: a process-wide "suppress merging" flag leaks across
+  allocations and early returns. The former flag on
+  `EvalContext`/`InputAllocationContext` is retired. [LR09-R3; Design_Syntax §7.27]
 - **D2.6.6v3*** **One container hierarchy — map → array → element — and
   nominal is a descriptor property, not a kind.** Physically, containers form
   a single-inheritance chain: `Map` is the base (header plus the attribute
@@ -499,6 +500,24 @@ language-visible counterparts are the semantics spec's SI ledger.
   **prerequisite** for lane routing, not a later optimization, and an
   unannotated literal that boxes solely for unproven fallibility must be
   diagnosed rather than silently demoted. [TE-17, TE-18; IEH I3, I4]
+
+### D2.9 Mark file conventions
+
+- **D2.9.1** **`.mark` is the sole canonical file extension for Mark
+  Notation.** New files, examples, generated artifacts and file associations
+  use lowercase `.mark`; automatic filename-based Mark detection recognizes
+  only this extension, using the detector's existing case-insensitive match.
+  `.m`, `.mk`, `.mr`, `.ma` and `.mrk` are not aliases, including for legacy
+  input. *Spell the format's name: `.m` conflicts with MATLAB/Objective-C,
+  `.mk` with makefiles, `.ma` with Maya ASCII, `.mr` is obscure, and `.mrk`
+  loses readability and overlaps DPOF; multiple standard extensions fragment
+  tooling without adding a capability.* [Input_System §Mark file extensions]
+- **D2.9.2** **An explicit `mark` format overrides the filename.** Mark
+  input accepts any filename, including one without an extension or with
+  another format's extension, when the caller selects `mark` (for example,
+  `input("data.payload", 'mark')` or `convert -f mark`). Filename aliases
+  are unnecessary when format selection is explicit.
+  [Input_System §Mark file extensions]
 
 ## D3 Type and Shape
 
@@ -2212,7 +2231,7 @@ slice; no formal semantic ruling or document semver changes.
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
-| D2.6.5v3 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. **Landed with [List Fixes](<../vibe/impl/Lambda_List_Fixes (done).md>) P1–P4 (2026-09-22/23, both tiers); that plan closed at P6.** One kind bit (`is_spreadable`; the old `is_content` survives only as LambdaJS's `is_js_arguments`); a value-decided sequence append (`array_push` splices a list by its bit; array literals, pipe items included, never choose spreading syntactically); the verbatim append `array_push_verbatim` at every positional site — argument and rest lists, group/join/order keys and rows, path keys, query and `find` matches, directory listings, clones, element-copying transforms, `zip` pairs; single-value slots store a list's array image (`slot_image`, S2.5.6); and the content append now applies all of S2.6.2–S2.6.4 unconditionally — a lone `""` is dropped, adjacent binaries merge, and the `input_context` gate on string merging (the retired flag in disguise) is gone. Content writes stay normalized (S2.6.5): `e[i] = v` rebuilds the children through the content append and `push` on an element appends content. `input-ics.cpp` builds its component sequence with the pool-owned verbatim `array_append`; `input-mark.cpp`'s `list_push` is element content, the content append's own case. P4 removes the last syntactic spreading: `*x` no longer marks its operand (the retired `item_spread`) but builds the list of x's items, which the sequence and content appends then splice by its kind bit like any other list, so the ruling's "decided by the value, never by the syntax" now holds for the spread operator too. Remaining: LaTeX's verbatim content, the transitional deviation named in the ruling. |
+| D2.6.5v4 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. **Landed with [List Fixes](<../vibe/impl/Lambda_List_Fixes (done).md>) P1–P4 (2026-09-22/23, both tiers); that plan closed at P6.** One kind bit (`is_spreadable`; the old `is_content` survives only as LambdaJS's `is_js_arguments`); a value-decided sequence append (`array_push` splices a list by its bit; array literals, pipe items included, never choose spreading syntactically); the verbatim append `array_push_verbatim` at every positional site — argument and rest lists, group/join/order keys and rows, path keys, query and `find` matches, directory listings, clones, element-copying transforms, `zip` pairs; single-value slots store a list's array image (`slot_image`, S2.5.6); and the content append now applies all of S2.6.2–S2.6.4 unconditionally — a lone `""` is dropped, adjacent binaries merge, and the `input_context` gate on string merging (the retired flag in disguise) is gone. Content writes stay normalized (S2.6.5): `e[i] = v` rebuilds the children through the content append and `push` on an element appends content. `input-ics.cpp` builds its component sequence with the pool-owned verbatim `array_append`; `input-mark.cpp`'s `list_push` is element content, the content append's own case. P4 removes the last syntactic spreading: `*x` no longer marks its operand (the retired `item_spread`) but builds the list of x's items, which the sequence and content appends then splice by its kind bit like any other list, so the ruling's "decided by the value, never by the syntax" now holds for the spread operator too. The LaTeX deviation closed on 2026-10-02: element appends normalize strings, command argument runs are array children, and the LaTeX package and formatter consume their entries positionally. The unused LaTeX AST-normalization module and reconstruction helper are retired. MarkEditor child writes normalize in both edit modes (54/54 editor tests); explicit web DOM node APIs retain node identity (112/112 node/range tests). Verified: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. [Input_Latex](../vibe/input/Input_Latex.md). |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |
@@ -2230,6 +2249,7 @@ slice; no formal semantic ruling or document semver changes.
 | D2.6.8 | No identity carrier exists; nothing to verify until DO25 is decided. |
 | D2.7.2v2 | v2 (companion-lane entries) decided 2026-08-14, not implemented — the v1 trailing-home wrapper ABI ships until Return_Value P4. Ownerless-slot GC scalar fallback active and counted; removal gated on the per-boundary inventory reaching zero. SG2 OQ audits open (dispatch-helper enumeration, resume-path slot reads, RetItem census). |
 | D2.8.2–D2.8.3 | **Built 2026-09-27 (LR12-24), on the D6.1.3 fact.** Lane entry is gated on static proof: a call whose value may be an error it does not declare (a defect-capable callee, a call through a function-type contract, a system function that rejects or passes through an operand that may be one) is a boxed join to every lane planner, and so are a member, element or arithmetic result of one; a literal slot fed by one is boxed on both tiers. Exact lowerings keep the common consumers native: equality against an in-band int compares Item words, integer arithmetic tests the first error and runs on the lanes, and a destination whose contract the join's success already satisfies tests only the error arm. The 2026-09-18 routing (shape 4 for a body that originates a defect) now covers every origination class. Cost: +14/+82/+217/+53 module instructions on the four affected ratchet probes (tune4, cube3d, deltablue, prettier_ast); runtime (release, paired A/B against the base, 15 pairs, 27 typed rows): 20 rows within ±2%, three faster (prettier_ast −3.8%), and deltablue +2.4%, fast_diff +4.8%, hashmap +8.4% (−4.5% to +15.6% across four runs) and queens +12% (a 70 µs run) slower. The remaining cost is join arithmetic feeding a declared accumulator. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, which keeps D2.8.1 true but makes the S7.7.2 dominance guarantee false. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
+| D2.9.1–D2.9.2 | **Implemented 2026-10-02.** Twenty fixtures migrated with unchanged contents; Lambda/input baseline 6,162/6,162, MIME detection 13/13, new extension regression matches on interp/jit/auto, and 15 CLI checks pass. Verification and existing fixture residue: [Input_System appendix](../vibe/input/Input_System.md#appendix--mark-extension-migration-2026-10-02). |
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
 | D3.4.3v3 | **Implemented 2026-09-25 ([Impl_Element_Type_Sharing](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md) P0–P3).** Maps built through `map_put` — every `MarkBuilder` parser and every JS object — share through the per-`Input` tree (`map_put_with_data_growth`): the edge table dates from 2026-06-25, the shared root and the bounds (256 edges from the root, 16 from any other type, 1,024 map types per `Input`) from 2026-09-09; maps stopped interning through the shape pool on 2026-08-08. Parsed elements share since P1: `ElementBuilder` starts each element on its tag's root (`elmt_tree_root`) and `putToElement` adds attributes through the tree (`elmt_put_tree`), under their own budget of 16,384 per `Input`. Editor rebuilds since P2 replay their field list through the tree (`type_tree_root_like`, `type_tree_follow`), editing in place only a type the container owns — the old guard had also rewritten tree and literal types, re-laying a sibling map's fields. P3 deleted the shape pool (`shape_pool.cpp`, `Input::shape_pool`, `elmt_finalize_shape`, `map_finalize_shape`, `shape_builder_finalize`). Verification: peak RSS on a 13 MiB layout-test corpus (203K elements, 1,775 types) 184.0 → 120.2 MB and on a 13 MiB page corpus 109.6 → 85.8 MB, parse 1.42× and 1.39× faster; 17,230 HTML files, 99 test inputs and 84 formatter outputs identical to the pre-change build; the map budget took the test262 batch peak from 5,662 to 891 MB (2026-09-09). Since 2026-09-25 tree nodes and edges come from the `Input`'s arena and go with the `Input` (D4.1.4v4, D4.2.6; `input_tree_alloc`); the element-root table stays a pool block and frees its old copy when it grows; JavaScript descriptor retags (`js_property_attrs.cpp`) keep `js_input`'s pool. **v3 implemented 2026-09-25** (`transition_target_for_key`): a child extends its parent's chain in place while the parent's `last` has no successor, and takes the parent's lookup table while it has room and holds no entry with the added field's identity (`typemap_hash_holds_equal`); an entry the tree appends records its position (`ShapeEntry::chain_index`, in padding) and `typemap_hash_entry_is_own` rejects a descendant's; an in-place child shares the parent's `slot_entries`. Every walk goes through `FOR_EACH_MAP_FIELD` / `typemap_next_field` / `shape_chain_next_until` — the link is renamed `ShapeEntry::chain_next`, 181 walks were converted, and lint `no-raw-shape-chain-walk` flags a raw read — and the collector stops at `last` (`LAMBDA_GC_OFF_TYPE_MAP_LAST`). Verification (release, medians of five): one 1,000-key JSON object's parse peak 94.1 → 16.5 MB (debug: 98.8 → 17.4 MB; a 1,000-key JS object 84.7 → 18.4 MB); 13 MiB HTML corpora (real-site pages 99.3 → 99.0 MB, layout tests 104.7 → 104.5 MB) and 60K 20-field JSON records (102.7 MB) unchanged in memory and parse time; Lambda baseline 5,924/5,924, Radiant baseline green, test262 baseline 40,261/40,261 with an unchanged batch peak (643.9 vs 639.8 MB); `TransitionTreePrefixSharingTest` (6). |
@@ -2516,6 +2536,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
 | D2.8 | TE-15/TE-17/TE-18; IEH I1–I4 | `Lambda_Design_Type_Enforcement.md`, `vibe/impl/Lambda_Impl_Error_Handling (done).md` |
+| D2.9 | Mark file extensions (2026-10-02) | `input/Input_System.md` §Mark file extensions |
 | D3.1–D3.3 | C8.5-4, C9a; TE-1/TE-6/TE-10/TE-13/TE-19; DF12/DF13; B7; Lane §1 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Compiling_Dual_Func.md` |
 | D3.4 | Shape_Pool §1–§8; Shape_Transitions §1–§8; Transpiler DD1–DD4; NI10/NI13; Nullable §6; TE §6 B7b; JSCU33; JS Tune10 §9.3–§9.9 | `Lambda_Shape_Pool.md`, `Lambda_Design_Shape_Transitions.md`, `Lambda_Transpiler.md`, `Lambda_Design_Name_Identity.md`, `Lambda_Design_Structs_JS.md`, `jube/JS_Tune10_Fast_Paths (done).md` |
 | D4.1 | GC1 §2.10.4; CW8; SF16; CR8; Mem_Heap §1 (MP-12, MP-15) | `Lambda_Garbage_Collector.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Mem_Heap.md` |

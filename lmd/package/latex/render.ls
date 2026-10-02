@@ -333,15 +333,16 @@ fn resolve_extended_or_generic(tag_str, el, info) {
 // ============================================================
 
 fn render_children(el, from_idx, info) {
-    let n = len(el)
+    let children = util.command_args(el)
+    let n = len(children)
     if (from_idx >= n) { [] }
-    else { collect_children(el, from_idx, n, [], info) }
+    else { collect_children(children, from_idx, n, [], info) }
 }
 
 // render children but skip brack_group elements (used by box commands)
 fn render_children_skip_brack(el, info) {
-    let n = len(el)
-    collect_children_skip_brack(el, 0, n, [], info)
+    let children = util.command_args(el)
+    collect_children_skip_brack(children, 0, len(children), [], info)
 }
 
 fn collect_children_skip_brack(el, i, n, acc, info) {
@@ -1150,17 +1151,19 @@ fn handle_rendered_child(el, i, n, current_cells, acc_rows, col_spec, info, chil
 // --- multicolumn / multirow cell handling ---
 
 fn handle_multicol_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
-    let colspan = int(child[0])
-    let align = parse_multicol_align(child[1])
-    let content = render_span_content(child, 2, info)
+    let args = util.command_args(child)
+    let colspan = int(args[0])
+    let align = parse_multicol_align(args[1])
+    let content = render_span_content(args, 2, info)
     let cell_desc = {type: "multicol", colspan: colspan, align: align, content: content}
     let new_cells = current_cells ++ [cell_desc]
     collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
 }
 
 fn handle_multirow_child(el, i, n, current_cells, acc_rows, col_spec, info, child) {
-    let rowspan = int(child[0])
-    let content = render_span_content(child, 2, info)
+    let args = util.command_args(child)
+    let rowspan = int(args[0])
+    let content = render_span_content(args, 2, info)
     let cell_desc = {type: "multirow", rowspan: rowspan, content: content}
     let new_cells = current_cells ++ [cell_desc]
     collect_rows(el, i + 1, n, new_cells, acc_rows, col_spec, info)
@@ -1394,8 +1397,9 @@ fn get_nameref_display(title_val, number_val) {
 }
 
 fn render_href(el, info) {
-    let n = len(el)
-    let url = if (n > 0) util.text_of(el[0]) else "#"
+    let args = util.command_args(el)
+    let n = len(args)
+    let url = if (n > 0) util.text_of(args[0]) else "#"
     let display = if (n > 1) render_children(el, 1, info) else [url];
     <a href: url, for d in display { d }>
 }
@@ -1823,9 +1827,10 @@ fn render_macro_invocation(el, info, macro_def) {
 }
 
 fn build_macro_args(el, macro_def) {
-    if (macro_def.default_arg == null) { el }
-    else if (has_optional_arg(el)) { el }
-    else { prepend_default(el, macro_def.default_arg) }
+    let args = util.command_args(el)
+    if (macro_def.default_arg == null) { args }
+    else if (has_optional_arg(args)) { args }
+    else { [macro_def.default_arg] ++ args }
 }
 
 fn has_optional_arg(el) {
@@ -1834,15 +1839,6 @@ fn has_optional_arg(el) {
         (first is element and string(name(first)) == "brack_group")
     }
     else { false }
-}
-
-fn prepend_default(el, default_val) {
-    [default_val] ++ collect_el_children(el, 0, len(el), [])
-}
-
-fn collect_el_children(el, i, n, acc) {
-    if (i >= n) { acc }
-    else { collect_el_children(el, i + 1, n, acc ++ [el[i]]) }
 }
 
 fn render_items(items, i, n, info, acc) {

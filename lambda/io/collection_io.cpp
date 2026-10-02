@@ -57,13 +57,20 @@ bool list_grow_io(List* list, int64_t min_capacity, Pool* pool, Arena* arena) {
 
 void array_append(Array* arr, Item item, Pool* pool, Arena* arena) {
     if (!arr || (!pool && !arena)) return;
+    // S2.6.4: an element always appends content, including parser-owned elements.
+    if (arr->type_id == LMD_TYPE_ELEMENT) {
+        InputAllocationContext* owner = input_allocation_context;
+        bool ui_mode = owner && owner->pool == pool && owner->arena == arena && owner->ui_mode;
+        list_push_with_owner((List*)arr, item, pool, arena, ui_mode);
+        return;
+    }
     if (arr->length + arr->extra + 2 > arr->capacity &&
             !list_grow_io((List*)arr, 0, pool, arena)) return;
     array_set(arr, arr->length, item);
     arr->length++;
 }
 
-static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena,
+void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena,
         bool ui_mode) {
     if (!list || (!pool && !arena)) return;
     TypeId type_id = get_type_id(item);
@@ -84,8 +91,10 @@ static void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena
         }
     }
 
-    if (type_id == LMD_TYPE_STRING && list->is_spreadable && ui_mode && arena) {
-        item = ui_copy_string_to_arena(arena, item);
+    if (type_id == LMD_TYPE_STRING) {
+        String* text = item.get_safe_string();
+        if (text && text->len == 0) return;  // S2.6.2: empty text contributes no content
+        if (ui_mode && arena) item = ui_copy_string_to_arena(arena, item);
     }
     if (type_id == LMD_TYPE_STRING && list->length > 0 && list->items) {
         String* previous = list->items[list->length - 1].get_safe_string();

@@ -340,10 +340,11 @@ fn walk_appendix(el, st) {
 
 fn walk_setcounter(el, st) {
     // children: [counter_name_text, value_text]
-    let n = len(el)
+    let args = util.command_args(el)
+    let n = len(args)
     if (n >= 2) {
-        let cname = trim(string(el[0]))
-        let cval = trim(string(el[1]))
+        let cname = trim(util.text_of(args[0]))
+        let cval = trim(util.text_of(args[1]))
         let val = int(cval)
         if (cname == "secnumdepth" and val != null) {
             {*:st, secnumdepth: val}
@@ -355,11 +356,12 @@ fn walk_setcounter(el, st) {
 
 fn walk_definecolor(el, st) {
     // children: [name, model, spec]
-    let n = len(el)
+    let args = util.command_args(el)
+    let n = len(args)
     if (n >= 3) {
-        let cname = trim(string(el[0]))
-        let model = trim(string(el[1]))
-        let spec = trim(string(el[2]))
+        let cname = trim(util.text_of(args[0]))
+        let model = trim(util.text_of(args[1]))
+        let spec = trim(util.text_of(args[2]))
         let css = parse_color_model(model, spec)
         let new_colors = add_entry(st.custom_colors, cname, css)
         {*:st, custom_colors: new_colors}
@@ -406,15 +408,17 @@ fn parse_gray(spec) {
 // \newtheorem{name}[counter]{Label} → shared counter with existing type
 // \newtheorem*{name}{Label}      → unnumbered (star variant)
 fn walk_newtheorem(el, st) {
-    let n = len(el)
+    let args = util.command_args(el)
+    let n = len(args)
     if (n < 2) st
-    else build_newtheorem_def(el, st, n, true)
+    else build_newtheorem_def(args, st, n, true)
 }
 
 fn walk_newtheorem_star(el, st) {
-    let n = len(el)
+    let args = util.command_args(el)
+    let n = len(args)
     if (n < 2) st
-    else build_newtheorem_def(el, st, n, false)
+    else build_newtheorem_def(args, st, n, false)
 }
 
 fn build_newtheorem_def(el, st, n, is_numbered) {

@@ -286,7 +286,8 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
             else if (strcmp(ext, "txt") == 0) effective_format = "text";
             else if (strcmp(ext, "toml") == 0) effective_format = "toml";
             else if (strcmp(ext, "ini") == 0) effective_format = "ini";
-            else if (strcmp(ext, "ls") == 0 || strcmp(ext, "mark") == 0 || strcmp(ext, "mk") == 0) effective_format = "mark";
+            // D2.9.1: Mark filenames have one canonical extension.
+            else if (strcmp(ext, "mark") == 0) effective_format = "mark";
             // unknown extension: leave as NULL for fallback handling below
         }
         // no extension or unknown extension: effective_format remains NULL

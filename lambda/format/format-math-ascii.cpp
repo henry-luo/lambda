@@ -3,7 +3,7 @@
 // Converts the direct math Mark Element AST back to ASCII math text.
 // The AST has element tags like: math, subsup, operator, relation, group,
 // radical, command, fraction, frac_like, delimiter_group, etc.
-// Variables and numbers appear as plain String children.
+// Variables and numbers are strings; adjacent atom runs are array children.
 //
 // This formatter handles both LaTeX-parsed and ASCII-parsed math since
 // both go through the same direct parser.
@@ -12,7 +12,7 @@
 
 // Forward declarations (format_item/format_element_impl/format_children from shared header):
 static void format_children(StringBuf* sb, const ElementReader& elem, int depth, const char* sep);
-static void format_children_range(StringBuf* sb, const ElementReader& elem,
+static void format_children_range(StringBuf* sb, const MathContentReader& elem,
                                    int64_t start, int64_t end, int depth, const char* sep);
 
 // ============================================================================
@@ -192,7 +192,7 @@ static bool is_ascii_function_word(const char* word) {
 
 // Check if children starting at index form a parenthesized group: punc"(" ... punc")"
 // Returns the index past the closing paren, or -1 if no match.
-static int64_t find_matching_paren(const ElementReader& elem, int64_t start, int64_t count) {
+static int64_t find_matching_paren(const MathContentReader& elem, int64_t start, int64_t count) {
     if (start >= count) return -1;
     ItemReader child = elem.childAt(start);
     if (!child.isElement()) return -1;
@@ -596,7 +596,7 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
 
 // Core coalescing loop over children [start, end)
 // This is the workhorse function that handles word coalescing and subsup boundary merging.
-static void format_children_range(StringBuf* sb, const ElementReader& elem,
+static void format_children_range(StringBuf* sb, const MathContentReader& elem,
                                    int64_t start, int64_t end, int depth, const char* sep) {
     bool first = true;
 
@@ -723,8 +723,8 @@ static void format_children_range(StringBuf* sb, const ElementReader& elem,
 }
 
 static void format_children(StringBuf* sb, const ElementReader& elem, int depth, const char* sep) {
-    int64_t count = elem.childCount();
-    format_children_range(sb, elem, 0, count, depth, sep);
+    MathContentReader content(elem);
+    format_children_range(sb, content, 0, content.childCount(), depth, sep);
 }
 
 // ============================================================================

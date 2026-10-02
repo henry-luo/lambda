@@ -4,6 +4,35 @@
 
 This document outlines the design and implementation plan for enhancing the Lambda Script input system with directory listing, HTTP/HTTPS support, and comprehensive caching capabilities. The enhanced system will provide efficient, cached access to local files, directories, and remote resources.
 
+## Mark file extensions
+
+**Adopted 2026-10-02 — D2.9.1–D2.9.2** in
+[Lambda Formal Design](../../doc/Lambda_Formal_Design.md#d29-mark-file-conventions).
+Mark Notation uses **`.mark` as its only canonical extension**. Automatic
+filename detection recognizes only `.mark` (case-insensitively); `.m` and
+`.mk` are removed without a compatibility period. Explicit `mark` selection
+accepts arbitrary filenames, including extensionless files and filenames
+such as `data.json` whose extension ordinarily selects another parser.
+
+### Options considered
+
+| Extension or policy | Decision | Reason |
+|---|---|---|
+| `.mark` | Adopt as the sole canonical extension | Spells the format's name, is recognizable without context, already appears in Lambda fixtures, and gives documentation, editors and file associations one predictable default. |
+| `.m` | Reject; remove the existing alias | Already used by [MATLAB](https://www.mathworks.com/help/matlab/matlab_prog/publishing-matlab-code.html) and [Objective-C](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjectiveC/Chapters/ocDefiningClasses.html); a single letter does not identify Mark clearly. |
+| `.mk` | Reject; remove the existing alias | Commonly used for [makefiles](https://www.gnu.org/software/make/manual/make.html), which causes competing editor and file associations. |
+| `.mr` | Reject | An obscure abbreviation of Mark, with little convenience gained by saving two characters. |
+| `.ma` | Reject | Already identifies [Maya ASCII](https://download.autodesk.com/us/maya/2011help/files/Glossary_M_ma_file_format.htm), and is less recognizable than the full format name. |
+| `.mrk` | Reject | A plausible shorthand, but less readable than `.mark` and also used by [DPOF camera files](https://www.cipa.jp/std/documents/e/DC_001_2003_Rev2.pdf). There is no three-character extension constraint requiring it. |
+| All six, or several equally preferred extensions | Reject | Splits documentation, editor configuration, file associations and generated filenames across spellings without adding functionality. |
+| `.mark` plus deprecated `.m`/`.mk` input aliases | Reject | Retains ambiguous automatic detection; callers with noncanonical filenames can explicitly select `mark` under D2.9.2. |
+
+The final choice overrides the earlier suggestion to retain legacy input
+aliases. New and migrated files use lowercase `.mark`, and Lambda scripts
+keep their separate `.ls` extension. The MIME identity remains `text/x-mark`
+(with the existing `application/x-mark` parser mapping); this decision changes
+filenames rather than the Mark data model or syntax.
+
 ## Current State Analysis
 
 ### Existing Architecture
@@ -561,3 +590,25 @@ The current implementation provides a solid foundation for future enhancements:
 - **Authentication**: Basic auth and OAuth support
 
 This implementation successfully brings Lambda Script into the modern web era, enabling seamless integration with web APIs, remote data sources, and cloud services while maintaining the language's focus on simplicity and performance.
+
+
+## Appendix — Mark extension migration (2026-10-02)
+
+**D2.9.1–D2.9.2 implemented.** Renamed all 20 existing Mark `.m`/`.mk`
+fixtures to `.mark`, verified byte-identical contents, and updated live
+references, generated-file examples and the release sample list. Removed
+aliases from the shared MIME table, validator auto-detection, output extension
+selection and viewer icons. Historical benchmark manifests retain the paths
+recorded when those measurements were taken.
+
+Verification: `make test-lambda-baseline` passed **6,162/6,162** tests;
+MIME detection passed **13/13**, including `MarkCanonicalExtension`;
+the new `proc/mark_file_extension.ls` regression matched its golden on
+`interp`, `jit` and `auto`. Fifteen CLI checks cover explicit `mark`
+conversion with arbitrary filenames and automatic converter/validator
+detection for `.mark`, `.MARK`, `.m` and `.mk`.
+
+A supplemental run of `input/input_mark.ls` now reaches the migrated
+`example.mark` but fails on its pre-existing `version: 1.0n` literal
+(S4.3.3). The filename migration preserves that content; numeric-literal
+repair is outside this decision.

@@ -4,6 +4,7 @@
 import box: lambda.doc.math.box
 import ctx: lambda.doc.math.context
 import css: lambda.doc.math.css
+import util: lambda.doc.math.util
 
 // ============================================================
 // Style command rendering
@@ -80,24 +81,13 @@ fn get_style_override(cmd) {
 // ============================================================
 
 fn render_children(node, context, render_fn) {
-    let n = len(node)
-    if (n == 0) box.text_box("", null, "ord")
-    else
-        (let children = [for (i in 0 to (n - 1),
-                             let child = node[i]
-                             where child != null)
-                         render_fn(child, context)],
-         box.hbox(children))
+    let items = util.content_items(node)
+    box.hbox([for (child in items where child != null) render_fn(child, context)])
 }
 
 fn style_arg_text(arg) {
     if (arg == null) ""
     else if (arg is string) string(arg)
-    else if (arg is element) style_arg_text_el(arg, 0, "")
+    else if (arg is element or arg is array) util.children_text(arg, style_arg_text)
     else string(arg)
-}
-
-fn style_arg_text_el(arg, i, acc) {
-    if (i >= len(arg)) acc
-    else style_arg_text_el(arg, i + 1, acc ++ style_arg_text(arg[i]))
 }

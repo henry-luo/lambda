@@ -1595,6 +1595,7 @@ void array_append(Array* arr, Item itm, Pool* pool, Arena* arena = nullptr);
 // append entry points keep parser-owned list growth in its Pool/Arena owner.
 void list_push_io(List* list, Item item);
 void list_push_pooled(List* list, Item item, Pool* pool);
+void list_push_with_owner(List* list, Item item, Pool* pool, Arena* arena, bool ui_mode);
 // Grow an Input-owned list to at least `min_capacity` slots (doubling) from the
 // arena when given, else the pool. The old buffer stays with whoever owns it,
 // and an owned wide-scalar tail moves with the dense items that point into it.

@@ -193,8 +193,7 @@ MimeGlob glob_patterns[] = {
     {"*.ical", "text/calendar"},
     {"*.textile", "text/textile"},
     {"*.txtl", "text/textile"},
-    {"*.m", "text/x-mark"},
-    {"*.mk", "text/x-mark"},
+    // D2.9.1: only .mark identifies Mark; other filenames require an explicit format.
     {"*.mark", "text/x-mark"},
 
     // Programming languages

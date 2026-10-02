@@ -57,7 +57,7 @@ let content = io.fetch("./data.txt")
 
 ---
 
-### io.mkdir(path)
+### io.markdir(path)
 
 Create a directory, including parent directories if needed (like `mkdir -p`).
 
@@ -68,7 +68,7 @@ Create a directory, including parent directories if needed (like `mkdir -p`).
 
 **Example:**
 ```lambda
-io.mkdir("./output/reports/2024")
+io.markdir("./output/reports/2024")
 ```
 
 ---
@@ -205,7 +205,7 @@ io.chmod("./config.json", 644)
 // Procedural script with io module
 pn main() {
     // Create output directory
-    io.mkdir("./output")
+    io.markdir("./output")
     
     // Check if source exists before copying
     if exists("./data/input.csv") {
@@ -266,6 +266,10 @@ Write data to a file.
 **Returns:** Number of bytes written on success, error on failure.
 
 **Format Auto-Detection** (when `format` is omitted):
+
+Mark filename selection follows D2.9.1: only `.mark` is canonical.
+Explicit `mark` input accepts arbitrary filenames under D2.9.2.
+
 - `.json` → JSON format
 - `.yaml`, `.yml` → YAML format
 - `.xml` → XML format
@@ -274,7 +278,7 @@ Write data to a file.
 - `.txt` → Text format
 - `.toml` → TOML format
 - `.ini` → INI format
-- `.ls`, `.mark`, `.mk` → Mark format (Lambda's native format)
+- `.mark` → Mark format (Lambda's native format)
 - Unknown/no extension → Based on data type:
   - String → text
   - Binary → binary
@@ -287,7 +291,7 @@ let data = {name: "Lambda", version: 1}
 // Auto-detect format from extension
 let bytes = output(data, "/tmp/config.json")  // writes as JSON, returns bytes
 output(data, "/tmp/config.yaml")              // writes as YAML
-output(data, "/tmp/config.mk")                // writes as Mark
+output(data, "./temp/config.mark")                // writes as Mark
 output("Hello", "/tmp/greeting.txt")          // writes as text
 
 // Explicit format (overrides extension)
@@ -297,8 +301,8 @@ output(data, "/tmp/data", {format: "yaml"})      // write YAML to extensionless 
 // Append mode
 let entry1 = {event: "start", time: t'2026-02-06'}
 let entry2 = {event: "end", time: t'2026-02-06'}
-output(entry1, "/tmp/log.mk", {})                  // create/overwrite file
-output(entry2, "/tmp/log.mk", {mode: "append"})    // append to file
+output(entry1, "./temp/log.mark", {})                  // create/overwrite file
+output(entry2, "./temp/log.mark", {mode: "append"})    // append to file
 
 // Atomic writes (safe for concurrent access)
 output(data, "/tmp/config.json", {atomic: true})   // writes atomically
@@ -323,9 +327,9 @@ Write data to a file, truncating if it exists.
 
 **Example:**
 ```lambda
-let bytes = {name: "Lambda", version: 1} |> "/tmp/config.mk"
+let bytes = {name: "Lambda", version: 1} |> "./temp/config.mark"
 "Hello, world!" |> "/tmp/greeting.txt"
-42 |> "/tmp/answer.mk"
+42 |> "./temp/answer.mark"
 ```
 
 ---
@@ -341,9 +345,9 @@ Append data to a file, creating it if it doesn't exist.
 **Example:**
 ```lambda
 // Build a log file incrementally
-{event: "start"} |> "/tmp/events.mk"      // create file
-{event: "process"} |>> "/tmp/events.mk"   // append
-{event: "end"} |>> "/tmp/events.mk"       // append
+{event: "start"} |> "./temp/events.mark"      // create file
+{event: "process"} |>> "./temp/events.mark"   // append
+{event: "end"} |>> "./temp/events.mark"       // append
 ```
 
 ---
@@ -384,7 +388,7 @@ pn main() {
     // Write as different formats
     let bytes = output(users, "./users.json")  // JSON, returns bytes written
     output(users, "./users.yaml")              // YAML
-    output(users, "./users.mk")                // Mark
+    output(users, "./users.mark")                // Mark
     
     // Append log entries
     "=== Session Start ===" |> "./session.log"
@@ -443,7 +447,7 @@ Lambda provides a native `Path` type for cross-platform path handling:
 // Path literals use dots instead of slashes
 let config = input(/etc.config.json)
 let data = input(.data.input.csv)      // relative path
-let parent = input(..parent.config.mk) // parent directory
+let parent = input(..parent.config.mark) // parent directory
 ```
 
 **Path Type Features:**

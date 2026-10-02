@@ -1,5 +1,24 @@
 # Lambda MarkEditor - Structural CRUD Support
 
+**Content contract (2026-10-02):** S2.6.5 and D2.6.5v4 apply to every
+`elmt_*` child write in both edit modes. Insert, replacement, batch insertion
+and deletion rebuild through the owner-aware content append, so removing a
+separator merges its neighbouring strings. `array_insert`/`array_append` on
+an element use that same path. The shared splice builds destination-owned
+scalar storage and immutable edits retain the original element and type.
+
+Web DOM node edits use explicit `dom_insert_child`, `dom_replace_child`,
+`dom_delete_child` and `dom_append_child` methods. These operate on positional
+node slots, retaining Text-node identity for DOM operations such as splitting
+text; no ambient merge-suppression flag changes Lambda content semantics.
+
+Verified 2026-10-02: MarkEditor 54/54, DOM nodes 40/40, DOM ranges 72/72,
+Lambda baseline 6151/6151, and the Radiant integer-cast lint. The full Radiant
+baseline did not pass in this checkout: layout/render runners, fonts and
+page fixtures are missing; Tree-sitter's CLI is a Linux executable on macOS;
+the local HTTP-server test cannot start; the directory-layout fixture lacks
+the expected 800-pixel gap with this checkout's reduced file tree.
+
 ## Executive Summary
 
 This document proposes a comprehensive CRUD (Create, Read, Update, Delete) API for Lambda's markup data structures through the `MarkEditor` class. The editor supports two distinct operation modes:
@@ -1564,4 +1583,3 @@ The `MarkEditor` provides a comprehensive, mode-aware CRUD API for Lambda docume
 The MarkEditor is **production-ready** and provides a solid foundation for document editing in Lambda, enabling use cases from simple data transformations to complex versioned document systems. Integration with Lambda runtime and REPL can proceed.
 
 **Status**: ✅ **COMPLETED AND VALIDATED**
-

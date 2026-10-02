@@ -2944,7 +2944,7 @@ import, not new syntax — recorded as SO37.
 
 ### 7.27 Lists, blocks, and the content model (decided 2026-09-21 — ratified as S2.5 + S2.6)
 
-> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P1–P4. The kind of a query result was ruled 2026-09-23 as S8.2.4 (a run; [Expr_Query §4.1](Lambda_Expr_Query.md)). Open: LaTeX input's unmerged string runs, the transitional deviation D2.6.5v3 names.
+> **Implemented 2026-09-23**, both tiers, by [Lambda_List_Fixes (done)](<impl/Lambda_List_Fixes (done).md>) P1–P4. The kind of a query result was ruled 2026-09-23 as S8.2.4 (a run; [Expr_Query §4.1](Lambda_Expr_Query.md)). The remaining LaTeX deviation closed on 2026-10-02: S2.6.1v2/D2.6.5v4 require command string runs to be array children and all element appends to merge adjacent strings.
 
 **Revision (USER, 2026-09-23): `count(x)` is the size of the run `x` is.**
 S8.3.3v2 had defined `count` as the number of items a value contributes
@@ -3009,10 +3009,18 @@ were raised:
    construction-time courtesy: a normalized element must stay normalized, so
    `e[i] = v`, insertion, and removal renormalize at the write site, and
    positions after the write may shift.
-8. **Parsed documents are bound by the same model** (S2.6.1). LaTeX keeping
-   consecutive strings unmerged (MarkBuilder's verbatim append, D2.6.5v2) is a
-   temporary workaround; its parser must eventually align. One route: carry a
-   run that must stay apart in a non-merging item, `<cmd ["str", "str"]>`.
+8. **Parsed documents are bound by the same model** (S2.6.1v2, D2.6.5v4;
+   USER, 2026-10-02). Every element append merges adjacent strings. LaTeX
+   commands carry consecutive string arguments in an array child,
+   `<cmd ["str", "str"]>`, and the package and formatter read its entries as
+   positional arguments. A group within one argument normalizes its text
+   before arguments are collected; optional groups and non-string children
+   break a run. Arrays keep the argument boundaries without ambient state.
+
+   **Superseded implementation exception:** ~~LaTeX keeps consecutive strings
+   unmerged through MarkBuilder's verbatim element append~~ (D2.6.5v3).
+   This exception hid argument boundaries in adjacent element strings; the
+   array child now makes those boundaries explicit.
 
 **Block and list rulings (USER, 2026-09-21) — S2.5, placed before content.**
 Where lists come from, and what contributes to them, is its own model that

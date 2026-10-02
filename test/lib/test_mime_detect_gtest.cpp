@@ -68,6 +68,21 @@ TEST_F(MimeDetectTest, FilenameDetection) {
     EXPECT_NE(strstr(mime, "pdf"), nullptr) << "Expected MIME type to contain 'pdf', got: " << mime;
 }
 
+TEST_F(MimeDetectTest, MarkCanonicalExtension) {
+    // D2.9.1: existing case-insensitive matching applies to the sole Mark extension.
+    EXPECT_STREQ(detect_mime_from_filename(detector, "data.mark"), "text/x-mark");
+    EXPECT_STREQ(detect_mime_from_filename(detector, "/site.v2/data.MARK"), "text/x-mark");
+    const char* source = "'extension-check'";
+    EXPECT_STREQ(detect_mime_type(detector, "data.mark", source, strlen(source)), "text/x-mark");
+    const char* other_names[] = {
+        "data.m", "data.mk", "data.mr", "data.ma", "data.mrk", "data", "data.mark.bak"
+    };
+    for (const char* name : other_names) {
+        EXPECT_EQ(detect_mime_from_filename(detector, name), nullptr) << name;
+        EXPECT_STREQ(detect_mime_type(detector, name, source, strlen(source)), "text/plain") << name;
+    }
+}
+
 // Filename detection sees absolute paths: a '.' in a directory name must not
 // hide the file's extension.
 TEST_F(MimeDetectTest, FilenameDetectionThroughDottedDirectories) {

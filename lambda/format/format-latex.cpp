@@ -70,17 +70,26 @@ static void format_latex_value(LaTeXContext& ctx, const ItemReader& value) {
 // ---------------------------------------------------------------------------
 
 // Format element children as LaTeX arguments/content
+static void format_content_item(LaTeXContext& ctx, const ItemReader& child) {
+    if (child.isArray()) {
+        // S2.6.1v2: a command's array child carries separate text arguments.
+        ArrayReader arguments = child.asArray();
+        auto items = arguments.items();
+        ItemReader argument;
+        while (items.next(&argument)) format_content_item(ctx, argument);
+    } else if (child.isString()) {
+        // Text argument: wrap in braces
+        ctx.write_char('{');
+        format_latex_value(ctx, child);
+        ctx.write_char('}');
+    } else {
+        format_latex_value(ctx, child);
+    }
+}
+
 static void format_element_content(LaTeXContext& ctx, const ElementReader& elem) {
     for (int64_t i = 0; i < elem.childCount(); i++) {
-        ItemReader child = elem.childAt(i);
-        if (child.isString()) {
-            // Text argument: wrap in braces
-            ctx.write_char('{');
-            format_latex_value(ctx, child);
-            ctx.write_char('}');
-        } else {
-            format_latex_value(ctx, child);
-        }
+        format_content_item(ctx, elem.childAt(i));
     }
 }
 

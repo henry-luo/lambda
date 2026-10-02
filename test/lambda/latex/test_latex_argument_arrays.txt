@@ -1,0 +1,10 @@
+[1, true, ["accent", "HTML", "FF8000"]]
+["accent", "HTML", "FF8000"]
+["#FF8000", 2, "Claim"]
+[4, ["a", "b"], 'brack_group', ["c", "d"], 'curly_group']
+["a", "b", <brack_group
+    "opt">, "c", "d", <curly_group>]
+[1, "a%b c"]
+"abab\definecolor{accent}{HTML}{FF8000}"
+[true, true, true, true, false]
+[true, true, true, true]

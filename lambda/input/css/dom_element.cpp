@@ -2340,7 +2340,7 @@ bool DomElement::append_child(DomElement* child) {
 
     // Preserve this live wrapper even when its detached document is non-UI.
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item result = editor.elmt_append_dom_child(
+    Item result = editor.dom_append_child(
         {.element = parent_backing},
         {.element = child_backing}
     );
@@ -2892,7 +2892,7 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     Item new_string_item = (Item){.item = s2it(new_s)};
 
     // Replace child in parent Element's items array
-    Item result = editor.elmt_replace_child(
+    Item result = editor.dom_replace_child(
         {.element = dom_element_to_element(parent)},
         child_idx,
         new_string_item
@@ -3034,7 +3034,7 @@ bool dom_text_remove(DomText* text_node) {
 
     // Remove from Lambda parent Element's children array
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item result = editor.elmt_delete_child(
+    Item result = editor.dom_delete_child(
         {.element = dom_element_to_element(parent)},
         child_idx
     );
@@ -3088,7 +3088,7 @@ DomText* DomElement::append_text(const char* text_content) {
     Item string_item = (Item){.item = s2it(s)};
 
     // Append to parent Element's children via MarkEditor
-    Item result = editor.elmt_append_child(
+    Item result = editor.dom_append_child(
         {.element = dom_element_to_element(parent)},
         string_item
     );
@@ -3316,14 +3316,14 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     Item result;
     if (comment_node->native_element->length > 0) {
         // Replace existing content (child at index 0)
-        result = editor.elmt_replace_child(
+        result = editor.dom_replace_child(
             {.element = comment_node->native_element},
             0,  // Content is always first child
             new_string_item
         );
     } else {
         // Append content (comment was empty)
-        result = editor.elmt_append_child(
+        result = editor.dom_append_child(
             {.element = comment_node->native_element},
             new_string_item
         );
@@ -3376,7 +3376,7 @@ DomComment* DomElement::append_comment(const char* comment_content) {
     }
 
     // Append to parent Element's children
-    Item result = editor.elmt_append_child(
+    Item result = editor.dom_append_child(
         {.element = dom_element_to_element(parent)},
         comment_item
     );
@@ -3433,7 +3433,7 @@ bool dom_comment_remove(DomComment* comment_node) {
 
     // Remove from Lambda parent Element's children array
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item result = editor.elmt_delete_child(
+    Item result = editor.dom_delete_child(
         {.element = dom_element_to_element(parent)},
         child_idx
     );

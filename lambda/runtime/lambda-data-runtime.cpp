@@ -2238,7 +2238,7 @@ Array* fn_group_by_keys(Item rows_item, Item keys_item, const char** aliases, in
             elmt_put(group, attr, group_key_part(entry_key, k, alias_count), active_runtime->pool);
         }
         for (int64_t m = 0; members && m < members->length; m++) {
-            // Group members are existing Item handles; copying handles preserves source values without re-shaping rows.
+            // S14.1.1/S2.6.4: group members are element content, so adjacent strings merge.
             group = rooted_group.get();
             array_append((Array*)group, members->items[m], active_runtime->pool, NULL);
         }

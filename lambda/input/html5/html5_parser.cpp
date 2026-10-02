@@ -818,7 +818,7 @@ void html5_flush_pending_text(Html5Parser* parser) {
     }
     log_debug("html5_flush_pending_text: created String with len=%zu", text_str->len);
     Item text_node = {.item = s2it(text_str)};
-    array_append((Array*)parent, text_node, parser->pool, parser->arena);
+    list_push_with_owner((List*)parent, text_node, parser->pool, parser->arena, parser->input->ui_mode);
 
     // Reset buffer for next text run
     stringbuf_reset(parser->text_buffer);
@@ -931,7 +931,7 @@ void html5_flush_foster_text(Html5Parser* parser) {
     } else {
         // Table not found, append
         log_debug("html5_flush_foster_text: appending '%s' to foster parent", text_str->chars);
-        array_append(foster_parent, text_node, parser->pool, parser->arena);
+        list_push_with_owner((List*)foster_parent, text_node, parser->pool, parser->arena, parser->input->ui_mode);
     }
 
     // Reset buffer
@@ -1191,7 +1191,7 @@ static void remove_element_child(Element* parent, Element* child) {
 static void reparent_children(Html5Parser* parser, Element* from, Element* to) {
     for (int64_t i = 0; i < from->length; i++) {
         Item child = from->items[i];
-        array_append((Array*)to, child, parser->pool, parser->arena);
+        list_push_with_owner((List*)to, child, parser->pool, parser->arena, parser->input->ui_mode);
     }
     from->length = 0;
 }

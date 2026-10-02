@@ -133,7 +133,10 @@ lambda validate [-s <schema>] [-f <format>] [options] <file>
 | | `--allow-unknown` | Accepted, but has no effect: map types are open, so undeclared fields always pass | `false` |
 | `-h` | `--help` | Show help | |
 
-**Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`/`.mk`/`.m`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
+**Input formats.** Auto-detected from the extension: `.json`, `.csv`, `.ini`, `.toml`, `.yaml`/`.yml`, `.xml`, `.md`/`.markdown`, `.rst`, `.html`/`.htm`, `.wiki`, `.adoc`/`.asciidoc`, `.1`–`.9` (man pages), `.eml`, `.ics`, `.vcf`, `.textile`/`.txtl`, `.mark`. Formats without an auto-detected extension take `-f`: `latex`, `rtf`, `pdf`, `text`.
+
+Mark auto-detection recognizes only `.mark` (D2.9.1); use `-f mark` for
+arbitrary filenames, including files without an extension (D2.9.2).
 
 **Built-in schemas** (no `-s` needed):
 
