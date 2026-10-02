@@ -798,10 +798,10 @@ capture are in `temp/interp_perf/` (`cpu.sh`, `prof.sh`, `agg.py`,
 | 1 Loop-head handoff | Implemented 2026-10-02 (§12.2), narrower than the §6 plan; Phase 1.1 census not done |
 | 2 Lazy boundary diagnostics | Implemented 2026-10-02 (§12.1) |
 | 3 Contract plan | Implemented 2026-10-02 as a tag fast path, not a stored plan (§12.1) |
-| 4 Planned call sites, direct entry | Not started |
-| 5 Walker hot path | Partial: binder-walk gate and one-block `var` scratch (§12.3) |
+| 4 Planned call sites, direct entry | Declined on the reprofile (§12.4): the layer it removes is 3–5% |
+| 5 Walker hot path | Implemented (§12.3, §12.4) |
 | 6 Static path writes | Partial: key array sized once; key-span form not used (§12.3) |
-| 7 Guarded scalar operations | Conditional on a reprofile |
+| 7 Guarded scalar operations | Implemented for int/float `+ - *` in the shared helper (§12.4) |
 
 ## 12. Implementation record (2026-10-02)
 
@@ -924,7 +924,44 @@ stress mode, and the log confirms each function handed off.
   arm, whose span form needs a compiler-resolved leaf contract T0 lacks.
 - Interpreter CPU against the Item 1 binary: `richards2` 0.85×,
   `deltablue2` 0.92×, `ack2` 0.97×, `nbody2` 0.99×.
-- Deferred: recording a procedure block's last value expression in the plan
-  (4.1% of `richards2`). `AstListNode` would need a new field, and nodes are
-  morphed in place between kinds, so a smaller node becoming a list would be
-  read past its allocation.
+- Recording a procedure block's last value expression in the plan was first
+  deferred over in-place node morphing; §12.4 checked that no node is morphed
+  into a list and landed it.
+
+### 12.4 Second round: walker and scalar operations
+
+Reprofiled after §12.2–12.3. Interpreter CPU against the §12.3 binary:
+`mandelbrot2` 0.73×, `ack2` 0.76×, `richards2` 0.87×, `matmul2` 0.88×,
+`deltablue2` 0.88×, `nbody2` 0.90×; the scalar fast path then adds
+`mandelbrot2` 0.90×, `matmul2` 0.88×, `nbody2` 0.80× (`ack2` neutral).
+
+- **Empty block value.** A procedural block with no value expression
+  allocated an empty list only to finish it as `null` (or the item-position
+  marker); it now returns that constant. One allocation per loop-body
+  iteration.
+- **Block shape in the plan.** `AstListNode` records the block's procedural
+  last value and counts (`plan_scan_proc_block`); `eval_content` falls back to
+  the live scan for a block the plan never reached. No code converts another
+  node kind into a list, and every list allocation is `sizeof(AstListNode)`.
+- **Planned local reads.** `AstIdentNode::interp_frame_slot_read`, set by the
+  capture-link pass, marks an occurrence that reads a plain frame slot of the
+  function it was planned in. `eval_expr` loads it directly when the node has
+  no const fact, the mode is `RUNTIME` and no view binding is active. The flag
+  sits in the node's tail padding (a `static_assert` pins the size) because
+  identifiers are also produced by morphing other nodes in place.
+- **Smaller `eval_expr` frame.** The member/index assignment arm and the N-D
+  index read moved to `noinline` helpers; their coordinate arrays and COW path
+  descriptor had made every node evaluation reserve 752 bytes beyond the
+  saved registers. It is now 192.
+- **Scalar operations (Item 7).** `fn_numeric_binary` answers int and float
+  `+ - *` of two same-kind operands before its null, complex, vector and
+  classification probes. These are exactly the classifier's int and float
+  cells, computed with the same helpers, so both tiers' boxed paths gain and
+  nothing is duplicated. Comparisons were left alone: their total order and
+  merged-poison rules are not a plain IEEE compare.
+- **Item 4 declined.** In `richards2`, `lambda_dynamic_call`'s signature
+  check and root span, `interp_call` and frame setup together are 3–5%; a
+  direct entry would need its own argument-rooting protocol for that.
+- Remaining large costs: member reads by name (`map_get_for_owner_keyed`,
+  ~10% of `richards2`, a runtime lookup that D8.4.1v2 keeps uncached) and
+  `eval_expr`'s own dispatch.

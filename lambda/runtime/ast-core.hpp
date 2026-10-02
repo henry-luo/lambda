@@ -941,7 +941,15 @@ typedef struct AstIdentNode : AstNode {
     // AST facts, never EvalContext-owned runtime values (D8.2.4).
     const AstNode* interp_capture_owner;
     uint16_t interp_capture_slot;
+    // The planner proved this occurrence reads a plain frame slot of the
+    // function it was planned in (not a capture, import, object field,
+    // binder, type or pattern name). Sits in tail padding: identifiers are
+    // also created by morphing other nodes in place, so the size must not grow.
+    bool interp_frame_slot_read;
 } AstIdentNode;
+// name, entry, capture owner, then slot + flag inside one padded word
+static_assert(sizeof(AstIdentNode) == sizeof(AstNode) + 4 * sizeof(void*),
+    "AstIdentNode must not grow past its pre-existing tail padding");
 
 typedef struct AstVarDeclNode : AstNode {
     union {

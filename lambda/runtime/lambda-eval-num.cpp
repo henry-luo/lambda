@@ -864,6 +864,25 @@ static Item fn_numeric_binary(Item item_a, Item item_b,
     TypeId type_a = get_type_id(item_a);
     TypeId type_b = get_type_id(item_b);
 
+    // The classifier's two hottest closed cells, answered before the null,
+    // complex, vector and classification probes: int (+,-,*) int stays int
+    // with its saturation, float (+,-,*) float is the IEEE result. Both are
+    // exactly what apply_classified_numeric computes for them.
+    if (numeric_op == LAMBDA_NUM_OP_ADD || numeric_op == LAMBDA_NUM_OP_SUB ||
+            numeric_op == LAMBDA_NUM_OP_MUL) {
+        if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
+            double left = item_a.get_double();
+            double right = item_b.get_double();
+            return push_d(numeric_op == LAMBDA_NUM_OP_ADD ? left + right
+                : numeric_op == LAMBDA_NUM_OP_SUB ? left - right : left * right);
+        }
+        if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
+            Item result;
+            if (int_binary_arithmetic_double(lambda_int_item_value(item_a),
+                    lambda_int_item_value(item_b), numeric_op, &result)) return result;
+        }
+    }
+
     if (type_a == LMD_TYPE_NULL || type_b == LMD_TYPE_NULL) return ItemNull;
     if (complex_op >= 0 &&
             (type_a == LMD_TYPE_COMPLEX || type_b == LMD_TYPE_COMPLEX)) {

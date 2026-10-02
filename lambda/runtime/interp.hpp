@@ -74,6 +74,10 @@ struct InterpState;
 // callers that need whole-script facts must use this traversal instead.
 typedef void (*InterpAstChildVisitor)(AstNode* child, void* ctx);
 void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx);
+// The value item of a block run procedurally (its last value expression, or
+// NULL) plus its value/declaration/statement counts; the plan pass records it.
+AstNode* interp_proc_block_last_value(struct AstListNode* list_node,
+    int* value_count, int* decl_count, int* stam_count);
 
 // Slot window layout, matching FnFramePlan (ast-core.hpp):
 //   [ 0 .. param_count )                          parameters
