@@ -505,7 +505,10 @@ typedef struct {
 } DlFillRadialGradient;
 
 typedef struct {
-    void* resource_owner;    // optional ImageSurface* owner for generation checks
+    // Owning surface, by handle: a retained list checks liveness through the
+    // slot table instead of reading a surface that may be gone. Null when the
+    // pixels have no registered owner (then the item is never retained).
+    lam::Handle<ImageSurface> resource;
     uint64_t resource_generation;
     const uint32_t* pixels;  // borrowed — image lifetime must exceed display list
     int src_w, src_h, src_stride;
@@ -558,7 +561,8 @@ typedef struct {
 
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
 typedef struct {
-    void* src_surface;       // ImageSurface* — borrowed
+    ImageSurface* src_surface;           // borrowed for replay
+    lam::Handle<ImageSurface> src_resource;  // liveness for retained replay; may be null
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
@@ -660,7 +664,8 @@ typedef struct {
 
 // Webview layer placeholder: records the layout rect and clip for post-composite blit.
 typedef struct {
-    void* surface;           // ImageSurface* — borrowed, lifetime managed by WebViewProp
+    ImageSurface* surface;           // borrowed for replay, lifetime managed by WebViewProp
+    lam::Handle<ImageSurface> resource;  // liveness for retained replay; may be null
     uint64_t surface_generation;
     float dst_x, dst_y, dst_w, dst_h;
     Bound clip;
@@ -824,7 +829,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
-                   void* resource_owner = nullptr,
+                   ImageSurface* resource_owner = nullptr,
                    uint64_t resource_generation = 0);
 
 // Record a glyph draw command.  bitmap buffer is borrowed (must outlive display list).
@@ -844,7 +849,7 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
                           uint32_t color, const Bound* clip,
                           ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 
-void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
+void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
                             float dst_x, float dst_y, float dst_w, float dst_h,
                             int scale_mode, const Bound* clip,
                             ClipShape** clip_shapes = nullptr, int clip_depth = 0,
@@ -891,7 +896,7 @@ void dl_video_placeholder(DisplayList* dl, void* video,
                           uint64_t video_generation = 0);
 
 // Webview layer placeholder (rect + clip only; actual blit is post-composite)
-void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
+void dl_webview_layer_placeholder(DisplayList* dl, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation = 0);
@@ -1158,7 +1163,7 @@ typedef struct {
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
-    void* resource_owner;   // optional ImageSurface* owner for generation checks
+    ImageSurface* resource_owner;   // optional owner for generation checks
 } PaintDrawImage;
 
 typedef struct {
@@ -1198,7 +1203,7 @@ typedef struct {
 } PaintVideoPlaceholder;
 
 typedef struct {
-    void* surface;           // ImageSurface* — borrowed
+    ImageSurface* surface;   // borrowed
     float dst_x, dst_y, dst_w, dst_h;
     bool has_clip;
     Bound clip;
@@ -1290,7 +1295,7 @@ typedef struct {
 } PaintFillSurfaceRect;
 
 typedef struct {
-    void* src_surface;       // ImageSurface* — borrowed
+    ImageSurface* src_surface;   // borrowed
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
@@ -1482,7 +1487,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       int src_w, int src_h, int src_stride,
                       float dst_x, float dst_y, float dst_w, float dst_h,
                       uint8_t opacity, const RdtMatrix* transform,
-                      void* resource_owner);
+                      ImageSurface* resource_owner);
 void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
                                float dst_x, float dst_y,
                                float dst_w, float dst_h,
@@ -1497,7 +1502,7 @@ void paint_video_placeholder(PaintList* pl, void* video,
                              float dst_x, float dst_y, float dst_w, float dst_h,
                              int object_fit, const Bound* clip,
                              uint64_t video_generation);
-void paint_webview_layer_placeholder(PaintList* pl, void* surface,
+void paint_webview_layer_placeholder(PaintList* pl, ImageSurface* surface,
                                      float dst_x, float dst_y, float dst_w, float dst_h,
                                      const Bound* clip,
                                      uint64_t surface_generation);
@@ -1532,7 +1537,7 @@ void paint_outer_shadow(PaintList* pl,
 void paint_fill_surface_rect(PaintList* pl, float x, float y, float w, float h,
                              uint32_t color, const Bound* clip,
                              ClipShape** clip_shapes, int clip_depth);
-void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
+void paint_blit_surface_scaled(PaintList* pl, ImageSurface* src_surface,
                                float dst_x, float dst_y, float dst_w, float dst_h,
                                int scale_mode, const Bound* clip,
                                ClipShape** clip_shapes, int clip_depth,
@@ -2826,7 +2831,7 @@ static inline void paint_record_video_placeholder(PaintRecordTarget* target, con
 }
 
 static inline void paint_record_webview_layer_placeholder(PaintRecordTarget* target,
-                                                         const char* op, void* surface,
+                                                         const char* op, ImageSurface* surface,
                                                          float dst_x, float dst_y,
                                                          float dst_w, float dst_h,
                                                          const Bound* clip,
@@ -3054,7 +3059,7 @@ void rc_video_placeholder(RenderContext* rdcon, void* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation);
-void rc_webview_layer_placeholder(RenderContext* rdcon, void* surface,
+void rc_webview_layer_placeholder(RenderContext* rdcon, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation);

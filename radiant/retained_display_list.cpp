@@ -408,8 +408,11 @@ static bool retained_dl_dirty_rect_intersects_bound(const DirtyRect* dirty,
     return view_geometry_bounds_intersect(visual_bound, dirty_bound);
 }
 
-static bool retained_dl_surface_generation_current(void* surface_ptr, uint64_t generation) {
-    ImageSurface* surface = (ImageSurface*)surface_ptr;
+// Resolves the handle through the slot table first, so a destroyed surface is
+// detected without reading its memory.
+static bool retained_dl_surface_generation_current(lam::Handle<ImageSurface> resource,
+                                                   uint64_t generation) {
+    ImageSurface* surface = image_surface_lookup(resource);
     return surface && generation != 0 && surface->generation == generation;
 }
 
@@ -427,7 +430,7 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
         switch (item->op) {
             case DL_DRAW_IMAGE: {
                 if (item->draw_image.pixels && !retained_dl_surface_generation_current(
-                        item->draw_image.resource_owner, item->draw_image.resource_generation)) return false;
+                        item->draw_image.resource, item->draw_image.resource_generation)) return false;
                 break;
             }
             case DL_DRAW_GLYPH:
@@ -435,7 +438,7 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
                         item->draw_glyph.resource_generation, current_glyph_generation)) return false;
                 break;
             case DL_BLIT_SURFACE_SCALED: {
-                if (!retained_dl_surface_generation_current(item->blit_surface_scaled.src_surface,
+                if (!retained_dl_surface_generation_current(item->blit_surface_scaled.src_resource,
                         item->blit_surface_scaled.src_generation)) return false;
                 break;
             }
@@ -444,7 +447,7 @@ bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fra
                         item->video_placeholder.video_generation, current_video_generation)) return false;
                 break;
             case DL_WEBVIEW_LAYER_PLACEHOLDER: {
-                if (!retained_dl_surface_generation_current(item->webview_layer_placeholder.surface,
+                if (!retained_dl_surface_generation_current(item->webview_layer_placeholder.resource,
                         item->webview_layer_placeholder.surface_generation)) return false;
                 break;
             }
