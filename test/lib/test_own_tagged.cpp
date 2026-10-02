@@ -282,3 +282,126 @@ TEST(MemoryKinds, ZeroFilledStructIsNullAndCopiesBitwise) {
     EXPECT_TRUE(copy.image == node.image);
     EXPECT_FALSE(copy.image.is_null());
 }
+
+// ---------------------------------------------------------------------------
+// Slot table, typed pool, always-on checks, saturating conversion
+// ---------------------------------------------------------------------------
+
+#include "../../lib/slot_table.hpp"
+#include "../../lib/typed_pool.hpp"
+#include "../../lib/check.h"
+#include "../../lib/math_utils.h"
+
+TEST(SlotTable, LookupFollowsTargetUntilRelease) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    lam::SlotTable<KindProp> table;
+    ASSERT_TRUE(table.init(pool));
+    KindProp a = {1.0f};
+    KindProp b = {2.0f};
+
+    lam::Handle<KindProp> ha = table.insert(&a);
+    lam::Handle<KindProp> copy = ha;
+    ASSERT_FALSE(ha.is_null());
+    EXPECT_EQ(table.lookup(ha), &a);
+    EXPECT_EQ(table.lookup(copy), &a);
+
+    EXPECT_TRUE(table.release(ha));
+    EXPECT_EQ(table.lookup(ha), nullptr);
+    EXPECT_EQ(table.lookup(copy), nullptr);    // every copy goes stale at once
+    EXPECT_FALSE(table.release(copy));
+
+    lam::Handle<KindProp> hb = table.insert(&b);
+    EXPECT_EQ(hb.index, ha.index);              // the slot is reused
+    EXPECT_NE(hb.gen, ha.gen);                  // under a new generation
+    EXPECT_EQ(table.lookup(hb), &b);
+    EXPECT_EQ(table.lookup(ha), nullptr);
+    EXPECT_EQ(table.live, 1u);
+
+    table.destroy();
+    pool_destroy(pool);
+}
+
+TEST(SlotTable, NullAndOutOfRangeHandlesLookUpNull) {
+    Pool* pool = pool_create();
+    lam::SlotTable<KindProp> table;
+    ASSERT_TRUE(table.init(pool));
+    EXPECT_EQ(table.lookup(lam::Handle<KindProp>{0, 0}), nullptr);
+    EXPECT_EQ(table.lookup(lam::Handle<KindProp>{1000, 1}), nullptr);
+    EXPECT_TRUE(table.insert(nullptr).is_null());
+    table.destroy();
+    pool_destroy(pool);
+}
+
+TEST(SlotTable, GrowsPastInitialCapacity) {
+    Pool* pool = pool_create();
+    lam::SlotTable<KindProp> table;
+    ASSERT_TRUE(table.init(pool));
+    KindProp props[100];
+    lam::Handle<KindProp> handles[100];
+    for (int i = 0; i < 100; i++) {
+        props[i].width = (float)i;
+        handles[i] = table.insert(&props[i]);
+        ASSERT_FALSE(handles[i].is_null());
+    }
+    for (int i = 0; i < 100; i++) EXPECT_EQ(table.lookup(handles[i]), &props[i]);
+    table.destroy();
+    pool_destroy(pool);
+}
+
+TEST(SlotTable, SlotRetiresInsteadOfWrappingGeneration) {
+    Pool* pool = pool_create();
+    lam::SlotTable<KindProp> table;
+    ASSERT_TRUE(table.init(pool));
+    KindProp a = {1.0f};
+    lam::Handle<KindProp> h = table.insert(&a);
+    table.slots[h.index].gen = UINT32_MAX - 1;   // jump to the end of the generation range
+    h.gen = UINT32_MAX - 1;
+    EXPECT_TRUE(table.release(h));
+    EXPECT_EQ(table.free_head, 0u);              // retired, not recycled
+    lam::Handle<KindProp> next = table.insert(&a);
+    EXPECT_NE(next.index, h.index);
+    table.destroy();
+    pool_destroy(pool);
+}
+
+struct TypedPoolNode { void* link; int value; double payload; };
+
+TEST(TypedPool, ReleasedSlotIsReusedOnlyForTheSameType) {
+    Pool* pool = pool_create();
+    lam::TypedPool<TypedPoolNode> nodes;
+    nodes.init(pool);
+    TypedPoolNode* a = nodes.alloc_zero();
+    ASSERT_NE(a, nullptr);
+    a->value = 7;
+    nodes.release(a);
+    EXPECT_EQ(nodes.live, 0u);
+    EXPECT_EQ(nodes.retained, 1u);
+
+    TypedPoolNode* b = nodes.alloc_zero();
+    EXPECT_EQ(b, a);           // same slot, still a TypedPoolNode
+    EXPECT_EQ(b->value, 0);    // handed back zeroed
+    EXPECT_EQ(b->link, nullptr);
+    EXPECT_EQ(nodes.retained, 0u);
+    pool_destroy(pool);
+}
+
+TEST(CheckAndConversion, SaturatingFloatToInt) {
+    EXPECT_EQ(math_float_to_int_sat(3.9f), 3);
+    EXPECT_EQ(math_float_to_int_sat(-3.9f), -3);
+    EXPECT_EQ(math_float_to_int_sat(NAN), 0);
+    EXPECT_EQ(math_float_to_int_sat(INFINITY), INT32_MAX);
+    EXPECT_EQ(math_float_to_int_sat(-INFINITY), INT32_MIN);
+    EXPECT_EQ(math_float_to_int_sat(1e30f), INT32_MAX);
+    EXPECT_EQ(math_float_to_int_sat(-1e30f), INT32_MIN);
+    EXPECT_EQ(math_floor_to_int_sat(-0.5f), -1);
+    EXPECT_EQ(math_ceil_to_int_sat(0.2f), 1);
+    EXPECT_EQ(math_round_to_int_sat(2.5f), 3);
+    EXPECT_EQ(math_round_to_int_sat(NAN), 0);
+}
+
+TEST(CheckAndConversion, FailedCheckAbortsInEveryBuild) {
+    int value = 1;
+    LAM_CHECK(value == 1);
+    EXPECT_DEATH(LAM_CHECK(value == 2), "");
+}

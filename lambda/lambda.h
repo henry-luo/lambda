@@ -2924,6 +2924,22 @@ extern "C" {
     // legacy ABI remains a NULL-env wrapper for every existing boundary.
     Item lambda_type_check_env(Item value, Type* expected, Type** env,
         const char* boundary);
+    // A boundary label that is formatted only if the check fails. The T0
+    // walker checks every declared binding, assignment and argument, and
+    // formatting the label eagerly cost it 15-29% of its time. `text` is used
+    // as-is when `format` is NULL; `subject`/`owner`/`index` belong to `format`.
+    typedef struct LambdaBoundary LambdaBoundary;
+    typedef void (*LambdaBoundaryFormat)(const LambdaBoundary* boundary,
+        char* out, size_t capacity);
+    struct LambdaBoundary {
+        const char* text;
+        LambdaBoundaryFormat format;
+        const void* subject;
+        const void* owner;
+        int32_t index;
+    };
+    Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
+        const LambdaBoundary* boundary);
     // Exact identity guard for a first-class type argument.  This is not
     // subtyping: raw variants are selected only by their immutable key.
     Bool lambda_type_value_is_exact(Item value, Type* expected);

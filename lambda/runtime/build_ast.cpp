@@ -551,15 +551,11 @@ SysFuncInfo* get_sys_func_for_method(StrView* method_name, int method_arg_count,
 
 
 Type* unwrap_simple_type_type(Type* type) {
-    while (type && type->type_id == LMD_TYPE_TYPE && !is_global_simple_type(type) &&
-            type->kind == TYPE_KIND_SIMPLE) {
-        // Global meta-types use the compact Type prefix. Only a compiler-built
-        // TypeType owns the extended `kind` and nested-type fields below.
-        TypeType* type_type = (TypeType*)type;
-        if (!type_type->type) break;
-        type = type_type->type;
-    }
-    return type;
+    // Same walk as the header's: under `type_id == LMD_TYPE_TYPE`, the only
+    // compact globals are the four meta-types, so the full
+    // is_global_simple_type chain (~35 compares per step) bought nothing and
+    // was ~8% of T0 time on typed loops.
+    return type_field_unwrap_simple_decl(type);
 }
 
 static bool type_is_sized_integer(Type* type) {
@@ -5703,9 +5699,13 @@ void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* decl
     param_type->is_var_param = was_var_param;
     param_type->default_value = default_value;
 
-    Type* parameter_contract = parameter_contract_for_declared(tp, declared,
-        was_optional, default_value);
-    set_param_contract(param_type, parameter_contract, true);
+    apply_param_contract(param_type, parameter_contract_for_declared(tp, declared,
+        was_optional, default_value), true);
+}
+
+void apply_param_contract(TypeParam* param_type, Type* parameter_contract,
+        bool is_explicit) {
+    set_param_contract(param_type, parameter_contract, is_explicit);
 
     // For complex types (TypeBinary, TypeUnary) and named map/object types,
     // store pointer to full type so downstream code can reach the extended

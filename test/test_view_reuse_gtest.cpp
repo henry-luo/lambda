@@ -955,3 +955,23 @@ TEST_F(StyleEpochTest, RecascadeRetiresPseudoTreesAfterBorrowersRebind) {
     pool_get_detailed_stats(doc.document_pool, &stable);
     EXPECT_LE(stable.live_bytes, warm.live_bytes + 4096u);
 }
+
+// Every view-tree allocator is registered under its document's context, so
+// the view tree is a subtree of the document in the ownership tree.
+TEST(ViewTreeOwnershipTest, AllocatorsRegisterUnderTheOwnerContext) {
+    MemContext* doc_ctx = mem_context_create(mem_context_root(), MEM_ROLE_NODE, "test.document");
+    ASSERT_NE(doc_ctx, nullptr);
+    ViewTree tree = {};
+    tree.init(doc_ctx);
+    ASSERT_NE(tree.prop_pool, nullptr);
+    EXPECT_EQ(mem_node_owner((MemNode*)pool_get_mem_node(tree.prop_pool)), doc_ctx);
+    Arena* arenas[] = {tree.canonical_prop_arena, tree.scratch_arena, tree.layout_pass_arena,
+                       tree.render_scratch_arena, tree.display_list_arena};
+    for (Arena* arena : arenas) {
+        ASSERT_NE(arena, nullptr);
+        EXPECT_EQ(mem_node_owner((MemNode*)arena_get_mem_node(arena)), doc_ctx);
+    }
+    tree.destroy();
+    EXPECT_EQ(mem_context_live_count(doc_ctx), 0u);
+    mem_context_destroy(doc_ctx);
+}

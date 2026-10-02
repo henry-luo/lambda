@@ -765,7 +765,7 @@ void log_layout_timing_summary() {
     }
 }
 
-void view_pool_init(ViewTree* tree);
+void view_pool_init(ViewTree* tree, MemContext* owner);
 char* read_text_file(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, CssEnum display);
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
@@ -5211,15 +5211,9 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     }
     // Reflow callers either keep the current pool or pre-reset it for retained
     if (init_view_pool && !doc->incremental_layout) {
-        view_pool_init(doc->view_tree);
-        if (doc->services.mem_ctx && doc->view_tree->prop_pool) {
-            uint32_t did = mem_context_doc_id((MemContext*)doc->services.mem_ctx);
-            mem_node_set_doc((MemNode*)pool_get_mem_node(doc->view_tree->prop_pool), did);
-            if (doc->view_tree->canonical_prop_arena)
-                mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->canonical_prop_arena), did);
-            if (doc->view_tree->scratch_arena)
-                mem_node_set_doc((MemNode*)arena_get_mem_node(doc->view_tree->scratch_arena), did);
-        }
+        // registering under the document context attributes the view tree's
+        // allocators to the document
+        view_pool_init(doc->view_tree, (MemContext*)doc->services.mem_ctx);
     }
 
     DomNode* root_node = doc->root;

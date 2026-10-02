@@ -6,6 +6,14 @@
 #include "../lib/arena.h"
 #include <string.h>
 
+// Tests link only the surface registry, not the full image teardown; their
+// surfaces own no pixels, so releasing the slot and the struct is complete.
+static void free_test_surface(ImageSurface* surface) {
+    image_surface_release_slot(surface);
+    mem_free(surface);
+}
+
+
 void test_display_list_stub_set_path_bounds(const RdtPath* path,
                                             bool has_bounds,
                                             float left, float top,
@@ -299,18 +307,20 @@ TEST_F(DisplayListTest, RadialGradientCopiesStopsAndTracksTransformedBounds) {
 
 TEST_F(DisplayListTest, DrawImageStoresGenerationOpacityAndTransformedBounds) {
     uint32_t pixels[4] = {0, 1, 2, 3};
-    ImageSurface owner = {};
-    owner.generation = 42;
+    ImageSurface* owner = image_surface_alloc();
+    ASSERT_NE(owner, nullptr);
+    owner->generation = 42;
     RdtMatrix transform = rdt_matrix_translate(5.0f, -2.0f);
 
     dl_draw_image(&dl, pixels, 2, 2, 2, 10.0f, 20.0f, 30.0f, 40.0f,
-                  123, &transform, &owner, owner.generation);
+                  123, &transform, owner, owner->generation);
 
     ASSERT_EQ(dl.size(), 1u);
     const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_DRAW_IMAGE);
     EXPECT_EQ(item->draw_image.pixels, pixels);
-    EXPECT_EQ(item->draw_image.resource_owner, &owner);
+    EXPECT_TRUE(item->draw_image.resource == owner->self);
+    EXPECT_EQ(image_surface_lookup(item->draw_image.resource), owner);
     EXPECT_EQ(item->draw_image.resource_generation, 42u);
     EXPECT_EQ(item->draw_image.opacity, 123);
     EXPECT_TRUE(item->draw_image.has_transform);
@@ -318,6 +328,7 @@ TEST_F(DisplayListTest, DrawImageStoresGenerationOpacityAndTransformedBounds) {
     EXPECT_FLOAT_EQ(item->bounds[1], 17.0f);
     EXPECT_FLOAT_EQ(item->bounds[2], 32.0f);
     EXPECT_FLOAT_EQ(item->bounds[3], 42.0f);
+    free_test_surface(owner);
 }
 
 TEST_F(DisplayListTest, DrawGlyphIntersectsRecordedBoundsWithClip) {
@@ -738,7 +749,7 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
         EXPECT_FLOAT_EQ(x.dst_x, y.dst_x); EXPECT_FLOAT_EQ(x.dst_y, y.dst_y);
         EXPECT_FLOAT_EQ(x.dst_w, y.dst_w); EXPECT_FLOAT_EQ(x.dst_h, y.dst_h);
         EXPECT_EQ(x.opacity, y.opacity);
-        EXPECT_EQ(x.resource_owner, y.resource_owner);
+        EXPECT_TRUE(x.resource == y.resource);
         EXPECT_EQ(x.resource_generation, y.resource_generation);
         EXPECT_EQ(x.has_transform, y.has_transform);
         if (x.has_transform) expect_matrix_eq(x.transform, y.transform);

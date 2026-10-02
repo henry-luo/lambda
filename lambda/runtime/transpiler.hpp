@@ -331,6 +331,9 @@ typedef struct InterpSatelliteImage {
     LambdaModuleLayout* module_layout;
     const AstFuncNode* target;
     void* target_entry;
+    // D8.1.1v14: a loop continuation's synthesized nodes, retired with the
+    // image because the published Function names its definition
+    Pool* continuation_pool;
     uint32_t member_count;
     const AstFuncNode* members[INTERP_SATELLITE_CLUSTER_CAP];
     void* member_entries[INTERP_SATELLITE_CLUSTER_CAP];

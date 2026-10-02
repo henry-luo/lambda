@@ -118,7 +118,7 @@ void rc_video_placeholder(RenderContext* rdcon, void* video,
                                    object_fit, clip, video_generation);
 }
 
-void rc_webview_layer_placeholder(RenderContext* rdcon, void* surface,
+void rc_webview_layer_placeholder(RenderContext* rdcon, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation) {
