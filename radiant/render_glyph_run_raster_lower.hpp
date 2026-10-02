@@ -5,6 +5,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "../lib/str.h"
+#include "../lib/utf.h"
 #include <math.h>
 #include <string.h>
 
@@ -48,7 +49,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
             continue;
         }
 
-        bool emoji_presentation = false;
+        bool emoji_presentation = utf_is_emoji_presentation_default(codepoint);
         if (cursor < end) {
             uint32_t peek_cp = 0;
             int peek_bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &peek_cp);
@@ -71,7 +72,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
         int glyph_x = (int)lroundf(x + (float)glyph->bitmap.bearing_x); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
         int glyph_y = (int)lroundf(run->baseline_y - (float)glyph->bitmap.bearing_y); // INT_CAST_OK: glyph bitmap destination is an integer pixel coordinate.
         dl_draw_glyph(dl, &glyph->bitmap, glyph_x, glyph_y,
-                      run->color, emoji_presentation, nullptr,
+                      run->color, glyph->bitmap.pixel_mode == GLYPH_PIXEL_BGRA, nullptr,
                       run->has_transform ? &run->transform : nullptr,
                       0);
         x += glyph->advance_x;

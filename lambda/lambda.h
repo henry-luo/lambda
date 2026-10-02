@@ -2493,6 +2493,8 @@ typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
 // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
 Element* elmt_fill_items(Element *elmt, const Item* values, int value_count);
+// Retain a field written to an arena-backed UI element across GC cycles.
+bool ui_prepare_element_field(Item* value);
 
 typedef struct Url Url;
 typedef struct Pool Pool;

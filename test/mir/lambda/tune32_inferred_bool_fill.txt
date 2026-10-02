@@ -1,0 +1,8 @@
+4 null
+0 null
+[false, false, false, false] null null
+[] null null
+[true, true] [false, true] [true, true]
+true error
+[7, true]
+x null

@@ -1,11 +1,11 @@
 /**
  * Lambda Unified Font Module — COLR v0 + CPAL Color Glyph Tables
  *
- * Parses COLR v0 (layered color glyphs) and CPAL (color palette)
+ * Parses COLR v0 records (including compatibility records in v1) and CPAL
  * tables. Each color glyph is decomposed into an ordered list of
  * (glyph_id, palette_color) layers rendered bottom-to-top.
  *
- * COLR v1 (gradients, transforms, compositing) is out of scope.
+ * COLR v1 paint trees (gradients, transforms, compositing) are out of scope.
  *
  * Copyright (c) 2026 Lambda Script Project
  */
@@ -34,7 +34,7 @@ typedef struct ColrGlyph {
     int        num_layers;
 } ColrGlyph;
 
-// check if a font has COLR v0 + CPAL tables
+// check if a font has COLR + CPAL tables
 bool colr_has_table(FontTables* tables);
 
 // check if a specific glyph has COLR v0 layers.

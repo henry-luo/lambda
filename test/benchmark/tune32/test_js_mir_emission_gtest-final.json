@@ -1,0 +1,384 @@
+{
+  "tests": 32,
+  "failures": 0,
+  "disabled": 0,
+  "errors": 0,
+  "timestamp": "2026-10-02T08:52:52Z",
+  "time": "5.288s",
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "JsMirEmissionCorpus",
+      "tests": 1,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "timestamp": "2026-10-02T08:52:52Z",
+      "time": "0s",
+      "testsuite": [
+        {
+          "name": "IsNotEmpty",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 46,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:52Z",
+          "time": "0s",
+          "classname": "JsMirEmissionCorpus"
+        }
+      ]
+    },
+    {
+      "name": "Fixtures\/JsMirEmissionTest",
+      "tests": 31,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "timestamp": "2026-10-02T08:52:52Z",
+      "time": "5.288s",
+      "testsuite": [
+        {
+          "name": "MatchesMirCheck\/error_lane_dynamic_catch",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 27-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 E0-53 C0-34 0A-00 00-00 2E-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 40-C2 C0-34 0A-00 00-00 18-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:52Z",
+          "time": "0.16s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/numeric_inference_call",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 E0-53 C0-34 0A-00 00-00 2C-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 6E-75 6D-65 72-69 63-5F 69-6E 66-65 72-65 6E-63 65-5F 63-61 6C-6C 00-16>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:52Z",
+          "time": "0.143s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/tune6_exact_collection",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 E0-53 C0-34 0A-00 00-00 2C-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 74-75 6E-65 36-5F 65-78 61-63 74-5F 63-6F 6C-6C 65-63 74-69 6F-6E 00-16>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:53Z",
+          "time": "0.491s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/error_lane_direct_throw",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 26-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 E0-53 C0-34 0A-00 00-00 2D-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 A0-C3 C0-34 0A-00 00-00 17-00 00-00 00-00 00-00 19-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:53Z",
+          "time": "0.125s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/runtime_for_in_roots",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 E0-53 C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 72-75 6E-74 69-6D 65-5F 66-6F 72-5F 69-6E 5F-72 6F-6F 74-73 00-00 00-14>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:53Z",
+          "time": "0.167s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/module_var_bulk_init",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 E0-53 C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 6D-6F 64-75 6C-65 5F-76 61-72 5F-62 75-6C 6B-5F 69-6E 69-74 00-00 00-14>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:53Z",
+          "time": "0.174s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/tune5_property_lanes",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 E0-53 C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 74-75 6E-65 35-5F 70-72 6F-70 65-72 74-79 5F-6C 61-6E 65-73 00-00 00-14>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:54Z",
+          "time": "0.168s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/error_lane_generator_resume",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 00-C2 00-35 0A-00 00-00 31-00 00-00 00-00 00-00 38-00 00-00 00-00 00-80 E0-C4 C0-34 0A-00 00-00 1B-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:54Z",
+          "time": "0.155s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/error_lane_raw_scalar",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 24-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 30-58 C0-34 0A-00 00-00 2B-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 65-72 72-6F 72-5F 6C-61 6E-65 5F-72 61-77 5F-73 63-61 6C-61 72-00 00-15>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:54Z",
+          "time": "0.162s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/result47_bigint_boxed_adapter",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 2C-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 80-C2 00-35 0A-00 00-00 33-00 00-00 00-00 00-00 38-00 00-00 00-00 00-80 80-C3 C0-34 0A-00 00-00 1D-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:54Z",
+          "time": "0.156s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/js_number_item_policy",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 24-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 70-5A C0-34 0A-00 00-00 2B-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 6A-73 5F-6E 75-6D 62-65 72-5F 69-74 65-6D 5F-70 6F-6C 69-63 79-00 00-15>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:54Z",
+          "time": "0.141s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/shared_loop_effects",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 22-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 70-5A C0-34 0A-00 00-00 29-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 73-68 61-72 65-64 5F-6C 6F-6F 70-5F 65-66 66-65 63-74 73-00 00-00 00-13>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:54Z",
+          "time": "0.151s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/runtime_regex_result_roots",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 29-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 80-C3 00-35 0A-00 00-00 30-00 00-00 00-00 00-00 38-00 00-00 00-00 00-80 80-C6 C0-34 0A-00 00-00 1A-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:54Z",
+          "time": "0.159s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/native_index_plan",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 20-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 F0-5B C0-34 0A-00 00-00 27-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 6E-61 74-69 76-65 5F-69 6E-64 65-78 5F-70 6C-61 6E-00 00-00 00-00 00-11>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.226s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/tune4_call_construct",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 F0-5B C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 74-75 6E-65 34-5F 63-61 6C-6C 5F-63 6F-6E 73-74 72-75 63-74 00-00 00-14>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.152s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/arg_frame_roots",
+          "value_param": "72-byte object <80-C7 C0-34 0A-00 00-00 1E-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 B0-53 C0-34 0A-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 61-72 67-5F 66-72 61-6D 65-5F 72-6F 6F-74 73-00 00-00 00-00 00-00 00-0F>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.139s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/native_number_plan",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 21-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 28-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 6E-61 74-69 76-65 5F-6E 75-6D 62-65 72-5F 70-6C 61-6E 00-00 00-00 00-12>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.152s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/class_field_arrow_this",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 2C-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 63-6C 61-73 73-5F 66-69 65-6C 64-5F 61-72 72-6F 77-5F 74-68 69-73 00-16>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.146s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/runtime_global_string_cache_roots",
+          "value_param": "72-byte object <40-C5 00-35 0A-00 00-00 30-00 00-00 00-00 00-00 38-00 00-00 00-00 00-80 80-C5 00-35 0A-00 00-00 37-00 00-00 00-00 00-00 38-00 00-00 00-00 00-80 B0-53 C0-34 0A-00 00-00 21-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.18s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/error_lane_clean_entry",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 2C-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 65-72 72-6F 72-5F 6C-61 6E-65 5F-63 6C-65 61-6E 5F-65 6E-74 72-79 00-16>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.133s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/shared_access_guards",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 73-68 61-72 65-64 5F-61 63-63 65-73 73-5F 67-75 61-72 64-73 00-00 00-14>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.189s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/tune12_numeric_admission",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 27-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 2E-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 40-C9 C0-34 0A-00 00-00 18-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.144s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/native_field_plan",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 20-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 27-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 6E-61 74-69 76-65 5F-66 69-65 6C-64 5F-70 6C-61 6E-00 00-00 00-00 00-11>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.206s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/dynamic_adapter_span",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 64-79 6E-61 6D-69 63-5F 61-64 61-70 74-65 72-5F 73-70 61-6E 00-00 00-14>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.193s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/result29_indexed_guards",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 26-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-5E C0-34 0A-00 00-00 2D-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 40-CA C0-34 0A-00 00-00 17-00 00-00 00-00 00-00 19-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.174s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/hoisted_modvar_write_through",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 2B-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 C0-C7 00-35 0A-00 00-00 32-00 00-00 00-00 00-00 38-00 00-00 00-00 00-80 40-CA C0-34 0A-00 00-00 1C-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.129s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/native_completion_ownership",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 2A-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 C0-C7 00-35 0A-00 00-00 31-00 00-00 00-00 00-00 38-00 00-00 00-00 00-80 40-CA C0-34 0A-00 00-00 1B-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.151s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/tune12_array_access",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 22-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 70-66 C0-34 0A-00 00-00 29-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 74-75 6E-65 31-32 5F-61 72-72 61-79 5F-61 63-63 65-73 73-00 00-00 00-13>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.168s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/tune12_tdz_native_frame",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 26-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 70-66 C0-34 0A-00 00-00 2D-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 00-CC C0-34 0A-00 00-00 17-00 00-00 00-00 00-00 19-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.154s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/error_lane_direct_call",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 70-66 C0-34 0A-00 00-00 2C-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 65-72 72-6F 72-5F 6C-61 6E-65 5F-64 69-72 65-63 74-5F 63-61 6C-6C 00-16>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.12s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        },
+        {
+          "name": "MatchesMirCheck\/dynamic_call_invoke_entry",
+          "value_param": "72-byte object <B0-53 C0-34 0A-00 00-00 28-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 70-66 C0-34 0A-00 00-00 2F-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 C0-CC C0-34 0A-00 00-00 19-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80>",
+          "file": "..\/..\/test\/test_js_mir_emission_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.162s",
+          "classname": "Fixtures\/JsMirEmissionTest"
+        }
+      ]
+    }
+  ]
+}

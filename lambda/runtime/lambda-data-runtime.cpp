@@ -3232,28 +3232,30 @@ static RootVector* ui_attribute_roots(void) {
     return &state->values;
 }
 
-static bool ui_set_element_fields(Element* elmt, Item* values, int count) {
-    if (count == 0) return true;
+bool ui_prepare_element_field(Item* value) {
+    if (!value || !context || !context->arena) return false;
     RootVector* retained = ui_attribute_roots();
     if (!retained) return false;
-    for (int i = 0; i < count; i++) {
-        Item value = values[i];
-        TypeId type = get_type_id(value);
-        if (type == LMD_TYPE_STRING) {
-            // UI elements live in an arena that GC does not scan. Keep text
-            // attributes with that arena, including PDF SVG path data.
-            String* source = value.get_safe_string();
-            if (source) {
-                String* held = string_from_strview_arena(
-                    strview_init(source->chars, source->len), context->arena);
-                if (!held) return false;
-                values[i] = {.item = s2it(held)};
-            }
-        } else if (type > LMD_TYPE_INT && !root_vector_push(retained, value)) {
-            // Non-text attributes such as component path lists can point
-            // into the GC heap and must remain live with the arena tree.
-            return false;
+    TypeId type = get_type_id(*value);
+    if (type == LMD_TYPE_STRING) {
+        // Arena elements cannot keep GC text live through their attribute data.
+        String* source = value->get_safe_string();
+        if (source) {
+            String* held = string_from_strview_arena(
+                strview_init(source->chars, source->len), context->arena);
+            if (!held) return false;
+            *value = {.item = s2it(held)};
         }
+    } else if (type > LMD_TYPE_INT && !root_vector_push(retained, *value)) {
+        // Non-text attributes can still point into the GC heap.
+        return false;
+    }
+    return true;
+}
+
+static bool ui_set_element_fields(Element* elmt, Item* values, int count) {
+    for (int i = 0; i < count; i++) {
+        if (!ui_prepare_element_field(&values[i])) return false;
     }
     set_fields_items((TypeMap*)elmt->type, elmt->data, values, count);
     return true;

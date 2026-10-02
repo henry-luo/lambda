@@ -835,10 +835,13 @@ static void validate_view_state_registry(DocState* state,
             case VIEW_STATE_BASE:
                 break;
             case VIEW_STATE_SCROLL:
-                if (view_state->data.scroll.max_x < 0.0f || view_state->data.scroll.max_y < 0.0f) {
-                    report_fail(report, "view scroll state has negative max");
+                // reverse flex and vertical writing modes can scroll below zero.
+                if (view_state->data.scroll.max_x < view_state->data.scroll.min_x ||
+                    view_state->data.scroll.max_y < view_state->data.scroll.min_y) {
+                    report_fail(report, "view scroll state has inverted range");
                 }
-                if (view_state->data.scroll.x < 0.0f || view_state->data.scroll.y < 0.0f ||
+                if (view_state->data.scroll.x < view_state->data.scroll.min_x ||
+                    view_state->data.scroll.y < view_state->data.scroll.min_y ||
                     view_state->data.scroll.x > view_state->data.scroll.max_x ||
                     view_state->data.scroll.y > view_state->data.scroll.max_y) {
                     report_fail(report, "view scroll state is out of bounds");

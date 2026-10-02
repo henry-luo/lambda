@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "Tune32 T32-4: inferred scalar raw tails use parallel parameter assignment and the existing iteration guard, while mixed keys and non-tail recursion keep calls (D8.3.2).",
+  "checks": [
+    {"in_func": "_tune32_count_#", "expect": ["add\t{{r}}, {{r}}, 1"], "forbid": ["call\t_tune32_count_"]},
+    {"in_func": "_tune32_float_count_#", "expect": ["dadd\t"], "forbid": ["call\t_tune32_float_count_"]},
+    {"in_func": "_tune32_permute_#", "forbid": ["call\t_tune32_permute_"]},
+    {"in_func": "_tune32_non_tail_#", "expect": ["call\t_tune32_non_tail_"]},
+    {"in_func": "_tune32_shape_change_#", "expect": ["call\t_tune32_shape_change_"]}
+  ]
+}

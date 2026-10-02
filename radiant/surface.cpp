@@ -10,6 +10,7 @@
 #include "../lib/base64.h"
 #include "../lib/url.h"
 #include "../lib/file.h"
+#include "../lib/path_str.h"
 #include "../lib/str.h"
 #include "../lib/endian.h"
 #include "../lambda/input/input.hpp"  // for download_http_content
@@ -543,7 +544,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     char* local_file_url = nullptr;
     if (file_exists(img_url)) {
         char abs_path[4096];
-        if (img_url[0] == '/') {
+#ifdef _WIN32
+        bool is_absolute_path = path_str_win32_is_absolute(img_url);
+#else
+        bool is_absolute_path = path_str_posix_is_absolute(img_url);
+#endif
+        if (is_absolute_path) {
+            // a native absolute path must not acquire a second working-directory prefix.
             str_copy(abs_path, sizeof(abs_path), img_url, strlen(img_url));
         } else {
             char cwd_buf[4096];

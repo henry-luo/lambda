@@ -939,6 +939,7 @@
         "lambda/module/radiant/*.cpp"
       ],
       "objcxx_source_files": [
+        "radiant/app_icon_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/webview_child_mac_static.cpp",
         "radiant/webview_layer_mac_static.cpp"
@@ -1238,9 +1239,13 @@
       ],
       "exclude_source_files": [
         "lib/clock_compat.c",
+        "radiant/app_icon_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/webview_child_mac_static.cpp",
         "radiant/webview_layer_mac_static.cpp"
+      ],
+      "additional_source_files": [
+        "lambda/asset/lambda.rc"
       ],
       "libraries": [
         {
@@ -1640,7 +1645,8 @@
       "pkg_config_includes": ["webkit2gtk-4.1"],
       "exclude_source_files": [
         "lib/clock_compat.c",
-        "lib/font/font_backend_dwrite.cpp"
+        "lib/font/font_backend_dwrite.cpp",
+        "radiant/app_icon_mac_static.cpp"
       ],
       "includes": [
         "/usr/include",
@@ -1892,6 +1898,7 @@
     "macos": {
       "exclude_source_files": [
         "lib/clock_compat.c",
+        "radiant/app_icon_mac_static.cpp",
         "radiant/ime_mac_static.cpp",
         "radiant/rdt_video_stub.cpp"
       ],

@@ -1,4 +1,4 @@
-// Tune31 Phase III B2: inferred string lanes retain their established helper.
+// Tune32 T32-2: exact inferred string lanes reuse the shared pair helper.
 
 pn tune31_inferred_char_pair(left, left_index: int, right, right_index: int) bool {
     left[left_index] == right[right_index]

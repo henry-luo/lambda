@@ -1726,7 +1726,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
                 prof.thread_id = profile_current_thread_id();
                 profile_record_phase(&prof);
             }
-            log_notice("interp: planned file=%s module_slots=%u",
+            log_debug("interp: planned file=%s module_slots=%u",
                 script_path, (unsigned)tp->interp_slab_count);
             if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
             return;

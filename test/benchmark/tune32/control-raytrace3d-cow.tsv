@@ -1,0 +1,35 @@
+type	share_marks	unique_mutations	shared_copies	copied_bytes
+array[num]	7496	0	16	2688
+array	40	0	0	0
+map	144	0	32	2592
+vmap_snapshots	0
+vmap_rejections	0
+fn_mutable_value_calls	0
+union_admit_calls	0
+union_map_rep_cache_hits	0
+union_map_rep_cache_misses	0
+map_admit_calls	0
+js_realm_slot_reservations	0
+map_admit_relation_cache_hits	0
+map_admit_relation_cache_misses	0
+map_admit_exact_shape_hits	0
+map_admit_storage_compatible_hits	0
+map_admit_readonly_validations	0
+map_admit_reifications	0
+map_admit_deep_clone_calls	0
+map_admit_fields_visited	0
+map_admit_bytes_copied	0
+array_checked_store_calls	0
+array_checked_store_direct	0
+array_checked_store_unique_inplace	0
+array_checked_store_cow_detach	0
+array_checked_store_rebuild	0
+array_checked_store_full_clone	0
+array_checked_store_bytes_copied	0
+string_append_calls	4
+string_append_pieces	4
+string_inplace_appends	0
+string_growth_copies	4
+string_copied_bytes	99
+string_freezes	0
+string_generic_joins	4

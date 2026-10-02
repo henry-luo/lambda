@@ -56,7 +56,7 @@
 <header class="hero">
   <div class="container">
     <div class="hero-badge">
-      <span>v0.3</span> · MIT Licensed · 9 MB Runtime
+      <span>v0.3 alpha</span> · MIT Licensed · ~20 MB Runtime
     </div>
     <h1>Documents as Data.<br><span class="highlight">One Language. One Pipeline.</span></h1>
     <p class="hero-subtitle">
@@ -228,7 +228,7 @@ html?&lt;<span style="color:#38bdf8">div</span>&gt;?&lt;<span style="color:#38bd
       <div class="feature-card">
         <div class="feature-icon blue">⚡</div>
         <h3>JIT Compiled Performance</h3>
-        <p>MIR-based JIT compilation delivers near-native speed. Competitive with Node.js V8, 13× faster than CPython.</p>
+        <p>MIR-based JIT compilation delivers near-native speed. Typed Lambda code runs 1.8× faster than Node.js V8 (geomean).</p>
       </div>
 
       <div class="feature-card">
@@ -251,8 +251,8 @@ html?&lt;<span style="color:#38bdf8">div</span>&gt;?&lt;<span style="color:#38bd
 
       <div class="feature-card">
         <div class="feature-icon green">🖥</div>
-        <h3>Interactive Viewer</h3>
-        <p>Open HTML, Markdown, LaTeX, SVG, PDF, diagrams, and Lambda scripts in a native viewer with <code>lambda view</code>.</p>
+        <h3>Viewer, Editor &amp; Reactive UI</h3>
+        <p>Open HTML, Markdown, LaTeX, SVG, PDF, diagrams, and Lambda scripts with <code>lambda view</code>; author Markdown, HTML, and SVG with <code>lambda edit</code>; build reactive apps from <code>view</code>/<code>edit</code> templates.</p>
       </div>
     </div>
   </div>
@@ -264,42 +264,48 @@ html?&lt;<span style="color:#38bdf8">div</span>&gt;?&lt;<span style="color:#38bd
     <div class="section-header">
       <span class="section-label">Performance</span>
       <h2>Near-Native Speed via JIT Compilation</h2>
-      <p>Benchmarked across 56 standard benchmarks (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream).</p>
+      <p>Benchmarked across 63 benchmarks from six standard suites (R7RS, AWFY, BENG, KOSTYA, LARCENY, JetStream) plus Text, against Node.js v22.13.0.</p>
     </div>
 
     <div class="benchmark-table">
       <table>
         <thead>
           <tr>
-            <th>vs. Engine</th>
-            <th>Geo. Mean Ratio</th>
-            <th>Lambda Wins</th>
+            <th>Engine</th>
+            <th>Geo. Mean vs. Node.js</th>
+            <th>Faster than Node.js</th>
             <th>Total</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td><strong>Node.js (V8)</strong></td>
-            <td><strong>1.05×</strong></td>
-            <td>28</td>
-            <td>56</td>
+            <td><strong>Lambda (typed)</strong></td>
+            <td><strong>0.54×</strong> (1.8× faster)</td>
+            <td>42</td>
+            <td>63</td>
           </tr>
           <tr>
-            <td><strong>QuickJS</strong></td>
-            <td><strong>0.12×</strong> (8× faster)</td>
-            <td>49</td>
-            <td>53</td>
+            <td><strong>Lambda (untyped)</strong></td>
+            <td><strong>1.05×</strong> (5% slower)</td>
+            <td>32</td>
+            <td>63</td>
           </tr>
           <tr>
-            <td><strong>CPython 3.13</strong></td>
-            <td><strong>0.08×</strong> (13× faster)</td>
-            <td>47</td>
-            <td>55</td>
+            <td>CPython</td>
+            <td>5.02×</td>
+            <td>—</td>
+            <td>63</td>
+          </tr>
+          <tr>
+            <td>QuickJS</td>
+            <td>7.24×</td>
+            <td>—</td>
+            <td>63</td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p class="text-center text-muted mt-md" style="font-size: 0.85rem;">Ratio &lt; 1.0 = Lambda is faster. Excels on micro-benchmarks, tight numeric loops, and recursive workloads.</p>
+    <p class="text-center text-muted mt-md" style="font-size: 0.85rem;">Ratio &lt; 1.0 = faster than Node.js. Result50, 2026-09-30; median of 3 runs on Apple Silicon. <a href="https://github.com/henry-luo/lambda/blob/master/test/benchmark/Overall_Result50.md" target="_blank" rel="noopener">Full report →</a></p>
   </div>
 </section>
 
@@ -312,34 +318,38 @@ html?&lt;<span style="color:#38bdf8">div</span>&gt;?&lt;<span style="color:#38bd
     </div>
     <div class="stats-row">
       <div class="stat-item">
-        <div class="stat-value">13×</div>
-        <div class="stat-label">Faster than CPython (geomean)</div>
+        <div class="stat-value">1.8×</div>
+        <div class="stat-label">Faster than Node.js V8 (typed, geomean)</div>
       </div>
       <div class="stat-item">
         <div class="stat-value">20+</div>
         <div class="stat-label">Input formats — JSON, HTML, CSS, PDF …</div>
       </div>
       <div class="stat-item">
-        <div class="stat-value">9 MB</div>
+        <div class="stat-value">~20 MB</div>
         <div class="stat-label">Single binary, zero dependencies</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">40,261</div>
+        <div class="stat-label">ECMAScript test262 passing, 0 failing</div>
       </div>
     </div>
     <div class="stats-row" style="margin-top: 2rem;">
       <div class="stat-item">
         <div class="stat-value">100%</div>
-        <div class="stat-label">HTML5 (html5lib / WPT) · 1,560+ tests</div>
+        <div class="stat-label">HTML5 parsing (html5lib) · 364 / 364 tests</div>
       </div>
       <div class="stat-item">
-        <div class="stat-value">98.2%</div>
-        <div class="stat-label">CSS 2.1 (W3C) · 1,788 / 1,821 tests</div>
-      </div>
-      <div class="stat-item">
-        <div class="stat-value">100%</div>
-        <div class="stat-label">CommonMark · 662 / 662 tests</div>
+        <div class="stat-value">1,874</div>
+        <div class="stat-label">CSS layout full passes vs. Chrome (+1,403 partial) of 3,302</div>
       </div>
       <div class="stat-item">
         <div class="stat-value">100%</div>
-        <div class="stat-label">YAML 1.2 · 231 / 231 tests</div>
+        <div class="stat-label">CommonMark · 655 / 655 tests</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">100%</div>
+        <div class="stat-label">YAML 1.2 · 276 / 276 tests</div>
       </div>
     </div>
   </div>
@@ -369,7 +379,7 @@ html?&lt;<span style="color:#38bdf8">div</span>&gt;?&lt;<span style="color:#38bd
       <a href="./recipes/" class="card">
         <span class="card-tag green">Rendering</span>
         <h3>Document Rendering</h3>
-        <p>Render HTML, LaTeX, Mermaid, D2, and GraphViz to SVG, PDF, PNG, or JPEG with the Radiant engine.</p>
+        <p>Render HTML, LaTeX, TikZ, Mermaid, D2, GraphViz, and Structurizr C4 to SVG, PDF, PNG, or JPEG with the Radiant engine.</p>
       </a>
 
       <a href="./examples/" class="card">
@@ -386,8 +396,8 @@ html?&lt;<span style="color:#38bdf8">div</span>&gt;?&lt;<span style="color:#38bd
 
       <a href="./recipes/" class="card">
         <span class="card-tag green">Viewer</span>
-        <h3>Interactive Viewing</h3>
-        <p>Open any supported format in a native viewer window — HTML, Markdown, LaTeX, SVG, PDF, diagrams, and more.</p>
+        <h3>Interactive Viewing &amp; Editing</h3>
+        <p>Open any supported format in a native viewer window, or edit Markdown, HTML, and SVG documents in place with <code>lambda edit</code>.</p>
       </a>
     </div>
   </div>

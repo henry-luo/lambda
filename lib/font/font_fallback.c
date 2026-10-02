@@ -264,6 +264,20 @@ static FontHandle* resolve_exact_fallback_family(FontContext* ctx,
     return handle;
 }
 
+FontHandle* font_find_emoji_fallback(FontContext* ctx, const FontStyleDesc* style,
+                                      uint32_t codepoint) {
+    if (!ctx || !style || !ctx->fallback_fonts) return NULL;
+    // Emoji presentation uses the configured color families that ordinary text
+    // fallback skips; require coverage before choosing a face.
+    for (int i = 0; ctx->fallback_fonts[i]; i++) {
+        const char* family = ctx->fallback_fonts[i];
+        if (!fallback_family_is_color_emoji(family)) continue;
+        FontHandle* handle = resolve_exact_fallback_family(ctx, style, family, codepoint);
+        if (handle) return handle;
+    }
+    return NULL;
+}
+
 static uint64_t cp_fallback_hash(const void* item, uint64_t seed0, uint64_t seed1) {
     const CodepointFallbackEntry* e = (const CodepointFallbackEntry*)item;
     // include the source face because platform fallback depends on its coverage and traits.

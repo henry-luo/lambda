@@ -35,6 +35,10 @@ Each registered benchmark has a Lambda script (`.ls`), a JavaScript equivalent
 Its Go and Python ports use the same fixture data,
 round counts, algorithms, and checksums as the checked-in Node scripts.
 
+All 69 entries also have native Julia ports under `julia/<suite>/<name>.jl`.
+See [Julia ports](julia/README.md) for validation commands, typing choices,
+warmup accounting, and the documented Splay/DeltaBlue implementation differences.
+
 ### File naming
 
 | Pattern | Purpose |
@@ -59,6 +63,7 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
 | **Node.js**    | `nodejs`   | JIT (V8)    | `node script.js`                     |
 | **Go**         | `go`       | Native      | `python3 test/benchmark/run_go_benchmarks.py` |
 | **Python**     | `python`   | Interpreter | `python3 script.py`                  |
+| **Julia**      | `julia`    | JIT         | `python3 test/benchmark/run_julia_benchmarks.py` |
 
 - **MIR Direct**: Lambda → MIR IR → native. Default compiler path, lowest startup.
 - **C2MIR**: Lambda → C source → MIR. Legacy path, sometimes better optimized.
@@ -72,6 +77,10 @@ For the BENG suite, the convention is simpler: `binarytrees.ls` and `js/binarytr
   baseline, bump `PINNED_NODE_VERSION` and note it in the result doc.
 - **QuickJS**: Lightweight interpreter. Needs a polyfill wrapper (auto-generated).
 - **Python**: CPython interpreter. AWFY benchmarks use the official AWFY Python harness with iteration counts read from each checked-in Node wrapper.
+- **Julia**: use `julia` on PATH or set `JULIA_EXE`. Default execution timing follows
+  one full warmup with fresh inputs; `julia_e2e` includes startup, compilation and
+  warmup. Set `JULIA_BENCH_WARMUP=0` for a process with only one workload. Julia
+  requires no external Julia packages and runs with one thread.
 
 ### QuickJS wrapper
 
@@ -501,7 +510,7 @@ python3 test/benchmark/run_benchmarks.py -b fib -s r7rs --no-save --typed
 | `-m, --mode` | `time` (default), `memory`, or `mir-vs-c` |
 | `-s, --suite` | Comma-separated suite filter (substring match) |
 | `-b, --bench` | Comma-separated benchmark filter (substring match) |
-| `-e, --engines` | Comma-separated engine filter: `mir,c2mir,lambdajs,quickjs,nodejs,python` |
+| `-e, --engines` | Comma-separated engine filter: `mir,c2mir,go,lambdajs,mvpjs,quickjs,nodejs,python,julia` |
 | `-n, --runs` | Number of runs per engine (default: 3 for time, 1 for memory) |
 | `-t, --timeout` | Timeout per run in seconds (default: 120) |
 | `--typed` | In time mode, run both MIR variants (`mir` = untyped, `mir_typed` = typed); in mir-vs-c mode, include typed R7RS variants. **Time mode requires this or `--legacy`** |

@@ -11005,6 +11005,12 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
     Rooted<Map*> rooted_map(roots, map);
     Rooted<Item> rooted_value(roots, value);
     bool is_element = extend_tid == LMD_TYPE_ELEMENT;
+    bool arena_element = is_element && context->ui_mode && context->arena;
+    if (arena_element) {
+        Item held = rooted_value.get();
+        if (!ui_prepare_element_field(&held)) return false;
+        rooted_value.set(held);
+    }
     TypeMap* new_type = (TypeMap*)alloc_type(context->pool,
         is_element ? LMD_TYPE_ELEMENT : LMD_TYPE_MAP,
         is_element ? sizeof(TypeElmt) : sizeof(TypeMap));
@@ -11017,7 +11023,11 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
         new_element->content_list = old_element->content_list;
         new_element->ns = old_element->ns;
     }
-    void* new_data = heap_data_calloc(new_size > 0 ? (size_t)new_size : 1);
+    // ui elements live in an arena; their dynamic attribute buffers must have
+    // the same owner because the collector cannot trace pointers from that arena.
+    void* new_data = arena_element
+        ? arena_calloc(context->arena, new_size > 0 ? (size_t)new_size : 1)
+        : heap_data_calloc(new_size > 0 ? (size_t)new_size : 1);
     if (!new_data) return false;
     map = rooted_map.get();
     old_type = (TypeMap*)map->type;

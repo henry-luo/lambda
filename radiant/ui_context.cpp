@@ -37,6 +37,9 @@ void radiant_register_event_hooks();
 extern "C" void radiant_ime_mac_attach(UiContext* uicon);
 extern "C" void radiant_ime_win_attach(UiContext* uicon);
 
+// application icon for the Dock / window (radiant/app_icon.cpp)
+extern "C" void radiant_app_icon_install(GLFWwindow* window);
+
 static char fallback_font_noto_color_emoji[] = "Noto Color Emoji";
 static char fallback_font_apple_color_emoji[] = "Apple Color Emoji";
 static char fallback_font_segoe_ui_emoji[] = "Segoe UI Emoji";
@@ -249,6 +252,8 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
             log_error("GLFW window create failed");
             return EXIT_FAILURE;
         }
+        // GUI mode only: headless runs must not touch the Dock or a window icon
+        radiant_app_icon_install(window);
 
         // ensure window is shown and focused (needed on some Wayland/XWayland setups)
         glfwShowWindow(window);

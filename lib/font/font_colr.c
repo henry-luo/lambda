@@ -52,8 +52,11 @@ static bool parse_colr_header(const uint8_t* colr, uint32_t colr_len, ColrHeader
     uint32_t layer_offset = rd32(colr + 8);
     out->num_layer_records = rd16(colr + 12);
 
-    // only v0 supported
-    if (out->version != 0) return false;
+    // COLR v1 retains these v0 records for compatibility; its paint tree is separate.
+    if (out->version > 1 || out->num_base_glyphs == 0 || out->num_layer_records == 0)
+        return false;
+    if (out->version == 1 && colr_len < 34) return false;
+    if (base_offset == 0 || layer_offset == 0) return false;
 
     // validate offsets
     // BaseGlyphRecord: 6 bytes each (glyphID(2) + firstLayerIndex(2) + numLayers(2))

@@ -274,16 +274,20 @@ bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
             ? evcon->target_document
             : (evcon && evcon->ui_context ? evcon->ui_context->document : nullptr));
     DocState* state = doc ? (DocState*)doc->state : nullptr;
-    float h = 0.0f, v = 0.0f, h_max = 0.0f, v_max = 0.0f;
-    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, &h_max, &v_max);
+    float h = 0.0f, v = 0.0f;
+    scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
+    float h_min = 0.0f, h_max = 0.0f, v_min = 0.0f, v_max = 0.0f;
+    scroll_state_get_range_for_view(state, (View*)block, sp,
+                                    &h_min, &h_max, &v_min, &v_max);
     float previous_h = h;
     float previous_v = v;
     float scroll_amount = RDT_WHEEL_PIXEL_STEP;
 
-    if (event->yoffset != 0 && v_max > 0) {
+    // signed reverse-flow ranges may scroll even when their upper bound is zero.
+    if (event->yoffset != 0 && v_max > v_min) {
         v += -event->yoffset * scroll_amount;
     }
-    if (event->xoffset != 0 && h_max > 0) {
+    if (event->xoffset != 0 && h_max > h_min) {
         h += -event->xoffset * scroll_amount;
     }
 

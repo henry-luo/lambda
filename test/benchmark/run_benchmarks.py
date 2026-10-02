@@ -54,6 +54,7 @@ os.chdir(PROJECT_ROOT)
 # correctness scripts and this timing runner cannot drift apart.
 import run_c2mir_benchmarks as c2mir_ports  # noqa: E402
 import run_go_benchmarks as go_ports  # noqa: E402
+import run_julia_benchmarks as julia_ports  # noqa: E402
 
 # ============================================================
 # Configuration
@@ -89,7 +90,7 @@ MIR_VS_C_CSV_PATH = "temp/mir_vs_c_bench.csv"
 
 IS_MACOS = platform.system() == "Darwin"
 
-ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "mvpjs", "quickjs", "nodejs", "python"]
+ALL_ENGINES = ["mir", "c2mir", "go", "lambdajs", "mvpjs", "quickjs", "nodejs", "python", "julia"]
 
 # Native statically-typed reference ports. They are not alternative Lambda
 # execution paths — they bound what a fully typed Lambda program could reach on
@@ -111,6 +112,7 @@ WRONG_OUTPUT_ROWS = {}
 ENGINE_LABELS = {
     "mir": "MIR-U", "mir_typed": "MIR-T", "c2mir": "C2MIR", "go": "Go",
     "lambdajs": "LambdaJS", "mvpjs": "JS MVP", "quickjs": "QuickJS", "nodejs": "Node.js", "python": "Python",
+    "julia": "Julia",
 }
 
 # ============================================================
@@ -528,6 +530,7 @@ def build_run_metadata(mode, engines, num_runs, timeout_s, results_output, fresh
         "node_version": get_command_output([NODE_EXE, "--version"]),
         "node_version_pinned": expected_node_version(),
         "python_version": get_command_output([PYTHON_EXE, "--version"]),
+        "julia": julia_ports.runtime_metadata() if "julia" in engines else None,
         "quickjs_version": quickjs_version,
         "quickjs_exe": quickjs_path,
         "quickjs_exe_sha256": executable_sha256(quickjs_path),
@@ -1076,11 +1079,16 @@ def go_command(suite, name):
     return shlex.quote(str(executable)), "ok"
 
 
+def reference_port_command(engine, suite, name):
+    commands = {"c2mir": c2mir_command, "go": go_command, "julia": julia_ports.shell_command}
+    return commands[engine](suite, name)
+
+
 def run_native_engine(engine, suite, name, num_runs, timeout_s, results, row):
-    """Time one native reference port (c2mir or go) for a benchmark row."""
+    """Time a standalone reference port for a benchmark row."""
     label = ENGINE_LABELS.get(engine, engine)
     print(f"  {label:<8} ", end="", flush=True)
-    cmd, status = (c2mir_command if engine == "c2mir" else go_command)(suite, name)
+    cmd, status = reference_port_command(engine, suite, name)
     if cmd is None:
         results[suite][name][engine] = None
         row[engine] = None
@@ -1088,11 +1096,13 @@ def run_native_engine(engine, suite, name, num_runs, timeout_s, results, row):
         print(f" --- ({status})")
         return
     w, e, ok, status, detail = time_run_benchmark(cmd, num_runs, timeout_s)
+    if engine == "julia" and ok and e is None:
+        ok, status = False, "invalid_timing"
     # A native port pays its own process startup inside the wall figure, which
     # is exactly what set 2 compares against Lambda's auto tier.
     record_time_result(results, row, suite, name, engine, w, e, ok, status, detail,
                        e2e_engine=f"{engine}_e2e")
-    print(f" {fmt_ms(e if e is not None else w)}")
+    print(f" {fmt_ms(e if e is not None else w)}" if ok else f" --- ({status})")
 
 
 def variant_desc(args):
@@ -1197,10 +1207,10 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
                                        aw, None, aok, astatus, adetail)
                     print(f" {fmt_ms(aw)}")
 
-    # --- Native reference ports (statically typed ceiling) ---
+    # --- Standalone reference ports ---
     # `lambda.exe run --c2mir` was removed from the CLI, so the C2MIR column now
     # measures the native C ports through MIR's own C frontend (mac-deps/mir/c2m).
-    for native_engine in ("c2mir", "go"):
+    for native_engine in ("c2mir", "go", "julia"):
         if native_engine in engines and ls_path:
             run_native_engine(native_engine, suite, name, num_runs, timeout_s, results, row)
 
@@ -1546,13 +1556,14 @@ def mem_run_single(b, engines, num_runs, timeout_s, results, include_typed=False
     # --- Native reference ports ---
     # These peaks include the toolchain's own footprint (c2m holds the C
     # frontend and MIR generator in-process; a Go binary carries its runtime and
-    # GC heap), so they bound Lambda's RSS only loosely.
-    for native_engine in ("c2mir", "go"):
+    # GC heap; Julia includes its compiler and warmup), so these process peaks
+    # bound Lambda's RSS only loosely.
+    for native_engine in ("c2mir", "go", "julia"):
         if native_engine not in engines or not ls_path:
             continue
         label = ENGINE_LABELS.get(native_engine, native_engine)
         print(f"  {label:<8} ", end="", flush=True)
-        cmd, status = (c2mir_command if native_engine == "c2mir" else go_command)(suite, name)
+        cmd, status = reference_port_command(native_engine, suite, name)
         if cmd is None:
             results[suite][name][native_engine] = None
             row[native_engine] = None
@@ -2143,6 +2154,7 @@ Examples:
         "engines": engines,
         "runs": num_runs,
         "coverage_build": args.coverage,
+        "julia": julia_ports.runtime_metadata() if "julia" in engines else None,
     })
 
     # Build benchmark list
@@ -2192,11 +2204,11 @@ Examples:
         return
 
     # Enforce the build and Node baseline gates before any timing starts, so a
-    # mismatch costs nothing rather than being discovered in the result file
-    # afterwards. Both apply to every mode; --list and --dry-run returned already.
+    # mismatch costs nothing rather than being discovered in the result file.
+    # Lambda's build gate applies whenever a Lambda engine will run.
     if args.coverage:
         print("coverage build check enabled: LLVM-instrumented build accepted")
-    else:
+    elif mode == "mir-vs-c" or any(engine in engines for engine in ("mir", "lambdajs", "mvpjs")):
         check_release_build()
     require_pinned_node_version(engines, mode)
 

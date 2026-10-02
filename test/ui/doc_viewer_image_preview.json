@@ -1,0 +1,25 @@
+{
+  "name": "Document viewer renders PNG and SVG previews",
+  "html": "test/ui/doc_viewer.ls",
+  "viewport": {"width": 1280, "height": 4000},
+  "events": [
+    {"type": "click", "target": {"selector": "#file-filter"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "sample1.png"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout_data .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout_data_res .tree-label"}},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout_data_res_sample1_png .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#image-preview img"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "#image-preview img"}, "attribute": "src", "contains": "sample1.png"},
+    {"type": "assert_rect", "target": {"selector": "#image-preview img"}, "width": 640, "height": 427, "tolerance": 2},
+    {"type": "assert_pixel", "target": {"selector": "#image-preview img", "offset_x": 100, "offset_y": 100}, "max_r": 230, "max_g": 230, "max_b": 230},
+    {"type": "click", "target": {"selector": ".tree-filter-clear"}},
+    {"type": "type", "target": {"selector": "#file-filter"}, "text": "hn_y18.svg"},
+    {"type": "click", "target": {"selector": ".tree-hit-__test_layout_data_res_hn_y18_svg .tree-label"}},
+    {"type": "assert_count", "target": {"selector": "#image-preview img"}, "count": 1},
+    {"type": "assert_attribute", "target": {"selector": "#image-preview img"}, "attribute": "src", "contains": "hn_y18.svg"},
+    {"type": "assert_rect", "target": {"selector": "#image-preview img"}, "width": 18, "height": 18, "tolerance": 0.5},
+    {"type": "assert_pixel", "target": {"selector": "#image-preview img", "offset_x": 2, "offset_y": 2}, "min_r": 225, "max_g": 145, "max_b": 30}
+  ]
+}

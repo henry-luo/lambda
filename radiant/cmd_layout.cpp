@@ -35,6 +35,7 @@ extern "C" {
 #include "../lib/str.h"
 #include "../lib/strbuf.h"
 #include "../lib/url.h"
+#include "../lib/path_str.h"
 #include "../lib/log.h"
 #include "../lib/image.h"
 #include "../lib/hashmap.h"
@@ -2738,7 +2739,17 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
-    Url* full_url = parse_url(base, doc_url);
+    Url* full_url = nullptr;
+#ifdef _WIN32
+    // A drive path in an iframe src is a local file, not a one-letter URL scheme.
+    if (doc_url && path_str_is_drive_letter(doc_url[0]) && doc_url[1] == ':' &&
+        path_str_is_win32_separator(doc_url[2])) {
+        full_url = url_parse_path_or_url(doc_url, base);
+    } else
+#endif
+    {
+        full_url = parse_url(base, doc_url);
+    }
     if (!full_url) {
         log_error("Failed to parse URL: %s, with base: %p", doc_url, base);
         pool_destroy(pool);

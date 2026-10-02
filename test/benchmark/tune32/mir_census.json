@@ -1,0 +1,6049 @@
+{
+  "fft": [
+    {
+      "name": "_four1_205",
+      "lines": 2598,
+      "instructions": 2447,
+      "calls": 110,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "cow_mark_shared": 1,
+        "int2it_lane": 7,
+        "fn_lt": 2,
+        "is_truthy": 6,
+        "fn_index": 4,
+        "array_num_set_cow_idx": 20,
+        "push_d": 26,
+        "index_assign_cow": 4,
+        "fn_add": 6,
+        "lambda_int_lane_to_double_c": 10,
+        "fn_ge": 2,
+        "fn_sub": 2,
+        "lambda_int_lane_add_slow": 12,
+        "sin": 4,
+        "lambda_int_lane_mul_slow": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 4,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 7,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 245,
+      "memory_stores": 155,
+      "labels": 325,
+      "entry_calls": 0,
+      "labeled_calls": 110
+    },
+    {
+      "name": "_four1_b_205",
+      "lines": 93,
+      "instructions": 85,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "_four1_205": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 7,
+      "memory_stores": 10,
+      "labels": 12,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_benchmark_1632",
+      "lines": 80,
+      "instructions": 72,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "int2it_lane": 1,
+        "fn_fill": 1,
+        "_four1_205": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 9,
+      "memory_stores": 10,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_benchmark_b_1632",
+      "lines": 61,
+      "instructions": 55,
+      "calls": 3,
+      "call_targets": {
+        "_benchmark_1632": 1,
+        "push_d": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 3,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 3
+    },
+    {
+      "name": "_main_1748",
+      "lines": 177,
+      "instructions": 164,
+      "calls": 17,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_1632": 1,
+        "push_d": 2,
+        "fn_eq": 1,
+        "pn_print": 5,
+        "fn_join": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 21,
+      "memory_stores": 15,
+      "labels": 29,
+      "entry_calls": 0,
+      "labeled_calls": 17
+    },
+    {
+      "name": "_main_b_1748",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_1748": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 87,
+      "instructions": 79,
+      "calls": 10,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "push_d": 1,
+        "lambda_module_var_store": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_1748": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 10,
+      "memory_stores": 6,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 10
+    }
+  ],
+  "fft2": [
+    {
+      "name": "_four1_221",
+      "lines": 3828,
+      "instructions": 3601,
+      "calls": 82,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "cow_mark_shared": 1,
+        "push_d": 24,
+        "lambda_array_set_checked_lane": 24,
+        "lambda_int_lane_divmod_slow": 5,
+        "lambda_int_lane_sub_slow": 3,
+        "lambda_int_lane_add_slow": 14,
+        "lambda_int_lane_to_double_c": 2,
+        "sin": 4,
+        "lambda_int_lane_mul_slow": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 24,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 305,
+      "memory_stores": 261,
+      "labels": 483,
+      "entry_calls": 0,
+      "labeled_calls": 82
+    },
+    {
+      "name": "_four1_b_221",
+      "lines": 113,
+      "instructions": 105,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "lambda_item_to_int_lane_c": 1,
+        "_four1_221": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 13,
+      "labels": 15,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_benchmark_1869",
+      "lines": 142,
+      "instructions": 131,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "int2it_lane": 1,
+        "fn_fill": 1,
+        "lambda_array_admit_numeric_contract": 1,
+        "_four1_221": 1,
+        "push_d": 1,
+        "lambda_type_check": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 13,
+      "memory_stores": 16,
+      "labels": 19,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_benchmark_b_1869",
+      "lines": 19,
+      "instructions": 15,
+      "calls": 2,
+      "call_targets": {
+        "_benchmark_1869": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 3,
+      "memory_stores": 2,
+      "labels": 3,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_main_1999",
+      "lines": 160,
+      "instructions": 148,
+      "calls": 17,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_1869": 1,
+        "lambda_item_resolve_pending": 1,
+        "fn_eq": 1,
+        "pn_print": 5,
+        "push_d": 1,
+        "fn_join": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 21,
+      "memory_stores": 15,
+      "labels": 24,
+      "entry_calls": 0,
+      "labeled_calls": 17
+    },
+    {
+      "name": "_main_b_1999",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_1999": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 87,
+      "instructions": 79,
+      "calls": 10,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "push_d": 1,
+        "lambda_module_var_store": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_1999": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 10,
+      "memory_stores": 6,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 10
+    }
+  ],
+  "primes": [
+    {
+      "name": "_sieve_165",
+      "lines": 620,
+      "instructions": 583,
+      "calls": 23,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_int_lane_add_slow": 7,
+        "int2it_lane": 1,
+        "fn_fill": 1,
+        "fn_array_set": 5,
+        "item_at": 4,
+        "lambda_int_lane_mul_slow": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 4,
+        "checked_set": 5,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 49,
+      "memory_stores": 32,
+      "labels": 97,
+      "entry_calls": 0,
+      "labeled_calls": 23
+    },
+    {
+      "name": "_sieve_b_165",
+      "lines": 70,
+      "instructions": 63,
+      "calls": 4,
+      "call_targets": {
+        "lambda_item_to_int_lane_c": 1,
+        "_sieve_165": 1,
+        "int2it_lane": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 4
+    },
+    {
+      "name": "_main_657",
+      "lines": 189,
+      "instructions": 176,
+      "calls": 19,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_sieve_165": 1,
+        "int2it_lane": 1,
+        "fn_eq": 1,
+        "fn_join": 4,
+        "pn_print": 5,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 22,
+      "memory_stores": 17,
+      "labels": 32,
+      "entry_calls": 0,
+      "labeled_calls": 19
+    },
+    {
+      "name": "_main_b_657",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_657": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_657": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "primes2": [
+    {
+      "name": "_sieve_181",
+      "lines": 714,
+      "instructions": 674,
+      "calls": 20,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_int_lane_add_slow": 7,
+        "int2it_lane": 1,
+        "fn_fill": 1,
+        "lambda_array_admit_numeric_contract": 1,
+        "array_num_set_cow_idx": 5,
+        "lambda_int_lane_mul_slow": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 38,
+      "memory_stores": 33,
+      "labels": 120,
+      "entry_calls": 0,
+      "labeled_calls": 20
+    },
+    {
+      "name": "_sieve_b_181",
+      "lines": 106,
+      "instructions": 98,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "_sieve_181": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 8,
+      "labels": 18,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_main_705",
+      "lines": 190,
+      "instructions": 177,
+      "calls": 19,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_sieve_181": 1,
+        "int2it_lane": 2,
+        "fn_join": 4,
+        "pn_print": 5,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 21,
+      "memory_stores": 16,
+      "labels": 33,
+      "entry_calls": 0,
+      "labeled_calls": 19
+    },
+    {
+      "name": "_main_b_705",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_705": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_705": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "raytrace3d": [
+    {
+      "name": "_vec3_196",
+      "lines": 27,
+      "instructions": 22,
+      "calls": 2,
+      "call_targets": {
+        "array_num_new_uninit": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 2,
+      "memory_stores": 3,
+      "labels": 4,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_vec3_b_196",
+      "lines": 148,
+      "instructions": 138,
+      "calls": 10,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "it2d": 3,
+        "_vec3_196": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 15,
+      "memory_stores": 18,
+      "labels": 19,
+      "entry_calls": 0,
+      "labeled_calls": 10
+    },
+    {
+      "name": "_vec_add_260",
+      "lines": 341,
+      "instructions": 316,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 29,
+      "labels": 37,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_add_b_260",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_add_260": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_sub_359",
+      "lines": 341,
+      "instructions": 316,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 29,
+      "labels": 37,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_sub_b_359",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_sub_359": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_scale_458",
+      "lines": 236,
+      "instructions": 218,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 22,
+      "memory_stores": 20,
+      "labels": 28,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_scale_b_458",
+      "lines": 104,
+      "instructions": 96,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2d": 1,
+        "_vec_scale_458": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 9,
+      "memory_stores": 12,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_scalev_540",
+      "lines": 341,
+      "instructions": 316,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 29,
+      "labels": 37,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_scalev_b_540",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_scalev_540": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_dot_642",
+      "lines": 359,
+      "instructions": 333,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "it2d": 4,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 4,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 28,
+      "labels": 44,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_vec_dot_b_642",
+      "lines": 114,
+      "instructions": 106,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_dot_642": 1,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 9,
+      "memory_stores": 13,
+      "labels": 15,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_cross_747",
+      "lines": 561,
+      "instructions": 520,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 61,
+      "memory_stores": 41,
+      "labels": 61,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_cross_b_747",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_cross_747": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_length_920",
+      "lines": 339,
+      "instructions": 314,
+      "calls": 10,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2d": 3,
+        "sqrt": 1,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 32,
+      "memory_stores": 23,
+      "labels": 43,
+      "entry_calls": 0,
+      "labeled_calls": 10
+    },
+    {
+      "name": "_vec_length_b_920",
+      "lines": 91,
+      "instructions": 84,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_vec_length_920": 1,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 7,
+      "memory_stores": 9,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_normalise_1019",
+      "lines": 248,
+      "instructions": 230,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_vec_length_920": 1,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 25,
+      "memory_stores": 22,
+      "labels": 29,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_normalise_b_1019",
+      "lines": 73,
+      "instructions": 66,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_vec_normalise_1019": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 8,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_vec_add_inplace_1121",
+      "lines": 435,
+      "instructions": 407,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "cow_mark_shared": 1,
+        "push_d": 3,
+        "lambda_array_set_checked_lane": 3,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 3,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 50,
+      "memory_stores": 40,
+      "labels": 53,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_vec_add_inplace_b_1121",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_add_inplace_1121": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_scale_inplace_1263",
+      "lines": 323,
+      "instructions": 302,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "cow_mark_shared": 1,
+        "push_d": 3,
+        "lambda_array_set_checked_lane": 3,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 3,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 30,
+      "memory_stores": 29,
+      "labels": 44,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_vec_scale_inplace_b_1263",
+      "lines": 104,
+      "instructions": 96,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2d": 1,
+        "_vec_scale_inplace_1263": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 9,
+      "memory_stores": 12,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_transform_matrix_1423",
+      "lines": 863,
+      "instructions": 800,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "array_num_new_uninit": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 94,
+      "memory_stores": 54,
+      "labels": 96,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_transform_matrix_b_1423",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_transform_matrix_1423": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_invert_matrix_1672",
+      "lines": 1064,
+      "instructions": 995,
+      "calls": 20,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "cow_mark_shared": 1,
+        "int2it_lane": 1,
+        "fn_fill": 1,
+        "push_d": 6,
+        "fn_array_set": 1,
+        "array_num_set_cow_idx": 2,
+        "lambda_int_lane_add_slow": 1,
+        "lambda_array_set_checked_lane": 3,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 4,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 105,
+      "memory_stores": 76,
+      "labels": 135,
+      "entry_calls": 0,
+      "labeled_calls": 20
+    },
+    {
+      "name": "_invert_matrix_b_1672",
+      "lines": 73,
+      "instructions": 66,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_invert_matrix_1672": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 8,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_create_triangle_2294",
+      "lines": 1784,
+      "instructions": 1714,
+      "calls": 112,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 7,
+        "_vec_sub_359": 2,
+        "_vec_cross_747": 1,
+        "int2it_lane": 31,
+        "fn_index": 15,
+        "fn_abs": 6,
+        "fn_gt": 3,
+        "is_truthy": 3,
+        "lambda_int_lane_add_slow": 2,
+        "lambda_int_lane_divmod_slow": 2,
+        "_vec_normalise_1019": 1,
+        "fn_div": 7,
+        "_vec_dot_642": 1,
+        "push_d": 3,
+        "fn_mul": 2,
+        "fn_sub": 3,
+        "slot_image": 9,
+        "cow_capture_value": 8,
+        "array_num_new_uninit": 1,
+        "map_with_tl": 1,
+        "map_fill": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 15,
+        "checked_set": 0,
+        "type_check": 7,
+        "numeric_admission": 0,
+        "boxing_unboxing": 31,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 500,
+      "memory_stores": 151,
+      "labels": 225,
+      "entry_calls": 0,
+      "labeled_calls": 112
+    },
+    {
+      "name": "_create_triangle_b_2294",
+      "lines": 121,
+      "instructions": 112,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "_create_triangle_2294": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 16,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_triangle_intersect_3375",
+      "lines": 864,
+      "instructions": 830,
+      "calls": 80,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "lambda_type_check": 3,
+        "fn_member_by_id": 15,
+        "int2it_lane": 4,
+        "fn_add": 9,
+        "fn_mod": 2,
+        "fn_index": 10,
+        "fn_mul": 10,
+        "fn_sub": 5,
+        "fn_div": 1,
+        "push_d": 7,
+        "fn_lt": 3,
+        "is_truthy": 5,
+        "fn_gt": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 10,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 4,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 336,
+      "memory_stores": 94,
+      "labels": 71,
+      "entry_calls": 0,
+      "labeled_calls": 80
+    },
+    {
+      "name": "_triangle_intersect_b_3375",
+      "lines": 183,
+      "instructions": 172,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 4,
+        "it2d": 2,
+        "_triangle_intersect_3375": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 24,
+      "memory_stores": 22,
+      "labels": 21,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_create_scene_4145",
+      "lines": 206,
+      "instructions": 194,
+      "calls": 17,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "slot_image": 4,
+        "cow_capture_value": 1,
+        "int2it_lane": 3,
+        "fn_fill": 1,
+        "array_num_new_uninit": 2,
+        "fn_len": 1,
+        "map_with_tl": 1,
+        "map_fill": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 43,
+      "memory_stores": 24,
+      "labels": 24,
+      "entry_calls": 0,
+      "labeled_calls": 17
+    },
+    {
+      "name": "_create_scene_b_4145",
+      "lines": 59,
+      "instructions": 53,
+      "calls": 4,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_create_scene_4145": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 5,
+      "labels": 8,
+      "entry_calls": 0,
+      "labeled_calls": 4
+    },
+    {
+      "name": "_scene_add_light_4355",
+      "lines": 357,
+      "instructions": 338,
+      "calls": 29,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "cow_mark_shared": 1,
+        "lambda_type_check": 2,
+        "int2it_lane": 2,
+        "fn_member_by_id": 2,
+        "cow_bind_var": 1,
+        "slot_image": 4,
+        "cow_capture_value": 3,
+        "map_with_tl": 1,
+        "map_fill": 1,
+        "array": 1,
+        "array_push_capture": 1,
+        "array_end": 1,
+        "fn_join": 1,
+        "heap_create_symbol": 1,
+        "map_set_cow": 1,
+        "fn_add": 1,
+        "fn_map_set": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 81,
+      "memory_stores": 48,
+      "labels": 34,
+      "entry_calls": 0,
+      "labeled_calls": 29
+    },
+    {
+      "name": "_scene_add_light_b_4355",
+      "lines": 105,
+      "instructions": 97,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_scene_add_light_4355": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 10,
+      "memory_stores": 13,
+      "labels": 12,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_scene_intersect_4638",
+      "lines": 2605,
+      "instructions": 2492,
+      "calls": 164,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "lambda_type_check": 24,
+        "fn_member_by_id": 18,
+        "int2it_lane": 31,
+        "fn_lt": 3,
+        "is_truthy": 4,
+        "fn_index": 12,
+        "cow_bind_var": 4,
+        "_triangle_intersect_3375": 2,
+        "lambda_item_resolve_pending": 2,
+        "base_type": 8,
+        "fn_is": 8,
+        "push_d": 6,
+        "it2d": 5,
+        "fn_eq": 1,
+        "array": 3,
+        "array_push_capture": 9,
+        "array_end": 3,
+        "_vec_scale_458": 3,
+        "_vec_add_260": 1,
+        "_vec_dot_642": 2,
+        "fn_gt": 1,
+        "fn_sub": 3,
+        "_vec_sub_359": 1,
+        "_vec_length_920": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "lambda_int_lane_add_slow": 1,
+        "_vec_add_inplace_1121": 1,
+        "cow_mark_shared": 1,
+        "_vec_scalev_540": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 12,
+        "checked_set": 0,
+        "type_check": 24,
+        "numeric_admission": 0,
+        "boxing_unboxing": 36,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 666,
+      "memory_stores": 207,
+      "labels": 310,
+      "entry_calls": 0,
+      "labeled_calls": 164
+    },
+    {
+      "name": "_scene_intersect_b_4638",
+      "lines": 231,
+      "instructions": 218,
+      "calls": 13,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 5,
+        "it2d": 2,
+        "lambda_item_to_int_lane_c": 1,
+        "_scene_intersect_4638": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 5,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 33,
+      "memory_stores": 27,
+      "labels": 27,
+      "entry_calls": 0,
+      "labeled_calls": 13
+    },
+    {
+      "name": "_create_camera_6883",
+      "lines": 1602,
+      "instructions": 1533,
+      "calls": 112,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 18,
+        "_vec_sub_359": 1,
+        "_vec_normalise_1019": 7,
+        "_vec_cross_747": 2,
+        "array": 1,
+        "int2it_lane": 26,
+        "fn_index": 12,
+        "fn_sub": 3,
+        "array_push_capture": 3,
+        "array_end": 1,
+        "fn_fill": 1,
+        "fn_array_set": 11,
+        "_invert_matrix_1672": 1,
+        "cow_mark_shared": 1,
+        "member_set_cow": 1,
+        "array_num_new_uninit": 4,
+        "_transform_matrix_1423": 4,
+        "slot_image": 5,
+        "cow_capture_value": 5,
+        "map_with_tl": 1,
+        "map_fill": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 12,
+        "checked_set": 11,
+        "type_check": 18,
+        "numeric_admission": 0,
+        "boxing_unboxing": 26,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 350,
+      "memory_stores": 209,
+      "labels": 183,
+      "entry_calls": 0,
+      "labeled_calls": 112
+    },
+    {
+      "name": "_create_camera_b_6883",
+      "lines": 121,
+      "instructions": 112,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "_create_camera_6883": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 16,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_render_scene_7830",
+      "lines": 2314,
+      "instructions": 2213,
+      "calls": 126,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "lambda_int_lane_to_double_c": 10,
+        "fn_member_by_id": 14,
+        "lambda_type_check": 49,
+        "_vec_scale_458": 20,
+        "_vec_add_260": 10,
+        "_vec_normalise_1019": 3,
+        "_scene_intersect_4638": 3,
+        "lambda_item_resolve_pending": 3,
+        "cow_mark_shared": 3,
+        "lambda_int_lane_add_slow": 6,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 49,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 453,
+      "memory_stores": 277,
+      "labels": 260,
+      "entry_calls": 0,
+      "labeled_calls": 126
+    },
+    {
+      "name": "_render_scene_b_7830",
+      "lines": 109,
+      "instructions": 101,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "_render_scene_7830": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 13,
+      "labels": 15,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_raytrace_scene_8654",
+      "lines": 1788,
+      "instructions": 1718,
+      "calls": 120,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_vec3_196": 18,
+        "array": 2,
+        "lambda_type_check": 53,
+        "_create_triangle_2294": 14,
+        "array_push": 12,
+        "array_end": 2,
+        "array_push_capture": 2,
+        "fn_join": 1,
+        "_create_scene_4145": 1,
+        "array_num_new_uninit": 4,
+        "_scene_add_light_4355": 3,
+        "slot_image": 1,
+        "heap_create_symbol": 1,
+        "map_set_cow": 1,
+        "_create_camera_6883": 1,
+        "_render_scene_7830": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 53,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 638,
+      "memory_stores": 257,
+      "labels": 82,
+      "entry_calls": 0,
+      "labeled_calls": 120
+    },
+    {
+      "name": "_raytrace_scene_b_8654",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_raytrace_scene_8654": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_main_10352",
+      "lines": 232,
+      "instructions": 217,
+      "calls": 22,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "int2it_lane": 3,
+        "_raytrace_scene_8654": 1,
+        "fn_add": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "fn_join": 6,
+        "pn_print": 3,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 20,
+      "memory_stores": 21,
+      "labels": 40,
+      "entry_calls": 0,
+      "labeled_calls": 22
+    },
+    {
+      "name": "_main_b_10352",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_10352": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_10352": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "raytrace3d2": [
+    {
+      "name": "_vec3_814",
+      "lines": 56,
+      "instructions": 50,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "array_num_new_uninit": 1,
+        "lambda_type_check": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 4,
+      "memory_stores": 8,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_vec3_b_814",
+      "lines": 148,
+      "instructions": 138,
+      "calls": 10,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "it2d": 3,
+        "_vec3_814": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 15,
+      "memory_stores": 18,
+      "labels": 19,
+      "entry_calls": 0,
+      "labeled_calls": 10
+    },
+    {
+      "name": "_vec_add_886",
+      "lines": 366,
+      "instructions": 340,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 4,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 35,
+      "labels": 39,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_vec_add_b_886",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_add_886": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_sub_993",
+      "lines": 366,
+      "instructions": 340,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 4,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 35,
+      "labels": 39,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_vec_sub_b_993",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_sub_993": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_scale_1100",
+      "lines": 261,
+      "instructions": 242,
+      "calls": 8,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 22,
+      "memory_stores": 26,
+      "labels": 30,
+      "entry_calls": 0,
+      "labeled_calls": 8
+    },
+    {
+      "name": "_vec_scale_b_1100",
+      "lines": 104,
+      "instructions": 96,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2d": 1,
+        "_vec_scale_1100": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 9,
+      "memory_stores": 12,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_scalev_1190",
+      "lines": 366,
+      "instructions": 340,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 4,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 35,
+      "labels": 39,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_vec_scalev_b_1190",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_scalev_1190": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_dot_1300",
+      "lines": 359,
+      "instructions": 333,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "it2d": 4,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 4,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 37,
+      "memory_stores": 28,
+      "labels": 44,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_vec_dot_b_1300",
+      "lines": 114,
+      "instructions": 106,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_dot_1300": 1,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 9,
+      "memory_stores": 13,
+      "labels": 15,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_vec_cross_1405",
+      "lines": 586,
+      "instructions": 544,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 4,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 61,
+      "memory_stores": 47,
+      "labels": 63,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_vec_cross_b_1405",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_cross_1405": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_length_1586",
+      "lines": 339,
+      "instructions": 314,
+      "calls": 10,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2d": 3,
+        "sqrt": 1,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 32,
+      "memory_stores": 23,
+      "labels": 43,
+      "entry_calls": 0,
+      "labeled_calls": 10
+    },
+    {
+      "name": "_vec_length_b_1586",
+      "lines": 91,
+      "instructions": 84,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_vec_length_1586": 1,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 7,
+      "memory_stores": 9,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_normalise_1685",
+      "lines": 274,
+      "instructions": 254,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "_vec_length_1586": 1,
+        "array_num_new_uninit": 1,
+        "array_float_literal_with_nulls": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 25,
+      "memory_stores": 28,
+      "labels": 31,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_vec_normalise_b_1685",
+      "lines": 73,
+      "instructions": 66,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_vec_normalise_1685": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 8,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_vec_add_inplace_1802",
+      "lines": 453,
+      "instructions": 424,
+      "calls": 13,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "cow_mark_shared": 1,
+        "push_d": 3,
+        "lambda_array_set_checked_lane": 3,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 3,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 51,
+      "memory_stores": 44,
+      "labels": 55,
+      "entry_calls": 0,
+      "labeled_calls": 13
+    },
+    {
+      "name": "_vec_add_inplace_b_1802",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_vec_add_inplace_1802": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_vec_scale_inplace_1952",
+      "lines": 341,
+      "instructions": 319,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "cow_mark_shared": 1,
+        "push_d": 3,
+        "lambda_array_set_checked_lane": 3,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 3,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 31,
+      "memory_stores": 33,
+      "labels": 46,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_vec_scale_inplace_b_1952",
+      "lines": 104,
+      "instructions": 96,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2d": 1,
+        "_vec_scale_inplace_1952": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 9,
+      "memory_stores": 12,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_transform_matrix_2120",
+      "lines": 875,
+      "instructions": 812,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "array_num_new_uninit": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 94,
+      "memory_stores": 57,
+      "labels": 97,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_transform_matrix_b_2120",
+      "lines": 96,
+      "instructions": 88,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_transform_matrix_2120": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 12,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_invert_matrix_2377",
+      "lines": 1081,
+      "instructions": 1012,
+      "calls": 21,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "cow_mark_shared": 1,
+        "int2it_lane": 1,
+        "fn_fill": 1,
+        "push_d": 6,
+        "fn_array_set": 1,
+        "array_num_set_cow_idx": 2,
+        "lambda_int_lane_add_slow": 1,
+        "lambda_array_set_checked_lane": 3,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 4,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 106,
+      "memory_stores": 80,
+      "labels": 137,
+      "entry_calls": 0,
+      "labeled_calls": 21
+    },
+    {
+      "name": "_invert_matrix_b_2377",
+      "lines": 73,
+      "instructions": 66,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_invert_matrix_2377": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 8,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_create_triangle_3007",
+      "lines": 1940,
+      "instructions": 1866,
+      "calls": 118,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 13,
+        "_vec_sub_993": 2,
+        "_vec_cross_1405": 1,
+        "int2it_lane": 31,
+        "fn_index": 15,
+        "fn_abs": 6,
+        "fn_gt": 3,
+        "is_truthy": 3,
+        "lambda_int_lane_add_slow": 2,
+        "lambda_int_lane_divmod_slow": 2,
+        "_vec_normalise_1685": 1,
+        "fn_div": 7,
+        "_vec_dot_1300": 1,
+        "push_d": 3,
+        "fn_mul": 2,
+        "fn_sub": 3,
+        "slot_image": 9,
+        "cow_capture_value": 8,
+        "array_num_new_uninit": 1,
+        "map_with_type_tl": 1,
+        "map_fill": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 15,
+        "checked_set": 0,
+        "type_check": 13,
+        "numeric_admission": 0,
+        "boxing_unboxing": 31,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 581,
+      "memory_stores": 166,
+      "labels": 231,
+      "entry_calls": 0,
+      "labeled_calls": 118
+    },
+    {
+      "name": "_create_triangle_b_3007",
+      "lines": 121,
+      "instructions": 112,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "_create_triangle_3007": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 16,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_triangle_intersect_4125",
+      "lines": 662,
+      "instructions": 617,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2d": 2,
+        "lambda_int_lane_add_slow": 2,
+        "lambda_int_lane_divmod_slow": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 80,
+      "memory_stores": 35,
+      "labels": 85,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_triangle_intersect_b_4125",
+      "lines": 228,
+      "instructions": 216,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 5,
+        "it2d": 2,
+        "_triangle_intersect_4125": 1,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 5,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 30,
+      "memory_stores": 31,
+      "labels": 28,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_create_scene_4905",
+      "lines": 247,
+      "instructions": 233,
+      "calls": 19,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "slot_image": 4,
+        "cow_capture_value": 1,
+        "array": 1,
+        "lambda_type_check": 3,
+        "array_num_new_uninit": 2,
+        "int2it_lane": 2,
+        "fn_len": 1,
+        "map_with_type_tl": 1,
+        "map_fill": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 53,
+      "memory_stores": 32,
+      "labels": 25,
+      "entry_calls": 0,
+      "labeled_calls": 19
+    },
+    {
+      "name": "_create_scene_b_4905",
+      "lines": 72,
+      "instructions": 65,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 1,
+        "_create_scene_4905": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 8,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_scene_add_light_5145",
+      "lines": 254,
+      "instructions": 238,
+      "calls": 21,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "cow_mark_shared": 1,
+        "lambda_type_check": 2,
+        "heap_calloc_class": 1,
+        "slot_image": 3,
+        "cow_capture_value": 3,
+        "array": 1,
+        "array_push_capture": 1,
+        "array_end": 1,
+        "fn_join": 1,
+        "lambda_map_set_checked": 1,
+        "lambda_int_lane_add_slow": 1,
+        "int2it_lane": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 1,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 45,
+      "memory_stores": 34,
+      "labels": 27,
+      "entry_calls": 0,
+      "labeled_calls": 21
+    },
+    {
+      "name": "_scene_add_light_b_5145",
+      "lines": 134,
+      "instructions": 125,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "_scene_add_light_5145": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 13,
+      "memory_stores": 19,
+      "labels": 16,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_scene_intersect_5446",
+      "lines": 2267,
+      "instructions": 2163,
+      "calls": 106,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 19,
+        "item_at": 12,
+        "cow_bind_var": 4,
+        "_triangle_intersect_4125": 2,
+        "push_d": 11,
+        "base_type": 8,
+        "fn_is": 8,
+        "it2d": 14,
+        "fn_eq": 1,
+        "array_num_new_uninit": 2,
+        "array_float_literal_with_nulls": 2,
+        "_vec_scale_1100": 3,
+        "_vec_add_886": 1,
+        "_vec_dot_1300": 2,
+        "array": 1,
+        "fn_sub": 3,
+        "array_push_capture": 3,
+        "array_end": 1,
+        "_vec_sub_993": 1,
+        "_vec_length_1586": 1,
+        "lambda_int_lane_add_slow": 1,
+        "_vec_add_inplace_1802": 1,
+        "cow_mark_shared": 1,
+        "_vec_scalev_1190": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 12,
+        "checked_set": 0,
+        "type_check": 19,
+        "numeric_admission": 0,
+        "boxing_unboxing": 14,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 565,
+      "memory_stores": 228,
+      "labels": 239,
+      "entry_calls": 0,
+      "labeled_calls": 106
+    },
+    {
+      "name": "_scene_intersect_b_5446",
+      "lines": 266,
+      "instructions": 252,
+      "calls": 14,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 6,
+        "it2d": 2,
+        "lambda_item_to_int_lane_c": 1,
+        "_scene_intersect_5446": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 6,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 39,
+      "memory_stores": 36,
+      "labels": 31,
+      "entry_calls": 0,
+      "labeled_calls": 14
+    },
+    {
+      "name": "_create_camera_7717",
+      "lines": 1479,
+      "instructions": 1413,
+      "calls": 102,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 9,
+        "_vec_sub_993": 1,
+        "_vec_normalise_1685": 7,
+        "_vec_cross_1405": 2,
+        "array": 1,
+        "int2it_lane": 26,
+        "fn_index": 12,
+        "fn_sub": 3,
+        "array_push_capture": 3,
+        "array_end": 1,
+        "fn_fill": 1,
+        "fn_array_set": 11,
+        "_invert_matrix_2377": 1,
+        "cow_mark_shared": 1,
+        "member_set_cow": 1,
+        "array_num_new_uninit": 4,
+        "_transform_matrix_2120": 4,
+        "heap_calloc_class": 1,
+        "slot_image": 5,
+        "cow_capture_value": 5,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 12,
+        "checked_set": 11,
+        "type_check": 9,
+        "numeric_admission": 0,
+        "boxing_unboxing": 26,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 312,
+      "memory_stores": 170,
+      "labels": 183,
+      "entry_calls": 0,
+      "labeled_calls": 102
+    },
+    {
+      "name": "_create_camera_b_7717",
+      "lines": 121,
+      "instructions": 112,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "_create_camera_7717": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 16,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_render_scene_8697",
+      "lines": 974,
+      "instructions": 920,
+      "calls": 62,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_int_lane_to_double_c": 10,
+        "_vec_scale_1100": 20,
+        "_vec_add_886": 10,
+        "_vec_normalise_1685": 3,
+        "_scene_intersect_5446": 3,
+        "lambda_item_resolve_pending": 3,
+        "cow_mark_shared": 3,
+        "lambda_int_lane_add_slow": 6,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 180,
+      "memory_stores": 78,
+      "labels": 113,
+      "entry_calls": 0,
+      "labeled_calls": 62
+    },
+    {
+      "name": "_render_scene_b_8697",
+      "lines": 167,
+      "instructions": 157,
+      "calls": 8,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "lambda_item_to_int_lane_c": 1,
+        "_render_scene_8697": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 14,
+      "memory_stores": 25,
+      "labels": 23,
+      "entry_calls": 0,
+      "labeled_calls": 8
+    },
+    {
+      "name": "_raytrace_scene_9540",
+      "lines": 891,
+      "instructions": 850,
+      "calls": 72,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_vec3_814": 18,
+        "array": 2,
+        "_create_triangle_3007": 14,
+        "array_push": 12,
+        "array_end": 2,
+        "array_push_capture": 2,
+        "fn_join": 1,
+        "lambda_type_check": 5,
+        "_create_scene_4905": 1,
+        "array_num_new_uninit": 4,
+        "_scene_add_light_5145": 3,
+        "slot_image": 1,
+        "heap_create_symbol": 1,
+        "map_set_cow": 1,
+        "_create_camera_7717": 1,
+        "_render_scene_8697": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 5,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 288,
+      "memory_stores": 131,
+      "labels": 46,
+      "entry_calls": 0,
+      "labeled_calls": 72
+    },
+    {
+      "name": "_raytrace_scene_b_9540",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_raytrace_scene_9540": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_main_11242",
+      "lines": 259,
+      "instructions": 242,
+      "calls": 23,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_raytrace_scene_9540": 1,
+        "lambda_item_to_int_lane_c": 2,
+        "lambda_int_lane_add_slow": 1,
+        "int2it_lane": 3,
+        "fn_join": 6,
+        "pn_print": 3,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 19,
+      "memory_stores": 19,
+      "labels": 46,
+      "entry_calls": 0,
+      "labeled_calls": 23
+    },
+    {
+      "name": "_main_b_11242",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_11242": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 63,
+      "instructions": 55,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_11242": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "towers": [
+    {
+      "name": "_push_disk_153",
+      "lines": 146,
+      "instructions": 134,
+      "calls": 8,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "cow_capture_value": 1,
+        "array_num_set_cow_idx": 2,
+        "lambda_int_lane_add_slow": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 19,
+      "memory_stores": 11,
+      "labels": 15,
+      "entry_calls": 0,
+      "labeled_calls": 8
+    },
+    {
+      "name": "_push_disk_b_153",
+      "lines": 126,
+      "instructions": 117,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "lambda_item_to_int_lane_c": 1,
+        "_push_disk_153": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 15,
+      "labels": 15,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_pop_disk_from_292",
+      "lines": 177,
+      "instructions": 164,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_int_lane_sub_slow": 1,
+        "int2it_lane": 2,
+        "array_num_set_cow_idx": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 24,
+      "memory_stores": 10,
+      "labels": 21,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_pop_disk_from_b_292",
+      "lines": 123,
+      "instructions": 114,
+      "calls": 8,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "lambda_item_to_int_lane_c": 1,
+        "_pop_disk_from_292": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 10,
+      "memory_stores": 14,
+      "labels": 15,
+      "entry_calls": 0,
+      "labeled_calls": 8
+    },
+    {
+      "name": "_move_top_disk_449",
+      "lines": 253,
+      "instructions": 239,
+      "calls": 18,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "lambda_type_check": 3,
+        "_pop_disk_from_b_292": 1,
+        "lambda_item_resolve_pending": 2,
+        "cow_mark_shared": 1,
+        "_push_disk_b_153": 1,
+        "int2it_lane": 2,
+        "fn_member_by_id": 1,
+        "fn_add": 1,
+        "slot_image": 1,
+        "fn_map_set": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 59,
+      "memory_stores": 33,
+      "labels": 28,
+      "entry_calls": 0,
+      "labeled_calls": 18
+    },
+    {
+      "name": "_move_top_disk_b_449",
+      "lines": 88,
+      "instructions": 81,
+      "calls": 4,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_move_top_disk_449": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 9,
+      "labels": 12,
+      "entry_calls": 0,
+      "labeled_calls": 4
+    },
+    {
+      "name": "_move_disks_643",
+      "lines": 244,
+      "instructions": 230,
+      "calls": 18,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "int2it_lane": 5,
+        "_move_top_disk_b_449": 2,
+        "lambda_item_resolve_pending": 2,
+        "lambda_int_lane_sub_slow": 4,
+        "_move_disks_643": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 5,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 26,
+      "memory_stores": 46,
+      "labels": 35,
+      "entry_calls": 0,
+      "labeled_calls": 18
+    },
+    {
+      "name": "_move_disks_b_643",
+      "lines": 168,
+      "instructions": 157,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "lambda_item_to_int_lane_c": 3,
+        "_move_disks_643": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 16,
+      "memory_stores": 19,
+      "labels": 21,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_benchmark_1054",
+      "lines": 234,
+      "instructions": 219,
+      "calls": 17,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "int2it_lane": 5,
+        "fn_fill": 1,
+        "array_num_new_uninit": 1,
+        "_push_disk_153": 1,
+        "lambda_int_lane_sub_slow": 1,
+        "map_with_tl": 1,
+        "map_fill": 1,
+        "_move_disks_643": 1,
+        "fn_member_by_id": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 5,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 26,
+      "memory_stores": 33,
+      "labels": 32,
+      "entry_calls": 0,
+      "labeled_calls": 17
+    },
+    {
+      "name": "_benchmark_b_1054",
+      "lines": 19,
+      "instructions": 15,
+      "calls": 2,
+      "call_targets": {
+        "_benchmark_1054": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 3,
+      "memory_stores": 2,
+      "labels": 3,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_main_1431",
+      "lines": 166,
+      "instructions": 154,
+      "calls": 17,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_1054": 1,
+        "lambda_item_resolve_pending": 1,
+        "fn_eq": 1,
+        "pn_print": 5,
+        "push_d": 1,
+        "fn_join": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 21,
+      "memory_stores": 15,
+      "labels": 26,
+      "entry_calls": 0,
+      "labeled_calls": 17
+    },
+    {
+      "name": "_main_b_1431",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_1431": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_1431": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "towers2": [
+    {
+      "name": "_push_disk_105",
+      "lines": 236,
+      "instructions": 220,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "int2it_lane": 2,
+        "array_num_set_cow_idx": 2,
+        "lambda_int_lane_add_slow": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 28,
+      "memory_stores": 33,
+      "labels": 25,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_push_disk_b_105",
+      "lines": 246,
+      "instructions": 233,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "cow_prepare_write": 2,
+        "lambda_type_check": 4,
+        "lambda_item_to_int_lane_c": 2,
+        "_push_disk_105": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 33,
+      "memory_stores": 38,
+      "labels": 30,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_pop_disk_from_277",
+      "lines": 245,
+      "instructions": 229,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 4,
+        "lambda_int_lane_sub_slow": 1,
+        "int2it_lane": 2,
+        "array_num_set_cow_idx": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 25,
+      "memory_stores": 27,
+      "labels": 29,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_pop_disk_from_b_277",
+      "lines": 163,
+      "instructions": 153,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "cow_prepare_write": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "_pop_disk_from_277": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 17,
+      "memory_stores": 23,
+      "labels": 20,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_move_top_disk_458",
+      "lines": 220,
+      "instructions": 207,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "_pop_disk_from_277": 1,
+        "cow_prepare_write": 1,
+        "lambda_item_to_int_lane_c": 2,
+        "_push_disk_105": 1,
+        "lambda_int_lane_add_slow": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 40,
+      "memory_stores": 37,
+      "labels": 26,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_move_top_disk_b_458",
+      "lines": 312,
+      "instructions": 297,
+      "calls": 14,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "cow_prepare_write": 3,
+        "lambda_type_check": 5,
+        "lambda_item_to_int_lane_c": 2,
+        "_move_top_disk_458": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 5,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 46,
+      "memory_stores": 50,
+      "labels": 38,
+      "entry_calls": 0,
+      "labeled_calls": 14
+    },
+    {
+      "name": "_move_disks_688",
+      "lines": 285,
+      "instructions": 270,
+      "calls": 15,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "lambda_stack_overflow_error": 2,
+        "_move_top_disk_458": 2,
+        "int2it_lane": 1,
+        "lambda_int_lane_sub_slow": 4,
+        "_move_disks_688": 2,
+        "lambda_side_stack_ensure_for": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 45,
+      "memory_stores": 67,
+      "labels": 29,
+      "entry_calls": 0,
+      "labeled_calls": 15
+    },
+    {
+      "name": "_move_disks_b_688",
+      "lines": 371,
+      "instructions": 354,
+      "calls": 16,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "cow_prepare_write": 3,
+        "lambda_type_check": 6,
+        "lambda_item_to_int_lane_c": 3,
+        "_move_disks_688": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 6,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 59,
+      "memory_stores": 61,
+      "labels": 44,
+      "entry_calls": 0,
+      "labeled_calls": 16
+    },
+    {
+      "name": "_benchmark_1145",
+      "lines": 381,
+      "instructions": 358,
+      "calls": 21,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "int2it_lane": 4,
+        "fn_fill": 1,
+        "lambda_array_admit_numeric_contract": 1,
+        "array_num_new_uninit": 1,
+        "lambda_type_check": 3,
+        "item_at": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "array_num_set_cow_idx": 2,
+        "lambda_int_lane_add_slow": 1,
+        "lambda_int_lane_sub_slow": 1,
+        "heap_calloc_class": 1,
+        "_move_disks_688": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 1,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 4,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 47,
+      "memory_stores": 61,
+      "labels": 39,
+      "entry_calls": 0,
+      "labeled_calls": 21
+    },
+    {
+      "name": "_benchmark_b_1145",
+      "lines": 53,
+      "instructions": 47,
+      "calls": 3,
+      "call_targets": {
+        "_benchmark_1145": 1,
+        "int2it_lane": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 10,
+      "entry_calls": 0,
+      "labeled_calls": 3
+    },
+    {
+      "name": "_main_1430",
+      "lines": 176,
+      "instructions": 163,
+      "calls": 17,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_1145": 1,
+        "int2it_lane": 2,
+        "pn_print": 5,
+        "push_d": 1,
+        "fn_join": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 19,
+      "memory_stores": 13,
+      "labels": 31,
+      "entry_calls": 0,
+      "labeled_calls": 17
+    },
+    {
+      "name": "_main_b_1430",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_1430": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 54,
+      "instructions": 47,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_1430": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "fast_diff": [
+    {
+      "name": "_score_diff_156",
+      "lines": 1818,
+      "instructions": 1711,
+      "calls": 78,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "fn_len": 2,
+        "lambda_int_lane_add_slow": 23,
+        "lambda_int_lane_mul_slow": 5,
+        "int2it_lane": 16,
+        "fn_fill": 1,
+        "lambda_array_admit_numeric_contract": 1,
+        "lambda_int_lane_sub_slow": 4,
+        "fn_index": 6,
+        "fn_eq": 3,
+        "lambda_array_set_checked_lane": 1,
+        "array_num_set_cow_idx": 1,
+        "is_truthy": 6,
+        "lambda_int_lane_to_double_c": 4,
+        "lambda_type_check": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 6,
+        "checked_set": 1,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 16,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 104,
+      "memory_stores": 58,
+      "labels": 259,
+      "entry_calls": 0,
+      "labeled_calls": 78
+    },
+    {
+      "name": "_score_diff_b_156",
+      "lines": 83,
+      "instructions": 76,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_score_diff_156": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 6,
+      "labels": 14,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_main_2055",
+      "lines": 690,
+      "instructions": 657,
+      "calls": 68,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "array": 7,
+        "array_push": 18,
+        "array_end": 7,
+        "pn_clock": 2,
+        "fn_len_l": 1,
+        "item_at": 2,
+        "int2it_lane": 8,
+        "fn_index": 2,
+        "lambda_type_check": 3,
+        "_score_diff_156": 1,
+        "lambda_item_to_int_lane_c": 2,
+        "lambda_int_lane_add_slow": 1,
+        "fn_join": 6,
+        "pn_print": 3,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 4,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 8,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 115,
+      "memory_stores": 64,
+      "labels": 110,
+      "entry_calls": 0,
+      "labeled_calls": 68
+    },
+    {
+      "name": "_main_b_2055",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_2055": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_2055": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "levenshtein": [
+    {
+      "name": "_min2_251",
+      "lines": 34,
+      "instructions": 28,
+      "calls": 1,
+      "call_targets": {
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 1
+    },
+    {
+      "name": "_min2_b_251",
+      "lines": 129,
+      "instructions": 120,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_item_to_int_lane_c": 2,
+        "_min2_251": 1,
+        "int2it_lane": 1,
+        "fn_lt": 1,
+        "is_truthy": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 6,
+      "labels": 19,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_min3_311",
+      "lines": 70,
+      "instructions": 63,
+      "calls": 8,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_min2_b_251": 2,
+        "lambda_item_resolve_pending": 2,
+        "lambda_item_to_int_lane_c": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 7,
+      "memory_stores": 7,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 8
+    },
+    {
+      "name": "_min3_b_311",
+      "lines": 84,
+      "instructions": 77,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_min3_311": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 7,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_levenshtein_364",
+      "lines": 1272,
+      "instructions": 1206,
+      "calls": 73,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "fn_len_s": 2,
+        "int2it_lane": 23,
+        "fn_fill": 2,
+        "fn_array_set": 3,
+        "lambda_int_lane_add_slow": 12,
+        "array_num_set_cow_idx": 3,
+        "fn_string_ascii_at": 6,
+        "fn_eq": 3,
+        "_min3_311": 3,
+        "cow_bind_var": 6,
+        "member_set_cow": 1,
+        "fn_index": 2,
+        "fn_add": 1,
+        "lambda_type_check": 1,
+        "cow_mark_shared": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 2,
+        "checked_set": 3,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 23,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 168,
+      "memory_stores": 81,
+      "labels": 186,
+      "entry_calls": 0,
+      "labeled_calls": 73
+    },
+    {
+      "name": "_levenshtein_b_364",
+      "lines": 1545,
+      "instructions": 1467,
+      "calls": 88,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "it2s": 2,
+        "_levenshtein_364": 1,
+        "int2it_lane": 36,
+        "fn_len": 2,
+        "fn_fill": 2,
+        "fn_array_set": 3,
+        "lambda_int_lane_add_slow": 12,
+        "array_num_set_cow_idx": 3,
+        "fn_index": 8,
+        "fn_eq": 3,
+        "_min3_311": 3,
+        "cow_bind_var": 6,
+        "member_set_cow": 1,
+        "fn_add": 1,
+        "lambda_type_check": 1,
+        "cow_mark_shared": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 8,
+        "checked_set": 3,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 38,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 192,
+      "memory_stores": 106,
+      "labels": 240,
+      "entry_calls": 0,
+      "labeled_calls": 88
+    },
+    {
+      "name": "_make_string_1134",
+      "lines": 236,
+      "instructions": 220,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "fn_join": 5,
+        "lambda_int_lane_mul_slow": 2,
+        "lambda_int_lane_sub_slow": 1,
+        "lambda_int_lane_add_slow": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 19,
+      "labels": 37,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_make_string_b_1134",
+      "lines": 83,
+      "instructions": 76,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "_make_string_1134": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 6,
+      "labels": 12,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_benchmark_1492",
+      "lines": 452,
+      "instructions": 428,
+      "calls": 40,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "_levenshtein_364": 2,
+        "int2it_lane": 2,
+        "_make_string_1134": 4,
+        "lambda_item_resolve_pending": 6,
+        "cow_mark_shared": 4,
+        "_levenshtein_b_364": 2,
+        "fn_join": 8,
+        "pn_print": 6,
+        "fn_eq": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 109,
+      "memory_stores": 44,
+      "labels": 61,
+      "entry_calls": 0,
+      "labeled_calls": 40
+    },
+    {
+      "name": "_benchmark_b_1492",
+      "lines": 19,
+      "instructions": 15,
+      "calls": 2,
+      "call_targets": {
+        "_benchmark_1492": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 3,
+      "memory_stores": 2,
+      "labels": 3,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_main_2280",
+      "lines": 108,
+      "instructions": 98,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_1492": 1,
+        "lambda_item_resolve_pending": 1,
+        "push_d": 1,
+        "fn_join": 2,
+        "pn_print": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 10,
+      "labels": 16,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_main_b_2280",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_2280": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_2280": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "primes_array_only": [
+    {
+      "name": "_sieve_165",
+      "lines": 714,
+      "instructions": 674,
+      "calls": 20,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_int_lane_add_slow": 7,
+        "int2it_lane": 1,
+        "fn_fill": 1,
+        "lambda_array_admit_numeric_contract": 1,
+        "array_num_set_cow_idx": 5,
+        "lambda_int_lane_mul_slow": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 38,
+      "memory_stores": 33,
+      "labels": 120,
+      "entry_calls": 0,
+      "labeled_calls": 20
+    },
+    {
+      "name": "_sieve_b_165",
+      "lines": 70,
+      "instructions": 63,
+      "calls": 4,
+      "call_targets": {
+        "lambda_item_to_int_lane_c": 1,
+        "_sieve_165": 1,
+        "int2it_lane": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 4
+    },
+    {
+      "name": "_main_665",
+      "lines": 189,
+      "instructions": 176,
+      "calls": 19,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_sieve_165": 1,
+        "int2it_lane": 1,
+        "fn_eq": 1,
+        "fn_join": 4,
+        "pn_print": 5,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 22,
+      "memory_stores": 17,
+      "labels": 32,
+      "entry_calls": 0,
+      "labeled_calls": 19
+    },
+    {
+      "name": "_main_b_665",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_665": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_665": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "levenshtein_strings_only": [
+    {
+      "name": "_min2_251",
+      "lines": 34,
+      "instructions": 28,
+      "calls": 1,
+      "call_targets": {
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 1
+    },
+    {
+      "name": "_min2_b_251",
+      "lines": 129,
+      "instructions": 120,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_item_to_int_lane_c": 2,
+        "_min2_251": 1,
+        "int2it_lane": 1,
+        "fn_lt": 1,
+        "is_truthy": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 6,
+      "labels": 19,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_min3_311",
+      "lines": 70,
+      "instructions": 63,
+      "calls": 8,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_min2_b_251": 2,
+        "lambda_item_resolve_pending": 2,
+        "lambda_item_to_int_lane_c": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 7,
+      "memory_stores": 7,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 8
+    },
+    {
+      "name": "_min3_b_311",
+      "lines": 84,
+      "instructions": 77,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_min3_311": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 7,
+      "labels": 13,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_levenshtein_364",
+      "lines": 1282,
+      "instructions": 1211,
+      "calls": 67,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "fn_len_s": 2,
+        "int2it_lane": 23,
+        "fn_fill": 2,
+        "fn_array_set": 3,
+        "lambda_int_lane_add_slow": 12,
+        "array_num_set_cow_idx": 3,
+        "fn_string_char_eq": 3,
+        "_min3_311": 3,
+        "cow_bind_var": 6,
+        "member_set_cow": 1,
+        "fn_index": 2,
+        "fn_add": 1,
+        "lambda_type_check": 1,
+        "cow_mark_shared": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 2,
+        "checked_set": 3,
+        "type_check": 1,
+        "numeric_admission": 0,
+        "boxing_unboxing": 23,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 138,
+      "memory_stores": 71,
+      "labels": 192,
+      "entry_calls": 0,
+      "labeled_calls": 67
+    },
+    {
+      "name": "_levenshtein_b_364",
+      "lines": 131,
+      "instructions": 122,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2s": 2,
+        "_levenshtein_364": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 16,
+      "labels": 20,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_make_string_1150",
+      "lines": 236,
+      "instructions": 220,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "fn_join": 5,
+        "lambda_int_lane_mul_slow": 2,
+        "lambda_int_lane_sub_slow": 1,
+        "lambda_int_lane_add_slow": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 19,
+      "labels": 37,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_make_string_b_1150",
+      "lines": 83,
+      "instructions": 76,
+      "calls": 6,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "_make_string_1150": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 6,
+      "labels": 12,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_benchmark_1508",
+      "lines": 573,
+      "instructions": 544,
+      "calls": 48,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "_levenshtein_364": 4,
+        "int2it_lane": 4,
+        "_make_string_1150": 4,
+        "lambda_item_resolve_pending": 4,
+        "cow_mark_shared": 4,
+        "lambda_type_check": 4,
+        "it2s": 4,
+        "fn_join": 8,
+        "pn_print": 6,
+        "fn_eq": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 4,
+        "numeric_admission": 0,
+        "boxing_unboxing": 8,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 121,
+      "memory_stores": 60,
+      "labels": 81,
+      "entry_calls": 0,
+      "labeled_calls": 48
+    },
+    {
+      "name": "_benchmark_b_1508",
+      "lines": 19,
+      "instructions": 15,
+      "calls": 2,
+      "call_targets": {
+        "_benchmark_1508": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 3,
+      "memory_stores": 2,
+      "labels": 3,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_main_2296",
+      "lines": 108,
+      "instructions": 98,
+      "calls": 12,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_1508": 1,
+        "lambda_item_resolve_pending": 1,
+        "push_d": 1,
+        "fn_join": 2,
+        "pn_print": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 10,
+      "labels": 16,
+      "entry_calls": 0,
+      "labeled_calls": 12
+    },
+    {
+      "name": "_main_b_2296",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_2296": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_2296": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "fast_diff_strings_only": [
+    {
+      "name": "_score_diff_156",
+      "lines": 1522,
+      "instructions": 1427,
+      "calls": 56,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "fn_len_s": 2,
+        "lambda_int_lane_mul_slow": 5,
+        "int2it_lane": 4,
+        "fn_fill": 1,
+        "lambda_array_admit_numeric_contract": 1,
+        "fn_string_char_eq": 3,
+        "lambda_int_lane_add_slow": 21,
+        "lambda_array_set_checked_lane": 1,
+        "array_num_set_cow_idx": 1,
+        "lambda_int_lane_sub_slow": 2,
+        "is_truthy": 6,
+        "lambda_int_lane_to_double_c": 4,
+        "lambda_type_check": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 1,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 4,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 61,
+      "memory_stores": 31,
+      "labels": 214,
+      "entry_calls": 0,
+      "labeled_calls": 56
+    },
+    {
+      "name": "_score_diff_b_156",
+      "lines": 131,
+      "instructions": 122,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "it2s": 2,
+        "_score_diff_156": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 3,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 16,
+      "labels": 20,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_main_2071",
+      "lines": 707,
+      "instructions": 673,
+      "calls": 70,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "array": 7,
+        "array_push": 18,
+        "array_end": 7,
+        "pn_clock": 2,
+        "fn_len_l": 1,
+        "item_at": 2,
+        "int2it_lane": 8,
+        "fn_index": 2,
+        "lambda_type_check": 3,
+        "it2s": 2,
+        "_score_diff_156": 1,
+        "lambda_item_to_int_lane_c": 2,
+        "lambda_int_lane_add_slow": 1,
+        "fn_join": 6,
+        "pn_print": 3,
+        "push_d": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 4,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 10,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 115,
+      "memory_stores": 64,
+      "labels": 114,
+      "entry_calls": 0,
+      "labeled_calls": 70
+    },
+    {
+      "name": "_main_b_2071",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_2071": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_2071": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "divrec": [
+    {
+      "name": "_divrec_div_helper_228",
+      "lines": 57,
+      "instructions": 50,
+      "calls": 4,
+      "call_targets": {
+        "lambda_int_lane_sub_slow": 1,
+        "lambda_int_lane_add_slow": 1,
+        "_divrec_div_helper_228": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 4
+    },
+    {
+      "name": "_divrec_div_helper_b_228",
+      "lines": 97,
+      "instructions": 89,
+      "calls": 6,
+      "call_targets": {
+        "lambda_item_to_int_lane_c": 3,
+        "_divrec_div_helper_228": 1,
+        "int2it_lane": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 17,
+      "entry_calls": 0,
+      "labeled_calls": 6
+    },
+    {
+      "name": "_divrec_div_349",
+      "lines": 71,
+      "instructions": 64,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "int2it_lane": 1,
+        "_divrec_div_helper_b_228": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_item_to_int_lane_c": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 6,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    },
+    {
+      "name": "_divrec_div_b_349",
+      "lines": 77,
+      "instructions": 70,
+      "calls": 5,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "_divrec_div_349": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 6,
+      "labels": 12,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_divrec_mod_412",
+      "lines": 46,
+      "instructions": 40,
+      "calls": 3,
+      "call_targets": {
+        "lambda_int_lane_sub_slow": 1,
+        "_divrec_mod_412": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 3
+    },
+    {
+      "name": "_divrec_mod_b_412",
+      "lines": 80,
+      "instructions": 73,
+      "calls": 5,
+      "call_targets": {
+        "lambda_item_to_int_lane_c": 2,
+        "_divrec_mod_412": 1,
+        "int2it_lane": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 14,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_benchmark_509",
+      "lines": 111,
+      "instructions": 101,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "int2it_lane": 2,
+        "_divrec_div_349": 1,
+        "lambda_int_lane_add_slow": 1,
+        "_divrec_mod_412": 1,
+        "lambda_int_lane_sub_slow": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 2,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 3,
+      "memory_stores": 4,
+      "labels": 18,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_benchmark_b_509",
+      "lines": 46,
+      "instructions": 41,
+      "calls": 3,
+      "call_targets": {
+        "_benchmark_509": 1,
+        "int2it_lane": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 8,
+      "entry_calls": 0,
+      "labeled_calls": 3
+    },
+    {
+      "name": "_main_731",
+      "lines": 157,
+      "instructions": 145,
+      "calls": 16,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_509": 1,
+        "pn_print": 5,
+        "int2it_lane": 1,
+        "push_d": 1,
+        "fn_join": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 17,
+      "memory_stores": 13,
+      "labels": 26,
+      "entry_calls": 0,
+      "labeled_calls": 16
+    },
+    {
+      "name": "_main_b_731",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_731": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_731": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ],
+  "divrec2": [
+    {
+      "name": "_divrec_div_helper_244",
+      "lines": 67,
+      "instructions": 60,
+      "calls": 4,
+      "call_targets": {
+        "lambda_stack_overflow_error": 2,
+        "lambda_int_lane_sub_slow": 1,
+        "lambda_int_lane_add_slow": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 11,
+      "entry_calls": 0,
+      "labeled_calls": 4
+    },
+    {
+      "name": "_divrec_div_helper_b_244",
+      "lines": 186,
+      "instructions": 175,
+      "calls": 11,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 3,
+        "lambda_item_to_int_lane_c": 3,
+        "_divrec_div_helper_244": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 3,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 12,
+      "memory_stores": 21,
+      "labels": 28,
+      "entry_calls": 0,
+      "labeled_calls": 11
+    },
+    {
+      "name": "_divrec_div_384",
+      "lines": 21,
+      "instructions": 16,
+      "calls": 2,
+      "call_targets": {
+        "_divrec_div_helper_244": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 3,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "_divrec_div_b_384",
+      "lines": 141,
+      "instructions": 131,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "lambda_item_to_int_lane_c": 2,
+        "_divrec_div_384": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 13,
+      "labels": 22,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_divrec_mod_461",
+      "lines": 56,
+      "instructions": 49,
+      "calls": 3,
+      "call_targets": {
+        "lambda_stack_overflow_error": 2,
+        "lambda_int_lane_sub_slow": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 9,
+      "entry_calls": 0,
+      "labeled_calls": 3
+    },
+    {
+      "name": "_divrec_mod_b_461",
+      "lines": 141,
+      "instructions": 131,
+      "calls": 9,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_type_check": 2,
+        "lambda_item_to_int_lane_c": 2,
+        "_divrec_mod_461": 1,
+        "int2it_lane": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 2,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 8,
+      "memory_stores": 13,
+      "labels": 22,
+      "entry_calls": 0,
+      "labeled_calls": 9
+    },
+    {
+      "name": "_benchmark_572",
+      "lines": 71,
+      "instructions": 63,
+      "calls": 5,
+      "call_targets": {
+        "_divrec_div_384": 1,
+        "lambda_int_lane_add_slow": 1,
+        "_divrec_mod_461": 1,
+        "lambda_int_lane_sub_slow": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 1,
+      "memory_stores": 0,
+      "labels": 10,
+      "entry_calls": 0,
+      "labeled_calls": 5
+    },
+    {
+      "name": "_benchmark_b_572",
+      "lines": 46,
+      "instructions": 41,
+      "calls": 3,
+      "call_targets": {
+        "_benchmark_572": 1,
+        "int2it_lane": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 8,
+      "entry_calls": 0,
+      "labeled_calls": 3
+    },
+    {
+      "name": "_main_808",
+      "lines": 157,
+      "instructions": 145,
+      "calls": 16,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "lambda_module_state_for_unit": 1,
+        "pn_clock": 2,
+        "_benchmark_572": 1,
+        "pn_print": 5,
+        "int2it_lane": 1,
+        "push_d": 1,
+        "fn_join": 2,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 1,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 17,
+      "memory_stores": 13,
+      "labels": 26,
+      "entry_calls": 0,
+      "labeled_calls": 16
+    },
+    {
+      "name": "_main_b_808",
+      "lines": 36,
+      "instructions": 31,
+      "calls": 2,
+      "call_targets": {
+        "_main_808": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 5,
+      "memory_stores": 2,
+      "labels": 5,
+      "entry_calls": 0,
+      "labeled_calls": 2
+    },
+    {
+      "name": "main",
+      "lines": 51,
+      "instructions": 45,
+      "calls": 7,
+      "call_targets": {
+        "lambda_stack_is_exhausted": 1,
+        "list": 1,
+        "list_end": 1,
+        "_main_b_808": 1,
+        "lambda_item_resolve_pending": 1,
+        "lambda_side_stack_ensure_for": 1,
+        "lambda_stack_overflow_error": 1
+      },
+      "categories": {
+        "index": 0,
+        "checked_set": 0,
+        "type_check": 0,
+        "numeric_admission": 0,
+        "boxing_unboxing": 0,
+        "side_root": 0,
+        "scalar_home": 0
+      },
+      "memory_loads": 6,
+      "memory_stores": 4,
+      "labels": 7,
+      "entry_calls": 0,
+      "labeled_calls": 7
+    }
+  ]
+}

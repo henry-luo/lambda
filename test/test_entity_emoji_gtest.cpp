@@ -11,6 +11,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <thorvg_capi.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -24,6 +25,9 @@
 #include "../lib/log.h"
 #include "../lib/url.h"
 #include "../lib/arena.h"
+#include "../lib/font/font_colr.h"
+#include "../lib/font/font_tables.h"
+#include "../lib/font/font_internal.h"
 
 // Forward declarations
 extern "C" {
@@ -477,4 +481,95 @@ TEST_F(EntityEmojiIntegrationTest, XmlEntityHandling) {
     EXPECT_GT(output->len, 0);
 
     printf("XML entity output: %s\n", output->chars);
+}
+
+TEST(FontColorTest, ColrV1CompatibilityLayersKeepPaletteColors) {
+    // COLR v1 may carry v0 records so older rasterizers can still draw color.
+    uint8_t data[62] = {};
+    data[1] = 1;                  // COLR version 1
+    data[3] = 1;                  // one v0 BaseGlyph record
+    data[7] = 34;                 // BaseGlyph records start after the v1 header
+    data[11] = 40;                // Layer records follow the base record
+    data[13] = 1;                 // one layer
+    data[34] = 0x12; data[35] = 0x34; // base glyph
+    data[39] = 1;                 // one layer for the base glyph
+    data[40] = 0x23; data[41] = 0x45; // layer glyph
+
+    data[47] = 1;                 // CPAL: one entry per palette
+    data[49] = 1;                 // one palette
+    data[51] = 1;                 // one color record
+    data[55] = 14;                // color records offset from CPAL start
+    data[58] = 0x33; data[59] = 0x22; data[60] = 0x11; data[61] = 0xFF;
+
+    FontTableDir dirs[2] = {};
+    dirs[0].tag = FONT_TAG('C', 'O', 'L', 'R');
+    dirs[0].length = 44;
+    dirs[1].tag = FONT_TAG('C', 'P', 'A', 'L');
+    dirs[1].offset = 44;
+    dirs[1].length = 18;
+    FontTables tables = {};
+    tables.data = data;
+    tables.data_len = sizeof(data);
+    tables.dirs = dirs;
+    tables.num_tables = 2;
+
+    ASSERT_TRUE(colr_has_glyph(&tables, 0x1234));
+    ColrLayer layer = {};
+    ASSERT_EQ(colr_get_layers(&tables, 0x1234, &layer, 1), 1);
+    EXPECT_EQ(layer.glyph_id, 0x2345);
+    EXPECT_EQ(layer.r, 0x11);
+    EXPECT_EQ(layer.g, 0x22);
+    EXPECT_EQ(layer.b, 0x33);
+    EXPECT_EQ(layer.a, 0xFF);
+
+    data[3] = 0; // v1 without compatibility records cannot use this renderer
+    EXPECT_FALSE(colr_has_glyph(&tables, 0x1234));
+}
+
+TEST_F(EntityResolutionTest, EmojiFallbackProducesColorBitmap) {
+#if defined(__linux__)
+    // The standalone font test needs the same ThorVG engine initialization as Radiant.
+    ASSERT_EQ(tvg_engine_init(0), TVG_RESULT_SUCCESS);
+#endif
+    FontContextConfig cfg = {};
+    cfg.pixel_ratio = 1.0f;
+    FontContext* ctx = font_context_create(&cfg);
+    ASSERT_NE(ctx, nullptr);
+    ASSERT_TRUE(font_context_scan(ctx));
+
+    FontDatabaseCriteria criteria = {};
+    strncpy(criteria.family_name, "Noto Color Emoji", sizeof(criteria.family_name) - 1);
+    FontDatabaseResult match = font_database_find_best_match_internal(ctx->database, &criteria);
+    if (!match.font || !match.exact_family_match) {
+        font_context_destroy(ctx);
+#if defined(__linux__)
+        tvg_engine_term();
+#endif
+        GTEST_SKIP() << "Noto Color Emoji is not installed";
+    }
+
+    FontStyleDesc style = {};
+    style.family = "sans-serif";
+    style.size_px = 16.0f;
+    style.weight = FONT_WEIGHT_NORMAL;
+    style.slant = FONT_SLANT_NORMAL;
+    FontHandle* text_face = font_resolve(ctx, &style);
+    ASSERT_NE(text_face, nullptr);
+
+    // Emoji glyphs must have decoded color pixels, not just an advance width.
+    uint32_t codepoints[] = {0x1F600u, 0x1F44Du};
+    for (uint32_t codepoint : codepoints) {
+        LoadedGlyph* glyph = font_load_glyph_emoji(text_face, &style, codepoint, true);
+        ASSERT_NE(glyph, nullptr);
+        EXPECT_EQ(glyph->bitmap.pixel_mode, GLYPH_PIXEL_BGRA);
+        EXPECT_NE(glyph->bitmap.buffer, nullptr);
+        EXPECT_GT(glyph->bitmap.width, 0);
+        EXPECT_GT(glyph->bitmap.height, 0);
+    }
+
+    font_handle_release(text_face);
+    font_context_destroy(ctx);
+#if defined(__linux__)
+    tvg_engine_term();
+#endif
 }

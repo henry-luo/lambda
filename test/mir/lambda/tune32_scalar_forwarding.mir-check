@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "description": "Tune32 T32-3: closed scalar forwarding reaches the native leaf consumer while escaped non-int calls retain boxed source semantics and row snapshots (D8.3.2, S9.1.2).",
+  "checks": [
+    {"in_func": "_tune32_scalar_forward_#", "expect": ["lt\t"], "forbid": ["call\t_tune32_scalar_pick_b_", "call\tfn_lt_p, fn_lt"]}
+  ]
+}

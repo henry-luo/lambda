@@ -1,0 +1,14 @@
+{
+  "name": "Reverse flex scroll preserves a signed scroll range",
+  "html": "test/ui/scroll_negative_range.html",
+  "viewport": {"width": 400, "height": 240},
+  "events": [
+    {"type": "scroll", "target": {"selector": "#pane"}, "dx": 0, "dy": 1},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": -50, "tolerance": 1},
+    {"type": "scroll", "target": {"selector": "#pane-x"}, "dx": 1, "dy": 0},
+    {"type": "assert_state_store", "target": {"selector": "#pane-x"},
+     "view_state": true, "kind": "scroll", "view_scroll_x": -50, "tolerance": 1},
+    {"type": "assert_event_log", "contains": "\"valid\":false", "max": 0}
+  ]
+}

@@ -1,0 +1,252 @@
+{
+  "tests": 20,
+  "failures": 0,
+  "disabled": 0,
+  "errors": 0,
+  "timestamp": "2026-10-02T08:52:55Z",
+  "time": "2.465s",
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "MirRatchetConfig",
+      "tests": 1,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "timestamp": "2026-10-02T08:52:55Z",
+      "time": "0s",
+      "testsuite": [
+        {
+          "name": "LoadsProbes",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 447,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0s",
+          "classname": "MirRatchetConfig"
+        }
+      ]
+    },
+    {
+      "name": "Probes\/MirRatchetTest",
+      "tests": 19,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "timestamp": "2026-10-02T08:52:55Z",
+      "time": "2.465s",
+      "testsuite": [
+        {
+          "name": "WithinBudget\/lambda_scalar_home_donation",
+          "value_param": "144-byte object <40-10 00-5B 0B-00 00-00 1B-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 20-07 C2-5A 0B-00 00-00 27-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-61 72-77 69-6E 2D-64 ... 01-2D 2D-20 70-72 69-6E C3-00 00-00 00-00 00-00 70-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 C0-5D 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.034s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_scalar_home_tail_forward",
+          "value_param": "144-byte object <40-10 00-5B 0B-00 00-00 1F-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 20-07 C2-5A 0B-00 00-00 2B-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-61 72-77 69-6E 2D-64 ... 01-2D 2D-20 70-72 69-6E E7-00 00-00 00-00 00-00 70-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 C0-5D 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.032s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_sized_int_boxing",
+          "value_param": "144-byte object <40-10 00-5B 0B-00 00-00 17-00 00-00 00-00 00-00 19-00 00-00 00-00 00-80 20-07 C2-5A 0B-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E 39-00 00-00 00-00 00-00 00-C2 C5-5A 0B-00 00-00 38-C2 C5-5A 0B-00 00-00 38-C2 C5-5A 0B-00 00-00 70-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.03s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/js_numeric_inference_call",
+          "value_param": "144-byte object <40-10 00-5B 0B-00 00-00 19-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 20-07 C2-5A 0B-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 01-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E F4-00 00-00 00-00 00-00 00-C2 C5-5A 0B-00 00-00 38-C2 C5-5A 0B-00 00-00 38-C2 C5-5A 0B-00 00-00 70-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.157s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/js_hoisted_modvar_write_through",
+          "value_param": "144-byte object <40-10 00-5B 0B-00 00-00 1F-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 20-07 C2-5A 0B-00 00-00 2B-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 01-00 00-00 00-00 00-00 64-61 72-77 69-6E 2D-64 ... 01-2D 2D-20 70-72 69-6E 5E-01 00-00 00-00 00-00 00-C2 C5-5A 0B-00 00-00 38-C2 C5-5A 0B-00 00-00 38-C2 C5-5A 0B-00 00-00 C0-5D 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.149s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_corpus_closure",
+          "value_param": "144-byte object <6C-61 6D-62 64-61 5F-63 6F-72 70-75 73-5F 63-6C 6F-73 75-72 65-00 00-15 74-65 73-74 2F-6C 61-6D 62-64 61-2F 63-6C 6F-73 75-72 65-2E 6C-73 00-16 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E 2E-09 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.054s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_corpus_array_float",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 19-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 E0-11 00-5B 0B-00 00-00 1A-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E A5-07 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.042s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/js_corpus_array_methods",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 17-00 00-00 00-00 00-00 19-00 00-00 00-00 00-80 E0-11 00-5B 0B-00 00-00 18-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 01-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E BC-0E 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:55Z",
+          "time": "0.182s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/js_corpus_generator_basic",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 19-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 E0-11 00-5B 0B-00 00-00 1A-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 01-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E AB-17 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.217s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/js_corpus_side_stack_frame_gc",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 1D-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 29-00 00-00 00-00 00-00 30-00 00-00 00-00 00-80 01-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E C3-22 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.333s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_cow_nested_store",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 17-00 00-00 00-00 00-00 19-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-61 72-77 69-6E 2D-64 ... 01-2D 2D-20 70-72 69-6E AF-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.031s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_tune4_typed_array_guard",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 1E-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 24-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E D2-04 00-00 00-00 00-00 70-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 C0-5D 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.043s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_tune4_callsite_inference",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 1F-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E 61-02 00-00 00-00 00-00 70-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 C0-5D 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00 A0-5E 04-5B 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.032s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/js_error_lane_tag_budget",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 18-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 27-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 01-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 00-2D 2D-20 70-72 69-6E 00-00 00-00 00-00 00-00 C0-C5 C5-5A 0B-00 00-00 F8-C5 C5-5A 0B-00 00-00 F8-C5 C5-5A 0B-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.124s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/js_tune6_exact_collection",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 19-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 25-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 01-00 00-00 00-00 00-00 64-61 72-77 69-6E 2D-64 ... 01-2D 2D-20 70-72 69-6E F8-42 00-00 00-00 00-00 70-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 E0-47 C5-5A 0B-00 00-00 50-48 C5-5A 0B-00 00-00 50-48 C5-5A 0B-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:56Z",
+          "time": "0.509s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_tune30_libm_no_gc",
+          "value_param": "144-byte object <40-0C 00-5B 0B-00 00-00 18-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 24-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E D1-01 00-00 00-00 00-00 40-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.034s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_corpus_cube3d",
+          "value_param": "144-byte object <6C-61 6D-62 64-61 5F-63 6F-72 70-75 73-5F 63-75 62-65 33-64 00-00 00-14 D0-0B C2-5A 0B-00 00-00 23-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E 5A-3F 00-00 00-00 00-00 40-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.183s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_corpus_deltablue",
+          "value_param": "144-byte object <E0-11 00-5B 0B-00 00-00 17-00 00-00 00-00 00-00 19-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 26-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E 90-27 00-00 00-00 00-00 40-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.109s",
+          "classname": "Probes\/MirRatchetTest"
+        },
+        {
+          "name": "WithinBudget\/lambda_corpus_prettier_ast",
+          "value_param": "144-byte object <E0-11 00-5B 0B-00 00-00 1A-00 00-00 00-00 00-00 20-00 00-00 00-00 00-80 D0-0B C2-5A 0B-00 00-00 24-00 00-00 00-00 00-00 28-00 00-00 00-00 00-80 00-00 00-00 00-00 00-00 64-65 66-61 75-6C 74-00 ... 01-2D 2D-20 70-72 69-6E 6D-44 00-00 00-00 00-00 40-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 78-C6 C5-5A 0B-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00 00-00>",
+          "file": "..\/..\/test\/test_mir_ratchet_gtest.cpp",
+          "line": 341,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2026-10-02T08:52:57Z",
+          "time": "0.162s",
+          "classname": "Probes\/MirRatchetTest"
+        }
+      ]
+    }
+  ]
+}

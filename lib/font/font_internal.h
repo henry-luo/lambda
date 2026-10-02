@@ -449,6 +449,10 @@ FontEntry*          font_database_get_by_postscript_name_internal(FontDatabase* 
 bool                font_database_save_cache_internal(FontDatabase* db, const char* path);
 bool                font_database_load_cache_internal(FontDatabase* db, const char* path);
 
+// font_fallback.c
+FontHandle*         font_find_emoji_fallback(FontContext* ctx, const FontStyleDesc* style,
+                                             uint32_t codepoint);
+
 // font_platform.c
 void                font_platform_add_default_dirs(FontDatabase* db);
 char*               font_platform_find_fallback(const char* font_name, int* out_face_index);
