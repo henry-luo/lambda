@@ -1,7 +1,7 @@
 # Lambda Tune32 — Recover Typed Optimizations in Untyped Programs
 
-- **Version:** 1.3.0, 2026-10-02.
-- **Status:** Phase I COMPLETE; Phase II IN PROGRESS.
+- **Version:** 1.4.0, 2026-10-02.
+- **Status:** Phase I COMPLETE; Phase II COMPLETE.
   T32-1 through T32-4 are implemented and validated;
   T32-5 is closed as an investigated deferral under its conditional gate.
   All four Phase I pilot targets and its round geomean objective are met.
@@ -22,8 +22,8 @@
 Sections 2 and 5–10 preserve the control analysis and implementation plan.
 Section 13 records the final changes, measurements, gates and dispositions.
 Section 14 records the follow-up review and benchmark-source experiments.
-Section 15 specifies the Phase II implementation plan; its tasks and performance
-targets are prospective, not completed work or measured improvements.
+Section 15 specifies the Phase II implementation plan. Section 16 records its
+completed implementation, validation, measurement limits and dispositions.
 
 ## 1. Objective and evidence boundary
 
@@ -1617,8 +1617,10 @@ into one engine geomean or rewrite historical JSON/results.
 
 These are candidate touchpoints, not a requirement to edit every listed file.
 Search for an existing helper before extending an abstraction. Keep profiling
-hooks out of normal benchmark timing and avoid changes to vendored MIR, the
-parser, logging configuration or unrelated runtime behavior.
+hooks out of normal benchmark timing. The Phase II self-phi compiler crash was
+isolated to vendored MIR; its approved repair is recorded under `patches/` and
+`lambda/mir/VENDOR.md`. No parser, logging configuration or unrelated runtime
+behavior change is part of this phase.
 
 Representative commands from the repository root follow. The control/candidate
 archives and frozen manifests are produced by II-0 and each implementation
@@ -1667,31 +1669,29 @@ Node benchmark refresh is required by this plan.
 
 ### 15.15 T32-II-8 — Completion checklist and report
 
-All items below are initially unchecked.
-
-- [ ] II-0: freeze the exact control, canonical population, source/input/oracle
+- [x] II-0: freeze the exact control, canonical population, source/input/oracle
   hashes, noise check and per-pilot proof-loss inventory.
-- [ ] II-1/II-2: implement and validate a complete string producer → collection
+- [x] II-1/II-2: implement and validate a complete string producer → collection
   read → consumer path, with honest null/mixed/unknown fallbacks.
-- [ ] II-3: measure residual selector-call cost; implement and retain the bounded
+- [x] II-3: measure residual selector-call cost; implement and retain the bounded
   extension only if justified, otherwise record its conditional deferral.
-- [ ] II-4: implement descriptor-correct inferred record construction and prove
+- [x] II-4: implement descriptor-correct inferred record construction and prove
   precise lifetime/scalar-storage ownership on positive and fallback paths.
-- [ ] II-5: implement a bounded read-only record/consumer slice and measure its
+- [x] II-5: implement a bounded read-only record/consumer slice and measure its
   incremental benefit; separately disposition inferred small-record returns.
-- [ ] II-6: implement and measure the eligible loop slice; validate read/store
+- [x] II-6: implement and measure the eligible loop slice; validate read/store
   ownership, zero-trip and bounds behavior independently.
-- [ ] II-7: retest relevant annotation-free alternatives; adopt only confirmed
-  winners with separate source-pair provenance.
-- [ ] Run focused output/MIR/GC/ASAN checks, root/effect audits and the emission
+- [x] II-7: retest relevant annotation-free alternatives; no candidate met the
+  confirmation rule, so the canonical sources remain unchanged.
+- [x] Run focused output/MIR/GC/ASAN checks, root/effect audits and the emission
   ratchet; resolve or explicitly identify inherited gate failures.
-- [ ] Pass `make test-lambda-baseline` and `make test262-baseline` for the final
+- [x] Pass `make test-lambda-baseline` and `make test262-baseline` for the final
   engine changes; do not mask failed Test262 cases in the test harness.
-- [ ] Complete 21-pair pilots, typed companions, the fixed-population screen
+- [x] Complete 21-pair pilots, typed companions, the fixed-population screen
   and required regression follow-ups with matching full outputs.
-- [ ] Preserve raw samples, exact binaries/build hashes, fixed source manifests,
+- [x] Preserve raw samples, exact binaries/build hashes, fixed source manifests,
   emitted/executed mechanism evidence and the final release identity.
-- [ ] Update this document with actual per-track results, target met/missed
+- [x] Update this document with actual per-track results, target met/missed
   status, retained/rejected changes and remaining gaps. Mark Phase II complete
   only when its core implementation and required validation are complete.
 
@@ -1704,8 +1704,8 @@ certificates, roots or correctness gates to satisfy a timing target.
 
 ## 16. Phase II implementation record
 
-**Status: IN PROGRESS.** Core slices have release screens and semantic fixtures;
-aggregate gates, confirmation, source alternatives and population closeout remain.
+**Status: COMPLETE.** Core slices, release screens, correctness gates,
+population follow-ups, source alternatives and final provenance are complete.
 This section records actual work; §15 retains the original plan and targets.
 
 ### 16.1 Implementation and proof boundaries
@@ -1789,15 +1789,21 @@ million generic field reads with descriptor reads. The null consumer removes
 its remaining 3.222 million hot equality calls; its cold type fallback remains
 in MIR. Diagnostic profiles are not used as benchmark samples.
 
-### 16.3 Provenance and pending closeout
+### 16.3 Provenance and final validation
 
 Control: commit `8b40c7754`, initially clean, `make release`, SHA-256
 `d2c117a8b18117e429ec83e1a552d4d1980185e75d5d487ce11296cba2411d4a`.
 Step builds use the same `release_native` profile through
 `make build-release-compile`; each binary and patch is separately archived.
-The final safe release is `temp/tune32-phase2/final-release`; its hash lives in
-`final-release-binary.json`. Earlier `candidate-release` is an attribution
-artifact and is not the final type-fallback-safe binary.
+The final repaired release is `temp/tune32-phase2/final-self-phi-release`,
+SHA-256 `53ca1ee9e2407a89d515f040b6703cb712d5dcd87d8a462a707ba55c5796f831`;
+`final-self-phi-release-binary.json` records its `release_native` build. The
+ASAN companion is `final-self-phi-asan`, SHA-256
+`47466a7a68989fdc294e1ff2aedd93447740ded560f6e9b6aa05091f1cd8bc21`.
+Earlier `candidate-release`, `final-release`, and `guard-refined-release` are
+attribution artifacts, not the final binaries. The approved MIR patch was
+placed under `patches/` before the vendor source edit and verified against the
+pinned upstream revision.
 
 The 126-row engine manifest points at frozen source/oracle copies. Referenced
 repository-relative inputs are archived in the same source tree, with an
@@ -1810,31 +1816,32 @@ and escaped readers, negative/large indices, Unicode, native-string widening,
 shared snapshots, packed ANY/wide fields, guard misses, source order, null/type/
 error consumers, short arrays, shared stores and error-producing zero-trip
 loops. All focused final fixtures pass JIT, interpreter, AUTO, forced/seeded GC
-with poison and the MIR interpreter with forced GC. Root/effect audits pass:
+with poison and the MIR interpreter with forced GC. The final release and ASAN
+binaries pass **72/72** focused boundary runs. Root/effect audits pass:
 16,667 migrated native functions and 95 NO_GC imports / 302 call-graph nodes.
-Aggregate MIR/GC/ASAN and Lambda/Test262 gates are pending; no completion is
-claimed from these focused passes.
+The patched ASAN MIR compiler also replays both the captured Navier–Stokes
+module and its reduced reproducer without a memory error (**D5.3.4**).
 
 ### 16.4 Correctness gates and inherited failures
 
-The final engine passes `make test-lambda-baseline`: **6,166/6,166**, comprising
-2,104 input tests and 4,062 Lambda/runtime tests. Its native MIR emission suite
-passes **233/233**, GC stress **284/284**, and debug emission ratchet **20/20**.
+The final repaired engine passes `make test-lambda-baseline`: **6,169/6,169**,
+comprising 2,104 input tests and 4,065 Lambda/runtime tests. Its native MIR
+emission suite passes **235/235**, GC stress **285/285**, and debug emission
+ratchet **20/20**.
 The expanded string consumer fixture also checks positive and negative bounds,
 integer/null values and selected errors through an escaped selector, retaining
 both native string equality and the original generic equality fallback.
-ASAN validates **24/24** focused runs across all six modes; the final string
-fixture refresh is recorded in `asan-verified.json`.
+The exact final release and ASAN binaries validate **72/72** focused runs
+across all six modes, recorded in `final-self-phi-boundaries.json`.
 
-`make test262-baseline` passes on the unchanged standard serial rerun:
-**40,261/40,261**, zero skipped baseline cases, retry-only cases or regressions
-(2,652 non-baseline entries are skipped). The first run had 40,259 fully passing
-cases and two Unicode-10 identifier cases classified as slow, then recovered in
-isolation. This repeats the recorded Phase I timing sensitivity. Both runs and
-the first timing/memory/batch diagnostics are preserved; no runtime threshold,
-test runner, baseline list or job-count change was used to obtain the rerun.
+`make test262-baseline` passes **40,261/40,261** for the final repaired engine,
+with zero baseline regressions or slow cases on the standard seven-worker run.
+The earlier pre-repair candidate needed a serial rerun after two timing-sensitive
+Unicode cases; both earlier logs remain evidence, but the final gate does not
+depend on that rerun. No threshold, runner, baseline list or job-count change
+was used.
 
-Both exact release binaries reproduce three pre-existing emission-ratchet
+The control and final release binaries reproduce three pre-existing emission-ratchet
 failures. `js_hoisted_modvar_write_through` remains 87 instructions against 76;
 `js_tune6_exact_collection` remains 12,627 against 12,573. The COW nested-store
 module improves **173 → 169**, still above its 166 budget. There are no new
@@ -1863,7 +1870,7 @@ as an optimization credit. The corrected reproducers remain under `temp/`.
 
 ### 16.5 Closeout regression investigations
 
-The full population screen found a real typed NBody regression: its 31-pair
+An earlier pre-repair population screen found a typed NBody regression: its 31-pair
 candidate/control ratio was **1.12236**, with a one-sided upper bound of
 **1.13510**. Loop admission unnecessarily checked carrier layout again for
 typed roots whose layout was already proven. Read admission now branches over
@@ -1882,8 +1889,8 @@ This refined engine passes the Lambda baseline **6,168/6,168**, native MIR
 emission **234/234**, GC stress **285/285**, and **72/72** focused release and
 ASAN runs across JIT, interpreter, AUTO, forced GC, seeded GC with poison, and
 MIR interpreter with forced GC. These results supersede the earlier focused
-counts in §16.4 for the refined Lambda guards. Final Test262 and performance
-closeout must use the eventual final engine identity.
+counts in §16.4 for the refined Lambda guards. The final self-phi-repaired
+engine then superseded it for Test262 and performance closeout.
 
 Untyped Navier–Stokes also exposed an intermittent compilation crash (4/31
 older-candidate processes). A standalone replay of the captured binary MIR,
@@ -1894,12 +1901,93 @@ to that same phi, then frees it; a later branch reads its freed definition.
 The original emitted MIR defines the guard before reachable uses. A
 100-process release pass does not override the ASAN reproducer.
 
-The detailed evidence and reviewable proposed patch are in
+The detailed evidence and patch are in
 `temp/tune32-phase2/mir-self-phi-diagnosis.md` and
-`temp/tune32-phase2/proposed-mir-self-phi-copy.patch`. The proposal excludes a
+`patches/mir-self-phi-copy.patch`. The patch excludes a
 self-referential phi from copy substitution because it has no replacement
 definition; existing unreachable-code cleanup can then remove the cycle.
-**The vendor patch has not been applied.** AGENTS.md rule 16 requires approval
-before such an upstream repair. Phase II remains in progress pending this
-defect's resolution and final validation; failed processes remain visible
-(**D8.6.1–D8.6.3**).
+The user approved the vendor edit under AGENTS.md rule 16. The patch was
+placed under `patches/` first, applied to MIR, documented in its vendor ledger,
+and `make verify-mir-patches` passes against the pinned upstream commit. A
+22-line reduced MIR program ASAN-crashes in the original compiler and compiles
+with the patched compiler. Its permanent optimization-level-2 GTest passes.
+The final engine validation and timing results follow in §16.6; earlier failed
+processes remain visible as diagnostic evidence (**D8.6.1–D8.6.3**).
+
+### 16.6 Final performance attribution and source dispositions
+
+All engine comparisons in this section use the frozen source and oracle tree,
+the JIT tier, interleaved serial ordering, exact control SHA-256
+`d2c117a8b18117e429ec83e1a552d4d1980185e75d5d487ce11296cba2411d4a`, and
+exact final SHA-256
+`53ca1ee9e2407a89d515f040b6703cb712d5dcd87d8a462a707ba55c5796f831`.
+Normalized complete output matched for every valid row. The two pre-existing
+untyped oracle failures described in §16.4 are not performance evidence.
+
+The final 21-pair pilot establishes the retained primary results. A ratio and
+one-sided 95% upper bound below one is a confirmed improvement; the remaining
+rows are reported as targets missed or inconclusive, not as wins.
+
+| Unchanged untyped source | Ratio | 95% upper | Result |
+|---|---:|---:|---|
+| `three_way_merge` | 0.7341 | 0.7408 | target met; 21/21 pairs faster |
+| `gcbench` | 0.7344 | 0.7396 | target met; 21/21 pairs faster |
+| `primes` | 0.8084 | 0.8192 | target met; 21/21 pairs faster |
+| `knucleotide` | 0.8784 | 0.8931 | retained shared gain; 21/21 pairs faster |
+| `log_pipeline` | 0.9873 | 1.0119 | target missed |
+| `prettier_ast` | 0.9919 | 1.0062 | stretch target missed |
+| `raytrace3d` | 0.9690 | 1.0291 | target missed |
+
+The five-pair 126-row population screen is a breadth screen, not a replacement
+for the pilot confidence intervals. It has 61 valid untyped rows and 63 valid
+typed rows. Its untyped geometric ratio is **0.9423** and its sum-of-medians
+ratio is **0.8568**, meeting both phase-wide screen targets. Its typed geometric
+ratio is **0.9676** and its sum-of-medians ratio is **1.0105**. Twenty apparent
+slowdowns or invalid rows received 31-pair follow-ups. No valid row confirmed a
+slowdown over five percent. The remaining invalid rows are the inherited
+`spectralnorm` and `matmul` source defects. In particular, final typed
+`log_pipeline` is 1.0046 (upper 1.0242) and typed `three_way_merge` is 0.9579
+(upper 1.0105), so neither establishes a typed regression.
+
+Control/control 31-pair checks demonstrate the uncertainty on the long rows:
+identical NBody control binaries measured 0.9044 untyped and 0.9826 typed, and
+identical typed merge controls measured 1.0501. Therefore the large NBody and
+merge median shifts are host noise, not an attribution to the retained change.
+This is why the report retains the paired confidence bounds and does not turn a
+five-pair screen point into a performance claim.
+
+Final caller profiles reproduce the intended string mechanism: the hot
+`_merge_words_1073 -> fn_index` count falls from 27,291,000 to zero, and its
+generic equality calls fall from 12,870,000 to 1,551,000. GCbench retains
+descriptor allocation for 3,222,190 constructors and descriptor-fast field
+paths; Primes records its admitted dense loop path. These are executed-event
+counters, not CPU samples, and do not authorize removing roots, bounds, COW,
+or fallback operations (**D5.3.4**, **S7.1.1v3**, **S9.1.2–S9.1.3**).
+
+The full-procedure compiler diagnostic uses nine alternating samples per pilot
+row and records the phase's `transpile` time, emitted module instruction count
+and frame-slot log. `mir_gen` is zero for this Lambda profile because it is an
+optional final-codegen subphase not recorded on this path; it is not treated as
+zero compilation. The material attributable cost is untyped merge: **1.270x**
+total compile time and **2,971 → 3,537** module instructions, from the guarded
+string collection and consumer lowering. The final emission ratchet remains
+unchanged. Typed GCbench (1.135x), untyped Fast Diff (1.100x), and typed text
+search (1.175x) have no corresponding module-size growth and have overlapping
+sample ranges, so the diagnostic does not establish a code-generation cause.
+They remain disclosed rather than being hidden behind the aggregate runtime
+result (**D8.6.1–D8.6.3**).
+
+The source-only variants ran on the final binary, against their frozen original
+sources, with complete output equality and a zero-annotation audit. The initial
+nine-pair ratios were log scanner **1.8516**, formatter representation
+**1.0173**, formatter traversal **0.9704**, character-code Fast Diff **7.6746**,
+and flattened CD **1.2468**. Traversal alone entered 21-pair confirmation but
+finished at **1.0231** (upper 2.0697; 10/21 wins). No variant met the adoption
+rule, so every canonical untyped benchmark remains unchanged. These source
+measurements are separate from the engine population and do not contribute to
+its geometric mean.
+
+Phase II is complete: it retains the three confirmed primary untyped gains,
+documents the missed text/record targets and compiler-cost tradeoff, preserves
+typed behavior without a confirmed material regression, and leaves failed
+source rewrites and inherited oracle defects visible.
