@@ -12,6 +12,8 @@
 #include <vector>
 
 #include "test_mir_check_helpers.hpp"
+#include "../lambda/mir/mir.h"
+#include "../lambda/mir/mir-gen.h"
 
 static const char* kLambdaMirDir = "test/mir/lambda";
 
@@ -49,4 +51,56 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, LambdaMirEmissionTest,
 TEST(LambdaMirEmissionCorpus, IsNotEmpty) {
     EXPECT_FALSE(g_lambda_mir_fixtures.empty())
         << "no .ls fixtures found in " << kLambdaMirDir;
+}
+
+TEST(MirOptimizer, UnreachableSelfPhiKeepsItsDefinitionUntilCleanup) {
+    // a value-numbered load removes the loop's entry edges after SSA is built.
+    const char* program =
+        "self_phi: module\n"
+        "export probe\n"
+        "probe: func i64, i64:arg\n"
+        "local i64:cell, i64:condition, i64:guard\n"
+        "alloca cell, 8\n"
+        "mov i64:(cell), 0\n"
+        "mov condition, i64:(cell)\n"
+        "bt dead, condition\n"
+        "ret 77\n"
+        "dead:\n"
+        "beq set_false, arg, 0\n"
+        "mov guard, 1\n"
+        "jmp loop\n"
+        "set_false:\n"
+        "mov guard, 0\n"
+        "loop:\n"
+        "bt escape, guard\n"
+        "jmp loop\n"
+        "escape:\n"
+        "ret 0\n"
+        "endfunc\n"
+        "endmodule\n";
+
+    MIR_context_t ctx = MIR_init();
+    ASSERT_NE(ctx, nullptr);
+    MIR_gen_init(ctx);
+    MIR_gen_set_optimize_level(ctx, 2);
+    MIR_scan_string(ctx, program);
+    MIR_module_t module = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ctx));
+    ASSERT_NE(module, nullptr);
+    MIR_item_t probe = nullptr;
+    for (MIR_item_t item = DLIST_HEAD(MIR_item_t, module->items); item != nullptr;
+         item = DLIST_NEXT(MIR_item_t, item)) {
+        if (item->item_type != MIR_func_item) continue;
+        ASSERT_EQ(probe, nullptr);
+        probe = item;
+    }
+    ASSERT_NE(probe, nullptr);
+    MIR_load_module(ctx, module);
+    MIR_link(ctx, MIR_set_gen_interface, nullptr);
+    using Probe = int64_t (*)(int64_t);
+    Probe run = (Probe)probe->addr;
+    ASSERT_NE(run, nullptr);
+    EXPECT_EQ(run(0), 77);
+    EXPECT_EQ(run(1), 77);
+    MIR_gen_finish(ctx);
+    MIR_finish(ctx);
 }

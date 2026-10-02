@@ -4730,7 +4730,8 @@
             "source": "test/test_mir_emission_gtest.cpp",
             "name": "Lambda MIR Emission Tests",
             "dependencies": [
-              "lambda-lib"
+              "lambda-lib",
+              "mir"
             ],
             "binary": "test_mir_emission_gtest.exe",
             "libraries": [
