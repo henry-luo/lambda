@@ -59,7 +59,7 @@ protected:
         arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
         doc.document_pool = pool;
-        doc.node_arena = arena;
+        doc.node_pool = pool;
         lycon.pool = pool;
         scratch_init(&lycon.scratch, arena);
         lycon.block.direction = CSS_VALUE_LTR;

@@ -9,7 +9,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/math_checked.hpp"
-#include "../../lib/arena.h"  // for arena_owns() and arena_realloc()
+#include "../../lib/arena.h"  // for arena_owns()
 #include "../../lib/atomic.h"
 
 extern __thread EvalContext* context;

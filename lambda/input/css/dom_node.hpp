@@ -243,6 +243,7 @@ struct DomText : public DomNode {
     static DomText* create_in(Arena* arena);
     static DomText* create_in(Pool* pool);
     static DomText* create_in(Arena* arena, size_t inline_string_length);
+    static DomText* create_in(Pool* pool, size_t inline_string_length);
 
     // Check if this is a symbol node
     bool is_symbol() const { return (node_flags & DOM_NODE_FLAG_TEXT_SYMBOL) != 0; }

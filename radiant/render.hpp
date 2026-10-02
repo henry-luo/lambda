@@ -1,5 +1,6 @@
 #pragma once
 #include "../lib/arraylist.hpp"
+#include "../lib/mem_factory.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -751,7 +752,37 @@ void dl_item_free_owned_payload(DisplayItem* item);
 
 // Initialise a display list.  backing_arena is used for variable-length data
 // (path copies, gradient stops, dash arrays).
+// `backing_arena` must not be shared: the list's scratch owns its tail.
 void dl_init(DisplayList* dl, Arena* backing_arena);
+
+// Allocators for a private one-shot display-list render: a temp pool, and
+// separate arenas for the list payloads and the replay scratch, since each
+// scratch arena owns its backing arena exclusively.
+struct OffscreenRenderArenas {
+    Pool* pool = nullptr;
+    Arena* list_arena = nullptr;
+    Arena* scratch_arena = nullptr;
+
+    bool init(const char* pool_label, const char* list_label, const char* scratch_label) {
+        pool = mem_pool_create(NULL, MEM_ROLE_RENDER, pool_label);
+        list_arena = pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, list_label) : nullptr;
+        scratch_arena = list_arena ? mem_arena_create(NULL, MEM_ROLE_RENDER, scratch_label) : nullptr;
+        if (scratch_arena) return true;
+        destroy();
+        return false;
+    }
+
+    // the arenas are registered under the root context, not the pool, so each
+    // is destroyed explicitly
+    void destroy() {
+        if (scratch_arena) mem_arena_destroy(scratch_arena);
+        if (list_arena) mem_arena_destroy(list_arena);
+        if (pool) mem_pool_destroy(pool);
+        scratch_arena = nullptr;
+        list_arena = nullptr;
+        pool = nullptr;
+    }
+};
 
 // Reset the display list for re-recording (rewinds arena, zeroes count).
 void dl_clear(DisplayList* dl);

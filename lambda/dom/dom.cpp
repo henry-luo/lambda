@@ -3433,7 +3433,7 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     const char* srcdoc = iframe->get_attribute("srcdoc");
     if (!srcdoc || !*srcdoc) return;
     DomElement* body = dom_document_body_element(doc);
-    if (!body || !doc->node_arena) return;
+    if (!body || !doc->node_pool) return;
 
     Html5Parser* parser = dom_create_fragment_parser(doc);
     if (!parser) return;

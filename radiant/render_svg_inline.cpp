@@ -5386,20 +5386,16 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
         return;
     }
 
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
-    if (!temp_pool) return;
-    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_inline.arena");
-    if (!temp_arena) {
-        mem_pool_destroy(temp_pool);
-        return;
-    }
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.svg_inline", "render.svg_inline.list_arena",
+                     "render.svg_inline.scratch_arena")) return;
 
     DisplayList dl = {};
     PaintList paint_list = {};
     ScratchArena scratch = {};
-    dl_init(&dl, temp_arena);
-    paint_list_init(&paint_list, temp_arena);
-    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
+    dl_init(&dl, arenas.list_arena);
+    paint_list_init(&paint_list, nullptr);
+    mem_scratch_init(NULL, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
 
     // this list is private, so no RenderContext may receive its glyphs
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
@@ -5436,8 +5432,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     scratch_release(&scratch);
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
-    mem_arena_destroy(temp_arena);
-    mem_pool_destroy(temp_pool);
+    arenas.destroy();
 }
 
 // ============================================================================
@@ -5554,18 +5549,17 @@ static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomEl
                                   const SvgInitialPaint* paint, uint32_t* pixels,
                                   int width, int height, uint32_t backdrop) {
     for (size_t i = 0, n = (size_t)width * (size_t)height; i < n; i++) pixels[i] = backdrop;
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_layer");
-    Arena* temp_arena = temp_pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_layer.arena") : nullptr;
-    if (!temp_arena) {
-        if (temp_pool) mem_pool_destroy(temp_pool);
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.svg_layer", "render.svg_layer.list_arena",
+                     "render.svg_layer.scratch_arena")) {
         return false;
     }
     DisplayList dl = {};
     PaintList paint_list = {};
     ScratchArena scratch = {};
-    dl_init(&dl, temp_arena);
-    paint_list_init(&paint_list, temp_arena);
-    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_layer.scratch");
+    dl_init(&dl, arenas.list_arena);
+    paint_list_init(&paint_list, nullptr);
+    mem_scratch_init(NULL, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.svg_layer.scratch");
 
     DisplayList* saved_dl = rdcon->dl;
     PaintList* saved_paint_list = rdcon->paint_list;
@@ -5624,8 +5618,7 @@ static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomEl
     scratch_release(&scratch);
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
-    mem_arena_destroy(temp_arena);
-    mem_pool_destroy(temp_pool);
+    arenas.destroy();
     return ok;
 }
 

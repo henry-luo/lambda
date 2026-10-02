@@ -123,7 +123,7 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
     uint32_t doc_id = doc->services.mem_ctx
         ? mem_context_doc_id((MemContext*)doc->services.mem_ctx) : 0;
     ViewMemoryDomain document_pool = {};
-    ViewMemoryDomain node_arena = {};
+    ViewMemoryDomain node_pool = {};
     ViewMemoryDomain prop_pool = {};
     ViewMemoryDomain canonical_prop_arena = {};
     ViewMemoryDomain scratch_arena = {};
@@ -153,8 +153,8 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
         if (sample->flags & MEM_FLAG_ATTRIBUTION_ERROR) attribution_errors++;
         if (view_memory_label_is(sample, "dom.document.pool")) {
             view_memory_domain_add(&document_pool, sample);
-        } else if (view_memory_label_is(sample, "dom.node.arena")) {
-            view_memory_domain_add(&node_arena, sample);
+        } else if (view_memory_label_is(sample, "dom.node.pool")) {
+            view_memory_domain_add(&node_pool, sample);
         } else if (view_memory_label_is(sample, "view_tree.prop_pool")) {
             view_memory_domain_add(&prop_pool, sample);
         } else if (view_memory_label_is(sample, "view_tree.canonical_prop_arena")) {
@@ -196,7 +196,7 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
         jw_key(&writer, "domains");
         jw_obj_begin(&writer);
             view_memory_domain_json(&writer, "dom.document.pool", &document_pool);
-            view_memory_domain_json(&writer, "dom.node.arena", &node_arena);
+            view_memory_domain_json(&writer, "dom.node.pool", &node_pool);
             view_memory_domain_json(&writer, "view_tree.prop_pool", &prop_pool);
             view_memory_domain_json(&writer, "view_tree.canonical_prop_arena",
                                     &canonical_prop_arena);
@@ -216,7 +216,7 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
         jw_key(&writer, "logical_composites");
         jw_obj_begin(&writer);
             jw_kv_uint(&writer, "dom_storage_active_bytes",
-                       document_pool.direct_bytes + node_arena.bytes_in_use);
+                       document_pool.direct_bytes + node_pool.direct_bytes);
             jw_kv_uint(&writer, "view_prop_storage_active_bytes",
                        prop_pool.direct_bytes + canonical_prop_arena.bytes_in_use +
                        scratch_arena.bytes_in_use);
@@ -275,7 +275,7 @@ bool view_memory_profile_write(DomDocument* doc, const char* input_file,
         jw_key(&writer, "comparability");
         jw_obj_begin(&writer);
             jw_kv_bool(&writer, "all_six_domains_present",
-                       document_pool.present && node_arena.present && prop_pool.present &&
+                       document_pool.present && node_pool.present && prop_pool.present &&
                        canonical_prop_arena.present && scratch_arena.present &&
                        style_epoch_pool.present);
             jw_kv_uint(&writer, "attribution_errors", attribution_errors);

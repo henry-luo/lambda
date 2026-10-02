@@ -20,15 +20,15 @@ _Static_assert(sizeof(ScratchHeader) == 16, "ScratchHeader must be 16 bytes");
 // Internal helpers
 // ============================================================================
 
-// return a single block to the backing arena (bump-back at the chunk tail)
-static inline void _scratch_arena_free_block(ScratchArena* sa, ScratchHeader* hdr) {
-    size_t total_size = SCRATCH_HEADER_SIZE + (size_t)hdr->size;
+// The backing arena is rewound once per unwind; blocks are only poisoned here.
+static inline void _scratch_retire_block(ScratchHeader* hdr) {
 #ifndef NDEBUG
     // poison released payloads so a use after scope end reads garbage, not
     // the stale value, and shows up in layout/render output during testing
     memset((char*)hdr + SCRATCH_HEADER_SIZE, 0xDB, hdr->size);
+#else
+    (void)hdr;
 #endif
-    arena_free(sa->arena, hdr, total_size);
 }
 
 // ============================================================================
@@ -44,6 +44,7 @@ void scratch_init(ScratchArena* sa, Arena* arena) {
     sa->open_scope = 0;
     sa->last_scope = 0;
     arena_scope_enter(arena);
+    sa->base = arena_mark(arena);
 }
 
 static void* _scratch_alloc_tagged(ScratchArena* sa, size_t size, uint32_t scope) {
@@ -63,7 +64,7 @@ static void* _scratch_alloc_tagged(ScratchArena* sa, size_t size, uint32_t scope
         !math_checked_add(SCRATCH_HEADER_SIZE, aligned_size, &total_size)) return NULL;
 
     // allocate from backing arena (header + payload in one block)
-    void* raw = arena_alloc_aligned(sa->arena, total_size, SCRATCH_ALIGNMENT);
+    void* raw = arena_scope_alloc(sa->arena, total_size, SCRATCH_ALIGNMENT);
     if (!raw) {
         log_error("scratch_alloc: backing arena failed for %zu bytes", total_size);
         return NULL;
@@ -98,6 +99,7 @@ ScratchMark scratch_mark(ScratchArena* sa) {
     ScratchMark mark = {0};
     if (sa) {
         mark.head = sa->head;
+        mark.tail = arena_mark(sa->arena);
     }
     return mark;
 }
@@ -110,8 +112,9 @@ void scratch_restore(ScratchArena* sa, ScratchMark mark) {
         ScratchHeader* hdr = sa->head;
         if (!hdr) break;  // safety: ran past beginning
         sa->head = hdr->prev;
-        _scratch_arena_free_block(sa, hdr);
+        _scratch_retire_block(hdr);
     }
+    arena_rewind(sa->arena, mark.tail);
 }
 
 ScratchMark scratch_scope_begin(ScratchArena* sa) {
@@ -121,6 +124,7 @@ ScratchMark scratch_scope_begin(ScratchArena* sa) {
     if (serial == 0) serial = 1;  // on wrap; 0 stays reserved for plain blocks
     sa->last_scope = serial;
     mark.head = sa->head;
+    mark.tail = arena_mark(sa->arena);
     mark.scope = serial;
     mark.outer = sa->open_scope;
     sa->open_scope = serial;
@@ -170,8 +174,9 @@ void scratch_scope_end(ScratchArena* sa, ScratchMark* scope) {
             foreign_bytes += hdr->size;
         }
         sa->head = hdr->prev;
-        _scratch_arena_free_block(sa, hdr);
+        _scratch_retire_block(hdr);
     }
+    arena_rewind(sa->arena, scope->tail);
     if (foreign) {
         // a block the scope did not allocate is still live: whoever allocated
         // it may still hold it, so unwinding it here can leave a dangling pointer
@@ -190,8 +195,9 @@ void scratch_release(ScratchArena* sa) {
     while (sa->head) {
         ScratchHeader* hdr = sa->head;
         sa->head = hdr->prev;
-        _scratch_arena_free_block(sa, hdr);
+        _scratch_retire_block(hdr);
     }
+    if (sa->scope_active) arena_rewind(sa->arena, sa->base);
     sa->open_scope = 0;
 
     // unlink from the memory context if registered (factory-created scratch)

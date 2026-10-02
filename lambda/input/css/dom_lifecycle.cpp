@@ -13,7 +13,7 @@
 
 typedef struct DomNodeRecord {
     DomNode* address;
-    Arena* primary_arena;
+    Pool* primary_pool;
     uint32_t id;
     DomNodeType type;
     DomNodeLifeState state;
@@ -112,19 +112,20 @@ static DomNodeRecord* dom_record_find(DomNodeRegistry* registry, DomNode* addres
     return nullptr;
 }
 
-static Arena* dom_node_primary_arena(DomDocument* doc, DomNode* node) {
+// Only the document's node pool frees individual nodes. Arenas free in batch
+// only (D4.1.4v4), so a node embedded in the Input arena (a parsed node or a
+// fat UI-mode Lambda value) keeps its storage until the Input is released.
+static Pool* dom_node_primary_pool(DomDocument* doc, DomNode* node) {
     if (!doc || !node) return nullptr;
-    if (doc->node_arena && arena_owns(doc->node_arena, node)) {
-        return doc->node_arena;
-    }
-    // UI-mode Lambda values embed DomNode storage in the retained Input arena.
-    // Recording that physical owner keeps the single arena recycler valid for
-    // both parsed nodes and fat Lambda-backed nodes.
-    if (doc->input && doc->input->arena &&
-        arena_owns(doc->input->arena, node)) {
-        return doc->input->arena;
+    if (doc->node_pool && pool_owns(doc->node_pool, node)) {
+        return doc->node_pool;
     }
     return nullptr;
+}
+
+static bool dom_node_in_input_arena(DomDocument* doc, DomNode* node) {
+    return doc && node && doc->input && doc->input->arena &&
+        arena_owns(doc->input->arena, node);
 }
 
 static bool dom_registry_resize(DomDocument* doc, size_t bucket_count) {
@@ -173,12 +174,12 @@ void dom_lifecycle_destroy(DomDocument* doc) {
 }
 
 static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
-        Arena* primary_arena, uint32_t id, DomNodeType type,
+        Pool* primary_pool, uint32_t id, DomNodeType type,
         size_t primary_size, bool recyclable, Element* backing_source) {
     DomNodeRegistry* registry = dom_registry(doc);
     if (!registry || !node || !id || !primary_size) return false;
-    if (recyclable && !primary_arena) {
-        log_error("DOM_LIFECYCLE_INVARIANT: recyclable node %p has no owning arena",
+    if (recyclable && !primary_pool && !dom_node_in_input_arena(doc, node)) {
+        log_error("DOM_LIFECYCLE_INVARIANT: recyclable node %p has no owning storage",
                   (void*)node);
         return false;
     }
@@ -193,7 +194,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
         }
         memset(record->pins, 0, sizeof(record->pins));
         record->id = id;
-        record->primary_arena = primary_arena;
+        record->primary_pool = primary_pool;
         record->type = type;
         record->state = DOM_NODE_LIVE;
         record->recyclable = recyclable;
@@ -212,7 +213,7 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
     record = (DomNodeRecord*)pool_calloc(doc->document_pool, sizeof(DomNodeRecord));
     if (!record) return false;
     record->address = node;
-    record->primary_arena = primary_arena;
+    record->primary_pool = primary_pool;
     record->id = id;
     record->type = type;
     record->state = DOM_NODE_LIVE;
@@ -232,8 +233,8 @@ static bool dom_node_registry_register_owned(DomDocument* doc, DomNode* node,
 
 bool dom_node_registry_register(DomDocument* doc, DomNode* node,
                                 size_t primary_size, bool recyclable) {
-    Arena* primary_arena = dom_node_primary_arena(doc, node);
-    return dom_node_registry_register_owned(doc, node, primary_arena,
+    Pool* primary_pool = dom_node_primary_pool(doc, node);
+    return dom_node_registry_register_owned(doc, node, primary_pool,
         node ? node->id : 0, node ? node->node_type : DOM_NODE_ELEMENT,
         primary_size, recyclable, nullptr);
 }
@@ -262,7 +263,7 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
         // ranges still pin it; their saved references use that generation ID.
         if (retained_ref) *destination_id = destination_record->id;
         destination_record->id = *destination_id;
-        destination_record->primary_arena = source_record->primary_arena;
+        destination_record->primary_pool = source_record->primary_pool;
         destination_record->type = source_record->type;
         destination_record->state = DOM_NODE_LIVE;
         destination_record->recyclable = source_record->recyclable;
@@ -271,7 +272,7 @@ bool dom_node_registry_transfer(DomDocument* source, DomDocument* destination,
         destination_record->primary_size = source_record->primary_size;
         destination_record->backing_source = source_record->backing_source;
     } else if (!dom_node_registry_register_owned(destination, node,
-                   source_record->primary_arena, *destination_id, source_record->type,
+                   source_record->primary_pool, *destination_id, source_record->type,
                    source_record->primary_size, source_record->recyclable,
                    source_record->backing_source)) {
         return false;
@@ -527,7 +528,7 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
 
 static size_t dom_retire_collect(DomDocument* doc) {
     DomNodeRegistry* registry = dom_registry(doc);
-    if (!registry || !doc->node_arena) return 0;
+    if (!registry || !doc->node_pool) return 0;
     // Range endpoints mutate through many DOM-spec algorithms. Recomputing
     // their pins at the single sweep boundary makes the registry authoritative
     // without allowing a missed setter to expose a detached live endpoint.
@@ -594,7 +595,9 @@ static void dom_retire_recycle_one(DomNodeRegistry* registry) {
     record->retire_next = nullptr;
     // Edges and generation refs are invalidated before a slot becomes reusable.
     memset(record->address, 0xdd, record->primary_size);
-    arena_free(record->primary_arena, record->address, record->primary_size);
+    // Input-arena storage (no primary pool) stays poisoned until its Input is
+    // released; arenas have no individual free.
+    if (record->primary_pool) pool_free(record->primary_pool, record->address);
     registry->stats.pending_primary_bytes -= record->primary_size;
     registry->stats.recycled_nodes++;
 }

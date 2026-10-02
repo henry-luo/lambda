@@ -146,22 +146,17 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
         render_effect_raster_fill_surface(surface, 0xffffffffu);
     }
 
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.effect.raster");
-    if (!temp_pool) {
-        image_surface_destroy(surface);
-        return false;
-    }
-    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.effect.arena");
-    if (!temp_arena) {
-        mem_pool_destroy(temp_pool);
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.effect.raster", "render.effect.list_arena",
+                     "render.effect.scratch_arena")) {
         image_surface_destroy(surface);
         return false;
     }
 
     DisplayList dl = {};
     ScratchArena scratch = {};
-    dl_init(&dl, temp_arena);
-    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.effect.scratch");
+    dl_init(&dl, arenas.list_arena);
+    mem_scratch_init(NULL, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.effect.scratch");
 
     RdtVector vec = {};
     rdt_vector_init(&vec, (uint32_t*)surface->pixels, w, h, w);
@@ -178,9 +173,7 @@ static inline bool render_effect_rasterize_paint_list(const PaintList* paint_lis
     // effect rasterization is one-shot; dl_clear() retains the heap-grown item
     // buffer and leaked it when the backing arena was destroyed immediately after.
     dl_destroy(&dl);
-    // The arena object and its chunks live inside temp_pool, so destroying the
-    // pool is the single owner teardown and also unregisters the arena cascade.
-    mem_pool_destroy(temp_pool);
+    arenas.destroy();
 
     out->surface = surface;
     out->x = (float)x0;

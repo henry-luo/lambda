@@ -3284,6 +3284,9 @@ typedef struct LayoutContext {
     CounterContext* counter_context;
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
+    // pass-lifetime data that is not stack-shaped (counter state, generated
+    // content); owned by the view tree and reset at layout_cleanup
+    Arena* pass_arena;
     // Recursion depth guard against deeply nested DOM trees (fuzzer-found stack overflow)
     int depth;
     // Flex-specific nesting depth guard (flex-in-flex recursion)

@@ -19,21 +19,9 @@
 static void (*g_arena_node_release)(void*) = NULL;
 void arena_set_node_release_hook(void (*fn)(void*)) { g_arena_node_release = fn; }
 
-// Free-list configuration
-#define ARENA_FREE_LIST_BINS 8
-#define ARENA_MIN_FREE_BLOCK_SIZE sizeof(ArenaFreeBlock)
-
 // Minimum of two values
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
-
-/**
- * Free block header for arena free-list
- */
-typedef struct ArenaFreeBlock {
-    size_t size;                    // Size of this free block
-    struct ArenaFreeBlock* next;    // Next block in same bin
-} ArenaFreeBlock;
 
 /**
  * Arena chunk - linked list node containing allocation space
@@ -62,18 +50,9 @@ struct Arena {
     unsigned valid;             // validity marker
     MemCategory category;       // memtrack category for owned blocks
 
-    // Free-list for memory reuse
-    ArenaFreeBlock* free_lists[ARENA_FREE_LIST_BINS];  // Free-list bins
-    size_t free_bytes;          // Total bytes in free-lists
-
     size_t high_water_active_bytes;
     uint64_t allocation_count;
-    uint64_t free_count;
-    uint64_t reuse_hits;
-    uint64_t reuse_misses;
-    uint64_t split_count;
-    uint64_t coalesce_count;
-    uint64_t bump_back_count;
+    uint64_t rewind_count;
     uint64_t fresh_chunk_count;
     uint64_t fresh_growth_bytes;
     uint64_t reset_count;
@@ -83,66 +62,11 @@ struct Arena {
     void* mem_node;             // MemContext registration node (NULL if untracked)
 };
 
-static inline size_t _arena_active_bytes(const Arena* arena) {
-    return arena->total_used >= arena->free_bytes
-        ? arena->total_used - arena->free_bytes : 0;
-}
-
 static inline void _arena_update_high_water(Arena* arena) {
-    size_t active = _arena_active_bytes(arena);
-    if (active > arena->high_water_active_bytes) {
-        arena->high_water_active_bytes = active;
+    if (arena->total_used > arena->high_water_active_bytes) {
+        arena->high_water_active_bytes = arena->total_used;
     }
 }
-
-// Helper: get bin index for size (log2-based bins: 16, 32, 64, 128, 256, 512, 1024, 2048+)
-static inline int _arena_get_bin(size_t size) {
-    if (size <= 16) return 0;
-    if (size <= 32) return 1;
-    if (size <= 64) return 2;
-    if (size <= 128) return 3;
-    if (size <= 256) return 4;
-    if (size <= 512) return 5;
-    if (size <= 1024) return 6;
-    return 7;  // 2048+ goes to last bin
-}
-
-static inline size_t _arena_allocation_span(const Arena* arena, size_t size) {
-    size_t span = 0;
-    if (!math_size_align_up(size, arena->alignment, &span)) return 0;
-    return span < ARENA_MIN_FREE_BLOCK_SIZE ? ARENA_MIN_FREE_BLOCK_SIZE : span;
-}
-
-// Helper: find and remove a free block adjacent to [addr, addr+size)
-// Scans all bins for a block whose end touches addr (left neighbor)
-// or whose start is at addr+size (right neighbor).
-// Returns the removed block, or NULL if no adjacent block found.
-static ArenaFreeBlock* _arena_find_adjacent_block(Arena* arena, uintptr_t addr, size_t size) {
-    uintptr_t block_end = addr + size;
-
-    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
-        ArenaFreeBlock** prev_ptr = &arena->free_lists[i];
-        ArenaFreeBlock* block = arena->free_lists[i];
-
-        while (block) {
-            uintptr_t fb_start = (uintptr_t)block;
-            uintptr_t fb_end = fb_start + block->size;
-
-            if (fb_end == addr || fb_start == block_end) {
-                // adjacent — remove from bin
-                *prev_ptr = block->next;
-                arena->free_bytes -= block->size;
-                return block;
-            }
-            prev_ptr = &block->next;
-            block = block->next;
-        }
-    }
-    return NULL;
-}
-
-// Forward declarations
-static void* _arena_alloc_from_freelist(Arena* arena, size_t size, size_t alignment);
 
 /**
  * Allocate a new directly-owned chunk
@@ -198,23 +122,12 @@ Arena* arena_create(size_t initial_chunk_size, size_t max_chunk_size) {
     arena->mem_node = NULL;
     arena->high_water_active_bytes = 0;
     arena->allocation_count = 0;
-    arena->free_count = 0;
-    arena->reuse_hits = 0;
-    arena->reuse_misses = 0;
-    arena->split_count = 0;
-    arena->coalesce_count = 0;
-    arena->bump_back_count = 0;
+    arena->rewind_count = 0;
     arena->fresh_chunk_count = 1;
     arena->fresh_growth_bytes = initial_chunk_size;
     arena->reset_count = 0;
     arena->clear_count = 0;
     arena->active_scope_count = 0;
-
-    // Initialize free-lists
-    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
-        arena->free_lists[i] = NULL;
-    }
-    arena->free_bytes = 0;
 
     // Allocate first chunk
     ArenaChunk* first_chunk = _arena_alloc_chunk(arena, initial_chunk_size);
@@ -259,11 +172,8 @@ void arena_destroy(Arena* arena) {
     mem_free_loc(arena, 0);
 }
 
-void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
-    if (!arena || arena->valid != ARENA_VALID_MARKER) {
-        return NULL;
-    }
-
+// Bump allocation at the arena tail; arenas never reuse interior blocks.
+static void* _arena_alloc_tail(Arena* arena, size_t size, size_t alignment) {
     if (size == 0 || size > SIZE_LIMIT) {
         return NULL;
     }
@@ -272,24 +182,8 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     if (alignment > alignof(ArenaChunk)) return NULL;
 
     // Calculate aligned size for proper accounting
-    // Ensure minimum size so all blocks can participate in free-list (A1 fix)
     size_t aligned_size = 0;
     if (!math_size_align_up(size, alignment, &aligned_size)) return NULL;
-    if (aligned_size < ARENA_MIN_FREE_BLOCK_SIZE) aligned_size = ARENA_MIN_FREE_BLOCK_SIZE;
-
-    // Try to allocate from free-list first (alignment-aware, A3 fix). An arena
-    // that has never freed a block -- a parser's document arena, say -- skips
-    // the walk over its empty bins on every allocation.
-    if (arena->free_bytes) {
-        void* free_ptr = _arena_alloc_from_freelist(arena, aligned_size, alignment);
-        if (free_ptr) {
-            arena->allocation_count++;
-            arena->reuse_hits++;
-            _arena_update_high_water(arena);
-            return free_ptr;
-        }
-    }
-    arena->reuse_misses++;
 
     ArenaChunk* chunk = arena->current;
 
@@ -344,6 +238,27 @@ void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
     _arena_update_high_water(arena);
 
     return ptr;
+}
+
+void* arena_alloc_aligned(Arena* arena, size_t size, size_t alignment) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER) {
+        return NULL;
+    }
+    // A scratch scope owns the tail of its arena and rewinds it; a direct
+    // allocation here would sit inside that tail and be rewound with it.
+    if (arena->active_scope_count != 0) {
+        log_error("arena_alloc: arena %p is owned by a scratch scope", (void*)arena);
+        assert(arena->active_scope_count == 0);
+        return NULL;
+    }
+    return _arena_alloc_tail(arena, size, alignment);
+}
+
+void* arena_scope_alloc(Arena* arena, size_t size, size_t alignment) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER) {
+        return NULL;
+    }
+    return _arena_alloc_tail(arena, size, alignment);
 }
 
 void* arena_alloc(Arena* arena, size_t size) {
@@ -446,12 +361,6 @@ void arena_reset(Arena* arena) {
     // Reset to first chunk
     arena->current = arena->first;
     arena->total_used = 0;
-
-    // Clear free-lists (pointers into reset chunks are now stale)
-    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
-        arena->free_lists[i] = NULL;
-    }
-    arena->free_bytes = 0;
     arena->reset_count++;
 
     // Note: chunk_size is NOT reset - keeps grown size for efficiency
@@ -487,12 +396,6 @@ void arena_clear(Arena* arena) {
     arena->total_allocated = arena->first->capacity;
     arena->total_used = 0;
     arena->chunk_count = 1;
-
-    // Clear free-lists (pointers into freed chunks are now stale)
-    for (int i = 0; i < ARENA_FREE_LIST_BINS; i++) {
-        arena->free_lists[i] = NULL;
-    }
-    arena->free_bytes = 0;
     arena->clear_count++;
 
     // Reset chunk size to initial
@@ -539,19 +442,13 @@ void arena_get_stats(Arena* arena, ArenaStats* out) {
     out->backing_bytes = backing;
     out->committed_bytes = arena->total_allocated;
     out->bump_used_bytes = arena->total_used;
-    out->active_bytes = _arena_active_bytes(arena);
-    out->recyclable_bytes = arena->free_bytes;
+    out->active_bytes = arena->total_used;
     out->waste_bytes = arena->total_allocated - arena->total_used;
     out->overhead_bytes = backing > arena->total_allocated
         ? backing - arena->total_allocated : 0;
     out->high_water_active_bytes = arena->high_water_active_bytes;
     out->allocation_count = arena->allocation_count;
-    out->free_count = arena->free_count;
-    out->reuse_hits = arena->reuse_hits;
-    out->reuse_misses = arena->reuse_misses;
-    out->split_count = arena->split_count;
-    out->coalesce_count = arena->coalesce_count;
-    out->bump_back_count = arena->bump_back_count;
+    out->rewind_count = arena->rewind_count;
     out->fresh_chunk_count = arena->fresh_chunk_count;
     out->fresh_growth_bytes = arena->fresh_growth_bytes;
     out->reset_count = arena->reset_count;
@@ -561,7 +458,44 @@ void arena_get_stats(Arena* arena, ArenaStats* out) {
 
 void arena_scope_enter(Arena* arena) {
     if (!arena || arena->valid != ARENA_VALID_MARKER) return;
+    // one scratch owner per arena: two would interleave blocks, and neither
+    // could rewind its own tail without cutting into the other's
+    if (arena->active_scope_count != 0) {
+        log_error("arena_scope_enter: arena %p already has a scratch owner", (void*)arena);
+        assert(arena->active_scope_count == 0);
+    }
     arena->active_scope_count++;
+}
+
+ArenaMark arena_mark(Arena* arena) {
+    ArenaMark mark = {0};
+    if (!arena || arena->valid != ARENA_VALID_MARKER) return mark;
+    mark.chunk = arena->current;
+    mark.used = arena->current ? arena->current->used : 0;
+    mark.total_used = arena->total_used;
+    return mark;
+}
+
+void arena_rewind(Arena* arena, ArenaMark mark) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER || !mark.chunk) return;
+    ArenaChunk* target = (ArenaChunk*)mark.chunk;
+    // the mark must lie at or behind the tail, on this arena's chain
+    ArenaChunk* chunk = target;
+    while (chunk && chunk != arena->current) chunk = chunk->next;
+    if (!chunk || (target == arena->current && mark.used > target->used)) {
+        log_error("arena_rewind: mark is not behind the tail of arena %p", (void*)arena);
+        assert(false);
+        return;
+    }
+    // chunks past the mark keep their capacity for reuse
+    for (chunk = target->next; chunk; chunk = chunk->next) {
+        chunk->used = 0;
+        if (chunk == arena->current) break;
+    }
+    target->used = mark.used;
+    arena->current = target;
+    arena->total_used = mark.total_used;
+    arena->rewind_count++;
 }
 
 void arena_scope_leave(Arena* arena) {
@@ -625,171 +559,4 @@ void arena_set_mem_category(Arena* arena, int category) {
     if (!arena || arena->valid != ARENA_VALID_MARKER) return;
     arena->category = category >= 0 && category < MEM_CAT_COUNT
         ? (MemCategory)category : MEM_CAT_UNKNOWN;
-}
-
-void arena_free(Arena* arena, void* ptr, size_t size) {
-    if (!arena || arena->valid != ARENA_VALID_MARKER || !ptr) {
-        return;
-    }
-
-    // validate that ptr belongs to this arena before adding to free-list
-    if (!arena_owns(arena, ptr)) {
-        log_error("arena_free: ptr %p (size %zu) not owned by arena %p", ptr, size, (void*)arena);
-        return;
-    }
-    arena->free_count++;
-
-    // Callers retain requested object sizes, while the bump cursor advances by
-    // the aligned allocation span. Freeing the raw size stranded tail padding
-    // and made variable-sized DOM text churn grow linearly.
-    size = _arena_allocation_span(arena, size);
-    if (size == 0) return;
-
-    // Bump-back coalescing: if block is at the end of current chunk,
-    // reclaim space directly instead of adding to free-list (A4 fix)
-    ArenaChunk* chunk = arena->current;
-    uintptr_t data_start = (uintptr_t)&chunk->data[0];
-    uintptr_t block_end = (uintptr_t)ptr + size;
-    uintptr_t chunk_cursor = data_start + chunk->used;
-    if (block_end == chunk_cursor) {
-        chunk->used -= size;
-        arena->total_used -= size;
-        arena->bump_back_count++;
-        return;
-    }
-
-    // Determine bin index based on size
-    int bin = _arena_get_bin(size);
-
-    // Coalesce with adjacent free blocks
-    uintptr_t merged_addr = (uintptr_t)ptr;
-    size_t merged_size = size;
-
-    // Repeatedly scan for adjacent free blocks and merge them
-    ArenaFreeBlock* adj;
-    while ((adj = _arena_find_adjacent_block(arena, merged_addr, merged_size)) != NULL) {
-        arena->coalesce_count++;
-        uintptr_t adj_addr = (uintptr_t)adj;
-        if (adj_addr + adj->size == merged_addr) {
-            // left neighbor: adj is before our block
-            merged_addr = adj_addr;
-            merged_size += adj->size;
-        } else {
-            // right neighbor: adj is after our block
-            merged_size += adj->size;
-        }
-    }
-
-    // After coalescing, check if merged block reaches the bump cursor (bump-back)
-    uintptr_t merged_end = merged_addr + merged_size;
-    chunk_cursor = data_start + chunk->used;
-    if (merged_end == chunk_cursor) {
-        chunk->used -= merged_size;
-        arena->total_used -= merged_size;
-        arena->bump_back_count++;
-        return;
-    }
-
-    // Add merged block to free-list in appropriate bin
-    bin = _arena_get_bin(merged_size);
-    ArenaFreeBlock* block = (ArenaFreeBlock*)merged_addr;
-    block->size = merged_size;
-    block->next = arena->free_lists[bin];
-    arena->free_lists[bin] = block;
-    arena->free_bytes += merged_size;
-}
-
-// Try to allocate from free-list (alignment-aware, A3 fix)
-static void* _arena_alloc_from_freelist(Arena* arena, size_t size, size_t alignment) {
-    int bin = _arena_get_bin(size);
-
-    // Search current bin and larger bins for suitable block
-    for (int i = bin; i < ARENA_FREE_LIST_BINS; i++) {
-        ArenaFreeBlock** prev_ptr = &arena->free_lists[i];
-        ArenaFreeBlock* block = arena->free_lists[i];
-
-        while (block) {
-            // Check both size and alignment before selecting (A3 fix)
-            if (block->size >= size && ((uintptr_t)block & (alignment - 1)) == 0) {
-                // Found suitable block - remove from free-list
-                *prev_ptr = block->next;
-                arena->free_bytes -= block->size;
-
-                // If block is significantly larger, split it
-                size_t excess = block->size - size;
-                if (excess >= ARENA_MIN_FREE_BLOCK_SIZE) {
-                    arena->split_count++;
-                    void* excess_ptr = (char*)block + size;
-                    arena_free(arena, excess_ptr, excess);
-                }
-
-                return (void*)block;
-            }
-            prev_ptr = &block->next;
-            block = block->next;
-        }
-    }
-
-    return NULL;  // No suitable block found
-}
-
-void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size) {
-    if (!arena || arena->valid != ARENA_VALID_MARKER) {
-        return NULL;
-    }
-
-    // NULL ptr -> allocate new
-    if (!ptr) {
-        return arena_alloc(arena, new_size);
-    }
-
-    // new_size == 0 -> free
-    if (new_size == 0) {
-        arena_free(arena, ptr, old_size);
-        return NULL;
-    }
-
-    size_t old_span = _arena_allocation_span(arena, old_size);
-    size_t new_span = _arena_allocation_span(arena, new_size);
-    if (old_span == 0 || new_span == 0) return NULL;
-
-    // Same allocator span -> no-op
-    if (new_span == old_span) {
-        return ptr;
-    }
-
-    // Shrinking -> add excess to free-list
-    if (new_span < old_span) {
-        size_t excess = old_span - new_span;
-        if (excess >= ARENA_MIN_FREE_BLOCK_SIZE) {
-            void* excess_ptr = (char*)ptr + new_span;
-            arena_free(arena, excess_ptr, excess);
-        }
-        return ptr;
-    }
-
-    // Growing -> check if at end of current chunk (can extend in-place)
-    ArenaChunk* chunk = arena->current;
-    uintptr_t ptr_addr = (uintptr_t)ptr;
-    uintptr_t data_start = (uintptr_t)&chunk->data[0];
-    uintptr_t chunk_end = data_start + chunk->used;
-
-    // If at end of chunk and enough space remaining, extend in place
-    if (ptr_addr + old_span == chunk_end) {
-        size_t aligned_growth = new_span - old_span;
-
-        if (chunk->used + aligned_growth <= chunk->capacity) {
-            chunk->used += aligned_growth;
-            arena->total_used += aligned_growth;
-            return ptr;
-        }
-    }
-
-    // Otherwise, allocate new, copy, free old
-    void* new_ptr = arena_alloc(arena, new_size);
-    if (new_ptr) {
-        memcpy(new_ptr, ptr, MIN(old_size, new_size));
-        arena_free(arena, ptr, old_size);
-    }
-    return new_ptr;
 }

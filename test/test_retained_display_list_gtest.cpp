@@ -7,17 +7,23 @@
 class RetainedDisplayListTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;
-    Arena* arena = nullptr;
+    Arena* arena = nullptr;          // source list's arena
+    Arena* replay_arena = nullptr;   // each list's scratch owns its arena
 
     void SetUp() override {
         pool = pool_create();
         arena = arena_create_default();
+        replay_arena = arena_create_default();
     }
 
     void TearDown() override {
         if (arena) {
             arena_destroy(arena);
             arena = nullptr;
+        }
+        if (replay_arena) {
+            arena_destroy(replay_arena);
+            replay_arena = nullptr;
         }
         if (pool) {
             pool_destroy(pool);
@@ -96,7 +102,7 @@ TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     EXPECT_EQ(stats.copy_failed, 0);
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
     ASSERT_EQ(replay.size(), 3u);
     EXPECT_EQ(replay.data()[0].op, DL_BEGIN_ELEMENT);
@@ -196,7 +202,7 @@ TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentForExternalDirtySource) {
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -228,7 +234,7 @@ TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentWhenUnknownDirtyMissesVis
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -259,7 +265,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForUnknownIntersectingDir
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -291,7 +297,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForDirtySourceInsideSubtr
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -322,7 +328,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentWhenMarkerBoundsChanged) 
     Bound moved_marker = {11.0f, 20.0f, 41.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, moved_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -354,7 +360,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentDuringFullRepaint) {
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -386,7 +392,7 @@ TEST_F(RetainedDisplayListTest, AppliesDirtyScaleWhenTestingFragmentVisualBounds
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 2.0f,
         retained_test_contains_view_id, &contained_id));
@@ -420,7 +426,7 @@ TEST_F(RetainedDisplayListTest, ReusesWhenUnknownDirtyMissesAndExternalDirtyInte
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -497,7 +503,7 @@ TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay
     vy[0] = 200.0f;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
     ASSERT_EQ(replay.size(), 3u);
     ASSERT_EQ(replay.data()[1].op, DL_FILL_SURFACE_RECT);
@@ -538,7 +544,7 @@ TEST_F(RetainedDisplayListTest, AppendsTransformedVisualFragmentWithStableMarker
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -673,7 +679,7 @@ TEST_F(RetainedDisplayListTest, UnsafeRecaptureClearsPreviousFragment) {
     dl_end_element(&safe_source, safe_begin);
 
     DisplayList unsafe_source = {};
-    dl_init(&unsafe_source, arena);
+    dl_init(&unsafe_source, replay_arena);
     int fake_filter = 1;
     int unsafe_begin = dl_begin_element(&unsafe_source, 86, 0.0f, 0.0f, 10.0f, 10.0f);
     DisplayItem* filter = dl_alloc_item(&unsafe_source);
@@ -796,7 +802,7 @@ TEST_F(RetainedDisplayListTest, RejectsUnknownDirtyIntersectingOnlyEffectOverflo
     Bound current_marker = {50.0f, 50.0f, 70.0f, 70.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));

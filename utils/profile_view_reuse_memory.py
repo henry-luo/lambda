@@ -25,7 +25,7 @@ EXPECTED_PAGE_COUNT = 46
 
 DOMAINS = (
     "dom.document.pool",
-    "dom.node.arena",
+    "dom.node.pool",
     "view_tree.prop_pool",
     "view_tree.canonical_prop_arena",
     "view_tree.scratch_arena",
@@ -39,10 +39,10 @@ METRICS = {
         ("domains", "dom.document.pool", "direct_live_bytes"),
     "dom.document.pool.cumulative_bytes":
         ("domains", "dom.document.pool", "cumulative_bytes"),
-    "dom.node.arena.active_bytes":
-        ("domains", "dom.node.arena", "live_or_active_bytes"),
-    "dom.node.arena.committed_bytes":
-        ("domains", "dom.node.arena", "committed_bytes"),
+    "dom.node.pool.active_bytes":
+        ("domains", "dom.node.pool", "live_or_active_bytes"),
+    "dom.node.pool.committed_bytes":
+        ("domains", "dom.node.pool", "committed_bytes"),
     "view_tree.prop_pool.direct_live_bytes":
         ("domains", "view_tree.prop_pool", "direct_live_bytes"),
     "view_tree.prop_pool.cumulative_bytes":
@@ -108,7 +108,7 @@ def ensure_baseline_domains(profile):
     profile["logical_composites"].setdefault(
         "dom_storage_active_bytes",
         domains["dom.document.pool"].get("direct_live_bytes", 0) +
-        domains["dom.node.arena"].get("live_or_active_bytes", 0))
+        domains["dom.node.pool"].get("direct_live_bytes", 0))
     profile["logical_composites"].setdefault(
         "view_prop_storage_active_bytes",
         domains["view_tree.prop_pool"].get("direct_live_bytes", 0) +

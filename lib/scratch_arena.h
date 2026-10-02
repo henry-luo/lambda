@@ -49,6 +49,7 @@ typedef struct ScratchArena {
     bool scope_active;       // paired arena scope registration
     uint32_t open_scope;     // serial of the innermost open scope (0 = none)
     uint32_t last_scope;     // last serial issued
+    ArenaMark base;          // backing-arena tail at init; release rewinds to it
 } ScratchArena;
 
 // Mark for save/restore pattern; a scope mark also carries its serial
@@ -56,6 +57,7 @@ typedef struct ScratchMark {
     ScratchHeader* head;     // saved head pointer
     uint32_t scope;          // scope serial (0 = plain mark or ended scope)
     uint32_t outer;          // enclosing open scope, restored at scope end
+    ArenaMark tail;          // backing-arena tail at the mark
 } ScratchMark;
 
 // Install a hook called by scratch_release to release a registered scratch
@@ -63,9 +65,11 @@ typedef struct ScratchMark {
 void scratch_set_node_release_hook(void (*fn)(void* node));
 
 /**
- * Initialize a scratch arena on an existing backing arena
+ * Initialize a scratch arena on an existing backing arena. The scratch arena
+ * becomes the backing arena's sole allocator until released, and frees by
+ * rewinding the arena's tail.
  * @param sa Scratch arena to initialize (caller-owned, typically on stack)
- * @param arena Backing arena for memory allocation
+ * @param arena Backing arena, not shared with any other allocator meanwhile
  */
 void scratch_init(ScratchArena* sa, Arena* arena);
 
@@ -101,10 +105,8 @@ ScratchMark scratch_mark(ScratchArena* sa);
 void scratch_restore(ScratchArena* sa, ScratchMark mark);
 
 /**
- * Release all scratch allocations back to the backing arena
- * Rewinds all allocations made through this scratch arena.
- * The backing arena itself is NOT reset — only scratch-tracked allocations
- * are freed via arena_free().
+ * Release all scratch allocations by rewinding the backing arena to where it
+ * was at scratch_init, and give up ownership of the backing arena.
  * @param sa Scratch arena
  */
 void scratch_release(ScratchArena* sa);

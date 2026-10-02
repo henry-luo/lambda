@@ -110,16 +110,20 @@ class DomRetirementTest : public ::testing::Test {
 protected:
     Input input = {};
     DomDocument doc;
+    Arena* backing_arena = nullptr;
     Element* backing = nullptr;
 
     void SetUp() override {
         ASSERT_TRUE(doc.init(&input));
-        backing = elmt_arena(doc.node_arena);
+        backing_arena = arena_create_default();
+        ASSERT_NE(backing_arena, nullptr);
+        backing = elmt_arena(backing_arena);
         ASSERT_NE(backing, nullptr);
     }
 
     void TearDown() override {
         doc.destroy();
+        arena_destroy(backing_arena);
     }
 
     DomElement* element(const char* tag) {
@@ -376,7 +380,7 @@ TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
     pool_destroy(tree.prop_pool);
 }
 
-TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
+TEST_F(DomRetirementTest, NodePoolGrowthPlateausAcrossTenThousandRetirements) {
     DomElement* parent = root();
     for (int i = 0; i < 128; i++) {
         DomElement* child = element("child");
@@ -384,8 +388,8 @@ TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
         ASSERT_TRUE(parent->remove_child(child));
         ASSERT_EQ(dom_retire_sweep(&doc), 1u);
     }
-    ArenaStats warm = {};
-    arena_get_stats(doc.node_arena, &warm);
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.node_pool, &warm);
 
     uint32_t last_id = 0;
     for (int i = 0; i < 10000; i++) {
@@ -397,10 +401,10 @@ TEST_F(DomRetirementTest, NodeArenaGrowthPlateausAcrossTenThousandRetirements) {
         ASSERT_TRUE(parent->remove_child(child));
         ASSERT_EQ(dom_retire_sweep(&doc), 1u);
     }
-    ArenaStats after = {};
-    arena_get_stats(doc.node_arena, &after);
-    EXPECT_EQ(after.fresh_growth_bytes, warm.fresh_growth_bytes);
-    EXPECT_GE(after.bump_back_count - warm.bump_back_count, 10000u);
+    PoolStats after = {};
+    pool_get_detailed_stats(doc.node_pool, &after);
+    EXPECT_EQ(after.reserved_bytes, warm.reserved_bytes);
+    EXPECT_GE(after.free_count - warm.free_count, 10000u);
 }
 
 TEST_F(DomRetirementTest, MoreThanMutationRecordCapRetiresAfterPinsRelease) {
@@ -422,7 +426,7 @@ TEST_F(DomRetirementTest, MoreThanMutationRecordCapRetiresAfterPinsRelease) {
     EXPECT_EQ(dom_retire_sweep(&doc), DOM_JS_MUTATION_RECORD_CAP * 4u);
 }
 
-TEST_F(DomRetirementTest, VariableTextSizesReuseArenaBlocksAfterWarmup) {
+TEST_F(DomRetirementTest, VariableTextSizesReusePoolBlocksAfterWarmup) {
     DomElement* parent = root();
     char text[513];
     memset(text, 'x', sizeof(text));
@@ -433,8 +437,8 @@ TEST_F(DomRetirementTest, VariableTextSizesReuseArenaBlocksAfterWarmup) {
         ASSERT_TRUE(parent->remove_child(node));
         ASSERT_EQ(dom_retire_sweep(&doc), 1u);
     }
-    ArenaStats warm = {};
-    arena_get_stats(doc.node_arena, &warm);
+    PoolStats warm = {};
+    pool_get_detailed_stats(doc.node_pool, &warm);
     for (int cycle = 0; cycle < 20; cycle++) {
         for (size_t len = 1; len <= 512; len++) {
             DomText* node = DomText::create_copy(text, len, parent);
@@ -444,13 +448,15 @@ TEST_F(DomRetirementTest, VariableTextSizesReuseArenaBlocksAfterWarmup) {
             ASSERT_EQ(dom_retire_sweep(&doc), 1u);
         }
     }
-    ArenaStats after = {};
-    arena_get_stats(doc.node_arena, &after);
-    EXPECT_EQ(after.fresh_growth_bytes, warm.fresh_growth_bytes);
-    EXPECT_GT(after.bump_back_count, warm.bump_back_count);
+    PoolStats after = {};
+    pool_get_detailed_stats(doc.node_pool, &after);
+    EXPECT_EQ(after.reserved_bytes, warm.reserved_bytes);
+    EXPECT_GT(after.free_count, warm.free_count);
 }
 
-TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
+// Arenas free only in batch, so a node embedded in the Input arena is retired
+// (its references invalidated) while its storage stays until the Input goes.
+TEST(DomRetirementOwnerArenaTest, FatLambdaNodeRetiresInPlaceInItsInputArena) {
     Pool* input_pool = pool_create();
     ASSERT_NE(input_pool, nullptr);
     Arena* input_arena = arena_create_default();
@@ -474,12 +480,14 @@ TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
     ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(child));
     ASSERT_TRUE(root->remove_child(child));
 
+    DomNodeRef child_ref = dom_node_ref(child);
     ArenaStats before = {};
     arena_get_stats(input_arena, &before);
     EXPECT_EQ(dom_retire_sweep(&doc), 1u);
     ArenaStats after = {};
     arena_get_stats(input_arena, &after);
-    EXPECT_EQ(after.free_count, before.free_count + 1u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, child_ref), nullptr);
+    EXPECT_EQ(after.bump_used_bytes, before.bump_used_bytes);
 
     doc.destroy();
     arena_destroy(input_arena);

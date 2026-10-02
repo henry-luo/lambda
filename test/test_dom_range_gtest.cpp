@@ -75,7 +75,7 @@ protected:
         // generated nodes require canonical ownership fields and the lifecycle
         // registry after the legacy document aliases were removed.
         doc_storage.document_pool = pool;
-        doc_storage.node_arena = arena;
+        doc_storage.node_pool = pool;
         ASSERT_TRUE(dom_lifecycle_init(&doc_storage));
 
         div   = make_element();

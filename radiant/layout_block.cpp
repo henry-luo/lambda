@@ -1564,7 +1564,7 @@ void layout_update_pseudo_content_with_counters(LayoutContext* lycon,
         is_before ? PSEUDO_STYLE_BEFORE : PSEUDO_STYLE_AFTER);
     apply_pseudo_counter_ops(lycon, style);
     const char* content = dom_element_get_pseudo_element_content_with_counters(
-        origin, pseudo, lycon->counter_context, lycon->scratch.arena);
+        origin, pseudo, lycon->counter_context, lycon->pass_arena);
     if (!content) content = dom_element_get_pseudo_element_content(origin, pseudo);
     if (!content) content = "";
     DomNode* first = pseudo_element->first_child;

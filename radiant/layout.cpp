@@ -5086,7 +5086,8 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     lycon->pool = doc->view_tree->prop_pool;
     mem_scratch_init((MemContext*)doc->services.mem_ctx, &lycon->scratch, doc->view_tree->scratch_arena, MEM_ROLE_LAYOUT, "layout.scratch");
 
-    lycon->counter_context = counter_context_create(lycon->scratch.arena);
+    lycon->pass_arena = doc->view_tree->layout_pass_arena;
+    lycon->counter_context = counter_context_create(lycon->pass_arena);
     lycon->deferred_sticky_blocks = arraylist_new(8);
 
 }
@@ -5098,6 +5099,10 @@ void layout_cleanup(LayoutContext* lycon) {
     if (lycon->counter_context) {
         counter_context_destroy(lycon->counter_context);
         lycon->counter_context = nullptr;
+    }
+    if (lycon->pass_arena) {
+        arena_reset(lycon->pass_arena);
+        lycon->pass_arena = nullptr;
     }
     if (lycon->deferred_sticky_blocks) {
         arraylist_free(lycon->deferred_sticky_blocks);
