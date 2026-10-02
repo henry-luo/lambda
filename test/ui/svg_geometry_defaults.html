@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- SVG 2 basic shapes and path-data error recovery. -->
+<html><head><style>
+html, body { margin: 0; padding: 0; background: white; }
+svg { display: block; }
+</style></head><body>
+<svg width="480" height="180" viewBox="0 0 480 180">
+  <rect id="ry-only" x="10" y="10" width="60" height="40" ry="20" fill="#ff0000"/>
+  <rect id="rx-only" x="90" y="10" width="60" height="40" rx="20" fill="#00ff00"/>
+  <rect id="explicit-zero" x="170" y="10" width="60" height="40" rx="0" ry="20" fill="#0000ff"/>
+  <rect id="radius-clamp" x="250" y="10" width="60" height="40" ry="100" fill="#ff0000"/>
+  <line id="default-line" x1="10" y1="80" x2="70" y2="80"/>
+  <line id="none-line" x1="90" y1="80" x2="150" y2="80" stroke="none"/>
+  <line id="styled-line" x1="170" y1="80" x2="230" y2="80" style="stroke:#ff0000;stroke-width:6"/>
+  <line id="styled-none-line" x1="250" y1="80" x2="310" y2="80" style="stroke:none"/>
+  <g stroke="#0000ff" stroke-width="6"><line id="inherited-line" x1="330" y1="80" x2="390" y2="80"/></g>
+  <path id="invalid-token-prefix" d="M10 110 H70 V150 H10 Z ?" fill="#ff0000"/>
+  <path id="incomplete-pair" d="M90 130 L150 130 170" fill="none" stroke="#00ff00" stroke-width="6"/>
+  <path id="invalid-command-prefix" d="M190 130 L250 130 X300 150" fill="none" stroke="#0000ff" stroke-width="6"/>
+  <path id="invalid-start" d="L330 110 L390 110 L390 150 Z" fill="#ff0000"/>
+  <path id="invalid-thin-rect" d="M410 110L470 110,,L470 110.25L410 110.25Z" fill="#ff0000"/>
+  <path id="zero-rx-arc" d="M410 130A0 10 0 0 1 470 130" fill="none" stroke="#ff0000" stroke-width="6"/>
+  <path id="zero-ry-arc" d="M410 150A10 0 0 0 1 470 150" fill="none" stroke="#0000ff" stroke-width="6"/>
+</svg>
+</body></html>

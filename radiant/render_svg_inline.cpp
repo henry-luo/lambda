@@ -377,12 +377,17 @@ static bool read_svg_number_attr(Element* elem, const char* name, float* result)
     Item item = {.item = value.item};
     double number = 0.0;
     if (item_try_to_double(item, &number)) {
-        *result = (float)number;
+        float value = (float)number;
+        if (!isfinite(value)) return false;
+        *result = value;
         return true;
     }
     const char* text = get_svg_attr(elem, name);
     if (!text || !*text) return false;
-    *result = parse_svg_length(text, 0.0f);
+    // invalid attributes retain the caller's default instead of inventing zero.
+    float length = parse_svg_length(text, NAN);
+    if (!isfinite(length)) return false;
+    *result = length;
     return true;
 }
 
@@ -674,137 +679,21 @@ static float parse_svg_length(const char* value, float default_value) {
 // SVG Color Parsing
 // ============================================================================
 
-// named color lookup table - extended SVG/CSS named colors
-static const struct { const char* name; uint32_t rgb; } svg_named_colors[] = {
-    // Basic colors
-    {"black", 0x000000}, {"white", 0xFFFFFF}, {"red", 0xFF0000},
-    {"green", 0x008000}, {"blue", 0x0000FF}, {"yellow", 0xFFFF00},
-    {"cyan", 0x00FFFF}, {"magenta", 0xFF00FF}, {"gray", 0x808080},
-    {"grey", 0x808080}, {"silver", 0xC0C0C0}, {"maroon", 0x800000},
-    {"olive", 0x808000}, {"lime", 0x00FF00}, {"aqua", 0x00FFFF},
-    {"teal", 0x008080}, {"navy", 0x000080}, {"fuchsia", 0xFF00FF},
-    {"purple", 0x800080}, {"orange", 0xFFA500}, {"pink", 0xFFC0CB},
-    {"brown", 0xA52A2A}, {"coral", 0xFF7F50}, {"gold", 0xFFD700},
-    {"indigo", 0x4B0082}, {"ivory", 0xFFFFF0}, {"khaki", 0xF0E68C},
-    {"lavender", 0xE6E6FA}, {"transparent", 0x00000000},
-    // Reds
-    {"crimson", 0xDC143C}, {"darkred", 0x8B0000}, {"firebrick", 0xB22222},
-    {"indianred", 0xCD5C5C}, {"lightcoral", 0xF08080}, {"salmon", 0xFA8072},
-    {"darksalmon", 0xE9967A}, {"lightsalmon", 0xFFA07A}, {"orangered", 0xFF4500},
-    {"tomato", 0xFF6347},
-    // Oranges & Yellows
-    {"darkorange", 0xFF8C00}, {"peachpuff", 0xFFDAB9}, {"moccasin", 0xFFE4B5},
-    {"palegoldenrod", 0xEEE8AA}, {"lightyellow", 0xFFFFE0}, {"lemonchiffon", 0xFFFACD},
-    // Greens
-    {"limegreen", 0x32CD32}, {"lightgreen", 0x90EE90}, {"palegreen", 0x98FB98},
-    {"darkgreen", 0x006400}, {"forestgreen", 0x228B22}, {"seagreen", 0x2E8B57},
-    {"mediumseagreen", 0x3CB371}, {"springgreen", 0x00FF7F}, {"mediumspringgreen", 0x00FA9A},
-    {"darkseagreen", 0x8FBC8F}, {"mediumaquamarine", 0x66CDAA}, {"yellowgreen", 0x9ACD32},
-    {"olivedrab", 0x6B8E23}, {"darkolivegreen", 0x556B2F}, {"greenyellow", 0xADFF2F},
-    {"chartreuse", 0x7FFF00}, {"lawngreen", 0x7CFC00},
-    // Blues
-    {"lightblue", 0xADD8E6}, {"powderblue", 0xB0E0E6}, {"lightskyblue", 0x87CEFA},
-    {"skyblue", 0x87CEEB}, {"deepskyblue", 0x00BFFF}, {"dodgerblue", 0x1E90FF},
-    {"cornflowerblue", 0x6495ED}, {"steelblue", 0x4682B4}, {"royalblue", 0x4169E1},
-    {"mediumblue", 0x0000CD}, {"darkblue", 0x00008B}, {"midnightblue", 0x191970},
-    {"cadetblue", 0x5F9EA0}, {"lightsteelblue", 0xB0C4DE}, {"slateblue", 0x6A5ACD},
-    {"mediumslateblue", 0x7B68EE}, {"darkslateblue", 0x483D8B},
-    // Purples
-    {"mediumpurple", 0x9370DB}, {"blueviolet", 0x8A2BE2}, {"darkviolet", 0x9400D3},
-    {"darkorchid", 0x9932CC}, {"mediumorchid", 0xBA55D3}, {"orchid", 0xDA70D6},
-    {"plum", 0xDDA0DD}, {"violet", 0xEE82EE}, {"thistle", 0xD8BFD8},
-    {"darkmagenta", 0x8B008B}, {"mediumvioletred", 0xC71585}, {"deeppink", 0xFF1493},
-    {"hotpink", 0xFF69B4}, {"lightpink", 0xFFB6C1}, {"palevioletred", 0xDB7093},
-    // Cyans & Teals
-    {"lightcyan", 0xE0FFFF}, {"paleturquoise", 0xAFEEEE}, {"aquamarine", 0x7FFFD4},
-    {"turquoise", 0x40E0D0}, {"mediumturquoise", 0x48D1CC}, {"darkturquoise", 0x00CED1},
-    {"darkcyan", 0x008B8B},
-    // Browns & Tans
-    {"tan", 0xD2B48C}, {"burlywood", 0xDEB887}, {"wheat", 0xF5DEB3},
-    {"sandybrown", 0xF4A460}, {"goldenrod", 0xDAA520}, {"darkgoldenrod", 0xB8860B},
-    {"peru", 0xCD853F}, {"chocolate", 0xD2691E}, {"sienna", 0xA0522D},
-    {"saddlebrown", 0x8B4513}, {"rosybrown", 0xBC8F8F},
-    // Grays
-    {"lightgray", 0xD3D3D3}, {"lightgrey", 0xD3D3D3}, {"darkgray", 0xA9A9A9},
-    {"darkgrey", 0xA9A9A9}, {"dimgray", 0x696969}, {"dimgrey", 0x696969},
-    {"lightslategray", 0x778899}, {"slategray", 0x708090}, {"darkslategray", 0x2F4F4F},
-    {"gainsboro", 0xDCDCDC},
-    // Whites
-    {"snow", 0xFFFAFA}, {"honeydew", 0xF0FFF0}, {"mintcream", 0xF5FFFA},
-    {"azure", 0xF0FFFF}, {"aliceblue", 0xF0F8FF}, {"ghostwhite", 0xF8F8FF},
-    {"whitesmoke", 0xF5F5F5}, {"seashell", 0xFFF5EE}, {"beige", 0xF5F5DC},
-    {"oldlace", 0xFDF5E6}, {"floralwhite", 0xFFFAF0}, {"linen", 0xFAF0E6},
-    {"lavenderblush", 0xFFF0F5}, {"mistyrose", 0xFFE4E1}, {"papayawhip", 0xFFEFD5},
-    {"blanchedalmond", 0xFFEBCD}, {"bisque", 0xFFE4C4}, {"antiquewhite", 0xFAEBD7},
-    {"cornsilk", 0xFFF8DC}, {"navajowhite", 0xFFDEAD},
-    {nullptr, 0}
-};
-
 static Color parse_svg_color(const char* value) {
-    Color c;
-    c.r = 0; c.g = 0; c.b = 0; c.a = 255;  // default black
-    if (!value || !*value) return c;
-
-    // skip whitespace
+    Color result = {};
+    result.a = 255;
+    if (!value || !*value) return result;
     value = str_skip_ascii_space(value);
-
-    // check for "none"
     if (strcmp(value, "none") == 0) {
-        c.a = 0;
-        return c;
+        result.a = 0;
+        return result;
     }
-
-    // check for "transparent"
-    if (strcmp(value, "transparent") == 0) {
-        c.a = 0;
-        return c;
+    // SVG and HTML paint share named colors, numeric syntax and channel clamping.
+    CssColor color = {};
+    if (css_parse_color(value, &color) && color.type != CSS_COLOR_CURRENT) {
+        result.r = color.r; result.g = color.g; result.b = color.b; result.a = color.a;
     }
-
-    // hex color: #rgb, #rrggbb, #rgba, #rrggbbaa
-    if (*value == '#') {
-        uint8_t r, g, b, a;
-        // Shared parser rejects malformed long hex colors instead of folding
-        // invalid nibbles into negative channel math.
-        if (color_parse_hex(value, &r, &g, &b, &a)) {
-            c.r = r; c.g = g; c.b = b; c.a = a;
-        }
-        return c;
-    }
-
-    // rgb() or rgba()
-    if (strncmp(value, "rgb", 3) == 0) {
-        const char* p = strchr(value, '(');
-        if (p) {
-            p++;
-            int r, g, b;
-            float a = 1.0f;
-            if (sscanf(p, "%d,%d,%d,%f", &r, &g, &b, &a) >= 3 ||
-                sscanf(p, "%d %d %d / %f", &r, &g, &b, &a) >= 3 ||
-                sscanf(p, "%d %d %d", &r, &g, &b) == 3) {
-                c.r = clamp_byte(r);
-                c.g = clamp_byte(g);
-                c.b = clamp_byte(b);
-                c.a = (uint8_t)(a * 255);
-            }
-        }
-        return c;
-    }
-
-    // named color lookup
-    for (int i = 0; svg_named_colors[i].name != nullptr; i++) {
-        if (str_ieq(value, strlen(value), svg_named_colors[i].name, strlen(svg_named_colors[i].name))) {
-            uint32_t rgb = svg_named_colors[i].rgb;
-            c.r = (rgb >> 16) & 0xFF;
-            c.g = (rgb >> 8) & 0xFF;
-            c.b = rgb & 0xFF;
-            if (strcmp(svg_named_colors[i].name, "transparent") == 0) {
-                c.a = 0;
-            }
-            return c;
-        }
-    }
-
-    return c;  // default black
+    return result;
 }
 
 static Color svg_resolve_color_keyword(SvgInlineRenderContext* ctx, const char* value) {
@@ -1756,7 +1645,6 @@ struct SvgBasicShapeGeometry {
     float y;
     float width;
     float height;
-    bool is_line;
 };
 
 // Appends the simple SVG primitives shared by normal painting, masks, and clips.
@@ -1768,13 +1656,19 @@ static bool svg_append_basic_shape_path(Element* elem, RdtPath* path,
     SvgBasicShapeGeometry result = {};
 
     if (strcmp(tag, "rect") == 0) {
-        float rx = get_svg_number_attr(elem, "rx", 0.0f);
-        float ry = get_svg_number_attr(elem, "ry", rx);
+        float rx = 0.0f, ry = 0.0f;
+        bool has_rx = read_svg_number_attr(elem, "rx", &rx) && rx >= 0.0f;
+        bool has_ry = read_svg_number_attr(elem, "ry", &ry) && ry >= 0.0f;
+        // either auto radius takes the other's used length before clamping.
+        if (!has_rx) rx = has_ry ? ry : 0.0f;
+        if (!has_ry) ry = rx;
         result.x = get_svg_number_attr(elem, "x", 0.0f);
         result.y = get_svg_number_attr(elem, "y", 0.0f);
         result.width = get_svg_number_attr(elem, "width", 0.0f);
         result.height = get_svg_number_attr(elem, "height", 0.0f);
         if (result.width <= 0.0f || result.height <= 0.0f) return false;
+        rx = fminf(rx, result.width * 0.5f);
+        ry = fminf(ry, result.height * 0.5f);
         rdt_path_add_rect(path, result.x, result.y, result.width, result.height, rx, ry);
     } else if (strcmp(tag, "circle") == 0 || strcmp(tag, "ellipse") == 0) {
         float rx = get_svg_number_attr(elem, strcmp(tag, "circle") == 0 ? "r" : "rx", 0.0f);
@@ -1795,7 +1689,6 @@ static bool svg_append_basic_shape_path(Element* elem, RdtPath* path,
         float y2 = get_svg_number_attr(elem, "y2", 0.0f);
         rdt_path_move_to(path, x1, y1);
         rdt_path_line_to(path, x2, y2);
-        result.is_line = true;
     } else if (strcmp(tag, "polygon") == 0 || strcmp(tag, "polyline") == 0) {
         const char* points = get_svg_attr(elem, "points");
         if (!points || !parse_points_to_path(points, path, strcmp(tag, "polygon") == 0)) {
@@ -1805,7 +1698,15 @@ static bool svg_append_basic_shape_path(Element* elem, RdtPath* path,
         return false;
     }
 
-    if (geometry) *geometry = result;
+    if (geometry) {
+        // every primitive supplies its actual bounds to objectBoundingBox paint servers.
+        float right, bottom;
+        if (rdt_path_get_bounds(path, &result.x, &result.y, &right, &bottom)) {
+            result.width = right - result.x;
+            result.height = bottom - result.y;
+        }
+        *geometry = result;
+    }
     return true;
 }
 
@@ -1818,16 +1719,7 @@ static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem) {
     }
 
     RdtMatrix matrix = compose_element_transform(ctx, elem);
-    if (geometry.is_line) {
-        // lines have stroke only by default — ensure stroke is set
-        const char* stroke = get_svg_attr(elem, "stroke");
-        if (!stroke && ctx->stroke_none) {
-            // no inherited stroke and no explicit stroke: draw with default black
-            Color black = {}; black.a = 255;
-            svg_stroke_path(ctx, path, black, 1.0f, RDT_CAP_BUTT, RDT_JOIN_MITER,
-                            nullptr, 0, 0.0f, &matrix);
-        }
-    }
+    // lines use the same computed stroke as other shapes; the initial paint is none.
     draw_svg_fill_stroke(ctx, path, elem, &matrix,
                          geometry.x, geometry.y, geometry.width, geometry.height);
     rdt_path_free(path);
@@ -1837,32 +1729,76 @@ static void render_svg_basic_shape(SvgInlineRenderContext* ctx, Element* elem) {
 // SVG Path Rendering
 // ============================================================================
 
-static bool peek_number(const char* p) {
-    p = str_skip_chars(p, ", \t\n\r\f\v");
-    return *p == '-' || *p == '+' || *p == '.' || str_char_is_digit(*p);
-}
-
-static float parse_number(const char** p) {
-    *p = str_skip_chars(*p, ", \t\n\r\f\v");
-    char* end;
-    float val = strtof(*p, &end);
-    if (end == *p) {
-        log_error("[SVG] path parse: expected number near '%.16s'", *p);
-        if (**p) (*p)++;
-        return 0.0f;
+static bool parse_number(const char** p, float* result) {
+    const char* start = *p;
+    const char* end = start;
+    if (*end == '+' || *end == '-') end++;
+    bool digits = false;
+    while (str_char_is_digit(*end)) { digits = true; end++; }
+    if (*end == '.') {
+        end++;
+        while (str_char_is_digit(*end)) { digits = true; end++; }
     }
+    if (!digits) return false;
+    if (*end == 'e' || *end == 'E') {
+        end++;
+        if (*end == '+' || *end == '-') end++;
+        if (!str_char_is_digit(*end)) return false;
+        while (str_char_is_digit(*end)) end++;
+    }
+    // strtof also accepts hex/inf; SVG path numbers permit finite decimal syntax only.
+    char* parsed_end = nullptr;
+    float value = strtof(start, &parsed_end);
+    if (parsed_end != end || !isfinite(value)) return false;
     *p = end;
-    return val;
+    *result = value;
+    return true;
 }
 
-static int parse_flag(const char** p) {
-    *p = str_skip_chars(*p, ", \t\n\r\f\v");
-    int flag = 0;
-    if (**p == '0' || **p == '1') {
-        flag = **p - '0';
-        (*p)++;
+static int svg_path_parameter_count(char command) {
+    switch (command) {
+        case 'M': case 'L': case 'T': return 2;
+        case 'H': case 'V': return 1;
+        case 'S': case 'Q': return 4;
+        case 'C': return 6;
+        case 'A': return 7;
+        default: return -1;
     }
-    return flag;
+}
+
+static bool svg_read_path_parameters(const char** p, char command,
+                                      bool repeated, float args[7]) {
+    int count = svg_path_parameter_count(command);
+    if (count < 0) return false;
+    // commit geometry only after a whole segment parses; a bad suffix keeps its prefix.
+    for (int i = 0; i < count; i++) {
+        *p = str_skip_ascii_space(*p);
+        if ((i > 0 || repeated) && **p == ',') {
+            *p = str_skip_ascii_space(*p + 1);
+        }
+        if (command == 'A' && (i == 3 || i == 4)) {
+            if (**p != '0' && **p != '1') return false;
+            args[i] = (float)(**p - '0');
+            (*p)++;
+        } else if (!parse_number(p, &args[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void svg_path_resolve_relative_parameters(char command, float args[7],
+                                                  float x, float y) {
+    int count = svg_path_parameter_count(command);
+    if (count == 1) {
+        args[0] += command == 'H' ? x : y;
+        return;
+    }
+    // arc radii, rotation and flags are not coordinates.
+    for (int i = command == 'A' ? 5 : 0; i < count; i += 2) {
+        args[i] += x;
+        args[i + 1] += y;
+    }
 }
 
 static inline bool svg_same_point(float x1, float y1, float x2, float y2) {
@@ -1882,24 +1818,28 @@ static bool svg_parse_simple_rect_path(const char* d, SvgSimpleRectPath* rect) {
     float xs[4] = {};
     float ys[4] = {};
 
-    p = str_skip_chars(p, ", \t\n\r\f\v");
+    // commas separate parameters, never commands, even on the rectangle fast path.
+    p = str_skip_ascii_space(p);
     if (*p != 'M') return false;
     p++;
-    xs[0] = parse_number(&p);
-    ys[0] = parse_number(&p);
+    float point[7];
+    if (!svg_read_path_parameters(&p, 'M', false, point)) return false;
+    xs[0] = point[0];
+    ys[0] = point[1];
 
     for (size_t i = 1; i < 4; i++) {
-        p = str_skip_chars(p, ", \t\n\r\f\v");
+        p = str_skip_ascii_space(p);
         if (*p != 'L') return false;
         p++;
-        xs[i] = parse_number(&p);
-        ys[i] = parse_number(&p);
+        if (!svg_read_path_parameters(&p, 'L', false, point)) return false;
+        xs[i] = point[0];
+        ys[i] = point[1];
     }
 
-    p = str_skip_chars(p, ", \t\n\r\f\v");
+    p = str_skip_ascii_space(p);
     if (*p != 'Z') return false;
     p++;
-    p = str_skip_chars(p, ", \t\n\r\f\v");
+    p = str_skip_ascii_space(p);
     if (*p) return false;
 
     float min_x = xs[0], max_x = xs[0];
@@ -1984,8 +1924,8 @@ static inline void svg_emit_pending_move(RdtPath* path, bool* pending_move,
 static void arc_to_beziers(RdtPath* path, float x1, float y1,
                            float rx, float ry, float x_rotation,
                            int large_arc, int sweep, float x2, float y2) {
-    // F.6.2 - degenerate cases
-    if ((x1 == x2 && y1 == y2) || (rx == 0 && ry == 0)) {
+    // either zero radius is a line; the ellipse conversion would divide by zero.
+    if ((x1 == x2 && y1 == y2) || rx == 0.0f || ry == 0.0f) {
         rdt_path_line_to(path, x2, y2);
         return;
     }
@@ -2196,11 +2136,14 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
 
     RdtPath* path = rdt_path_new();
 
+    if (!path) return nullptr;
+
     float cur_x = 0, cur_y = 0;
     float start_x = 0, start_y = 0;
     float pending_x = 0, pending_y = 0;
     float last_ctrl_x = 0, last_ctrl_y = 0;
     char last_cmd = 0;
+    char previous_cmd = 0;
     bool pending_move = false;
     bool subpath_has_draw = false;
     bool any_draw = false;
@@ -2213,7 +2156,7 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
     const char* p = d;
 
     while (*p) {
-        p = str_skip_chars(p, ", \t\n\r\f\v");
+        p = str_skip_ascii_space(p);
         if (!*p) break;
 
         char cmd = *p;
@@ -2221,26 +2164,28 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
 
         if (is_cmd) {
             p++;
-            last_cmd = cmd;
         } else {
-            if (!last_cmd || !peek_number(p)) {
+            if (!last_cmd || last_cmd == 'Z' || last_cmd == 'z') {
                 log_error("[SVG] path parse: invalid token near '%.16s'", p);
-                rdt_path_free(path);
-                return nullptr;
+                break;
             }
             cmd = last_cmd;
-            if (cmd == 'M') cmd = 'L';
-            if (cmd == 'm') cmd = 'l';
         }
 
         bool relative = islower((unsigned char)cmd);
         cmd = (char)toupper((unsigned char)cmd);
+        float args[7] = {};
+        if ((!last_cmd && cmd != 'M') ||
+            (cmd != 'Z' && !svg_read_path_parameters(&p, cmd, !is_cmd, args))) {
+            log_error("[SVG] path parse: invalid '%c' segment near '%.16s'", cmd, p);
+            break;
+        }
+        last_cmd = relative ? (char)tolower((unsigned char)cmd) : cmd;
+        if (relative) svg_path_resolve_relative_parameters(cmd, args, cur_x, cur_y);
 
         switch (cmd) {
             case 'M': {  // moveto
-                float x = parse_number(&p);
-                float y = parse_number(&p);
-                if (relative) { x += cur_x; y += cur_y; }
+                float x = args[0], y = args[1];
                 cur_x = start_x = x;
                 cur_y = start_y = y;
                 pending_x = x;
@@ -2249,155 +2194,66 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
                 subpath_has_draw = false;
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
-                // subsequent coords are implicit lineto
-                while (peek_number(p)) {
-                    x = parse_number(&p);
-                    y = parse_number(&p);
-                    if (relative) { x += cur_x; y += cur_y; }
-                    svg_path_emit_line(&emit_context, x, y);
-                }
+                last_cmd = relative ? 'l' : 'L';
                 break;
             }
             case 'L': {  // lineto
-                while (peek_number(p)) {
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { x += cur_x; y += cur_y; }
-                    svg_path_emit_line(&emit_context, x, y);
-                }
+                float x = args[0], y = args[1];
+                svg_path_emit_line(&emit_context, x, y);
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
                 break;
             }
             case 'H': {  // horizontal lineto
-                while (peek_number(p)) {
-                    float previous_x = cur_x;
-                    float x = parse_number(&p);
-                    if (relative) { x += cur_x; }
-                    if (!svg_same_point(cur_x, cur_y, x, cur_y)) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_line_to(path, x, cur_y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    cur_x = x;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - previous_x;
-                        end_info->tangent_y = 0.0f;
-                        end_info->has_tangent = fabsf(end_info->tangent_x) > 0.0001f;
-                    }
-                }
+                svg_path_emit_line(&emit_context, args[0], cur_y);
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
                 break;
             }
             case 'V': {  // vertical lineto
-                while (peek_number(p)) {
-                    float previous_y = cur_y;
-                    float y = parse_number(&p);
-                    if (relative) { y += cur_y; }
-                    if (!svg_same_point(cur_x, cur_y, cur_x, y)) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        rdt_path_line_to(path, cur_x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = 0.0f;
-                        end_info->tangent_y = cur_y - previous_y;
-                        end_info->has_tangent = fabsf(end_info->tangent_y) > 0.0001f;
-                    }
-                }
+                svg_path_emit_line(&emit_context, cur_x, args[0]);
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
                 break;
             }
             case 'C': {  // cubic bezier
-                while (peek_number(p)) {
-                    float x1 = parse_number(&p);
-                    float y1 = parse_number(&p);
-                    float x2 = parse_number(&p);
-                    float y2 = parse_number(&p);
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) {
-                        x1 += cur_x; y1 += cur_y;
-                        x2 += cur_x; y2 += cur_y;
-                        x += cur_x; y += cur_y;
-                    }
-                    svg_path_emit_cubic(&emit_context, x1, y1, x2, y2, x, y);
-                }
+                svg_path_emit_cubic(&emit_context, args[0], args[1], args[2], args[3], args[4], args[5]);
                 break;
             }
             case 'S': {  // smooth cubic bezier
-                while (peek_number(p)) {
-                    // reflect previous control point
-                    float x1 = 2 * cur_x - last_ctrl_x;
-                    float y1 = 2 * cur_y - last_ctrl_y;
-                    float x2 = parse_number(&p);
-                    float y2 = parse_number(&p);
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) {
-                        x2 += cur_x; y2 += cur_y;
-                        x += cur_x; y += cur_y;
-                    }
-                    svg_path_emit_cubic(&emit_context, x1, y1, x2, y2, x, y);
-                }
+                bool reflect = previous_cmd == 'C' || previous_cmd == 'S';
+                float x1 = reflect ? 2 * cur_x - last_ctrl_x : cur_x;
+                float y1 = reflect ? 2 * cur_y - last_ctrl_y : cur_y;
+                svg_path_emit_cubic(&emit_context, x1, y1, args[0], args[1], args[2], args[3]);
                 break;
             }
             case 'Q': {  // quadratic bezier -> convert to cubic
-                while (peek_number(p)) {
-                    float qx = parse_number(&p);
-                    float qy = parse_number(&p);
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) {
-                        qx += cur_x; qy += cur_y;
-                        x += cur_x; y += cur_y;
-                    }
-                    svg_path_emit_quadratic(&emit_context, qx, qy, x, y);
-                }
+                svg_path_emit_quadratic(&emit_context, args[0], args[1], args[2], args[3]);
                 break;
             }
             case 'T': {  // smooth quadratic bezier
-                while (peek_number(p)) {
-                    float qx = 2 * cur_x - last_ctrl_x;
-                    float qy = 2 * cur_y - last_ctrl_y;
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) {
-                        x += cur_x; y += cur_y;
-                    }
-                    svg_path_emit_quadratic(&emit_context, qx, qy, x, y);
-                }
+                bool reflect = previous_cmd == 'Q' || previous_cmd == 'T';
+                float qx = reflect ? 2 * cur_x - last_ctrl_x : cur_x;
+                float qy = reflect ? 2 * cur_y - last_ctrl_y : cur_y;
+                float x = args[0], y = args[1];
+                svg_path_emit_quadratic(&emit_context, qx, qy, x, y);
                 break;
             }
             case 'A': {  // arc
-                while (peek_number(p)) {
-                    float previous_x = cur_x, previous_y = cur_y;
-                    float rx = parse_number(&p);
-                    float ry = parse_number(&p);
-                    float rotation = parse_number(&p);
-                    int large_arc = parse_flag(&p);
-                    int sweep = parse_flag(&p);
-                    float x = parse_number(&p);
-                    float y = parse_number(&p);
-                    if (relative) { x += cur_x; y += cur_y; }
-
-                    if (!svg_same_point(cur_x, cur_y, x, y)) {
-                        svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
-                        arc_to_beziers(path, cur_x, cur_y, rx, ry, rotation, large_arc, sweep, x, y);
-                        subpath_has_draw = true;
-                        any_draw = true;
-                    }
-                    cur_x = x; cur_y = y;
-                    if (end_info) {
-                        end_info->tangent_x = cur_x - previous_x;
-                        end_info->tangent_y = cur_y - previous_y;
-                        end_info->has_tangent = !svg_same_point(cur_x, cur_y, previous_x, previous_y);
-                    }
+                float previous_x = cur_x, previous_y = cur_y;
+                float x = args[5], y = args[6];
+                if (!svg_same_point(cur_x, cur_y, x, y)) {
+                    svg_emit_pending_move(path, &pending_move, pending_x, pending_y);
+                    arc_to_beziers(path, cur_x, cur_y, args[0], args[1], args[2],
+                                    args[3] != 0.0f, args[4] != 0.0f, x, y);
+                    subpath_has_draw = true;
+                    any_draw = true;
+                }
+                cur_x = x; cur_y = y;
+                if (end_info) {
+                    end_info->tangent_x = cur_x - previous_x;
+                    end_info->tangent_y = cur_y - previous_y;
+                    end_info->has_tangent = !svg_same_point(cur_x, cur_y, previous_x, previous_y);
                 }
                 last_ctrl_x = cur_x;
                 last_ctrl_y = cur_y;
@@ -2420,11 +2276,8 @@ static RdtPath* parse_svg_path_d(const char* d, SvgPathEndInfo* end_info = nullp
                 }
                 break;
             }
-            default:
-                log_error("[SVG] path parse: unsupported command '%c'", cmd);
-                rdt_path_free(path);
-                return nullptr;
         }
+        previous_cmd = cmd;
     }
 
     if (end_info) {
@@ -2535,7 +2388,9 @@ static void render_svg_path(SvgInlineRenderContext* ctx, Element* elem) {
         if (stable_path) draw_path = stable_path;
     }
 
-    draw_svg_fill_stroke(ctx, draw_path, elem, &m, 0, 0, 0, 0);
+    float bx = 0.0f, by = 0.0f, right = 0.0f, bottom = 0.0f;
+    rdt_path_get_bounds(path, &bx, &by, &right, &bottom);
+    draw_svg_fill_stroke(ctx, draw_path, elem, &m, bx, by, right - bx, bottom - by);
     char marker_stroke_width_buf[64];
     const char* marker_stroke_width = get_svg_attr_or_style(ctx, elem, "stroke-width",
                                                             marker_stroke_width_buf,
@@ -4406,8 +4261,9 @@ static void svg_group_enter(SvgInlineRenderContext* ctx, Element* elem, SvgGroup
                                          &scope->op_x0, &scope->op_y0, &scope->op_w, &scope->op_h);
             }
             else {
-                opacity_bounds_from_rect(&ctx->transform, 0.0f, 0.0f,
-                                         ctx->viewbox_width, ctx->viewbox_height,
+                // save the clipped target viewport independently of ancestor/viewBox transforms.
+                opacity_bounds_from_rect(&ctx->viewport_transform, 0.0f, 0.0f,
+                                         ctx->viewport_width, ctx->viewport_height,
                                          &scope->op_x0, &scope->op_y0, &scope->op_w, &scope->op_h);
             }
             if (scope->op_w > 0 && scope->op_h > 0) {
@@ -4957,6 +4813,9 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
 
     // start with base transform (document position/scale)
     ctx.transform = base_transform ? *base_transform : rdt_matrix_identity();
+    ctx.viewport_transform = ctx.transform;
+    ctx.viewport_width = viewport_width;
+    ctx.viewport_height = viewport_height;
 
     // parse viewBox
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");

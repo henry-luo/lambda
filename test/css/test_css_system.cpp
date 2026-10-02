@@ -282,6 +282,36 @@ TEST_F(CssPropertySystemTest, ColorParsing) {
     EXPECT_FALSE(css_parse_color("", &color));
 }
 
+TEST_F(CssPropertySystemTest, HslNumericSyntaxAndInvalidSeparators) {
+    const char* cyan[] = {
+        "hsl(180, 100%, 50%)", "hsl(180 100% 50%)", "hsla(180 100% 50%)",
+        "hsl(.5turn 100% 50%)", "hsl(200grad 100% 50%)",
+        "hsl(3.141592653589793rad 100% 50%)", "hsl(-180deg 100% 50%)"
+    };
+    for (const char* value : cyan) {
+        SCOPED_TRACE(value);
+        CssColor color = {};
+        ASSERT_TRUE(css_parse_color(value, &color));
+        EXPECT_EQ(color.r, 0); EXPECT_EQ(color.g, 255); EXPECT_EQ(color.b, 255);
+        EXPECT_EQ(color.a, 255);
+    }
+    const char* invalid[] = {
+        "hsl(180, 100% 50%)", "hsl(180 100%, 50%)", "hsl(180, 100, 50)",
+        "hsl(180 100% 50% /)", "hsl(180 100% 50%", "hsl(180 100% 50%) junk",
+        "hsl(180% 100% 50%)", "hsl(1e999 100% 50%)", "hsl(180 100% 50%, .5)"
+    };
+    for (const char* value : invalid) {
+        SCOPED_TRACE(value);
+        CssColor color = {};
+        EXPECT_FALSE(css_parse_color(value, &color));
+    }
+    CssColor color = {};
+    ASSERT_TRUE(css_parse_color("hsla(240, 100%, 50%, 0.5)", &color));
+    EXPECT_EQ(color.b, 255); EXPECT_EQ(color.a, 128);
+    ASSERT_TRUE(css_parse_color("hsl(120 200% 50% / -1)", &color));
+    EXPECT_EQ(color.g, 255); EXPECT_EQ(color.a, 0);
+}
+
 TEST_F(CssPropertySystemTest, PropertyValueValidation) {
     void* parsed_value;
 

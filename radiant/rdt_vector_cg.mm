@@ -486,7 +486,7 @@ bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
                          float* right, float* bottom) {
     if (!p || !p->cg || !left || !top || !right || !bottom) return false;
     if (CGPathIsEmpty(p->cg)) return false;
-    CGRect box = CGPathGetBoundingBox(p->cg);
+    CGRect box = CGPathGetPathBoundingBox(p->cg);
     if (CGRectIsNull(box) || CGRectIsEmpty(box)) return false;
     *left = (float)CGRectGetMinX(box);
     *top = (float)CGRectGetMinY(box);

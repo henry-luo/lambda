@@ -1,0 +1,23 @@
+{
+  "name": "SVG gradients use geometry bounds and group opacity uses the target viewport",
+  "html": "test/ui/svg_paint_bounds.html",
+  "viewport": {"width": 480, "height": 520},
+  "events": [
+    {"type": "assert_pixel", "x": 20, "y": 40, "min_r": 220, "max_r": 235, "max_g": 5, "min_b": 20, "max_b": 35},
+    {"type": "assert_pixel", "x": 105, "y": 40, "max_r": 20, "max_g": 5, "min_b": 235},
+    {"type": "assert_pixel", "x": 140, "y": 40, "min_r": 220, "max_r": 235, "max_g": 5, "min_b": 20, "max_b": 35},
+    {"type": "assert_pixel", "x": 225, "y": 40, "max_r": 20, "max_g": 5, "min_b": 235},
+    {"type": "assert_pixel", "x": 260, "y": 40, "min_r": 220, "max_r": 235, "max_g": 5, "min_b": 20, "max_b": 35},
+    {"type": "assert_pixel", "x": 345, "y": 40, "max_r": 20, "max_g": 5, "min_b": 235},
+    {"type": "assert_pixel", "x": 420, "y": 40, "min_r": 240, "max_g": 5, "max_b": 15},
+    {"type": "assert_pixel", "x": 465, "y": 40, "max_r": 30, "max_g": 5, "min_b": 225},
+    {"type": "assert_pixel", "x": 60, "y": 120, "min_r": 200, "max_r": 220, "max_g": 5, "min_b": 35, "max_b": 55},
+    {"type": "assert_pixel", "x": 180, "y": 145, "min_r": 250, "min_g": 120, "max_g": 135, "min_b": 120, "max_b": 135},
+    {"type": "assert_pixel", "x": 210, "y": 145, "min_r": 120, "max_r": 135, "min_g": 120, "max_g": 135, "min_b": 250},
+    {"type": "assert_pixel", "x": 240, "y": 145, "min_r": 120, "max_r": 135, "min_g": 120, "max_g": 135, "min_b": 250},
+    {"type": "assert_pixel", "x": 350, "y": 145, "min_r": 185, "max_r": 200, "min_g": 185, "max_g": 200, "min_b": 250},
+    {"type": "assert_pixel", "x": 210, "y": 405, "min_r": 120, "max_r": 135, "min_g": 120, "max_g": 135, "min_b": 250},
+    {"type": "assert_pixel", "x": 350, "y": 405, "min_r": 185, "max_r": 200, "min_g": 185, "max_g": 200, "min_b": 250},
+    {"type": "assert_pixel", "x": 450, "y": 220, "min_r": 245, "min_g": 245, "min_b": 245}
+  ]
+}
