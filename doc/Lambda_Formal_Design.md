@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 15.0.0 (2026-10-02)
+**Spec version:** 16.0.0 (2026-10-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1483,7 +1483,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v13*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v14*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1493,17 +1493,24 @@ loosely across the corpus — context disambiguates, and we live with it.
   the shipped Lambda script policy is **AUTO**: each definition starts in T0,
   and an eligible hot definition may promote to its P2 boxed MIR satellite.
   Ordinary interpreted entries promote at `LAMBDA_JIT_THRESHOLD` (**5** by
-  default); *(v7, 2026-09-07)* a procedure whose body owns a loop statement
-  promotes at its **first** entry -- it is hot by construction, and a
-  once-called `main` that owns the workload's loop never reached the entry
-  threshold while back-edge promotion only takes effect at the next entry.
-  A direct, validated self-tail edge also increments the
+  default). A direct, validated self-tail edge also increments the
   definition-site call and tail-edge counters; at the same threshold it may
   synchronously publish the eligible satellite and transfer to its ordinary
   boxed entry with the rooted next-call arguments. This is a tail-entry
-  handoff, not general OSR: no interpreter program counter or arbitrary local
-  frame is materialized into MIR. General loop backedges remain next-entry
-  promotion candidates (`LAMBDA_JIT_BACKEDGE`, default 1024). *(v6, 2026-09-06)*
+  handoff: a tail expression has no continuation, so its state is exactly the
+  next entry's arguments. *(v14, 2026-10-02, USER)* A running T0 activation
+  may also hand off at a **loop-head test**. Back-edges are counted per loop
+  site; a loop that reaches `LAMBDA_JIT_BACKEDGE` (**10000** by default)
+  queues its definition once, and that image carries, beside the boxed entry,
+  a loop entry for that loop. After publication the activation enters it at
+  the next head test of the same loop with its frame's named slots; compiled
+  code completes the activation and returns its result, and T0 unwinds as for
+  `return`. Handoff is one-way: compiled code never returns control to the
+  interpreter mid-activation. A loop is eligible only where every T0 value
+  live at its head is a named frame slot; every other loop, and every guard
+  miss, stays T0. Owning a loop does not promote a definition at entry: the
+  call threshold, the self-tail threshold and the loop threshold are the only
+  triggers. [Ast_Interpreter AI23] *(v6, 2026-09-06)*
   A satellite is always entered through its boxed `_b` wrapper, so a definition
   whose signature carries plain `any` parameters is promotable: an `any`
   parameter has no raw carrier to mis-decode, and a lane the body alone infers
@@ -1568,10 +1575,12 @@ loosely across the corpus — context disambiguates, and we live with it.
   facts in a private MIR context and returns a sealed image; it may not mutate
   the Script MIR context, module slab, constant/type/property-key images,
   shared import resolver, AST analysis facts, or Function entries. Only a
-  later ordinary execution safe point verifies the generation and publishes the
-  target boxed entry. A failed, stale, or unsupported image is discarded and
-  pins that execution-local definition to T0. This is asynchronous code
-  generation, not OSR: no active interpreter frame is replaced. The first
+  later ordinary execution safe point -- an interpreted function entry or a
+  loop-head test -- verifies the generation and publishes the image's
+  entries. A failed, stale, or unsupported image is discarded and
+  pins that execution-local definition to T0. Publication itself replaces no
+  active frame; the loop-head handoff above is the only transfer of a running
+  activation. The first
   parallel implementation excludes async closures, cross-language imports,
   pattern prepasses, and constant-list growth; those cases do not revert to
   synchronous compilation. Private direct-callee cluster images remain future
@@ -2295,6 +2304,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.1v11 | Revised 2026-09-22 (v11): static file-backed import prebuild uses one bounded closure-wide task pool. Parse-accurate discovery immediately canonicalizes, deduplicates, and queues each static-import request; a completed child notifies and releases all direct parents, so a shared child is built once without dependency-depth batch barriers. Worker tasks publish only AST templates and never wait on child work; the cache retains its ordinary single-flight handling for separate closures. Initialization, execution, and MIR stay on the receiving runtime. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.1.1v12 | Revised 2026-09-22: AUTO P2 promotion queues one deduplicated, snapshot-safe target definition to the bounded process-wide compiler service and continues the triggering call in T0. A worker produces only a private, immutable MIR image from frozen facts; it never mutates a live Script context, AST analysis fact, module image, or Function entry. A later ordinary safe point generation-checks and publishes the target boxed entry. Stale/failed/unsupported work pins that execution-local definition to T0. This adds no OSR or active-frame replacement; private direct-callee cluster images remain later work. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. **Conformance fix 2026-09-22 (LR01-16):** the worker placed its image's property-key suffix from the owner slab's key count. That thread-local read saw an empty slab, and publication kept any suffix whose count differed, so every image after the first resolved member names through the first image's keys. The suffix is now placed when the safe point binds the image, linked by key-ID content and recorded in `LambdaModuleLayout::property_key_base`, which the generated code reads; `LAMBDA_SATELLITE_SYNC=1` pins publication for tests. |
 | D8.1.1v13 | Revised 2026-09-22: static import prebuild moves from a per-root closure graph to a process-global canonical profile/path task-future registry and one bounded pool. Root discovery is fire-and-forget; tasks immediately request all children, deduplicate a shared child, and release only direct parents by continuation. AST build workers never wait on child work. Ordinary Lambda/JS import consumers wait only for their direct dependency future; prebuild-worker loaders bypass that wait. The cache separately validates exact source identity before an artifact is consumed, and cycle/prebuild failure falls back to ordinary-loader diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
+| D8.1.1v14 | Ruled 2026-10-02 (USER), **not implemented**: loop-head handoff, the per-loop-site back-edge trigger at 10000, and retirement of the loop-owner first-entry trigger. Shipped behavior is unchanged: a definition whose body owns a loop is still queued at its first entry, back-edges are counted per definition against 1024, and a published image is reached only by a later function entry, so a once-called loop owner (`mandelbrot2`, `matmul2`) runs wholly in T0 under AUTO (about 250x its JIT time; `LAMBDA_SATELLITE_SYNC=1` removes the gap). Plan and evidence: `vibe/impl/Lambda_Impl_Interp_Tune2.md` Item 1. Working record: `vibe/Lambda_Design_Ast_Interpreter.md` §5.1.1. |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
 | D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXECUTION_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
 | D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
@@ -2386,15 +2396,16 @@ Numbered `DO#` (design-open); each links to its record.
   deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
   OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
   JR3.
-- **DO25** Interpreter tier (D8.1.1v6) remains open for breadth/performance: satellite-module
+- **DO25** Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module
   treatment under the MT7 emission budgets (AIO2); cross-context visibility of
-  promotion cells (AIO8); once-called hot bodies — `run`-mode `main` with
-  heavy inline loops never re-enters, so backedge marking never pays; escape
-  hatches vs eventual OSR (AIO11); and the remaining full call-site matrix
+  promotion cells (AIO8); loop-head handoff breadth — loops outside the
+  eligible shape, a second handoff loop per definition, work-weighted
+  counting, and a per-Script image budget (AIO13); and the remaining full
+  call-site matrix
   needed to widen promotion beyond the current fail-closed boundary (AIO1).
   The release AUTO correctness gate is green; these are follow-on tiering
   breadth/performance questions, not correctness blockers. [Ast_Interpreter
-  AIO1–AIO12]
+  AIO1–AIO13]
 
 **Runtime services & modules**
 - **DO16** Name identity: temporal canonical accepted; dynamic-intern
@@ -2556,7 +2567,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
-| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |
