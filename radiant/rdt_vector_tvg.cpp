@@ -1915,32 +1915,31 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
     if (!pic) return;
 
     const uint32_t* raw_pixels = pixels;
-    uint32_t* tight_pixels = nullptr;
+    lam::Temp<uint32_t> tight_pixels;
     if (src_stride_bytes != tight_stride) {
         // ThorVG raw images have no stride parameter; copy strided rows tightly
         // so clipped/offset image draws cannot make ThorVG read past each row.
-        tight_pixels = (uint32_t*)mem_alloc((size_t)src_w * src_h * 4, MEM_CAT_IMAGE);
+        tight_pixels = lam::temp_array<uint32_t>((size_t)src_w * (size_t)src_h, MEM_CAT_IMAGE);
         if (!tight_pixels) {
             tvg_paint_unref(pic, true);
             return;
         }
         const unsigned char* src = (const unsigned char*)pixels;
-        unsigned char* dst = (unsigned char*)tight_pixels;
+        unsigned char* dst = (unsigned char*)tight_pixels.get();
         for (int y = 0; y < src_h; y++) {
             memcpy(dst + (size_t)y * tight_stride, src + (size_t)y * src_stride_bytes, (size_t)tight_stride);
         }
-        raw_pixels = tight_pixels;
+        raw_pixels = tight_pixels.get();
     }
 
-    bool copy_pixels = (resource_generation != 0 || tight_pixels != nullptr);
+    // ThorVG copies the tight buffer, so it can be freed when this returns
+    bool copy_pixels = (resource_generation != 0 || tight_pixels);
     if (tvg_picture_load_raw(pic, (uint32_t*)raw_pixels, src_w, src_h,
         TVG_COLORSPACE_ABGR8888, copy_pixels) != TVG_RESULT_SUCCESS) {
         log_debug("rdt_draw_image: tvg_picture_load_raw failed");
-        if (tight_pixels) mem_free(tight_pixels);
         tvg_paint_unref(pic, true);
         return;
     }
-    if (tight_pixels) mem_free(tight_pixels);
 
     if (resource_generation != 0) {
         Tvg_Paint draw = image_paint_cache_store(pixels, src_w, src_h, src_stride,
@@ -2047,13 +2046,13 @@ RdtPicture* rdt_picture_load(const char* path) {
     long fsz = ftell(fp);
     fseek(fp, 0, SEEK_SET);
     if (fsz <= 0) { fclose(fp); return nullptr; }
-    char* buf = (char*)mem_alloc((size_t)fsz, MEM_CAT_RENDER);
+    lam::Temp<char> buf = lam::temp_array<char>((size_t)fsz, MEM_CAT_RENDER);
     if (!buf) { fclose(fp); return nullptr; }
-    size_t rd = fread(buf, 1, (size_t)fsz, fp);
+    size_t rd = fread(buf.get(), 1, (size_t)fsz, fp);
     fclose(fp);
 
-    RdtPicture* p = svg_picture_create(buf, (int)rd, path);
-    mem_free(buf);
+    RdtPicture* p = svg_picture_create(buf.get(), (int)rd, path);
+    buf.reset();
     if (!p) {
         log_error("rdt_picture_load: failed to parse %s", path);
         return nullptr;

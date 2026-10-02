@@ -353,19 +353,18 @@ static int jpeg_exif_orientation_from_file(const char* file_path) {
         return 1;
     }
 
-    unsigned char* bytes = (unsigned char*)mem_alloc((size_t)file_size, MEM_CAT_IMAGE);
+    lam::Temp<unsigned char> bytes = lam::temp_array<unsigned char>((size_t)file_size, MEM_CAT_IMAGE);
     if (!bytes) {
         fclose(fp);
         return 1;
     }
-    size_t read_count = fread(bytes, 1, (size_t)file_size, fp);
+    size_t read_count = fread(bytes.get(), 1, (size_t)file_size, fp);
     fclose(fp);
 
     int orientation = 1;
     if (read_count == (size_t)file_size) {
-        orientation = jpeg_exif_orientation_from_memory(bytes, (size_t)file_size);
+        orientation = jpeg_exif_orientation_from_memory(bytes.get(), (size_t)file_size);
     }
-    mem_free(bytes);
     return orientation;
 }
 

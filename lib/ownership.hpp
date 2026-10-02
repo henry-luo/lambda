@@ -7,6 +7,7 @@
 #include "mem.h"
 #include "mempool.h"
 #include "arena.h"
+#include "math_checked.hpp"
 
 namespace lam {
 
@@ -113,6 +114,7 @@ public:
     T* get() const { return p_; }
     T* operator->() const { return p_; }
     T& operator*() const { return *p_; }
+    T& operator[](size_t i) const { return p_[i]; }
     explicit operator bool() const { return p_ != nullptr; }
 
     T* release() {
@@ -156,6 +158,26 @@ SessionPtr<T> session_make(MemCategory cat) {
 
 inline OwnedPtr<char, LayoutSessionDomain> session_strdup(const char* s, MemCategory cat) {
     return OwnedPtr<char, LayoutSessionDomain>(mem_strdup(s, cat));
+}
+
+// Temp class: a memtracked buffer owned by one function and freed on every
+// exit path. For pass-shaped temporaries prefer a ScratchScope.
+template<class T> using Temp = SessionPtr<T>;
+
+// Uninitialised array of trivial elements; null on overflow or failure.
+template<class T>
+Temp<T> temp_array(size_t count, MemCategory cat) {
+    static_assert(__is_trivial(T), "temp_array holds trivial elements only");
+    size_t bytes = 0;
+    if (count == 0 || !math_checked_mul(count, sizeof(T), &bytes)) return Temp<T>();
+    return Temp<T>(static_cast<T*>(mem_alloc(bytes, cat)));
+}
+
+template<class T>
+Temp<T> temp_array_zero(size_t count, MemCategory cat) {
+    static_assert(__is_trivial(T), "temp_array_zero holds trivial elements only");
+    if (count == 0) return Temp<T>();
+    return Temp<T>(static_cast<T*>(mem_calloc(count, sizeof(T), cat)));
 }
 
 template<class T>
