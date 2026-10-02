@@ -2675,20 +2675,34 @@ static void runtime_validation_detail(ValidationResult* result, char* buffer,
     snprintf(buffer, capacity, "; validator: %s", message);
 }
 
-static Item lambda_type_error_with_validation(Item actual, Type* expected,
-        const char* boundary, ValidationResult* validation) {
+static Item lambda_type_error_lazy(Item actual, Type* expected,
+        const LambdaBoundary* boundary, ValidationResult* validation) {
+    char label[192];
     char expected_name[128];
     char actual_summary[192];
     char message[512];
     char validation_detail[320] = {};
+    const char* where = boundary ? boundary->text : NULL;
+    if (boundary && boundary->format) {
+        // the only point at which a deferred label is ever materialized
+        label[0] = '\0';
+        boundary->format(boundary, label, sizeof(label));
+        where = label;
+    }
     lambda_type_format_contract_name(expected, expected_name, sizeof(expected_name));
     runtime_value_summary(actual, actual_summary, sizeof(actual_summary));
     runtime_validation_detail(validation, validation_detail, sizeof(validation_detail));
     snprintf(message, sizeof(message),
         "type check at %s failed: expected %s, got %s%s",
-        boundary ? boundary : "typed boundary", expected_name, actual_summary,
+        where ? where : "typed boundary", expected_name, actual_summary,
         validation_detail);
     return runtime_error_item(ERR_TYPE_MISMATCH, message, NULL);
+}
+
+static Item lambda_type_error_with_validation(Item actual, Type* expected,
+        const char* boundary, ValidationResult* validation) {
+    LambdaBoundary label = {boundary, NULL, NULL, NULL, 0};
+    return lambda_type_error_lazy(actual, expected, &label, validation);
 }
 
 Item lambda_type_error(Item actual, Type* expected, const char* boundary) {
@@ -2753,6 +2767,12 @@ static bool runtime_type_admit_binder(Item value, TypeBinder* binder,
 
 Item lambda_type_check_env(Item value, Type* expected, Type** env,
         const char* boundary) {
+    LambdaBoundary label = {boundary, NULL, NULL, NULL, 0};
+    return lambda_type_check_lazy(value, expected, env, &label);
+}
+
+Item lambda_type_check_lazy(Item value, Type* expected, Type** env,
+        const LambdaBoundary* boundary) {
     // Error-transparent contracts (`any`, `error`, or an explicit union) keep
     // an incoming error value.  Plain T short-circuits it unchanged so callers
     // retain the original diagnostic instead of receiving a misleading second
@@ -2775,7 +2795,7 @@ Item lambda_type_check_env(Item value, Type* expected, Type** env,
             contract->type_id == LMD_TYPE_ELEMENT)) {
         (void)runtime_validate_value_against_type(value, contract, &validation);
     }
-    return lambda_type_error_with_validation(value, expected, boundary, validation);
+    return lambda_type_error_lazy(value, expected, boundary, validation);
 }
 
 Item lambda_type_check(Item value, Type* expected, const char* boundary) {

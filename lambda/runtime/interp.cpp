@@ -671,8 +671,8 @@ static bool interp_note_tail_call(InterpFrame* frame);
 static bool interp_tail_handoff_candidate(const InterpFrame* frame);
 static bool interp_promote_function_from_tail(Function* fn);
 static uint32_t interp_jit_threshold(void);
-static void interp_format_parameter_boundary(char* boundary, size_t capacity,
-    const AstFuncNode* fn_node, const char* fallback_name, int index);
+static LambdaBoundary interp_parameter_boundary(const AstFuncNode* fn_node,
+    const char* fallback_name, int index);
 static bool interp_constrained_type_matches(InterpFrame* f,
     TypeConstrained* constrained, Scratch& subject);
 
@@ -963,7 +963,7 @@ static void interp_write_binding(InterpFrame* f, NameEntry* entry, Item value) {
 // too, so `x: u8` admitted -1 as 255 on T0 while the JIT rejected it
 // (LR03-11); they remain the explicit `u8(v)` conversion only.
 static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
-        Type* declared_type, const char* boundary) {
+        Type* declared_type, const LambdaBoundary* boundary) {
     if (!f || item_is_error(value)) return value;
     Type* target = unwrap_simple_type_type(declared_type);
     if (!target) return value;
@@ -973,11 +973,11 @@ static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
     }
     Scratch source_root(f);
     source_root.set(value);
-    return lambda_type_check(source_root.get(), target, boundary);
+    return lambda_type_check_lazy(source_root.get(), target, NULL, boundary);
 }
 
 static Item interp_coerce_declared_array(InterpFrame* f, Item value,
-        Type* declared_type, const char* boundary) {
+        Type* declared_type, const LambdaBoundary* boundary) {
     if (!f || item_is_error(value)) return value;
     LambdaArrayContractInfo info = {};
     if (!lambda_array_contract_info(declared_type, &info)) return value;
@@ -992,7 +992,7 @@ static Item interp_coerce_declared_array(InterpFrame* f, Item value,
     // TypeId-only coercion lost nested rank and named map layout. The shared
     // boundary validates/reifies every element once and installs its exact
     // certificate for both T0 and MIR consumers (D3.1.1v2, D3.3.3).
-    return lambda_type_check(source_root.get(), declared_type, boundary);
+    return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
 }
 
 static bool interp_declared_optional_array(Type* type) {
@@ -1065,11 +1065,23 @@ static bool interp_type_uses_binder(Type* type) {
 }
 
 static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
-        Type* declared_type, const char* boundary) {
+        Type* declared_type, const LambdaBoundary* boundary) {
+    if (!declared_type) return value;
+    // A plain `int`/`float`/`string` contract admits a value of its own kind
+    // unchanged: lambda_numeric_boundary_admit is the identity there (an int
+    // Item is int53 by construction) and the string singleton is a membership
+    // test. Answer from the tag before the general classification below.
+    Type* plain = type_field_unwrap_simple_decl(declared_type);
+    TypeId value_type = get_type_id(value);
+    if ((plain == &TYPE_FLOAT && value_type == LMD_TYPE_FLOAT) ||
+            (plain == &TYPE_INT && value_type == LMD_TYPE_INT) ||
+            (plain == &TYPE_STRING && value_type == LMD_TYPE_STRING)) {
+        return value;
+    }
     if (f && interp_type_uses_binder(declared_type)) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_env(source_root.get(), declared_type,
+        return lambda_type_check_lazy(source_root.get(), declared_type,
             f->binder_env, boundary);
     }
     value = interp_coerce_declared_array(f, value, declared_type, boundary);
@@ -1080,7 +1092,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
         // A dynamic structural value must be recursively converted before the
         // binding publishes it; otherwise nested float fields evade Person's
         // int contract until a later write observes the wrong representation.
-        return lambda_type_check(source_root.get(), declared_type, boundary);
+        return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
     }
     Type* target = unwrap_simple_type_type(declared_type);
     if (!target) return value;
@@ -1103,27 +1115,31 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
     // assignment that MIR returns through its checked-boundary edge.
     Scratch source_root(f);
     source_root.set(value);
-    return lambda_type_check(source_root.get(), declared_type, boundary);
+    return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
 }
 
 static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
-        AstNamedNode* parameter, const char* boundary) {
+        AstNamedNode* parameter, const LambdaBoundary* boundary) {
     if (!parameter) return value;
+    static const LambdaBoundary type_parameter_label =
+        {"type parameter binding", NULL, NULL, NULL, 0};
+    static const LambdaBoundary declared_parameter_label =
+        {"declared parameter binding", NULL, NULL, NULL, 0};
     TypeParam* parameter_type = lambda_type_param(parameter->type);
     if (parameter_type && parameter_type->binder) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_env(source_root.get(),
+        return lambda_type_check_lazy(source_root.get(),
             (Type*)parameter_type->binder, f ? f->binder_env : NULL,
-            boundary ? boundary : "type parameter binding");
+            boundary ? boundary : &type_parameter_label);
     }
     Type* contract = parameter_type && parameter_type->contract_type
         ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
     if (f && interp_type_uses_binder(contract)) {
         Scratch source_root(f);
         source_root.set(value);
-        return lambda_type_check_env(source_root.get(), contract, f->binder_env,
-            boundary ? boundary : "declared parameter binding");
+        return lambda_type_check_lazy(source_root.get(), contract, f->binder_env,
+            boundary ? boundary : &declared_parameter_label);
     }
     if (parameter_type && parameter_type->is_optional && value.item == ITEM_NULL) {
         // The optional-call adapter resolves an omitted argument to null before
@@ -1149,7 +1165,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         }
     }
     return interp_coerce_declared_binding(f, value, parameter->declared_type,
-        boundary ? boundary : "declared parameter binding");
+        boundary ? boundary : &declared_parameter_label);
 }
 
 static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
@@ -1160,15 +1176,21 @@ static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
         interp_contract_has_binder(contract, false));
 }
 
+// "<kind> '<name>'" for a declaration or assignment; `owner` is the kind
+static void interp_format_named_boundary(const LambdaBoundary* boundary,
+        char* out, size_t capacity) {
+    const String* name = (const String*)boundary->subject;
+    snprintf(out, capacity, "%s '%.*s'", (const char*)boundary->owner,
+        name ? (int)name->len : 0, name ? name->chars : "");
+}
+
 static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
         Item value) {
     if (!named) return false;
-    char boundary[192];
-    snprintf(boundary, sizeof(boundary), "declaration '%.*s'",
-        named->name ? (int)named->name->len : 0,
-        named->name ? named->name->chars : "");
+    LambdaBoundary boundary = {NULL, interp_format_named_boundary, named->name,
+        "declaration", 0};
     Item bound = interp_coerce_declared_binding(f, value, named->declared_type,
-        boundary);
+        &boundary);
     // CW24v2 phase 2: a place-copy binding (`var row = m.rows[i]`) marks the
     // read value so the first write DETACHES -- a real S9.1.2 snapshot --
     // instead of aliasing a child a fresh literal never captured. All T0
@@ -1875,10 +1897,9 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
                     i++, parameter = (AstNamedNode*)((AstNode*)parameter)->next) {
                 if (interp_parameter_is_binder_site(parameter) != (pass == 0)) continue;
                 Item source = (Item){.item = words[i]};
-                char boundary[192];
-                interp_format_parameter_boundary(boundary, sizeof(boundary),
-                    f->fn, f->fn && f->fn->name ? f->fn->name->chars : NULL, i);
-                Item coerced = interp_coerce_parameter_binding(f, source, parameter, boundary);
+                LambdaBoundary boundary = interp_parameter_boundary(f->fn,
+                    f->fn && f->fn->name ? f->fn->name->chars : NULL, i);
+                Item coerced = interp_coerce_parameter_binding(f, source, parameter, &boundary);
                 words[i] = coerced.item;
                 fresh_parameter_rejection = fresh_parameter_rejection ||
                     (!source_was_error[i] && interp_parameter_rejects_error(parameter, coerced));
@@ -5445,13 +5466,13 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             }
         }
         // S7.7.4: the runtime report names the binding, in MIR's spelling
-        char boundary[192] = "declared assignment binding";
+        LambdaBoundary boundary = {"declared assignment binding", NULL, NULL, NULL, 0};
         if (target->declared_type && assign->target) {
-            snprintf(boundary, sizeof(boundary), "assignment to '%.*s'",
-                (int)assign->target->len, assign->target->chars);
+            boundary = (LambdaBoundary){NULL, interp_format_named_boundary,
+                assign->target, "assignment to", 0};
         }
         value = interp_coerce_declared_binding(f, value, target->declared_type,
-            boundary);
+            &boundary);
         if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
                 !lambda_type_accepts_error(target->declared_type)) {
             // A fresh checked-assignment failure returns before publishing the
@@ -5896,18 +5917,24 @@ static bool interp_parameter_rejects_error(const AstNamedNode* parameter,
 // Keep T0's deferred parameter diagnostics at the call boundary, matching the
 // MIR wrapper. The generic declaration label used here before made the same
 // rejected argument report different provenance by execution tier.
-static void interp_format_parameter_boundary(char* boundary, size_t capacity,
-        const AstFuncNode* fn_node, const char* fallback_name, int index) {
-    if (!boundary || capacity == 0) return;
-    boundary[0] = '\0';
+static void interp_format_parameter_label(const LambdaBoundary* boundary,
+        char* out, size_t capacity) {
+    const AstFuncNode* fn_node = (const AstFuncNode*)boundary->subject;
+    const char* fallback_name = (const char*)boundary->owner;
     StrBuf* function_name = strbuf_new_cap(96);
     if (function_name && fn_node) {
         write_fn_name(function_name, (AstFuncNode*)fn_node, NULL);
     }
     const char* display_name = function_name && function_name->str
         ? function_name->str : (fallback_name ? fallback_name : "<anonymous>");
-    snprintf(boundary, capacity, "argument %d of %s", index + 1, display_name);
+    snprintf(out, capacity, "argument %d of %s", boundary->index + 1, display_name);
     if (function_name) strbuf_free(function_name);
+}
+
+static LambdaBoundary interp_parameter_boundary(const AstFuncNode* fn_node,
+        const char* fallback_name, int index) {
+    return (LambdaBoundary){NULL, interp_format_parameter_label, fn_node,
+        fallback_name, index};
 }
 
 typedef struct InterpBorrowedCall {
@@ -6097,18 +6124,16 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
         // invocation-local environment. Complete all of those writes before
         // checking references, so `T` observes the call's joined binding
         // rather than the first parameter's incidental representation (S4.2.2).
+        int parameter_index = -1;
         for (AstNamedNode* p = fn_node->param, *next = NULL; p && index > 0;
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
-            int parameter_index = 0;
-            for (AstNamedNode* before = fn_node->param; before != p;
-                    before = (AstNamedNode*)((AstNode*)before)->next) parameter_index++;
+            parameter_index++;
             if (!interp_parameter_is_binder_site(p)) continue;
-            char boundary[192];
-            interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
-                fn->name, parameter_index);
+            LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
+                parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
-                (Item){.item = frame->slots[parameter_index]}, p, boundary);
+                (Item){.item = frame->slots[parameter_index]}, p, &boundary);
             frame->slots[parameter_index] = value.item;
             if (p->entry && p->entry->cow_param_mutated) {
                 cow_mark_shared(value);
@@ -6122,18 +6147,16 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             }
         }
 
+        parameter_index = -1;
         for (AstNamedNode* p = fn_node->param, *next = NULL; p && !interp_frame_pending(frame);
                 p = next) {
             next = (AstNamedNode*)((AstNode*)p)->next;
-            int parameter_index = 0;
-            for (AstNamedNode* before = fn_node->param; before != p;
-                    before = (AstNamedNode*)((AstNode*)before)->next) parameter_index++;
+            parameter_index++;
             if (interp_parameter_is_binder_site(p)) continue;
-            char boundary[192];
-            interp_format_parameter_boundary(boundary, sizeof(boundary), fn_node,
-                fn->name, parameter_index);
+            LambdaBoundary boundary = interp_parameter_boundary(fn_node, fn->name,
+                parameter_index);
             Item value = interp_coerce_parameter_binding(frame,
-                (Item){.item = frame->slots[parameter_index]}, p, boundary);
+                (Item){.item = frame->slots[parameter_index]}, p, &boundary);
             // CW29/S9.1.3 (gated): a plain param the body writes is a snapshot
             // -- one share-mark; its first write detaches a private copy and
             // the caller's value is never touched. Non-mutating callees skip
@@ -6207,8 +6230,10 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             // return site. T0 must perform the same check before the callee
             // frame closes, otherwise `fn f() int { any_value() }` leaks its
             // runtime value to the caller without the required E201 (S7.7.2).
+            static const LambdaBoundary return_label =
+                {"function return", NULL, NULL, NULL, 0};
             Item checked = interp_coerce_declared_binding(frame, result,
-                signature->return_contract, "function return");
+                signature->return_contract, &return_label);
             result = checked;
         }
         if (borrowed) {
