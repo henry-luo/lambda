@@ -1,6 +1,8 @@
 #pragma once
 
-#include <assert.h>
+// *_require downcasts use LAM_CHECK, not assert: a wrong-tag downcast is type
+// confusion in release builds too, so it must fail closed in every build.
+#include "check.h"
 
 #include "../radiant/view.hpp"
 
@@ -43,13 +45,13 @@ const typename ViewTagToType<T>::type* view_as(const View* v) {
 
 template<ViewType T>
 typename ViewTagToType<T>::type* view_require(View* v) {
-    assert(v && v->view_type == T);
+    LAM_CHECK(v && v->view_type == T);
     return static_cast<typename ViewTagToType<T>::type*>(v);
 }
 
 template<ViewType T>
 const typename ViewTagToType<T>::type* view_require(const View* v) {
-    assert(v && v->view_type == T);
+    LAM_CHECK(v && v->view_type == T);
     return static_cast<const typename ViewTagToType<T>::type*>(v);
 }
 
@@ -120,12 +122,12 @@ inline const ViewElement* view_as_element(const View* v) {
 }
 
 inline ViewElement* view_require_element(View* v) {
-    assert(v && v->is_element());
+    LAM_CHECK(v && v->is_element());
     return static_cast<ViewElement*>(v);
 }
 
 inline const ViewElement* view_require_element(const View* v) {
-    assert(v && v->is_element());
+    LAM_CHECK(v && v->is_element());
     return static_cast<const ViewElement*>(v);
 }
 
@@ -138,12 +140,12 @@ inline const ViewBlock* view_as_block(const View* v) {
 }
 
 inline ViewBlock* view_require_block(View* v) {
-    assert(v && view_type_is_block(v->view_type));
+    LAM_CHECK(v && view_type_is_block(v->view_type));
     return static_cast<ViewBlock*>(v);
 }
 
 inline const ViewBlock* view_require_block(const View* v) {
-    assert(v && view_type_is_block(v->view_type));
+    LAM_CHECK(v && view_type_is_block(v->view_type));
     return static_cast<const ViewBlock*>(v);
 }
 
@@ -258,13 +260,13 @@ const typename DomNodeTagToType<T>::type* dom_as(const DomNode* n) {
 
 template<DomNodeType T>
 typename DomNodeTagToType<T>::type* dom_require(DomNode* n) {
-    assert(n && n->node_type == T);
+    LAM_CHECK(n && n->node_type == T);
     return static_cast<typename DomNodeTagToType<T>::type*>(n);
 }
 
 template<DomNodeType T>
 const typename DomNodeTagToType<T>::type* dom_require(const DomNode* n) {
-    assert(n && n->node_type == T);
+    LAM_CHECK(n && n->node_type == T);
     return static_cast<const typename DomNodeTagToType<T>::type*>(n);
 }
 

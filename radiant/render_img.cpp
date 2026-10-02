@@ -76,7 +76,8 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     // Convert RGBA to RGB (JPEG doesn't support alpha channel)
     int width = surface->width;
     int height = surface->height;
-    unsigned char* rgb_buffer = (unsigned char*)mem_alloc(width * height * 3, MEM_CAT_RENDER);
+    lam::Temp<unsigned char> rgb_buffer = lam::temp_array<unsigned char>(
+        (size_t)width * (size_t)height * 3, MEM_CAT_RENDER);
     if (!rgb_buffer) {
         log_error("Failed to allocate memory for RGB buffer");
         tjDestroy(tj_instance);
@@ -101,12 +102,11 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     unsigned long jpeg_size = 0;
 
     // Compress to JPEG
-    int result = tjCompress2(tj_instance, rgb_buffer, width, 0, height, TJPF_RGB,
+    int result = tjCompress2(tj_instance, rgb_buffer.get(), width, 0, height, TJPF_RGB,
                              &jpeg_buffer, &jpeg_size, TJSAMP_444, quality, TJFLAG_FASTDCT);
 
     if (result != 0) {
         log_error("TurboJPEG compression failed: %s", tjGetErrorStr());
-        mem_free(rgb_buffer);
         tjDestroy(tj_instance);
         return;
     }
@@ -115,7 +115,6 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
     FILE* fp = fopen(filename, "wb");
     if (!fp) {
         log_error("Failed to open file for writing: %s", filename);
-        mem_free(rgb_buffer);
         tjFree(jpeg_buffer);
         tjDestroy(tj_instance);
         return;
@@ -130,7 +129,6 @@ void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quali
 
     // Clean up
     fclose(fp);
-    mem_free(rgb_buffer);
     tjFree(jpeg_buffer);
     tjDestroy(tj_instance);
 }

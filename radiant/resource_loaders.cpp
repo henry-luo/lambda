@@ -247,7 +247,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
     }
 
     if (!img_surface && image_get_dimensions(res->local_path, &img_width, &img_height)) {
-        img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+        img_surface = image_surface_alloc();
         if (img_surface) {
             img_surface->width = img_width;
             img_surface->height = img_height;

@@ -5363,12 +5363,11 @@ static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) 
     if (!document) return nullptr;
     SvgLayerRegistry* registry = (SvgLayerRegistry*)document->services.svg_layer_registry;
     if (registry) return registry;
-    registry = (SvgLayerRegistry*)mem_calloc(1, sizeof(SvgLayerRegistry), MEM_CAT_LAYOUT);
-    if (!registry) return nullptr;
-    if (!dom_document_add_resource(document, registry, svg_layer_registry_destroy)) {
-        mem_free(registry);
-        return nullptr;
-    }
+    // the document takes ownership once its resource hook is registered
+    lam::Temp<SvgLayerRegistry> owned = lam::temp_array_zero<SvgLayerRegistry>(1, MEM_CAT_LAYOUT);
+    if (!owned) return nullptr;
+    if (!dom_document_add_resource(document, owned.get(), svg_layer_registry_destroy)) return nullptr;
+    registry = owned.release();
     document->services.svg_layer_registry = registry;
     return registry;
 }
@@ -5516,16 +5515,17 @@ static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
     }
     ImageSurface* surface = image_surface_create(width, height);
     if (!surface) return false;
-    uint32_t* over_black = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
-    uint32_t* over_white = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
+    lam::Temp<uint32_t> over_black = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
+    lam::Temp<uint32_t> over_white = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
     bool ok = over_black && over_white &&
         svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
-                              paint, over_black, width, height, 0xFF000000u) &&
+                              paint, over_black.get(), width, height, 0xFF000000u) &&
         svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
-                              paint, over_white, width, height, 0xFFFFFFFFu);
-    if (ok) svg_layer_resolve_alpha(over_black, over_white, (uint32_t*)surface->pixels, count);
-    if (over_black) mem_free(over_black);
-    if (over_white) mem_free(over_white);
+                              paint, over_white.get(), width, height, 0xFFFFFFFFu);
+    if (ok) svg_layer_resolve_alpha(over_black.get(), over_white.get(),
+                                    (uint32_t*)surface->pixels, count);
+    over_black.reset();
+    over_white.reset();
     if (!ok) {
         image_surface_destroy(surface);
         return false;

@@ -999,26 +999,29 @@ void view_pool_reset_retained_subtree(ViewTree* tree, DomNode* root) {
         false);
 }
 
-void ViewTree::init() {
+void ViewTree::init(MemContext* owner) {
     log_debug("init view pool");
-    prop_pool = mem_pool_create(NULL, MEM_ROLE_VIEW, "view_tree.prop_pool");
+    // The document context outlives the view tree: free_document destroys the
+    // tree before it releases the document's Input context.
+    mem_ctx = owner;
+    prop_pool = mem_pool_create(owner, MEM_ROLE_VIEW, "view_tree.prop_pool");
     if (!prop_pool) {
         log_error("Failed to initialize view pool");
     }
     else {
         view_tree_canonical_init(this);
-        scratch_arena = mem_arena_create(NULL, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
-        layout_pass_arena = mem_arena_create(NULL, MEM_ROLE_LAYOUT, "view_tree.layout_pass_arena");
-        render_scratch_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "view_tree.render_scratch_arena");
-        display_list_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "view_tree.display_list_arena");
+        scratch_arena = mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
+        layout_pass_arena = mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.layout_pass_arena");
+        render_scratch_arena = mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.render_scratch_arena");
+        display_list_arena = mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.display_list_arena");
         free_text_rects = nullptr;
         if (layout_generation == 0) layout_generation = 1;
         log_debug("view pool initialized");
     }
 }
 
-void view_pool_init(ViewTree* tree) {
-    if (tree) tree->init();
+void view_pool_init(ViewTree* tree, MemContext* owner) {
+    if (tree) tree->init(owner);
 }
 
 void ViewTree::reset_retained() {

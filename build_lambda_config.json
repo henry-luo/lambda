@@ -2919,6 +2919,7 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "radiant/image_surface_generation.cpp",
               "radiant/display_list_bounds.cpp",
               "radiant/display_list_storage.cpp",
               "radiant/view_clip.cpp",
@@ -2940,6 +2941,7 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "radiant/image_surface_generation.cpp",
               "radiant/display_list_bounds.cpp",
               "radiant/display_list_storage.cpp",
               "radiant/view_clip.cpp",
@@ -3099,6 +3101,7 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "radiant/image_surface_generation.cpp",
               "lambda/input/css/dom_node.cpp",
               "lambda/input/css/dom_element.cpp",
               "lambda/input/css/dom_lifecycle.cpp",

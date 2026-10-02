@@ -8,6 +8,7 @@
 #include "../lib/arena.h"
 #include "../lib/math_utils.h"
 #include "../lib/memtrack.h"
+#include "../lib/mem_kind.hpp"
 #include "../lib/font/font.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/core/well_known_markup_names.h"
@@ -627,8 +628,20 @@ typedef struct ImageSurface {
     // Otherwise the buffer matches width/height/pitch above.
     int decoded_width;
     int decoded_height;
+    // Slot in the process image-surface table (image_surface_lookup). Null for
+    // surfaces built on the stack or inside another object, which are never
+    // referenced by a retained display list.
+    lam::Handle<struct ImageSurface> self;
 } ImageSurface;
 
+// The one allocation path for heap ImageSurfaces: zeroed and
+// registered in the slot table. image_surface_destroy releases the slot.
+extern ImageSurface* image_surface_alloc(void);
+// The live surface behind `handle`, or null once it was destroyed. Reads only
+// the slot table, never the surface.
+extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
+// Invalidates every handle to `surface`; image_surface_destroy calls it.
+extern void image_surface_release_slot(ImageSurface* surface);
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern bool image_surface_is_dom_owned(const ImageSurface* img_surface);
@@ -2685,6 +2698,9 @@ typedef struct CanonicalPropStats {
 struct ViewTree {
     Pool* prop_pool;       // Mutable element-owned view props; survives retained reflow.
     Arena* canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
+    // The owning document's memory context (borrowed); every allocator below is
+    // registered under it, so the view tree is a subtree of its document.
+    struct MemContext* mem_ctx;
     Arena* scratch_arena;  // Layout-pass scratch; never owns retained props.
     // Layout-pass data that is not stack-shaped (counter state, generated
     // content strings); reset when the pass ends.
@@ -2708,7 +2724,7 @@ struct ViewTree {
     uint32_t layout_generation; // Advances at each retained full-layout boundary.
     int sticky_box_count;       // sticky boxes the last layout pass solved; scrolls re-solve them
 #ifdef __cplusplus
-    void init();
+    void init(struct MemContext* owner);
     void reset_retained();
     void destroy();
     void* alloc_prop(size_t size);

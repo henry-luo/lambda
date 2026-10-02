@@ -608,7 +608,29 @@ the new `proc/mark_file_extension.ls` regression matched its golden on
 conversion with arbitrary filenames and automatic converter/validator
 detection for `.mark`, `.MARK`, `.m` and `.mk`.
 
-A supplemental run of `input/input_mark.ls` now reaches the migrated
-`example.mark` but fails on its pre-existing `version: 1.0n` literal
-(S4.3.3). The filename migration preserves that content; numeric-literal
-repair is outside this decision.
+A supplemental run of `input/input_mark.ls` initially reached the migrated
+`example.mark` but failed on its pre-existing `version: 1.0n` literal
+(S4.3.3). **Resolved in the 2026-10-02 fixture follow-up:** the user chose
+`version: '1.0'`, since a version is an identifier and may have forms such
+as `'1.0.5.alpha'`, rather than a decimal quantity. The numeric example
+also changes from `2.71n` to `2.71m`, following S4.3.3's decimal suffix.
+These content corrections follow the byte-preserving filename migration;
+they do not revise D2.9.1–D2.9.2 or the numeric semantics.
+
+The same follow-up replaces the quoted explanatory lines inside `<list>`
+with actual named values: element, map, array, string, symbol, numeric array,
+datetime and binary attributes. The attribute pairs use commas under
+S16.9.3, and the three numeric examples form one array-valued attribute.
+`b'A0FE'` is valid hexadecimal binary syntax and needs no enclosing string.
+
+Checking the typed example exposed a D2.1.5 conformance bug: Mark's string
+case passed the cursor-advancing parser into the `s2it` macro, which evaluates
+its pointer argument twice. Parsing once into a local before boxing preserves
+the string and cursor position. `mark_string_input.ls` covers root strings,
+empty strings, arrays, attributes, adjacent text (S2.6.4), and all eight
+typed example fields.
+
+The string-parser follow-up passed **6,163/6,163** Lambda/input baseline
+tests; all 25 assertions in `mark_string_input.ls` match its expected result
+on `interp`, `jit` and `auto`. The existing `input/input_mark.ls` script
+also preserves the book's prose and the `Strings: "text"` attribute.

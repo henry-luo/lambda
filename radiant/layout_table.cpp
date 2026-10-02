@@ -6668,7 +6668,8 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
         // rowspans normalized from zero; otherwise later-row cells reuse an
         // occupied column instead of creating the required missing-cell slot.
         int est_cols = columns * 2 + 4;  // generous estimate
-        bool* occupied = (bool*)mem_calloc(rows * est_cols, sizeof(bool), MEM_CAT_LAYOUT);
+        ScratchScope occupied_scope(&lycon->scratch);
+        bool* occupied = occupied_scope.array_zero<bool>((size_t)rows * (size_t)est_cols);
         int max_col_used = 0;
         int cur_row = 0;
         table->each_row( [&](ViewTableRow* row) {
@@ -6676,7 +6677,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
                                   &max_col_used);
             cur_row++;
         });
-        mem_free(occupied);
+        occupied_scope.end();
         if (max_col_used > columns) {
             columns = max_col_used;
         }
