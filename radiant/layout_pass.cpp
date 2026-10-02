@@ -31,12 +31,13 @@ struct LayoutViewSnapshot {
     bool block_percentage_height_resolved_late;
 };
 
-static void layout_measure_snapshot_append(::LayoutContext* lycon,
+// Snapshots live in the measurement's scope, ended after they are restored.
+static void layout_measure_snapshot_append(::LayoutContext* lycon, ScratchMark* scope,
                                             ArrayList* snapshots, ::DomNode* node) {
     if (!lycon || !snapshots || !node) return;
 
-    LayoutViewSnapshot* snapshot =
-        (LayoutViewSnapshot*)scratch_calloc(&lycon->scratch, sizeof(LayoutViewSnapshot));
+    LayoutViewSnapshot* snapshot = (LayoutViewSnapshot*)scratch_scope_calloc(
+        &lycon->scratch, scope, sizeof(LayoutViewSnapshot));
     if (!snapshot) return;
 
     snapshot->node = node;
@@ -75,13 +76,12 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon,
     }
 
     if (!arraylist_append(snapshots, snapshot)) {
-        scratch_free(&lycon->scratch, snapshot);
         return;
     }
 
     if (node->is_element()) {
         for (::DomNode* child = node->as_element()->first_child; child; child = child->next_sibling) {
-            layout_measure_snapshot_append(lycon, snapshots, child);
+            layout_measure_snapshot_append(lycon, scope, snapshots, child);
         }
     }
 }
@@ -92,7 +92,6 @@ static void layout_measure_snapshot_restore(::LayoutContext* lycon, ArrayList* s
     for (int i = snapshots->length - 1; i >= 0; i--) {
         LayoutViewSnapshot* snapshot = (LayoutViewSnapshot*)snapshots->data[i];
         if (!snapshot || !snapshot->node) {
-            scratch_free(&lycon->scratch, snapshot);
             continue;
         }
 
@@ -128,8 +127,6 @@ static void layout_measure_snapshot_restore(::LayoutContext* lycon, ArrayList* s
                     snapshot->block_percentage_height_resolved_late;
             }
         }
-
-        scratch_free(&lycon->scratch, snapshot);
     }
     arraylist_free(snapshots);
 }
@@ -155,7 +152,8 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
       saved_run_mode(RunMode::PerformLayout),
       saved_sizing_mode(SizingMode::InherentSize),
       saved_available_space(AvailableSpace::make_indefinite()),
-      saved_views(nullptr) {
+      saved_views(nullptr),
+      snapshot_scope{} {
     if (!lycon) return;
 
     saved_block = lycon->block;
@@ -166,7 +164,8 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
     saved_sizing_mode = lycon->sizing_mode;
     saved_available_space = lycon->available_space;
     saved_views = arraylist_new(8);
-    layout_measure_snapshot_append(lycon, saved_views, measure_elmt);
+    snapshot_scope = scratch_scope_begin(&lycon->scratch);
+    layout_measure_snapshot_append(lycon, &snapshot_scope, saved_views, measure_elmt);
 
     lycon->run_mode = RunMode::ComputeSize;
     lycon->elmt = measure_elmt;
@@ -184,6 +183,7 @@ LayoutMeasureScope::~LayoutMeasureScope() {
     lycon->available_space = saved_available_space;
     layout_measure_snapshot_restore(lycon, saved_views);
     saved_views = nullptr;
+    scratch_scope_end(&lycon->scratch, &snapshot_scope);
 }
 
 KnownDimensions layout_known_dimensions_from_block(::ViewBlock* block) {

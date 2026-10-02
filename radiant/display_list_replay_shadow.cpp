@@ -19,10 +19,13 @@ void dl_replay_shadow_clip_save_at_offset(DisplayReplayShadowClip* clip,
                                           const DlShadowClipSave* save,
                                           float origin_x, float origin_y) {
     if (!clip) return;
-    clip->saved = nullptr;
+    // a save without its restore must not leave its scope open under the next one
+    dl_replay_shadow_clip_discard(clip);
     if (!surface || !surface->pixels || !scratch || !save) return;
 
-    clip->saved = surface_region_save(surface, scratch,
+    clip->scratch = scratch;
+    clip->scope = scratch_scope_begin(scratch);
+    clip->saved = surface_region_save(surface, scratch, &clip->scope,
                                       save->rx - (int)origin_x,
                                       save->ry - (int)origin_y,
                                       save->rw, save->rh,
@@ -48,10 +51,12 @@ void dl_replay_shadow_clip_restore_at_offset(DisplayReplayShadowClip* clip,
         surface_region_restore_masked(surface, clip->saved, &clip->region,
                                       &ex, restore->restore_inside);
     }
-    clip->saved = nullptr;
+    dl_replay_shadow_clip_discard(clip);
 }
 
 void dl_replay_shadow_clip_discard(DisplayReplayShadowClip* clip) {
     if (!clip) return;
+    if (clip->scratch) scratch_scope_end(clip->scratch, &clip->scope);
     clip->saved = nullptr;
+    clip->scratch = nullptr;
 }

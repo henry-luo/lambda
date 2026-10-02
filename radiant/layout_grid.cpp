@@ -584,9 +584,9 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
 
     int node_capacity = grid_layout->allocated_items > 0
         ? grid_layout->allocated_items : 0;
+    ScratchScope nodes_scope(&grid_layout->lycon->scratch);
     DomNode** nodes = node_capacity > 0
-        ? (DomNode**)scratch_calloc(&grid_layout->lycon->scratch,
-            (size_t)node_capacity * sizeof(DomNode*)) : nullptr;
+        ? nodes_scope.array_zero<DomNode*>((size_t)node_capacity) : nullptr;
     int node_count = nodes
         ? collect_grid_item_nodes(grid_layout->lycon, container,
             container->first_child, nodes, node_capacity, false) : 0;
@@ -614,7 +614,7 @@ int collect_grid_items(GridContainerLayout* grid_layout, ViewBlock* container, V
         }
     }
 
-    if (nodes) scratch_free(&grid_layout->lycon->scratch, nodes);
+    nodes_scope.end();
 
     if (count == 0) {
         *items = nullptr;

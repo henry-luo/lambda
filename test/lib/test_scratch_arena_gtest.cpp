@@ -45,191 +45,19 @@ TEST_F(ScratchArenaTest, RepeatedReleaseLeavesScopeBalanced) {
     EXPECT_EQ(arena_active_scope_count(arena), 0u);
 }
 
-TEST_F(ScratchArenaTest, SingleAllocFree) {
+TEST_F(ScratchArenaTest, PlainAllocIsAlignedAndZeroed) {
     ScratchArena sa;
     scratch_init(&sa, arena);
 
     void* p = scratch_alloc(&sa, 64);
     ASSERT_NE(p, nullptr);
-    EXPECT_EQ(scratch_live_count(&sa), 1);
-
-    // verify 16-byte alignment
     EXPECT_EQ((uintptr_t)p % 16, 0);
-
-    scratch_free(&sa, p);
-    EXPECT_EQ(scratch_live_count(&sa), 0);
-
-    scratch_release(&sa);
-}
-
-TEST_F(ScratchArenaTest, CallocZeros) {
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    uint8_t* p = (uint8_t*)scratch_calloc(&sa, 256);
-    ASSERT_NE(p, nullptr);
-
+    uint8_t* z = (uint8_t*)scratch_calloc(&sa, 256);
+    ASSERT_NE(z, nullptr);
     for (int i = 0; i < 256; i++) {
-        EXPECT_EQ(p[i], 0) << "byte " << i << " not zero";
+        EXPECT_EQ(z[i], 0) << "byte " << i << " not zero";
     }
-
-    scratch_free(&sa, p);
-    scratch_release(&sa);
-}
-
-// ============================================================================
-// LIFO free (the common path)
-// ============================================================================
-
-TEST_F(ScratchArenaTest, LIFOFree_TwoAllocations) {
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    void* a = scratch_alloc(&sa, 100);
-    void* b = scratch_alloc(&sa, 200);
     EXPECT_EQ(scratch_live_count(&sa), 2);
-
-    // free in LIFO order
-    scratch_free(&sa, b);
-    EXPECT_EQ(scratch_live_count(&sa), 1);
-
-    scratch_free(&sa, a);
-    EXPECT_EQ(scratch_live_count(&sa), 0);
-
-    scratch_release(&sa);
-}
-
-TEST_F(ScratchArenaTest, LIFOFree_ManyAllocations) {
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    const int N = 100;
-    void* ptrs[100];
-    for (int i = 0; i < N; i++) {
-        ptrs[i] = scratch_alloc(&sa, 32 + i * 4);
-        ASSERT_NE(ptrs[i], nullptr);
-    }
-    EXPECT_EQ(scratch_live_count(&sa), (size_t)N);
-
-    // free all in reverse (LIFO)
-    for (int i = N - 1; i >= 0; i--) {
-        scratch_free(&sa, ptrs[i]);
-    }
-    EXPECT_EQ(scratch_live_count(&sa), 0);
-
-    scratch_release(&sa);
-}
-
-TEST_F(ScratchArenaTest, LIFOFree_BumpBackReclaimsMemory) {
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    size_t used_before = arena_total_used(arena);
-
-    void* a = scratch_alloc(&sa, 512);
-    void* b = scratch_alloc(&sa, 512);
-    size_t used_with_both = arena_total_used(arena);
-    EXPECT_GT(used_with_both, used_before);
-
-    // LIFO free both — arena bump pointer should rewind
-    scratch_free(&sa, b);
-    scratch_free(&sa, a);
-
-    size_t used_after = arena_total_used(arena);
-    // should be back to (approximately) where we started
-    // (exact match depends on arena alignment, but should be close)
-    EXPECT_LE(used_after, used_before + 32); // allow small alignment rounding
-
-    scratch_release(&sa);
-}
-
-// ============================================================================
-// Non-LIFO free (hole creation + backward coalescing)
-// ============================================================================
-
-TEST_F(ScratchArenaTest, NonLIFO_HoleCoalescing) {
-    // The critical scenario from §9.3:
-    // [A] ← [B] ← [C] ← [D]    head = D
-    // free(B) → hole
-    // free(C) → hole
-    // free(D) → LIFO, backward walk reclaims C, B holes
-    // Result: [A] head = A
-
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    void* a = scratch_alloc(&sa, 64);
-    void* b = scratch_alloc(&sa, 64);
-    void* c = scratch_alloc(&sa, 64);
-    void* d = scratch_alloc(&sa, 64);
-    EXPECT_EQ(scratch_live_count(&sa), 4);
-
-    // non-LIFO: free B and C first (creates holes)
-    scratch_free(&sa, b);
-    EXPECT_EQ(scratch_live_count(&sa), 3); // A, C, D live; B is hole
-
-    scratch_free(&sa, c);
-    EXPECT_EQ(scratch_live_count(&sa), 2); // A, D live; B, C are holes
-
-    // LIFO: free D → should trigger backward walk and reclaim B, C holes
-    scratch_free(&sa, d);
-    EXPECT_EQ(scratch_live_count(&sa), 1); // only A remains
-
-    // verify A is still usable
-    memset(a, 0xAA, 64);
-    EXPECT_EQ(((uint8_t*)a)[0], 0xAA);
-
-    scratch_free(&sa, a);
-    EXPECT_EQ(scratch_live_count(&sa), 0);
-
-    scratch_release(&sa);
-}
-
-TEST_F(ScratchArenaTest, NonLIFO_SingleHoleBehindTail) {
-    // [A] ← [B] ← [C]   head = C
-    // free(B) → hole
-    // free(C) → LIFO, backward walk reclaims B
-    // Result: [A]
-
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    void* a = scratch_alloc(&sa, 128);
-    void* b = scratch_alloc(&sa, 128);
-    void* c = scratch_alloc(&sa, 128);
-
-    scratch_free(&sa, b); // hole
-    scratch_free(&sa, c); // LIFO + coalesce B
-    EXPECT_EQ(scratch_live_count(&sa), 1);
-
-    scratch_free(&sa, a);
-    EXPECT_EQ(scratch_live_count(&sa), 0);
-
-    scratch_release(&sa);
-}
-
-TEST_F(ScratchArenaTest, NonLIFO_HoleNotAtTail) {
-    // [A] ← [B] ← [C]   head = C
-    // free(A) → hole (not behind tail, just marked)
-    // live_count should still be 2
-
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    void* a = scratch_alloc(&sa, 64);
-    void* b = scratch_alloc(&sa, 64);
-    void* c = scratch_alloc(&sa, 64);
-
-    scratch_free(&sa, a); // non-LIFO, not behind tail → just mark
-    EXPECT_EQ(scratch_live_count(&sa), 2); // B, C live
-
-    // free C (LIFO) → coalesces B? No — B is not a hole. Stops.
-    scratch_free(&sa, c);
-    EXPECT_EQ(scratch_live_count(&sa), 1); // B live, A is hole deep in stack
-
-    scratch_free(&sa, b);
-    // B is now LIFO → reclaim B, then backward walk hits A which is hole → reclaim A
-    EXPECT_EQ(scratch_live_count(&sa), 0);
 
     scratch_release(&sa);
 }
@@ -242,35 +70,33 @@ TEST_F(ScratchArenaTest, MarkRestore_Basic) {
     ScratchArena sa;
     scratch_init(&sa, arena);
 
-    void* a = scratch_alloc(&sa, 100);
+    ASSERT_NE(scratch_alloc(&sa, 100), nullptr);  // a
     ScratchMark mark = scratch_mark(&sa);
 
-    void* b = scratch_alloc(&sa, 200);
-    void* c = scratch_alloc(&sa, 300);
+    ASSERT_NE(scratch_alloc(&sa, 200), nullptr);  // b
+    ASSERT_NE(scratch_alloc(&sa, 300), nullptr);  // c
     EXPECT_EQ(scratch_live_count(&sa), 3);
 
     // restore should free b and c
     scratch_restore(&sa, mark);
     EXPECT_EQ(scratch_live_count(&sa), 1); // only a remains
 
-    scratch_free(&sa, a);
-    EXPECT_EQ(scratch_live_count(&sa), 0);
-
     scratch_release(&sa);
+    EXPECT_EQ(scratch_live_count(&sa), 0);
 }
 
 TEST_F(ScratchArenaTest, MarkRestore_Nested) {
     ScratchArena sa;
     scratch_init(&sa, arena);
 
-    void* a = scratch_alloc(&sa, 64);
+    ASSERT_NE(scratch_alloc(&sa, 64), nullptr);  // a
     ScratchMark mark1 = scratch_mark(&sa);
 
-    void* b = scratch_alloc(&sa, 64);
+    ASSERT_NE(scratch_alloc(&sa, 64), nullptr);  // b
     ScratchMark mark2 = scratch_mark(&sa);
 
-    void* c = scratch_alloc(&sa, 64);
-    void* d = scratch_alloc(&sa, 64);
+    ASSERT_NE(scratch_alloc(&sa, 64), nullptr);  // c
+    ASSERT_NE(scratch_alloc(&sa, 64), nullptr);  // d
 
     // restore inner scope
     scratch_restore(&sa, mark2);
@@ -280,9 +106,6 @@ TEST_F(ScratchArenaTest, MarkRestore_Nested) {
     scratch_restore(&sa, mark1);
     EXPECT_EQ(scratch_live_count(&sa), 1); // a
 
-    scratch_free(&sa, a);
-    EXPECT_EQ(scratch_live_count(&sa), 0);
-
     scratch_release(&sa);
 }
 
@@ -290,14 +113,13 @@ TEST_F(ScratchArenaTest, MarkRestore_EmptyScope) {
     ScratchArena sa;
     scratch_init(&sa, arena);
 
-    void* a = scratch_alloc(&sa, 64);
+    ASSERT_NE(scratch_alloc(&sa, 64), nullptr);  // a
     ScratchMark mark = scratch_mark(&sa);
 
     // no allocations between mark and restore
     scratch_restore(&sa, mark);
     EXPECT_EQ(scratch_live_count(&sa), 1);
 
-    scratch_free(&sa, a);
     scratch_release(&sa);
 }
 
@@ -310,9 +132,10 @@ TEST_F(ScratchArenaTest, DataIntegrity_WriteAndRead) {
     scratch_init(&sa, arena);
 
     // simulate a table layout: multiple arrays of different sizes
-    int* col_widths = (int*)scratch_calloc(&sa, sizeof(int) * 20);
-    float* row_heights = (float*)scratch_calloc(&sa, sizeof(float) * 50);
-    uint8_t* grid = (uint8_t*)scratch_calloc(&sa, 20 * 50);
+    ScratchScope scope(&sa);
+    int* col_widths = scope.array_zero<int>(20);
+    float* row_heights = scope.array_zero<float>(50);
+    uint8_t* grid = scope.array_zero<uint8_t>(20 * 50);
 
     ASSERT_NE(col_widths, nullptr);
     ASSERT_NE(row_heights, nullptr);
@@ -328,11 +151,8 @@ TEST_F(ScratchArenaTest, DataIntegrity_WriteAndRead) {
     for (int i = 0; i < 50; i++) EXPECT_FLOAT_EQ(row_heights[i], 20.0f + i * 0.5f);
     for (int i = 0; i < 1000; i++) EXPECT_EQ(grid[i], (uint8_t)(i & 0xFF));
 
-    // free in LIFO order
-    scratch_free(&sa, grid);
-    scratch_free(&sa, row_heights);
-    scratch_free(&sa, col_widths);
-
+    scope.end();
+    EXPECT_EQ(scratch_live_count(&sa), 0);
     scratch_release(&sa);
 }
 
@@ -355,7 +175,6 @@ TEST_F(ScratchArenaTest, DataIntegrity_LargeAllocation) {
         EXPECT_EQ(pixels[i], (uint32_t)(0xFF000000 | (i & 0xFFFFFF)));
     }
 
-    scratch_free(&sa, pixels);
     scratch_release(&sa);
 }
 
@@ -378,10 +197,10 @@ TEST_F(ScratchArenaTest, Alignment16Byte) {
 }
 
 // ============================================================================
-// Reuse after free
+// Reuse after scope end
 // ============================================================================
 
-TEST_F(ScratchArenaTest, ReuseAfterLIFOFree) {
+TEST_F(ScratchArenaTest, ReuseAfterScopeEnd) {
     ScratchArena sa;
     scratch_init(&sa, arena);
 
@@ -389,12 +208,11 @@ TEST_F(ScratchArenaTest, ReuseAfterLIFOFree) {
 
     // allocate and free several times — memory should be reclaimed each time
     for (int round = 0; round < 10; round++) {
-        void* a = scratch_alloc(&sa, 1024);
-        void* b = scratch_alloc(&sa, 1024);
+        ScratchScope scope(&sa);
+        void* a = scope.alloc(1024);
+        void* b = scope.alloc(1024);
         ASSERT_NE(a, nullptr);
         ASSERT_NE(b, nullptr);
-        scratch_free(&sa, b);
-        scratch_free(&sa, a);
     }
 
     size_t used_end = arena_total_used(arena);
@@ -414,38 +232,23 @@ TEST_F(ScratchArenaTest, NullSafety) {
     scratch_init(nullptr, arena);
     EXPECT_EQ(scratch_alloc(nullptr, 64), nullptr);
     EXPECT_EQ(scratch_calloc(nullptr, 64), nullptr);
-    scratch_free(nullptr, (void*)0x1234);
+    ScratchMark null_scope = scratch_scope_begin(nullptr);
+    EXPECT_EQ(scratch_scope_alloc(nullptr, &null_scope, 64), nullptr);
+    scratch_scope_end(nullptr, &null_scope);
     scratch_release(nullptr);
     EXPECT_EQ(scratch_live_count(nullptr), 0);
 
     ScratchArena sa;
     scratch_init(&sa, arena);
-    scratch_free(&sa, nullptr); // should not crash
     EXPECT_EQ(scratch_alloc(&sa, 0), nullptr); // zero-size
     scratch_release(&sa);
-}
-
-TEST_F(ScratchArenaTest, ReleaseWithHoles) {
-    // release should clean up even if there are unreleased holes
-    ScratchArena sa;
-    scratch_init(&sa, arena);
-
-    void* a = scratch_alloc(&sa, 64);
-    void* b = scratch_alloc(&sa, 64);
-    void* c = scratch_alloc(&sa, 64);
-
-    scratch_free(&sa, b); // create hole
-    // a and c still live, b is hole
-
-    scratch_release(&sa); // should clean up everything
-    EXPECT_EQ(scratch_live_count(&sa), 0);
 }
 
 TEST_F(ScratchArenaTest, SingleAllocation_Release) {
     ScratchArena sa;
     scratch_init(&sa, arena);
 
-    void* a = scratch_alloc(&sa, 32);
+    ASSERT_NE(scratch_alloc(&sa, 32), nullptr);
     EXPECT_EQ(scratch_live_count(&sa), 1);
 
     scratch_release(&sa);
@@ -453,39 +256,130 @@ TEST_F(ScratchArenaTest, SingleAllocation_Release) {
 }
 
 // ============================================================================
-// Interleaved alloc/free (render_block_view pattern)
+// Scopes (the only individual release path)
 // ============================================================================
 
-TEST_F(ScratchArenaTest, InterleavedAllocFree) {
-    // simulates render_block_view: alloc clip, render children, free clip,
-    // alloc blend, render, free blend
+TEST_F(ScratchArenaTest, Scope_EndFreesOwnBlocks) {
     ScratchArena sa;
     scratch_init(&sa, arena);
 
-    // outer block
     void* outer = scratch_alloc(&sa, 256);
+    size_t used_before = arena_total_used(arena);
+    {
+        ScratchScope scope(&sa);
+        void* a = scope.alloc(512);
+        void* b = scope.alloc_zero(512);
+        ASSERT_NE(a, nullptr);
+        ASSERT_NE(b, nullptr);
+        EXPECT_EQ(((uint8_t*)b)[100], 0);
+        EXPECT_EQ(scratch_live_count(&sa), 3);
+    }
+    EXPECT_EQ(scratch_live_count(&sa), 1);  // outer
+    EXPECT_LE(arena_total_used(arena), used_before + 32);
+    EXPECT_NE(outer, nullptr);
 
-    // clip scope
-    void* clip = scratch_alloc(&sa, 1024);
-    memset(clip, 0xCC, 1024);
-    // ... render children ...
-    scratch_free(&sa, clip); // LIFO
+    scratch_release(&sa);
+}
 
-    EXPECT_EQ(scratch_live_count(&sa), 1); // outer
+TEST_F(ScratchArenaTest, Scope_NestedEndInOrder) {
+    // render_block_view pattern: a clip scope, then a blend scope, inside a block scope
+    ScratchArena sa;
+    scratch_init(&sa, arena);
 
-    // blend scope
-    void* blend = scratch_alloc(&sa, 2048);
-    memset(blend, 0xBB, 2048);
-    // ... render ...
-    scratch_free(&sa, blend); // LIFO
-
-    EXPECT_EQ(scratch_live_count(&sa), 1); // outer
-
-    scratch_free(&sa, outer);
+    ScratchScope block(&sa);
+    void* outer = block.alloc(256);
+    {
+        ScratchScope clip(&sa);
+        memset(clip.alloc(1024), 0xCC, 1024);
+        EXPECT_EQ(sa.open_scope, clip.mark.scope);
+    }
+    EXPECT_EQ(sa.open_scope, block.mark.scope);
+    {
+        ScratchScope blend(&sa);
+        memset(blend.alloc(2048), 0xBB, 2048);
+    }
+    EXPECT_EQ(scratch_live_count(&sa), 1);
+    EXPECT_NE(outer, nullptr);
+    block.end();
+    EXPECT_EQ(sa.open_scope, 0u);
     EXPECT_EQ(scratch_live_count(&sa), 0);
 
     scratch_release(&sa);
 }
+
+TEST_F(ScratchArenaTest, Scope_EndIsIdempotent) {
+    ScratchArena sa;
+    scratch_init(&sa, arena);
+
+    ScratchMark scope = scratch_scope_begin(&sa);
+    ASSERT_NE(scratch_scope_alloc(&sa, &scope, 64), nullptr);
+    scratch_scope_end(&sa, &scope);
+    EXPECT_EQ(scope.scope, 0u);
+    scratch_scope_end(&sa, &scope);  // ended scope: no-op
+    EXPECT_EQ(scratch_scope_alloc(&sa, &scope, 64), nullptr);
+    EXPECT_EQ(scratch_live_count(&sa), 0);
+
+    scratch_release(&sa);
+}
+
+TEST_F(ScratchArenaTest, Scope_ArrayOverflowReturnsNull) {
+    ScratchArena sa;
+    scratch_init(&sa, arena);
+    {
+        ScratchScope scope(&sa);
+        EXPECT_EQ(scope.array<uint64_t>(SIZE_MAX / 4), nullptr);
+        EXPECT_EQ(scope.array_zero<uint64_t>(SIZE_MAX / 4), nullptr);
+        EXPECT_EQ(scratch_live_count(&sa), 0);
+    }
+    scratch_release(&sa);
+}
+
+TEST_F(ScratchArenaTest, Scope_ReleaseClosesOpenScopes) {
+    ScratchArena sa;
+    scratch_init(&sa, arena);
+    ScratchMark scope = scratch_scope_begin(&sa);
+    ASSERT_NE(scratch_scope_alloc(&sa, &scope, 64), nullptr);
+    scratch_release(&sa);
+    EXPECT_EQ(sa.open_scope, 0u);
+    EXPECT_EQ(scratch_live_count(&sa), 0);
+}
+
+#ifndef NDEBUG
+// A block the scope did not allocate (a plain scratch_alloc made inside it)
+// would be unwound under its owner, so ending the scope must fail loudly.
+TEST_F(ScratchArenaTest, Scope_ForeignLiveBlockAsserts) {
+    EXPECT_DEATH({
+        ScratchArena sa;
+        scratch_init(&sa, arena);
+        ScratchMark scope = scratch_scope_begin(&sa);
+        scratch_scope_alloc(&sa, &scope, 64);
+        scratch_alloc(&sa, 64);  // foreign: not allocated through the scope
+        scratch_scope_end(&sa, &scope);
+    }, "");
+}
+
+TEST_F(ScratchArenaTest, Scope_OutOfOrderEndAsserts) {
+    EXPECT_DEATH({
+        ScratchArena sa;
+        scratch_init(&sa, arena);
+        ScratchMark outer = scratch_scope_begin(&sa);
+        ScratchMark inner = scratch_scope_begin(&sa);
+        (void)inner;
+        scratch_scope_end(&sa, &outer);  // inner is still open
+    }, "");
+}
+
+TEST_F(ScratchArenaTest, Scope_AllocThroughOuterScopeAsserts) {
+    EXPECT_DEATH({
+        ScratchArena sa;
+        scratch_init(&sa, arena);
+        ScratchMark outer = scratch_scope_begin(&sa);
+        ScratchMark inner = scratch_scope_begin(&sa);
+        (void)inner;
+        scratch_scope_alloc(&sa, &outer, 64);  // would sit above inner's mark
+    }, "");
+}
+#endif
 
 // ============================================================================
 // TableMetadata pattern (many parallel arrays)
@@ -497,20 +391,20 @@ TEST_F(ScratchArenaTest, TableMetadataPattern) {
     scratch_init(&sa, arena);
 
     const int rows = 50, cols = 10;
-    ScratchMark mark = scratch_mark(&sa);
+    ScratchScope scope(&sa);
 
-    bool* grid_occupied = (bool*)scratch_calloc(&sa, rows * cols * sizeof(bool));
-    float* col_widths = (float*)scratch_calloc(&sa, cols * sizeof(float));
-    float* col_min_widths = (float*)scratch_calloc(&sa, cols * sizeof(float));
-    float* col_max_widths = (float*)scratch_calloc(&sa, cols * sizeof(float));
-    float* row_heights = (float*)scratch_calloc(&sa, rows * sizeof(float));
-    float* row_y_pos = (float*)scratch_calloc(&sa, rows * sizeof(float));
-    bool* row_collapsed = (bool*)scratch_calloc(&sa, rows * sizeof(bool));
-    bool* col_collapsed = (bool*)scratch_calloc(&sa, cols * sizeof(bool));
-    float* col_orig_widths = (float*)scratch_calloc(&sa, cols * sizeof(float));
-    bool* row_pct_height = (bool*)scratch_calloc(&sa, rows * sizeof(bool));
-    float* col_edge_border = (float*)scratch_calloc(&sa, (cols + 1) * sizeof(float));
-    bool* col_explicit_w = (bool*)scratch_calloc(&sa, cols * sizeof(bool));
+    bool* grid_occupied = scope.array_zero<bool>(rows * cols);
+    float* col_widths = scope.array_zero<float>(cols);
+    float* col_min_widths = scope.array_zero<float>(cols);
+    float* col_max_widths = scope.array_zero<float>(cols);
+    float* row_heights = scope.array_zero<float>(rows);
+    float* row_y_pos = scope.array_zero<float>(rows);
+    bool* row_collapsed = scope.array_zero<bool>(rows);
+    bool* col_collapsed = scope.array_zero<bool>(cols);
+    float* col_orig_widths = scope.array_zero<float>(cols);
+    bool* row_pct_height = scope.array_zero<bool>(rows);
+    float* col_edge_border = scope.array_zero<float>((cols + 1));
+    bool* col_explicit_w = scope.array_zero<bool>(cols);
 
     ASSERT_NE(grid_occupied, nullptr);
     ASSERT_NE(col_explicit_w, nullptr);
@@ -522,8 +416,8 @@ TEST_F(ScratchArenaTest, TableMetadataPattern) {
     EXPECT_FLOAT_EQ(col_widths[5], 85.0f);
     EXPECT_FLOAT_EQ(row_heights[0], 24.0f);
 
-    // scope exit: restore frees all 12 at once
-    scratch_restore(&sa, mark);
+    // scope exit frees all 12 at once
+    scope.end();
     EXPECT_EQ(scratch_live_count(&sa), 0);
 
     scratch_release(&sa);

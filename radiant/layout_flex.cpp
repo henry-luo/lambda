@@ -235,6 +235,7 @@ static bool measure_anonymous_flex_text_run(LayoutContext* lycon,
 }
 
 static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
+                                                     ScratchMark* scope,
                                                      ViewBlock* container,
                                                      DomText* text,
                                                      bool preserve_leading_space,
@@ -251,8 +252,11 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     ViewText* text_view = lam::view_require<RDT_VIEW_TEXT>(text);
     if (!text_view) return nullptr;
 
-    ViewElement* item = (ViewElement*)scratch_calloc(
-        &lycon->scratch, sizeof(ViewElement));
+    // With a scope the item is that caller's temporary; without one it lives
+    // until the enclosing flex pass restores its scratch mark.
+    ViewElement* item = scope
+        ? (ViewElement*)scratch_scope_calloc(&lycon->scratch, scope, sizeof(ViewElement))
+        : (ViewElement*)scratch_calloc(&lycon->scratch, sizeof(ViewElement));
     if (!item) return nullptr;
     // CSS Flexbox §4 generates an anonymous blockified item for each non-empty
     // direct text run; keeping it pass-local avoids changing the DOM/render tree.
@@ -271,8 +275,10 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     item->ensure_flex_item(lycon->doc ? lycon->doc->view_tree : nullptr);
     if (!item->fi) return nullptr;
     item->fi->anonymous_text = text;
-    FlexAnonymousTextRun* first_run = (FlexAnonymousTextRun*)scratch_calloc(
-        &lycon->scratch, sizeof(FlexAnonymousTextRun));
+    FlexAnonymousTextRun* first_run = scope
+        ? (FlexAnonymousTextRun*)scratch_scope_calloc(&lycon->scratch, scope,
+                                                      sizeof(FlexAnonymousTextRun))
+        : (FlexAnonymousTextRun*)scratch_calloc(&lycon->scratch, sizeof(FlexAnonymousTextRun));
     if (!first_run) return nullptr;
     first_run->text = text;
     first_run->preserve_leading_space = preserve_leading_space;
@@ -1665,8 +1671,8 @@ IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
 
     int capacity = layout_count_flattened_item_nodes(container, true);
     if (capacity <= 0) return sizes;
-    DomNode** nodes = (DomNode**)scratch_calloc(
-        &lycon->scratch, (size_t)capacity * sizeof(DomNode*));
+    ScratchScope scope(&lycon->scratch);
+    DomNode** nodes = scope.array_zero<DomNode*>((size_t)capacity);
     if (!nodes) return sizes;
 
     int node_count = collect_flex_item_nodes(
@@ -1686,7 +1692,7 @@ IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
                 flex_text_has_collapsible_edge(child->as_text(), true) &&
                 flex_adjacent_flattened_text(child, container, true) != nullptr;
             ViewElement* item = create_anonymous_flex_text_item(
-                lycon, container, child->as_text(), preserve_leading_space,
+                lycon, &scope.mark, container, child->as_text(), preserve_leading_space,
                 preserve_trailing_space, text_is_whitespace);
             if (!item) continue;
             if (row_flex) {
@@ -1734,7 +1740,6 @@ IntrinsicSizes flex_measure_display_contents_intrinsic_widths(
         if (item_count) (*item_count)++;
     }
 
-    scratch_free(&lycon->scratch, nodes);
     return sizes;
 }
 
@@ -1796,7 +1801,7 @@ int collect_and_prepare_flex_items(LayoutContext* lycon,
                     }
                 }
                 ViewElement* anonymous_item = create_anonymous_flex_text_item(
-                    lycon, container, child->as_text(), preserve_leading_space,
+                    lycon, nullptr, container, child->as_text(), preserve_leading_space,
                     preserve_trailing_space, text_is_whitespace);
                 if (anonymous_item && ensure_flex_items_capacity(
                         flex_layout, item_count + 1)) {
@@ -3120,8 +3125,8 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
 
     if (!flex_layout->lycon) return;
     // Flex resolution temporaries are pass-local and must unwind with the layout scratch arena.
-    FlexLengthScratch* scratch = (FlexLengthScratch*)scratch_calloc(
-        &flex_layout->lycon->scratch, (size_t)line->item_count * sizeof(FlexLengthScratch));
+    ScratchScope scope(&flex_layout->lycon->scratch);
+    FlexLengthScratch* scratch = scope.array_zero<FlexLengthScratch>((size_t)line->item_count);
     if (!scratch) return;
 
     float total_hypothetical_size = 0.0f;
@@ -3184,7 +3189,6 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
     line->free_space = free_space;
 
     if (free_space == 0.0f) {
-        scratch_free(&flex_layout->lycon->scratch, scratch);
         return;  // No space to distribute
     }
     // Per CSS Flexbox Spec: https://www.w3.org/TR/css-flexbox-1/#resolve-flexible-lengths
@@ -3266,8 +3270,9 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         applied_flexible_distribution = true;
         // CSS Flexbox §9.7 Step 5: Calculate target sizes for unfrozen items
         // Iteration state is scoped to one §9.7 loop pass; keep it on layout scratch.
-        FlexIterationScratch* iteration_scratch = (FlexIterationScratch*)scratch_calloc(
-            &flex_layout->lycon->scratch, (size_t)line->item_count * sizeof(FlexIterationScratch));
+        ScratchScope iteration_scope(&flex_layout->lycon->scratch);
+        FlexIterationScratch* iteration_scratch =
+            iteration_scope.array_zero<FlexIterationScratch>((size_t)line->item_count);
         if (!iteration_scratch) {
             break;
         }
@@ -3349,7 +3354,7 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
             }
         }
 
-        scratch_free(&flex_layout->lycon->scratch, iteration_scratch);
+        iteration_scope.end();
 
         if (!any_frozen_this_iteration) {
             break;
@@ -3419,7 +3424,6 @@ static void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineI
         }
     }
 
-    scratch_free(&flex_layout->lycon->scratch, scratch);
 }
 
 static int flex_line_auto_margin_count(FlexContainerLayout* flex_layout,

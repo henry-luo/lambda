@@ -10,11 +10,13 @@ static uint32_t* dl_replay_backdrop_pop(DisplayReplayBackdropStack* stack,
     return backdrop;
 }
 
+// Ends the popped level's scope, freeing its saved backdrop.
 static void dl_replay_backdrop_release(DisplayReplayBackdropStack* stack,
                                        ScratchArena* scratch,
                                        uint32_t* backdrop) {
     if (!stack) return;
-    if (backdrop && scratch) scratch_free(scratch, backdrop);
+    (void)backdrop;
+    if (scratch) scratch_scope_end(scratch, &stack->scope[stack->sp]);
     stack->stack[stack->sp] = nullptr;
 }
 
@@ -45,14 +47,17 @@ void dl_replay_backdrop_save_at_offset(DisplayReplayBackdropStack* stack,
     }
 
     IRect region = {};
-    uint32_t* buf = surface_region_save(surface, scratch,
+    ScratchMark scope = scratch_scope_begin(scratch);
+    uint32_t* buf = surface_region_save(surface, scratch, &scope,
                                         backdrop->x0 - (int)origin_x,
                                         backdrop->y0 - (int)origin_y,
                                         backdrop->w, backdrop->h,
                                         &region);
     if (!buf) {
+        scratch_scope_end(scratch, &scope);
         stack->stack[stack->sp] = nullptr;
         stack->region[stack->sp] = region;
+        stack->scope[stack->sp] = scope;
         stack->sp++;
         return;
     }
@@ -60,6 +65,7 @@ void dl_replay_backdrop_save_at_offset(DisplayReplayBackdropStack* stack,
     surface_region_clear(surface, &region);
     stack->stack[stack->sp] = buf;
     stack->region[stack->sp] = region;
+    stack->scope[stack->sp] = scope;
     stack->sp++;
 }
 
@@ -67,6 +73,7 @@ void dl_replay_backdrop_push_empty(DisplayReplayBackdropStack* stack) {
     if (!stack || stack->sp >= DL_REPLAY_MAX_BACKDROP_DEPTH) return;
     stack->stack[stack->sp] = nullptr;
     memset(&stack->region[stack->sp], 0, sizeof(stack->region[stack->sp]));
+    memset(&stack->scope[stack->sp], 0, sizeof(stack->scope[stack->sp]));
     stack->sp++;
 }
 
@@ -115,6 +122,26 @@ void dl_replay_backdrop_apply_blend_mode(DisplayReplayBackdropStack* stack,
     render_composite_blend_surface(surface, backdrop, bx, by, bw, bh,
                                    (CssEnum)blend->blend_mode);
     dl_replay_backdrop_release(stack, scratch, backdrop);
+}
+
+void dl_replay_close_open_scopes(DisplayReplayBackdropStack* stack,
+                                 DisplayReplayShadowClip* clip,
+                                 ScratchArena* scratch) {
+    if (!scratch) return;
+    // an unbalanced list leaves save scopes open; close them innermost first so
+    // none outlives the replay and a caller's enclosing scope still ends in order
+    for (;;) {
+        bool clip_open = clip && clip->scratch && clip->scope.scope != 0;
+        if (clip_open && clip->scope.scope == scratch->open_scope) {
+            dl_replay_shadow_clip_discard(clip);
+        } else if (stack && stack->sp > 0) {
+            dl_replay_backdrop_discard(stack, scratch);
+        } else if (clip_open) {
+            dl_replay_shadow_clip_discard(clip);
+        } else {
+            break;
+        }
+    }
 }
 
 bool dl_replay_backdrop_skip_item(DisplayReplayBackdropStack* stack,

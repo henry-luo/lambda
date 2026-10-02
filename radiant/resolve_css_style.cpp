@@ -1191,15 +1191,17 @@ static EmbedProp* resolve_embed_prop(LayoutContext* lycon, ViewBlock* block) {
     return block->embed;
 }
 
+// The joined string lives in the caller's scope.
 static char* css_join_grid_template_area_strings(const CssValue* value,
-                                                 ScratchArena* scratch) {
+                                                 ScratchScope* scope) {
     size_t total_len = 0;
     for (int i = 0; i < value->data.list.count; i++) {
         const CssValue* part = value->data.list.values[i];
         if (part->type == CSS_VALUE_TYPE_STRING) total_len += strlen(part->data.string) + 4;
     }
     if (!total_len) return nullptr;
-    char* combined = (char*)scratch_alloc(scratch, total_len + 1);
+    char* combined = scope->array<char>(total_len + 1);
+    if (!combined) return nullptr;
     combined[0] = '\0';
     size_t combined_len = 0;
     for (int i = 0; i < value->data.list.count; i++) {
@@ -8140,11 +8142,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 parse_grid_template_areas(grid, value->data.string, &lycon->scratch);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST) {
-                char* combined = css_join_grid_template_area_strings(
-                    value, &lycon->scratch);
+                ScratchScope join_scope(&lycon->scratch);
+                char* combined = css_join_grid_template_area_strings(value, &join_scope);
                 if (combined) {
                     parse_grid_template_areas(grid, combined, &lycon->scratch);
-                    scratch_free(&lycon->scratch, combined);
                 }
             }
             break;

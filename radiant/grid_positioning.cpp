@@ -119,8 +119,9 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
 
     // Calculate track positions
-    float* row_positions = (float*)scratch_calloc(sa, (grid_layout->computed_row_count + 1) * sizeof(float));
-    float* column_positions = (float*)scratch_calloc(sa, (grid_layout->computed_column_count + 1) * sizeof(float));
+    ScratchScope scope(sa);
+    float* row_positions = scope.array_zero<float>((size_t)grid_layout->computed_row_count + 1);
+    float* column_positions = scope.array_zero<float>((size_t)grid_layout->computed_column_count + 1);
 
     // First, calculate the total grid content size (all tracks + gaps)
     float total_row_size = grid_track_total(
@@ -251,8 +252,6 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
     }
 
-    scratch_free(sa, column_positions);
-    scratch_free(sa, row_positions);
 
 }
 
@@ -358,12 +357,11 @@ void align_grid_items(GridContainerLayout* grid_layout) {
 
     if (has_baseline_alignment && grid_layout->computed_row_count > 0) {
         int row_count = grid_layout->computed_row_count;
-        ScratchArena* sa = &grid_layout->lycon->scratch;
-        float* row_max_baseline = (float*)scratch_calloc(sa, row_count * sizeof(float));
-        float* row_max_below = (float*)scratch_calloc(sa, row_count * sizeof(float));
-        int* row_baseline_count = (int*)scratch_calloc(sa, row_count * sizeof(int));
-        float* item_baseline_shift = (float*)scratch_calloc(
-            sa, grid_layout->item_count * sizeof(float));
+        ScratchScope scope(&grid_layout->lycon->scratch);
+        float* row_max_baseline = scope.array_zero<float>(row_count);
+        float* row_max_below = scope.array_zero<float>(row_count);
+        int* row_baseline_count = scope.array_zero<int>(row_count);
+        float* item_baseline_shift = scope.array_zero<float>(grid_layout->item_count);
 
         // First pass: compute baselines and find per-row max above/below baseline
         for (int i = 0; i < grid_layout->item_count; i++) {
@@ -496,10 +494,6 @@ void align_grid_items(GridContainerLayout* grid_layout) {
             gi->track_base_y = base_y;
         }
 
-        scratch_free(sa, item_baseline_shift);
-        scratch_free(sa, row_baseline_count);
-        scratch_free(sa, row_max_below);
-        scratch_free(sa, row_max_baseline);
         return;
     }
 

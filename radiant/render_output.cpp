@@ -540,7 +540,8 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
         pthread_once(&g_render_pool_once, init_render_pool_once);
 
         // Render jobs are frame-scoped; scratch allocation prevents queue storage from outliving dispatch.
-        TileJob* jobs = (TileJob*)scratch_calloc(&rdcon->scratch, (size_t)grid.total * sizeof(TileJob));
+        ScratchScope jobs_scope(&rdcon->scratch);
+        TileJob* jobs = jobs_scope.array_zero<TileJob>((size_t)grid.total);
         if (!jobs) {
             log_error("[RENDER] failed to allocate %d tile jobs", grid.total);
             tile_grid_destroy(&grid);
@@ -560,7 +561,7 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
         result.tile_count = grid.total;
         result.thread_count = g_render_pool ? g_render_pool->thread_count : 1;
 
-        scratch_free(&rdcon->scratch, jobs);
+        jobs_scope.end();
         tile_grid_destroy(&grid);
         return result;
     }

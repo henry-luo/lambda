@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "../../lib/ownership.hpp"
+#include "../../lib/mem_kind.hpp"
 #include "../../lib/tagged.hpp"
 #include "../../radiant/radiant.hpp"
 
@@ -163,4 +164,121 @@ TEST(TaggedDomNode, DomAsCastsOnlyWhenRuntimeTagMatches) {
 
     EXPECT_EQ(lam::dom_as<DOM_NODE_TEXT>(node), &text);
     EXPECT_EQ(lam::dom_as<DOM_NODE_ELEMENT>(node), nullptr);
+}
+
+// ---------------------------------------------------------------------------
+// Pointer-kind field templates (lib/mem_kind.hpp)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// detects whether `To t = from_value;` (copy-initialization) compiles
+template<class To, class From>
+class CanCopyInit {
+    static void take(To);
+    template<class F>
+    static char test(int, decltype(take(test_declval<F>()))* = 0);
+    template<class>
+    static long test(...);
+
+public:
+    enum { value = sizeof(test<From>(0)) == sizeof(char) };
+};
+
+// detects whether `to = from_value;` compiles
+template<class To, class From>
+class CanAssign {
+    template<class T, class F>
+    static char test(int, decltype((void)(test_declval<T&>() = test_declval<F>()))* = 0);
+    template<class, class>
+    static long test(...);
+
+public:
+    enum { value = sizeof(test<To, From>(0)) == sizeof(char) };
+};
+
+// detects whether a kind can be dereferenced with ->
+template<class K>
+class CanArrow {
+    template<class T>
+    static char test(int, decltype(test_declval<T&>().operator->())* = 0);
+    template<class>
+    static long test(...);
+
+public:
+    enum { value = sizeof(test<K>(0)) == sizeof(char) };
+};
+
+struct KindProp { float width; };
+
+struct KindNode {
+    lam::Up<KindNode> parent;
+    lam::Own<KindProp> prop;
+    lam::OwnArr<float> columns;
+    lam::Counted<KindProp> shared;
+    lam::Handle<KindProp> image;
+    lam::Foreign<KindProp> vendor;
+};
+
+struct KindTestDocumentNode {};
+
+} // namespace
+
+template<> struct lam::NodeOf<KindNode> { typedef KindTestDocumentNode type; };
+
+// a raw pointer must not silently become a kind, and kinds must not mix
+static_assert(!CanCopyInit<lam::Own<KindProp>, KindProp*>::value, "raw -> Own must be explicit");
+static_assert(!CanCopyInit<lam::Up<KindProp>, KindProp*>::value, "raw -> Up must be explicit");
+static_assert(!CanAssign<lam::Own<KindProp>, KindProp*>::value, "raw pointer assignment to Own");
+static_assert(!CanAssign<lam::Own<KindProp>, lam::Up<KindProp>>::value, "Up must not become Own");
+static_assert(!CanAssign<lam::Up<KindProp>, lam::Own<KindProp>>::value, "Own -> Up only via borrow()");
+static_assert(!CanAssign<lam::Counted<KindProp>, lam::Own<KindProp>>::value, "Own must not become Counted");
+static_assert(CanAssign<lam::Own<KindProp>, lam::Own<KindProp>>::value, "same kind copies");
+static_assert(CanAssign<lam::Own<KindProp>, decltype(nullptr)>::value, "kinds clear to null");
+static_assert(CanCopyInit<KindProp*, lam::Own<KindProp>>::value, "reads convert to T*");
+static_assert(!CanArrow<lam::Handle<KindProp>>::value, "a handle is not dereferenceable");
+static_assert(__is_trivial(KindNode), "a struct of kinds stays trivial (pool calloc + memcpy)");
+static_assert(sizeof(KindNode) == 5 * sizeof(void*) + 8, "kinds add no size");
+
+TEST(MemoryKinds, ReadsAndWritesThroughKinds) {
+    KindProp prop = {12.5f};
+    KindProp other = {3.0f};
+    float cols[3] = {1.0f, 2.0f, 3.0f};
+    KindNode parent = {};
+    KindNode node = {};
+
+    node.parent = lam::Up<KindNode>(&parent);
+    node.prop = lam::Own<KindProp>(&prop);
+    node.columns = lam::OwnArr<float>(cols);
+    node.shared = lam::Counted<KindProp>(&other);
+    node.vendor = lam::Foreign<KindProp>(&other);
+
+    EXPECT_EQ(node.parent.get(), &parent);
+    EXPECT_FLOAT_EQ(node.prop->width, 12.5f);
+    KindProp* raw = node.prop;
+    EXPECT_EQ(raw, &prop);
+    EXPECT_FLOAT_EQ(node.columns[2], 3.0f);
+    EXPECT_EQ(node.prop.borrow().get(), &prop);
+    EXPECT_TRUE(node.prop == &prop);
+
+    node.prop = nullptr;
+    EXPECT_FALSE(node.prop);
+    EXPECT_TRUE(node.prop == nullptr);
+}
+
+TEST(MemoryKinds, ZeroFilledStructIsNullAndCopiesBitwise) {
+    KindNode node;
+    memset(&node, 0, sizeof(node));
+    EXPECT_EQ(node.parent.get(), nullptr);
+    EXPECT_EQ(node.prop.get(), nullptr);
+    EXPECT_TRUE(node.image.is_null());
+
+    KindProp prop = {4.0f};
+    node.prop = lam::Own<KindProp>(&prop);
+    node.image = lam::Handle<KindProp>{7, 3};
+    KindNode copy;
+    memcpy(&copy, &node, sizeof(copy));
+    EXPECT_EQ(copy.prop.get(), &prop);
+    EXPECT_TRUE(copy.image == node.image);
+    EXPECT_FALSE(copy.image.is_null());
 }

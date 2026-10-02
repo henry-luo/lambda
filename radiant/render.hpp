@@ -1955,16 +1955,17 @@ static inline bool surface_region_clip(ImageSurface* surface,
     return w > 0 && h > 0;
 }
 
+// The saved pixels belong to `scope`, which the caller ends after restoring.
 static inline uint32_t* surface_region_save(ImageSurface* surface,
-                                            ScratchArena* scratch,
+                                            ScratchArena* scratch, ScratchMark* scope,
                                             int rx, int ry, int rw, int rh,
                                             IRect* out_region) {
-    if (!scratch || !surface_region_clip(surface, rx, ry, rw, rh, out_region)) return nullptr;
+    if (!scratch || !scope || !surface_region_clip(surface, rx, ry, rw, rh, out_region)) return nullptr;
     int x0 = out_region->x;
     int y0 = out_region->y;
     int w = out_region->w;
     int h = out_region->h;
-    uint32_t* saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
+    uint32_t* saved = (uint32_t*)scratch_scope_alloc(scratch, scope, (size_t)w * h * sizeof(uint32_t));
     if (!saved) return nullptr;
     uint32_t* px = (uint32_t*)surface->pixels;
     int pitch = surface->pitch / 4;
@@ -2070,6 +2071,7 @@ void dl_replay_webview_layer_placeholder_at_offset(ImageSurface* surface,
 typedef struct DisplayReplayBackdropStack {
     uint32_t* stack[DL_REPLAY_MAX_BACKDROP_DEPTH];
     IRect region[DL_REPLAY_MAX_BACKDROP_DEPTH];
+    ScratchMark scope[DL_REPLAY_MAX_BACKDROP_DEPTH];  // owns stack[i]; ended when popped
     int sp;
 } DisplayReplayBackdropStack;
 
@@ -2103,7 +2105,14 @@ bool dl_replay_backdrop_skip_item(DisplayReplayBackdropStack* stack,
 typedef struct DisplayReplayShadowClip {
     uint32_t* saved;
     IRect region;
+    ScratchArena* scratch;  // arena holding `saved`
+    ScratchMark scope;      // owns `saved`; ended on restore or discard
 } DisplayReplayShadowClip;
+
+// End any save scopes an unbalanced display list left open.
+void dl_replay_close_open_scopes(DisplayReplayBackdropStack* stack,
+                                 DisplayReplayShadowClip* clip,
+                                 ScratchArena* scratch);
 
 void dl_replay_shadow_clip_init(DisplayReplayShadowClip* clip);
 void dl_replay_shadow_clip_save(DisplayReplayShadowClip* clip,
@@ -3243,6 +3252,7 @@ typedef struct RenderClipScope {
     bool active;
     bool pushed_shape;
     bool owns_shape;
+    ScratchMark mem;  // owns the shape when owns_shape; ended on pop
 } RenderClipScope;
 
 RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,

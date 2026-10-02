@@ -747,8 +747,9 @@ static void bidi_place_visual_line(LayoutContext* lycon,
         }
     }
 
-    float* min_x = (float*)scratch_alloc(&lycon->scratch, sizeof(float) * rect_count);
-    float* max_x = (float*)scratch_alloc(&lycon->scratch, sizeof(float) * rect_count);
+    ScratchScope scope(&lycon->scratch);
+    float* min_x = scope.array<float>(rect_count);
+    float* max_x = scope.array<float>(rect_count);
     if (!min_x || !max_x) return;
     for (int i = 0; i < rect_count; i++) {
         min_x[i] = FLT_MAX;
@@ -902,18 +903,14 @@ void layout_bidi_line(LayoutContext* lycon) {
     if (counts.chars <= 0 || counts.rects <= 0 || counts.has_atomic ||
         (!counts.has_bidi_trigger && !counts.has_bidi_layout_feature)) return;
 
-    BidiCharFragment* chars = (BidiCharFragment*)scratch_calloc(
-        &lycon->scratch, sizeof(BidiCharFragment) * counts.chars);
-    BidiRectInfo* rects = (BidiRectInfo*)scratch_calloc(
-        &lycon->scratch, sizeof(BidiRectInfo) * counts.rects);
-    BidiSpanInfo* spans = (BidiSpanInfo*)scratch_calloc(
-        &lycon->scratch, sizeof(BidiSpanInfo) * counts.spans);
-    int* visual_to_logical = (int*)scratch_alloc(
-        &lycon->scratch, sizeof(int) * counts.chars);
-    int* levels = (int*)scratch_alloc(
-        &lycon->scratch, sizeof(int) * counts.chars);
-    signed char* bidi_classes = (signed char*)scratch_alloc(
-        &lycon->scratch, sizeof(signed char) * counts.chars);
+    // every bidi temporary of this line is released when the scope ends
+    ScratchScope scope(&lycon->scratch);
+    BidiCharFragment* chars = scope.array_zero<BidiCharFragment>(counts.chars);
+    BidiRectInfo* rects = scope.array_zero<BidiRectInfo>(counts.rects);
+    BidiSpanInfo* spans = scope.array_zero<BidiSpanInfo>(counts.spans);
+    int* visual_to_logical = scope.array<int>(counts.chars);
+    int* levels = scope.array<int>(counts.chars);
+    signed char* bidi_classes = scope.array<signed char>(counts.chars);
     // A block's anonymous inline content can have no inline-span records;
     // zero-count scratch storage is valid and must not suppress bidi placement.
     if (!chars || !rects || (counts.spans > 0 && !spans) ||
@@ -940,16 +937,11 @@ void layout_bidi_line(LayoutContext* lycon) {
 
     int max_level = 0;
 #if RDT_HAS_FRIBIDI
-    FriBidiChar* logical = (FriBidiChar*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiChar) * counts.chars);
-    FriBidiChar* visual = (FriBidiChar*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiChar) * counts.chars);
-    FriBidiStrIndex* logical_to_visual = (FriBidiStrIndex*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiStrIndex) * counts.chars);
-    FriBidiStrIndex* fri_visual_to_logical = (FriBidiStrIndex*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiStrIndex) * counts.chars);
-    FriBidiLevel* fri_levels = (FriBidiLevel*)scratch_alloc(
-        &lycon->scratch, sizeof(FriBidiLevel) * counts.chars);
+    FriBidiChar* logical = scope.array<FriBidiChar>(counts.chars);
+    FriBidiChar* visual = scope.array<FriBidiChar>(counts.chars);
+    FriBidiStrIndex* logical_to_visual = scope.array<FriBidiStrIndex>(counts.chars);
+    FriBidiStrIndex* fri_visual_to_logical = scope.array<FriBidiStrIndex>(counts.chars);
+    FriBidiLevel* fri_levels = scope.array<FriBidiLevel>(counts.chars);
     if (!logical || !visual || !logical_to_visual || !fri_visual_to_logical ||
         !fri_levels) return;
     for (int i = 0; i < counts.chars; i++) logical[i] = chars[i].codepoint;
