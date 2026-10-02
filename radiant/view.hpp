@@ -2685,7 +2685,14 @@ typedef struct CanonicalPropStats {
 struct ViewTree {
     Pool* prop_pool;       // Mutable element-owned view props; survives retained reflow.
     Arena* canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
-    Arena* scratch_arena;  // Pass-local layout/render scratch; never owns retained props.
+    Arena* scratch_arena;  // Layout-pass scratch; never owns retained props.
+    // Layout-pass data that is not stack-shaped (counter state, generated
+    // content strings); reset when the pass ends.
+    Arena* layout_pass_arena;
+    // Each scratch arena owns its backing arena's tail exclusively, so render
+    // scratch and the frame display list each get their own arena.
+    Arena* render_scratch_arena;
+    Arena* display_list_arena;
     CanonicalInlineEntry** inline_canonical_buckets; // Resizable exact-value index in prop_pool.
     size_t inline_canonical_bucket_count;
     size_t inline_canonical_count;

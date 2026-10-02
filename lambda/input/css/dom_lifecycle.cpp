@@ -594,7 +594,9 @@ static void dom_retire_recycle_one(DomNodeRegistry* registry) {
     record->retire_next = nullptr;
     // Edges and generation refs are invalidated before a slot becomes reusable.
     memset(record->address, 0xdd, record->primary_size);
-    arena_free(record->primary_arena, record->address, record->primary_size);
+    // DOM nodes are the sanctioned arena reuse case: the slot is retained on
+    // its arena's retired list for later node allocations, never discarded.
+    arena_retire(record->primary_arena, record->address, record->primary_size);
     registry->stats.pending_primary_bytes -= record->primary_size;
     registry->stats.recycled_nodes++;
 }

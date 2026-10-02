@@ -2469,6 +2469,16 @@ typedef struct Map Map;
 Map* map_fill(Map* map, ...);
 // Same fill from a caller-rooted Item span; the T0 walker has no varargs.
 Map* map_fill_items(Map* map, const Item* values, int value_count);
+// descriptor-aware packed slots; the caller keeps the map/value owners rooted.
+struct ShapeEntry;
+#ifdef __cplusplus
+extern "C" {
+#endif
+void set_field_value(struct ShapeEntry* field, void* field_ptr, Item item);
+Item map_shape_field_to_item(void* map_data, const struct ShapeEntry* field);
+#ifdef __cplusplus
+}
+#endif
 
 // A shaped field is stored in the lane the store path chose for it, which is
 // NOT always ShapeEntry::type->type_id: a non-simple `type` contract (`T?`, a

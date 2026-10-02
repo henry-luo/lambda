@@ -1,4 +1,4 @@
-// lib/color.h - CSS hex color parse/format (header-only).
+// lib/color.h - CSS color conversion and hex parse/format (header-only).
 //
 // Byte-level (r,g,b,a) in/out so each subsystem can adapt into its own color
 // struct (CSS CssColor, Radiant Color, graph theme ints, ...). Centralizes the
@@ -10,7 +10,15 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 #include "hex.h"
+#ifdef __cplusplus
+extern "C++" {
+#endif
+#include "math_utils.h"
+#ifdef __cplusplus
+}
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -61,6 +69,28 @@ static inline bool color_parse_hex(const char* str, uint8_t* r, uint8_t* g,
     if (R < 0 || G < 0 || B < 0 || A < 0) return false;
     *r = (uint8_t)R; *g = (uint8_t)G; *b = (uint8_t)B; *a = (uint8_t)A;
     return true;
+}
+
+// CSS Color: hue in degrees; saturation, lightness and alpha in [0,1].
+static inline void color_hsl_to_rgba(float h, float s, float l, float a,
+                                      uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* alpha) {
+    h = fmodf(h, 360.0f);
+    if (h < 0.0f) h += 360.0f;
+    s = clamp_unit(s); l = clamp_unit(l); a = clamp_unit(a);
+    float c = (1.0f - fabsf(2.0f * l - 1.0f)) * s;
+    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
+    float m = l - c * 0.5f;
+    float r1, g1, b1;
+    if (h < 60.0f)       { r1 = c; g1 = x; b1 = 0.0f; }
+    else if (h < 120.0f) { r1 = x; g1 = c; b1 = 0.0f; }
+    else if (h < 180.0f) { r1 = 0.0f; g1 = c; b1 = x; }
+    else if (h < 240.0f) { r1 = 0.0f; g1 = x; b1 = c; }
+    else if (h < 300.0f) { r1 = x; g1 = 0.0f; b1 = c; }
+    else                { r1 = c; g1 = 0.0f; b1 = x; }
+    *r = clamp_byte_round((r1 + m) * 255.0f);
+    *g = clamp_byte_round((g1 + m) * 255.0f);
+    *b = clamp_byte_round((b1 + m) * 255.0f);
+    *alpha = clamp_byte_round(a * 255.0f);
 }
 
 // Format "#rrggbb" (lowercase, 7 chars + NUL) into out (must hold >= 8 bytes).

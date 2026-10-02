@@ -34,25 +34,20 @@ static float grid_container_content_size_for_item_percentages(LayoutContext* lyc
 }
 
 struct GridNodeScratch {
-    LayoutContext* lycon;
+    ScratchScope scope;
     DomNode** data;
     int count;
 
-    GridNodeScratch(LayoutContext* context, ViewBlock* container, bool initialize)
-        : lycon(context), data(nullptr), count(0) {
+    GridNodeScratch(LayoutContext* lycon, ViewBlock* container, bool initialize)
+        : scope(&lycon->scratch), data(nullptr), count(0) {
         int capacity = layout_count_flattened_item_nodes(container, false);
         if (capacity > 0) {
-            data = (DomNode**)scratch_calloc(
-                &lycon->scratch, (size_t)capacity * sizeof(DomNode*));
+            data = scope.array_zero<DomNode*>((size_t)capacity);
         }
         if (data) {
             count = collect_grid_item_nodes(
                 lycon, container, container->first_child, data, capacity, initialize);
         }
-    }
-
-    ~GridNodeScratch() {
-        if (data) scratch_free(&lycon->scratch, data);
     }
 };
 
@@ -307,23 +302,27 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
             return;
         }
         // Check whether positioned children need the resolved grid lines.
+        // The node buffer's scope must end before layout_grid_container: the
+        // track arrays it allocates belong to the enclosing grid pass.
         bool has_absolute_children = false;
-        GridNodeScratch nodes(lycon, grid_container, false);
-        for (int node_index = 0; node_index < nodes.count; node_index++) {
-            DomNode* ch = nodes.data[node_index];
-            if (ch->is_element()) {
-                DomElement* ce = ch->as_element();
-                if (ce->position &&
-                    (ce->positionp()->position == CSS_VALUE_ABSOLUTE ||
-                     ce->positionp()->position == CSS_VALUE_FIXED)) {
-                    // Styles were already resolved in resolve_grid_item_styles above
-                    // (init_grid_item_view was called for all children). Only call again
-                    // if for some reason gi was not populated yet (defensive guard).
-                    ViewBlock* ce_block = lam::view_as_block(ce);
-                    if (!grid_item_prop(ce_block)) {
-                        init_grid_item_view(lycon, ch);
+        {
+            GridNodeScratch nodes(lycon, grid_container, false);
+            for (int node_index = 0; node_index < nodes.count; node_index++) {
+                DomNode* ch = nodes.data[node_index];
+                if (ch->is_element()) {
+                    DomElement* ce = ch->as_element();
+                    if (ce->position &&
+                        (ce->positionp()->position == CSS_VALUE_ABSOLUTE ||
+                         ce->positionp()->position == CSS_VALUE_FIXED)) {
+                        // Styles were already resolved in resolve_grid_item_styles above
+                        // (init_grid_item_view was called for all children). Only call again
+                        // if for some reason gi was not populated yet (defensive guard).
+                        ViewBlock* ce_block = lam::view_as_block(ce);
+                        if (!grid_item_prop(ce_block)) {
+                            init_grid_item_view(lycon, ch);
+                        }
+                        has_absolute_children = true;
                     }
-                    has_absolute_children = true;
                 }
             }
         }
@@ -892,9 +891,11 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
 }
 // Grid Absolute Positioning Helpers
 // Calculate track positions for a given axis
-// Returns an array of (track_count + 1) positions representing grid line positions
-static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, LayoutAxis axis,
-                                            float container_offset, int* out_line_count) {
+// Returns an array of (track_count + 1) positions representing grid line positions,
+// allocated in the caller's scope
+static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, ScratchScope* scope,
+                                            LayoutAxis axis, float container_offset,
+                                            int* out_line_count) {
     if (!grid_layout || !grid_layout->lycon) return nullptr;
     bool row_axis = axis == LAYOUT_AXIS_Y;
     int track_count = row_axis ? grid_layout->computed_row_count : grid_layout->computed_column_count;
@@ -903,8 +904,7 @@ static float* calculate_grid_line_positions(GridContainerLayout* grid_layout, La
     float gap = row_axis ? grid_layout->row_gap : grid_layout->column_gap;
     // We need (track_count + 1) positions for grid lines
     int line_count = track_count + 1;
-    float* positions = (float*)scratch_calloc(&grid_layout->lycon->scratch,
-        (size_t)line_count * sizeof(float));
+    float* positions = scope->array_zero<float>((size_t)line_count);
     if (!positions) return nullptr;
 
     float current_pos = container_offset;
@@ -949,15 +949,14 @@ static bool compute_grid_area_for_absolute(
     };
     LayoutAxisPair<int> line_counts = {};
     LayoutAxisPair<float*> positions = {};
+    ScratchScope scope(&grid_layout->lycon->scratch);
     for (int i = LAYOUT_AXIS_X; i <= LAYOUT_AXIS_Y; i++) {
         LayoutAxis axis = (LayoutAxis)i;
         positions[axis] = calculate_grid_line_positions(
-            grid_layout, axis, offsets[axis], &line_counts[axis]);
+            grid_layout, &scope, axis, offsets[axis], &line_counts[axis]);
     }
 
     if (!positions[LAYOUT_AXIS_X] || !positions[LAYOUT_AXIS_Y]) {
-        scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_X]);
-        scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_Y]);
         return false;
     }
     // CSS Grid §9.1: For absolutely positioned items, when a start or end is auto,
@@ -1013,8 +1012,6 @@ static bool compute_grid_area_for_absolute(
     *out_width = end[LAYOUT_AXIS_X] - start[LAYOUT_AXIS_X];
     *out_height = end[LAYOUT_AXIS_Y] - start[LAYOUT_AXIS_Y];
 
-    scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_Y]);
-    scratch_free(&grid_layout->lycon->scratch, positions[LAYOUT_AXIS_X]);
     return true;
 }
 

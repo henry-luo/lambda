@@ -116,6 +116,15 @@ typedef struct SysFuncInfo {
     int result_arg_index;
 } SysFuncInfo;
 
+// share the text-split relation between AST typing and guarded MIR candidates;
+// an open source never proves a string element or a pointer-slot carrier.
+static inline TypeId sysfunc_text_split_element_type(const SysFuncInfo* info,
+        TypeId source) {
+    return info && info->result_kind == SYS_RESULT_TEXT_SPLIT &&
+        (source == LMD_TYPE_STRING || source == LMD_TYPE_SYMBOL ||
+         source == LMD_TYPE_NULL) ? LMD_TYPE_STRING : LMD_TYPE_ANY;
+}
+
 // Variadic rows currently use the universal Item ABI. A fixed row's descriptor
 // length is its declared arity, so no second arity source can drift from it.
 static inline ValueRep sysfunc_arg_required_rep(const SysFuncInfo* info,

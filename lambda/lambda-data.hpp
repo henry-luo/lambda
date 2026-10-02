@@ -673,7 +673,8 @@ static inline bool shape_entry_storage_fits_data(const ShapeEntry* field,
 Item map_field_to_item(void* field_ptr, TypeId type_id);
 // Read/write helpers must see ShapeEntry::type: TypeId alone cannot tell
 // `int` apart from `int?` once both use an eight-byte packed slot.
-Item map_shape_field_to_item(void* map_data, const ShapeEntry* field);
+// the JIT import and C++ readers share the same C-linkage symbol.
+extern "C" Item map_shape_field_to_item(void* map_data, const ShapeEntry* field);
 // Static MIR member sites already carry a context-resolved NameId. Keep the
 // hot lookup on that identity instead of reconstructing a boxed key string;
 // NAME_ID_NONE remains the id-less Input fallback handled by the caller.

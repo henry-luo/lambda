@@ -638,7 +638,8 @@ TEST_F(DisplayListTest, ValidateRejectsUnclosedElementMarker) {
 class PaintIrParityTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;
-    Arena* arena = nullptr;
+    Arena* arena = nullptr;          // lowered list's arena
+    Arena* direct_arena = nullptr;   // each list's scratch owns its arena
     PaintList pl = {};
     DisplayList lowered = {};   // PaintBuilder -> paint_ir_lower_raster
     DisplayList direct = {};    // direct dl_* calls
@@ -646,9 +647,10 @@ protected:
     void SetUp() override {
         pool = pool_create();
         arena = arena_create_default();
-        paint_list_init(&pl, arena);
+        direct_arena = arena_create_default();
+        paint_list_init(&pl, nullptr);
         dl_init(&lowered, arena);
-        dl_init(&direct, arena);
+        dl_init(&direct, direct_arena);
     }
 
     void TearDown() override {
@@ -656,6 +658,7 @@ protected:
         dl_destroy(&direct);
         paint_list_destroy(&pl);
         if (arena) { arena_destroy(arena); arena = nullptr; }
+        if (direct_arena) { arena_destroy(direct_arena); direct_arena = nullptr; }
         if (pool) { pool_destroy(pool); pool = nullptr; }
     }
 

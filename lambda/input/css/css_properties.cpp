@@ -1263,15 +1263,23 @@ static const char* css_color_skip_whitespace(const char* cursor) {
     return cursor;
 }
 
-static bool css_color_parse_component(const char** cursor, bool alpha,
-                                      uint8_t* out) {
-    if (!cursor || !*cursor || !out) return false;
+static bool css_color_parse_number(const char** cursor, float* out, bool* percentage) {
     const char* start = css_color_skip_whitespace(*cursor);
     char* end = nullptr;
     float value = strtof(start, &end);
     if (end == start || !isfinite(value)) return false;
-    bool percentage = *end == '%';
-    if (percentage) end++;
+    *percentage = *end == '%';
+    if (*percentage) end++;
+    *cursor = end;
+    *out = value;
+    return true;
+}
+
+static bool css_color_parse_component(const char** cursor, bool alpha,
+                                      uint8_t* out) {
+    float value;
+    bool percentage;
+    if (!css_color_parse_number(cursor, &value, &percentage)) return false;
     if (alpha) {
         if (percentage) value *= 0.01f;
         value = clamp_unit(value);
@@ -1280,7 +1288,50 @@ static bool css_color_parse_component(const char** cursor, bool alpha,
         if (percentage) value = value * 255.0f / 100.0f;
         *out = clamp_byte_round(value);
     }
-    *cursor = end;
+    return true;
+}
+
+static bool css_color_parse_hsl(const char* value_str, CssColor* color) {
+    bool hsla = str_istarts_with_cstr(value_str, "hsla(");
+    if (!hsla && !str_istarts_with_cstr(value_str, "hsl(")) return false;
+    const char* cursor = value_str + (hsla ? 5 : 4);
+    float components[3] = {};
+    bool comma = false;
+    // legacy commas and modern whitespace cannot be mixed within one color.
+    for (int index = 0; index < 3; index++) {
+        bool percentage;
+        if (!css_color_parse_number(&cursor, &components[index], &percentage)) return false;
+        if (index == 0) {
+            if (percentage) return false;
+            if (str_istarts_with_cstr(cursor, "grad")) { components[index] *= 0.9f; cursor += 4; }
+            else if (str_istarts_with_cstr(cursor, "deg")) cursor += 3;
+            else if (str_istarts_with_cstr(cursor, "rad")) { components[index] *= 180.0f / math_pi_f(); cursor += 3; }
+            else if (str_istarts_with_cstr(cursor, "turn")) { components[index] *= 360.0f; cursor += 4; }
+        } else {
+            if (comma && !percentage) return false;
+            components[index] *= 0.01f;
+        }
+        const char* next = css_color_skip_whitespace(cursor);
+        if (index == 0) comma = *next == ',';
+        if (index < 2) {
+            if (comma) {
+                if (*next != ',') return false;
+                next++;
+            } else if (next == cursor || *next == ',') return false;
+        }
+        cursor = next;
+    }
+    uint8_t alpha = 255;
+    if (*cursor == (comma ? ',' : '/')) {
+        cursor++;
+        if (!css_color_parse_component(&cursor, true, &alpha)) return false;
+        cursor = css_color_skip_whitespace(cursor);
+    }
+    if (*cursor != ')' || *css_color_skip_whitespace(cursor + 1) != '\0') return false;
+    if (!isfinite(components[0])) return false;
+    color_hsl_to_rgba(components[0], components[1], components[2], (float)alpha / 255.0f,
+                      &color->r, &color->g, &color->b, &color->a);
+    color->type = CSS_COLOR_RGB;
     return true;
 }
 
@@ -1332,7 +1383,7 @@ bool css_parse_color(const char* value_str, CssColor* color) {
         return false;
     }
 
-    if (css_color_parse_function(value_str, color)) return true;
+    if (css_color_parse_function(value_str, color) || css_color_parse_hsl(value_str, color)) return true;
 
     CssEnum keyword = css_enum_by_name(value_str);
     if (keyword == CSS_VALUE_CURRENTCOLOR) {

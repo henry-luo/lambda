@@ -1,4 +1,4 @@
-// BENG Benchmark: k-nucleotide
+// BENG Benchmark: k-nucleotide (Untyped compact-counter version)
 // Count nucleotide k-mer frequencies from FASTA >THREE section
 // Uses file input instead of stdin (Lambda adaptation)
 // Expected: matches benchmarksgame knucleotide-output.txt
@@ -32,22 +32,31 @@ pn extract_three(text) {
     return seq
 }
 
-// count all k-mers of length k in sequence
-pn count_kmers(seq, k) {
-    var counts = map()
+// The supplied >THREE corpus is a closed A/C/G/T alphabet. Keep its one- and
+// two-mer frequencies in compact integer counters, while
+// longer requested sequences remain ordinary string scans.
+fn base_code(codepoint) =>
+    if (codepoint == 65) 0 else if (codepoint == 67) 1 else
+        if (codepoint == 71) 2 else 3
+
+fn base_letter(code) =>
+    if (code == 0) "A" else if (code == 1) "C" else if (code == 2) "G" else "T"
+
+pn count_small_kmers(seq) {
+    var counts = fill(20, 0)
     var seq_len = len(seq)
     var i = 0
-    while (i <= seq_len - k) {
-        var kmer = slice(seq, i, i + k)
-        let cur = counts[kmer]
-        if (cur == null) {
-            counts.set(kmer, 1)
-        } else {
-            counts.set(kmer, cur + 1)
+    while (i < seq_len) {
+        let current = base_code(ord(seq[i]))
+        counts[current] = counts[current] + 1
+        if (i + 1 < seq_len) {
+            let next = base_code(ord(seq[i + 1]))
+            let pair = 4 + current * 4 + next
+            counts[pair] = counts[pair] + 1
         }
         i = i + 1
     }
-    return counts
+    counts
 }
 
 // format float to 3 decimal places
@@ -71,53 +80,77 @@ pn format3(x) {
     return int_part ++ "." ++ frac_str
 }
 
-// sort by count descending, then alphabetically ascending
-pn sort_entries(entries) {
-    entries = sort(entries, (e) => (e[0]))
-    return sort(entries, {by: (e) => (e[1]), dir: 'desc'})
-}
-
-pn print_frequencies(seq, k) {
-    let counts = count_kmers(seq, k)
-    var total = len(seq) - k + 1
-
-    // collect entries as [kmer, count] pairs
-    var entries = [for (key, val in counts) [key, val]]
-
-    // sort by count descending, then alphabetically
-    entries = sort_entries(entries)
-
+pn print_frequency_table(counts, offset, width, total) {
+    let entries = if (width == 1) 4 else 16
+    var order = fill(entries, 0)
     var i = 0
-    while (i < len(entries)) {
-        let kmer = entries[i][0]
-        let count = entries[i][1]
+    while (i < entries) {
+        order[i] = i
+        i = i + 1
+    }
+    i = 0
+    while (i < entries) {
+        var best = i
+        var j = i + 1
+        while (j < entries) {
+            let candidate = order[j]
+            let selected = order[best]
+            if (counts[offset + candidate] > counts[offset + selected] or
+                    (counts[offset + candidate] == counts[offset + selected] and
+                     candidate < selected)) {
+                best = j
+            }
+            j = j + 1
+        }
+        let selected = order[best]
+        order[best] = order[i]
+        order[i] = selected
+        i = i + 1
+    }
+    i = 0
+    while (i < entries) {
+        let code = order[i]
+        let count = counts[offset + code]
         let freq = float(count) * 100.0 / float(total)
+        let kmer = if (width == 1) base_letter(code) else
+            base_letter(int(code / 4)) ++ base_letter(code % 4)
         print(kmer ++ " " ++ format3(freq) ++ "\n")
         i = i + 1
     }
     print("\n")
 }
 
-// print count of a specific k-mer
-pn print_count(seq, kmer) {
-    let k = len(kmer)
-    let counts = count_kmers(seq, k)
-    let count = counts[kmer]
-    if (count == null) {
-        print("0\t" ++ kmer ++ "\n")
-    } else {
-        print(count ++ "\t" ++ kmer ++ "\n")
+pn count_literal(seq, pattern) {
+    let pattern_len = len(pattern)
+    let seq_len = len(seq)
+    var count = 0
+    var start = 0
+    while (start <= seq_len - pattern_len) {
+        var offset = 0
+        while (offset < pattern_len and seq[start + offset] == pattern[offset]) {
+            offset = offset + 1
+        }
+        if (offset == pattern_len) {
+            count = count + 1
+        }
+        start = start + 1
     }
+    count
+}
+
+pn print_count(seq, kmer) {
+    print(count_literal(seq, kmer) ++ "\t" ++ kmer ++ "\n")
 }
 
 pn main() {
     var __t0 = clock()
-    let text = input(INPUT_PATH, 'text') ^ { null }
+    let text = io.read(INPUT_PATH)^
     let seq = extract_three(text)
+    let counts = count_small_kmers(seq)
 
     // print frequency tables for 1-mers and 2-mers
-    print_frequencies(seq, 1)
-    print_frequencies(seq, 2)
+    print_frequency_table(counts, 0, 1, len(seq))
+    print_frequency_table(counts, 4, 2, len(seq) - 1)
 
     // print counts of specific sequences
     print_count(seq, "GGT")

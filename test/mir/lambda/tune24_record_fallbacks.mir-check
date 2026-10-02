@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "D3.3.3v3, D5.3.4, D8.3.1: record fallbacks.",
+  "description": "D3.3.3v3, D5.3.4, D8.3.1: unsupported record-result ABIs retain boxed returns; inferred extra fields use descriptor construction without losing either field.",
   "checks": [
     {
       "in_func": "_extra_#",
@@ -8,8 +8,11 @@
         "_record_result0"
       ],
       "expect": [
-        "call\tmap_fill"
-      ]
+        "call\tmap_alloc_for_type_p, map_alloc_for_type"
+      ],
+      "count": {
+        "call\tset_field_value_p, set_field_value": 2
+      }
     },
     {
       "in_func": "_floating_#",

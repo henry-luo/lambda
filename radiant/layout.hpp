@@ -1532,10 +1532,7 @@ struct TableMetadata {
     float collapsed_border_bottom;
     float collapsed_border_left;
 
-    ScratchArena* sa;
-
-    TableMetadata(ScratchArena* scratch, int cols, int rows);
-    ~TableMetadata();
+    TableMetadata(ScratchScope* scope, int cols, int rows);
 
     inline bool& grid(int row, int col) {
         return grid_occupied[row * column_count + col];
@@ -1592,7 +1589,7 @@ struct LayoutTableAxis {
     }
 };
 
-TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows);
+TableMetadata* table_metadata_create(ScratchScope* scope, int cols, int rows);
 void table_metadata_destroy(TableMetadata* meta);
 
 // tier-3: layout-transient, valid within pass
@@ -1747,56 +1744,59 @@ typedef struct ColumnFragment {
 } ColumnFragment;
 
 // All multicol balancing passes use the same bounded group scratch shape.
-// Keeping allocation and reverse-order release together prevents the nested
-// spanner path and the ordinary container path from drifting in ownership.
+// The buffers share one scratch scope, so release frees them together and the
+// nested spanner path and the ordinary container path cannot drift.
 struct MulticolGroupScratch {
-    float* heights;
-    float* content_heights;
-    float* margin_before;
-    float* margin_after;
-    float* line_advances;
-    bool* can_fragment;
-    bool* break_before;
-    bool* break_after;
-    ColumnFragment* fragments;
+    float* heights = nullptr;
+    float* content_heights = nullptr;
+    float* margin_before = nullptr;
+    float* margin_after = nullptr;
+    float* line_advances = nullptr;
+    bool* can_fragment = nullptr;
+    bool* break_before = nullptr;
+    bool* break_after = nullptr;
+    ColumnFragment* fragments = nullptr;
+    ScratchMark scope = {};
+    ScratchArena* owner = nullptr;
+
+    MulticolGroupScratch() = default;
+    MulticolGroupScratch(const MulticolGroupScratch&) = delete;
+    MulticolGroupScratch& operator=(const MulticolGroupScratch&) = delete;
+    // every exit path ends the scope; release() is idempotent
+    ~MulticolGroupScratch() { if (owner) release(owner); }
 
     bool init(ScratchArena* scratch) {
-        heights = (float*)scratch_alloc(scratch,
+        owner = scratch;
+        scope = scratch_scope_begin(scratch);
+        heights = (float*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(float));
-        content_heights = (float*)scratch_alloc(scratch,
+        content_heights = (float*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(float));
-        margin_before = (float*)scratch_alloc(scratch,
+        margin_before = (float*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(float));
-        margin_after = (float*)scratch_alloc(scratch,
+        margin_after = (float*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(float));
-        line_advances = (float*)scratch_alloc(scratch,
+        line_advances = (float*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(float));
-        can_fragment = (bool*)scratch_alloc(scratch,
+        can_fragment = (bool*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(bool));
-        break_before = (bool*)scratch_alloc(scratch,
+        break_before = (bool*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(bool));
-        break_after = (bool*)scratch_alloc(scratch,
+        break_after = (bool*)scratch_scope_alloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(bool));
-        fragments = (ColumnFragment*)scratch_calloc(scratch,
+        fragments = (ColumnFragment*)scratch_scope_calloc(scratch, &scope,
             MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
         return heights && content_heights && margin_before && margin_after && line_advances &&
             can_fragment && break_before && break_after && fragments;
     }
 
     void release(ScratchArena* scratch) {
-        if (fragments) scratch_free(scratch, fragments);
-        if (break_after) scratch_free(scratch, break_after);
-        if (break_before) scratch_free(scratch, break_before);
-        if (can_fragment) scratch_free(scratch, can_fragment);
-        if (line_advances) scratch_free(scratch, line_advances);
-        if (margin_after) scratch_free(scratch, margin_after);
-        if (margin_before) scratch_free(scratch, margin_before);
-        if (content_heights) scratch_free(scratch, content_heights);
-        if (heights) scratch_free(scratch, heights);
+        scratch_scope_end(scratch, &scope);
         fragments = nullptr;
         break_after = nullptr;
         break_before = nullptr;
         can_fragment = nullptr;
+        line_advances = nullptr;
         heights = nullptr;
         margin_after = nullptr;
         margin_before = nullptr;
@@ -1804,19 +1804,29 @@ struct MulticolGroupScratch {
     }
 };
 
-// Keep the bounded flow-item buffer paired with its scratch lifetime; nested
+// Keep the bounded flow-item buffer paired with its scratch scope; nested
 // and top-level multicol passes otherwise duplicate the same allocation path.
 struct MulticolFlowScratch {
-    MulticolFlowItem* items;
+    MulticolFlowItem* items = nullptr;
+    ScratchMark scope = {};
+    ScratchArena* owner = nullptr;
+
+    MulticolFlowScratch() = default;
+    MulticolFlowScratch(const MulticolFlowScratch&) = delete;
+    MulticolFlowScratch& operator=(const MulticolFlowScratch&) = delete;
+    // every exit path ends the scope; release() is idempotent
+    ~MulticolFlowScratch() { if (owner) release(owner); }
 
     bool init(ScratchArena* scratch) {
-        items = (MulticolFlowItem*)scratch_calloc(
-            scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem));
+        owner = scratch;
+        scope = scratch_scope_begin(scratch);
+        items = (MulticolFlowItem*)scratch_scope_calloc(
+            scratch, &scope, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem));
         return items != nullptr;
     }
 
     void release(ScratchArena* scratch) {
-        if (items) scratch_free(scratch, items);
+        scratch_scope_end(scratch, &scope);
         items = nullptr;
     }
 };
@@ -3274,6 +3284,9 @@ typedef struct LayoutContext {
     CounterContext* counter_context;
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
+    // pass-lifetime data that is not stack-shaped (counter state, generated
+    // content); owned by the view tree and reset at layout_cleanup
+    Arena* pass_arena;
     // Recursion depth guard against deeply nested DOM trees (fuzzer-found stack overflow)
     int depth;
     // Flex-specific nesting depth guard (flex-in-flex recursion)
@@ -3619,6 +3632,7 @@ struct LayoutMeasureScope {
     SizingMode saved_sizing_mode;
     AvailableSpace saved_available_space;
     ArrayList* saved_views;
+    ScratchMark snapshot_scope;  // owns the view snapshots for the measurement
 
     LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt);
     ~LayoutMeasureScope();

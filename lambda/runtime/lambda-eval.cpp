@@ -9388,9 +9388,15 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
         // generic Array with Item* items — use internal array_set
         if (array_has_native_lane(arr)) {
             if (!array_native_lane_store(arr, index, value)) {
-                set_runtime_error(ERR_TYPE_MISMATCH,
-                    "fn_array_set: incompatible write to native lane array");
-                return ItemError;
+                // open pointer lanes widen like ArrayNum; typed boundaries
+                // admitted their replacement before this raw setter (D3.3.3v3).
+                RootFrame roots(2);
+                Rooted<Array*> rooted_arr(roots, arr);
+                Rooted<Item> rooted_value(roots, value);
+                convert_specialized_to_generic(rooted_arr.get());
+                arr = rooted_arr.get();
+                if (array_has_native_lane(arr)) return ItemError;
+                array_set(arr, index, rooted_value.get());
             }
         } else {
             array_set(arr, index, value);

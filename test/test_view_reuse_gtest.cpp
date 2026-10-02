@@ -479,7 +479,7 @@ TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
     EXPECT_EQ(dom_retire_sweep(&doc), 1u);
     ArenaStats after = {};
     arena_get_stats(input_arena, &after);
-    EXPECT_EQ(after.free_count, before.free_count + 1u);
+    EXPECT_EQ(after.retire_count, before.retire_count + 1u);
 
     doc.destroy();
     arena_destroy(input_arena);

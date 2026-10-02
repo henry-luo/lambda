@@ -2,7 +2,9 @@
 #include "../lib/memtrack.h"
 #include <new>
 
-TableMetadata::TableMetadata(ScratchArena* scratch, int cols, int rows)
+// The arrays belong to the caller's scratch scope, which outlives the
+// metadata and frees them together with the caller's other pass arrays.
+TableMetadata::TableMetadata(ScratchScope* scope, int cols, int rows)
     : column_count(cols), row_count(rows), grid_occupied(nullptr),
       col_widths(nullptr), col_single_min_widths(nullptr),
       col_min_widths(nullptr), col_max_widths(nullptr),
@@ -14,53 +16,34 @@ TableMetadata::TableMetadata(ScratchArena* scratch, int cols, int rows)
       col_edge_max_border(nullptr),
       col_has_explicit_width(nullptr), collapsed_border_top(0),
       collapsed_border_right(0), collapsed_border_bottom(0),
-      collapsed_border_left(0), sa(scratch) {
-    grid_occupied = (bool*)scratch_calloc(sa, rows * cols * sizeof(bool));
-    col_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
-    col_single_min_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
-    col_min_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
-    col_max_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
-    col_percent_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
-    row_heights = (float*)scratch_calloc(sa, rows * sizeof(float));
-    row_base_heights = (float*)scratch_calloc(sa, rows * sizeof(float));
-    row_reference_heights = (float*)scratch_calloc(sa, rows * sizeof(float));
-    row_y_positions = (float*)scratch_calloc(sa, rows * sizeof(float));
-    row_collapsed = (bool*)scratch_calloc(sa, rows * sizeof(bool));
-    col_collapsed = (bool*)scratch_calloc(sa, cols * sizeof(bool));
-    col_original_widths = (float*)scratch_calloc(sa, cols * sizeof(float));
-    row_has_percent_height = (bool*)scratch_calloc(sa, rows * sizeof(bool));
-    row_has_specified_height = (bool*)scratch_calloc(sa, rows * sizeof(bool));
-    col_edge_max_border = (float*)scratch_calloc(sa, (cols + 1) * sizeof(float));
-    col_has_explicit_width = (bool*)scratch_calloc(sa, cols * sizeof(bool));
+      collapsed_border_left(0) {
+    grid_occupied = scope->array_zero<bool>((size_t)rows * (size_t)cols);
+    col_widths = scope->array_zero<float>(cols);
+    col_single_min_widths = scope->array_zero<float>(cols);
+    col_min_widths = scope->array_zero<float>(cols);
+    col_max_widths = scope->array_zero<float>(cols);
+    col_percent_widths = scope->array_zero<float>(cols);
+    row_heights = scope->array_zero<float>(rows);
+    row_base_heights = scope->array_zero<float>(rows);
+    row_reference_heights = scope->array_zero<float>(rows);
+    row_y_positions = scope->array_zero<float>(rows);
+    row_collapsed = scope->array_zero<bool>(rows);
+    col_collapsed = scope->array_zero<bool>(cols);
+    col_original_widths = scope->array_zero<float>(cols);
+    row_has_percent_height = scope->array_zero<bool>(rows);
+    row_has_specified_height = scope->array_zero<bool>(rows);
+    col_edge_max_border = scope->array_zero<float>((size_t)cols + 1);
+    col_has_explicit_width = scope->array_zero<bool>(cols);
 }
 
-TableMetadata::~TableMetadata() {
-    scratch_free(sa, col_has_explicit_width);
-    scratch_free(sa, col_edge_max_border);
-    scratch_free(sa, row_has_specified_height);
-    scratch_free(sa, row_has_percent_height);
-    scratch_free(sa, col_original_widths);
-    scratch_free(sa, col_collapsed);
-    scratch_free(sa, row_collapsed);
-    scratch_free(sa, row_y_positions);
-    scratch_free(sa, row_reference_heights);
-    scratch_free(sa, row_base_heights);
-    scratch_free(sa, row_heights);
-    scratch_free(sa, col_percent_widths);
-    scratch_free(sa, col_max_widths);
-    scratch_free(sa, col_min_widths);
-    scratch_free(sa, col_single_min_widths);
-    scratch_free(sa, col_widths);
-    scratch_free(sa, grid_occupied);
-}
 //------------------------------------------------------------------------------
 // Heap factory (audited boundary for `new TableMetadata` / `delete meta`)
 //------------------------------------------------------------------------------
 
-TableMetadata* table_metadata_create(ScratchArena* scratch, int cols, int rows) {
+TableMetadata* table_metadata_create(ScratchScope* scope, int cols, int rows) {
     TableMetadata* meta = (TableMetadata*)mem_alloc(sizeof(TableMetadata), MEM_CAT_LAYOUT);
     if (!meta) return nullptr;
-    new (meta) TableMetadata(scratch, cols, rows); // NEW_DELETE_OK: single audited construction boundary for TableMetadata.
+    new (meta) TableMetadata(scope, cols, rows); // NEW_DELETE_OK: single audited construction boundary for TableMetadata.
     return meta;
 }
 

@@ -1,0 +1,12 @@
+--- a/mir-gen.c
++++ b/mir-gen.c
+@@ -4406,7 +4406,9 @@
+       case MIR_PHI:
+         const_p = gvn_phi_val (bb_insn, &val);
+         if (const_p) break;
++        /* a self-only phi in an unreachable cycle has no replacement definition. */
+         if (insn->nops == 2 && insn->ops[0].mode == MIR_OP_VAR && insn->ops[1].mode == MIR_OP_VAR
++            && ((ssa_edge_t) insn->ops[1].data)->def != bb_insn
+             && MIR_reg_hard_reg_name (ctx, insn->ops[0].u.var - MAX_HARD_REG, func) == NULL
+             && MIR_reg_hard_reg_name (ctx, insn->ops[1].u.var - MAX_HARD_REG, func) == NULL) {
+           remove_copy (gen_ctx, insn);

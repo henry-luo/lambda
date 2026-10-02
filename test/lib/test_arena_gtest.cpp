@@ -289,28 +289,32 @@ TEST(ArenaTest, Statistics) {
     pool_destroy(pool);
 }
 
-TEST(ArenaTest, DetailedStatisticsTrackReuseAndBacking) {
+TEST(ArenaTest, DetailedStatisticsTrackRewindAndBacking) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
     Arena* arena = arena_create_default();
     ASSERT_NE(arena, nullptr);
 
     void* first = arena_alloc(arena, 64);
-    void* guard = arena_alloc(arena, 64);
+    ArenaMark mark = arena_mark(arena);
+    void* second = arena_alloc(arena, 64);
     ASSERT_NE(first, nullptr);
-    ASSERT_NE(guard, nullptr);
-    arena_free(arena, first, 64);
+    ASSERT_NE(second, nullptr);
+    arena_rewind(arena, mark);
     void* reused = arena_alloc(arena, 64);
-    EXPECT_EQ(reused, first);
+    EXPECT_EQ(reused, second);
+    ASSERT_NE(arena_alloc(arena, 64), nullptr);  // guard keeps the retired block interior
+    arena_retire(arena, first, 64);
 
     ArenaStats stats;
     arena_get_stats(arena, &stats);
     EXPECT_GT(stats.backing_bytes, stats.committed_bytes);
     EXPECT_EQ(stats.committed_bytes, ARENA_INITIAL_CHUNK_SIZE);
     EXPECT_EQ(stats.active_bytes, 128u);
-    EXPECT_EQ(stats.allocation_count, 3u);
-    EXPECT_EQ(stats.free_count, 1u);
-    EXPECT_EQ(stats.reuse_hits, 1u);
+    EXPECT_EQ(stats.retired_bytes, 64u);
+    EXPECT_EQ(stats.allocation_count, 4u);
+    EXPECT_EQ(stats.rewind_count, 1u);
+    EXPECT_EQ(stats.retire_count, 1u);
     EXPECT_EQ(stats.fresh_chunk_count, 1u);
     EXPECT_GE(stats.high_water_active_bytes, stats.active_bytes);
 
@@ -1039,331 +1043,205 @@ TEST(ArenaOwnershipTest, OwnsReturnsFalseForInvalidArena) {
 }
 
 // ============================================================================
-// arena_free() Tests
+// Tail rewind (the only partial free) and scratch ownership
 // ============================================================================
 
-TEST(ArenaFreeTest, FreeAddsToFreeList) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    // Free should not crash
-    arena_free(arena, ptr, 64);
-    
+TEST(ArenaRewindTest, RewindReturnsTailAndKeepsChunks) {
+    Arena* arena = arena_create(1024, 4096);
+    ASSERT_NE(arena, nullptr);
+    void* keep = arena_alloc(arena, 64);
+    ASSERT_NE(keep, nullptr);
+    memset(keep, 0x5A, 64);
+    size_t used_at_mark = arena_total_used(arena);
+    ArenaMark mark = arena_mark(arena);
+
+    // spill into later chunks
+    for (int i = 0; i < 40; i++) ASSERT_NE(arena_alloc(arena, 256), nullptr);
+    size_t chunks = arena_chunk_count(arena);
+    size_t allocated = arena_total_allocated(arena);
+    EXPECT_GT(chunks, 1u);
+
+    arena_rewind(arena, mark);
+    EXPECT_EQ(arena_total_used(arena), used_at_mark);
+    EXPECT_EQ(arena_chunk_count(arena), chunks);
+    EXPECT_EQ(arena_total_allocated(arena), allocated);
+    EXPECT_EQ(((unsigned char*)keep)[63], 0x5A);
+
+    // the retained chunks serve the same pattern again without growth
+    for (int i = 0; i < 40; i++) ASSERT_NE(arena_alloc(arena, 256), nullptr);
+    EXPECT_EQ(arena_total_allocated(arena), allocated);
     arena_destroy(arena);
-    pool_destroy(pool);
 }
 
-TEST(ArenaFreeTest, FreeSmallBlockIgnored) {
-    Pool* pool = pool_create();
+TEST(ArenaRewindTest, NestedMarksRewindInOrder) {
     Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    // Free with size smaller than ArenaFreeBlock should be ignored
-    arena_free(arena, ptr, 8);  // Too small to be useful
-    
+    ASSERT_NE(arena, nullptr);
+    ArenaMark outer = arena_mark(arena);
+    void* a = arena_alloc(arena, 32);
+    ArenaMark inner = arena_mark(arena);
+    void* b = arena_alloc(arena, 32);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    arena_rewind(arena, inner);
+    EXPECT_EQ(arena_alloc(arena, 32), b);
+    arena_rewind(arena, outer);
+    EXPECT_EQ(arena_total_used(arena), 0u);
+    EXPECT_EQ(arena_alloc(arena, 32), a);
     arena_destroy(arena);
-    pool_destroy(pool);
 }
 
-TEST(ArenaFreeTest, FreeNullPointerIgnored) {
-    Pool* pool = pool_create();
+TEST(ArenaRewindTest, NullAndEmptyMarksAreIgnored) {
+    arena_rewind(nullptr, ArenaMark{});
+    ArenaMark none = arena_mark(nullptr);
+    EXPECT_EQ(none.chunk, nullptr);
     Arena* arena = arena_create_default();
-    
-    // Should not crash
-    arena_free(arena, nullptr, 64);
-    
+    ASSERT_NE(arena, nullptr);
+    ASSERT_NE(arena_alloc(arena, 16), nullptr);
+    arena_rewind(arena, ArenaMark{});
+    EXPECT_EQ(arena_total_used(arena), 16u);
     arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaFreeTest, FreeInvalidArenaIgnored) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    // Should not crash
-    arena_free(nullptr, ptr, 64);
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-// ============================================================================
-// arena_realloc() Tests
-// ============================================================================
-
-TEST(ArenaReallocTest, ReallocFromNullAllocatesNew) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_realloc(arena, nullptr, 0, 64);
-    ASSERT_NE(ptr, nullptr);
-    EXPECT_TRUE(arena_owns(arena, ptr));
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaReallocTest, ReallocToZeroFrees) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    void* result = arena_realloc(arena, ptr, 64, 0);
-    EXPECT_EQ(result, nullptr);
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaReallocTest, ReallocSameSizeReturnsOriginal) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    memset(ptr, 0xAB, 64);
-    
-    void* new_ptr = arena_realloc(arena, ptr, 64, 64);
-    EXPECT_EQ(ptr, new_ptr);
-    
-    // Data should be unchanged
-    EXPECT_EQ(((unsigned char*)new_ptr)[0], 0xAB);
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaReallocTest, ReallocShrinkReturnsOriginal) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 128);
-    ASSERT_NE(ptr, nullptr);
-    
-    memset(ptr, 0xCD, 128);
-    
-    void* new_ptr = arena_realloc(arena, ptr, 128, 64);
-    EXPECT_EQ(ptr, new_ptr);
-    
-    // Data in first 64 bytes should be unchanged
-    EXPECT_EQ(((unsigned char*)new_ptr)[0], 0xCD);
-    EXPECT_EQ(((unsigned char*)new_ptr)[63], 0xCD);
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaReallocTest, ReallocGrowAtEndExtendsInPlace) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    // Allocate at end of chunk
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    memset(ptr, 0xEF, 64);
-    
-    // Grow should extend in place if at end of chunk
-    void* new_ptr = arena_realloc(arena, ptr, 64, 128);
-    ASSERT_NE(new_ptr, nullptr);
-    
-    // Data should be preserved
-    EXPECT_EQ(((unsigned char*)new_ptr)[0], 0xEF);
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaReallocTest, ReallocGrowNotAtEndAllocatesNew) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    // Allocate two blocks
-    void* ptr1 = arena_alloc(arena, 64);
-    void* ptr2 = arena_alloc(arena, 64);
-    
-    ASSERT_NE(ptr1, nullptr);
-    ASSERT_NE(ptr2, nullptr);
-    
-    memset(ptr1, 0x12, 64);
-    
-    // Growing ptr1 should allocate new since ptr2 is after it
-    void* new_ptr = arena_realloc(arena, ptr1, 64, 128);
-    ASSERT_NE(new_ptr, nullptr);
-    
-    // Data should be copied
-    EXPECT_EQ(((unsigned char*)new_ptr)[0], 0x12);
-    EXPECT_EQ(((unsigned char*)new_ptr)[63], 0x12);
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaReallocTest, ReallocPreservesData) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    // Fill with pattern
-    for (int i = 0; i < 64; i++) {
-        ((unsigned char*)ptr)[i] = (unsigned char)i;
-    }
-    
-    // Reallocate to larger size
-    void* new_ptr = arena_realloc(arena, ptr, 64, 256);
-    ASSERT_NE(new_ptr, nullptr);
-    
-    // Verify pattern is preserved
-    for (int i = 0; i < 64; i++) {
-        EXPECT_EQ(((unsigned char*)new_ptr)[i], (unsigned char)i);
-    }
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
-}
-
-TEST(ArenaReallocTest, ReallocInvalidArenaReturnsNull) {
-    Pool* pool = pool_create();
-    Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    void* result = arena_realloc(nullptr, ptr, 64, 128);
-    EXPECT_EQ(result, nullptr);
-    
-    arena_destroy(arena);
-    pool_destroy(pool);
 }
 
 // ============================================================================
-// Free-list Reuse Tests
+// Retired list (arena_retire): retained for reuse, never discarded
 // ============================================================================
 
-TEST(ArenaFreeListTest, FreeListReusesMemory) {
-    Pool* pool = pool_create();
+TEST(ArenaRetireTest, RetiredBlockIsReusedBySameSizeAllocation) {
     Arena* arena = arena_create_default();
-    
-    // Allocate and free a block
-    void* ptr1 = arena_alloc(arena, 64);
-    ASSERT_NE(ptr1, nullptr);
-    arena_free(arena, ptr1, 64);
-    
-    // Allocate again - might reuse freed block
-    void* ptr2 = arena_alloc(arena, 64);
-    ASSERT_NE(ptr2, nullptr);
-    
-    // Both should be valid
-    EXPECT_TRUE(arena_owns(arena, ptr2));
-    
+    ASSERT_NE(arena, nullptr);
+    void* first = arena_alloc(arena, 64);
+    void* guard = arena_alloc(arena, 64);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(guard, nullptr);
+    arena_retire(arena, first, 64);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retired_bytes, 64u);
+    EXPECT_EQ(stats.active_bytes, 64u);
+    EXPECT_EQ(stats.bump_used_bytes, 128u);
+
+    EXPECT_EQ(arena_alloc(arena, 64), first);
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retired_bytes, 0u);
+    EXPECT_EQ(stats.retire_count, 1u);
+    EXPECT_EQ(stats.reuse_hits, 1u);
     arena_destroy(arena);
-    pool_destroy(pool);
 }
 
-TEST(ArenaFreeListTest, FreeListSplitsLargeBlocks) {
-    Pool* pool = pool_create();
+TEST(ArenaRetireTest, AdjacentRetiredBlocksCoalesceAndSplit) {
     Arena* arena = arena_create_default();
-    
-    // Allocate and free a large block
-    void* ptr1 = arena_alloc(arena, 256);
-    ASSERT_NE(ptr1, nullptr);
-    arena_free(arena, ptr1, 256);
-    
-    // Allocate smaller block - should split the free block
-    void* ptr2 = arena_alloc(arena, 64);
-    ASSERT_NE(ptr2, nullptr);
-    
-    EXPECT_TRUE(arena_owns(arena, ptr2));
-    
+    ASSERT_NE(arena, nullptr);
+    void* a = arena_alloc(arena, 64);
+    void* b = arena_alloc(arena, 64);
+    void* guard = arena_alloc(arena, 64);
+    ASSERT_NE(guard, nullptr);
+    arena_retire(arena, a, 64);
+    arena_retire(arena, b, 64);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.coalesce_count, 1u);
+    EXPECT_EQ(stats.retired_bytes, 128u);
+
+    // a smaller request takes the front and keeps the rest retained
+    EXPECT_EQ(arena_alloc(arena, 32), a);
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.split_count, 1u);
+    EXPECT_EQ(stats.retired_bytes, 96u);
     arena_destroy(arena);
-    pool_destroy(pool);
 }
 
-// ============================================================================
-// Integration Tests
-// ============================================================================
-
-TEST(ArenaIntegrationTest, ReallocAndOwnershipIntegration) {
-    Pool* pool = pool_create();
+TEST(ArenaRetireTest, RetiredTailRejoinsBumpCursor) {
     Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    EXPECT_TRUE(arena_owns(arena, ptr));
-    
-    // Realloc should maintain ownership
-    void* new_ptr = arena_realloc(arena, ptr, 64, 128);
-    ASSERT_NE(new_ptr, nullptr);
-    EXPECT_TRUE(arena_owns(arena, new_ptr));
-    
-    // Shrink should maintain ownership
-    void* shrunk_ptr = arena_realloc(arena, new_ptr, 128, 32);
-    ASSERT_NE(shrunk_ptr, nullptr);
-    EXPECT_TRUE(arena_owns(arena, shrunk_ptr));
-    
+    ASSERT_NE(arena, nullptr);
+    ASSERT_NE(arena_alloc(arena, 64), nullptr);
+    void* tail = arena_alloc(arena, 64);
+    arena_retire(arena, tail, 64);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.bump_back_count, 1u);
+    EXPECT_EQ(stats.retired_bytes, 0u);
+    EXPECT_EQ(arena_total_used(arena), 64u);
     arena_destroy(arena);
-    pool_destroy(pool);
 }
 
-TEST(ArenaIntegrationTest, MultipleAllocationsAndReallocs) {
-    Pool* pool = pool_create();
+TEST(ArenaRetireTest, ResetDropsRetiredBlocks) {
     Arena* arena = arena_create_default();
-    
-    // Complex scenario with multiple operations
-    void* ptr1 = arena_alloc(arena, 64);
-    void* ptr2 = arena_alloc(arena, 128);
-    void* ptr3 = arena_alloc(arena, 256);
-    
-    ASSERT_NE(ptr1, nullptr);
-    ASSERT_NE(ptr2, nullptr);
-    ASSERT_NE(ptr3, nullptr);
-    
-    // All should be owned
-    EXPECT_TRUE(arena_owns(arena, ptr1));
-    EXPECT_TRUE(arena_owns(arena, ptr2));
-    EXPECT_TRUE(arena_owns(arena, ptr3));
-    
-    // Realloc middle one
-    void* new_ptr2 = arena_realloc(arena, ptr2, 128, 64);
-    ASSERT_NE(new_ptr2, nullptr);
-    EXPECT_TRUE(arena_owns(arena, new_ptr2));
-    
-    // Original pointers should still be owned
-    EXPECT_TRUE(arena_owns(arena, ptr1));
-    EXPECT_TRUE(arena_owns(arena, ptr3));
-    
+    ASSERT_NE(arena, nullptr);
+    void* a = arena_alloc(arena, 64);
+    ASSERT_NE(arena_alloc(arena, 64), nullptr);
+    arena_retire(arena, a, 64);
+    arena_reset(arena);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retired_bytes, 0u);
+    EXPECT_EQ(arena_alloc(arena, 64), a);  // fresh bump from the start
     arena_destroy(arena);
-    pool_destroy(pool);
 }
 
-TEST(ArenaIntegrationTest, LargeRealloc) {
-    Pool* pool = pool_create();
+TEST(ArenaRetireTest, ForeignPointerIsIgnored) {
     Arena* arena = arena_create_default();
-    
-    void* ptr = arena_alloc(arena, 64);
-    ASSERT_NE(ptr, nullptr);
-    
-    // Realloc to much larger size
-    void* new_ptr = arena_realloc(arena, ptr, 64, 16384);
-    ASSERT_NE(new_ptr, nullptr);
-    EXPECT_TRUE(arena_owns(arena, new_ptr));
-    
+    ASSERT_NE(arena, nullptr);
+    char outside[64];
+    arena_retire(arena, outside, 64);
+    arena_retire(arena, nullptr, 64);
+    arena_retire(nullptr, outside, 64);
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retire_count, 0u);
     arena_destroy(arena);
-    pool_destroy(pool);
 }
+
+#ifndef NDEBUG
+TEST(ArenaRetireTest, RetireOnScopeOwnedArenaAsserts) {
+    EXPECT_DEATH({
+        Arena* arena = arena_create_default();
+        void* p = arena_alloc(arena, 64);
+        arena_scope_enter(arena);
+        arena_retire(arena, p, 64);  // the owner rewinds this tail
+    }, "");
+}
+
+TEST(ArenaRetireTest, RewindWithRetiredBlocksAsserts) {
+    EXPECT_DEATH({
+        Arena* arena = arena_create_default();
+        ArenaMark mark = arena_mark(arena);
+        void* p = arena_alloc(arena, 64);
+        arena_alloc(arena, 64);
+        arena_retire(arena, p, 64);
+        arena_rewind(arena, mark);
+    }, "");
+}
+
+TEST(ArenaRewindTest, MarkAheadOfTailAsserts) {
+    EXPECT_DEATH({
+        Arena* arena = arena_create_default();
+        ASSERT_NE(arena_alloc(arena, 64), nullptr);
+        ArenaMark ahead = arena_mark(arena);
+        arena_reset(arena);
+        arena_rewind(arena, ahead);  // the mark lies beyond the current tail
+    }, "");
+}
+
+TEST(ArenaScopeOwnerTest, DirectAllocationWhileScopeOwnedAsserts) {
+    EXPECT_DEATH({
+        Arena* arena = arena_create_default();
+        arena_scope_enter(arena);
+        arena_alloc(arena, 64);  // would land inside the owner's rewound tail
+    }, "");
+}
+
+TEST(ArenaScopeOwnerTest, SecondScopeOwnerAsserts) {
+    EXPECT_DEATH({
+        Arena* arena = arena_create_default();
+        arena_scope_enter(arena);
+        arena_scope_enter(arena);
+    }, "");
+}
+#endif
 
 //==============================================================================
 // Container Arena Allocation Tests (Phase 5a)

@@ -855,8 +855,7 @@ static Type* sys_func_success_result_type(Transpiler* tp, SysFuncInfo* info,
     case SYS_RESULT_TEXT_SPLIT:
         // fn_split/fn_split3 build String parts on their text and null-source
         // paths. ArrayNum and open sources retain the generic array contract.
-        if (source->type_id == LMD_TYPE_STRING || source->type_id == LMD_TYPE_SYMBOL ||
-                source->type_id == LMD_TYPE_NULL) {
+        if (sysfunc_text_split_element_type(info, source->type_id) == LMD_TYPE_STRING) {
             TypeArray* out = (TypeArray*)alloc_type(tp->pool, LMD_TYPE_ARRAY,
                 sizeof(TypeArray));
             out->nested = &TYPE_STRING;

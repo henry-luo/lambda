@@ -80,14 +80,13 @@ static bool arena_stat_fn(void* a, MemStatSample* s) {
     s->backing_bytes = 0;
     s->direct_bytes = stats.active_bytes;
     s->committed_bytes = stats.committed_bytes;
-    s->recyclable_bytes = stats.recyclable_bytes;
     s->waste_bytes = stats.waste_bytes;
     s->overhead_bytes = stats.overhead_bytes;
     s->high_water_bytes = stats.high_water_active_bytes;
     s->alloc_count = stats.allocation_count;
-    s->free_count = stats.free_count;
+    s->recyclable_bytes = stats.retired_bytes;
+    s->free_count = stats.retire_count;
     s->reuse_hits = stats.reuse_hits;
-    s->reuse_misses = stats.reuse_misses;
     s->split_count = stats.split_count;
     s->coalesce_count = stats.coalesce_count;
     s->bump_back_count = stats.bump_back_count;

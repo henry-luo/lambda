@@ -7,6 +7,19 @@
       "expect": [
         "mov\tu8:({{r}}), {{r}}",
         "call\titem_at_p, item_at"
+      ],
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r:dense_type}}, u8:({{r:array}})"
+        },
+        {
+          "pattern": ", {{r:dense_type}}, 17",
+          "next_line": true
+        },
+        {
+          "pattern": "mov\t{{r}}, u8:2({{r:array}})",
+          "next_line": true
+        }
       ]
     }
   ]

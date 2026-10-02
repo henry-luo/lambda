@@ -3004,38 +3004,26 @@ struct TableCollapsedBorderLookup {
     bool ready;
 };
 
-static void table_collapsed_border_lookup_destroy(LayoutContext* lycon,
-                                                  TableCollapsedBorderLookup* lookup) {
-    if (!lycon || !lookup) return;
-    scratch_free(&lycon->scratch, lookup->cells);
-    scratch_free(&lycon->scratch, lookup->row_groups);
-    scratch_free(&lycon->scratch, lookup->rows);
-    lookup->cells = nullptr;
-    lookup->row_groups = nullptr;
-    lookup->rows = nullptr;
-    lookup->ready = false;
-}
-
+// The lookup arrays live in the caller's scope.
 static TableCollapsedBorderLookup table_collapsed_border_lookup_create(
-    LayoutContext* lycon, ViewTable* table, const TableMetadata* meta) {
+    ScratchScope* scope, ViewTable* table, const TableMetadata* meta) {
     TableCollapsedBorderLookup lookup = {nullptr, nullptr, nullptr, 0, 0, false};
-    if (!lycon || !table || !meta || meta->row_count <= 0 || meta->column_count <= 0) {
+    if (!scope || !table || !meta || meta->row_count <= 0 || meta->column_count <= 0) {
         return lookup;
     }
 
     lookup.row_count = meta->row_count;
     lookup.column_count = meta->column_count;
     size_t cell_count = (size_t)lookup.row_count * (size_t)lookup.column_count;
-    lookup.rows = (ViewTableRow**)scratch_calloc(
-        &lycon->scratch, (size_t)lookup.row_count * sizeof(ViewTableRow*));
-    lookup.row_groups = (ViewBlock**)scratch_calloc(
-        &lycon->scratch, (size_t)lookup.row_count * sizeof(ViewBlock*));
-    lookup.cells = (ViewTableCell**)scratch_calloc(
-        &lycon->scratch, cell_count * sizeof(ViewTableCell*));
+    lookup.rows = scope->array_zero<ViewTableRow*>((size_t)lookup.row_count);
+    lookup.row_groups = scope->array_zero<ViewBlock*>((size_t)lookup.row_count);
+    lookup.cells = scope->array_zero<ViewTableCell*>(cell_count);
     if (!lookup.rows || !lookup.row_groups || !lookup.cells) {
         log_error("table_collapsed_border_lookup_alloc_failed: rows=%d columns=%d",
                   lookup.row_count, lookup.column_count);
-        table_collapsed_border_lookup_destroy(lycon, &lookup);
+        lookup.rows = nullptr;
+        lookup.row_groups = nullptr;
+        lookup.cells = nullptr;
         return lookup;
     }
 
@@ -3358,7 +3346,8 @@ static void collect_collapsed_border_candidates(ViewTable* table,
 
 static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, TableMetadata* meta) {
     if (!table || !meta || !table->tb->border_collapse) return;
-    TableCollapsedBorderLookup lookup = table_collapsed_border_lookup_create(lycon, table, meta);
+    ScratchScope scope(&lycon->scratch);
+    TableCollapsedBorderLookup lookup = table_collapsed_border_lookup_create(&scope, table, meta);
     auto resolve_axis = [&](bool horizontal) {
         LayoutTableAxis axis(meta, horizontal);
         for (int edge = 0; edge <= axis.edge_count; edge++) {
@@ -3379,7 +3368,6 @@ static void resolve_collapsed_borders(LayoutContext* lycon, ViewTable* table, Ta
     table_update_collapsed_edge(table, meta, &lookup, true, false);
     table_update_collapsed_edge(table, meta, &lookup, false, true);
     table_update_collapsed_edge(table, meta, &lookup, false, false);
-    table_collapsed_border_lookup_destroy(lycon, &lookup);
 
 }
 
@@ -6634,7 +6622,8 @@ static int table_place_row_cells(ViewTableRow* row, int row_index, int rows,
     return col;
 }
 
-static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* table) {
+static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* table,
+                                              ScratchScope* scope) {
     int columns = 0;
     int rows = 0;
     // CSS 2.1 §17.5.5: Collapsed rows still contribute to column width calculation
@@ -6692,7 +6681,7 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
             columns = max_col_used;
         }
     }
-    TableMetadata* meta = table_metadata_create(&lycon->scratch, columns, rows);
+    TableMetadata* meta = table_metadata_create(scope, columns, rows);
     int current_row = 0;
     table->each_row( [&](ViewTableRow* row) {
         // CSS 2.1 §17.5.5: Rows with visibility: collapse don't contribute to height
@@ -6740,6 +6729,8 @@ static TableMetadata* analyze_table_structure(LayoutContext* lycon, ViewTable* t
 
 void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
+    // owns the metadata arrays and column positions for the whole table pass
+    ScratchScope scope(&lycon->scratch);
     float row_spacing = table_inter_spacing(table, false);
     float column_spacing = table_inter_spacing(table, true);
     float table_font_size = (table->tb && table->tb->computed_font_size > 0)
@@ -6753,7 +6744,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     ViewBlock* caption = caption_collection.first_caption;  // first caption (for backward-compat checks)
     float top_caption_height = caption_collection.top_height;
     float caption_height = caption_collection.total_height;
-    TableMetadata* meta = analyze_table_structure(lycon, table);
+    TableMetadata* meta = analyze_table_structure(lycon, table, &scope);
     if (!meta) {
         // CSS 2.1 §17.4: A table with only a caption is valid; the caption
         if (caption) {
@@ -7070,7 +7061,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
       if (fixed_explicit_width > 0) {
         float content_width = table_fixed_content_width_for_columns(
             table, fixed_explicit_width, columns);
-        float* explicit_col_widths = (float*)scratch_calloc(&lycon->scratch, columns * sizeof(float));
+        ScratchScope explicit_scope(&lycon->scratch);
+        float* explicit_col_widths = explicit_scope.array_zero<float>(columns);
         float total_explicit = 0.0f;  int unspecified_cols = 0;
         {
             int col_idx = 0;
@@ -7103,7 +7095,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_distribute_fixed_column_widths(
             explicit_col_widths, columns, &content_width, total_explicit, unspecified_cols);
         memcpy(col_widths, explicit_col_widths, columns * sizeof(float));
-        scratch_free(&lycon->scratch, explicit_col_widths);
         table_apply_fixed_height_distribution(lycon, table, rows);
       } // end if (fixed_explicit_width > 0)
     }
@@ -7230,7 +7221,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_apply_minmax_width_constraints(
             table, meta, col_widths, columns, &table_width, table_padding_horizontal);
     }
-    float* col_x_positions = (float*)scratch_calloc(&lycon->scratch, (columns + 1) * sizeof(float));
+    float* col_x_positions = scope.array_zero<float>((size_t)columns + 1);
     BoxMetrics table_box = layout_box_metrics(table);
     float table_padding_left = table->tb->border_collapse
         ? 0.0f : max(table_box.padding.left, 0.0f);
@@ -7436,8 +7427,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
             if (has_percentage_reference_rows && extra_for_body > 0 &&
                 meta->row_count > 0) {
-                bool* selected_rows = (bool*)scratch_calloc(
-                    &lycon->scratch, meta->row_count * sizeof(bool));
+                ScratchScope selected_scope(&lycon->scratch);
+                bool* selected_rows = selected_scope.array_zero<bool>(meta->row_count);
                 if (selected_rows) {
                     if (body_row_count > 0) {
                         table->each_body_row( [&](ViewTableRowGroup* group, ViewTableRow* trow) {
@@ -7459,7 +7450,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             meta, selected_rows, base_height + extra_for_body)) {
                         distributed_height_delta = extra_for_body;
                     }
-                    scratch_free(&lycon->scratch, selected_rows);
                     table_recalculate_row_y_positions(
                         table, meta, table_border_top + table_padding_top + top_caption_height + row_spacing);
                 }
@@ -7634,7 +7624,6 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     arraylist_free(body_groups);
     arraylist_free(ordered_elements);
     table_metadata_destroy(meta);
-    scratch_free(&lycon->scratch, col_x_positions);
     table_release_caption_collection(&caption_collection);
     #undef GRID
 }

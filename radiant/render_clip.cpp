@@ -61,18 +61,16 @@ static RdtPath* render_clip_create_shape_path(ClipShape* shape) {
     return p;
 }
 
-static void render_clip_free_shape(ScratchArena* scratch, ClipShape* shape) {
-    if (!scratch || !shape) return;
-    if (shape->type == CLIP_SHAPE_POLYGON) {
-        scratch_free(scratch, shape->polygon.vy);
-        scratch_free(scratch, shape->polygon.vx);
-    }
-    scratch_free(scratch, shape);
+// Owned clip shapes (and polygon vertices) live in the clip scope's scratch
+// scope, which render_clip_pop_scope ends.
+static ClipShape* render_clip_alloc_shape(ScratchArena* scratch, ScratchMark* mem) {
+    return (ClipShape*)scratch_scope_calloc(scratch, mem, sizeof(ClipShape));
 }
 
-static ClipShape* render_clip_clone_shape(ScratchArena* scratch, const ClipShape* shape) {
+static ClipShape* render_clip_clone_shape(ScratchArena* scratch, ScratchMark* mem,
+                                          const ClipShape* shape) {
     if (!scratch || !shape) return nullptr;
-    ClipShape* copy = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
+    ClipShape* copy = render_clip_alloc_shape(scratch, mem);
     if (!copy) return nullptr;
     *copy = *shape;
     return copy;
@@ -267,7 +265,8 @@ static RdtPath* render_clip_parse_path_function(const char* value,
     return path;
 }
 
-static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char* value,
+static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, ScratchMark* mem,
+                                              const char* value,
                                               float elem_w, float elem_h,
                                               float abs_x, float abs_y) {
     if (!scratch || !value || strncmp(value, "none", 4) == 0) return nullptr;
@@ -294,7 +293,8 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
             rx = render_clip_parse_len(s, elem_w);
             ry = rx;
         }
-        ClipShape* cs = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
+        ClipShape* cs = render_clip_alloc_shape(scratch, mem);
+        if (!cs) return nullptr;
         if (rx > 0 || ry > 0) {
             cs->type = CLIP_SHAPE_ROUNDED_RECT;
             cs->rounded_rect = {abs_x + left_v, abs_y + top,
@@ -314,7 +314,8 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
         float r = render_clip_parse_len(s, ref);
         float cx, cy;
         render_clip_parse_center(s, elem_w, elem_h, abs_x, abs_y, &cx, &cy);
-        ClipShape* cs = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
+        ClipShape* cs = render_clip_alloc_shape(scratch, mem);
+        if (!cs) return nullptr;
         cs->type = CLIP_SHAPE_CIRCLE;
         cs->circle = {cx, cy, r};
         return cs;
@@ -326,7 +327,8 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
         float ry = render_clip_parse_len(s, elem_h);
         float cx, cy;
         render_clip_parse_center(s, elem_w, elem_h, abs_x, abs_y, &cx, &cy);
-        ClipShape* cs = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
+        ClipShape* cs = render_clip_alloc_shape(scratch, mem);
+        if (!cs) return nullptr;
         cs->type = CLIP_SHAPE_ELLIPSE;
         cs->ellipse = {cx, cy, rx, ry};
         return cs;
@@ -352,19 +354,19 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, const char*
         }
         if (count < 3) return nullptr;
 
-        float* vx = (float*)scratch_alloc(scratch, count * sizeof(float));
-        float* vy = (float*)scratch_alloc(scratch, count * sizeof(float));
+        float* vx = (float*)scratch_scope_alloc(scratch, mem, (size_t)count * sizeof(float));
+        float* vy = (float*)scratch_scope_alloc(scratch, mem, (size_t)count * sizeof(float));
+        if (!vx || !vy) return nullptr;
         for (int i = 0; i < count; i++) {
             if (!render_clip_parse_polygon_len(s, elem_w, &vx[i]) ||
                 !render_clip_parse_polygon_len(s, elem_h, &vy[i])) {
-                scratch_free(scratch, vy);
-                scratch_free(scratch, vx);
                 return nullptr;
             }
             vx[i] += abs_x;
             vy[i] += abs_y;
         }
-        ClipShape* cs = (ClipShape*)scratch_calloc(scratch, sizeof(ClipShape));
+        ClipShape* cs = render_clip_alloc_shape(scratch, mem);
+        if (!cs) return nullptr;
         cs->type = CLIP_SHAPE_POLYGON;
         cs->polygon = {vx, vy, count};
         return cs;
@@ -397,14 +399,16 @@ static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* 
     return true;
 }
 
+// On success the clip scope takes over `mem`; on failure `mem` is ended here.
 static bool render_clip_push_owned_shape(RenderContext* rdcon,
                                          RenderClipScope* scope,
-                                         ClipShape* shape) {
+                                         ClipShape* shape, ScratchMark* mem) {
     if (!shape || !render_clip_push_shape_scope(rdcon, scope, shape)) {
-        if (shape && rdcon) render_clip_free_shape(&rdcon->scratch, shape);
+        if (rdcon) scratch_scope_end(&rdcon->scratch, mem);
         return false;
     }
     scope->owns_shape = true;
+    scope->mem = *mem;
     return true;
 }
 
@@ -437,12 +441,10 @@ RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* bloc
         return scope;
     }
 
-    ClipShape* css_shape = render_clip_parse_css_shape(&rdcon->scratch, clip_str, elem_w, elem_h, abs_x, abs_y);
-    if (!css_shape) {
-        return scope;
-    }
-
-    if (!render_clip_push_owned_shape(rdcon, &scope, css_shape)) return scope;
+    ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
+    ClipShape* css_shape = render_clip_parse_css_shape(&rdcon->scratch, &mem, clip_str,
+                                                       elem_w, elem_h, abs_x, abs_y);
+    if (!render_clip_push_owned_shape(rdcon, &scope, css_shape, &mem)) return scope;
     log_debug("[CLIP] CSS clip-path: %s on element %s", clip_str, block->node_name());
     return scope;
 }
@@ -461,11 +463,9 @@ RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* c
     ClipShape inline_shape = {};
     inline_shape.type = CLIP_SHAPE_INSET;
     inline_shape.inset = {clip->left, clip->top, w, h, 0, 0};
-    ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &inline_shape);
-    if (!shape) {
-        return scope;
-    }
-    if (!render_clip_push_owned_shape(rdcon, &scope, shape)) return scope;
+    ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
+    ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &mem, &inline_shape);
+    if (!render_clip_push_owned_shape(rdcon, &scope, shape, &mem)) return scope;
     log_debug("[CLIP] pushed rect clip: (%.0f,%.0f) %.0fx%.0f",
         clip->left, clip->top, w, h);
     return scope;
@@ -488,11 +488,9 @@ RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
     inline_shape.type = CLIP_SHAPE_ROUNDED_RECT;
     inline_shape.rounded_rect = {clip->left, clip->top, cw, ch,
         cr->top_left, cr->top_right, cr->bottom_right, cr->bottom_left};
-    ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &inline_shape);
-    if (!shape) {
-        return scope;
-    }
-    if (!render_clip_push_owned_shape(rdcon, &scope, shape)) return scope;
+    ScratchMark mem = scratch_scope_begin(&rdcon->scratch);
+    ClipShape* shape = render_clip_clone_shape(&rdcon->scratch, &mem, &inline_shape);
+    if (!render_clip_push_owned_shape(rdcon, &scope, shape, &mem)) return scope;
 
     // Clear the flag so child elements do not redundantly push the same clip.
     rdcon->block.has_clip_radius = false;
@@ -511,7 +509,7 @@ void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope) {
         rdcon->clip_shape_depth--;
     }
     if (scope->owns_shape) {
-        render_clip_free_shape(&rdcon->scratch, scope->shape);
+        scratch_scope_end(&rdcon->scratch, &scope->mem);
     }
     *scope = {};
 }

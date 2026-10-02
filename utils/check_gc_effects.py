@@ -117,6 +117,8 @@ VERIFIED_EXTERNAL_LEAVES = {
 VERIFIED_READER_METHODS = {
     "bool_value",
     "get_chars",
+    # lambda.hpp: pointer masking and a tag check only; no payload allocation.
+    "get_complex",
     "get_double",
     "get_decimal",
     "get_int56",
@@ -128,6 +130,7 @@ VERIFIED_READER_METHODS = {
     "get_num_type",
     "get_safe_binary",
     "get_safe_string",
+    "get_safe_symbol",
     "get_uint64",
     "get_elem_type",
     "is_inline_int64",

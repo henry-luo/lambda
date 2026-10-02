@@ -1008,6 +1008,9 @@ void ViewTree::init() {
     else {
         view_tree_canonical_init(this);
         scratch_arena = mem_arena_create(NULL, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
+        layout_pass_arena = mem_arena_create(NULL, MEM_ROLE_LAYOUT, "view_tree.layout_pass_arena");
+        render_scratch_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "view_tree.render_scratch_arena");
+        display_list_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "view_tree.display_list_arena");
         free_text_rects = nullptr;
         if (layout_generation == 0) layout_generation = 1;
         log_debug("view pool initialized");
@@ -1054,12 +1057,21 @@ void ViewTree::destroy() {
     }
     view_tree_canonical_destroy(this);
     Arena* old_arena = scratch_arena;
+    Arena* old_pass_arena = layout_pass_arena;
+    Arena* old_render_arena = render_scratch_arena;
+    Arena* old_display_list_arena = display_list_arena;
     Pool* old_pool = prop_pool;
     scratch_arena = NULL;
+    layout_pass_arena = NULL;
+    render_scratch_arena = NULL;
+    display_list_arena = NULL;
     prop_pool = NULL;
     free_text_rects = NULL;
     // Factory-created view roots must unregister their memory-context nodes on teardown.
     if (old_arena) mem_arena_destroy(old_arena);
+    if (old_pass_arena) mem_arena_destroy(old_pass_arena);
+    if (old_render_arena) mem_arena_destroy(old_render_arena);
+    if (old_display_list_arena) mem_arena_destroy(old_display_list_arena);
     if (old_pool) mem_pool_destroy(old_pool);
 }
 

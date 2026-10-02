@@ -3566,8 +3566,8 @@ static bool multicol_project_fragmented_inline_descendants(
     WritingMode parent_mode = layout_block_writing_mode(parent_block);
     // 2048 InlineFragmentItem (~56 B) ≈ 112 KiB — too large for stack; allocate from scratch arena (LIFO).
     constexpr int MAX_INLINE_FRAGMENT_ITEMS = 2048;
-    InlineFragmentItem* items = (InlineFragmentItem*)scratch_alloc(&lycon->scratch,
-        MAX_INLINE_FRAGMENT_ITEMS * sizeof(InlineFragmentItem));
+    ScratchScope scope(&lycon->scratch);
+    InlineFragmentItem* items = scope.array<InlineFragmentItem>(MAX_INLINE_FRAGMENT_ITEMS);
     if (!items) return false;
     int item_count = 0;
 
@@ -3596,7 +3596,6 @@ static bool multicol_project_fragmented_inline_descendants(
     });
 
     if (item_count == 0) {
-        scratch_free(&lycon->scratch, items);
         return false;
     }
     float first_line_y = items[0].original_y;
@@ -3931,7 +3930,6 @@ static bool multicol_project_fragmented_inline_descendants(
         descendant = descendant->next();
     }
 
-    scratch_free(&lycon->scratch, items);
     return true;
 }
 
@@ -7044,7 +7042,7 @@ static float multicol_split_child_around_spanners(
         return original_child_height;
     }
     // MAX_MULTICOL_BLOCKS = 1024 → MulticolFlowItem[] ≈ 32 KiB; move to scratch arena (LIFO).
-    MulticolFlowScratch flow_scratch = {};
+    MulticolFlowScratch flow_scratch;
     if (!flow_scratch.init(&lycon->scratch)) return child->height;
     MulticolFlowItem* children = flow_scratch.items;
     int child_count = 0;
@@ -7104,7 +7102,7 @@ static float multicol_split_child_around_spanners(
     leading_fragment_border_height = layout_axis_decoration_start(
         child->bound ? child->boundary() : nullptr, LAYOUT_AXIS_Y);
 
-    MulticolGroupScratch group_scratch = {};
+    MulticolGroupScratch group_scratch;
     if (!group_scratch.init(&lycon->scratch)) {
         group_scratch.release(&lycon->scratch);
     flow_scratch.release(&lycon->scratch);
@@ -7786,19 +7784,11 @@ static bool multicol_reflow_mixed_direct_flow(
     if (!lycon || !block || column_count <= 1 || column_width <= 0.0f) {
         return false;
     }
-    MulticolMixedFlowItem* items = (MulticolMixedFlowItem*)scratch_calloc(
-        &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolMixedFlowItem));
-    MulticolMixedInlineRecord* records = (MulticolMixedInlineRecord*)scratch_calloc(
-        &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolMixedInlineRecord));
-    MulticolMixedInlineLine* lines = (MulticolMixedInlineLine*)scratch_calloc(
-        &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(MulticolMixedInlineLine));
-    auto release_scratch = [&]() {
-        if (lines) scratch_free(&lycon->scratch, lines);
-        if (records) scratch_free(&lycon->scratch, records);
-        if (items) scratch_free(&lycon->scratch, items);
-    };
+    ScratchScope scope(&lycon->scratch);
+    MulticolMixedFlowItem* items = scope.array_zero<MulticolMixedFlowItem>(MAX_MULTICOL_BLOCKS);
+    MulticolMixedInlineRecord* records = scope.array_zero<MulticolMixedInlineRecord>(MAX_MULTICOL_BLOCKS);
+    MulticolMixedInlineLine* lines = scope.array_zero<MulticolMixedInlineLine>(MAX_MULTICOL_BLOCKS);
     if (!items || !records || !lines) {
-        release_scratch();
         return false;
     }
 
@@ -7933,14 +7923,12 @@ static bool multicol_reflow_mixed_direct_flow(
         collection_ok = false;
     }
     if (!collection_ok || !has_inline_flow || block_count < 1 || item_count <= block_count) {
-        release_scratch();
         return false;
     }
 
-    MulticolGroupScratch balance_scratch = {};
+    MulticolGroupScratch balance_scratch;
     if (!balance_scratch.init(&lycon->scratch)) {
         balance_scratch.release(&lycon->scratch);
-        release_scratch();
         return false;
     }
     float total_height = 0.0f;
@@ -7969,7 +7957,6 @@ static bool multicol_reflow_mixed_direct_flow(
     }
     balance_scratch.release(&lycon->scratch);
     if (target_height <= 0.0f) {
-        release_scratch();
         return false;
     }
 
@@ -8334,7 +8321,6 @@ static bool multicol_reflow_mixed_direct_flow(
     if (out_last_fragment) *out_last_fragment = fragment_index;
     if (out_end_offset) *out_end_offset = fragment_used;
 
-    release_scratch();
     return true;
 }
 
@@ -9059,19 +9045,12 @@ float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
     int column_count = block->multicol_prop()->column_count;
     if (column_count <= 1) return 0.0f;
 
-    float* item_extents = (float*)scratch_calloc(
-        &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(float));
-    bool* item_can_fragment = (bool*)scratch_calloc(
-        &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(bool));
-    bool* break_before = (bool*)scratch_calloc(
-        &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(bool));
-    bool* break_after = (bool*)scratch_calloc(
-        &lycon->scratch, MAX_MULTICOL_BLOCKS * sizeof(bool));
+    ScratchScope scope(&lycon->scratch);
+    float* item_extents = scope.array_zero<float>(MAX_MULTICOL_BLOCKS);
+    bool* item_can_fragment = scope.array_zero<bool>(MAX_MULTICOL_BLOCKS);
+    bool* break_before = scope.array_zero<bool>(MAX_MULTICOL_BLOCKS);
+    bool* break_after = scope.array_zero<bool>(MAX_MULTICOL_BLOCKS);
     if (!item_extents || !item_can_fragment || !break_before || !break_after) {
-        if (break_after) scratch_free(&lycon->scratch, break_after);
-        if (break_before) scratch_free(&lycon->scratch, break_before);
-        if (item_can_fragment) scratch_free(&lycon->scratch, item_can_fragment);
-        if (item_extents) scratch_free(&lycon->scratch, item_extents);
         return 0.0f;
     }
 
@@ -9112,10 +9091,6 @@ float multicol_intrinsic_vertical_block_extent(LayoutContext* lycon,
             item_count, column_count, result, total_extent);
     }
 
-    scratch_free(&lycon->scratch, break_after);
-    scratch_free(&lycon->scratch, break_before);
-    scratch_free(&lycon->scratch, item_can_fragment);
-    scratch_free(&lycon->scratch, item_extents);
     return result;
 }
 
@@ -10090,7 +10065,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     // CSS Multicol §7.1: Spanners divide content into "column groups".
     // Each column group is balanced independently.
     // MAX_MULTICOL_BLOCKS = 1024 → MulticolFlowItem[] ≈ 32 KiB; move to scratch arena (LIFO).
-    MulticolFlowScratch flow_scratch = {};
+    MulticolFlowScratch flow_scratch;
     if (!flow_scratch.init(&lycon->scratch)) {
         log_error("[MULTICOL] Failed to allocate blocks array");
         return;
@@ -10548,7 +10523,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
     float max_column_height = 0;  // running Y offset for the entire container
     float prev_margin_bottom = 0; // for margin collapsing between consecutive spanners
 
-    MulticolGroupScratch group_scratch = {};
+    MulticolGroupScratch group_scratch;
     if (!group_scratch.init(&lycon->scratch)) {
         log_error("[MULTICOL] Failed to allocate group scratch buffers");
         group_scratch.release(&lycon->scratch);

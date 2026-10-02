@@ -1,5 +1,6 @@
 #pragma once
 #include "../lib/arraylist.hpp"
+#include "../lib/mem_factory.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -226,7 +227,8 @@ void     rdt_path_free(RdtPath* p);
 // Deep-copy a path (entries array is duplicated).
 RdtPath* rdt_path_clone(const RdtPath* src);
 
-// Compute a conservative axis-aligned path bound in path-local coordinates.
+// Compute an axis-aligned geometry bound in path-local coordinates, excluding
+// Bezier control points that are outside the curve.
 // Returns false when the path has no drawable geometry.
 bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
                          float* right, float* bottom);
@@ -751,7 +753,37 @@ void dl_item_free_owned_payload(DisplayItem* item);
 
 // Initialise a display list.  backing_arena is used for variable-length data
 // (path copies, gradient stops, dash arrays).
+// `backing_arena` must not be shared: the list's scratch owns its tail.
 void dl_init(DisplayList* dl, Arena* backing_arena);
+
+// Allocators for a private one-shot display-list render: a temp pool, and
+// separate arenas for the list payloads and the replay scratch, since each
+// scratch arena owns its backing arena exclusively.
+struct OffscreenRenderArenas {
+    Pool* pool = nullptr;
+    Arena* list_arena = nullptr;
+    Arena* scratch_arena = nullptr;
+
+    bool init(const char* pool_label, const char* list_label, const char* scratch_label) {
+        pool = mem_pool_create(NULL, MEM_ROLE_RENDER, pool_label);
+        list_arena = pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, list_label) : nullptr;
+        scratch_arena = list_arena ? mem_arena_create(NULL, MEM_ROLE_RENDER, scratch_label) : nullptr;
+        if (scratch_arena) return true;
+        destroy();
+        return false;
+    }
+
+    // the arenas are registered under the root context, not the pool, so each
+    // is destroyed explicitly
+    void destroy() {
+        if (scratch_arena) mem_arena_destroy(scratch_arena);
+        if (list_arena) mem_arena_destroy(list_arena);
+        if (pool) mem_pool_destroy(pool);
+        scratch_arena = nullptr;
+        list_arena = nullptr;
+        pool = nullptr;
+    }
+};
 
 // Reset the display list for re-recording (rewinds arena, zeroes count).
 void dl_clear(DisplayList* dl);
@@ -1955,16 +1987,17 @@ static inline bool surface_region_clip(ImageSurface* surface,
     return w > 0 && h > 0;
 }
 
+// The saved pixels belong to `scope`, which the caller ends after restoring.
 static inline uint32_t* surface_region_save(ImageSurface* surface,
-                                            ScratchArena* scratch,
+                                            ScratchArena* scratch, ScratchMark* scope,
                                             int rx, int ry, int rw, int rh,
                                             IRect* out_region) {
-    if (!scratch || !surface_region_clip(surface, rx, ry, rw, rh, out_region)) return nullptr;
+    if (!scratch || !scope || !surface_region_clip(surface, rx, ry, rw, rh, out_region)) return nullptr;
     int x0 = out_region->x;
     int y0 = out_region->y;
     int w = out_region->w;
     int h = out_region->h;
-    uint32_t* saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
+    uint32_t* saved = (uint32_t*)scratch_scope_alloc(scratch, scope, (size_t)w * h * sizeof(uint32_t));
     if (!saved) return nullptr;
     uint32_t* px = (uint32_t*)surface->pixels;
     int pitch = surface->pitch / 4;
@@ -2070,6 +2103,7 @@ void dl_replay_webview_layer_placeholder_at_offset(ImageSurface* surface,
 typedef struct DisplayReplayBackdropStack {
     uint32_t* stack[DL_REPLAY_MAX_BACKDROP_DEPTH];
     IRect region[DL_REPLAY_MAX_BACKDROP_DEPTH];
+    ScratchMark scope[DL_REPLAY_MAX_BACKDROP_DEPTH];  // owns stack[i]; ended when popped
     int sp;
 } DisplayReplayBackdropStack;
 
@@ -2103,7 +2137,14 @@ bool dl_replay_backdrop_skip_item(DisplayReplayBackdropStack* stack,
 typedef struct DisplayReplayShadowClip {
     uint32_t* saved;
     IRect region;
+    ScratchArena* scratch;  // arena holding `saved`
+    ScratchMark scope;      // owns `saved`; ended on restore or discard
 } DisplayReplayShadowClip;
+
+// End any save scopes an unbalanced display list left open.
+void dl_replay_close_open_scopes(DisplayReplayBackdropStack* stack,
+                                 DisplayReplayShadowClip* clip,
+                                 ScratchArena* scratch);
 
 void dl_replay_shadow_clip_init(DisplayReplayShadowClip* clip);
 void dl_replay_shadow_clip_save(DisplayReplayShadowClip* clip,
@@ -3243,6 +3284,7 @@ typedef struct RenderClipScope {
     bool active;
     bool pushed_shape;
     bool owns_shape;
+    ScratchMark mem;  // owns the shape when owns_shape; ended on pop
 } RenderClipScope;
 
 RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
@@ -3659,6 +3701,8 @@ struct SvgInlineRenderContext {
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
     void* image_resolver_context;
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
+    RdtMatrix viewport_transform; // target viewport before viewBox/group transforms
+    float viewport_width, viewport_height;
 
     // Derived logical-to-target scale; SVG text resource sizing divides by it
     // because the whole scene transform applies it during lowering.

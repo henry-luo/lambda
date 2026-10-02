@@ -452,16 +452,22 @@ Animations run on the frame clock of `lambda view` ([RAD_16](dev/radiant/RAD_16_
 
 Radiant parses and paints SVG itself, whichever way it arrives: inline `<svg>` in HTML, a standalone `.svg` file given to `lambda render` or `lambda view`, `<img src="x.svg">`, CSS `url(x.svg)`, `data:` SVG URIs, SVG `<image href="x.svg">`, and external `<use href="f.svg#id">`. ThorVG is the rasterizer underneath; its own SVG loader is not used. Design: [RAD_14 — SVG, Vector Graphics & Diagram Layout](dev/radiant/RAD_14_SVG_Vector_Graph.md). SVG *output* is covered in [§17](#17-output-targets).
 
+**2026-10-02 update:** radius defaults, default line paint, path error recovery,
+basic CSS colors, group opacity and geometry bounds for gradient fills have
+fresh Chromium pixel checks. The implementation and validation record is in
+[SVG Support](../vibe/impl/Lambda_Impl_SVG_Support.md#74-progress-record).
+Other entries retain the 2026-09-28 evidence date.
+
 ### 15.1 Elements
 
 | Element | Status | Notes |
 |---|---|---|
 | `<svg>`, nested `<svg>` | ✅ | `viewBox` and `preserveAspectRatio` (alignment, `meet`, `slice`, `none`). Default size 300 × 150; with only a `viewBox` it fills the container width at the viewBox ratio. Content is always clipped to the box, so `overflow="visible"` is ignored. |
-| `<g>` | ◐ | `opacity` on a group has no effect unless the root `<svg>` has a `viewBox`. |
-| `<path>` | ✅ | All commands (`M L H V C S Q T A Z`, absolute and relative), arcs included. An invalid token drops the whole path instead of drawing up to the error. |
-| `<rect>` | ◐ | `rx` and `ry` work, but `ry` on its own gives square corners. |
+| `<g>` | ✅ | Group opacity composites overlapping shapes once, with or without a root `viewBox`, including nested groups and a nonzero viewBox origin. |
+| `<path>` | ✅ | All commands (`M L H V C S Q T A Z`, absolute and relative), arcs included. Invalid data retains complete preceding segments; incomplete parameter sets are not emitted. |
+| `<rect>` | ✅ | Either omitted radius uses the other radius; used radii are clamped to half the corresponding dimension. An explicit zero radius gives square corners. |
 | `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>` | ✅ | |
-| `<line>` | ◐ | A line with no `stroke` is drawn as a 1 px black line; browsers draw nothing. |
+| `<line>` | ✅ | The default stroke is `none`; explicit, inherited and inline CSS strokes use normal paint resolution. |
 | `<text>`, `<tspan>` | ◐ | Runs, `text-anchor`, font family/size/weight/style, solid fill, `textLength`/`lengthAdjust`, `xml:space`. Only the first `x`/`y`/`dx`/`dy` value is used. Not supported on text: stroke, `opacity`, `fill-opacity`, `letter-spacing`, `word-spacing`, `dominant-baseline`, `text-decoration`, `rotate`, gradient fill. |
 | `<textPath>` | ❌ | Its content is skipped. |
 | `<a>` | ◐ | Children render; the link's own `transform` and attributes are ignored. |
@@ -485,10 +491,10 @@ Radiant parses and paints SVG itself, whichever way it arrives: inline `<svg>` i
 | Feature | Status | Notes |
 |---|---|---|
 | `transform` attribute | ✅ | All transform functions. The CSS `transform` property on SVG child elements is ignored. |
-| Colours | ◐ | Hex, integer `rgb()`/`rgba()` and about 140 named colours. `hsl()`, percentage `rgb()` and `rebeccapurple` render black inside SVG. |
+| Colours | ✅ | Hex, `rgb()`/`rgba()` including percentages, `hsl()`/`hsla()` with number/degree/radian/gradian/turn hues, and CSS named colours including `rebeccapurple`. SVG uses the shared CSS color parser. |
 | `currentColor` | ✅ | Including a CSS `color` set on the `<svg>` element. |
 | `context-fill`, `context-stroke` | ❌ | Render black. |
-| `fill="url(#gradient)"` | ◐ | Works on `<rect>`, `<circle>` and `<ellipse>`, and with `gradientUnits="userSpaceOnUse"`. With the default `objectBoundingBox` units, **gradient fills on `<path>`, `<polygon>` and `<polyline>` paint nothing**, which affects most icon SVGs. A gradient fill inherited from a `<g>` renders black. |
+| `fill="url(#gradient)"` | ◐ | Explicit linear/radial gradient fills work on paths and basic shapes, including polygons and polylines, with default `objectBoundingBox` units or `userSpaceOnUse`. Cubic paths use curve extrema for geometry bounds. A gradient fill inherited from a `<g>` still renders black. |
 | `stroke="url(#gradient)"` | ❌ | Renders solid black. |
 | `gradientUnits` | ✅ | |
 | `gradientTransform`, `spreadMethod` (other than `pad`), gradient `href` templates, `fx`/`fy`/`fr` | ❌ | A template reached through `href` renders nothing. |
