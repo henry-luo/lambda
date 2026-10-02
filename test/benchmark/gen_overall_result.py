@@ -43,6 +43,7 @@ ENGINE_LABELS = {
     "mir_typed_auto_e2e": "MIR (typed, auto)",
     "c2mir_e2e": "C2MIR",
     "go_e2e": "Go",
+    "julia_e2e": "Julia (startup + warmup)",
     "lambdajs_e2e": "LambdaJS (auto)",
     "quickjs_e2e": "QuickJS",
     "nodejs_e2e": "Node.js",
@@ -52,6 +53,7 @@ ENGINE_LABELS = {
     "quickjs": "QuickJS",
     "nodejs": "Node.js",
     "python": "Python",
+    "julia": "Julia",
 }
 
 
@@ -420,7 +422,7 @@ def write_historical_comparisons(w, metadata):
 # Set 2's engine list, in the order the report shows it. Built from what the
 # JSON actually carries so an older snapshot without e2e columns simply reports
 # part 1 alone.
-E2E_ENGINES = ["mir_auto_e2e", "mir_typed_auto_e2e", "c2mir_e2e",
+E2E_ENGINES = ["mir_auto_e2e", "mir_typed_auto_e2e", "c2mir_e2e", "julia_e2e",
                "lambdajs_e2e", "quickjs_e2e", "nodejs_e2e"]
 
 
@@ -563,6 +565,12 @@ def write_report(args, data):
     elif test262_baseline.get("status") and test262_baseline.get("status") != "not_run":
         w(f"- **Test262 baseline:** {test262_baseline['status']}")
     w(f"- **Node.js:** {node_version}")
+    if "julia" in engines:
+        julia = metadata.get("julia") or {}
+        warmup = julia.get('warmup_runs', 1)
+        w(f"- **Julia:** {julia.get('version') or 'unrecorded'}; one thread; {warmup} full warmup run(s) with fresh inputs. "
+          "Execution excludes startup and warmup; the process column includes startup, compilation and warmup. "
+          "Node's timer uses the checked-in script's own warmup policy.")
     w(f"- **QuickJS:** {qjs_version}")
     timeout_text = f", timeout {timeout_s}s per run" if timeout_s else ""
     cooldown_s = metadata.get("suite_cooldown_seconds")

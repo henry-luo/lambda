@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "Tune32 T32-2: nested literal string elements select an immutable guarded entry and retain the complete boxed slow body for absent rows (D8.3.1v2).",
+  "checks": [
+    {"in_func": "_tune32_nested_same_#", "expect": ["call\tfn_string_char_eq_p, fn_string_char_eq"]},
+    {"in_func": "_tune32_nested_same_b_#", "expect": ["call\tfn_index_p, fn_index"]}
+  ]
+}

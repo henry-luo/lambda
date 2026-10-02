@@ -1,0 +1,8 @@
+{
+  "commit": "84748fd62ccaba5c82410fa23b3124c48856e52f",
+  "binary": "/Users/henryluo/Projects/Lambda-opus/temp/tune32/control-release",
+  "sha256": "dd3d0319e59cfd9b8c7515ab7ada1048028f8eea9468c98c137933c915580a1b",
+  "profile": "release",
+  "build_log": "temp/tune32/control-release-build.log",
+  "initial_status": "?? test/benchmark/julia/\n?? test/benchmark/run_julia_benchmarks.py\n?? test/benchmark/tune32/\n?? vibe/impl/Lambda_Tune32.md\n"
+}

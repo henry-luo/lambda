@@ -1,0 +1,83 @@
+{
+  "first_full_gate": {
+    "fully_passed": 40259,
+    "retry_only": 2,
+    "failed": 0,
+    "slow_limit_us": 3000000
+  },
+  "standard_rerun": {
+    "fully_passed": 40261,
+    "retry_only": 0,
+    "failed": 0
+  },
+  "binary_sha256": {
+    "control": "dd3d0319e59cfd9b8c7515ab7ada1048028f8eea9468c98c137933c915580a1b",
+    "candidate": "74fec4ed49809bc27aa32a608182ffdd46cf4bd33030a13f6e10fd6ceaa51ec2"
+  },
+  "control_isolated_two": {
+    "tests": 2,
+    "all_passed": true,
+    "cases": {
+      "language_identifiers_start_unicode_10_0_0_js": {
+        "status": 0,
+        "elapsed_us": 1886200,
+        "cpu_us": 1877793
+      },
+      "language_identifiers_start_unicode_10_0_0_escaped_js": {
+        "status": 0,
+        "elapsed_us": 1699275,
+        "cpu_us": 1699120
+      }
+    }
+  },
+  "control_isolated_600": {
+    "tests": 600,
+    "all_passed": true,
+    "cases": {
+      "language_identifiers_start_unicode_10_0_0_escaped_js": {
+        "status": 0,
+        "elapsed_us": 1707055,
+        "cpu_us": 1707029
+      },
+      "language_identifiers_start_unicode_10_0_0_js": {
+        "status": 0,
+        "elapsed_us": 1704426,
+        "cpu_us": 1704399
+      }
+    }
+  },
+  "candidate_isolated_two": {
+    "tests": 2,
+    "all_passed": true,
+    "cases": {
+      "language_identifiers_start_unicode_10_0_0_js": {
+        "status": 0,
+        "elapsed_us": 1844965,
+        "cpu_us": 1823740
+      },
+      "language_identifiers_start_unicode_10_0_0_escaped_js": {
+        "status": 0,
+        "elapsed_us": 1693413,
+        "cpu_us": 1693250
+      }
+    }
+  },
+  "candidate_isolated_600": {
+    "tests": 600,
+    "all_passed": true,
+    "cases": {
+      "language_identifiers_start_unicode_10_0_0_escaped_js": {
+        "status": 0,
+        "elapsed_us": 1702211,
+        "cpu_us": 1702185
+      },
+      "language_identifiers_start_unicode_10_0_0_js": {
+        "status": 0,
+        "elapsed_us": 1707504,
+        "cpu_us": 1707479
+      }
+    }
+  },
+  "manifest_sha256": "c9135f3b9dd0494004188b55f6919e3ce28d4e4a2d8710eb9fc8764cbf11ffb7",
+  "diagnosis": "The first batch produced successful results, then the three-second timing classifier marked two cases partial. Both releases pass the same captured 600-source AST batch in isolation, below that threshold. The unchanged standard full rerun passes without retry or slow cases; no runtime, harness, threshold, baseline or job-count change was made between the full gate attempts."
+}

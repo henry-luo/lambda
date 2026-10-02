@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "description": "Tune32 T32-1 / D3.3.3v3: boolean fill uses guarded packed byte stores without manufacturing an array certificate; empty, absent, mixed and snapshot cases retain source semantics.",
+  "checks": [
+    {
+      "in_func": "_tune32_bool_hot_#",
+      "expect": [
+        "mov\tu8:({{r}}), {{r}}",
+        "call\titem_at_p, item_at"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "description": "Tune32 T32-2: exact inferred string entries reuse byte/Unicode pair fusion; unknown receiver or selection keys retain ordinary access (D8.3.2, S7.1.1v3, S8.2.4v3).",
+  "checks": [
+    {
+      "in_func": "_tune32_same_at_#",
+      "expect": ["call\tfn_string_char_eq_p, fn_string_char_eq", "mov\t{{r}}, u8:"],
+      "forbid": ["call\tfn_string_ascii_at_p, fn_string_ascii_at"]
+    },
+    {
+      "in_func": "_tune32_open_at_#",
+      "expect": ["call\tfn_index_p, fn_index"],
+      "forbid": ["call\tfn_string_char_eq_p, fn_string_char_eq"]
+    },
+    {
+      "in_func": "_tune32_borrowed_text_#",
+      "expect": ["call\tfn_index_p, fn_index"],
+      "forbid": ["call\tfn_string_char_eq_p, fn_string_char_eq"]
+    }
+  ]
+}
