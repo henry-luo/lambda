@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3 and D3.3.4: forwarded string candidates use checked boxed slots, preserve negative-index null and keep the complete generic carrier fallback.",
+  "checks": [
+    {"in_func": "_tune32_phase2_word_#", "expect": ["mov\t{{r}}, u8:2({{r}})", "and\t{{r}}, {{r}}, 19", "lsh\t{{r}}, %p2, 3", "mov\t{{r}}, 72057594037927936", "call\tfn_index_p, fn_index"]},
+    {"in_func": "_tune32_phase2_string_compare_#", "expect": ["call\tfn_str_eq_ptr_p, fn_str_eq_ptr", "call\tfn_eq_p, fn_eq"]}
+  ]
+}

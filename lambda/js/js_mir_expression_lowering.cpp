@@ -4273,7 +4273,7 @@ static bool jm_plan_predicted_literal_field(JsMirTranspiler* mt,
     }
 
     MirShapeCandidateProfile profile = {mt, jm_literal_shape_candidate_direct,
-        jm_literal_shape_candidate_binding, jm_literal_shape_candidate_call};
+        jm_literal_shape_candidate_binding, jm_literal_shape_candidate_call, NULL};
     void* candidate = mir_shape_candidate(profile, (AstNode*)member->object, 3);
     bool planned = mir_plan_field_access(candidate,
         [name](void* selected, MirFieldAccessPlan* selected_plan) {

@@ -1499,6 +1499,24 @@ JitImport jit_runtime_imports[] = {
     {"map_with_type_tl", FPTR(map_with_type_tl)},
     {"map_with_region_type_tl", FPTR(map_with_region_type_tl)},
     {"map_fill", FPTR(map_fill)},
+    {"map_alloc_for_type", FPTR(map_alloc_for_type),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR)}},
+    // These shared slot kernels only decode/store existing descriptor storage.
+    {"set_field_value", FPTR(set_field_value),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(2, JIT_VALUE_BOXED_ITEM),
+      JIT_IMPORT_NUMBER_STACK_PRESERVES | JIT_IMPORT_ARGS_BORROWED_AUDITED}},
+    {"map_shape_field_to_item", FPTR(map_shape_field_to_item),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(1, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES |
+      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
     {"map_get", FPTR(map_get)},
     {"map_literal_begin", FPTR(map_literal_begin)},
     {"map_literal_put", FPTR(map_literal_put)},
@@ -3811,6 +3829,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
 #else
     static const char* audited[] = {
         "memset", "memcpy", "fmod",
+        "set_field_value", "map_shape_field_to_item",
         "lambda_stack_is_exhausted",
 #if defined(__APPLE__) || defined(__linux__)
         "sigsetjmp",

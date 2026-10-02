@@ -34,6 +34,28 @@ pn tune32_bool_mixed() {
     print(flags[0]); print(" "); print(flags[1]); print("\n")
 }
 
+pn tune32_bool_count(n: int, bound: int) {
+    var flags = fill(n, true)
+    var i = 0
+    var count = 0
+    while (i < bound) {
+        if (flags[i]) { count = count + 1 }
+        i = i + 1
+    }
+    print(count); print("\n")
+}
+
+pn tune32_bool_snapshot(n: int) {
+    var flags = fill(n, true)
+    let snapshot = flags
+    var i = 0
+    while (i < n) {
+        flags[i] = false
+        i = i + 1
+    }
+    print(flags); print(" "); print(snapshot); print("\n")
+}
+
 pn main() {
     tune32_bool_hot(4)
     tune32_bool_hot(0)
@@ -49,4 +71,12 @@ pn main() {
     tune32_bool_oob(0) ^ { failed = true }
     print(failed); print(" "); print(fill(-1, true)); print("\n")
     tune32_bool_mixed()
+    tune32_bool_count(4, 4)
+    tune32_bool_count(2, 4)
+    tune32_bool_count(0, 0)
+    tune32_bool_count(0, 2)
+    tune32_bool_snapshot(4)
+    tune32_bool_snapshot(0)
+    tune32_bool_count(-1, 0)
+    tune32_bool_snapshot(-1)
 }

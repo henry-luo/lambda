@@ -6,3 +6,11 @@
 true error
 [7, true]
 x null
+4
+2
+0
+0
+[false, false, false, false] [true, true, true, true]
+[] []
+0
+error error

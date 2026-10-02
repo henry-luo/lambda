@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "description": "D2.6.4v3, D8.4.1v2: inferred packed layouts use exact shape guards and descriptor-aware slot kernels.",
+  "checks": [
+    {
+      "in_func": "_tune32_phase2_record_#",
+      "expect": [
+        "call\tmap_alloc_for_type_p, map_alloc_for_type",
+        "call\tset_field_value_p, set_field_value"
+      ]
+    },
+    {
+      "in_func": "_tune32_phase2_record_read_#",
+      "expect": [
+        "call\tmap_shape_field_to_item_p, map_shape_field_to_item"
+      ]
+    },
+    {
+      "in_func": "_tune32_phase2_record_null_#",
+      "expect": [
+        "ursh\t{{r}}, {{r}}, 56",
+        "eq\t{{r}}, {{r}}, 1",
+        "call\tfn_eq_p, fn_eq"
+      ]
+    }
+  ]
+}

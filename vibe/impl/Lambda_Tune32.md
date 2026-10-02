@@ -1,7 +1,7 @@
 # Lambda Tune32 — Recover Typed Optimizations in Untyped Programs
 
 - **Version:** 1.3.0, 2026-10-02.
-- **Status:** Phase I COMPLETE; Phase II PLANNED, not implemented.
+- **Status:** Phase I COMPLETE; Phase II IN PROGRESS.
   T32-1 through T32-4 are implemented and validated;
   T32-5 is closed as an investigated deferral under its conditional gate.
   All four Phase I pilot targets and its round geomean objective are met.
@@ -1054,7 +1054,7 @@ engine code; its adopted benchmark receives full-output tier/GC validation.
 
 ### 15.1 Objective, starting point and scope
 
-**Status: planned.** Phase II targets the remaining costs in unchanged untyped
+**Status: implementation in progress.** Phase II targets the remaining costs in unchanged untyped
 programs, starting with the largest text workloads. It extends the existing
 analysis, MIR value and guarded-lowering machinery. It does not add a new
 execution tier, adaptive optimizer, container representation or GC policy.
@@ -1700,3 +1700,206 @@ the remaining typed gap. Show the fixed-population geomean **and** sum-of-median
 change, together with the dominant text rows and any regression investigations.
 Document a failed optimization as a failed experiment; do not weaken semantics,
 certificates, roots or correctness gates to satisfy a timing target.
+
+
+## 16. Phase II implementation record
+
+**Status: IN PROGRESS.** Core slices have release screens and semantic fixtures;
+aggregate gates, confirmation, source alternatives and population closeout remain.
+This section records actual work; §15 retains the original plan and targets.
+
+### 16.1 Implementation and proof boundaries
+
+- **II-1/II-2:** shared `SYS_RESULT_TEXT_SPLIT` element instantiation; closed
+  string builders and bounded producer/result forwarding candidates, cached in
+  the existing call-site analysis epoch. Inferred strings do not select a numeric
+  array lane or manufacture a certificate (**D3.3.3v3, D8.2.5v3**).
+  The shared index planner handles ordinary boxed slots. The pointer reader
+  separately checks the actual native STRING descriptor that `split` installs.
+  Both retain bounds/null and generic carrier fallbacks; comparisons check selected
+  values' string tags before native equality (**D3.3.4, S7.1.1v3**).
+- **II-3:** extend the existing 48-node leaf plan to read-only string selection,
+  without captures, mutation, recursion or broader arbitrary calls. Arguments
+  are evaluated once before the implicit error boundary. Nullable results remain
+  Items and use emitter-owned roots (**D8.3.1v2–D8.3.3, D5.3.4**).
+- **II-4:** inferred fixed-key constructors reuse `map_alloc_for_type` and the
+  existing descriptor writer `set_field_value`; values are evaluated/captured/
+  rooted in source order before allocation. Region capabilities and allocator
+  policy are preserved. Nine-byte ANY slots use their complete descriptor, and
+  unsupported literals retain `map_fill` (**D2.6.4v3, D4.3.1, S7.7.1**).
+- **II-5:** prefer an addressable internal-node candidate over a null-slot leaf;
+  carry bounded candidates through returned array selection. Exact map-kind and
+  shape guards authorize descriptor reads of ANY slots, with boxed fallback.
+  NULL/BOOL retag exclusions and fixed-slot exclusions remain. A one-input,
+  one-operation scalar consumer extends the existing null comparison lowering:
+  convert the member's `MirValue` to Item, compare its null tag, and retain the
+  kernel for type values. This preserves existing type(null) compatibility and
+  error/null behavior (**D8.4.1v2, D3.4.5, S5.1.1–S5.1.2**).
+- **II-6:** inferred bool arrays use actual carrier/layout/element checks at
+  loop entry, separately from extent and exclusive-owner proofs. Same-lane stores
+  use the existing scoped write/COW machinery. Guard misses skip subsequent
+  length/ownership dereferences; zero-trip error producers do not crash
+  (**D3.3.1v2, S7.9.3, S9.1.2–S9.1.3**).
+
+Two correctness defects were reproduced before fixing their causes. A native
+string array rejected an incompatible unannotated store instead of using the
+existing generic widening helper; it now widens with precise owner/value roots.
+Both the frozen control and an early candidate crashed on a negative `fill`
+result before a zero-trip loop; scoped carrier misses now bypass every dependent
+metadata load. These are semantic repairs, not performance credits.
+
+### 16.2 Measured slice decisions
+
+The following are **nine-pair screens**, not final Phase II results. Ratios are
+candidate/preceding slice except the first row, which uses the frozen control.
+All listed screen outputs match in every pair.
+
+| Slice | Untyped primary ratio | Typed companion ratio | Decision |
+|---|---:|---:|---|
+| String chain + leaf, merge | 0.7240 | 1.0262 | Proceed to confirmation |
+| String chain, canonical log | 1.0013 | 1.0026 | No measured log benefit |
+| Descriptor construction/reads, GCbench | 0.8117 | 0.9995 | Proceed to confirmation |
+| Same record slice, formatter | 0.9679 | 1.0001 | Secondary benefit |
+| Same record slice, raytrace | 0.9848 | 0.9888 | Small secondary benefit |
+| Bool read guard | 1.0007 | 0.9959 | Correctness prerequisite; no speed claim |
+| Bool store guard, Primes | 0.8024 | 1.0046 | Proceed to confirmation |
+| Record null consumer, GCbench | 0.8948 | 0.9978 | Proceed to final safe-version confirmation |
+
+A separate **21-pair** merge comparison disables only the string-leaf extension
+in its control: untyped ratio **0.7926**, 21/21 wins; typed ratio **1.0069**.
+The complete producer/read/consumer prerequisites stay enabled on both sides.
+See `leaf-confirm-pairs.json` for raw samples and bootstrap uncertainty.
+
+The four-input/twelve-operation float-region prototype reused the existing local
+expression versioner and passed six-mode semantic tests. It failed profitability:
+untyped raytrace ratio 0.9960, while its typed companion was 1.6413. Dynamic axis
+and boxed helper results blocked the useful untyped formulas; emitted region
+work hurt the typed path. **The prototype was removed.** Its exact binary,
+patch and comparison are retained as `record-region-*`; the narrower measured
+record/null consumer is retained instead. This is a rejected optimization, not
+an unresolved implementation blocker. Inferred small-record result expansion
+remains conditionally deferred: this phase establishes no profitable complete
+result-home plan and introduces no new ABI (**D5.3.4, D8.3.2**).
+
+Executed profiles establish the mechanisms independently of timing: merge's
+30.855 million `word_at` calls and 27.291 million inner `fn_index` calls disappear;
+its generic equality count falls from 12.870 million to 1.551 million. GCbench
+replaces 3.222 million variadic map fills with descriptor construction and 4.801
+million generic field reads with descriptor reads. The null consumer removes
+its remaining 3.222 million hot equality calls; its cold type fallback remains
+in MIR. Diagnostic profiles are not used as benchmark samples.
+
+### 16.3 Provenance and pending closeout
+
+Control: commit `8b40c7754`, initially clean, `make release`, SHA-256
+`d2c117a8b18117e429ec83e1a552d4d1980185e75d5d487ce11296cba2411d4a`.
+Step builds use the same `release_native` profile through
+`make build-release-compile`; each binary and patch is separately archived.
+The final safe release is `temp/tune32-phase2/final-release`; its hash lives in
+`final-release-binary.json`. Earlier `candidate-release` is an attribution
+artifact and is not the final type-fallback-safe binary.
+
+The 126-row engine manifest points at frozen source/oracle copies. Referenced
+repository-relative inputs are archived in the same source tree, with an
+`input-oracle-manifest.json`; their original paths remain stable for this run.
+Later replay must restore those archived inputs if the originals have changed.
+Engine and source-rewrite comparisons remain separate.
+
+New fixtures cover producer forwarding, mixed/early returns, recursion, captured
+and escaped readers, negative/large indices, Unicode, native-string widening,
+shared snapshots, packed ANY/wide fields, guard misses, source order, null/type/
+error consumers, short arrays, shared stores and error-producing zero-trip
+loops. All focused final fixtures pass JIT, interpreter, AUTO, forced/seeded GC
+with poison and the MIR interpreter with forced GC. Root/effect audits pass:
+16,667 migrated native functions and 95 NO_GC imports / 302 call-graph nodes.
+Aggregate MIR/GC/ASAN and Lambda/Test262 gates are pending; no completion is
+claimed from these focused passes.
+
+### 16.4 Correctness gates and inherited failures
+
+The final engine passes `make test-lambda-baseline`: **6,166/6,166**, comprising
+2,104 input tests and 4,062 Lambda/runtime tests. Its native MIR emission suite
+passes **233/233**, GC stress **284/284**, and debug emission ratchet **20/20**.
+The expanded string consumer fixture also checks positive and negative bounds,
+integer/null values and selected errors through an escaped selector, retaining
+both native string equality and the original generic equality fallback.
+ASAN validates **24/24** focused runs across all six modes; the final string
+fixture refresh is recorded in `asan-verified.json`.
+
+`make test262-baseline` passes on the unchanged standard serial rerun:
+**40,261/40,261**, zero skipped baseline cases, retry-only cases or regressions
+(2,652 non-baseline entries are skipped). The first run had 40,259 fully passing
+cases and two Unicode-10 identifier cases classified as slow, then recovered in
+isolation. This repeats the recorded Phase I timing sensitivity. Both runs and
+the first timing/memory/batch diagnostics are preserved; no runtime threshold,
+test runner, baseline list or job-count change was used to obtain the rerun.
+
+Both exact release binaries reproduce three pre-existing emission-ratchet
+failures. `js_hoisted_modvar_write_through` remains 87 instructions against 76;
+`js_tune6_exact_collection` remains 12,627 against 12,573. The COW nested-store
+module improves **173 → 169**, still above its 166 budget. There are no new
+ratchet failures and no budget increases. The scoped test directories use
+symlinks to the same corpus and the appropriate exact release, avoiding host
+replacement while another gate is running.
+
+The aggregate build exposed an include-order linkage defect when exporting
+the existing descriptor reader to the JIT registry. Its declarations now
+explicitly agree on C linkage in both headers; the representation test passes
+**35/35**. Existing MIR assertions were updated only after examining the
+emission: the extra-field record retains its boxed return and both descriptor
+stores; the interval test still permits exactly four pointer-mask ANDs,
+excluding the safety guard's use of the same constant.
+
+The full frozen-control correctness preflight compares canonical sources with
+their archived copies and validates **124/126** oracles. Two untyped rows already
+fail before Phase II: `spectralnorm` produces NaN and `matmul` sums zero.
+Their output-array parameters are ordinary parameters, so writes snapshot into
+the callee. **S9.1.3** rules that `var` parameters are the "sole sharing
+construct — an inout borrow"; annotation-free borrow reproducers restore the
+expected results on the old control. These source defects remain visible in
+the unchanged 126-row screen and are excluded from validated performance
+aggregates. Neither a changed golden nor timing a failed computation is used
+as an optimization credit. The corrected reproducers remain under `temp/`.
+
+### 16.5 Closeout regression investigations
+
+The full population screen found a real typed NBody regression: its 31-pair
+candidate/control ratio was **1.12236**, with a one-sided upper bound of
+**1.13510**. Loop admission unnecessarily checked carrier layout again for
+typed roots whose layout was already proven. Read admission now branches over
+unsafe header access only when the carrier actually needs probing. Store
+admission separates established carrier layout from live copy-on-write
+ownership; borrowed typed stores retain the ownership byte check. This follows
+**D3.3.2v2** and **D5.3.4**, without removing bounds or COW guards.
+
+The refined candidate's 31-pair confirmation restores typed NBody:
+**0.9919**, 21/31 wins; untyped NBody is **0.9998**, 17/31 wins. All complete
+outputs match. Exact binary SHA-256:
+`9587f8d6d3b85a450b6fa7b997489ca032202ebef50815abc69b43052d08a49d`;
+artifact: `temp/tune32-phase2/guard-refined-nbody-31-pairs.json`.
+
+This refined engine passes the Lambda baseline **6,168/6,168**, native MIR
+emission **234/234**, GC stress **285/285**, and **72/72** focused release and
+ASAN runs across JIT, interpreter, AUTO, forced GC, seeded GC with poison, and
+MIR interpreter with forced GC. These results supersede the earlier focused
+counts in §16.4 for the refined Lambda guards. Final Test262 and performance
+closeout must use the eventual final engine identity.
+
+Untyped Navier–Stokes also exposed an intermittent compilation crash (4/31
+older-candidate processes). A standalone replay of the captured binary MIR,
+with the unchanged vendor optimizer instrumented by ASAN, proves a MIR SSA
+use-after-free before Lambda runtime or GC execution. GVN removes unreachable
+entry edges, leaving a self-only phi. Copy removal redirects its users back
+to that same phi, then frees it; a later branch reads its freed definition.
+The original emitted MIR defines the guard before reachable uses. A
+100-process release pass does not override the ASAN reproducer.
+
+The detailed evidence and reviewable proposed patch are in
+`temp/tune32-phase2/mir-self-phi-diagnosis.md` and
+`temp/tune32-phase2/proposed-mir-self-phi-copy.patch`. The proposal excludes a
+self-referential phi from copy substitution because it has no replacement
+definition; existing unreachable-code cleanup can then remove the cycle.
+**The vendor patch has not been applied.** AGENTS.md rule 16 requires approval
+before such an upstream repair. Phase II remains in progress pending this
+defect's resolution and final validation; failed processes remain visible
+(**D8.6.1–D8.6.3**).
