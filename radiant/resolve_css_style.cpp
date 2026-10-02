@@ -7,6 +7,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/memtrack.h"
 #include "../lib/math_utils.h"
+#include "../lib/color.h"
 #include "../lib/str.h"
 #include "../lib/tagged.hpp"
 #include <string.h>
@@ -2718,23 +2719,8 @@ static uint8_t css_color_byte(double value) {
 
 // CSS Color Level 4 §4.2.4: Convert HSL to RGB
 static Color hsl_to_rgb(float h, float s, float l, float a) {
-    h = fmodf(h, 360.0f);
-    if (h < 0) h += 360.0f;
-    float c = (1.0f - fabsf(2.0f * l - 1.0f)) * s;
-    float x = c * (1.0f - fabsf(fmodf(h / 60.0f, 2.0f) - 1.0f));
-    float m = l - c / 2.0f;
-    float r1, g1, b1;
-    if (h < 60)       { r1 = c; g1 = x; b1 = 0; }
-    else if (h < 120) { r1 = x; g1 = c; b1 = 0; }
-    else if (h < 180) { r1 = 0; g1 = c; b1 = x; }
-    else if (h < 240) { r1 = 0; g1 = x; b1 = c; }
-    else if (h < 300) { r1 = x; g1 = 0; b1 = c; }
-    else              { r1 = c; g1 = 0; b1 = x; }
     Color result;
-    result.r = clamp_byte_round((r1 + m) * 255.0f);
-    result.g = clamp_byte_round((g1 + m) * 255.0f);
-    result.b = clamp_byte_round((b1 + m) * 255.0f);
-    result.a = clamp_byte_round(a * 255.0f);
+    color_hsl_to_rgba(h, s, l, a, &result.r, &result.g, &result.b, &result.a);
     return result;
 }
 

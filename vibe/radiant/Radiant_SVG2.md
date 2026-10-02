@@ -29,7 +29,16 @@ This proposal makes the following decisions explicit:
 
 ## Implementation Status
 
-Status as of 2026-05-07: **partially implemented**. The core parser/render unification path is now in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete.
+Status as of 2026-10-02: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table retains the 2026-05-07 architecture audit; the latest SVG behavior work is recorded below.
+
+The [SVG support implementation plan](../impl/Lambda_Impl_SVG_Support.md#74-progress-record)
+records six repaired gaps: rectangle radius fallback, default line stroke,
+path error-prefix recovery, shared CSS colors, group opacity without a viewBox,
+and object-bounding-box gradients on paths/polygons/polylines. These changes
+continue through Radiant parsing, PaintIR and the ThorVG adapter. They preserve
+the existing retained document/resource ownership (**D4.2.2v2–D4.2.4** in
+[Lambda Formal Design](../../doc/Lambda_Formal_Design.md)); the full cascade,
+typed paints, advanced effects, animation and export remain planned.
 
 | Area | Status | Notes |
 |------|--------|-------|

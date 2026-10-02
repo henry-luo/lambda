@@ -332,3 +332,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **MIR Project**: JIT compilation infrastructure
 - **Tree-sitter**: Incremental parsing framework
 - **ThorVG**: SVG vector graphics library
+- **Curl**: HTTP client and network transfer library
+- **mbedTLS**: TLS and cryptography library

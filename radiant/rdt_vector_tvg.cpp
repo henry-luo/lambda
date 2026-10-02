@@ -1299,32 +1299,71 @@ static void path_bounds_include_rect(bool* has_point, float* left, float* top,
     path_bounds_include_point(has_point, left, top, right, bottom, x1, y1);
 }
 
+static void path_bounds_include_cubic_axis(float p0, float p1, float p2, float p3,
+                                           float* low, float* high) {
+    // paint-server bounds use curve extrema, not the Bezier control-point hull.
+    double a = -(double)p0 + 3.0 * p1 - 3.0 * p2 + p3;
+    double b = 2.0 * ((double)p0 - 2.0 * p1 + p2);
+    double c = (double)p1 - p0;
+    double roots[2];
+    int count = 0;
+    if (a == 0.0) {
+        if (b != 0.0) roots[count++] = -c / b;
+    } else {
+        double discriminant = b * b - 4.0 * a * c;
+        if (discriminant >= 0.0) {
+            // the stable quadratic form avoids cancellation at a nearly linear curve.
+            double q = -0.5 * (b + copysign(sqrt(discriminant), b));
+            roots[count++] = q / a;
+            if (q != 0.0) roots[count++] = c / q;
+        }
+    }
+    for (int i = 0; i < count; i++) {
+        double t = roots[i];
+        if (t <= 0.0 || t >= 1.0) continue;
+        double u = 1.0 - t;
+        float value = (float)(u * u * u * p0 + 3.0 * u * u * t * p1
+                              + 3.0 * u * t * t * p2 + t * t * t * p3);
+        *low = fminf(*low, value);
+        *high = fmaxf(*high, value);
+    }
+}
+
 bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
                          float* right, float* bottom) {
     if (!p || !left || !top || !right || !bottom) return false;
 
     bool has_point = false;
     float l = 0, t = 0, r = 0, b = 0;
+    float x = 0.0f, y = 0.0f, start_x = 0.0f, start_y = 0.0f;
     for (int i = 0; i < p->count; i++) {
         const RdtPath::Entry* e = &p->entries[i];
         switch (e->cmd) {
             case RdtPath::CMD_MOVE:
+                x = start_x = e->args[0];
+                y = start_y = e->args[1];
+                break;
             case RdtPath::CMD_LINE:
+                path_bounds_include_point(&has_point, &l, &t, &r, &b, x, y);
+                x = e->args[0]; y = e->args[1];
                 path_bounds_include_point(&has_point, &l, &t, &r, &b,
-                                          e->args[0], e->args[1]);
+                                          x, y);
                 break;
             case RdtPath::CMD_CUBIC:
-                path_bounds_include_point(&has_point, &l, &t, &r, &b,
-                                          e->args[0], e->args[1]);
-                path_bounds_include_point(&has_point, &l, &t, &r, &b,
-                                          e->args[2], e->args[3]);
+                path_bounds_include_point(&has_point, &l, &t, &r, &b, x, y);
                 path_bounds_include_point(&has_point, &l, &t, &r, &b,
                                           e->args[4], e->args[5]);
+                path_bounds_include_cubic_axis(x, e->args[0], e->args[2], e->args[4], &l, &r);
+                path_bounds_include_cubic_axis(y, e->args[1], e->args[3], e->args[5], &t, &b);
+                x = e->args[4]; y = e->args[5];
                 break;
             case RdtPath::CMD_RECT:
                 path_bounds_include_rect(&has_point, &l, &t, &r, &b,
                                          e->args[0], e->args[1],
                                          e->args[2], e->args[3]);
+                // appended closed primitives also establish the next segment's current point.
+                x = start_x = e->args[0] + e->args[2];
+                y = start_y = e->args[1] + fminf(e->args[5], e->args[3] * 0.5f);
                 break;
             case RdtPath::CMD_CIRCLE:
                 path_bounds_include_rect(&has_point, &l, &t, &r, &b,
@@ -1332,8 +1371,11 @@ bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
                                          e->args[1] - e->args[3],
                                          e->args[2] * 2.0f,
                                          e->args[3] * 2.0f);
+                x = start_x = e->args[0];
+                y = start_y = e->args[1] - e->args[3];
                 break;
             case RdtPath::CMD_CLOSE:
+                x = start_x; y = start_y;
                 break;
         }
     }

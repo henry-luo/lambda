@@ -1,0 +1,27 @@
+{
+  "name": "SVG geometry defaults and valid path prefixes",
+  "html": "test/ui/svg_geometry_defaults.html",
+  "viewport": {"width": 480, "height": 180},
+  "events": [
+    {"type": "assert_pixel", "x": 12, "y": 12, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 40, "y": 30, "min_r": 245, "max_g": 10, "max_b": 10},
+    {"type": "assert_pixel", "x": 92, "y": 12, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 120, "y": 30, "max_r": 10, "min_g": 245, "max_b": 10},
+    {"type": "assert_pixel", "x": 172, "y": 12, "max_r": 10, "max_g": 10, "min_b": 245},
+    {"type": "assert_pixel", "x": 252, "y": 12, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 280, "y": 30, "min_r": 245, "max_g": 10, "max_b": 10},
+    {"type": "assert_pixel", "x": 40, "y": 80, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 120, "y": 80, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 200, "y": 80, "min_r": 245, "max_g": 10, "max_b": 10},
+    {"type": "assert_pixel", "x": 280, "y": 80, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 360, "y": 80, "max_r": 10, "max_g": 10, "min_b": 245},
+    {"type": "assert_pixel", "x": 40, "y": 130, "min_r": 245, "max_g": 10, "max_b": 10},
+    {"type": "assert_pixel", "x": 120, "y": 130, "max_r": 10, "min_g": 245, "max_b": 10},
+    {"type": "assert_pixel", "x": 160, "y": 65, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 220, "y": 130, "max_r": 10, "max_g": 10, "min_b": 245},
+    {"type": "assert_pixel", "x": 380, "y": 130, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 440, "y": 110, "min_r": 245, "min_g": 245, "min_b": 245},
+    {"type": "assert_pixel", "x": 440, "y": 130, "min_r": 245, "max_g": 10, "max_b": 10},
+    {"type": "assert_pixel", "x": 440, "y": 150, "max_r": 10, "max_g": 10, "min_b": 245}
+  ]
+}
