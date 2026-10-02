@@ -244,7 +244,7 @@ struct DomDocument {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
     Pool* document_pool;         // Document-owned selectively released objects
-    Pool* node_pool;             // Runtime-created DOM nodes; retirement frees them individually
+    Arena* node_arena;           // Stable DOM nodes and registered node-owned payloads
     DomDocumentServices services;
 
     // Document content
@@ -389,7 +389,7 @@ struct DomDocument {
     DomScrollAlign pending_scroll_into_view_inline;
 
     // Constructor
-    DomDocument() : input(nullptr), document_pool(nullptr), node_pool(nullptr),
+    DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
                     html_scripting_enabled(false),
                     next_node_id(1),
@@ -682,8 +682,7 @@ struct DomElement : DomNode {
     // Factories rely on zeroed arena/pool storage and write only semantic non-zero fields.
     static DomElement* create(DomDocument* doc, const char* tag_name, Element* backing);
     static DomElement* create_in(Arena* arena);
-    static DomElement* create_in(Pool* pool);           // synthetic (view-generated) element
-    static DomElement* create_node_in(Pool* pool);      // document-owned element storage
+    static DomElement* create_in(Pool* pool);
     static DomElement* create_in(DomElement* storage, DomDocument* doc,
                                  const char* tag_name, Element* backing);
 

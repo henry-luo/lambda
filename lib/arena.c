@@ -23,6 +23,19 @@ void arena_set_node_release_hook(void (*fn)(void*)) { g_arena_node_release = fn;
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
+// Retired-list configuration (arena_retire)
+#define ARENA_RETIRED_BINS 8
+#define ARENA_MIN_RETIRED_BLOCK_SIZE sizeof(ArenaRetiredBlock)
+
+/**
+ * Header written into a block retained on the retired list. The block stays
+ * arena memory: it is only handed back out by a later allocation.
+ */
+typedef struct ArenaRetiredBlock {
+    size_t size;                       // span of this retained block
+    struct ArenaRetiredBlock* next;    // next block in the same bin
+} ArenaRetiredBlock;
+
 /**
  * Arena chunk - linked list node containing allocation space
  * Use alignas to ensure data array starts on a 256-byte boundary (max alignment we support)
@@ -50,9 +63,18 @@ struct Arena {
     unsigned valid;             // validity marker
     MemCategory category;       // memtrack category for owned blocks
 
+    // Blocks retained for reuse (arena_retire), binned by span
+    ArenaRetiredBlock* retired_lists[ARENA_RETIRED_BINS];
+    size_t retired_bytes;
+
     size_t high_water_active_bytes;
     uint64_t allocation_count;
     uint64_t rewind_count;
+    uint64_t retire_count;
+    uint64_t reuse_hits;
+    uint64_t split_count;
+    uint64_t coalesce_count;
+    uint64_t bump_back_count;
     uint64_t fresh_chunk_count;
     uint64_t fresh_growth_bytes;
     uint64_t reset_count;
@@ -62,10 +84,81 @@ struct Arena {
     void* mem_node;             // MemContext registration node (NULL if untracked)
 };
 
+static inline size_t _arena_active_bytes(const Arena* arena) {
+    return arena->total_used >= arena->retired_bytes
+        ? arena->total_used - arena->retired_bytes : 0;
+}
+
 static inline void _arena_update_high_water(Arena* arena) {
-    if (arena->total_used > arena->high_water_active_bytes) {
-        arena->high_water_active_bytes = arena->total_used;
+    size_t active = _arena_active_bytes(arena);
+    if (active > arena->high_water_active_bytes) {
+        arena->high_water_active_bytes = active;
     }
+}
+
+// log2-style bins: 16, 32, 64, 128, 256, 512, 1024, 2048+
+static inline int _arena_retired_bin(size_t size) {
+    if (size <= 16) return 0;
+    if (size <= 32) return 1;
+    if (size <= 64) return 2;
+    if (size <= 128) return 3;
+    if (size <= 256) return 4;
+    if (size <= 512) return 5;
+    if (size <= 1024) return 6;
+    return 7;
+}
+
+// The span an allocation occupies; every span can hold a retired-block header.
+static inline size_t _arena_allocation_span(const Arena* arena, size_t size, size_t alignment) {
+    size_t span = 0;
+    if (!math_size_align_up(size, alignment ? alignment : arena->alignment, &span)) return 0;
+    return span < ARENA_MIN_RETIRED_BLOCK_SIZE ? ARENA_MIN_RETIRED_BLOCK_SIZE : span;
+}
+
+// Remove and return a retired block adjacent to [addr, addr+size), or NULL.
+static ArenaRetiredBlock* _arena_take_adjacent_retired(Arena* arena, uintptr_t addr, size_t size) {
+    uintptr_t block_end = addr + size;
+    for (int i = 0; i < ARENA_RETIRED_BINS; i++) {
+        ArenaRetiredBlock** prev_ptr = &arena->retired_lists[i];
+        for (ArenaRetiredBlock* block = arena->retired_lists[i]; block; block = block->next) {
+            uintptr_t start = (uintptr_t)block;
+            if (start + block->size == addr || start == block_end) {
+                *prev_ptr = block->next;
+                arena->retired_bytes -= block->size;
+                return block;
+            }
+            prev_ptr = &block->next;
+        }
+    }
+    return NULL;
+}
+
+static void _arena_clear_retired(Arena* arena) {
+    for (int i = 0; i < ARENA_RETIRED_BINS; i++) arena->retired_lists[i] = NULL;
+    arena->retired_bytes = 0;
+}
+
+static void _arena_retain_span(Arena* arena, void* ptr, size_t span);
+
+// Hand out a retained block that fits, splitting off and re-retaining the rest.
+static void* _arena_reuse_retired(Arena* arena, size_t span, size_t alignment) {
+    for (int i = _arena_retired_bin(span); i < ARENA_RETIRED_BINS; i++) {
+        ArenaRetiredBlock** prev_ptr = &arena->retired_lists[i];
+        for (ArenaRetiredBlock* block = arena->retired_lists[i]; block; block = block->next) {
+            if (block->size >= span && ((uintptr_t)block & (alignment - 1)) == 0) {
+                *prev_ptr = block->next;
+                arena->retired_bytes -= block->size;
+                size_t excess = block->size - span;
+                if (excess >= ARENA_MIN_RETIRED_BLOCK_SIZE) {
+                    arena->split_count++;
+                    _arena_retain_span(arena, (char*)block + span, excess);
+                }
+                return (void*)block;
+            }
+            prev_ptr = &block->next;
+        }
+    }
+    return NULL;
 }
 
 /**
@@ -123,6 +216,12 @@ Arena* arena_create(size_t initial_chunk_size, size_t max_chunk_size) {
     arena->high_water_active_bytes = 0;
     arena->allocation_count = 0;
     arena->rewind_count = 0;
+    arena->retire_count = 0;
+    arena->reuse_hits = 0;
+    arena->split_count = 0;
+    arena->coalesce_count = 0;
+    arena->bump_back_count = 0;
+    _arena_clear_retired(arena);
     arena->fresh_chunk_count = 1;
     arena->fresh_growth_bytes = initial_chunk_size;
     arena->reset_count = 0;
@@ -181,9 +280,20 @@ static void* _arena_alloc_tail(Arena* arena, size_t size, size_t alignment) {
     // Chunks are aligned to their flexible data member's 256-byte boundary.
     if (alignment > alignof(ArenaChunk)) return NULL;
 
-    // Calculate aligned size for proper accounting
-    size_t aligned_size = 0;
-    if (!math_size_align_up(size, alignment, &aligned_size)) return NULL;
+    // Spans are at least a retired-block header so any block can be retained
+    size_t aligned_size = _arena_allocation_span(arena, size, alignment);
+    if (aligned_size == 0) return NULL;
+
+    // An arena that has never retired a block skips the bin walk entirely.
+    if (arena->retired_bytes) {
+        void* reused = _arena_reuse_retired(arena, aligned_size, alignment);
+        if (reused) {
+            arena->allocation_count++;
+            arena->reuse_hits++;
+            _arena_update_high_water(arena);
+            return reused;
+        }
+    }
 
     ArenaChunk* chunk = arena->current;
 
@@ -361,6 +471,7 @@ void arena_reset(Arena* arena) {
     // Reset to first chunk
     arena->current = arena->first;
     arena->total_used = 0;
+    _arena_clear_retired(arena);  // retained blocks lived in the reset chunks
     arena->reset_count++;
 
     // Note: chunk_size is NOT reset - keeps grown size for efficiency
@@ -396,6 +507,7 @@ void arena_clear(Arena* arena) {
     arena->total_allocated = arena->first->capacity;
     arena->total_used = 0;
     arena->chunk_count = 1;
+    _arena_clear_retired(arena);  // retained blocks lived in the released chunks
     arena->clear_count++;
 
     // Reset chunk size to initial
@@ -442,13 +554,19 @@ void arena_get_stats(Arena* arena, ArenaStats* out) {
     out->backing_bytes = backing;
     out->committed_bytes = arena->total_allocated;
     out->bump_used_bytes = arena->total_used;
-    out->active_bytes = arena->total_used;
+    out->active_bytes = _arena_active_bytes(arena);
+    out->retired_bytes = arena->retired_bytes;
     out->waste_bytes = arena->total_allocated - arena->total_used;
     out->overhead_bytes = backing > arena->total_allocated
         ? backing - arena->total_allocated : 0;
     out->high_water_active_bytes = arena->high_water_active_bytes;
     out->allocation_count = arena->allocation_count;
     out->rewind_count = arena->rewind_count;
+    out->retire_count = arena->retire_count;
+    out->reuse_hits = arena->reuse_hits;
+    out->split_count = arena->split_count;
+    out->coalesce_count = arena->coalesce_count;
+    out->bump_back_count = arena->bump_back_count;
     out->fresh_chunk_count = arena->fresh_chunk_count;
     out->fresh_growth_bytes = arena->fresh_growth_bytes;
     out->reset_count = arena->reset_count;
@@ -478,6 +596,13 @@ ArenaMark arena_mark(Arena* arena) {
 
 void arena_rewind(Arena* arena, ArenaMark mark) {
     if (!arena || arena->valid != ARENA_VALID_MARKER || !mark.chunk) return;
+    // retained blocks could lie in the rewound tail; tail-rewound arenas
+    // (scratch backings) never retire blocks
+    if (arena->retired_bytes) {
+        log_error("arena_rewind: arena %p holds retired blocks", (void*)arena);
+        assert(arena->retired_bytes == 0);
+        return;
+    }
     ArenaChunk* target = (ArenaChunk*)mark.chunk;
     // the mark must lie at or behind the tail, on this arena's chain
     ArenaChunk* chunk = target;
@@ -559,4 +684,52 @@ void arena_set_mem_category(Arena* arena, int category) {
     if (!arena || arena->valid != ARENA_VALID_MARKER) return;
     arena->category = category >= 0 && category < MEM_CAT_COUNT
         ? (MemCategory)category : MEM_CAT_UNKNOWN;
+}
+
+// Coalesce a span with retained neighbours; return it to the tail when it
+// reaches the bump cursor, otherwise keep it on the retired list.
+static void _arena_retain_span(Arena* arena, void* ptr, size_t span) {
+    uintptr_t merged_addr = (uintptr_t)ptr;
+    size_t merged_size = span;
+    ArenaRetiredBlock* adj;
+    while ((adj = _arena_take_adjacent_retired(arena, merged_addr, merged_size)) != NULL) {
+        arena->coalesce_count++;
+        if ((uintptr_t)adj + adj->size == merged_addr) merged_addr = (uintptr_t)adj;
+        merged_size += adj->size;
+    }
+
+    ArenaChunk* chunk = arena->current;
+    uintptr_t cursor = (uintptr_t)&chunk->data[0] + chunk->used;
+    if (merged_addr + merged_size == cursor) {
+        chunk->used -= merged_size;
+        arena->total_used -= merged_size;
+        arena->bump_back_count++;
+        return;
+    }
+
+    ArenaRetiredBlock* block = (ArenaRetiredBlock*)merged_addr;
+    block->size = merged_size;
+    int bin = _arena_retired_bin(merged_size);
+    block->next = arena->retired_lists[bin];
+    arena->retired_lists[bin] = block;
+    arena->retired_bytes += merged_size;
+}
+
+void arena_retire(Arena* arena, void* ptr, size_t size) {
+    if (!arena || arena->valid != ARENA_VALID_MARKER || !ptr) return;
+    // a scratch owner rewinds its tail; a retained block there would dangle
+    if (arena->active_scope_count != 0) {
+        log_error("arena_retire: arena %p is owned by a scratch scope", (void*)arena);
+        assert(arena->active_scope_count == 0);
+        return;
+    }
+    if (!arena_owns(arena, ptr)) {
+        log_error("arena_retire: ptr %p (size %zu) not owned by arena %p", ptr, size, (void*)arena);
+        return;
+    }
+    // callers pass the object size; the allocation occupied the aligned span
+    size_t span = _arena_allocation_span(arena, size, 0);
+    if (span == 0) return;
+    arena->retire_count++;
+    _arena_retain_span(arena, ptr, span);
 }

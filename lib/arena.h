@@ -42,13 +42,19 @@ typedef struct Arena Arena;
 typedef struct ArenaStats {
     size_t backing_bytes;       // always zero: Arena owns its blocks directly
     size_t committed_bytes;     // aggregate chunk data capacity
-    size_t bump_used_bytes;     // bump extent
-    size_t active_bytes;        // equal to bump_used_bytes: arenas keep no interior free blocks
+    size_t bump_used_bytes;     // bump extent including retained interior blocks
+    size_t active_bytes;        // bump_used_bytes minus retired_bytes
+    size_t retired_bytes;       // blocks retained for reuse (arena_retire)
     size_t waste_bytes;         // unused chunk tails
     size_t overhead_bytes;      // arena/chunk headers and allocator rounding
     size_t high_water_active_bytes;
     uint64_t allocation_count;
     uint64_t rewind_count;      // tail-region rewinds (arena_rewind)
+    uint64_t retire_count;      // arena_retire calls
+    uint64_t reuse_hits;        // allocations served from retained blocks
+    uint64_t split_count;
+    uint64_t coalesce_count;
+    uint64_t bump_back_count;   // retained spans that rejoined the tail
     uint64_t fresh_chunk_count;
     uint64_t fresh_growth_bytes;
     uint64_t reset_count;
@@ -181,8 +187,10 @@ size_t arena_chunk_count(Arena* arena);
 /** Copy the allocator's detailed logical/backing counters. */
 void arena_get_stats(Arena* arena, ArenaStats* out);
 
-// An arena frees only in batch: whole-arena reset/clear/destroy, or rewinding
-// its tail to a mark. There is no individual free (D4.1.4v4).
+// An arena releases memory only in batch: whole-arena reset/clear/destroy, or
+// rewinding its tail to a mark. A block is never individually freed or
+// discarded; it may only be retained for reuse within the same arena
+// (arena_retire), as DOM node retirement does (D4.1.4v5).
 
 // A scratch arena registers as the sole owner of its backing arena's tail, so
 // reset/clear cannot invalidate its pointers and no other allocation can land
@@ -202,7 +210,17 @@ typedef struct ArenaMark {
 
 ArenaMark arena_mark(Arena* arena);
 // Frees everything allocated after `mark`; later chunks are kept for reuse.
+// Not valid on an arena holding retired blocks.
 void arena_rewind(Arena* arena, ArenaMark mark);
+
+/**
+ * Retain a block on the arena's retired list for reuse by later allocations
+ * from the same arena. The memory stays arena-owned until reset/destroy; a
+ * retained span that reaches the tail rejoins it. Not allowed while a scratch
+ * scope owns the arena.
+ * @param size the size the block was allocated with
+ */
+void arena_retire(Arena* arena, void* ptr, size_t size);
 
 /**
  * Check if a pointer belongs to this arena

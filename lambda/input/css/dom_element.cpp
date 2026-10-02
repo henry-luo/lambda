@@ -33,7 +33,7 @@ static void dom_element_clear_synthetic_attributes(DomElement* element);
 bool dom_document_owns_node_storage(DomDocument* doc, const void* storage) {
     if (!doc || !storage) return false;
     return (doc->input && doc->input->arena && arena_owns(doc->input->arena, storage)) ||
-        (doc->node_pool && pool_owns(doc->node_pool, storage));
+        (doc->node_arena && arena_owns(doc->node_arena, storage));
 }
 
 extern "C" __attribute__((weak)) void svg_unregister_image_resolvers_for_tree(Element* root) {
@@ -210,10 +210,10 @@ bool DomDocument::init(Input* source_input) {
         return false;
     }
 
-    // Runtime-created DOM nodes live in a pool: retirement frees them one by one
-    node_pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.node.pool");
-    if (!node_pool) {
-        log_error("dom_document_create: failed to create node pool");
+    // Create arena for all DOM node allocations
+    node_arena = mem_arena_create(dctx, MEM_ROLE_NODE, "dom.node.arena");
+    if (!node_arena) {
+        log_error("dom_document_create: failed to create arena");
         // Factory-created DOM roots must unregister their memory-context nodes on teardown.
         destroy();
         return false;
@@ -335,11 +335,12 @@ void DomDocument::destroy() {
         element_dom_map = nullptr;
     }
 
-    // Runtime-created DOM nodes are freed with the node pool
-    if (node_pool) {
+    // Note: root and all DOM nodes are allocated from arena,
+    // so they will be freed when arena is destroyed
+    if (node_arena) {
         // Factory-created DOM roots must unregister their memory-context nodes on teardown.
-        mem_pool_destroy(node_pool);
-        node_pool = nullptr;
+        mem_arena_destroy(node_arena);
+        node_arena = nullptr;
     }
 
     if (document_pool) {
@@ -437,26 +438,22 @@ DomElement* DomElement::create_in(Arena* arena) {
     return element;
 }
 
-DomElement* DomElement::create_node_in(Pool* pool) {
-    if (!pool) return nullptr;
-    // Pool zeroing is the construction contract; only the discriminator is non-zero.
-    DomElement* element = (DomElement*)pool_calloc(pool, sizeof(DomElement));
-    if (element) element->node_type = DOM_NODE_ELEMENT;
-    return element;
-}
-
 DomElement* DomElement::create_in(Pool* pool) {
-    DomElement* element = create_node_in(pool);
-    // View-pool generated boxes have no Lambda backing; zero flags would
-    // otherwise make their embedded placeholder look tree-owned.
-    if (element) element->set_synthetic(true);
+    if (!pool) return nullptr;
+    DomElement* element = (DomElement*)pool_calloc(pool, sizeof(DomElement));
+    if (element) {
+        element->node_type = DOM_NODE_ELEMENT;
+        // View-pool generated boxes have no Lambda backing; zero flags would
+        // otherwise make their embedded placeholder look tree-owned.
+        element->set_synthetic(true);
+    }
     return element;
 }
 
 DomElement* DomElement::create(DomDocument* doc, const char* tag_name,
                                Element* native_element) {
-    if (!doc || !doc->node_pool || !tag_name) return nullptr;
-    return create_in(create_node_in(doc->node_pool), doc, tag_name, native_element);
+    if (!doc || !doc->node_arena || !tag_name) return nullptr;
+    return create_in(create_in(doc->node_arena), doc, tag_name, native_element);
 }
 
 DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
@@ -2723,15 +2720,15 @@ DomText* DomText::create_detached(String* native_string, DomDocument* doc) {
         log_error("DomText::create_detached: native_string required");
         return nullptr;
     }
-    if (!doc || !doc->node_pool) {
-        log_error("DomText::create_detached: doc with node pool required");
+    if (!doc || !doc->node_arena) {
+        log_error("DomText::create_detached: doc with arena required");
         return nullptr;
     }
 
-    // Pool zeroing supplies every null/zero default omitted below.
-    DomText* text_node = create_in(doc->node_pool);
+    // Arena zeroing supplies every null/zero default omitted below.
+    DomText* text_node = create_in(doc->node_arena);
     if (!text_node) {
-        log_error("DomText::create_detached: pool_calloc failed");
+        log_error("DomText::create_detached: arena_calloc failed");
         return nullptr;
     }
 
@@ -2779,8 +2776,8 @@ void dom_text_release_retired_storage(DomDocument* doc, DomText* text_node) {
 
 DomText* DomText::create_detached_copy(DomDocument* doc,
                                        const char* text, size_t len) {
-    if (!doc || !doc->node_pool || (!text && len)) return nullptr;
-    DomText* text_node = create_in(doc->node_pool, len);
+    if (!doc || !doc->node_arena || (!text && len)) return nullptr;
+    DomText* text_node = create_in(doc->node_arena, len);
     if (!text_node) return nullptr;
     String* string = dom_text_to_string(text_node);
     text_node->node_flags |= DOM_NODE_FLAG_TEXT_REINSERTABLE;
@@ -2805,10 +2802,10 @@ DomText* DomText::create_symbol(const char* name, size_t len,
         return nullptr;
     }
 
-    // Pool zeroing supplies every null/zero default omitted below.
-    DomText* text_node = create_in(parent_element->doc->node_pool);
+    // Arena zeroing supplies every null/zero default omitted below.
+    DomText* text_node = create_in(parent_element->doc->node_arena);
     if (!text_node) {
-        log_error("DomText::create_symbol: pool_calloc failed");
+        log_error("DomText::create_symbol: arena_calloc failed");
         return nullptr;
     }
 
@@ -2827,8 +2824,11 @@ DomText* DomText::create_symbol(const char* name, size_t len,
     return text_node;
 }
 
-// The inline Lambda String shares the node's zeroed allocation.
-static DomText* dom_text_init_inline(DomText* text_node, size_t inline_string_length) {
+DomText* DomText::create_in(Arena* arena, size_t inline_string_length) {
+    if (!arena) return nullptr;
+    size_t total = sizeof(DomText) + sizeof(String) + inline_string_length + 1;
+    // The inline Lambda String shares the same zeroed arena allocation as its node.
+    DomText* text_node = (DomText*)arena_calloc(arena, total);
     if (!text_node) return nullptr;
     text_node->node_type = DOM_NODE_TEXT;
     String* string = dom_text_to_string(text_node);
@@ -2837,18 +2837,6 @@ static DomText* dom_text_init_inline(DomText* text_node, size_t inline_string_le
     text_node->text = string->chars;
     text_node->length = inline_string_length;
     return text_node;
-}
-
-DomText* DomText::create_in(Arena* arena, size_t inline_string_length) {
-    if (!arena) return nullptr;
-    size_t total = sizeof(DomText) + sizeof(String) + inline_string_length + 1;
-    return dom_text_init_inline((DomText*)arena_calloc(arena, total), inline_string_length);
-}
-
-DomText* DomText::create_in(Pool* pool, size_t inline_string_length) {
-    if (!pool) return nullptr;
-    size_t total = sizeof(DomText) + sizeof(String) + inline_string_length + 1;
-    return dom_text_init_inline((DomText*)pool_calloc(pool, total), inline_string_length);
 }
 
 DomText* dom_text_create(String* native_string, DomElement* parent_element) {
@@ -3184,8 +3172,8 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
         log_error("DomComment::create_detached: native_element required");
         return nullptr;
     }
-    if (!doc || !doc->node_pool) {
-        log_error("DomComment::create_detached: doc with node pool required");
+    if (!doc || !doc->node_arena) {
+        log_error("DomComment::create_detached: doc with arena required");
         return nullptr;
     }
 
@@ -3206,10 +3194,10 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
         return nullptr;
     }
 
-    // Pool zeroing supplies every null/zero default omitted below.
-    DomComment* comment_node = (DomComment*)pool_calloc(doc->node_pool, sizeof(DomComment));
+    // Arena zeroing supplies every null/zero default omitted below.
+    DomComment* comment_node = (DomComment*)arena_calloc(doc->node_arena, sizeof(DomComment));
     if (!comment_node) {
-        log_error("DomComment::create_detached: pool_calloc failed");
+        log_error("DomComment::create_detached: arena_calloc failed");
         return nullptr;
     }
 

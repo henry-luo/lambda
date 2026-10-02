@@ -303,14 +303,18 @@ TEST(ArenaTest, DetailedStatisticsTrackRewindAndBacking) {
     arena_rewind(arena, mark);
     void* reused = arena_alloc(arena, 64);
     EXPECT_EQ(reused, second);
+    ASSERT_NE(arena_alloc(arena, 64), nullptr);  // guard keeps the retired block interior
+    arena_retire(arena, first, 64);
 
     ArenaStats stats;
     arena_get_stats(arena, &stats);
     EXPECT_GT(stats.backing_bytes, stats.committed_bytes);
     EXPECT_EQ(stats.committed_bytes, ARENA_INITIAL_CHUNK_SIZE);
     EXPECT_EQ(stats.active_bytes, 128u);
-    EXPECT_EQ(stats.allocation_count, 3u);
+    EXPECT_EQ(stats.retired_bytes, 64u);
+    EXPECT_EQ(stats.allocation_count, 4u);
     EXPECT_EQ(stats.rewind_count, 1u);
+    EXPECT_EQ(stats.retire_count, 1u);
     EXPECT_EQ(stats.fresh_chunk_count, 1u);
     EXPECT_GE(stats.high_water_active_bytes, stats.active_bytes);
 
@@ -1098,7 +1102,120 @@ TEST(ArenaRewindTest, NullAndEmptyMarksAreIgnored) {
     arena_destroy(arena);
 }
 
+// ============================================================================
+// Retired list (arena_retire): retained for reuse, never discarded
+// ============================================================================
+
+TEST(ArenaRetireTest, RetiredBlockIsReusedBySameSizeAllocation) {
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    void* first = arena_alloc(arena, 64);
+    void* guard = arena_alloc(arena, 64);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(guard, nullptr);
+    arena_retire(arena, first, 64);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retired_bytes, 64u);
+    EXPECT_EQ(stats.active_bytes, 64u);
+    EXPECT_EQ(stats.bump_used_bytes, 128u);
+
+    EXPECT_EQ(arena_alloc(arena, 64), first);
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retired_bytes, 0u);
+    EXPECT_EQ(stats.retire_count, 1u);
+    EXPECT_EQ(stats.reuse_hits, 1u);
+    arena_destroy(arena);
+}
+
+TEST(ArenaRetireTest, AdjacentRetiredBlocksCoalesceAndSplit) {
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    void* a = arena_alloc(arena, 64);
+    void* b = arena_alloc(arena, 64);
+    void* guard = arena_alloc(arena, 64);
+    ASSERT_NE(guard, nullptr);
+    arena_retire(arena, a, 64);
+    arena_retire(arena, b, 64);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.coalesce_count, 1u);
+    EXPECT_EQ(stats.retired_bytes, 128u);
+
+    // a smaller request takes the front and keeps the rest retained
+    EXPECT_EQ(arena_alloc(arena, 32), a);
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.split_count, 1u);
+    EXPECT_EQ(stats.retired_bytes, 96u);
+    arena_destroy(arena);
+}
+
+TEST(ArenaRetireTest, RetiredTailRejoinsBumpCursor) {
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    ASSERT_NE(arena_alloc(arena, 64), nullptr);
+    void* tail = arena_alloc(arena, 64);
+    arena_retire(arena, tail, 64);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.bump_back_count, 1u);
+    EXPECT_EQ(stats.retired_bytes, 0u);
+    EXPECT_EQ(arena_total_used(arena), 64u);
+    arena_destroy(arena);
+}
+
+TEST(ArenaRetireTest, ResetDropsRetiredBlocks) {
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    void* a = arena_alloc(arena, 64);
+    ASSERT_NE(arena_alloc(arena, 64), nullptr);
+    arena_retire(arena, a, 64);
+    arena_reset(arena);
+
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retired_bytes, 0u);
+    EXPECT_EQ(arena_alloc(arena, 64), a);  // fresh bump from the start
+    arena_destroy(arena);
+}
+
+TEST(ArenaRetireTest, ForeignPointerIsIgnored) {
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    char outside[64];
+    arena_retire(arena, outside, 64);
+    arena_retire(arena, nullptr, 64);
+    arena_retire(nullptr, outside, 64);
+    ArenaStats stats;
+    arena_get_stats(arena, &stats);
+    EXPECT_EQ(stats.retire_count, 0u);
+    arena_destroy(arena);
+}
+
 #ifndef NDEBUG
+TEST(ArenaRetireTest, RetireOnScopeOwnedArenaAsserts) {
+    EXPECT_DEATH({
+        Arena* arena = arena_create_default();
+        void* p = arena_alloc(arena, 64);
+        arena_scope_enter(arena);
+        arena_retire(arena, p, 64);  // the owner rewinds this tail
+    }, "");
+}
+
+TEST(ArenaRetireTest, RewindWithRetiredBlocksAsserts) {
+    EXPECT_DEATH({
+        Arena* arena = arena_create_default();
+        ArenaMark mark = arena_mark(arena);
+        void* p = arena_alloc(arena, 64);
+        arena_alloc(arena, 64);
+        arena_retire(arena, p, 64);
+        arena_rewind(arena, mark);
+    }, "");
+}
+
 TEST(ArenaRewindTest, MarkAheadOfTailAsserts) {
     EXPECT_DEATH({
         Arena* arena = arena_create_default();

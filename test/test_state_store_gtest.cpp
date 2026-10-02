@@ -30,7 +30,7 @@ protected:
         ASSERT_NE(arena, nullptr);
 
         doc.document_pool = pool;
-        doc.node_pool = pool;
+        doc.node_arena = arena;
 
         root = make_element();
         live = make_element();
