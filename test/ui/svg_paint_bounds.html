@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+html, body { margin: 0; background: white; }
+svg { display: block; }
+</style></head><body>
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="260">
+  <defs>
+    <linearGradient id="horizontal"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <linearGradient id="vertical" x2="0" y2="1"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+    <radialGradient id="radial"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></radialGradient>
+  </defs>
+  <path d="M10 10 H110 V70 H10 Z" fill="url(#horizontal)"/>
+  <polygon points="130,10 230,10 230,70 130,70" fill="url(#horizontal)"/>
+  <polyline points="250,10 350,10 350,70 250,70" fill="url(#horizontal)"/>
+  <path d="M370 10 H470 V70 H370 Z" fill="url(#radial)"/>
+  <path d="M10 170 C10 90 110 90 110 170 Z" fill="url(#vertical)"/>
+  <g opacity="0.5">
+    <rect x="160" y="110" width="60" height="60" fill="red"/>
+    <rect x="200" y="130" width="60" height="60" fill="blue"/>
+  </g>
+  <g opacity="0.5" transform="translate(300 100)"><g opacity="0.5">
+    <rect x="0" y="10" width="60" height="60" fill="red"/>
+    <rect x="40" y="30" width="60" height="60" fill="blue"/>
+  </g></g>
+</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="260" viewBox="100 100 480 260">
+  <g opacity="0.5">
+    <rect x="260" y="210" width="60" height="60" fill="red"/>
+    <rect x="300" y="230" width="60" height="60" fill="blue"/>
+  </g>
+  <g opacity="0.5" transform="translate(400 200)"><g opacity="0.5">
+    <rect x="0" y="10" width="60" height="60" fill="red"/>
+    <rect x="40" y="30" width="60" height="60" fill="blue"/>
+  </g></g>
+</svg>
+</body></html>
