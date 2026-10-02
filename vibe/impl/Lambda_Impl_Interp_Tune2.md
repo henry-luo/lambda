@@ -795,7 +795,7 @@ capture are in `temp/interp_perf/` (`cpu.sh`, `prof.sh`, `agg.py`,
 
 | Item | Status |
 |---|---|
-| 1 Loop-head handoff | Implemented 2026-10-02 (§12.2), narrower than the §6 plan; Phase 1.1 census not done |
+| 1 Loop-head handoff | Implemented 2026-10-02 (§12.2), narrower than the §6 plan; census done (§12.5) |
 | 2 Lazy boundary diagnostics | Implemented 2026-10-02 (§12.1) |
 | 3 Contract plan | Implemented 2026-10-02 as a tag fast path, not a stored plan (§12.1) |
 | 4 Planned call sites, direct entry | Declined on the reprofile (§12.4): the layer it removes is 3–5% |
@@ -898,7 +898,8 @@ stress mode, and the log confirms each function handed off.
 1. Fixed — an alias of a live-in container (`keep = c`) skipped its COW mark,
    so a later write showed through the alias (`cow_flow_join`). Continuation
    parameters are now owners.
-2. Pre-existing on eager JIT, fixed for continuations only — an untyped
+2. Pre-existing on eager JIT, at first fixed for continuations only and then
+   in the shared inference (§12.5) — an untyped
    parameter that the body uses arithmetically and passes to an untyped `var`
    parameter gets a native lane with no CW33 home, and the callee's writes
    are lost (`pn f(x) { x = x + 10; bump(x) ... }` returns 160 on `jit`
@@ -906,7 +907,7 @@ stress mode, and the log confirms each function handed off.
    lowering is not a general fix: direct native callers choose the argument
    lane elsewhere, and the result became `inf`. It belongs in the shared
    parameter inference.
-3. Pre-existing — `tune23_record_constructor.ls` aborts under
+3. Pre-existing, fixed in §12.5 — `tune23_record_constructor.ls` aborts under
    `LAMBDA_SATELLITE_SYNC=1` alone, on the baseline binary too ("mir-value:
    unavailable representation transition 1 -> 2 in `_forward_column_150`").
    Default AUTO and eager JIT pass.
@@ -965,3 +966,65 @@ Reprofiled after §12.2–12.3. Interpreter CPU against the §12.3 binary:
 - Remaining large costs: member reads by name (`map_get_for_owner_keyed`,
   ~10% of `richards2`, a runtime lookup that D8.4.1v2 keeps uncached) and
   `eval_expr`'s own dispatch.
+
+### 12.5 Open items: defects, census, release timings
+
+**Defect 2 fixed generally.** `infer_param_types_batched` keeps an untyped,
+non-`var` parameter boxed when the body passes it to an untyped `var`
+parameter, the rule `var` declarations already follow. Because all three
+callers of the shared inference see it, direct native callers agree on the
+argument lane (the callee-only attempt had printed `inf`). It replaces the
+continuation-only override of §12.2. A `var` parameter is excluded: it
+already owns its caller's home, and forwarding it keeps its inferred array
+witness (`test/mir/lambda/tune21_var_witness_forward` pins that). Regression
+`test/lambda/proc/var_arg_param_lane.ls`: base JIT printed `160 2.5`, all
+tiers now print `166 15`.
+
+**Defect 3 fixed, and it was not sync-mode-only.** A satellite of a native-int
+function whose body ends in a direct call to a function outside its image
+received an `any` Item from the dynamic edge and asked `em_require_rep` for
+the int lane, which aborts by design. With 20,000 iterations plain AUTO
+aborted on the base binary every time. `mir_require_native_return` applies the
+declared-return admission instead (checked boundary, error exit, unbox) when
+the produced Item's contract does not cover the lane, at the content tail and
+the body-result conversion; every value the lane covers keeps the plain
+conversion, and the MIR emission suite is unchanged (235/235). Regression
+`test/lambda/proc/satellite_open_call_return.ls`.
+
+**Handoff eligibility.** A body ending in an unconditional `return` or
+`raise` never yields its block value, so the "value before the loop" pin no
+longer applies to it. That was 10 of the 13 pins in the census
+(`nbody`'s `benchmark`, `fasta`, `revcomp`, `havlak`). The remaining pins are
+an object-field identifier (`hyphen`) and a variadic signature.
+
+**Phase 1.1 census** (`LAMBDA_LOOP_CENSUS=1`, 1,250 scripts: the golden
+corpus plus `test/benchmark`, before the eligibility change):
+
+| Measure | Value |
+|---|---:|
+| Handoff loop sites executed | 639 |
+| … reaching 1,024 / 10,000 / 50,000 / 100,000 back-edges | 251 / 147 / 14 / 6 |
+| Loop states at exit: published / still compiling / pinned | 96 / 53 / 17 |
+| Definitions that handed off | 81 |
+| Satellite images queued, base → new | 22,216 → 17,210 (−23%) |
+
+The 53 still compiling at exit are continuations the script finished before
+using: worker CPU spent, never the execution thread's time. The image count
+falls because the first-entry trigger is gone.
+
+**Release timings** (both binaries `build-release-compile`, minimum of 3
+interleaved runs, load average 37–57):
+
+| Fixture | interp base → new | AUTO base → new | JIT base → new |
+|---|---|---|---|
+| ack2 | 1.75 → 0.59 s | 0.022 → 0.022 s | 0.021 → 0.021 s |
+| mandelbrot2 | 6.31 → 2.35 s | 6.35 → 0.053 s | 0.030 → 0.030 s |
+| matmul2 | 4.05 → 2.09 s | 4.07 → 0.064 s | 0.024 → 0.024 s |
+| richards2 | 4.35 → 2.25 s | 0.388 → 0.382 s | 0.129 → 0.129 s |
+| deltablue2 | 1.57 → 0.84 s | 0.417 → 0.402 s | 0.137 → 0.137 s |
+| nbody2 | 1.41 → 0.89 s | 0.115 → 0.099 s | 0.051 → 0.051 s |
+| pnpoly2 | 2.13 → 0.76 s | 0.104 → 0.043 s | 0.019 → 0.019 s |
+| levenshtein2 | 1.13 → 0.42 s | 0.287 → 0.069 s | 0.025 → 0.024 s |
+
+Eager JIT is unchanged, as it should be: the shared-helper and lowering
+changes alter only paths it reaches through boxed calls.

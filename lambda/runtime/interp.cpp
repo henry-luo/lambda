@@ -4933,6 +4933,16 @@ static bool interp_fast_int_linear_while(InterpFrame* frame, AstWhileNode* loop,
     return true;
 }
 
+// `LAMBDA_LOOP_CENSUS=1`: log handoff-loop back-edge counts (Phase 1.1)
+static bool interp_loop_census_enabled(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char* value = getenv("LAMBDA_LOOP_CENSUS");
+        enabled = value && strcmp(value, "1") == 0;
+    }
+    return enabled != 0;
+}
+
 // D8.1.1v14: makes a numbered top-level loop the activation's handoff loop
 // for the loop statement's extent; nested loops leave the frame's loop as is.
 class InterpHandoffLoopScope {
@@ -4949,7 +4959,21 @@ public:
         frame->handoff_loop = loop;
         active_ = true;
     }
-    ~InterpHandoffLoopScope() { frame_->handoff_loop = saved_; }
+    ~InterpHandoffLoopScope() {
+        if (active_ && interp_loop_census_enabled()) {
+            // Interp Tune2 Phase 1.1: cumulative back-edges of this loop site,
+            // logged per loop exit; the census keeps each site's maximum
+            const FnPromotionCell* cell = frame_->promotion_cell;
+            const AstLoopControlNode* loop = frame_->handoff_loop;
+            log_notice("loop-census fn=%s loop=%u at=%u backedges=%u state=%d",
+                frame_->fn->name ? frame_->fn->name->chars : "<anonymous>",
+                (unsigned)loop->interp_handoff_ordinal,
+                (unsigned)((AstNode*)loop)->source_span.start_byte,
+                cell ? cell->loop_backedges[loop->interp_handoff_ordinal - 1] : 0,
+                cell ? (int)cell->loop_state : -1);
+        }
+        frame_->handoff_loop = saved_;
+    }
     bool active() const { return active_; }
 
     InterpHandoffLoopScope(const InterpHandoffLoopScope&) = delete;
@@ -6278,13 +6302,19 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
     } else {
         // The continuation's block value must be the definition's: the last
         // value expression of the body may not precede the loop.
+        // A body ending in an unconditional `return`/`raise` never yields its
+        // block value, so then the value expression may sit anywhere.
         int values = 0, decls = 0, stams = 0;
         AstNode* last_value = interp_proc_block_last_value(body, &values, &decls, &stams);
+        AstNode* last_item = (AstNode*)loop;
         bool value_after_loop = last_value == NULL;
-        for (AstNode* item = (AstNode*)loop; item && !value_after_loop; item = item->next) {
-            value_after_loop = item == last_value;
+        for (AstNode* item = (AstNode*)loop; item; item = item->next) {
+            value_after_loop = value_after_loop || item == last_value;
+            last_item = item;
         }
-        if (!value_after_loop) why = "block-value";
+        bool ends_in_transfer = last_item->node_type == AST_NODE_RETURN_STAM ||
+            last_item->node_type == AST_NODE_RAISE_STAM;
+        if (!value_after_loop && !ends_in_transfer) why = "block-value";
     }
     if (!why) why = interp_loop_live_ins(frame, (AstNode*)loop, live, &live_count);
     if (!why) {

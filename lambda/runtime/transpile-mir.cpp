@@ -23904,6 +23904,31 @@ static bool mir_tail_transfers_control(AstNode* node) {
         node->node_type == AST_NODE_RAISE_EXPR);
 }
 
+// A native-return body publishes one lane. A producer the planner expected
+// to deliver that lane can instead yield an Item whose contract the lane does
+// not cover -- in a satellite image a direct call to a function outside the
+// image is reached through the dynamic edge, so `column(r)` arrives as an
+// `any` Item that may be an error. Narrowing it is the declared-return
+// admission (the explicit `return` firewall), not a representation move,
+// which em_require_rep rightly refuses. Every value the lane covers keeps the
+// plain conversion.
+static MirValue mir_require_native_return(MirTranspiler* mt, AstNode* node,
+        MirValue value, ValueRep lane) {
+    if (value.rep == VALUE_REP_ITEM && !value.maybe_pending &&
+            value.semantic_contract && mt->current_return_type &&
+            mt->native_return_tid != LMD_TYPE_ANY &&
+            lambda_canonical_rep(value.semantic_contract) != lane) {
+        Type* declared = mir_unwrap_decl_type(mt->current_return_type);
+        MIR_reg_t checked = emit_checked_value_boundary(mt, value, declared,
+            "function return");
+        emit_return_if_item_error(mt, checked);
+        MIR_reg_t native = emit_unbox_contract_lane(mt, checked,
+            mt->native_return_tid, mt->current_return_type);
+        return mir_value_from_reg(mt, node, native, lane, declared);
+    }
+    return em_require_rep(&mt->em, value, lane);
+}
+
 static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
     AstNode* tail_value = ast_unwrap_primary(node);
     // A final `if` in a pn body is the procedure's implicit return value, not
@@ -23945,8 +23970,15 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
         // its reachable result joins in the function's native return lane.
         // Preserve that producer-selected lane through the content wrapper;
         // forcing Item here loses the physical fact before the ABI boundary.
-        MirValue result = transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP,
-            lambda_canonical_rep_for_type_id(mt->native_return_tid));
+        ValueRep lane = lambda_canonical_rep_for_type_id(mt->native_return_tid);
+        // A plain call (not folded, not a primary wrapper -- the two forms
+        // transpile_expr_value lowers differently under a required lane) is
+        // lowered first and then given the lane, so an open call result can
+        // take the declared-return admission instead of a refused move.
+        MirValue result = node->node_type == AST_NODE_CALL_EXPR &&
+                node->const_kind == AST_CONST_NONE
+            ? mir_require_native_return(mt, node, transpile_expr_value(mt, node), lane)
+            : transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP, lane);
         mt->preserve_proc_if_result = saved_preserve_proc_if_result;
         return result;
     }
@@ -40107,7 +40139,16 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
         }
         // Skip optional params without defaults (may_be_null — must remain ANY)
         bool may_be_null = tp && tp->is_optional && !tp->default_value;
-        if (may_be_null) {
+        // T21-3b for parameters: one the body passes to an untyped `var`
+        // parameter is written back through its CW33 home, which needs a
+        // rooted boxed binding -- the rule `var` declarations follow. A native
+        // lane had no home, so `x = x + 10; bump(x)` lost every bump on the
+        // JIT. Deciding it here keeps callers' argument lanes in agreement.
+        // A `var` parameter already owns its caller's home, so forwarding it
+        // keeps its inferred witness (T21-2d).
+        bool borrowed_as_var = p->entry && !(tp && tp->is_var_param) &&
+            mir_binding_borrowed_as_var_argument(fn_node->body, p->entry);
+        if (may_be_null || borrowed_as_var) {
             p = (AstNamedNode*)p->next;
             tp = tp ? tp->next : nullptr;
             continue;
@@ -42978,23 +43019,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // The former fixed-size infer cache duplicated this per-formal table and
     // made the ownership of inferred types depend on compilation order.
     if (fn_node->body) {
+        // a continuation parameter passed to a `var` parameter stays boxed
+        // through the shared inference rule (D8.1.1v14)
         infer_param_types_batched(mt, fn_node, is_proc_fn, resolved_param_types, user_param_count);
-        // D8.1.1v14: a continuation parameter is a T0 local, which the
-        // declaration rule (T21-3b) keeps boxed and rooted when the body
-        // passes it to an untyped `var` parameter -- its CW33 home needs a
-        // root slot, and an inferred native lane loses every write back. Only
-        // a continuation's own lowering changes: it has no native callers,
-        // whose raw argument lanes would otherwise disagree with this body.
-        int scan_index = 0;
-        for (AstNamedNode* p = fn_node->param; fn_node->is_loop_continuation &&
-                p && scan_index < user_param_count;
-                p = (AstNamedNode*)((AstNode*)p)->next, scan_index++) {
-            if (!p->declared_type && p->entry &&
-                    mir_is_native_scalar_value_type(resolved_param_types[scan_index]) &&
-                    mir_binding_borrowed_as_var_argument(fn_node->body, p->entry)) {
-                resolved_param_types[scan_index] = LMD_TYPE_ANY;
-            }
-        }
     }
     mir_store_param_types(mt, fn_node, resolved_param_types, user_param_count);
     FnParamTypeInfo saved_raw_variant_params[LAMBDA_MAX_FUNCTION_ARGS] = {};
@@ -44179,7 +44206,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             // The body is a producer-owned descriptor. The native ABI asks
             // for one explicit lane; MirEmitter owns every Item/native
             // conversion instead of recovering it from syntax or MIR types.
-            body_result = em_require_rep(&mt->em, body_value,
+            body_result = mir_require_native_return(mt, fn_node->body, body_value,
                 lambda_canonical_rep_for_type_id(nfi_body->return_type)).reg;
         } else if (mt->block_returned) {
             // Proc already returned — emit type-correct dummy for trailing ret
