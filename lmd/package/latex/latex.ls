@@ -6,7 +6,6 @@
 //   let html_string = latex.render_file_to_html("paper.tex")
 //   let elements = latex.render(ast)
 
-import normalize: .normalize
 import analyzer: .analyze
 import macros: .macros
 import dispatcher: .render
@@ -26,7 +25,7 @@ pub fn render_file_to_html(file_path) {
 
 // parse and render a LaTeX string to HTML string
 pub fn render_string_to_html(latex_source) {
-    let ast = input(latex_source, {type: "latex", source: true}) ^ { null }
+    let ast = parse(latex_source, {type: "latex"}) ^ { null }
     render_to_html(ast, null)
 }
 
@@ -83,7 +82,7 @@ pub fn render_file(file_path) {
 
 // parse and render a LaTeX string
 pub fn render_string(latex_source) {
-    let ast = input(latex_source, {type: "latex", source: true}) ^ { null }
+    let ast = parse(latex_source, {type: "latex"}) ^ { null }
     render(ast, null)
 }
 

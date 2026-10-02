@@ -11,7 +11,7 @@ pub fn text_of(node) {
     else if (node is int) string(node)
     else if (node is float) string(node)
     else if (node is symbol) string(node)
-    else if (node is element) text_of_element(node)
+    else if (node is element or node is array) text_of_element(node)
     else string(node)
 }
 
@@ -35,6 +35,7 @@ pub fn rich_text_of(node) {
     else if (node is float) { string(node) }
     else if (node is symbol) { string(node) }
     else if (node is element) { rich_text_of_element(node) }
+    else if (node is array) { join_rich_children(node, 0, len(node), "") }
     else { string(node) }
 }
 
@@ -207,6 +208,12 @@ pub fn children_array(el) {
     else { [for (i in 0 to (n - 1)) el[i]] }
 }
 
+// S2.6.1v2/S2.6.4: command string runs are array children, preserving positional arguments.
+pub fn command_args(el) {
+    let children = if (el is element) content(el) else el;
+    [for (child in children, arg in (if (child is array) child else [child])) arg]
+}
+
 // get attribute value or default
 pub fn attr_or(el, attr_name, default_val) {
     let v = el[attr_name]
@@ -214,25 +221,11 @@ pub fn attr_or(el, attr_name, default_val) {
     else default_val
 }
 
-// rebuild an element with new children (generic version for any tag)
-// Note: Lambda elements require literal tag names, so this returns the
-// original element when children are unchanged, or wraps in a generic container
-pub fn rebuild_with_children(el, new_kids) {
-    // if children haven't changed (same length), return original
-    if (len(new_kids) == len(el)) el
-    else <group for c in new_kids { c }>
-}
-
 // get text content of the Nth child
 pub fn text_of_child(el, idx) {
-    if (idx >= len(el)) ""
-    else get_child_text(el[idx])
-}
-
-fn get_child_text(child) {
-    if (child is string) child
-    else if (child is element) text_of(child)
-    else string(child)
+    let args = command_args(el)
+    if (idx >= len(args)) ""
+    else text_of(args[idx])
 }
 
 // ============================================================

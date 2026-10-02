@@ -244,7 +244,7 @@ fn parse_dim(attr, default_val) {
     if (attr == null) default_val
     else
         (let s = if (attr is string) attr
-             else if (attr is element) get_all_text(attr)
+             else if (attr is element or attr is array) get_all_text(attr)
              else string(attr),
          let v = parse_dim_string(s),
          if (v != null) v
@@ -358,12 +358,9 @@ fn get_text(el) {
 }
 
 fn get_all_text(el) {
-    get_all_text_at(el, 0, "")
-}
-
-fn get_all_text_at(el, i, acc) {
-    if (i >= len(el)) if (acc != "") acc else get_text(el)
-    else
-        (let child_text = if (el[i] is string) string(el[i]) else get_all_text(el[i]),
-         get_all_text_at(el, i + 1, acc ++ child_text))
+    if (el is string) el
+    else {
+        let text = util.children_text(el, get_all_text)
+        if (text != "") text else get_text(el)
+    }
 }

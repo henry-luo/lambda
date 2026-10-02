@@ -8,6 +8,7 @@
 #include "../lambda/core/mark_reader.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/input/input.hpp"
+#include "../lambda/input/css/dom_node.hpp"
 #include "../lib/mempool.h"
 #include "../lib/mem_context.h"
 #include "../lib/mem_factory.h"
@@ -219,6 +220,45 @@ TEST_F(MarkBuilderTest, CreateSimpleElement) {
     ASSERT_NE(elem_type, nullptr);
     EXPECT_GT(elem_type->name.length, 0);
     EXPECT_EQ(strncmp(elem_type->name.str, "div", 3), 0);
+}
+
+TEST_F(MarkBuilderTest, ElementContentMergesStringsButKeepsArrays) {
+    MarkBuilder builder(input);
+    Item arguments = builder.array().append("left").append("right").final();
+    Item item = builder.element("cmd").text("a").child(ItemNull).text("")
+        .child(builder.createStringItem("b")).child(arguments).text("c").text("d").final();
+    Element* element = item.element;
+    ASSERT_EQ(element->length, 3);
+    EXPECT_STREQ(element->items[0].get_string()->chars, "ab");
+    ASSERT_EQ(get_type_id(element->items[1]), LMD_TYPE_ARRAY);
+    EXPECT_EQ(element->items[1].array->length, 2);
+    EXPECT_STREQ(element->items[2].get_string()->chars, "cd");
+}
+
+TEST_F(MarkBuilderTest, PoolAppendNormalizesElementContent) {
+    MarkBuilder builder(input);
+    Element* element = builder.element("e").final().element;
+    array_append((Array*)element, builder.createStringItem("a"), input->pool, input->arena);
+    array_append((Array*)element, builder.createStringItem("b"), input->pool, input->arena);
+    ASSERT_EQ(element->length, 1);
+    EXPECT_STREQ(element->items[0].get_string()->chars, "ab");
+
+    Array* array = builder.array().final().array;
+    array_append(array, builder.createStringItem("a"), input->pool, input->arena);
+    array_append(array, builder.createStringItem("b"), input->pool, input->arena);
+    EXPECT_EQ(array->length, 2);
+}
+
+TEST_F(MarkBuilderTest, UiElementMergedTextRetainsDomStorage) {
+    input->ui_mode = true;
+    MarkBuilder builder(input);
+    Element* element = builder.element("p").text("hello").text(" world").final().element;
+    ASSERT_EQ(element->length, 1);
+    String* string = element->items[0].get_string();
+    EXPECT_STREQ(string->chars, "hello world");
+    DomText* text = string_to_dom_text(string);
+    EXPECT_EQ(text->native_string, string);
+    EXPECT_EQ(text->length, string->len);
 }
 
 // Test element with attributes

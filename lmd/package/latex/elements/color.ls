@@ -159,18 +159,17 @@ pub fn wrap_color_decl(el, items, custom_colors) {
 
 // get text of a child node (handles both string and element children)
 fn child_text(child) {
-    if (child is element and len(child) > 0) { trim(string(child[0])) }
-    else { trim(string(child)) }
+    trim(util.text_of(child))
 }
 
 // get text of first child (the color argument)
 fn get_first_text(el) {
-    if (len(el) > 0) { child_text(el[0]) }
-    else { "" }
+    get_child_text(el, 0)
 }
 
 // get text of child at index
 fn get_child_text(el, idx) {
-    if (idx < len(el)) { child_text(el[idx]) }
+    let args = util.command_args(el)
+    if (idx < len(args)) { child_text(args[idx]) }
     else { "" }
 }

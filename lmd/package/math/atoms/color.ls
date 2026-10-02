@@ -4,6 +4,7 @@
 import box: lambda.doc.math.box
 import ctx: lambda.doc.math.context
 import css: lambda.doc.math.css
+import util: lambda.doc.math.util
 
 // ============================================================
 // Color command rendering
@@ -124,14 +125,15 @@ fn resolve_background_color(node) {
 fn get_color_text(color_node) {
     if (color_node is string) string(color_node)
     else if (color_node is symbol) string(color_node)
-    else if (color_node is element) get_element_text(color_node)
+    else if (color_node is element or color_node is array) get_element_text(color_node)
     else string(color_node)
 }
 
 fn get_element_text(el) {
-    let n = len(el)
-    if (n == 0) element_text_value(el)
-    else concat_children(el, 0, n, "")
+    let text = util.children_text(el, get_color_text)
+    if (text != "") text
+    else if (el is element) element_text_value(el)
+    else ""
 }
 
 fn element_text_value(el) {
@@ -141,16 +143,7 @@ fn element_text_value(el) {
     else ""
 }
 
-fn concat_children(el, i, n, acc) {
-    if (i >= n) acc
-    else
-        (let child = el[i],
-         let txt = if (child is string) string(child)
-            else if (child is symbol) string(child)
-            else if (child is element) get_element_text(child)
-            else "",
-         concat_children(el, i + 1, n, acc ++ txt))
-}
+
 
 // map named LaTeX colors to CSS colors
 fn resolve_named_color(raw) {

@@ -40,6 +40,7 @@ for ( BINDINGS [, let N = E ...]
 
 - **`as ALIAS`** names each individual grouping key (optional — see the FC9 inference rule);
 - **`into NAME`** binds the **group element**: grouping keys are its *attributes* (one per key, under its alias/inferred name), and the group's members are its *children*. One value carries the whole group, using the element duality Lambda already has (`Element : List` + attribute map, lambda.hpp:445) — no new "group value" shape.
+- **Content normalization (2026-10-02, S14.1.1 and S2.6.2–S2.6.4):** the group obeys the same content rules as any element. Null members contribute no child, and adjacent string members merge. `len(content(g))` counts normalized children, not input rows; grouping `"bb"` and `"cc"` together produces one `"bbcc"` child. Store positional strings inside arrays when their boundaries must survive.
 - **The loop variable goes out of scope** after `group by` (LINQ `into` behavior). The interim XQuery regrouping idea — rebinding the loop var to the member list — was **withdrawn**: the variable would change type from item (before the clause) to list (after), a type instability worse than the ergonomic gain. Everything lives under `g`.
 
 ```lambda

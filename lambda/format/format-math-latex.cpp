@@ -3,7 +3,7 @@
 // Converts the direct math Mark Element AST back to LaTeX text.
 // The AST has element tags like: math, subsup, operator, relation, group,
 // radical, command, fraction, delimiter_group, environment, etc.
-// Variables and numbers appear as plain String children.
+// Variables and numbers are strings; adjacent atom runs are array children.
 
 #include "format-math-shared.hpp"
 
@@ -757,14 +757,15 @@ static void format_element_impl(StringBuf* sb, const ElementReader& elem, int de
 // ============================================================================
 
 static void format_children(StringBuf* sb, const ElementReader& elem, int depth, const char* sep) {
-    int64_t count = elem.childCount();
+    MathContentReader content(elem);
+    int64_t count = content.childCount();
     bool first = true;
     for (int64_t i = 0; i < count; i++) {
         if (!first && sep && sep[0]) {
             stringbuf_append_str(sb, sep);
         }
         first = false;
-        ItemReader child = elem.childAt(i);
+        ItemReader child = content.childAt(i);
         format_item(sb, child, depth + 1);
     }
 }

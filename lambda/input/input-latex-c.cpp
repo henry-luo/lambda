@@ -97,6 +97,22 @@ static bool is_supported_math_environment(const char* name) {
         strcmp(name, "equation") == 0 || strcmp(name, "smallmatrix") == 0;
 }
 
+static void append_latex_content(MarkBuilder& builder, ElementBuilder& command, Array* arguments) {
+    for (int64_t i = 0; i < arguments->length;) {
+        int64_t end = i;
+        while (end < arguments->length && get_type_id(arguments->items[end]) == LMD_TYPE_STRING) end++;
+        if (end > i + 1) {
+            // S2.6.1v2/S2.6.4: argument and math-token boundaries belong in arrays.
+            ArrayBuilder run = builder.array();
+            while (i < end) run.append(arguments->items[i++]);
+            command.child(run.final());
+        } else {
+            command.child(arguments->items[i++]);
+        }
+    }
+}
+
+
 class DirectMathParser {
 public:
     DirectMathParser(InputContext& context, const char* source, size_t length,
@@ -702,6 +718,7 @@ private:
         Item left = parse_delimiter_token();
         ElementBuilder elem = builder_.element("delimiter_group");
         elem.attr("left", left);
+        ArrayBuilder children = builder_.array();
         for (;;) {
             skip_space();
             size_t save = position_;
@@ -710,6 +727,7 @@ private:
                 read_command(name, sizeof(name), command, sizeof(command));
                 if (strcmp(name, "right") == 0) {
                     elem.attr("right", parse_delimiter_token());
+                    append_latex_content(builder_, elem, children.final().array);
                     return elem.final();
                 }
                 if (strcmp(name, "middle") == 0) {
@@ -717,17 +735,18 @@ private:
                     // Invalid middle tokens are recovered as a null delimiter;
                     // the renderer drops the following offending atom.
                     if (has_sized_delimiter_token()) middle.attr("delim", parse_delimiter_token());
-                    elem.child(middle.final());
+                    children.append(middle.final());
                     continue;
                 }
                 position_ = save;
             }
             Item child = parse_atom_with_scripts();
             if (!item_present(child)) break;
-            elem.child(child);
+            children.append(child);
         }
         // MathLive recovers incomplete delimiter pairs with a null right side.
         elem.attr("right", builder_.createStringItem("."));
+        append_latex_content(builder_, elem, children.final().array);
         return elem.final();
     }
 
@@ -883,24 +902,27 @@ private:
 
     void parse_children(ElementBuilder& parent, bool matrix_mode) {
         if (!matrix_mode && parse_infix_fraction(parent)) return;
+        ArrayBuilder children = builder_.array();
         while (position_ < length_) {
             skip_space();
             if (position_ >= length_) break;
             if (matrix_mode && source_[position_] == '&') {
                 position_++;
-                parent.child(builder_.createSymbolItem("col_sep"));
+                children.append(builder_.createSymbolItem("col_sep"));
                 continue;
             }
             if (matrix_mode && starts_with(source_, length_, position_, "\\\\")) {
                 position_ += 2;
-                parent.child(builder_.createSymbolItem("row_sep"));
+                children.append(builder_.createSymbolItem("row_sep"));
                 continue;
             }
             Item child = parse_atom_with_scripts();
-            if (item_present(child)) parent.child(child);
+            if (item_present(child)) children.append(child);
             else if (position_ < length_) position_++;
         }
+        append_latex_content(builder_, parent, children.final().array);
     }
+
 };
 
 class DirectLatexParser {
@@ -998,18 +1020,12 @@ private:
         return group.final();
     }
 
-    bool append_group_contents(ElementBuilder& parent, bool empty_marker) {
-        size_t begin = 0, end = 0;
-        if (!consume_group_span(&begin, &end)) return false;
-        if (begin == end && empty_marker) {
-            parent.child(builder_.element("curly_group").final());
-            return true;
-        }
-        DirectLatexParser nested(ctx_);
-        nested.source_ = source_ + begin;
-        nested.length_ = end - begin;
-        nested.position_ = 0;
-        nested.parse_children(parent, 0, false);
+    bool append_group_contents(ArrayBuilder& arguments) {
+        Item group = parse_group();
+        if (!item_present(group)) return false;
+        Element* content = group.element;
+        if (content->length == 0) arguments.append(group);
+        for (int64_t i = 0; i < content->length; i++) arguments.append(content->items[i]);
         return true;
     }
 
@@ -1208,6 +1224,7 @@ private:
             str_cat(tag, strlen(tag), sizeof(tag), "*", sizeof("*") - 1);
         }
         ElementBuilder elem = builder_.element(tag);
+        ArrayBuilder arguments = builder_.array();
         bool macro_definition = strcmp(name, "newcommand") == 0 ||
             strcmp(name, "renewcommand") == 0 || strcmp(name, "providecommand") == 0 ||
             strcmp(name, "def") == 0 || strcmp(name, "gdef") == 0 ||
@@ -1220,22 +1237,23 @@ private:
                 if ((macro_definition || environment_definition) && curly_index == 0) {
                     size_t begin = 0, end = 0;
                     if (!consume_group_span(&begin, &end)) break;
-                    elem.child(builder_.createStringItem(source_ + begin, end - begin));
+                    arguments.append(builder_.createStringItem(source_ + begin, end - begin));
                 } else if (environment_definition) {
                     Item group = parse_raw_group();
-                    if (item_present(group)) elem.child(group);
+                    if (item_present(group)) arguments.append(group);
                 } else if (macro_definition) {
                     Item group = parse_group();
-                    if (item_present(group)) elem.child(group);
-                } else if (!append_group_contents(elem, true)) {
+                    if (item_present(group)) arguments.append(group);
+                } else if (!append_group_contents(arguments)) {
                     break;
                 }
                 curly_index++;
             } else if (source_[position_] == '[') {
                 Item group = parse_brack_group();
-                if (item_present(group)) elem.child(group);
+                if (item_present(group)) arguments.append(group);
             } else break;
         }
+        append_latex_content(builder_, elem, arguments.final().array);
         return elem.final();
     }
 

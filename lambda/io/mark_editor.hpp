@@ -206,8 +206,7 @@ public:
      * @param child Child Item to insert
      * @return Updated element Item
      */
-    Item elmt_insert_child(Item element, int index, Item child,
-                           bool preserve_dom_child = false);
+    Item elmt_insert_child(Item element, int index, Item child);
     
     /**
      * Insert multiple children at index (batch operation)
@@ -238,9 +237,12 @@ public:
         return elmt_insert_child(element, -1, child);
     }
 
-    // Preserve a verified DomElement wrapper when editing a detached document.
-    Item elmt_append_dom_child(Item element, Item child) {
-        return elmt_insert_child(element, -1, child, true);
+    // web DOM node sequences retain Text identity; Lambda content uses elmt_*.
+    Item dom_insert_child(Item element, int index, Item child);
+    Item dom_delete_child(Item element, int index);
+    Item dom_replace_child(Item element, int index, Item child);
+    Item dom_append_child(Item element, Item child) {
+        return dom_insert_child(element, -1, child);
     }
     
     /**
@@ -353,7 +355,13 @@ private:
     Item container_delete_attr(Item container, String* key);
 
     // Element-only helpers (the content face has no map counterpart)
-    Item elmt_copy_with_new_children(Element* old_elmt, Item* new_children, int64_t new_length);
+    Item import_child(Item child);
+    bool prepare_child_edit(Item element, int64_t index, int64_t delete_count,
+                            int64_t count, Item* children, Array* edited);
+    Item publish_child_edit(Element* old_elmt, const Array* edited);
+    Item elmt_edit_children(Item element, int64_t index, int64_t delete_count,
+                            int64_t count, Item* children);
+    Item dom_edit_child(Item element, int64_t index, int64_t delete_count, Item* child);
     
     // Version helpers
     EditVersion* create_version(Item root, const char* description);

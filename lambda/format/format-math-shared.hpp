@@ -16,6 +16,7 @@
 #include "../core/mark_reader.hpp"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
+#include "../../lib/arraylist.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -23,6 +24,40 @@
 static void format_element_impl(StringBuf* sb, const ElementReader& elem, int depth);
 static void format_symbol_impl(StringBuf* sb, Symbol* sym);
 static void format_children(StringBuf* sb, const ElementReader& elem, int depth, const char* sep);
+
+// math token runs are array children; formatters read their logical atom sequence.
+class MathContentReader {
+    ArrayList* items_;
+
+public:
+    explicit MathContentReader(const ElementReader& elem) : items_(arraylist_new(8)) {
+        if (!items_) return;
+        auto children = elem.children();
+        ItemReader child;
+        while (children.next(&child)) {
+            if (child.isArray()) {
+                ArrayReader run = child.asArray();
+                for (int64_t i = 0; i < run.length(); i++) append(run.get(i));
+            } else append(child);
+        }
+    }
+    ~MathContentReader() { arraylist_free(items_); }
+    MathContentReader(const MathContentReader&) = delete;
+    MathContentReader& operator=(const MathContentReader&) = delete;
+
+    int64_t childCount() const { return items_ ? items_->length : 0; }
+    ItemReader childAt(int64_t index) const {
+        if (index < 0 || index >= childCount()) return ItemReader();
+        Item item = {.item = (uint64_t)(uintptr_t)items_->data[index]};
+        return ItemReader(item.to_const());
+    }
+
+private:
+    void append(const ItemReader& item) {
+        if (!arraylist_append(items_, (void*)(uintptr_t)item.item().item))
+            log_error("format-math: failed to collect token content");
+    }
+};
 
 // ============================================================================
 // Shared element handlers (identical output in all math formats)
@@ -48,6 +83,12 @@ static void format_item(StringBuf* sb, const ItemReader& item, int depth) {
     if (depth > 50) { stringbuf_append_str(sb, "..."); return; }
     if (item.isElement()) {
         format_element_impl(sb, item.asElement(), depth);
+    } else if (item.isArray()) {
+        ArrayReader run = item.asArray();
+        for (int64_t i = 0; i < run.length(); i++) {
+            if (i > 0) stringbuf_append_str(sb, " ");
+            format_item(sb, run.get(i), depth + 1);
+        }
     } else if (item.isString()) {
         String* str = item.asString();
         if (str) stringbuf_append_str(sb, str->chars);

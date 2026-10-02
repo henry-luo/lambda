@@ -12,7 +12,7 @@ let sales = [
 [for (x in sales group by x.region into g)
   {region: g.region, n: len(content(g)), first: g[0].amount, total: sum(g |> ~["amount"])}]
 
-// Numeric tower coherence and null grouping.
+// S2.6.2/S14.1.1: null keys form a group whose null content is dropped.
 let xs = [1, 1.0, 2, null, null];
 [for (x in xs group by x as value into g) {value: g.value, n: len(content(g))}]
 
@@ -25,7 +25,7 @@ let orders = [
 for (o in orders group by o.year, o.month into g order by g.month)
   {year: g.year, month: g.month, total: sum(g |> ~["amount"])}
 
-// Computed keys require an explicit alias.
+// S2.6.4/S14.1.1: computed keys use an alias; grouped string content merges.
 let words = ["a", "bb", "cc", "ddd"]
 for (w in words group by len(w) as wlen into g order by g.wlen)
   {length: g.wlen, n: len(content(g)), first: g[0]}

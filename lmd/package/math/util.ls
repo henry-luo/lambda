@@ -116,9 +116,27 @@ pub fn attr_or(el, key, default_val) {
 
 // get text content of a leaf element
 pub fn text_of(el) {
-    if (el is string) el
-    else if (len(el) > 0) string(el[0])
-    else ""
+    if (el is string or el is symbol) string(el)
+    else if (el is element or el is array) children_text(el, text_of)
+    else if (el == null) ""
+    else string(el)
+}
+
+// extract child text without interpreting attribute-count slots as glyphs.
+pub fn children_text(node, text_fn) {
+    let items = content_items(node)
+    join_content_text(items, text_fn, 0, "")
+}
+
+fn join_content_text(items, text_fn, i, acc) {
+    if (i >= len(items)) acc
+    else join_content_text(items, text_fn, i + 1, acc ++ text_fn(items[i]))
+}
+
+// S2.6.1v2: array children retain the separate tokens of a math content run.
+pub fn content_items(node) {
+    let children = if (node is element) content(node) else node;
+    [for (child in children, item in (if (child is array) child else [child])) item]
 }
 
 // ============================================================

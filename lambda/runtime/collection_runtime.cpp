@@ -218,6 +218,10 @@ static void array_append_one(Array* arr, Item item) {
 }
 
 void array_push(Array* arr, Item item) {
+    if (arr && arr->type_id == LMD_TYPE_ELEMENT) {
+        list_push((List*)arr, item);
+        return;
+    }
     // The sequence append (D2.6.5v3): a list spreads wherever it lands as an
     // item (S2.5.1v2); the item-position marker of an empty list producer
     // contributes nothing (S2.5.5v2). Everything else is stored verbatim.
@@ -399,8 +403,9 @@ Item pn_splice_cow(Item owner, Item start_item, Item count_item) {
     return pn_splice(replacement, start_item, count_item);
 }
 
-// The verbatim append (D2.6.5v3): the item is stored as one value whatever it
-// is -- never spliced, dropped or merged. Positional structures use it:
+// The verbatim collection append (D2.6.5v4) stores one value without
+// splicing, dropping or merging. Element destinations still normalize content.
+// Positional structures use it:
 // argument and rest lists, zip pairs, group/join/order keys and rows, path
 // keys, and element copies (clones, transforms). array_push splices a list
 // into its receiver (S2.5.1v2) and list_push also drops nulls, so a list
@@ -408,6 +413,11 @@ Item pn_splice_cow(Item owner, Item start_item, Item count_item) {
 // got 5") and a rest list lost arity (`count_args(for …)` was 2, not 1).
 void array_push_verbatim(Array* arr, Item item) {
     if (!arr) return;
+    // S2.6.4: collection helpers cannot bypass element content normalization.
+    if (arr->type_id == LMD_TYPE_ELEMENT) {
+        list_push((List*)arr, item);
+        return;
+    }
     array_append_one(arr, item);
 }
 
@@ -465,8 +475,7 @@ void list_push(List* list, Item item) {
         // allocation follows the owner (UI arena, input pool, or runtime heap).
         bool runtime_owned = input_context ? input_context->consts != NULL
             : (!input_allocation_context && context != NULL);
-        bool can_allocate = runtime_owned || input_allocation_context || input_context;
-        if (can_allocate && list->length > 0 && list->items) {
+        if (list->length > 0 && list->items) {
             Item previous_item = list->items[list->length - 1];
             if (get_type_id(previous_item) == LMD_TYPE_STRING) {
                 String* previous = previous_item.get_safe_string();

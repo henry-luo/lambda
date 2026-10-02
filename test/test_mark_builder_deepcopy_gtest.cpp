@@ -534,7 +534,10 @@ TEST_F(MarkBuilderDeepCopyTest, CopyElementWithChildren) {
     Item copied = builder2.deep_copy(elem);
     Element* copied_elem = copied.element;
     EXPECT_NE(copied_elem, elem.element);
-    EXPECT_EQ(copied_elem->length, 2);
+    // S2.6.4: construction and copying retain one normalized text child.
+    ASSERT_EQ(elem.element->length, 1);
+    ASSERT_EQ(copied_elem->length, 1);
+    EXPECT_STREQ(copied_elem->items[0].get_string()->chars, "HelloWorld");
 }
 
 TEST_F(MarkBuilderDeepCopyTest, CopyNestedElements) {

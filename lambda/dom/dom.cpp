@@ -14223,7 +14223,7 @@ static bool dom_remove_backed_element_item(DomElement* parent,
     // Mark slot first so a later relink cannot restore the previous order.
     Element* parent_backing = dom_element_to_element(parent);
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
-    Item result = editor.elmt_delete_child({.element = parent_backing},
+    Item result = editor.dom_delete_child({.element = parent_backing},
                                             (int)child_index);
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
         log_error("dom_remove_backed_element_item: inline delete changed backing identity");
@@ -14324,7 +14324,7 @@ static bool dom_insert_backed_element(DomElement* parent, DomNode* child,
 
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
-    Item result = editor.elmt_insert_child({.element = parent_backing},
+    Item result = editor.dom_insert_child({.element = parent_backing},
                                             (int)insert_index,
                                             {.element = dom_element_to_element(child_elem)});
     if (get_type_id(result) != LMD_TYPE_ELEMENT || result.element != parent_backing) {
@@ -14407,7 +14407,7 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
 
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
-    Item result = editor.elmt_insert_child(
+    Item result = editor.dom_insert_child(
         {.element = parent_backing},
         (int)insert_index,
         {.item = s2it(native_string)});
@@ -14546,7 +14546,7 @@ static bool dom_insert_text_before_child(DomElement* parent, Item text_item,
     if (insert_index < 0) return false;
     MarkEditor editor(parent->doc->input, EDIT_MODE_INLINE);
     Element* parent_backing = dom_element_to_element(parent);
-    Item result = editor.elmt_insert_child({.element = parent_backing},
+    Item result = editor.dom_insert_child({.element = parent_backing},
                                             (int)insert_index, text_item);
     if (get_type_id(result) != LMD_TYPE_ELEMENT ||
         result.element != parent_backing ||
@@ -14681,7 +14681,7 @@ static bool dom_replace_document_element(DomElement* old_root,
     dom_pre_remove((DomNode*)old_root, false);
     if (input_is_document) {
         MarkEditor editor(doc->input, EDIT_MODE_INLINE);
-        Item result = editor.elmt_replace_child(
+        Item result = editor.dom_replace_child(
             {.element = input_root}, (int)old_index,
             {.element = replacement_backing});
         if (get_type_id(result) != LMD_TYPE_ELEMENT ||
@@ -15197,7 +15197,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
             MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
-            Item result = editor.elmt_replace_child(
+            Item result = editor.dom_replace_child(
                 {.element = dom_element_to_element(elem)}, (int)old_index,
                 {.element = dom_element_to_element(new_elem)});
             if (get_type_id(result) != LMD_TYPE_ELEMENT ||
@@ -15234,7 +15234,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
             MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
-            Item result = editor.elmt_replace_child(
+            Item result = editor.dom_replace_child(
                 {.element = dom_element_to_element(elem)}, (int)old_index,
                 {.item = s2it(replacement_string)});
             if (get_type_id(result) != LMD_TYPE_ELEMENT ||
@@ -15265,7 +15265,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
             MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
-            Item result = editor.elmt_replace_child({.element = dom_element_to_element(elem)},
+            Item result = editor.dom_replace_child({.element = dom_element_to_element(elem)},
                 old_index, {.element = dom_element_to_element(new_elem)});
             if (get_type_id(result) != LMD_TYPE_ELEMENT ||
                 result.element != dom_element_to_element(elem)) {

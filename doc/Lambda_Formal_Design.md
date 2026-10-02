@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 14.1.0 (2026-09-29)
+**Spec version:** 14.2.0 (2026-10-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -335,7 +335,7 @@ language-visible counterparts are the semantics spec's SI ledger.
   `i64?[]`/`u64?[]` and packed Map/Shape fields of those types instead retain
   no raw scalar Item: each is an inline, destination-owned `TypedItem` slot
   under D2.5.2v3. [SF15]
-- **D2.6.5v3** **The append discipline follows the destination: content,
+- **D2.6.5v4** **The append discipline follows the destination: content,
   sequence, or slot.** Three runtime appends exist and they are not
   interchangeable. The **content** append (`list_push()`) applies S2.6's
   normalization — a `null` or `""` is dropped, a list is spliced in, a string
@@ -352,17 +352,18 @@ language-visible counterparts are the semantics spec's SI ledger.
   value's kind at run time, never by the syntax around it (S1.6): the one
   list flag is the kind bit.
   The split is **content versus collection**, never per format: every input
-  parser must yield normalized element content (S2.6.1). MarkBuilder appends
-  with `array_append` and never normalizes, which is why LaTeX holds
-  consecutive strings today — a **transitional deviation**, to be retired by
-  carrying such runs in non-merging items (e.g. `<cmd ["a", "b"]>`) — while
-  the markup family calls `list_push` and merges them. The choice belongs at
-  the **append site**, which is local and cannot
-  leak. It must not be re-expressed as ambient state: a process-wide
-  "suppress merging" flag stays suspended across every allocation in the
-  interval and leaks on any early return that forgets to restore it. Such a
-  flag existed on `EvalContext`/`InputAllocationContext` and was retired once
-  the append-site split made it dead.* [LR09-R3]
+  parser yields normalized element content (S2.6.1v2). MarkBuilder's element
+  child append uses the owner-aware content append; collection append APIs
+  also dispatch element destinations to content normalization, so none can
+  preserve adjacent element strings. MarkEditor child writes rebuild through
+  the same content append in both edit modes (S2.6.5); web DOM node operations
+  have explicit positional-node APIs. LaTeX commands carry consecutive string
+  arguments in one array child, `<cmd ["a", "b"]>`, and their consumers read
+  the array entries as positional arguments. Arrays remain non-spreading
+  values (S2.6.3). The choice belongs at the destination and append site,
+  never ambient state: a process-wide "suppress merging" flag leaks across
+  allocations and early returns. The former flag on
+  `EvalContext`/`InputAllocationContext` is retired. [LR09-R3; Design_Syntax §7.27]
 - **D2.6.6v3*** **One container hierarchy — map → array → element — and
   nominal is a descriptor property, not a kind.** Physically, containers form
   a single-inheritance chain: `Map` is the base (header plus the attribute
@@ -2212,7 +2213,7 @@ slice; no formal semantic ruling or document semver changes.
 |---|---|
 | D2.1.6 | Guardrail layer partial: ~24 raw `>> 56` sites across 11 files, open-coded `get_double` derefs, raw `MIR_EQ` emissions outstanding. |
 | D2.3.2 | Container unbox helpers + `p2it` returns designed, not landed (Box_Unbox2 Phase 1); MIR path still boxes container params as ANY (safe, unoptimized). |
-| D2.6.5v3 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. **Landed with [List Fixes](<../vibe/impl/Lambda_List_Fixes (done).md>) P1–P4 (2026-09-22/23, both tiers); that plan closed at P6.** One kind bit (`is_spreadable`; the old `is_content` survives only as LambdaJS's `is_js_arguments`); a value-decided sequence append (`array_push` splices a list by its bit; array literals, pipe items included, never choose spreading syntactically); the verbatim append `array_push_verbatim` at every positional site — argument and rest lists, group/join/order keys and rows, path keys, query and `find` matches, directory listings, clones, element-copying transforms, `zip` pairs; single-value slots store a list's array image (`slot_image`, S2.5.6); and the content append now applies all of S2.6.2–S2.6.4 unconditionally — a lone `""` is dropped, adjacent binaries merge, and the `input_context` gate on string merging (the retired flag in disguise) is gone. Content writes stay normalized (S2.6.5): `e[i] = v` rebuilds the children through the content append and `push` on an element appends content. `input-ics.cpp` builds its component sequence with the pool-owned verbatim `array_append`; `input-mark.cpp`'s `list_push` is element content, the content append's own case. P4 removes the last syntactic spreading: `*x` no longer marks its operand (the retired `item_spread`) but builds the list of x's items, which the sequence and content appends then splice by its kind bit like any other list, so the ruling's "decided by the value, never by the syntax" now holds for the spread operator too. Remaining: LaTeX's verbatim content, the transitional deviation named in the ruling. |
+| D2.6.5v4 | The append-site split is landed and the `disable_string_merging` flag it replaced has been retired from both context structs. **Landed with [List Fixes](<../vibe/impl/Lambda_List_Fixes (done).md>) P1–P4 (2026-09-22/23, both tiers); that plan closed at P6.** One kind bit (`is_spreadable`; the old `is_content` survives only as LambdaJS's `is_js_arguments`); a value-decided sequence append (`array_push` splices a list by its bit; array literals, pipe items included, never choose spreading syntactically); the verbatim append `array_push_verbatim` at every positional site — argument and rest lists, group/join/order keys and rows, path keys, query and `find` matches, directory listings, clones, element-copying transforms, `zip` pairs; single-value slots store a list's array image (`slot_image`, S2.5.6); and the content append now applies all of S2.6.2–S2.6.4 unconditionally — a lone `""` is dropped, adjacent binaries merge, and the `input_context` gate on string merging (the retired flag in disguise) is gone. Content writes stay normalized (S2.6.5): `e[i] = v` rebuilds the children through the content append and `push` on an element appends content. `input-ics.cpp` builds its component sequence with the pool-owned verbatim `array_append`; `input-mark.cpp`'s `list_push` is element content, the content append's own case. P4 removes the last syntactic spreading: `*x` no longer marks its operand (the retired `item_spread`) but builds the list of x's items, which the sequence and content appends then splice by its kind bit like any other list, so the ruling's "decided by the value, never by the syntax" now holds for the spread operator too. The LaTeX deviation closed on 2026-10-02: element appends normalize strings, command argument runs are array children, and the LaTeX package and formatter consume their entries positionally. The unused LaTeX AST-normalization module and reconstruction helper are retired. MarkEditor child writes normalize in both edit modes (54/54 editor tests); explicit web DOM node APIs retain node identity (112/112 node/range tests). Verified: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. [Input_Latex](../vibe/input/Input_Latex.md). |
 | D2.4.1–D2.4.3 | L0–L4 first slice landed 2026-08-28: explicit `INT_LANE`/machine reps, full-contract `MirValue`, canonical contract mapping, fail-closed carrier router, direct transition/fail-closed fixtures, and migration of arithmetic, branch, binding, index, call, and return consumers. Semantic `MIR_reg_type()` probes are removed from Lambda expression lowering. The 2026-08-31 P5 follow-up makes `transpile_primary_value()` publish literal/primary `MirValue` descriptors directly and retires its raw dispatcher arm. **Implemented boundary audit 2026-09-05:** `transpile_expr_value_core()`/`transpile_expr_value()` and `jm_transpile_expression_direct()`/`jm_transpile_expression_value()` now form the respective core demand-driven `MirValue` boundaries; no core `transpile_expr*` or `jm_transpile_expression*` function returns `MIR_reg_t`. Internal physical-register helpers remain below the boundary. |
 | D2.5.1 | Nullable-lane first slice landed 2026-08-05 (LaneStorageDesc, native arrays, packed nullable fields, scalar ABI); `f16?`/`f32?`, JS IC lowering, mutable ArrayNum views, vector/N-D kernels pending. |
 | D2.5.2v3, D2.6.1v3, D2.6.4v3 | **Implemented 2026-09-14.** `i64?`/`u64?` native Arrays and packed Map/Shape fields use descriptor-selected, destination-owned `TypedItem` slots. Construction, mutation, static materialization, rebuilding, COW, reads, and GC tracing preserve the selected layout; the regression covers JIT/interpreter plus forced-GC number-frame reuse. |

@@ -51,9 +51,9 @@ fn render_body(body, context, render_fn, env_name, columns) {
         // inheriting displaystyle makes ordinary \frac cells overgrow the row.
         ctx.derive(context, {style: "text", matrix_cell: true})
     else context
-    let n = len(body)
     let declared_cols = declared_column_count(columns)
-    let source_rows = parse_rows(body, 0, n, [], [], [])
+    let items = util.content_items(body)
+    let source_rows = parse_rows(items, 0, len(items), [], [], [])
     let row_groups = if (declared_cols > 0)
         expand_declared_rows(source_rows, declared_cols, 0, [])
     else source_rows

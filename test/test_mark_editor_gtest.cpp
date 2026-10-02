@@ -304,7 +304,7 @@ TEST_F(MarkEditorTest, ElementDeleteChild) {
     MarkBuilder builder(input);
     Item div = builder.element("div")
         .text("First")
-        .text("Second")
+        .child(builder.element("span").text("Second").final())
         .text("Third")
         .final();
 
@@ -317,7 +317,8 @@ TEST_F(MarkEditorTest, ElementDeleteChild) {
 
     ASSERT_NE(updated.element, nullptr);
     ASSERT_EQ(updated.element->type_id, LMD_TYPE_ELEMENT);
-    ASSERT_EQ(updated.element->length, 2);
+    ASSERT_EQ(updated.element->length, 1);
+    EXPECT_STREQ(updated.element->items[0].get_string()->chars, "FirstThird");
 }
 
 TEST_F(MarkEditorTest, ElementReplaceChild) {
@@ -337,6 +338,115 @@ TEST_F(MarkEditorTest, ElementReplaceChild) {
     ASSERT_NE(updated.element, nullptr);
     ASSERT_EQ(updated.element->type_id, LMD_TYPE_ELEMENT);
     ASSERT_EQ(updated.element->length, 1);
+}
+
+// S2.6.5 applies to insert, replace, batch writes and deletion in both edit modes.
+TEST_F(MarkEditorTest, ElementContentWritesNormalizeInBothModes) {
+    const EditMode modes[] = {EDIT_MODE_INLINE, EDIT_MODE_IMMUTABLE};
+    for (EditMode mode : modes) {
+        MarkBuilder builder(input);
+        Item original = builder.element("p").attr("id", "body")
+            .text("a").child(builder.element("i").final()).text("b").final();
+        void* original_type = original.element->type;
+        MarkEditor editor(input, mode);
+
+        Item edited = editor.elmt_insert_child(original, -1, builder.createStringItem("c"));
+        ASSERT_EQ(get_type_id(edited), LMD_TYPE_ELEMENT);
+        ASSERT_EQ(edited.element->length, 3);
+        EXPECT_STREQ(edited.element->items[2].get_string()->chars, "bc");
+        edited = editor.elmt_delete_child(edited, 1);
+        ASSERT_EQ(edited.element->length, 1);
+        EXPECT_STREQ(edited.element->items[0].get_string()->chars, "abc");
+        edited = editor.elmt_insert_child(edited, 0, builder.createStringItem("def"));
+        ASSERT_EQ(edited.element->length, 1);
+        EXPECT_STREQ(edited.element->items[0].get_string()->chars, "defabc");
+
+        Item args = builder.array().append("x").append("y").final();
+        Item children[] = {ItemNull, builder.createStringItem(""), args,
+                            builder.createStringItem("z")};
+        edited = editor.elmt_insert_children(edited, -1, 4, children);
+        ASSERT_EQ(edited.element->length, 3);
+        ASSERT_EQ(get_type_id(edited.element->items[1]), LMD_TYPE_ARRAY);
+        EXPECT_EQ(edited.element->items[1].array->length, 2);
+        edited = editor.elmt_replace_child(edited, 1, builder.createStringItem(""));
+        ASSERT_EQ(edited.element->length, 1);
+        EXPECT_STREQ(edited.element->items[0].get_string()->chars, "defabcz");
+
+        Item list = builder.array().append("m").append(ItemNull).append("n").final();
+        list.array->is_spreadable = true;
+        edited = editor.elmt_replace_child(edited, 0, list);
+        ASSERT_EQ(edited.element->length, 1);
+        EXPECT_STREQ(edited.element->items[0].get_string()->chars, "mn");
+        edited = editor.array_append(edited, builder.createStringItem("tail"));
+        ASSERT_EQ(edited.element->length, 1);
+        EXPECT_STREQ(edited.element->items[0].get_string()->chars, "mntail");
+        EXPECT_EQ(edited.element->type, original_type);
+        EXPECT_EQ(((Map*)edited.element)->get("id").type_id(), LMD_TYPE_STRING);
+
+        if (mode == EDIT_MODE_IMMUTABLE) {
+            EXPECT_NE(edited.element, original.element);
+            ASSERT_EQ(original.element->length, 3);
+            EXPECT_STREQ(original.element->items[0].get_string()->chars, "a");
+            EXPECT_STREQ(original.element->items[2].get_string()->chars, "b");
+        }
+        edited = editor.elmt_replace_child(edited, 0, ItemNull);
+        EXPECT_EQ(edited.element->length, 0);
+    }
+}
+
+TEST_F(MarkEditorTest, ElementRangeDeletionMergesNewNeighbours) {
+    const EditMode modes[] = {EDIT_MODE_INLINE, EDIT_MODE_IMMUTABLE};
+    for (EditMode mode : modes) {
+        MarkBuilder builder(input);
+        Item original = builder.element("p").text("left")
+            .child(builder.element("i").final())
+            .child(builder.element("b").final()).text("right").final();
+        MarkEditor editor(input, mode);
+        Item edited = editor.elmt_delete_children(original, 1, 3);
+        ASSERT_EQ(get_type_id(edited), LMD_TYPE_ELEMENT);
+        ASSERT_EQ(edited.element->length, 1);
+        EXPECT_STREQ(edited.element->items[0].get_string()->chars, "leftright");
+        if (mode == EDIT_MODE_IMMUTABLE) EXPECT_EQ(original.element->length, 4);
+    }
+}
+
+TEST_F(MarkEditorTest, ElementEditOwnsWideScalarTail) {
+    const EditMode modes[] = {EDIT_MODE_INLINE, EDIT_MODE_IMMUTABLE};
+    for (EditMode mode : modes) {
+        MarkBuilder builder(input);
+        const int64_t wide = INT64_C(1) << 50;
+        Item original = builder.element("p").child(builder.createLong(wide))
+            .child(builder.createInt(7)).text("a").final();
+        MarkEditor editor(input, mode);
+        Item children[] = {builder.createStringItem("b"), builder.createStringItem("c")};
+        Item edited = editor.elmt_insert_children(original, 2, 2, children);
+        ASSERT_EQ(get_type_id(edited), LMD_TYPE_ELEMENT);
+        ASSERT_EQ(edited.element->length, 3);
+        EXPECT_EQ(edited.element->items[0].get_int64(), wide);
+        EXPECT_GE(edited.element->extra, 1);
+        EXPECT_STREQ(edited.element->items[2].get_string()->chars, "bca");
+    }
+}
+
+TEST_F(MarkEditorTest, DomNodeEditsKeepTextSlotsDistinct) {
+    MarkBuilder builder(input);
+    Item original = builder.element("p").text("left")
+        .child(builder.element("i").final()).text("right").final();
+    String* left = original.element->items[0].get_string();
+    String* right = original.element->items[2].get_string();
+    MarkEditor editor(input, EDIT_MODE_INLINE);
+    Item edited = editor.dom_delete_child(original, 1);
+    ASSERT_EQ(edited.element->length, 2);
+    EXPECT_EQ(edited.element->items[0].get_string(), left);
+    EXPECT_EQ(edited.element->items[1].get_string(), right);
+
+    Item tail = builder.createStringItem("tail");
+    edited = editor.dom_insert_child(edited, -1, tail);
+    ASSERT_EQ(edited.element->length, 3);
+    EXPECT_EQ(edited.element->items[2].get_string(), tail.get_string());
+    edited = editor.elmt_insert_child(edited, -1, builder.createStringItem("end"));
+    ASSERT_EQ(edited.element->length, 1);
+    EXPECT_STREQ(edited.element->items[0].get_string()->chars, "leftrighttailend");
 }
 
 //==============================================================================
