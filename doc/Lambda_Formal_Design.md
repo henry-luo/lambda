@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 16.0.0 (2026-10-02)
+**Spec version:** 17.0.0 (2026-10-02)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
