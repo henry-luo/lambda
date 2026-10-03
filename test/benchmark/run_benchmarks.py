@@ -247,15 +247,27 @@ JETSTREAM_LJS = {
     "raytrace3d":    "test/benchmark/jetstream/3d-raytrace.js",
 }
 
+JULIA_MICRO = [
+    (name, category, f"test/benchmark/julia/{name}.ls",
+     f"test/benchmark/julia/{name}.js", f"test/benchmark/julia/python/{name}.py")
+    for name, category in [
+        ("parse_integers", "conversion"),
+        ("matrix_statistics", "numeric"),
+        ("iteration_pi_sum", "numeric"),
+        ("formatted_output", "io"),
+    ]
+]
+
 STANDARD_SUITES = [
     ("r7rs",    R7RS),
     ("awfy",    AWFY),
     ("beng",    BENG),
     ("kostya",  KOSTYA),
     ("larceny", LARCENY),
+    ("julia",   JULIA_MICRO),
 ]
 
-ALL_SUITE_NAMES = ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream", "text"]
+ALL_SUITE_NAMES = ["r7rs", "awfy", "beng", "kostya", "larceny", "julia", "jetstream", "text"]
 
 # These benchmark names represent the same standardized workloads in multiple
 # suites. Keep one authoritative row so timing and report populations do not
@@ -288,7 +300,17 @@ if (typeof console === 'undefined') {
 QJS_COMMONJS_SHIM = """
 function require(name) {
     if (name === 'fs') {
-        return {readFileSync: function(path, encoding) { return std.loadFile(path); }};
+        return {
+            readFileSync: function(path, encoding) { return std.loadFile(path); },
+            writeFileSync: function(path, text) {
+                var file = std.open(path, 'w');
+                if (!file) throw new Error('cannot open output: ' + path);
+                file.puts(text);
+                var failed = file.error();
+                var closed = file.close();
+                if (failed || closed !== 0) throw new Error('cannot write output: ' + path);
+            }
+        };
     }
     throw new Error('QuickJS benchmark wrapper does not provide module: ' + name);
 }
@@ -625,7 +647,7 @@ def lambda_run_cmd(script_path, tier):
 # lane (the historical LambdaJS series) and set 2 times the shipped AUTO default.
 def lambdajs_run_cmd(script_path, backend):
     prefix = f"JS_EXECUTION_BACKEND={backend} " if backend else ""
-    return f"{prefix}{LAMBDA_EXE} js {script_path}"
+    return f"{prefix}{LAMBDA_EXE} js {shlex.quote(expand_benchmark_js(script_path))}"
 
 
 def time_lambdajs(results, row, suite, name, script_path, num_runs, timeout_s):
@@ -644,7 +666,23 @@ def time_lambdajs(results, row, suite, name, script_path, num_runs, timeout_s):
 
 def mvpjs_run_cmd(script_path):
     """Run a source script through the independent JS MVP selector."""
-    return f"{LAMBDA_EXE} js --runtime=mvp {script_path}"
+    return f"{LAMBDA_EXE} js --runtime=mvp {shlex.quote(expand_benchmark_js(script_path))}"
+
+
+def expand_benchmark_js(script_path):
+    """Bundle shared benchmark helpers for engines without local CommonJS loading."""
+    with open(script_path) as source:
+        lines = source.readlines()
+    if not lines or not lines[0].startswith("// @benchmark-include "):
+        return script_path
+    helper = os.path.join(os.path.dirname(script_path), lines[0].split()[-1])
+    os.makedirs("temp", exist_ok=True)
+    wrapper = os.path.join("temp", "_shared_" + os.path.basename(script_path))
+    with open(helper) as common, open(wrapper, "w") as target:
+        target.write(common.read())
+        # The second line is the direct-Node CommonJS bootstrap, replaced by the bundle.
+        target.writelines(lines[2:])
+    return wrapper
 
 
 def qjs_run_cmd(wrapper):
@@ -664,7 +702,7 @@ def make_qjs_wrapper(js_path):
     """Create a QuickJS-compatible wrapper for a Node.js benchmark script."""
     os.makedirs("temp", exist_ok=True)
     wrapper = os.path.join("temp", "qjs_" + os.path.basename(js_path))
-    with open(js_path) as f:
+    with open(expand_benchmark_js(js_path)) as f:
         code = f.read()
     write_qjs_script_wrapper(wrapper, code)
     return wrapper

@@ -22,6 +22,7 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
 GO_ROOT = PROJECT_ROOT / "test" / "benchmark" / "go"
 DEFAULT_BUILD_DIR = PROJECT_ROOT / "temp" / "go-benchmarks"
 SUITES = {
+    "julia": ["parse_integers", "matrix_statistics", "iteration_pi_sum", "formatted_output"],
     "r7rs": ["ack", "cpstak", "fft", "fib", "fibfp", "mbrot", "nqueens", "sum", "sumfp", "tak"],
     "awfy": ["bounce", "cd", "deltablue", "havlak", "json", "list", "mandelbrot", "nbody", "permute", "queens", "richards", "sieve", "storage", "towers"],
     "kostya": ["base64", "brainfuck", "collatz", "json_gen", "levenshtein", "matmul", "primes"],

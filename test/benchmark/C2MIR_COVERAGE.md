@@ -1,13 +1,13 @@
 # Native C2MIR benchmark coverage
 
-`mac-deps/mir/c2m` compiles and JIT-runs the native C ports. Run all supported
+`lambda/mir/c2m` compiles and JIT-runs the native C ports using Lambda's pinned MIR sources. Run all supported
 benchmarks with:
 
 ```sh
 python3 test/benchmark/run_c2mir_benchmarks.py
 ```
 
-Each port is compiled together with `test/benchmark/c2mir/bench_timer_main.c`
+Most ports are compiled together with `test/benchmark/c2mir/bench_timer_main.c`
 under `-Dmain=c2mir_bench_body`: that renames the port's own entry point so the
 timer file can supply `main` and bracket the workload with a wall-clock
 measurement, reported as `__TIMING__` milliseconds like every other engine.
@@ -16,6 +16,9 @@ parsing and JIT-generating the source, which dominates every sub-100ms
 benchmark. The same invocation is reused by the `c2mir` engine of
 `run_benchmarks.py`, so the correctness runner and the timing runner cannot
 drift apart.
+The four [Julia microbenchmarks](julia/SUITE.md) provide their own timer around
+the measured call, excluding their complete warmup and result checks. They
+compile directly without the outer timer, so each emits one timing marker.
 
 `Overall_Result18.md` carries the resulting column. Note that it is **not** the
 retired `lambda --c2mir` transpiler path (CLAUDE rule 14) — that CLI option no
@@ -32,6 +35,7 @@ longer exists; the column measures these native C ports.
 | Larceny | 12/12 canonical workloads (`deriv` added 2026-08-19 with a tagged-struct expression tree) |
 | JetStream | 6/6 canonical rows (`crypto_sha1`, `cube3d`, `navier_stokes`, `raytrace3d`, `splay` added 2026-08-19) |
 | Text | 7/7 workloads (`prettier_ast`, `text_search`, `three_way_merge`, `log_pipeline` added 2026-09-09) |
+| Julia microbenchmarks | 4/4 matched scalar workloads |
 
 The two Lambda source variants (`name.ls` and `name2.ls`) represent the same
 benchmark with different Lambda typing; one native C port covers that workload.

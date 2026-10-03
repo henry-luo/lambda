@@ -89,6 +89,10 @@ def build_workloads(runner, rows, profile):
     workloads = []
     for row in rows:
         source = selected_source(row)
+        # Freeze the complete executable source, including shared benchmark helpers.
+        expand = runner.get("expand_benchmark_js")
+        if expand:
+            source = expand(source)
         inputs = inputs_for(row)
         workloads.append({
             "id": row["suite"] + "/" + row["name"],

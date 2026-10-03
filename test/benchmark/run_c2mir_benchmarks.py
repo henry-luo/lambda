@@ -31,6 +31,12 @@ C2M = PROJECT_ROOT / "lambda/mir" / ("c2m.exe" if sys.platform == "win32" else "
 TIMER_MAIN = PROJECT_ROOT / "test/benchmark/c2mir/bench_timer_main.c"
 TIMING_RE = re.compile(r"__TIMING__:([\d.]+(?:e[+-]?\d+)?)")
 SUITES = {
+    "julia": [
+        ("parse_integers", "parse_integers: PASS 592470661 854479 1966931148 0"),
+        ("matrix_statistics", "matrix_statistics: PASS 464726438 486656926 47509838 1966931148"),
+        ("iteration_pi_sum", "iteration_pi_sum: PASS 1644834071848 1644838824217 206015869118 5124750"),
+        ("formatted_output", "formatted_output: PASS 1177795 584298900 391 100000"),
+    ],
     "r7rs": [
         ("ack", "ack: PASS"),
         ("cpstak", "cpstak: PASS"),
@@ -128,6 +134,9 @@ def build_command(source):
     whole-process wall time, which for c2m includes parsing and JIT-generating
     the C source and so is not comparable with any engine's __TIMING__ value.
     """
+    # These ports time only the measured call, excluding their shared full warmup.
+    if source.parent.parent.name == "julia":
+        return [str(C2M), str(source), "-eg"]
     return [str(C2M), "-Dmain=c2mir_bench_body", str(source), str(TIMER_MAIN), "-eg"]
 
 
