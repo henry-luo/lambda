@@ -17,6 +17,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/mem_grow.hpp"
 #include "../../../lib/str.h"
+#include "../../../lib/strbuf.h"
 #include "../../../lib/escape.h"
 #include "../../../lib/recursion_guard.hpp"
 #include <stdlib.h>
@@ -29,6 +30,7 @@
 // Caps nested CSS function parsing (e.g. calc(calc(calc(...)))) so pathological input
 // reports a parse failure instead of recursing until the stack overflows.
 #define MAX_CSS_FUNC_DEPTH 256
+#define MAX_CSS_RULE_DEPTH 128
 
 static char* css_parser_unescape_url_component(const char* str, size_t len, Pool* pool) {
     return escape_css_unescape_pool(pool, str, len, true,
@@ -493,6 +495,7 @@ static bool css_parse_selector_function(const CssToken* tokens, int* pos,
     if (name_len > 0 && name[name_len - 1] == '(') {
         name[name_len - 1] = '\0';
     }
+    str_lower_inplace(name, strlen(name));
 
     (*pos)++;
     int argument_start = *pos;
@@ -919,6 +922,11 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
             }
         }
     }
+    // CSS function names are ASCII-insensitive; normalize before dispatch and validation.
+    char* canonical_name = pool_strdup(pool, func_name ? func_name : "");
+    if (!canonical_name) return NULL;
+    str_lower_inplace(canonical_name, strlen(canonical_name));
+    func_name = canonical_name;
 
     (*pos)++;  // Skip FUNCTION token
 
@@ -1007,7 +1015,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
         arg_count++;  // commas + 1 = number of arguments
     }
 
-    func_value->data.function->name = func_name ? pool_strdup(pool, func_name) : "";
+    func_value->data.function->name = func_name;
     func_value->data.function->arg_count = arg_count;
 
     if (arg_count > 0) {
@@ -1326,8 +1334,10 @@ CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tok
     while (*pos < token_count) {
         const CssToken* token = &tokens[*pos];
 
-        // Stop at structural tokens (whitespace, combinators, commas, braces)
-        if (token->type == CSS_TOKEN_WHITESPACE ||
+        // EOF must terminate a pseudo-element too; the guard below rejects followers.
+        if (token->type == CSS_TOKEN_EOF ||
+            token->type == CSS_TOKEN_WHITESPACE ||
+            token->type == CSS_TOKEN_COLUMN ||
             token->type == CSS_TOKEN_COMMA ||
             token->type == CSS_TOKEN_LEFT_BRACE ||
             token->type == CSS_TOKEN_RIGHT_BRACE) {
@@ -1418,23 +1428,27 @@ static const char* css_parse_attribute_value(const CssToken* tokens, int* pos,
 }
 
 static void css_parse_attribute_case_flag(const CssToken* tokens, int* pos,
-                                          int token_count, bool* case_insensitive) {
+                                          int token_count, bool* case_insensitive,
+                                          bool* case_sensitive) {
     if (*pos >= token_count || tokens[*pos].type != CSS_TOKEN_IDENT) return;
     const char* flag = tokens[*pos].value;
     if (flag && (strcmp(flag, "i") == 0 || strcmp(flag, "I") == 0)) {
         *case_insensitive = true;
         (*pos)++;
     } else if (flag && (strcmp(flag, "s") == 0 || strcmp(flag, "S") == 0)) {
+        *case_sensitive = true;
         (*pos)++;
     }
 }
 
 static const char* css_parse_attribute_tail(const CssToken* tokens, int* pos,
-        int token_count, Pool* pool, bool* case_insensitive) {
+        int token_count, Pool* pool, bool* case_insensitive,
+        bool* case_sensitive) {
     *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
     const char* value = css_parse_attribute_value(tokens, pos, token_count, pool);
     *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
-    css_parse_attribute_case_flag(tokens, pos, token_count, case_insensitive);
+    css_parse_attribute_case_flag(tokens, pos, token_count,
+        case_insensitive, case_sensitive);
     *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
     if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_RIGHT_BRACKET) (*pos)++;
     return value;
@@ -1476,9 +1490,12 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
 
         if (*pos >= token_count) break;
 
-        // Check for explicit combinators (>, +, ~)
+        // Check for explicit combinators (>, +, ~, ||)
         const CssToken* token = &tokens[*pos];
-        if (token->type == CSS_TOKEN_DELIM) {
+        if (token->type == CSS_TOKEN_COLUMN) {
+            combinator = CSS_COMBINATOR_COLUMN;
+            (*pos)++;
+        } else if (token->type == CSS_TOKEN_DELIM) {
             char delim = token->data.delimiter;
             if (delim == '>') {
                 combinator = CSS_COMBINATOR_CHILD;
@@ -1594,17 +1611,14 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
 
         // Parse next selector
         CssSelector* next = css_parse_selector_with_combinators(tokens, pos, token_count, pool);
-        if (!next) {
-            log_debug("[CSS Parser] WARNING: Failed to parse selector after comma, stopping group");
-            break;
-        }
+        if (!next) return NULL;
 
         // Expand array if needed
         if (count >= capacity) {
             if (!lam::pool_copy_grow_array(pool, &selectors, &capacity, count,
                                             count + 1, 4, true)) {
                 log_debug("[CSS Parser] ERROR: Failed to expand selector array");
-                break;
+                return NULL;
             }
         }
 
@@ -1626,6 +1640,58 @@ CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, i
     return group;
 }
 
+static bool css_selector_contains_generic_pseudo(const CssSelector* selector);
+
+static CssSelectorGroup* css_parse_segmented_selector_group(
+        const CssToken* tokens, int start, int end, Pool* pool,
+        bool forgiving, bool relative) {
+    size_t capacity = 4;
+    CssSelector** selectors = (CssSelector**)pool_calloc(pool, capacity * sizeof(CssSelector*));
+    if (!selectors) return NULL;
+    size_t count = 0;
+    int segment_start = start;
+    int depth = 0;
+    for (int i = start; i <= end; i++) {
+        if (i < end) {
+            if (tokens[i].type == CSS_TOKEN_FUNCTION ||
+                tokens[i].type == CSS_TOKEN_LEFT_PAREN ||
+                tokens[i].type == CSS_TOKEN_LEFT_BRACKET) depth++;
+            else if (tokens[i].type == CSS_TOKEN_RIGHT_PAREN ||
+                     tokens[i].type == CSS_TOKEN_RIGHT_BRACKET) depth--;
+        }
+        if (i < end && !(tokens[i].type == CSS_TOKEN_COMMA && depth == 0)) continue;
+        int pos = css_skip_whitespace_tokens(tokens, segment_start, i);
+        CssCombinator leading = CSS_COMBINATOR_DESCENDANT;
+        if (relative && pos < i && tokens[pos].type == CSS_TOKEN_DELIM) {
+            char delim = tokens[pos].data.delimiter;
+            if (delim == '>') leading = CSS_COMBINATOR_CHILD;
+            else if (delim == '+') leading = CSS_COMBINATOR_NEXT_SIBLING;
+            else if (delim == '~') leading = CSS_COMBINATOR_SUBSEQUENT_SIBLING;
+            if (leading != CSS_COMBINATOR_DESCENDANT) {
+                pos = css_skip_whitespace_tokens(tokens, pos + 1, i);
+            }
+        }
+        CssSelector* candidate = pos < i
+            ? css_parse_selector_with_combinators(tokens, &pos, i, pool) : NULL;
+        pos = css_skip_whitespace_tokens(tokens, pos, i);
+        if (candidate && pos == i && !css_selector_contains_generic_pseudo(candidate)) {
+            if (count >= capacity &&
+                !lam::pool_copy_grow_array(pool, &selectors, &capacity, count,
+                                           count + 1, 4, true)) return NULL;
+            if (relative) candidate->leading_combinator = leading;
+            selectors[count++] = candidate;
+        } else if (!forgiving) {
+            return NULL;
+        }
+        segment_start = i + 1;
+    }
+    CssSelectorGroup* group = (CssSelectorGroup*)pool_calloc(pool, sizeof(CssSelectorGroup));
+    if (!group) return NULL;
+    group->selectors = selectors;
+    group->selector_count = count;
+    return group;
+}
+
 // Helper: Parse a simple CSS selector from tokens (simplified for now)
 static bool css_apply_functional_pseudo(CssSimpleSelector* selector,
         const CssSelectorFunction* function, const CssToken* tokens,
@@ -1641,14 +1707,51 @@ static bool css_apply_functional_pseudo(CssSimpleSelector* selector,
     selector->value = function->name;
     selector->argument = function->argument;
 
+    if ((selector->type == CSS_SELECTOR_PSEUDO_LANG ||
+         selector->type == CSS_SELECTOR_PSEUDO_DIR) &&
+        (!selector->argument || !selector->argument[0])) return false;
+    if (selector->type == CSS_SELECTOR_PSEUDO_DIR &&
+        str_icmp_cstr(selector->argument, "ltr") != 0 &&
+        str_icmp_cstr(selector->argument, "rtl") != 0) return false;
+
     if (css_is_nth_pseudo(selector->type)) {
+        int formula_end = function->argument_end;
+        int of_pos = -1;
+        if (selector->type == CSS_SELECTOR_PSEUDO_NTH_CHILD ||
+            selector->type == CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD) {
+            for (int i = function->argument_start + 1; i < function->argument_end; i++) {
+                if (tokens[i].type == CSS_TOKEN_IDENT && tokens[i].value &&
+                    str_icmp_cstr(tokens[i].value, "of") == 0 &&
+                    tokens[i - 1].type == CSS_TOKEN_WHITESPACE) {
+                    formula_end = i;
+                    of_pos = i;
+                    break;
+                }
+            }
+        }
         if (!css_parse_anb_from_tokens(tokens, function->argument_start,
-                function->argument_end, &selector->nth_formula)) {
+                formula_end, &selector->nth_formula)) {
             log_debug(after_colon
                 ? "[CSS Parser] An+B parse error for ':%s(%s)'"
                 : "[CSS Parser] An+B parse error for '%s(%s)'",
                 function->name, function->argument ? function->argument : "");
             return false;
+        }
+        if (of_pos >= 0) {
+            int sub_pos = of_pos + 1;
+            CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(
+                tokens, &sub_pos, function->argument_end, pool);
+            if (!sub_group || sub_group->selector_count == 0 ||
+                css_selector_group_contains_generic_pseudo(sub_group) ||
+                css_skip_whitespace_tokens(tokens, sub_pos, function->argument_end) !=
+                    function->argument_end) return false;
+            selector->function_selectors = sub_group->selectors;
+            selector->function_selector_count = sub_group->selector_count;
+            // keep the separation around `of` for selectorText serialization.
+            const char* raw_start = tokens[function->argument_start].start;
+            const CssToken* last = &tokens[function->argument_end - 1];
+            const char* raw_end = last->start + last->length;
+            selector->argument = pool_dup_n(pool, raw_start, (size_t)(raw_end - raw_start));
         }
     } else if (selector->type == CSS_SELECTOR_PSEUDO_NOT ||
                selector->type == CSS_SELECTOR_PSEUDO_IS ||
@@ -1656,9 +1759,21 @@ static bool css_apply_functional_pseudo(CssSimpleSelector* selector,
                selector->type == CSS_SELECTOR_PSEUDO_HAS ||
                selector->type == CSS_SELECTOR_PSEUDO_SLOTTED) {
         int sub_pos = function->argument_start;
-        CssSelectorGroup* sub_group = css_parse_selector_group_from_tokens(
-            tokens, &sub_pos, function->argument_end, pool);
-        if (sub_group && sub_group->selector_count > 0) {
+        bool forgiving = selector->type == CSS_SELECTOR_PSEUDO_IS ||
+                         selector->type == CSS_SELECTOR_PSEUDO_WHERE;
+        CssSelectorGroup* sub_group = (forgiving || selector->type == CSS_SELECTOR_PSEUDO_HAS)
+            ? css_parse_segmented_selector_group(tokens, sub_pos,
+                function->argument_end, pool, forgiving,
+                selector->type == CSS_SELECTOR_PSEUDO_HAS)
+            : css_parse_selector_group_from_tokens(tokens, &sub_pos,
+                function->argument_end, pool);
+        if (!sub_group || (!forgiving &&
+            (sub_group->selector_count == 0 ||
+             css_selector_group_contains_generic_pseudo(sub_group) ||
+             (selector->type != CSS_SELECTOR_PSEUDO_HAS &&
+              css_skip_whitespace_tokens(tokens, sub_pos,
+                function->argument_end) != function->argument_end)))) return false;
+        if (sub_group->selector_count > 0) {
             selector->function_selectors = sub_group->selectors;
             selector->function_selector_count = sub_group->selector_count;
         }
@@ -1674,6 +1789,33 @@ static bool css_apply_functional_pseudo(CssSimpleSelector* selector,
     return true;
 }
 
+static bool css_parse_qualified_selector_name(const CssToken* tokens, int* pos,
+                                              int token_count, Pool* pool,
+                                              bool allow_universal_local,
+                                              const char** prefix,
+                                              const char** local) {
+    int start = *pos;
+    bool empty_prefix = tokens[start].type == CSS_TOKEN_DELIM &&
+        tokens[start].data.delimiter == '|';
+    bool named_or_wildcard = tokens[start].type == CSS_TOKEN_IDENT ||
+        (tokens[start].type == CSS_TOKEN_DELIM &&
+         tokens[start].data.delimiter == '*');
+    int local_index = start + (empty_prefix ? 1 : 2);
+    if (!empty_prefix && (!named_or_wildcard || start + 1 >= token_count ||
+        tokens[start + 1].type != CSS_TOKEN_DELIM ||
+        tokens[start + 1].data.delimiter != '|')) return false;
+    if (local_index >= token_count ||
+        (tokens[local_index].type != CSS_TOKEN_IDENT &&
+         !(allow_universal_local && tokens[local_index].type == CSS_TOKEN_DELIM &&
+           tokens[local_index].data.delimiter == '*'))) return false;
+    *prefix = empty_prefix ? "" : tokens[start].type == CSS_TOKEN_IDENT
+        ? css_token_value_dup(&tokens[start], pool) : "*";
+    *local = tokens[local_index].type == CSS_TOKEN_IDENT
+        ? css_token_value_dup(&tokens[local_index], pool) : "*";
+    *pos = local_index + 1;
+    return *prefix && *local;
+}
+
 CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
 
@@ -1687,23 +1829,20 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
     const CssToken* token = &tokens[*pos];
 
     bool matched = false;  // Track if we found a valid selector
+    const char* namespace_prefix = NULL;
+    const char* qualified_local = NULL;
+    bool has_namespace_local = css_parse_qualified_selector_name(
+        tokens, pos, token_count, pool, true,
+        &namespace_prefix, &qualified_local);
 
     // Parse based on token type
-    if (token->type == CSS_TOKEN_DELIM && token->data.delimiter == '*' &&
-        *pos + 2 < token_count &&
-        tokens[*pos + 1].type == CSS_TOKEN_DELIM &&
-        tokens[*pos + 1].data.delimiter == '|' &&
-        (tokens[*pos + 2].type == CSS_TOKEN_IDENT ||
-         (tokens[*pos + 2].type == CSS_TOKEN_DELIM &&
-          tokens[*pos + 2].data.delimiter == '*'))) {
-        // *| selects any namespace; retain the local-name test in the existing matcher.
-        const CssToken* local = &tokens[*pos + 2];
-        selector->type = local->type == CSS_TOKEN_IDENT
+    if (has_namespace_local) {
+        selector->type = strcmp(qualified_local, "*") != 0
             ? CSS_SELECTOR_TYPE_ELEMENT : CSS_SELECTOR_TYPE_UNIVERSAL;
-        selector->value = local->type == CSS_TOKEN_IDENT
-            ? css_token_value_dup(local, pool) : "*";
-        *pos += 3;
-        matched = selector->value != NULL;
+        selector->value = qualified_local;
+        selector->namespace_prefix = namespace_prefix;
+        selector->namespace_url = namespace_prefix[0] == '\0' ? "" : NULL;
+        matched = true;
     } else if (token->type == CSS_TOKEN_IDENT || token->type == CSS_TOKEN_CUSTOM_PROPERTY) {
         // Element/type selector: div, span, --foo, etc.
         selector->type = CSS_SELECTOR_TYPE_ELEMENT;
@@ -1786,8 +1925,9 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                 // This is a pseudo-element
                 (*pos)++;
                 if (*pos < token_count && tokens[*pos].type == CSS_TOKEN_IDENT) {
-                    const char* elem_name = css_token_value_dup(&tokens[*pos], pool);
+                    char* elem_name = css_token_value_dup(&tokens[*pos], pool);
                     if (!elem_name) return NULL;
+                    str_lower_inplace(elem_name, strlen(elem_name));
 
                     (*pos)++;
 
@@ -1848,8 +1988,9 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
 
             // Single colon - pseudo-class or legacy pseudo-element
             else if (pseudo_token->type == CSS_TOKEN_IDENT) {
-                const char* pseudo_name = css_token_value_dup(pseudo_token, pool);
+                char* pseudo_name = css_token_value_dup(pseudo_token, pool);
                 if (!pseudo_name) return NULL;
+                str_lower_inplace(pseudo_name, strlen(pseudo_name));
 
                 (*pos)++;
 
@@ -1923,6 +2064,8 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->type = CSS_SELECTOR_PSEUDO_LINK;
                 } else if (strcmp(pseudo_name, "any-link") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_ANY_LINK;
+                } else if (strcmp(pseudo_name, "local-link") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_LOCAL_LINK;
                 } else if (strcmp(pseudo_name, "enabled") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_ENABLED;
                 } else if (strcmp(pseudo_name, "disabled") == 0) {
@@ -1937,6 +2080,10 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->type = CSS_SELECTOR_PSEUDO_VALID;
                 } else if (strcmp(pseudo_name, "invalid") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_INVALID;
+                } else if (strcmp(pseudo_name, "user-invalid") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_USER_INVALID;
+                } else if (strcmp(pseudo_name, "user-valid") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_USER_VALID;
                 } else if (strcmp(pseudo_name, "open") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_OPEN;
                 } else if (strcmp(pseudo_name, "required") == 0) {
@@ -1951,10 +2098,16 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                     selector->type = CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN;
                 } else if (strcmp(pseudo_name, "default") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_DEFAULT;
+                } else if (strcmp(pseudo_name, "defined") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_DEFINED;
                 } else if (strcmp(pseudo_name, "in-range") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_IN_RANGE;
                 } else if (strcmp(pseudo_name, "out-of-range") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_OUT_OF_RANGE;
+                } else if (strcmp(pseudo_name, "modal") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_MODAL;
+                } else if (strcmp(pseudo_name, "popover-open") == 0) {
+                    selector->type = CSS_SELECTOR_PSEUDO_POPOVER_OPEN;
                 } else if (strcmp(pseudo_name, "target") == 0) {
                     selector->type = CSS_SELECTOR_PSEUDO_TARGET;
                 } else if (strcmp(pseudo_name, "scope") == 0) {
@@ -1992,15 +2145,19 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
         if (*pos >= token_count) return NULL;
 
-        // Expect attribute name (IDENT)
-        if (tokens[*pos].type != CSS_TOKEN_IDENT) {
+        // Attribute names do not use the default namespace.
+        const char* attr_prefix = NULL;
+        const char* attr_name = NULL;
+        bool qualified = css_parse_qualified_selector_name(
+            tokens, pos, token_count, pool, false, &attr_prefix, &attr_name);
+        if (!qualified && tokens[*pos].type != CSS_TOKEN_IDENT) {
             log_debug("[CSS Parser] Expected attribute name, got token type %d", tokens[*pos].type);
             return NULL;
         }
-
-        const char* attr_name = css_token_value_dup(&tokens[*pos], pool);
+        if (!qualified) attr_name = css_token_value_dup(&tokens[(*pos)++], pool);
         if (!attr_name) return NULL;
-        (*pos)++;
+        selector->namespace_prefix = qualified ? attr_prefix : "";
+        selector->namespace_url = selector->namespace_prefix[0] == '\0' ? "" : NULL;
 
         // Skip whitespace
         *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
@@ -2010,6 +2167,7 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         CssSelectorType attr_type = CSS_SELECTOR_ATTR_EXISTS;
         const char* attr_value = NULL;
         bool case_insensitive = false;
+        bool case_sensitive = false;
 
         if (tokens[*pos].type == CSS_TOKEN_RIGHT_BRACKET) {
             // Simple attribute exists selector: [attr]
@@ -2030,7 +2188,7 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             (*pos)++;
 
             attr_value = css_parse_attribute_tail(tokens, pos, token_count, pool,
-                &case_insensitive);
+                &case_insensitive, &case_sensitive);
         } else if (tokens[*pos].type == CSS_TOKEN_DELIM) {
             char delim = tokens[*pos].data.delimiter;
             (*pos)++;
@@ -2053,13 +2211,14 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
             }
 
             attr_value = css_parse_attribute_tail(tokens, pos, token_count, pool,
-                &case_insensitive);
+                &case_insensitive, &case_sensitive);
         }
 
         selector->type = attr_type;
         selector->attribute.name = attr_name;
         selector->attribute.value = attr_value;
         selector->attribute.case_insensitive = case_insensitive;
+        selector->attribute.case_sensitive = case_sensitive;
 
         log_debug("[CSS Parser] Attribute selector: [%s%s%s]%s",
                attr_name,
@@ -2105,7 +2264,8 @@ static bool css_value_is_single_var_block(const CssToken* tokens, int start, int
 }
 
 // Helper: Parse CSS declaration from tokens
-CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
+CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
+    int* pos, int token_count, Pool* pool, bool quirks_mode) {
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
 
     // Skip leading whitespace
@@ -2124,10 +2284,14 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     }
 
     // Extract property name from token (use start/length since value may be NULL)
-    const char* property_name = css_token_value_dup(&tokens[*pos], pool);
+    char* property_name = css_token_value_dup(&tokens[*pos], pool);
     if (!property_name) {
         log_debug("[CSS Parser] No property name in token");
         return NULL;
+    }
+    // Standard property names are ASCII-insensitive; custom names retain case.
+    if (!(property_name[0] == '-' && property_name[1] == '-')) {
+        str_lower_inplace(property_name, strlen(property_name));
     }
 
     (*pos)++;
@@ -2572,11 +2736,13 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
             }
         }
 
-        if (decl->property_code == CSS_PROPERTY_FONT_SIZE &&
-            !css_property_validate_value(decl->property_code, decl->value)) {
-            // Validate here as well as DOM application so an invalid value
-            // cannot displace the inherited font size in the cascade.
-            log_debug("[CSS Parse] Rejecting invalid font-size");
+        if (decl->property_code > 0 && decl->property_code < CSS_PROPERTY_CUSTOM &&
+            !css_property_validate_value_mode(decl->property_code, decl->value,
+                                              quirks_mode)) {
+            // A parse-time invalid value must never displace an earlier valid
+            // declaration; all standard properties use the same validator.
+            log_debug("[CSS Parse] Rejecting invalid value for property %d",
+                decl->property_code);
             return NULL;
         }
     }
@@ -2634,9 +2800,234 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     return decl;
 }
 
+CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens,
+    int* pos, int token_count, Pool* pool) {
+    return css_parse_declaration_from_tokens_mode(tokens, pos, token_count,
+                                                  pool, false);
+}
+
+static CssRule* css_new_author_rule(Pool* pool) {
+    CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+    if (rule) {
+        rule->pool = pool;
+        // zero-initialization otherwise mislabels author rules as UA origin.
+        rule->origin = CSS_ORIGIN_AUTHOR;
+    }
+    return rule;
+}
+
+static bool css_parse_layer_prelude(const CssToken* tokens, int start, int end,
+                                    bool statement, CssRule* rule, Pool* pool) {
+    if (!rule || !pool) return false;
+    int capacity = end - start + 1;
+    CssLayerName* names = (CssLayerName*)pool_calloc(
+        pool, (size_t)capacity * sizeof(CssLayerName));
+    const char** parts = (const char**)pool_calloc(
+        pool, (size_t)capacity * sizeof(const char*));
+    if (!names || !parts) return false;
+    int part_count = 0;
+    int name_count = 0;
+    int name_start = 0;
+    bool expect_ident = true;
+    for (int i = start; i < end; i++) {
+        if (tokens[i].type == CSS_TOKEN_WHITESPACE) continue;
+        if (expect_ident) {
+            if (tokens[i].type != CSS_TOKEN_IDENT &&
+                tokens[i].type != CSS_TOKEN_CUSTOM_PROPERTY) return false;
+            parts[part_count++] = css_token_value_dup(&tokens[i], pool);
+            if (!parts[part_count - 1]) return false;
+            expect_ident = false;
+        } else if (tokens[i].type == CSS_TOKEN_DELIM &&
+                   tokens[i].data.delimiter == '.') {
+            expect_ident = true;
+        } else if (statement && tokens[i].type == CSS_TOKEN_COMMA) {
+            names[name_count].parts = parts + name_start;
+            names[name_count++].part_count = (size_t)(part_count - name_start);
+            name_start = part_count;
+            expect_ident = true;
+        } else {
+            return false;
+        }
+    }
+    if (part_count == 0) return !statement;
+    if (expect_ident || (!statement && name_count > 0)) return false;
+    names[name_count].parts = parts + name_start;
+    names[name_count++].part_count = (size_t)(part_count - name_start);
+    rule->data.conditional_rule.layer_names = names;
+    rule->data.conditional_rule.layer_name_count = (size_t)name_count;
+    return true;
+}
+
+static int css_import_function_end(const CssToken* tokens, int start, int end) {
+    int depth = 1;
+    for (int i = start + 1; i < end; i++) {
+        if (tokens[i].type == CSS_TOKEN_FUNCTION ||
+            tokens[i].type == CSS_TOKEN_LEFT_PAREN) depth++;
+        else if (tokens[i].type == CSS_TOKEN_RIGHT_PAREN && --depth == 0)
+            return i;
+    }
+    return -1;
+}
+
+static bool css_parse_import_modifiers(const CssToken* tokens, int start,
+                                        int end, CssRule* rule, Pool* pool) {
+    int current = css_skip_whitespace_tokens(tokens, start, end);
+    if (current < end && tokens[current].type == CSS_TOKEN_IDENT &&
+        tokens[current].value &&
+        str_ieq_cstr(tokens[current].value, "layer")) {
+        rule->data.import_rule.has_layer = true;
+        rule->data.import_rule.anonymous_layer = true;
+        current = css_skip_whitespace_tokens(tokens, current + 1, end);
+    } else if (current < end && tokens[current].type == CSS_TOKEN_FUNCTION &&
+               tokens[current].value &&
+               str_ieq_cstr(tokens[current].value, "layer(")) {
+        int close = css_import_function_end(tokens, current, end);
+        if (close < 0) return false;
+        CssRule parsed = {};
+        if (!css_parse_layer_prelude(tokens, current + 1, close,
+                false, &parsed, pool) ||
+            parsed.data.conditional_rule.layer_name_count != 1) return false;
+        rule->data.import_rule.has_layer = true;
+        rule->data.import_rule.layer_name =
+            parsed.data.conditional_rule.layer_names[0];
+        current = css_skip_whitespace_tokens(tokens, close + 1, end);
+    }
+    if (current < end && tokens[current].type == CSS_TOKEN_FUNCTION &&
+        tokens[current].value &&
+        str_ieq_cstr(tokens[current].value, "supports(")) {
+        int close = css_import_function_end(tokens, current, end);
+        if (close <= current + 1) return false;
+        const char* from = tokens[current].start +
+            tokens[current].length - 1;
+        const char* to = tokens[close].start + tokens[close].length;
+        rule->data.import_rule.supports = pool_dup_n(
+            pool, from, (size_t)(to - from));
+        if (!rule->data.import_rule.supports) return false;
+        current = css_skip_whitespace_tokens(tokens, close + 1, end);
+    }
+    if (current < end) {
+        const char* from = tokens[current].start;
+        const char* to = tokens[end - 1].start + tokens[end - 1].length;
+        rule->data.import_rule.media = pool_dup_n(
+            pool, from, (size_t)(to - from));
+        if (!rule->data.import_rule.media) return false;
+    }
+    return true;
+}
+
+// Expand each relative-selector branch against the complete parent list, so
+// specificity follows :is(parent-list) without a selector cross product.
+static char* css_expand_nested_selector(const CssToken* tokens, int start, int end,
+                                         const char* parent_text, Pool* pool,
+                                         bool implicit_parent,
+                                         char** out_authored) {
+    if (!tokens || start >= end || !parent_text || !pool) return NULL;
+    StrBuf* expanded = strbuf_new();
+    StrBuf* authored = out_authored ? strbuf_new() : NULL;
+    if (!expanded || (out_authored && !authored)) {
+        if (expanded) strbuf_free(expanded);
+        if (authored) strbuf_free(authored);
+        return NULL;
+    }
+    int branch_start = start;
+    int paren_depth = 0;
+    int bracket_depth = 0;
+    bool valid = true;
+    for (int i = start; i <= end; i++) {
+        CssTokenType type = i < end ? tokens[i].type : CSS_TOKEN_COMMA;
+        if (type == CSS_TOKEN_LEFT_PAREN || type == CSS_TOKEN_FUNCTION) paren_depth++;
+        else if (type == CSS_TOKEN_RIGHT_PAREN && paren_depth > 0) paren_depth--;
+        else if (type == CSS_TOKEN_LEFT_BRACKET) bracket_depth++;
+        else if (type == CSS_TOKEN_RIGHT_BRACKET && bracket_depth > 0) bracket_depth--;
+        if (type != CSS_TOKEN_COMMA || paren_depth || bracket_depth) continue;
+
+        int first = css_skip_whitespace_tokens(tokens, branch_start, i);
+        int last = i;
+        while (last > first && tokens[last - 1].type == CSS_TOKEN_WHITESPACE) last--;
+        if (first >= last) { valid = false; break; }
+        if (branch_start != start) {
+            strbuf_append_char(expanded, ',');
+            if (authored) strbuf_append_str(authored, ", ");
+        }
+        bool has_ampersand = false;
+        for (int j = first; j < last; j++) {
+            if (tokens[j].type == CSS_TOKEN_DELIM &&
+                tokens[j].data.delimiter == '&') has_ampersand = true;
+        }
+        if (!has_ampersand && implicit_parent) {
+            strbuf_append_str(expanded, ":is(");
+            strbuf_append_str(expanded, parent_text);
+            strbuf_append_str(expanded, ") ");
+        }
+        const char* cursor = tokens[first].start;
+        const char* finish = tokens[last - 1].start + tokens[last - 1].length;
+        if (authored) {
+            if (!has_ampersand && implicit_parent)
+                strbuf_append_str(authored, "& ");
+            strbuf_append_str_n(authored, cursor, (size_t)(finish - cursor));
+        }
+        for (int j = first; j < last; j++) {
+            if (tokens[j].type != CSS_TOKEN_DELIM ||
+                tokens[j].data.delimiter != '&') continue;
+            strbuf_append_str_n(expanded, cursor, (size_t)(tokens[j].start - cursor));
+            strbuf_append_str(expanded, ":is(");
+            strbuf_append_str(expanded, parent_text);
+            strbuf_append_char(expanded, ')');
+            cursor = tokens[j].start + tokens[j].length;
+        }
+        strbuf_append_str_n(expanded, cursor, (size_t)(finish - cursor));
+        branch_start = i + 1;
+    }
+    char* result = valid && expanded->str
+        ? pool_dup_n(pool, expanded->str, expanded->length) : NULL;
+    if (out_authored) {
+        *out_authored = valid && authored && authored->str
+            ? pool_dup_n(pool, authored->str, authored->length) : NULL;
+    }
+    strbuf_free(expanded);
+    // DOM query expansion has no authored output buffer.
+    if (authored) strbuf_free(authored);
+    return result;
+}
+
+static bool css_nesting_flush_declarations(Pool* pool, CssRule*** nested_rules,
+                                            int* nested_count, int* nested_capacity,
+                                            CssDeclaration*** pending,
+                                            int* pending_count, int* pending_capacity,
+                                            CssSelectorGroup* parent_group) {
+    if (!pending_count || *pending_count == 0) return true;
+    CssRule* rule = css_new_author_rule(pool);
+    if (!rule) return false;
+    rule->type = CSS_RULE_NESTED_DECLARATIONS;
+    rule->data.style_rule.declarations = *pending;
+    rule->data.style_rule.declaration_count = *pending_count;
+    rule->data.style_rule.selector_group = parent_group;
+    rule->data.style_rule.selector = parent_group && parent_group->selector_count
+        ? parent_group->selectors[0] : NULL;
+    if (*nested_count >= *nested_capacity &&
+        !lam::pool_copy_grow_array(pool, nested_rules, nested_capacity,
+                                   *nested_count, *nested_count + 1, 4, true)) return false;
+    (*nested_rules)[(*nested_count)++] = rule;
+    *pending = NULL;
+    *pending_count = 0;
+    *pending_capacity = 0;
+    return true;
+}
+
+static int css_parse_nested_style_rule(const CssToken* tokens, int token_count,
+                                       Pool* pool, const char* parent_text,
+                                       CssRule** out_rule, bool implicit_parent,
+                                       bool quirks_mode);
+
 // Enhanced rule parsing from tokens (returns number of tokens consumed, or 0 on error)
-int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count, Pool* pool, CssRule** out_rule) {
+static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
+    int token_count, Pool* pool, CssRule** out_rule,
+    const char* nesting_parent_text, CssSelectorGroup* nesting_parent_group,
+    bool quirks_mode) {
     if (!tokens || token_count <= 0 || !pool || !out_rule) return 0;
+    static thread_local int css_rule_depth = 0;
+    lam::RecursionGuard depth_guard(&css_rule_depth, MAX_CSS_RULE_DEPTH);
+    if (!depth_guard) return 0;
 
     log_debug(" Parsing rule from %d tokens", token_count);
 
@@ -2659,18 +3050,17 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         pos++; // consume @keyword token
 
         // Skip leading '@' in keyword name if present
-        const char* keyword_name = at_keyword;
-        if (keyword_name && keyword_name[0] == '@') {
-            keyword_name++;
-        }
+        const char* keyword_start = at_keyword && at_keyword[0] == '@'
+            ? at_keyword + 1 : at_keyword;
+        char* keyword_name = keyword_start ? pool_strdup(pool, keyword_start) : NULL;
+        if (keyword_name) str_lower_inplace(keyword_name, strlen(keyword_name));
 
         // Create rule structure
-        CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+        CssRule* rule = css_new_author_rule(pool);
         if (!rule) {
             log_debug(" ERROR: Failed to allocate rule");
             return 0;
         }
-        rule->pool = pool;
 
         // Determine rule type and parse accordingly
         if (keyword_name && (strcmp(keyword_name, "media") == 0 ||
@@ -2684,64 +3074,123 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                         strcmp(keyword_name, "container") == 0 ? CSS_RULE_CONTAINER :
                         CSS_RULE_LAYER;
             int cond_start = pos;
-            while (pos < token_count && tokens[pos].type != CSS_TOKEN_LEFT_BRACE) {
+            while (pos < token_count &&
+                   tokens[pos].type != CSS_TOKEN_LEFT_BRACE &&
+                   tokens[pos].type != CSS_TOKEN_SEMICOLON) {
                 pos++;
             }
 
-            // Extract condition text
+            // Preserve source spacing: range operators such as >= are two tokens,
+            // and inserting spaces between them changes the media query grammar.
             if (pos > cond_start) {
-                size_t cond_length = 0;
-                for (int i = cond_start; i < pos; i++) {
-                    if (tokens[i].value) {
-                        cond_length += strlen(tokens[i].value) + 1; // +1 for space
-                    }
-                }
-
-                char* condition = (char*)pool_alloc(pool, cond_length + 1);
-                if (condition) {
-                    condition[0] = '\0';
-                    size_t condition_len = 0;
-                    for (int i = cond_start; i < pos; i++) {
-                        if (tokens[i].value) {
-                            if (condition_len > 0) condition_len = str_cat(condition, condition_len, cond_length + 1, " ", 1);
-                            condition_len = str_cat(condition, condition_len, cond_length + 1, tokens[i].value, strlen(tokens[i].value));
+                const char* begin = tokens[cond_start].start;
+                const char* last = tokens[pos - 1].start;
+                if (begin && last && last >= begin) {
+                    char* condition = pool_dup_n(pool, begin,
+                        (size_t)(last + tokens[pos - 1].length - begin));
+                    if (condition) {
+                        // CSS comments are whitespace, including between range-operator tokens.
+                        for (char* cursor = condition; cursor[0] && cursor[1]; cursor++) {
+                            if (cursor[0] != '/' || cursor[1] != '*') continue;
+                            cursor[0] = cursor[1] = ' ';
+                            cursor += 2;
+                            while (cursor[0] && !(cursor[0] == '*' && cursor[1] == '/'))
+                                *cursor++ = ' ';
+                            if (!cursor[0]) break;
+                            cursor[0] = cursor[1] = ' ';
                         }
+                        rule->data.conditional_rule.condition = condition;
                     }
-                    rule->data.conditional_rule.condition = condition;
                 }
+            }
+
+            if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) {
+                // A layer order statement ends here; scanning for the next
+                // brace would swallow the following style rule.
+                rule->data.conditional_rule.layer_statement =
+                    rule->type == CSS_RULE_LAYER;
+                if (rule->type == CSS_RULE_LAYER) {
+                    rule->data.conditional_rule.invalid_layer =
+                        !css_parse_layer_prelude(tokens, cond_start, pos,
+                            true, rule, pool);
+                }
+                *out_rule = rule->type == CSS_RULE_LAYER ? rule : NULL;
+                return pos + 1 - start_pos;
             }
 
             // Parse block with nested rules
             if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                if (rule->type == CSS_RULE_LAYER) {
+                    rule->data.conditional_rule.invalid_layer =
+                        !css_parse_layer_prelude(tokens, cond_start, pos,
+                            false, rule, pool) ||
+                        rule->data.conditional_rule.layer_name_count > 1;
+                }
                 pos++; // consume '{'
 
                 // Parse nested rules
                 int nested_capacity = 4;
-                rule->data.conditional_rule.rules = (CssRule**)pool_calloc(pool,
+                CssRule** nested_rules = (CssRule**)pool_calloc(pool,
                     nested_capacity * sizeof(CssRule*));
-                rule->data.conditional_rule.rule_count = 0;
+                int nested_count = 0;
+                CssDeclaration** pending_decls = NULL;
+                int pending_count = 0, pending_capacity = 0;
 
                 while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
                     // Skip whitespace
                     pos = css_skip_whitespace_tokens(tokens, pos, token_count);
                     if (pos >= token_count || tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
 
+                    if (nesting_parent_text && tokens[pos].type != CSS_TOKEN_AT_KEYWORD) {
+                        int next = css_skip_whitespace_tokens(tokens, pos + 1, token_count);
+                        bool declaration_start =
+                            (tokens[pos].type == CSS_TOKEN_IDENT ||
+                             tokens[pos].type == CSS_TOKEN_CUSTOM_PROPERTY) &&
+                            next < token_count && tokens[next].type == CSS_TOKEN_COLON;
+                        if (declaration_start) {
+                            int before = pos;
+                            CssDeclaration* decl = css_parse_declaration_from_tokens_mode(
+                                tokens, &pos, token_count, pool, quirks_mode);
+                            if (decl) {
+                                if (pending_count >= pending_capacity &&
+                                    !lam::pool_copy_grow_array(pool, &pending_decls,
+                                        &pending_capacity, pending_count,
+                                        pending_count + 1, 4, true)) return 0;
+                                pending_decls[pending_count++] = decl;
+                            }
+                            if (pos == before) pos++;
+                            if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON)
+                                pos++;
+                            continue;
+                        }
+                    }
+                    if (nesting_parent_text && !css_nesting_flush_declarations(pool,
+                            &nested_rules, &nested_count, &nested_capacity,
+                            &pending_decls, &pending_count, &pending_capacity,
+                            nesting_parent_group)) return 0;
+
                     // Recursively parse nested rule
                     CssRule* nested_rule = NULL;
-                    int nested_consumed = css_parse_rule_from_tokens_internal(
-                        tokens + pos, token_count - pos, pool, &nested_rule);
+                    int nested_consumed = nesting_parent_text &&
+                        tokens[pos].type != CSS_TOKEN_AT_KEYWORD
+                        ? css_parse_nested_style_rule(tokens + pos,
+                            token_count - pos, pool, nesting_parent_text,
+                            &nested_rule, true, quirks_mode)
+                        : css_parse_rule_from_tokens_with_context(tokens + pos,
+                            token_count - pos, pool, &nested_rule,
+                            nesting_parent_text, nesting_parent_group,
+                            quirks_mode);
 
                     if (nested_consumed > 0) {
                         pos += nested_consumed;
                         if (nested_rule) {
-                            // Expand array if needed
-                            if (rule->data.conditional_rule.rule_count >= (size_t)nested_capacity) {
+                            if (nested_count >= nested_capacity) {
                                 if (!lam::pool_copy_grow_array(pool,
-                                        &rule->data.conditional_rule.rules, &nested_capacity,
-                                        (int)rule->data.conditional_rule.rule_count,
-                                        (int)rule->data.conditional_rule.rule_count + 1, 4, false)) break;
+                                        &nested_rules, &nested_capacity,
+                                        nested_count, nested_count + 1, 4, false)) break;
                             }
-                            rule->data.conditional_rule.rules[rule->data.conditional_rule.rule_count++] = nested_rule;
+                            nested_rule->parent = rule;
+                            nested_rules[nested_count++] = nested_rule;
                         }
                     } else {
                         // CSS error recovery: skip the unparseable rule and continue
@@ -2769,6 +3218,16 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                     }
                 }
 
+                if (!css_nesting_flush_declarations(pool, &nested_rules,
+                        &nested_count, &nested_capacity, &pending_decls,
+                        &pending_count, &pending_capacity,
+                        nesting_parent_group)) return 0;
+                rule->data.conditional_rule.rules = nested_rules;
+                rule->data.conditional_rule.rule_count = (size_t)nested_count;
+                for (int i = 0; i < nested_count; i++) {
+                    if (nested_rules[i]) nested_rules[i]->parent = rule;
+                }
+
                 if (pos < token_count && tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) {
                     pos++; // consume '}'
                 }
@@ -2778,6 +3237,67 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             log_debug(" Parsed conditional @-rule with %zu nested rules",
                 rule->data.conditional_rule.rule_count);
             return pos - start_pos;
+
+        } else if (keyword_name && strcmp(keyword_name, "namespace") == 0) {
+            // The stylesheet owns prefix scope; the rule parser only retains a
+            // syntactically complete declaration for that scope to consume.
+            int current = css_skip_whitespace_tokens(tokens, pos, token_count);
+            const char* prefix = NULL;
+            if (current < token_count && tokens[current].type == CSS_TOKEN_IDENT) {
+                prefix = css_token_value_dup(&tokens[current], pool);
+                current = css_skip_whitespace_tokens(tokens, current + 1, token_count);
+            }
+            const char* namespace_url = NULL;
+            if (current < token_count &&
+                (tokens[current].type == CSS_TOKEN_STRING ||
+                 tokens[current].type == CSS_TOKEN_URL)) {
+                namespace_url = css_token_value_dup(&tokens[current], pool);
+                current++;
+            } else if (current < token_count &&
+                tokens[current].type == CSS_TOKEN_FUNCTION &&
+                tokens[current].value &&
+                str_icmp_cstr(tokens[current].value, "url(") == 0) {
+                int argument = css_skip_whitespace_tokens(tokens, current + 1,
+                    token_count);
+                if (argument < token_count &&
+                    tokens[argument].type == CSS_TOKEN_STRING) {
+                    namespace_url = css_token_value_dup(&tokens[argument], pool);
+                    current = css_skip_whitespace_tokens(tokens, argument + 1,
+                        token_count);
+                } else {
+                    const char* start = tokens[current].start + tokens[current].length;
+                    current = argument;
+                    while (current < token_count &&
+                           tokens[current].type != CSS_TOKEN_RIGHT_PAREN &&
+                           tokens[current].type != CSS_TOKEN_SEMICOLON) current++;
+                    if (current < token_count &&
+                        tokens[current].type == CSS_TOKEN_RIGHT_PAREN) {
+                        const char* end = tokens[current].start;
+                        while (start < end && css_is_whitespace(*start)) start++;
+                        while (end > start && css_is_whitespace(end[-1])) end--;
+                        namespace_url = pool_dup_n(pool, start, (size_t)(end - start));
+                    }
+                }
+                if (current < token_count &&
+                    tokens[current].type == CSS_TOKEN_RIGHT_PAREN) current++;
+                else namespace_url = NULL;
+            }
+            current = css_skip_whitespace_tokens(tokens, current, token_count);
+            if (!namespace_url || current >= token_count ||
+                tokens[current].type != CSS_TOKEN_SEMICOLON) {
+                while (current < token_count &&
+                       tokens[current].type != CSS_TOKEN_SEMICOLON &&
+                       tokens[current].type != CSS_TOKEN_LEFT_BRACE) current++;
+                if (current < token_count &&
+                    tokens[current].type == CSS_TOKEN_SEMICOLON) current++;
+                *out_rule = NULL;
+                return current - start_pos;
+            }
+            rule->type = CSS_RULE_NAMESPACE;
+            rule->data.namespace_rule.prefix = prefix;
+            rule->data.namespace_rule.namespace_url = namespace_url;
+            *out_rule = rule;
+            return current + 1 - start_pos;
 
         } else if (keyword_name && (strcmp(keyword_name, "import") == 0 ||
                                  strcmp(keyword_name, "charset") == 0)) {
@@ -2793,20 +3313,23 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 if (rule->type == CSS_RULE_IMPORT) {
                     // @import URL extraction: handle url('...'), url(...), '...', "..."
                     const char* import_url = nullptr;
+                    int after_url = value_start;
                     for (int ti = value_start; ti < pos; ti++) {
                         if (tokens[ti].type == CSS_TOKEN_WHITESPACE) continue;
                         if (tokens[ti].type == CSS_TOKEN_STRING) {
                             // @import 'file.css' or @import "file.css"
                             import_url = css_token_value_dup(&tokens[ti], pool);
+                            after_url = ti + 1;
                             break;
                         }
                         if (tokens[ti].type == CSS_TOKEN_URL) {
                             // @import url(file.css) — unquoted URL token
                             import_url = css_token_value_dup(&tokens[ti], pool);
+                            after_url = ti + 1;
                             break;
                         }
                         if (tokens[ti].type == CSS_TOKEN_FUNCTION && tokens[ti].value &&
-                            strcmp(tokens[ti].value, "url(") == 0) {
+                            str_ieq_cstr(tokens[ti].value, "url(")) {
                             // @import url(...) may contain punctuation that is tokenized
                             // as delimiters, e.g. http://host/css?family=Foo+Bar.
                             int arg_start = ti + 1;
@@ -2815,6 +3338,8 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                             }
                             if (arg_start < pos && tokens[arg_start].type == CSS_TOKEN_STRING) {
                                 import_url = css_token_value_dup(&tokens[arg_start], pool);
+                                int close = css_import_function_end(tokens, ti, pos);
+                                after_url = close >= 0 ? close + 1 : pos;
                                 break;
                             }
 
@@ -2846,11 +3371,16 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                                     import_url = url_buf;
                                 }
                             }
+                            int close = css_import_function_end(tokens, ti, pos);
+                            after_url = close >= 0 ? close + 1 : pos;
                             break;
                         }
                         break; // unknown token pattern
                     }
                     rule->data.import_rule.url = import_url;
+                    rule->data.import_rule.invalid = !import_url ||
+                        !css_parse_import_modifiers(tokens, after_url, pos,
+                            rule, pool);
                     if (import_url) {
                         log_debug(" @import URL extracted: '%s'", import_url);
                     }
@@ -3030,7 +3560,20 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
             log_debug(" Parsed generic @-rule: %s", keyword_name);
             return pos - start_pos;
         }
-    }    // Parse selector(s) using enhanced parser (supports compound, descendant, and comma-separated selectors)
+    }
+    // Outside nesting, & has the stylesheet :scope context.
+    if (!nesting_parent_text) {
+        for (int i = pos; i < token_count &&
+             tokens[i].type != CSS_TOKEN_LEFT_BRACE; i++) {
+            if (tokens[i].type == CSS_TOKEN_DELIM &&
+                tokens[i].data.delimiter == '&') {
+                return css_parse_nested_style_rule(tokens + pos,
+                    token_count - pos, pool, ":scope", out_rule, false,
+                    quirks_mode);
+            }
+        }
+    }
+    // Parse selector(s) using enhanced parser (supports compound, descendant, and comma-separated selectors)
     log_debug(" Parsing selectors at position %d", pos);
 
     // Parse selector group (handles single selectors and comma-separated groups)
@@ -3039,6 +3582,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         log_debug(" ERROR: Failed to parse selector group");
         return 0;
     }
+    if (css_selector_group_contains_generic_pseudo(selector_group)) return 0;
 
     log_debug(" Parsed selector group with %zu selector(s)", selector_group->selector_count);
 
@@ -3051,6 +3595,9 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 pos < token_count ? tokens[pos].type : -1, pos);
         return 0;
     }
+    const char* selector_source = pool_dup_n(pool, tokens[start_pos].start,
+        (size_t)(tokens[pos].start - tokens[start_pos].start));
+    if (!selector_source) return 0;
     log_debug(" Found '{', parsing declarations");
     pos++;
 
@@ -3075,9 +3622,31 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         pos = css_skip_whitespace_tokens(tokens, pos, token_count);
         if (pos >= token_count || tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
 
-        // Skip @-rules inside declaration blocks (e.g., @at {} or @at;)
+        // A group rule inside a style rule keeps the style selector as its
+        // context for declarations and relative child selectors.
         if (tokens[pos].type == CSS_TOKEN_AT_KEYWORD) {
-            pos = css_skip_at_rule_tokens(tokens, pos, token_count);
+            if (seen_nested_rule && !css_nesting_flush_declarations(pool,
+                    &nested_rules, &nested_rule_count, &nested_rule_capacity,
+                    &post_nested_decls, &post_nested_count,
+                    &post_nested_capacity, selector_group)) return 0;
+            CssRule* nested = NULL;
+            int consumed = css_parse_rule_from_tokens_with_context(tokens + pos,
+                token_count - pos, pool, &nested, selector_source,
+                selector_group, quirks_mode);
+            if (consumed > 0 && nested &&
+                (nested->type == CSS_RULE_MEDIA ||
+                 nested->type == CSS_RULE_SUPPORTS ||
+                 nested->type == CSS_RULE_LAYER ||
+                 nested->type == CSS_RULE_CONTAINER)) {
+                if (nested_rule_count >= nested_rule_capacity &&
+                    !lam::pool_copy_grow_array(pool, &nested_rules,
+                        &nested_rule_capacity, nested_rule_count,
+                        nested_rule_count + 1, 4, true)) return 0;
+                nested_rules[nested_rule_count++] = nested;
+                seen_nested_rule = true;
+            }
+            pos = consumed > 0 ? pos + consumed
+                               : css_skip_at_rule_tokens(tokens, pos, token_count);
             continue;
         }
 
@@ -3128,126 +3697,33 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         }
 
         if (looks_like_nested_rule) {
-            // Parse nested qualified rule: consume prelude until '{', then consume block
-            int prelude_start = pos;
-            bool has_ampersand = false;
-
-            // Check for leading '&' nesting selector
-            if (cur_type == CSS_TOKEN_DELIM && tokens[pos].data.delimiter == '&') {
-                has_ampersand = true;
-            }
-
-            // Skip prelude tokens until '{' (respecting nested brackets)
-            int nest_paren = 0, nest_bracket = 0;
-            while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
-                if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE && nest_paren == 0 && nest_bracket == 0) break;
-                if (tokens[pos].type == CSS_TOKEN_LEFT_PAREN) nest_paren++;
-                else if (tokens[pos].type == CSS_TOKEN_RIGHT_PAREN && nest_paren > 0) nest_paren--;
-                else if (tokens[pos].type == CSS_TOKEN_LEFT_BRACKET) nest_bracket++;
-                else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACKET && nest_bracket > 0) nest_bracket--;
-                pos++;
-            }
-
-            if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
-                // Consume the block (match braces)
-                int block_start = pos;
-                pos++; // skip '{'
-                int block_depth = 1;
-                while (pos < token_count && block_depth > 0) {
-                    if (tokens[pos].type == CSS_TOKEN_LEFT_BRACE) block_depth++;
-                    else if (tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) block_depth--;
-                    pos++;
-                }
-
-                // Try to parse prelude as a selector group
-                // If prelude starts with '&', skip it for selector parsing
-                int sel_start = prelude_start;
-                if (has_ampersand) {
-                    sel_start++; // skip '&' token
-                    sel_start = css_skip_whitespace_tokens(tokens, sel_start, token_count);
-                }
-
-                int sel_pos = sel_start;
-                CssSelectorGroup* nested_sg = NULL;
-                if (sel_pos < block_start) {
-                    nested_sg = css_parse_selector_group_from_tokens(tokens, &sel_pos, block_start, pool);
-                }
-
-                // Verify entire prelude was consumed (skip trailing whitespace)
-                int after_sel = css_skip_whitespace_tokens(tokens, sel_pos, block_start);
-                if (nested_sg && nested_sg->selector_count > 0 && after_sel >= block_start) {
-                    // Valid nested rule — create it
-                    CssRule* nested = (CssRule*)pool_calloc(pool, sizeof(CssRule));
-                    nested->type = CSS_RULE_STYLE;
-                    nested->pool = pool;
-                    nested->data.style_rule.selector_group = nested_sg;
-                    nested->data.style_rule.selector = nested_sg->selectors[0];
-
-                    // Parse declarations inside the nested block
-                    int inner_pos = block_start + 1; // skip '{'
-                    int inner_end = pos - 1; // before '}'
-                    CssDeclaration** inner_decls = NULL;
-                    int inner_count = 0;
-                    int inner_cap = 4;
-                    inner_decls = (CssDeclaration**)pool_calloc(pool, inner_cap * sizeof(CssDeclaration*));
-                    while (inner_pos < inner_end) {
-                        inner_pos = css_skip_whitespace_tokens(tokens, inner_pos, inner_end);
-                        if (inner_pos >= inner_end) break;
-
-                        // skip a nested-of-nested qualified rule's brace block to avoid
-                        // the declaration parser stalling on its tokens. proper recursive
-                        // nested-rule handling can be added later; for now drop the inner
-                        // block so we keep forward progress.
-                        if (tokens[inner_pos].type == CSS_TOKEN_LEFT_BRACE) {
-                            int depth = 1;
-                            inner_pos++;
-                            while (inner_pos < inner_end && depth > 0) {
-                                if (tokens[inner_pos].type == CSS_TOKEN_LEFT_BRACE) depth++;
-                                else if (tokens[inner_pos].type == CSS_TOKEN_RIGHT_BRACE) depth--;
-                                inner_pos++;
-                            }
-                            continue;
-                        }
-
-                        int before_pos = inner_pos;
-                        CssDeclaration* idecl = css_parse_declaration_from_tokens(tokens, &inner_pos, inner_end, pool);
-                        if (idecl) {
-                            if (inner_count >= inner_cap) {
-                                if (!lam::pool_copy_grow_array(pool, &inner_decls, &inner_cap,
-                                                                inner_count, inner_count + 1, 4, true)) break;
-                            }
-                            inner_decls[inner_count++] = idecl;
-                        }
-                        if (inner_pos < inner_end && tokens[inner_pos].type == CSS_TOKEN_SEMICOLON) inner_pos++;
-                        // guarantee forward progress: if the declaration parser made no
-                        // progress (e.g., stuck on a RIGHT_BRACE inside a nested block),
-                        // skip one token to avoid an infinite loop.
-                        if (inner_pos == before_pos) inner_pos++;
-                    }
-                    nested->data.style_rule.declarations = inner_decls;
-                    nested->data.style_rule.declaration_count = inner_count;
-
-                    // Add to nested_rules array
-                    if (nested_rule_count >= nested_rule_capacity) {
-                        if (!lam::pool_copy_grow_array(pool, &nested_rules, &nested_rule_capacity,
-                                                        nested_rule_count, nested_rule_count + 1, 4, true)) continue;
-                    }
+            if (seen_nested_rule && !css_nesting_flush_declarations(pool,
+                    &nested_rules, &nested_rule_count, &nested_rule_capacity,
+                    &post_nested_decls, &post_nested_count,
+                    &post_nested_capacity, selector_group)) return 0;
+            CssRule* nested = NULL;
+            int consumed = css_parse_nested_style_rule(tokens + pos,
+                token_count - pos, pool, selector_source, &nested, true,
+                quirks_mode);
+            if (consumed > 0) {
+                pos += consumed;
+                if (nested) {
+                    if (nested_rule_count >= nested_rule_capacity &&
+                        !lam::pool_copy_grow_array(pool, &nested_rules,
+                            &nested_rule_capacity, nested_rule_count,
+                            nested_rule_count + 1, 4, true)) return 0;
                     nested_rules[nested_rule_count++] = nested;
                     seen_nested_rule = true;
-                    log_debug(" Parsed nested rule with %d declarations", inner_count);
-                } else {
-                    // Invalid nested rule — discard it (error recovery)
-                    log_debug(" Discarded invalid nested rule (bad selector)");
                 }
             } else {
-                // No '{' found — skip to end of outer block
-                // (pos is already at '}' or past token_count)
+                pos++;
             }
             continue;
         }
 
         // Parse declaration
-        CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, pool);
+        CssDeclaration* decl = css_parse_declaration_from_tokens_mode(
+            tokens, &pos, token_count, pool, quirks_mode);
         log_debug(" After parsing: decl=%p", (void*)decl);
         if (decl) {
             log_debug(" Parsed declaration: property_code=%d for position %d",
@@ -3279,19 +3755,9 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     }
 
     // If there are post-nested declarations, create a CSSNestedDeclarations rule
-    if (post_nested_count > 0) {
-        CssRule* nd_rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
-        nd_rule->type = CSS_RULE_NESTED_DECLARATIONS;
-        nd_rule->pool = pool;
-        nd_rule->data.style_rule.declarations = post_nested_decls;
-        nd_rule->data.style_rule.declaration_count = post_nested_count;
-        // Add to nested_rules
-        if (nested_rule_count >= nested_rule_capacity) {
-            if (!lam::pool_copy_grow_array(pool, &nested_rules, &nested_rule_capacity,
-                                            nested_rule_count, nested_rule_count + 1, 4, true)) return 0;
-        }
-        nested_rules[nested_rule_count++] = nd_rule;
-    }
+    if (!css_nesting_flush_declarations(pool, &nested_rules, &nested_rule_count,
+            &nested_rule_capacity, &post_nested_decls, &post_nested_count,
+            &post_nested_capacity, selector_group)) return 0;
 
     // Expect closing brace (EOF implicitly closes the rule per CSS spec)
     if (pos < token_count && tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) {
@@ -3305,11 +3771,10 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     }
 
     // Create the CSS rule
-    CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+    CssRule* rule = css_new_author_rule(pool);
     if (!rule) return 0;
 
     rule->type = CSS_RULE_STYLE;
-    rule->pool = pool;
     rule->data.style_rule.selector_group = selector_group;
     // For backward compatibility, store the first selector in the single selector field
     rule->data.style_rule.selector = (selector_group->selector_count > 0) ? selector_group->selectors[0] : NULL;
@@ -3320,7 +3785,13 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
     // Set parent pointer on nested rules
     for (int i = 0; i < nested_rule_count; i++) {
-        if (nested_rules[i]) nested_rules[i]->parent = rule;
+        if (!nested_rules[i]) continue;
+        nested_rules[i]->parent = rule;
+        if (nested_rules[i]->type == CSS_RULE_NESTED_DECLARATIONS) {
+            // these declarations retain each matching branch of the parent.
+            nested_rules[i]->data.style_rule.selector_group = selector_group;
+            nested_rules[i]->data.style_rule.selector = rule->data.style_rule.selector;
+        }
     }
 
     log_debug(" Created rule with %d declarations:", decl_count);
@@ -3332,6 +3803,79 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
     *out_rule = rule;
     return pos - start_pos; // Return number of tokens consumed
+}
+
+static int css_parse_nested_style_rule(const CssToken* tokens, int token_count,
+                                       Pool* pool, const char* parent_text,
+                                       CssRule** out_rule, bool implicit_parent,
+                                       bool quirks_mode) {
+    if (!tokens || token_count <= 0 || !pool || !parent_text || !out_rule) return 0;
+    *out_rule = NULL;
+    int block_start = 0;
+    int paren_depth = 0, bracket_depth = 0;
+    while (block_start < token_count) {
+        CssTokenType type = tokens[block_start].type;
+        if (type == CSS_TOKEN_LEFT_BRACE && !paren_depth && !bracket_depth) break;
+        if (type == CSS_TOKEN_LEFT_PAREN || type == CSS_TOKEN_FUNCTION) paren_depth++;
+        else if (type == CSS_TOKEN_RIGHT_PAREN && paren_depth > 0) paren_depth--;
+        else if (type == CSS_TOKEN_LEFT_BRACKET) bracket_depth++;
+        else if (type == CSS_TOKEN_RIGHT_BRACKET && bracket_depth > 0) bracket_depth--;
+        if ((type == CSS_TOKEN_SEMICOLON || type == CSS_TOKEN_RIGHT_BRACE) &&
+            !paren_depth && !bracket_depth) return 0;
+        block_start++;
+    }
+    if (block_start >= token_count) return 0;
+    int end = block_start + 1;
+    int block_depth = 1;
+    while (end < token_count && block_depth > 0) {
+        if (tokens[end].type == CSS_TOKEN_LEFT_BRACE) block_depth++;
+        else if (tokens[end].type == CSS_TOKEN_RIGHT_BRACE) block_depth--;
+        end++;
+    }
+
+    char* authored = NULL;
+    char* expanded = css_expand_nested_selector(tokens, 0, block_start,
+                                                 parent_text, pool,
+                                                 implicit_parent, &authored);
+    if (!expanded) return end;
+    StrBuf* source = strbuf_new();
+    if (!source) return end;
+    const char* block_end = tokens[end - 1].start + tokens[end - 1].length;
+    strbuf_append_str(source, expanded);
+    strbuf_append_str_n(source, tokens[block_start].start,
+                        (size_t)(block_end - tokens[block_start].start));
+    // selector and value spans can be retained by the parsed rule.
+    char* retained_source = source->str
+        ? pool_dup_n(pool, source->str, source->length) : NULL;
+    if (retained_source) {
+        size_t nested_token_count = 0;
+        CssToken* nested_tokens = css_tokenize(retained_source, source->length,
+                                                pool, &nested_token_count);
+        CssRule* nested = NULL;
+        if (nested_tokens && nested_token_count > 0 &&
+            css_parse_rule_from_tokens_with_context(nested_tokens,
+                (int)nested_token_count, pool, &nested, NULL, NULL,
+                quirks_mode) > 0 &&
+            nested && nested->type == CSS_RULE_STYLE) {
+            nested->data.style_rule.authored_selector_text = authored;
+            *out_rule = nested;
+        }
+    }
+    strbuf_free(source);
+    return end;
+}
+
+int css_parse_rule_from_tokens_internal_mode(const CssToken* tokens,
+    int token_count, Pool* pool, CssRule** out_rule, bool quirks_mode) {
+    return css_parse_rule_from_tokens_with_context(tokens, token_count, pool,
+                                                   out_rule, NULL, NULL,
+                                                   quirks_mode);
+}
+
+int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
+                                        Pool* pool, CssRule** out_rule) {
+    return css_parse_rule_from_tokens_internal_mode(tokens, token_count,
+                                                    pool, out_rule, false);
 }
 
 // Legacy wrapper that returns CssRule* (for compatibility)
@@ -3377,6 +3921,59 @@ CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool) {
     return rule;
 }
 
+bool css_resolve_selector_namespaces(CssSelector* selector,
+                                     CssNamespaceLookupFn lookup, void* context) {
+    if (!selector) return true;
+    for (size_t c = 0; c < selector->compound_selector_count; c++) {
+        CssCompoundSelector* compound = selector->compound_selectors[c];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            CssSimpleSelector* simple = compound->simple_selectors[s];
+            if (!simple) continue;
+            if (simple->type == CSS_SELECTOR_TYPE_ELEMENT ||
+                simple->type == CSS_SELECTOR_TYPE_UNIVERSAL) {
+                const char* prefix = simple->namespace_prefix;
+                if (!prefix) {
+                    simple->namespace_url = lookup ? lookup(context, NULL) : NULL;
+                } else if (strcmp(prefix, "*") == 0) {
+                    simple->namespace_url = NULL;
+                } else if (!*prefix) {
+                    simple->namespace_url = "";
+                } else {
+                    simple->namespace_url = lookup ? lookup(context, prefix) : NULL;
+                    if (!simple->namespace_url) return false;
+                }
+            } else if (simple->type >= CSS_SELECTOR_ATTR_EXACT &&
+                       simple->type <= CSS_SELECTOR_ATTR_CASE_SENSITIVE) {
+                const char* prefix = simple->namespace_prefix;
+                if (!prefix || !*prefix) {
+                    simple->namespace_url = "";
+                } else if (strcmp(prefix, "*") == 0) {
+                    simple->namespace_url = NULL;
+                } else {
+                    simple->namespace_url = lookup ? lookup(context, prefix) : NULL;
+                    if (!simple->namespace_url) return false;
+                }
+            }
+            // :is() and :where() discard invalid arguments; other functional
+            // selectors invalidate the enclosing selector.
+            bool forgiving = simple->type == CSS_SELECTOR_PSEUDO_IS ||
+                             simple->type == CSS_SELECTOR_PSEUDO_WHERE;
+            size_t write = 0;
+            for (size_t i = 0; i < simple->function_selector_count; i++) {
+                CssSelector* argument = simple->function_selectors[i];
+                if (css_resolve_selector_namespaces(argument, lookup, context)) {
+                    simple->function_selectors[write++] = argument;
+                } else if (!forgiving) {
+                    return false;
+                }
+            }
+            simple->function_selector_count = write;
+        }
+    }
+    return true;
+}
+
 CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool) {
     if (!text || length == 0 || !pool) return NULL;
 
@@ -3384,14 +3981,64 @@ CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length,
     CssToken* tokens = css_tokenize(text, length, pool, &token_count);
     if (!tokens || token_count == 0) return NULL;
 
+    bool has_nesting_selector = false;
+    int selector_end = (int)token_count;
+    if (tokens[selector_end - 1].type == CSS_TOKEN_EOF) selector_end--;
+    for (int i = 0; i < selector_end; i++) {
+        if (tokens[i].type == CSS_TOKEN_DELIM &&
+            tokens[i].data.delimiter == '&') {
+            has_nesting_selector = true;
+            break;
+        }
+    }
+    if (has_nesting_selector) {
+        // & outside a nested rule has the caller's :scope anchor.
+        char* expanded = css_expand_nested_selector(tokens, 0, selector_end,
+                                                     ":scope", pool, false, NULL);
+        css_token_array_release(pool, tokens, token_count);
+        if (!expanded) return NULL;
+        tokens = css_tokenize(expanded, strlen(expanded), pool, &token_count);
+        if (!tokens || token_count == 0) return NULL;
+    }
+
     int pos = 0;
     CssSelectorGroup* group = css_parse_selector_group_from_tokens(
         tokens, &pos, (int)token_count, pool);
-    if (!group || group->selector_count == 0 ||
-        !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count)) {
+    bool valid_namespace = true;
+    if (group) {
+        for (size_t i = 0; i < group->selector_count; i++) {
+            if (!css_resolve_selector_namespaces(group->selectors[i], NULL, NULL)) {
+                valid_namespace = false;
+                break;
+            }
+        }
+    }
+    if (!group || group->selector_count == 0 || !valid_namespace ||
+        !css_selector_group_parse_consumed_all(tokens, pos, (int)token_count) ||
+        css_selector_group_contains_generic_pseudo(group)) {
         group = NULL;
     }
     css_token_array_release(pool, tokens, token_count);
+    return group;
+}
+
+CssSelectorGroup* css_parse_nested_selector_group_text(const char* text,
+    size_t length, const char* parent_selector_text, Pool* pool,
+    char** authored_text) {
+    if (!text || !length || !parent_selector_text || !pool) return NULL;
+    size_t token_count = 0;
+    CssToken* tokens = css_tokenize(text, length, pool, &token_count);
+    if (!tokens || !token_count) return NULL;
+    int selector_end = (int)token_count;
+    if (tokens[selector_end - 1].type == CSS_TOKEN_EOF) selector_end--;
+    char* authored = NULL;
+    char* expanded = css_expand_nested_selector(tokens, 0, selector_end,
+        parent_selector_text, pool, true, &authored);
+    css_token_array_release(pool, tokens, token_count);
+    if (!expanded) return NULL;
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        expanded, strlen(expanded), pool);
+    if (group && authored_text) *authored_text = authored;
     return group;
 }
 
@@ -3403,8 +4050,9 @@ static bool css_selector_contains_generic_pseudo(const CssSelector* selector) {
         for (size_t j = 0; j < compound->simple_selector_count; j++) {
             CssSimpleSelector* simple = compound->simple_selectors[j];
             if (!simple) continue;
-            if (simple->type == CSS_SELECTOR_PSEUDO_GENERIC ||
-                simple->type == CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) {
+            if ((simple->type == CSS_SELECTOR_PSEUDO_GENERIC ||
+                 simple->type == CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) &&
+                !css_selector_generic_pseudo_is_known(simple)) {
                 return true;
             }
             for (size_t k = 0; k < simple->function_selector_count; k++) {
@@ -3413,6 +4061,22 @@ static bool css_selector_contains_generic_pseudo(const CssSelector* selector) {
                 }
             }
         }
+    }
+    return false;
+}
+
+bool css_selector_generic_pseudo_is_known(const CssSimpleSelector* selector) {
+    if (!selector || !selector->value) return false;
+    if (selector->type == CSS_SELECTOR_PSEUDO_GENERIC) {
+        return strcmp(selector->value, "host") == 0;
+    }
+    if (selector->type != CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) return false;
+    static const char* names[] = {
+        "picker", "picker-icon", "checkmark", "details-content",
+        "part", "cue", "cue-region"
+    };
+    for (const char* name : names) {
+        if (strcmp(selector->value, name) == 0) return true;
     }
     return false;
 }
@@ -3449,7 +4113,9 @@ bool css_declaration_is_supported(const CssDeclaration* declaration) {
         return true;
     }
     return declaration->property_code > 0 &&
-        css_property_exists(declaration->property_code);
+        css_property_exists(declaration->property_code) &&
+        css_property_validate_value(declaration->property_code,
+                                    declaration->value);
 }
 
 CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,

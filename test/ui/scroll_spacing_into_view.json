@@ -1,0 +1,22 @@
+{
+  "name": "Scroll spacing adjusts programmatic start alignment",
+  "html": "test/ui/scroll_spacing_into_view.html",
+  "viewport": {"width": 420, "height": 500},
+  "events": [
+    {"type": "click", "target": {"selector": "#go-physical"}},
+    {"type": "assert_state_store", "target": {"selector": "#physical"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 145, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#go-logical"}},
+    {"type": "assert_state_store", "target": {"selector": "#logical"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 150, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#go-end"}},
+    {"type": "assert_state_store", "target": {"selector": "#end"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 85, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#go-math"}},
+    {"type": "assert_state_store", "target": {"selector": "#math"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 162.5, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#go-em"}},
+    {"type": "assert_state_store", "target": {"selector": "#em"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 152.5, "tolerance": 1}
+  ]
+}

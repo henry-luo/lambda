@@ -1,0 +1,16 @@
+<!doctype html>
+<style>
+html, body { margin: 0; }
+#pane { width: 100px; height: 100px; overflow: auto;
+        scroll-snap-type: y mandatory;
+        scroll-padding-top: calc(10px + 10%); }
+.item { height: 100px; scroll-snap-align: start; }
+#first { background: red; }
+#second { background: green; }
+#third { background: blue; }
+</style>
+<div id="pane">
+  <div id="first" class="item"></div>
+  <div id="second" class="item"></div>
+  <div id="third" class="item"></div>
+</div>

@@ -1,0 +1,25 @@
+{
+  "name": "Mandatory scroll snapping uses snapport and target margin",
+  "html": "test/ui/scroll_snap_wheel.html",
+  "viewport": {"width": 300, "height": 360},
+  "events": [
+    {"type": "scroll", "target": {"selector": "#pane"}, "dx": 0, "dy": -1.2},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 85, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#go"}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 85, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#set"}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 190, "tolerance": 1},
+    {"type": "scroll", "target": {"selector": "#near"}, "dx": 0, "dy": -1.2},
+    {"type": "assert_state_store", "target": {"selector": "#near"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 60, "tolerance": 1},
+    {"type": "scroll", "target": {"selector": "#near"}, "dx": 0, "dy": -0.5},
+    {"type": "assert_state_store", "target": {"selector": "#near"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 100, "tolerance": 1},
+    {"type": "scroll", "target": {"selector": "#horizontal"}, "dx": -1.2, "dy": 0},
+    {"type": "assert_state_store", "target": {"selector": "#horizontal"},
+     "view_state": true, "kind": "scroll", "view_scroll_x": 100, "tolerance": 1}
+  ]
+}

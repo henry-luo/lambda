@@ -95,6 +95,11 @@ bool layout_get_text_initial_letter_info(const DomNode* text_node,
 InitialLetterBoxInsets layout_initial_letter_box_insets(ViewText* text);
 bool layout_overflow_establishes_scroll_container(CssEnum overflow);
 bool layout_block_establishes_scroll_container(ViewBlock* block);
+float layout_scroll_document_coord(DomElement* element, bool horizontal);
+float layout_scrollport_start(DomElement* element, bool horizontal);
+float layout_scroll_spacing_used(LayoutContext* lycon, DomElement* owner,
+                                 const ScrollSpacingValue& spacing,
+                                 float scrollport_size);
 bool layout_block_inline_axis_is_vertical(ViewBlock* block);
 bool layout_details_needs_default_summary(ViewBlock* block);
 float layout_list_item_marker_line_height(LayoutContext* lycon);
@@ -798,18 +803,49 @@ inline BoxEdges layout_boundary_border_edges(const BoundaryProp* bound) {
 }
 
 // The block-local rect overflow clipping keeps: ScrollProp::clip is stored in
-// border-box coordinates and inset once here to the CSS padding edge. Paint,
-// the selection overlay and hit-testing share it so they clip alike. False
+// border-box coordinates and adjusted here to the authored overflow clip edge.
+// Paint, the selection overlay and hit-testing share it so they clip alike. False
 // when the block does not clip its content.
 inline bool layout_block_overflow_clip(const ViewBlock* block, Bound* out) {
     if (!block || !block->scroller || !block->scroll()->has_clip) return false;
     BoxEdges border = layout_boundary_border_edges(
         block->bound ? block->boundary() : nullptr);
+    BoxEdges padding = layout_boundary_padding_edges(
+        block->bound ? block->boundary() : nullptr);
     Bound clip = block->scroll()->clip;
-    out->left = clip.left + border.left;
-    out->top = clip.top + border.top;
-    out->right = clip.right - border.right;
-    out->bottom = clip.bottom - border.bottom;
+    float margin = block->scroll()->overflow_clip_margin;
+    CssEnum box = block->scroll()->overflow_clip_box;
+    float left = box == CSS_VALUE_BORDER_BOX ? 0.0f : border.left;
+    float top = box == CSS_VALUE_BORDER_BOX ? 0.0f : border.top;
+    float right = box == CSS_VALUE_BORDER_BOX ? 0.0f : border.right;
+    float bottom = box == CSS_VALUE_BORDER_BOX ? 0.0f : border.bottom;
+    if (box == CSS_VALUE_CONTENT_BOX) {
+        left += padding.left; top += padding.top;
+        right += padding.right; bottom += padding.bottom;
+    }
+    out->left = clip.left + left - margin;
+    out->top = clip.top + top - margin;
+    out->right = clip.right - right + margin;
+    out->bottom = clip.bottom - bottom + margin;
+    const ScrollProp* scroll = block->scroll();
+    if (layout_overflow_establishes_scroll_container(scroll->overflow_x) ||
+        layout_overflow_establishes_scroll_container(scroll->overflow_y)) {
+        // Scroll containers cannot paint beyond the padding edge; border-box
+        // also ignores its authored offset under CSS Overflow 3 §3.2.
+        if (box == CSS_VALUE_BORDER_BOX) {
+            out->left = clip.left + border.left;
+            out->top = clip.top + border.top;
+            out->right = clip.right - border.right;
+            out->bottom = clip.bottom - border.bottom;
+        } else {
+            out->left = max(out->left, clip.left + border.left);
+            out->top = max(out->top, clip.top + border.top);
+            out->right = min(out->right, clip.right - border.right);
+            out->bottom = min(out->bottom, clip.bottom - border.bottom);
+        }
+    }
+    out->right = max(out->right, out->left);
+    out->bottom = max(out->bottom, out->top);
     return true;
 }
 // tier-3: layout-transient, valid within pass
@@ -1006,11 +1042,11 @@ static inline CssValue* css_pair_side_value(const CssValue* value, bool end_side
 static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate,
                                                   CssDeclaration* decl, CssValue* value) {
     if (!candidate || !decl || !value) return;
-    int64_t priority = get_cascade_priority(decl);
-    if (!candidate->decl || priority >= candidate->priority) {
+    if (!candidate->decl ||
+        css_declaration_cascade_compare(decl, candidate->decl) >= 0) {
         candidate->decl = decl;
         candidate->value = value;
-        candidate->priority = priority;
+        candidate->priority = get_cascade_priority(decl);
     }
 }
 // A box property's physical and logical declarations all compete for the same
@@ -1504,6 +1540,7 @@ CssEnum layout_inherited_text_transform(DomNode* node);
 bool layout_text_combine_upright_applies(DomNode* text_node);
 float layout_inline_end_edge(ViewSpan* span);
 bool text_codepoint_has_zero_advance(uint32_t codepoint);
+bool text_emphasis_marks_codepoint(uint32_t codepoint);
 float text_unicode_space_width_em(uint32_t codepoint);
 // tier-3: layout-transient, valid within pass
 struct TableMetadata {
@@ -3127,11 +3164,11 @@ typedef enum GridTrackSizeType {
 // tier-3: layout-transient, valid within pass
 typedef struct GridTrackSize {
     GridTrackSizeType type;
-    int value;
+    float value;
     bool is_percentage;
     struct GridTrackSize* min_size;
     struct GridTrackSize* max_size;
-    int fit_content_limit;
+    float fit_content_limit;
     int repeat_count;
     struct GridTrackSize** repeat_tracks;
     int repeat_track_count;
@@ -3218,7 +3255,7 @@ struct GridLayoutScope {
 
 GridTrackList* create_grid_track_list(int initial_capacity);
 void destroy_grid_track_list(GridTrackList* track_list);
-GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
+GridTrackSize* create_grid_track_size(GridTrackSizeType type, float value);
 GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
 void destroy_grid_track_size(GridTrackSize* track_size);
 char* grid_scratch_strdup(ScratchArena* scratch, const char* source);
@@ -3264,6 +3301,7 @@ typedef struct LayoutContext {
     UiContext* ui_context;
     // Additional fields for test compatibility
     float width, height;  // context dimensions
+    float scroll_percentage_base;  // set only while resolving deferred scroll-padding math
     float dpi;           // dots per inch
     Pool* pool;  // memory pool for view allocation
     // Available space constraints for current layout
@@ -3284,6 +3322,10 @@ typedef struct LayoutContext {
     CounterContext* counter_context;
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
+    // A style-pass-local ordering of winning declarations, sorted by the
+    // cascade comparator so side-specific props can retain an exact rank.
+    CssDeclaration** cascade_priority_decls;
+    int cascade_priority_count;
     // pass-lifetime data that is not stack-shaped (counter state, generated
     // content); owned by the view tree and reset at layout_cleanup
     Arena* pass_arena;
@@ -3838,6 +3880,8 @@ CssEnum map_font_weight(const CssValue* value);
 int16_t map_font_weight_numeric(const CssValue* value);
 FontProp* layout_resolve_pseudo_font(LayoutContext* lycon, StyleTree* style,
                                      FontProp* base_font);
+void layout_apply_pseudo_font(LayoutContext* lycon, StyleTree* style,
+                              FontProp* base_font, FontProp* target);
 FontProp* layout_resolve_first_line_font(LayoutContext* lycon,
                                           DomElement* element,
                                           FontProp* base_font);
@@ -4086,29 +4130,47 @@ static inline LayoutLogicalProperty layout_logical_property(CssPropertyCode prop
     switch (property) {
         case CSS_PROPERTY_MARGIN_INLINE:
         case CSS_PROPERTY_PADDING_INLINE:
+        case CSS_PROPERTY_SCROLL_MARGIN_INLINE:
+        case CSS_PROPERTY_SCROLL_PADDING_INLINE:
         case CSS_PROPERTY_INSET_INLINE:
         case CSS_PROPERTY_BORDER_INLINE:
+        case CSS_PROPERTY_BORDER_INLINE_WIDTH:
+        case CSS_PROPERTY_BORDER_INLINE_STYLE:
+        case CSS_PROPERTY_BORDER_INLINE_COLOR:
             result.valid = true;
             result.pair = true;
             break;
         case CSS_PROPERTY_MARGIN_INLINE_START:
         case CSS_PROPERTY_PADDING_INLINE_START:
+        case CSS_PROPERTY_SCROLL_MARGIN_INLINE_START:
+        case CSS_PROPERTY_SCROLL_PADDING_INLINE_START:
         case CSS_PROPERTY_INSET_INLINE_START:
         case CSS_PROPERTY_BORDER_INLINE_START:
+        case CSS_PROPERTY_BORDER_INLINE_START_WIDTH:
+        case CSS_PROPERTY_BORDER_INLINE_START_STYLE:
+        case CSS_PROPERTY_BORDER_INLINE_START_COLOR:
             result.valid = true;
             break;
         case CSS_PROPERTY_MARGIN_INLINE_END:
         case CSS_PROPERTY_PADDING_INLINE_END:
+        case CSS_PROPERTY_SCROLL_MARGIN_INLINE_END:
+        case CSS_PROPERTY_SCROLL_PADDING_INLINE_END:
         case CSS_PROPERTY_INSET_INLINE_END:
         case CSS_PROPERTY_BORDER_INLINE_END:
+        case CSS_PROPERTY_BORDER_INLINE_END_WIDTH:
+        case CSS_PROPERTY_BORDER_INLINE_END_STYLE:
+        case CSS_PROPERTY_BORDER_INLINE_END_COLOR:
             result.valid = true;
             result.start = false;
             break;
         case CSS_PROPERTY_MARGIN_BLOCK:
         case CSS_PROPERTY_PADDING_BLOCK:
+        case CSS_PROPERTY_SCROLL_MARGIN_BLOCK:
+        case CSS_PROPERTY_SCROLL_PADDING_BLOCK:
         case CSS_PROPERTY_INSET_BLOCK:
         case CSS_PROPERTY_BORDER_BLOCK:
         case CSS_PROPERTY_BORDER_BLOCK_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_COLOR:
             result.valid = true;
             result.block_axis = true;
@@ -4116,18 +4178,24 @@ static inline LayoutLogicalProperty layout_logical_property(CssPropertyCode prop
             break;
         case CSS_PROPERTY_MARGIN_BLOCK_START:
         case CSS_PROPERTY_PADDING_BLOCK_START:
+        case CSS_PROPERTY_SCROLL_MARGIN_BLOCK_START:
+        case CSS_PROPERTY_SCROLL_PADDING_BLOCK_START:
         case CSS_PROPERTY_INSET_BLOCK_START:
         case CSS_PROPERTY_BORDER_BLOCK_START:
         case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_START_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
             result.valid = true;
             result.block_axis = true;
             break;
         case CSS_PROPERTY_MARGIN_BLOCK_END:
         case CSS_PROPERTY_PADDING_BLOCK_END:
+        case CSS_PROPERTY_SCROLL_MARGIN_BLOCK_END:
+        case CSS_PROPERTY_SCROLL_PADDING_BLOCK_END:
         case CSS_PROPERTY_INSET_BLOCK_END:
         case CSS_PROPERTY_BORDER_BLOCK_END:
         case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_END_STYLE:
         case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
             result.valid = true;
             result.block_axis = true;
@@ -4586,7 +4654,96 @@ CssEnum get_text_transform_from_node(DomNode* node);
  * Characters with ID class allow line breaks before and after them.
  * Used for CJK inter-character justification and line-breaking.
  */
-bool has_id_line_break_class(uint32_t cp);
+static inline bool has_id_line_break_class(uint32_t cp) {
+    if (cp >= 0x3400 && cp <= 0x9FFF) return true;   // Extension A + main block
+    if (cp >= 0xF900 && cp <= 0xFAFF) return true;   // CJK Compatibility Ideographs
+    if (cp >= 0x20000 && cp <= 0x2CEAF) return true;  // Extensions B/C/D/E
+    if (cp >= 0x2CEB0 && cp <= 0x2EBE0) return true;  // Extension F
+    if (cp >= 0x2EBF0 && cp <= 0x2F7FF) return true;  // Extension I + nearby
+    if (cp >= 0x2F800 && cp <= 0x2FA1F) return true;  // CJK Compat Ideographs Supplement
+    if (cp >= 0x30000 && cp <= 0x3FFFD) return true;  // Extensions G/H + Plane 3
+
+    if (cp >= 0x3040 && cp <= 0x30FF) return true;   // Hiragana + Katakana
+    if (cp >= 0x31F0 && cp <= 0x31FF) return true;   // Katakana Phonetic Extensions
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return true;   // Hangul Syllables
+    if (cp >= 0xFF65 && cp <= 0xFF9F) return true;   // Halfwidth Katakana
+    if (cp >= 0x1B000 && cp <= 0x1B2FF) return true;  // Kana Supplement + Extended-A + B
+
+    if (cp >= 0x2E80 && cp <= 0x2FFF) return true;   // CJK Radicals + Kangxi + IDC
+    if (cp >= 0x3003 && cp <= 0x3007) return true;   // Ditto mark, JIS, Closing, Number Zero
+    if (cp >= 0x3012 && cp <= 0x3013) return true;   // Postal Mark, Geta Mark
+    if (cp >= 0x3020 && cp <= 0x303F) return true;   // Postal Mark Face through IDHFS
+    if (cp >= 0x3200 && cp <= 0x33FF) return true;   // Enclosed CJK + CJK Compatibility
+    if (cp >= 0x3105 && cp <= 0x312F) return true;   // Bopomofo
+    if (cp >= 0x3131 && cp <= 0x318E) return true;   // Hangul Compatibility Jamo
+    if (cp >= 0x3190 && cp <= 0x31EF) return true;   // Kanbun + Bopomofo Ext + CJK Strokes
+
+    if (cp >= 0xA000 && cp <= 0xA4CF) return true;   // Yi Syllables + Yi Radicals
+
+    if (cp >= 0xFE30 && cp <= 0xFE6F) return true;   // CJK Compatibility Forms + Small Forms
+    if (cp >= 0xFF01 && cp <= 0xFF60) return true;   // Fullwidth ASCII variants
+    if (cp >= 0xFFA0 && cp <= 0xFFDC) return true;   // Halfwidth Hangul
+
+    if (cp >= 0x17000 && cp <= 0x18DF2) return true;  // Tangut Ideographs + Components
+
+    if (cp >= 0x1B170 && cp <= 0x1B2FB) return true;  // Nushu Characters
+
+    if (cp >= 0x1F000 && cp <= 0x1FAFF) return true;  // Mahjong..Symbols Extended-A
+    if (cp >= 0x1FC00 && cp <= 0x1FFFD) return true;  // Reserved (default ID)
+
+    if (cp == 0x231A || cp == 0x231B) return true;   // Watch, Hourglass
+    if (cp >= 0x23E9 && cp <= 0x23F3) return true;   // Media controls, timers
+    if (cp >= 0x23F8 && cp <= 0x23FA) return true;   // Pause, stop, record
+    if (cp == 0x2614 || cp == 0x2615) return true;   // Umbrella, Hot Beverage
+    if (cp == 0x2648) return true;                     // Aries (start of zodiac)
+    if (cp >= 0x2648 && cp <= 0x2653) return true;   // Zodiac symbols
+    if (cp == 0x267F) return true;                     // Wheelchair
+    if (cp >= 0x2693 && cp <= 0x2694) return true;   // Anchor, Swords
+    if (cp == 0x26A1) return true;                     // High Voltage
+    if (cp >= 0x26AA && cp <= 0x26AB) return true;   // Medium circles
+    if (cp >= 0x26BD && cp <= 0x26C8) return true;   // Soccer..Thunder Cloud
+    if (cp >= 0x26CE && cp <= 0x26D4) return true;   // Ophiuchus..No Entry
+    if (cp >= 0x26D5 && cp <= 0x26EA) return true;   // Various symbols..Church
+    if (cp >= 0x26F0 && cp <= 0x26F5) return true;   // Mountain..Sailboat
+    if (cp >= 0x26F7 && cp <= 0x26FA) return true;   // Skier..Tent
+    if (cp == 0x26FD) return true;                     // Fuel Pump
+    if (cp == 0x2702) return true;                     // Scissors
+    if (cp == 0x2705) return true;                     // Check Mark
+    if (cp >= 0x2708 && cp <= 0x270D) return true;   // Airplane..Writing Hand
+    if (cp == 0x270F) return true;                     // Pencil
+    if (cp == 0x2712) return true;                     // Black Nib
+    if (cp == 0x2714) return true;                     // Heavy Check Mark
+    if (cp == 0x2716) return true;                     // Heavy Multiplication X
+    if (cp == 0x271D) return true;                     // Latin Cross
+    if (cp == 0x2721) return true;                     // Star of David
+    if (cp == 0x2728) return true;                     // Sparkles
+    if (cp >= 0x2733 && cp <= 0x2734) return true;   // Asterisk, Star
+    if (cp == 0x2744) return true;                     // Snowflake
+    if (cp == 0x2747) return true;                     // Sparkle
+    if (cp == 0x274C) return true;                     // Cross Mark
+    if (cp == 0x274E) return true;                     // Cross Mark squared
+    if (cp >= 0x2753 && cp <= 0x2755) return true;   // Question marks, Exclamation
+    if (cp == 0x2757) return true;                     // Heavy Exclamation
+    if (cp >= 0x2763 && cp <= 0x2764) return true;   // Heart Exclamation, Heavy Heart
+    if (cp >= 0x2795 && cp <= 0x2797) return true;   // Plus, Minus, Division
+    if (cp == 0x27A1) return true;                     // Rightwards Arrow
+    if (cp == 0x27B0) return true;                     // Curly Loop
+    if (cp == 0x27BF) return true;                     // Double Curly Loop
+    if (cp >= 0x2934 && cp <= 0x2935) return true;   // Arrow up-right, down-right
+    if (cp >= 0x2B05 && cp <= 0x2B07) return true;   // Leftwards/Upwards/Downwards Arrow
+    if (cp >= 0x2B1B && cp <= 0x2B1C) return true;   // Black/White Large Square
+    if (cp == 0x2B50) return true;                     // White Medium Star
+    if (cp == 0x2B55) return true;                     // Heavy Large Circle
+    if (cp == 0x3297) return true;                     // Circled Ideograph Congratulation
+    if (cp == 0x3299) return true;                     // Circled Ideograph Secret
+
+    return false;
+}
+
+static inline bool text_justify_cjk_gap(uint32_t previous, uint32_t current) {
+    return has_id_line_break_class(previous) &&
+           has_id_line_break_class(current);
+}
 
 /**
  * Count justification opportunities in a UTF-8 text segment.
@@ -4597,6 +4754,7 @@ bool has_id_line_break_class(uint32_t cp);
  * @return number of justification opportunities (spaces + CJK inter-char gaps)
  */
 int count_justify_opportunities(const char* str, int len);
+CssEnum text_justify_computed_value(DomNode* node);
 int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
                                          bool trim_trailing_space,
                                          bool* out_suppressed = nullptr);

@@ -1,0 +1,22 @@
+<!doctype html>
+<style>
+  html { scroll-behavior: smooth; }
+  body { margin: 0; }
+  #jump, #sample { position: fixed; left: 0; }
+  #jump { top: 0; }
+  #sample { top: 28px; }
+  #before { height: 500px; }
+  #target { height: 100px; }
+  #after { height: 500px; }
+</style>
+<a id="jump" href="#target">Jump to target</a><span id="sample"></span>
+<div id="before"></div><div id="target"></div><div id="after"></div>
+<script>
+  document.getElementById('jump').addEventListener('click', () => {
+    setTimeout(() => {
+      const position = document.documentElement.scrollTop;
+      document.getElementById('sample').textContent =
+        position > 0 && position < 500 ? 'in-flight' : 'outside';
+    }, 150);
+  });
+</script>

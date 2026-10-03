@@ -25,6 +25,7 @@ static BlockProp make_block_prop_default() {
     value.orphans = 2;
     value.widows = 2;
     value.tab_size = 8;
+    value.tab_size_length = -1.0f;
     value.given_min_width = value.given_max_width = -1.0f;
     value.given_min_height = value.given_max_height = -1.0f;
     value.given_min_width_type = value.given_min_height_type = CSS_VALUE_AUTO;
@@ -59,12 +60,17 @@ static FontProp make_font_prop_default() {
     value.font_weight_numeric = 400;
     value.font_variant = CSS_VALUE_NORMAL;
     value.font_size_from_medium = true;
+    value.text_emphasis_color_current = true;
+    value.text_deco_skip_ink = CSS_VALUE_AUTO;
+    value.text_underline_position = CSS_VALUE_AUTO;
+    value.text_underline_side = CSS_VALUE__UNDEF;
     return value;
 }
 
 static InlineProp make_inline_prop_default() {
     InlineProp value = {};
     value.cursor = CSS_VALUE_AUTO;
+    value.image_rendering = CSS_VALUE_AUTO;
     value.caret_shape = CSS_VALUE_AUTO;
     value.vertical_align = CSS_VALUE_BASELINE;
     value.ruby_position = CSS_VALUE_ALTERNATE;
@@ -77,6 +83,10 @@ static InlineProp make_inline_prop_default() {
 static ScrollProp make_scroll_prop_default() {
     ScrollProp value = {};
     value.overflow_x = value.overflow_y = CSS_VALUE_VISIBLE;
+    value.overscroll_x = value.overscroll_y = CSS_VALUE_AUTO;
+    value.scroll_behavior = CSS_VALUE_AUTO;
+    value.overflow_clip_box = CSS_VALUE_PADDING_BOX;
+    value.snap_align_block = value.snap_align_inline = CSS_VALUE_NONE;
     return value;
 }
 
@@ -116,6 +126,7 @@ static MultiColumnProp make_multicol_prop_default() {
     value.column_gap_is_normal = true;
     value.rule_style = CSS_VALUE_NONE;
     value.rule_color.a = 255;
+    value.rule_color_is_current = true;
     value.span = COLUMN_SPAN_NONE;
     value.fill = COLUMN_FILL_BALANCE;
     value.wrap = COLUMN_WRAP_AUTO;

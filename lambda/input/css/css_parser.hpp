@@ -231,6 +231,8 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_DEFAULT,        // :default
     CSS_SELECTOR_PSEUDO_IN_RANGE,       // :in-range
     CSS_SELECTOR_PSEUDO_OUT_OF_RANGE,   // :out-of-range
+    CSS_SELECTOR_PSEUDO_MODAL,          // :modal
+    CSS_SELECTOR_PSEUDO_POPOVER_OPEN,   // :popover-open
     CSS_SELECTOR_PSEUDO_FULLSCREEN,     // :fullscreen
     CSS_SELECTOR_PSEUDO_GENERIC,        // Generic unknown pseudo-class (uses value field)
 
@@ -276,6 +278,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_PICTURE_IN_PICTURE, // :picture-in-picture
     CSS_SELECTOR_PSEUDO_USER_INVALID,       // :user-invalid
     CSS_SELECTOR_PSEUDO_USER_VALID,         // :user-valid
+    CSS_SELECTOR_PSEUDO_DEFINED,            // :defined
 
     // CSS Nesting
     CSS_SELECTOR_NESTING,                    // &
@@ -305,12 +308,15 @@ typedef struct CssNthFormula {
 typedef struct CssSimpleSelector {
     CssSelectorType type;
     const char* value;          // element name, class, id, etc.
+    const char* namespace_prefix; // null = unqualified; "" = null namespace; "*" = any
+    const char* namespace_url;    // resolved URI; null = any namespace
 
     // Attribute selector data
     struct {
         const char* name;
         const char* value;
         bool case_insensitive;
+        bool case_sensitive;
     } attribute;
 
     // nth-child/nth-of-type data
@@ -335,6 +341,7 @@ typedef struct CssSelector {
     CssCompoundSelector** compound_selectors;
     CssCombinator* combinators;
     size_t compound_selector_count;
+    CssCombinator leading_combinator; // relation to the :has() anchor, if relative
     CssSpecificity specificity;
 } CssSelector;
 
@@ -495,6 +502,10 @@ CssCompoundSelector* css_parse_compound_selector(CssTokenStream* stream, Pool* p
 CssSimpleSelector* css_parse_simple_selector(CssTokenStream* stream, Pool* pool);
 CssSpecificity css_calculate_specificity(const CssSelector* selector);
 
+typedef const char* (*CssNamespaceLookupFn)(void* context, const char* prefix);
+bool css_resolve_selector_namespaces(CssSelector* selector,
+                                     CssNamespaceLookupFn lookup, void* context);
+
 // Value parsing
 CssValue* css_parse_value(CssTokenStream* stream, CssPropertyCode property_code, Pool* pool);
 CssValue* css_parse_number(CssTokenStream* stream, Pool* pool);
@@ -527,8 +538,12 @@ bool css_is_valid_css_function(const char* name);
 // tokenization, strict end-of-input validation, and pool-backed allocations.
 CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool);
 CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool);
+CssSelectorGroup* css_parse_nested_selector_group_text(const char* text,
+    size_t length, const char* parent_selector_text, Pool* pool,
+    char** authored_text);
 // Unknown pseudos are valid in authored CSS but invalid in DOM selector APIs.
 bool css_selector_group_contains_generic_pseudo(const CssSelectorGroup* group);
+bool css_selector_generic_pseudo_is_known(const CssSimpleSelector* selector);
 CssDeclaration* css_parse_declaration_text(const char* text, size_t length, Pool* pool);
 bool css_declaration_is_supported(const CssDeclaration* declaration);
 CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length,
@@ -655,19 +670,19 @@ CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* po
 CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool);
 
 // Declaration parsing
-CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool);
+CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens,
+    int* pos, int token_count, Pool* pool);
+CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
+    int* pos, int token_count, Pool* pool, bool quirks_mode);
 
 // Rule parsing
 int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count, Pool* pool, CssRule** out_rule);
+int css_parse_rule_from_tokens_internal_mode(const CssToken* tokens,
+    int token_count, Pool* pool, CssRule** out_rule, bool quirks_mode);
 CssRule* css_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool);
 
 #ifdef __cplusplus
 }
-#endif
-
-// C++ only internal functions (not exposed to C code)
-#ifdef __cplusplus
-int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count, Pool* pool, CssRule** out_rule);
 #endif
 
 #endif // CSS_PARSER_H

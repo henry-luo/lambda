@@ -334,12 +334,18 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     default_font.font_size_from_medium = true;
+    default_font.text_deco_skip_ink = CSS_VALUE_AUTO;
+    default_font.text_underline_position = CSS_VALUE_AUTO;
+    default_font.text_underline_side = CSS_VALUE__UNDEF;
     default_font.platform_fallback_family = default_font_times;
     legacy_default_font = (FontProp){default_font_times, 16.0f, // 16px (CSS logical pixels)
         1.0f, // default CSS zoom
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     legacy_default_font.font_size_from_medium = true;
+    legacy_default_font.text_deco_skip_ink = CSS_VALUE_AUTO;
+    legacy_default_font.text_underline_position = CSS_VALUE_AUTO;
+    legacy_default_font.text_underline_side = CSS_VALUE__UNDEF;
     // Chromium's desktop UA preference keeps relative text at or above 6 CSS px.
     minimum_logical_font_size = 6.0f;
     fallback_fonts = ::fallback_fonts;

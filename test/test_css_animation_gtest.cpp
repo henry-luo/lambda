@@ -10,8 +10,11 @@
 #include <cstring>
 
 #include "../radiant/view.hpp"
+#include "../lambda/input/input.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/input/css/selector_matcher.hpp"
 
 extern "C" {
 #include "../lib/mempool.h"
@@ -24,6 +27,57 @@ void radiant_dispatch_css_event(UiContext*, DomElement*, const char*,
                                 const char*, const char*, double) {
     // The standalone interpolation tests have no JS event context; production
     // links event.cpp, while this isolated target only verifies animation state.
+}
+
+TEST(CssCascade, SelectorListUsesStrongestMatchingBranch) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    DomDocument* doc = dom_document_create(input);
+    ASSERT_NE(doc, nullptr);
+    DomElement* element = DomElement::create(doc, "div", nullptr);
+    ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(element->set_attribute("id", "target"));
+    ASSERT_TRUE(element->add_class("a"));
+
+    CssEngine* engine = css_engine_create(pool);
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "div.a, #target.a { color: red; } #target { color: blue; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 2u);
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+    ASSERT_NE(matcher, nullptr);
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        radiant_apply_css_rule_to_element(element, sheet->rules[i], matcher, pool, engine);
+    }
+
+    CssDeclaration* winner = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(winner, nullptr);
+    // the second branch has (1,1,0), above the later #target rule's (1,0,0).
+    EXPECT_EQ(winner->specificity.ids, 1);
+    EXPECT_EQ(winner->specificity.classes, 1);
+
+    DomElement* inline_target = DomElement::create(doc, "div", nullptr);
+    ASSERT_NE(inline_target, nullptr);
+    ASSERT_TRUE(inline_target->set_attribute("id", "inline-target"));
+    ASSERT_TRUE(inline_target->set_attribute("style", "color: blue !important"));
+    CssStylesheet* important_sheet = css_parse_stylesheet(engine,
+        "#inline-target { color: red !important; }", nullptr);
+    ASSERT_NE(important_sheet, nullptr);
+    ASSERT_EQ(important_sheet->rule_count, 1u);
+    radiant_apply_css_rule_to_element(inline_target, important_sheet->rules[0],
+                                      matcher, pool, engine);
+    CssDeclaration* important_winner = dom_element_get_specified_value(
+        inline_target, CSS_PROPERTY_COLOR);
+    ASSERT_NE(important_winner, nullptr);
+    // Both are author-important; the inline declaration wins on specificity.
+    EXPECT_EQ(important_winner->origin, CSS_ORIGIN_AUTHOR);
+    EXPECT_EQ(important_winner->specificity.inline_style, 1);
+    selector_matcher_destroy(matcher);
+    dom_document_destroy(doc);
+    pool_destroy(pool);
 }
 
 TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {

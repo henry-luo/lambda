@@ -62,7 +62,8 @@ static DomDocument* render_export_load_html_document(RenderExportSession* sessio
     RenderExportHtmlRequest* html_request = (RenderExportHtmlRequest*)request;
     return html_request && html_request->html_file
         ? load_html_doc(session->base_url, (char*)html_request->html_file,
-            layout_width, layout_height)
+            layout_width, layout_height, nullptr, nullptr, false,
+            session->print_media)
         : nullptr;
 }
 
@@ -232,7 +233,7 @@ static bool render_export_session_begin_internal(
         RenderExportSession* session,
         int viewport_width, int viewport_height,
         int fallback_width, int fallback_height, float output_scale,
-        float device_scale, bool raster_surface,
+        float device_scale, bool raster_surface, bool print_media,
         RenderExportDocumentLoader loader, void* request) {
     if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
@@ -248,6 +249,7 @@ static bool render_export_session_begin_internal(
     session->viewport_height = viewport_height;
     session->auto_width = auto_width;
     session->auto_height = auto_height;
+    session->print_media = print_media;
 
     session->ui_context = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
@@ -319,11 +321,13 @@ static bool render_export_session_begin_internal(
 
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
-                                 int fallback_width, int fallback_height, float output_scale) {
+                                 int fallback_width, int fallback_height, float output_scale,
+                                 bool print_media) {
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
-        output_scale, 1.0f, false, render_export_load_html_document, &request);
+        output_scale, 1.0f, false, print_media,
+        render_export_load_html_document, &request);
 }
 
 bool render_export_session_begin_raster(RenderExportSession* session,
@@ -333,7 +337,7 @@ bool render_export_session_begin_raster(RenderExportSession* session,
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, 1200, 800, output_scale,
-        device_scale, true, render_export_load_html_document, &request);
+        device_scale, true, false, render_export_load_html_document, &request);
 }
 
 bool render_export_session_begin_document_transform(RenderExportSession* session,
@@ -344,7 +348,8 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     RenderExportTransformRequest request = {document_file, transform, options, option_count};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height, output_scale,
-        device_scale, raster_surface, render_export_load_transform_document, &request);
+        device_scale, raster_surface, false,
+        render_export_load_transform_document, &request);
 }
 
 void render_export_session_end(RenderExportSession* session) {

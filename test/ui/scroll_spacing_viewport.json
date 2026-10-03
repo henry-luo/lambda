@@ -1,0 +1,10 @@
+{
+  "name": "Scroll spacing applies to the viewport",
+  "html": "test/ui/scroll_spacing_viewport.html",
+  "viewport": {"width": 320, "height": 300},
+  "events": [
+    {"type": "click", "target": {"selector": "#go"}},
+    {"type": "assert_state_store", "target": {"selector": "html"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 470, "tolerance": 1}
+  ]
+}

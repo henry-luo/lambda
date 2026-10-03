@@ -594,7 +594,21 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                 // Format based on selector type
                 switch (simple->type) {
                     case CSS_SELECTOR_TYPE_ELEMENT:
-                        if (simple->value) {
+                    case CSS_SELECTOR_TYPE_UNIVERSAL:
+                        if (simple->namespace_prefix) {
+                            if (*simple->namespace_prefix) {
+                                if (strcmp(simple->namespace_prefix, "*") == 0) {
+                                    stringbuf_append_str(formatter->output, "*");
+                                } else {
+                                    append_css_ident(formatter,
+                                        simple->namespace_prefix);
+                                }
+                            }
+                            stringbuf_append_str(formatter->output, "|");
+                        }
+                        if (simple->type == CSS_SELECTOR_TYPE_UNIVERSAL) {
+                            stringbuf_append_str(formatter->output, "*");
+                        } else if (simple->value) {
                             append_css_ident(formatter, simple->value);
                         }
                         break;
@@ -609,9 +623,6 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         if (simple->value) {
                             append_css_ident(formatter, simple->value);
                         }
-                        break;
-                    case CSS_SELECTOR_TYPE_UNIVERSAL:
-                        stringbuf_append_str(formatter->output, "*");
                         break;
                     case CSS_SELECTOR_ATTR_EXACT:
                     case CSS_SELECTOR_ATTR_CONTAINS:
@@ -745,7 +756,10 @@ const char* css_format_rule(CssFormatter* formatter, CssRule* rule) {
     // Handle different rule types
     if (rule->type == CSS_RULE_STYLE) {
         // Format selector group
-        if (rule->data.style_rule.selector_group) {
+        if (rule->data.style_rule.authored_selector_text) {
+            stringbuf_append_str(formatter->output,
+                                 rule->data.style_rule.authored_selector_text);
+        } else if (rule->data.style_rule.selector_group) {
             const char* selector_str = css_format_selector_group(formatter, rule->data.style_rule.selector_group);
             if (selector_str) {
                 stringbuf_append_str(formatter->output, selector_str);

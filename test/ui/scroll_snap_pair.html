@@ -1,0 +1,15 @@
+<!doctype html>
+<style>
+html, body { margin: 0; }
+#pair { position: relative; width: 100px; height: 100px; overflow: auto;
+        scroll-snap-type: pair mandatory; }
+#canvas { position: relative; width: 300px; height: 300px; }
+.target { position: absolute; width: 100px; height: 100px;
+          scroll-snap-align: start start; }
+#first { left: 100px; top: 0; background: green; }
+#second { left: 0; top: 100px; background: blue; }
+</style>
+<div id="pair"><div id="canvas">
+  <div id="first" class="target"></div>
+  <div id="second" class="target"></div>
+</div></div>

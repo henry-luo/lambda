@@ -1,10 +1,12 @@
 // #define _POSIX_C_SOURCE 200809L
 #include "dom_element.hpp"
+
 #include "dom_lifecycle.hpp"
 #include "style_epoch.hpp"
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
 #include "css_parser.hpp"
+#include "selector_matcher.hpp"
 #include "css_counter_hook.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/mem_factory.h"
@@ -15,6 +17,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/strview.h"
 #include "../../../lib/str.h"
+#include "../../../lib/utf.h"
 #include "../../../lib/arena.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mem_grow.hpp"
@@ -23,6 +26,130 @@
 #include "../../core/mark_reader.hpp"  // For ElementReader
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
+
+const char* dom_element_namespace_uri(DomElement* element) {
+    if (!element) return "";
+    const char* explicit_uri = element->get_attribute("__lambda_ns_uri");
+    if (explicit_uri) return explicit_uri;
+    for (DomNode* node = element; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* ancestor = node->as_element();
+        if (!ancestor->tag_name) continue;
+        if (node != element &&
+            str_icmp_cstr(ancestor->tag_name, "foreignObject") == 0) {
+            return "http://www.w3.org/1999/xhtml";
+        }
+        if (str_icmp_cstr(ancestor->tag_name, "svg") == 0) {
+            return "http://www.w3.org/2000/svg";
+        }
+        if (str_icmp_cstr(ancestor->tag_name, "math") == 0) {
+            return "http://www.w3.org/1998/Math/MathML";
+        }
+    }
+    return "http://www.w3.org/1999/xhtml";
+}
+
+DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element) {
+    return element && element->ext ? element->ext->namespaced_attributes : nullptr;
+}
+
+bool dom_element_record_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* qualified_name, const char* value) {
+    if (!element || !element->doc || !namespace_uri ||
+        !qualified_name || !*qualified_name || !value) return false;
+    const char* colon = strrchr(qualified_name, ':');
+    const char* local = *namespace_uri && colon
+        ? colon + 1 : qualified_name;
+    DomElementExt* ext = element->ensure_ext();
+    if (!ext) return false;
+    Pool* pool = element->doc->document_pool;
+    for (DomNamespacedAttribute* attr = ext->namespaced_attributes;
+         attr; attr = attr->next) {
+        if (strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+            strcmp(attr->local_name, local) == 0) {
+            attr->qualified_name = pool_strdup(pool, qualified_name);
+            attr->value = pool_strdup(pool, value);
+            attr->active = attr->qualified_name && attr->value;
+            return attr->active;
+        }
+    }
+    DomNamespacedAttribute* attr = (DomNamespacedAttribute*)pool_calloc(
+        pool, sizeof(DomNamespacedAttribute));
+    if (!attr) return false;
+    attr->namespace_uri = pool_strdup(pool, namespace_uri);
+    attr->local_name = pool_strdup(pool, local);
+    attr->qualified_name = pool_strdup(pool, qualified_name);
+    attr->value = pool_strdup(pool, value);
+    if (!attr->namespace_uri || !attr->local_name ||
+        !attr->qualified_name || !attr->value) return false;
+    attr->active = true;
+    attr->next = ext->namespaced_attributes;
+    ext->namespaced_attributes = attr;
+    return true;
+}
+
+void dom_element_remove_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* local_name) {
+    if (!namespace_uri || !local_name) return;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
+         attr; attr = attr->next) {
+        if (attr->active && strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+            strcmp(attr->local_name, local_name) == 0) {
+            attr->active = false;
+            return;
+        }
+    }
+}
+
+const char* dom_element_get_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* local_name) {
+    if (!namespace_uri || !local_name) return nullptr;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
+         attr; attr = attr->next) {
+        if (attr->active && strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+            strcmp(attr->local_name, local_name) == 0) return attr->value;
+    }
+    return nullptr;
+}
+
+const char* dom_element_attribute_namespace_uri(DomElement* element,
+    const char* qualified_name, const char** local_name) {
+    if (!element || !qualified_name || !local_name) return nullptr;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
+         attr; attr = attr->next) {
+        if (attr->active && strcmp(attr->qualified_name, qualified_name) == 0) {
+            *local_name = attr->local_name;
+            return attr->namespace_uri;
+        }
+    }
+    const char* colon = strchr(qualified_name, ':');
+    if (!colon) {
+        *local_name = qualified_name;
+        return strcmp(qualified_name, "xmlns") == 0
+            ? "http://www.w3.org/2000/xmlns/" : "";
+    }
+    *local_name = colon + 1;
+    size_t prefix_len = (size_t)(colon - qualified_name);
+    if (prefix_len == 3 && strncmp(qualified_name, "xml", 3) == 0)
+        return "http://www.w3.org/XML/1998/namespace";
+    if (prefix_len == 5 && strncmp(qualified_name, "xmlns", 5) == 0)
+        return "http://www.w3.org/2000/xmlns/";
+    if (prefix_len >= 120) return nullptr;
+    char declaration[128] = "xmlns:";
+    memcpy(declaration + 6, qualified_name, prefix_len);
+    declaration[6 + prefix_len] = '\0';
+    for (DomElement* current = element; current;
+         current = current->parent_element()) {
+        const char* uri = current->get_attribute(declaration);
+        if (uri) return uri;
+    }
+    // HTML parsing maps XLink names on SVG even without an xmlns attribute.
+    if (prefix_len == 5 && strncmp(qualified_name, "xlink", 5) == 0 &&
+        strcmp(dom_element_namespace_uri(element),
+               "http://www.w3.org/2000/svg") == 0)
+        return "http://www.w3.org/1999/xlink";
+    return nullptr;
+}
 
 // DOM bridge diagnostics are emitted per node during document construction.
 #define log_debug(...) log_trace(__VA_ARGS__)
@@ -50,6 +177,53 @@ bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
         if (dom_subtree_contains_node(child, target)) return true;
     }
     return false;
+}
+
+int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir,
+                              bool first) {
+    if (!node) return 0;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (!text->text || text->length == 0) return 0;
+        int last_strong = 0;
+        const char* cursor = text->text;
+        const char* end = cursor + text->length;
+        while (cursor < end) {
+            uint32_t codepoint = 0;
+            int consumed = utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
+            if (consumed <= 0) {
+                cursor++;
+                continue;
+            }
+            cursor += consumed;
+            int strong_class = utf_bidi_strong_class(codepoint);
+            if (strong_class != 0) {
+                if (first) return strong_class;
+                last_strong = strong_class;
+            }
+        }
+        return last_strong;
+    }
+    if (!node->is_element()) return 0;
+    DomElement* element = node->as_element();
+    if (element->tag_id == MARKUP_NAME_SCRIPT ||
+        element->tag_id == MARKUP_NAME_STYLE ||
+        (element->tag_name && strcmp(element->tag_name, "::marker") == 0) ||
+        element->tag_id == MARKUP_NAME_TEXTAREA ||
+        (skip_explicit_dir && element->get_attribute("dir"))) {
+        return 0;
+    }
+    int last_strong = 0;
+    for (DomNode* child = element->first_child; child;
+         child = child->next_sibling) {
+        int strong_class = dom_find_strong_direction(
+            child, skip_explicit_dir, first);
+        if (strong_class != 0) {
+            if (first) return strong_class;
+            last_strong = strong_class;
+        }
+    }
+    return last_strong;
 }
 
 static void dom_option_collect_normalized_text(DomNode* node, StrBuf* out,
@@ -780,6 +954,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_clear_synthetic_attributes(element);
     dom_element_clear_custom_properties(element, true);
     dom_element_clear_custom_properties(element, false);
+    style_epoch_selection_clear_element(element);
     if (element->ext) {
         for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
             if (element->ext->pseudo_styles[kind]) {
@@ -965,9 +1140,13 @@ static const char* dom_element_attr_key(DomElement* element, const char* name,
     return stored_exact ? name : lower;
 }
 
+static bool dom_attribute_name_present(const char* name) {
+    return name && name[0] != '\0';
+}
+
 bool DomElement::set_attribute(const char* name, const char* value) {
     DomElement* element = this;
-    if (!name || !value) {
+    if (!dom_attribute_name_present(name) || !value) {
         log_debug("dom_element_set_attribute: invalid parameters");
         return false;
     }
@@ -1029,7 +1208,7 @@ bool DomElement::set_attribute(NameId name_id, const char* value) {
 
 const char* DomElement::get_attribute(const char* name) {
     DomElement* element = this;
-    if (!name || name[0] == '\0') {
+    if (!dom_attribute_name_present(name)) {
         return nullptr;
     }
 
@@ -1064,7 +1243,7 @@ const char* DomElement::get_attribute(NameId name_id) {
 
 bool DomElement::remove_attribute(const char* name) {
     DomElement* element = this;
-    if (!name) {
+    if (!dom_attribute_name_present(name)) {
         return false;
     }
 
@@ -1109,7 +1288,7 @@ bool DomElement::remove_attribute(NameId name_id) {
 
 bool DomElement::has_attribute(const char* name) {
     DomElement* element = this;
-    if (!name) {
+    if (!dom_attribute_name_present(name)) {
         return false;
     }
 
@@ -1371,6 +1550,11 @@ const char* dom_inline_style_declaration_end(const char* text) {
     return p;
 }
 
+static bool dom_element_uses_quirks_css(const DomElement* element) {
+    return element && element->doc &&
+        is_quirks_mode((HtmlVersion)element->doc->html_version);
+}
+
 int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
     if (!element || !style_text || !element->doc) {
         return 0;
@@ -1454,7 +1638,9 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
 
             if (tokens && token_count > 0) {
                 int pos = 0;
-                CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, element->doc->document_pool);
+                CssDeclaration* decl = css_parse_declaration_from_tokens_mode(tokens,
+                    &pos, token_count, element->doc->document_pool,
+                    dom_element_uses_quirks_css(element));
 
                 if (decl) {
                     // Set origin to author (inline styles are author origin)
@@ -1573,7 +1759,9 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     }
 
     // Validate the property value before applying
-    if (!css_property_validate_value(declaration->property_code, declaration->value)) {
+    if (!css_property_validate_value_mode(declaration->property_code,
+                                          declaration->value,
+                                          dom_element_uses_quirks_css(element))) {
         return false;
     }
 
@@ -1602,7 +1790,9 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
     int applied_count = 0;
 
     // Apply each declaration from the rule
-    if (rule->type == CSS_RULE_STYLE && rule->data.style_rule.declarations) {
+    if ((rule->type == CSS_RULE_STYLE ||
+         rule->type == CSS_RULE_NESTED_DECLARATIONS) &&
+        rule->data.style_rule.declarations) {
         for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
             CssDeclaration* decl = rule->data.style_rule.declarations[i];
             if (decl) {
@@ -1643,9 +1833,12 @@ bool dom_element_remove_property(DomElement* element, CssPropertyCode property_c
 }
 
 bool dom_element_clear_pseudo_styles(DomElement* element) {
-    if (!element || !element->ext) return false;
-
-    bool cleared = false;
+    if (!element) return false;
+    CssSelectionStyle* selection = style_epoch_selection_style(element, false);
+    bool cleared = selection &&
+        (selection->color.source || selection->background_color.source);
+    style_epoch_selection_clear_element(element);
+    if (!element->ext) return cleared;
     for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
         StyleTree** slot = &element->ext->pseudo_styles[kind];
         StyleTree* style = *slot;
@@ -1671,6 +1864,53 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
 // Pseudo-Element Style Management (::before, ::after)
 // ============================================================================
 
+static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
+                                            CssSpecificity specificity) {
+    if (!element || !rule || rule->type != CSS_RULE_STYLE) return 0;
+    int applied_count = 0;
+    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* declaration = rule->data.style_rule.declarations[i];
+        if (!declaration || !declaration->value ||
+            !css_property_validate_value(declaration->property_code,
+                                         declaration->value)) continue;
+        CssSelectionCascadeValue* target = nullptr;
+        CssSelectionStyle* selection = nullptr;
+        if (declaration->property_code == CSS_PROPERTY_COLOR) {
+            selection = style_epoch_selection_style(element, true);
+            target = selection ? &selection->color : nullptr;
+        } else if (declaration->property_code == CSS_PROPERTY_BACKGROUND_COLOR ||
+                   declaration->property_code == CSS_PROPERTY_BACKGROUND) {
+            selection = style_epoch_selection_style(element, true);
+            target = selection ? &selection->background_color : nullptr;
+        }
+        if (!target) continue;
+        // The stylesheet owns the value; this element retains only the
+        // cascade metadata needed to select its highlight paint colors.
+        CssDeclaration candidate = *declaration;
+        candidate.specificity = specificity;
+        candidate.specificity.important = declaration->important;
+        candidate.origin = rule->origin;
+        CssDeclaration previous = {};
+        if (target->source) {
+            previous = *target->source;
+            previous.specificity = target->specificity;
+            previous.origin = target->origin;
+        }
+        if (!target->source ||
+            css_declaration_cascade_compare(&candidate, &previous) >= 0) {
+            target->source = declaration;
+            target->specificity = candidate.specificity;
+            target->origin = candidate.origin;
+            applied_count++;
+        }
+    }
+    if (applied_count) {
+        element->style_version++;
+        element->set_needs_style_recompute(true);
+    }
+    return applied_count;
+}
+
 int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
                                           CssSpecificity specificity, int pseudo_element) {
     log_debug("[CSS-PSEUDO] Applying pseudo-element rule to <%s>, pseudo_type=%d",
@@ -1679,6 +1919,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     if (!element || !rule || !element->doc) {
         log_debug("[CSS-PSEUDO] Early return due to null element/rule/doc");
         return 0;
+    }
+    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
+        return dom_element_apply_selection_rule(element, rule, specificity);
     }
 
     // Get the appropriate style tree for the pseudo-element
@@ -1706,6 +1949,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
         target_style = element->pseudo_style_slot(PSEUDO_STYLE_BACKDROP);
         pseudo_name = "::backdrop";
+    } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
+        pseudo_name = "::file-selector-button";
     } else {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
         return 0;
@@ -1754,6 +2000,14 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
     if (!element) {
         return NULL;
     }
+    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
+        CssSelectionStyle* selection = style_epoch_selection_style(element, false);
+        if (!selection) return nullptr;
+        return property_code == CSS_PROPERTY_COLOR
+            ? selection->color.source
+            : property_code == CSS_PROPERTY_BACKGROUND_COLOR
+                ? selection->background_color.source : nullptr;
+    }
 
     StyleTree* style = nullptr;
 
@@ -1771,6 +2025,8 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         style = element->pseudo_style(PSEUDO_STYLE_PLACEHOLDER);
     } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
         style = element->pseudo_style(PSEUDO_STYLE_BACKDROP);
+    } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
+        style = element->pseudo_style(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
     }
 
     if (!style) {

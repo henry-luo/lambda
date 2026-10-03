@@ -101,6 +101,22 @@ uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint3
         destination_a + ((source >> 24) * inv + 127u) / 255u);
 }
 
+uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
+                                  const uint8_t* p12, const uint8_t* p22,
+                                  float fx, float fy, bool round_channels) {
+    float w11 = (1.0f - fx) * (1.0f - fy);
+    float w21 = fx * (1.0f - fy);
+    float w12 = (1.0f - fx) * fy;
+    float w22 = fx * fy;
+    float rounding = round_channels ? 0.5f : 0.0f;
+    uint8_t c0 = (uint8_t)(p11[0] * w11 + p21[0] * w21 + p12[0] * w12 + p22[0] * w22 + rounding);
+    uint8_t c1 = (uint8_t)(p11[1] * w11 + p21[1] * w21 + p12[1] * w12 + p22[1] * w22 + rounding);
+    uint8_t c2 = (uint8_t)(p11[2] * w11 + p21[2] * w21 + p12[2] * w12 + p22[2] * w22 + rounding);
+    uint8_t c3 = (uint8_t)(p11[3] * w11 + p21[3] * w21 + p12[3] * w12 + p22[3] * w22 + rounding);
+    return (uint32_t)c0 | ((uint32_t)c1 << 8) |
+        ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
+}
+
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
                                       int pitch, float x, float y, bool wrap,
                                       bool round_channels) {
@@ -126,17 +142,8 @@ uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int heig
     const uint8_t* p21 = pixels + y1 * pitch + x2 * 4;
     const uint8_t* p12 = pixels + y2 * pitch + x1 * 4;
     const uint8_t* p22 = pixels + y2 * pitch + x2 * 4;
-    float w11 = (1.0f - fx) * (1.0f - fy);
-    float w21 = fx * (1.0f - fy);
-    float w12 = (1.0f - fx) * fy;
-    float w22 = fx * fy;
-    float rounding = round_channels ? 0.5f : 0.0f;
-    uint8_t c0 = (uint8_t)(p11[0] * w11 + p21[0] * w21 + p12[0] * w12 + p22[0] * w22 + rounding);
-    uint8_t c1 = (uint8_t)(p11[1] * w11 + p21[1] * w21 + p12[1] * w12 + p22[1] * w22 + rounding);
-    uint8_t c2 = (uint8_t)(p11[2] * w11 + p21[2] * w21 + p12[2] * w12 + p22[2] * w22 + rounding);
-    uint8_t c3 = (uint8_t)(p11[3] * w11 + p21[3] * w21 + p12[3] * w12 + p22[3] * w22 + rounding);
-    return (uint32_t)c0 | ((uint32_t)c1 << 8) |
-        ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
+    return render_pixel_bilinear_mix(p11, p21, p12, p22, fx, fy,
+                                     round_channels);
 }
 
 void render_pixel_source_over_coverage(uint8_t* destination, Color color,

@@ -90,6 +90,8 @@ typedef struct CssEngine {
         double viewport_height;
         double device_pixel_ratio;
         double root_font_size;
+        bool print_media;
+        bool quirks_mode;
         bool reduced_motion;
         bool high_contrast;
     } context;

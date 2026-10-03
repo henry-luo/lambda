@@ -4402,6 +4402,15 @@ void scroll_state_set_position_for_view(DocState* state, View* view, void* pane_
         old_max_y = view_state->data.scroll.max_y;
         if (h_pos < h_min) h_pos = h_min;
         if (v_pos < v_min) v_pos = v_min;
+        if (!state->smooth_scroll_tick_writing &&
+            (h_pos != old_x || v_pos != old_y) &&
+            !(view_state->data.scroll.smooth_active &&
+              h_pos == view_state->data.scroll.smooth_last_x &&
+              v_pos == view_state->data.scroll.smooth_last_y)) {
+            // Relayout may temporarily clamp a pane to zero and then restore
+            // the last animation sample; only a different target interrupts it.
+            view_state->data.scroll.smooth_active = false;
+        }
         view_state->data.scroll.x = h_pos;
         view_state->data.scroll.y = v_pos;
         view_state->data.scroll.max_x = pane->h_max_scroll;
@@ -4502,6 +4511,66 @@ void scroll_state_get_range_for_view(DocState* state, View* view, void* pane_ptr
     if (out_h_max) *out_h_max = pane->h_max_scroll;
     if (out_v_min) *out_v_min = pane->v_min_scroll;
     if (out_v_max) *out_v_max = pane->v_max_scroll;
+}
+
+bool scroll_state_begin_smooth_for_view(DocState* state, View* view, void* pane_ptr,
+                                        float target_x, float target_y) {
+    if (!state || !view || !pane_ptr) return false;
+    ScrollPane* pane = (ScrollPane*)pane_ptr;
+    ViewState* view_state = scroll_view_state_get_or_create(state, view, pane);
+    if (!view_state) return false;
+    auto& scroll = view_state->data.scroll;
+    target_x = fmaxf(scroll.min_x, fminf(scroll.max_x, target_x));
+    target_y = fmaxf(scroll.min_y, fminf(scroll.max_y, target_y));
+    if (target_x == scroll.x && target_y == scroll.y) {
+        scroll.smooth_active = false;
+        return false;
+    }
+    scroll.smooth_start_x = scroll.x;
+    scroll.smooth_start_y = scroll.y;
+    scroll.smooth_target_x = target_x;
+    scroll.smooth_target_y = target_y;
+    scroll.smooth_last_x = scroll.x;
+    scroll.smooth_last_y = scroll.y;
+    scroll.smooth_started = false;
+    scroll.smooth_active = true;
+    state->has_active_smooth_scroll = true;
+    doc_state_request_repaint(state);
+    return true;
+}
+
+void scroll_state_cancel_smooth_for_view(DocState* state, View* view) {
+    ViewState* view_state = state && view
+        ? view_state_get_for_kind(state, view, VIEW_STATE_SCROLL) : nullptr;
+    if (view_state) view_state->data.scroll.smooth_active = false;
+}
+
+bool scroll_state_tick_smooth_for_view(DocState* state, View* view, void* pane_ptr,
+                                       double now, bool is_viewport) {
+    ViewState* view_state = state && view && pane_ptr
+        ? view_state_get_for_kind(state, view, VIEW_STATE_SCROLL) : nullptr;
+    if (!view_state || !view_state->data.scroll.smooth_active) return false;
+    auto& scroll = view_state->data.scroll;
+    if (!scroll.smooth_started || now < scroll.smooth_start_time) {
+        scroll.smooth_start_time = now;
+        scroll.smooth_started = true;
+    }
+    // CSSOM View leaves duration and timing to the user agent. A fixed
+    // eased interval keeps virtual-clock and live-window ticks deterministic.
+    float progress = (float)((now - scroll.smooth_start_time) / 0.3);
+    progress = fmaxf(0.0f, fminf(1.0f, progress));
+    float eased = progress * progress * (3.0f - 2.0f * progress);
+    float x = scroll.smooth_start_x +
+        (scroll.smooth_target_x - scroll.smooth_start_x) * eased;
+    float y = scroll.smooth_start_y +
+        (scroll.smooth_target_y - scroll.smooth_start_y) * eased;
+    if (progress >= 1.0f) scroll.smooth_active = false;
+    state->smooth_scroll_tick_writing = true;
+    scroll_state_set_position_for_view(state, view, pane_ptr, x, y, is_viewport);
+    state->smooth_scroll_tick_writing = false;
+    scroll.smooth_last_x = scroll.x;
+    scroll.smooth_last_y = scroll.y;
+    return scroll.smooth_active;
 }
 
 static void scroll_interaction_mark_dirty(DocState* state) {

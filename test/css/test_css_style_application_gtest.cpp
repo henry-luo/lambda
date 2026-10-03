@@ -4,6 +4,7 @@
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/selector_matcher.hpp"
+#include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
 
@@ -107,6 +108,73 @@ protected:
         return sel;
     }
 };
+
+TEST_F(CssStyleApplicationTest, AllResetCompetesWithEachProperty) {
+    StyleTree* tree = style_tree_create(pool);
+    ASSERT_NE(tree, nullptr);
+    CssDeclaration* color = css_parse_declaration_text("color: red", 10, pool);
+    CssDeclaration* direction = css_parse_declaration_text("direction: rtl", 14, pool);
+    CssDeclaration* reset = css_parse_declaration_text("all: initial", 12, pool);
+    CssDeclaration* width = css_parse_declaration_text("width: 40px", 11, pool);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(direction, nullptr);
+    ASSERT_NE(reset, nullptr);
+    ASSERT_NE(width, nullptr);
+
+    ASSERT_NE(style_tree_apply_declaration(tree, color), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, direction), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, reset), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_COLOR), reset);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_HEIGHT), reset);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_DIRECTION), direction);
+    ASSERT_NE(style_tree_apply_declaration(tree, width), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_WIDTH), width);
+
+    color->specificity = css_specificity_create(0, 1, 0, 0, false);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_COLOR), color);
+}
+
+TEST_F(CssStyleApplicationTest, AllRevertLayerRollsBackLonghandsInSameLayer) {
+    StyleTree* tree = style_tree_create(pool);
+    ASSERT_NE(tree, nullptr);
+    CssDeclaration* earlier = css_parse_declaration_text("width: 40px", 11, pool);
+    CssDeclaration* later = css_parse_declaration_text("width: 60px", 11, pool);
+    CssDeclaration* rollback = css_parse_declaration_text("all: revert-layer", 17, pool);
+    ASSERT_NE(earlier, nullptr);
+    ASSERT_NE(later, nullptr);
+    ASSERT_NE(rollback, nullptr);
+    earlier->layer_order = 1;
+    later->layer_order = 2;
+    rollback->layer_order = 2;
+    ASSERT_NE(style_tree_apply_declaration(tree, earlier), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, later), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, rollback), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_WIDTH), earlier);
+
+    CssDeclaration* unlayered = css_parse_declaration_text("width: 80px", 11, pool);
+    ASSERT_NE(unlayered, nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, unlayered), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_WIDTH), unlayered);
+}
+
+TEST_F(CssStyleApplicationTest, AllRevertExposesUserAgentDeclaration) {
+    StyleTree* tree = style_tree_create(pool);
+    ASSERT_NE(tree, nullptr);
+    CssDeclaration* ua = css_parse_declaration_text("color: green", 12, pool);
+    CssDeclaration* author = css_parse_declaration_text("color: red", 10, pool);
+    CssDeclaration* rollback = css_parse_declaration_text("all: revert", 11, pool);
+    ASSERT_NE(ua, nullptr);
+    ASSERT_NE(author, nullptr);
+    ASSERT_NE(rollback, nullptr);
+    ua->origin = CSS_ORIGIN_USER_AGENT;
+    author->origin = CSS_ORIGIN_AUTHOR;
+    rollback->origin = CSS_ORIGIN_AUTHOR;
+    ASSERT_NE(style_tree_apply_declaration(tree, ua), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, author), nullptr);
+    ASSERT_NE(style_tree_apply_declaration(tree, rollback), nullptr);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_COLOR), ua);
+    EXPECT_EQ(style_tree_get_declaration(tree, CSS_PROPERTY_WIDTH), nullptr);
+}
 
 // ============================================================================
 // Issue 1: Universal Selector Tests
@@ -345,6 +413,32 @@ TEST_F(CssStyleApplicationTest, CascadeOrder_SpecificityOverridesSourceOrder) {
 // ============================================================================
 // Specificity Calculation Tests
 // ============================================================================
+
+TEST_F(CssStyleApplicationTest, Specificity_OrdinaryPseudoClassesAndElements) {
+    struct Case {
+        const char* selector;
+        uint8_t classes;
+        uint8_t elements;
+    } cases[] = {
+        {":checked", 1, 0},
+        {":only-of-type", 1, 0},
+        {":nth-of-type(2)", 1, 0},
+        {"::marker", 0, 1},
+        {"::before", 0, 1},
+        {":where(#target)", 0, 0},
+    };
+    for (const Case& test_case : cases) {
+        CssSelectorGroup* group = css_parse_selector_group_text(
+            test_case.selector, strlen(test_case.selector), pool);
+        ASSERT_NE(group, nullptr) << test_case.selector;
+        ASSERT_EQ(group->selector_count, 1u) << test_case.selector;
+        CssSpecificity specificity = selector_matcher_calculate_specificity(
+            matcher, group->selectors[0]);
+        EXPECT_EQ(specificity.ids, 0) << test_case.selector;
+        EXPECT_EQ(specificity.classes, test_case.classes) << test_case.selector;
+        EXPECT_EQ(specificity.elements, test_case.elements) << test_case.selector;
+    }
+}
 
 TEST_F(CssStyleApplicationTest, Specificity_UniversalSelector) {
     // Universal selector should have specificity (0,0,0,0)

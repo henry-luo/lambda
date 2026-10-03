@@ -3806,6 +3806,7 @@ static void inherit_anonymous_table_block_props(LayoutContext* lycon, DomElement
         anon->blk->line_break = parent->blk->line_break;
         anon->blk->text_spacing_trim = parent->blk->text_spacing_trim;
         anon->blk->tab_size = parent->blk->tab_size;
+        anon->blk->tab_size_length = parent->blk->tab_size_length;
         anon->blk->text_box_trim = parent->blk->text_box_trim;
         anon->blk->text_box_over_edge = parent->blk->text_box_over_edge;
         anon->blk->text_box_under_edge = parent->blk->text_box_under_edge;

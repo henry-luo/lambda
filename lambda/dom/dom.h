@@ -492,6 +492,15 @@ Item dom_realm_constructor_prototype(const char* ctor_name);
 
 /** A registered autonomous custom element's prototype, or ItemNull. */
 Item dom_realm_custom_element_prototype(const char* local_name);
+void dom_custom_elements_registry_changed(void);
+void* dom_form_first_submitter(void* form, bool skip_disabled);
+bool dom_css_element_is_default(void* element);
+bool dom_css_element_is_indeterminate(void* element);
+bool dom_css_element_matches_range(void* element, bool out_of_range);
+int dom_css_element_matches_validity(void* element, bool invalid, bool user);
+int dom_css_element_placeholder_shown(void* element);
+void dom_set_user_validity(void* element, bool value);
+void dom_form_mark_user_validity(void* form);
 
 /** Give `value` the realm prototype for `<ctor_name>`; no-op when absent. */
 void dom_realm_apply_prototype(Item value, const char* ctor_name);

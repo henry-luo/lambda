@@ -68,6 +68,10 @@ extern "C" Item dom_realm_custom_element_prototype(const char* local_name) {
     return get_type_id(prototype) == LMD_TYPE_MAP ? prototype : ItemNull;
 }
 
+extern "C" bool dom_css_custom_element_defined(const char* local_name) {
+    return dom_realm_custom_element_prototype(local_name).item != ItemNull.item;
+}
+
 extern "C" void dom_realm_apply_prototype(Item value, const char* ctor_name) {
     if (!dom_realm_active()) return;
     Item proto = dom_realm_constructor_prototype(ctor_name);
