@@ -30,6 +30,10 @@ DOM_ENGINE_WEAK bool dom_engine_history_set_location(DomDocument* d, const char*
 }
 DOM_ENGINE_WEAK int dom_engine_input_value_kind(const char* type) { (void)type; return 0; }
 DOM_ENGINE_WEAK const char* dom_engine_input_live_value(DomElement* e) { (void)e; return nullptr; }
+DOM_ENGINE_WEAK bool dom_engine_input_value_as_number(const char* t, const char* v,
+                                                       double* out) {
+    (void)t; (void)v; (void)out; return false;
+}
 DOM_ENGINE_WEAK bool dom_engine_input_set_live_value(DomElement* e, const char* v) {
     (void)e; (void)v; return false;
 }
@@ -45,6 +49,15 @@ DOM_ENGINE_WEAK void dom_engine_input_value_validate(const char* t, const char* 
 DOM_ENGINE_WEAK void dom_engine_reconcile_dom_mutations(UiContext* u, DomDocument* d) { (void)u; (void)d; }
 DOM_ENGINE_WEAK void* dom_engine_element_from_point(DomDocument* d, float x, float y) {
     (void)d; (void)x; (void)y; return nullptr;
+}
+DOM_ENGINE_WEAK void* dom_engine_subtree_element_from_point(DomElement* root, float x, float y) {
+    (void)root; (void)x; (void)y; return nullptr;
+}
+DOM_ENGINE_WEAK void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail) {
+    (void)target; (void)type; (void)bubbles; (void)detail;
+}
+DOM_ENGINE_WEAK void dom_engine_svg_timing_key(DomElement* target, const char* key) {
+    (void)target; (void)key;
 }
 DOM_ENGINE_WEAK bool dom_engine_layout_active(DomDocument* d) { (void)d; return false; }
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {

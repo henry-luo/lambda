@@ -130,6 +130,7 @@ typedef enum AnimationType {
     ANIM_CSS_TRANSITION,
     ANIM_GIF,
     ANIM_LOTTIE,
+    ANIM_SVG,
 } AnimationType;
 
 typedef enum AnimationDirection {
@@ -314,6 +315,7 @@ static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
 
 // Per-view CSS transform matrix, for painted bounds and for hit-testing.
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
+bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform = true);
 
 static inline RdtMatrix rdt_matrix_identity(void) {
     RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
@@ -405,6 +407,17 @@ static inline bool rdt_matrix_unproject_affine_point(
     float dy = y - matrix->e23;
     *out_x = (matrix->e22 * dx - matrix->e12 * dy) / determinant;
     *out_y = (-matrix->e21 * dx + matrix->e11 * dy) / determinant;
+    return true;
+}
+
+static inline bool rdt_matrix_invert_affine(const RdtMatrix* matrix, RdtMatrix* inverse) {
+    if (!matrix || !inverse || matrix->e31 != 0.0f || matrix->e32 != 0.0f || matrix->e33 != 1.0f) return false;
+    float determinant = matrix->e11 * matrix->e22 - matrix->e21 * matrix->e12;
+    if (determinant == 0.0f || !isfinite(determinant)) return false;
+    float a = matrix->e22 / determinant, b = -matrix->e12 / determinant;
+    float c = -matrix->e21 / determinant, d = matrix->e11 / determinant;
+    *inverse = {a, b, -a * matrix->e13 - b * matrix->e23,
+        c, d, -c * matrix->e13 - d * matrix->e23, 0.0f, 0.0f, 1.0f};
     return true;
 }
 
@@ -584,13 +597,20 @@ typedef enum {
     IMAGE_FORMAT_PNG,
     IMAGE_FORMAT_JPEG,
     IMAGE_FORMAT_GIF,
+    IMAGE_FORMAT_WEBP,
 } ImageFormat;
 
 typedef enum {
-    SCALE_MODE_NEAREST = 0,  // Nearest neighbor (fast, pixelated)
+    SCALE_MODE_NEAREST = 0,  // Nearest neighbor
     SCALE_MODE_LINEAR,       // Bilinear interpolation (smooth)
     SCALE_MODE_LINEAR_WRAP,  // Bilinear with wrap-around for tiled backgrounds
+    SCALE_MODE_PIXELATED,    // Nearest to integer multiple, then smooth to target
 } ScaleMode;
+
+typedef enum {
+    IMAGE_ALPHA_PREMULTIPLIED = 0,
+    IMAGE_ALPHA_STRAIGHT,
+} ImageAlphaMode;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ImageSurface {
@@ -608,6 +628,7 @@ typedef struct ImageSurface {
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL;
                            // owned_pixels, or a buffer borrowed from a GIF frame, video or Lottie player
     lam::OwnArr<uint8_t> owned_pixels;  // the buffer this surface owns; set through image_surface_adopt_pixels
+    ImageAlphaMode alpha_mode; // decoded images are straight; native raster/effect surfaces are premultiplied
 #ifndef LAMBDA_HEADLESS
     struct RdtPicture* pic;  // SVG picture (opaque, managed by rdt_vector API)
 #endif
@@ -641,6 +662,10 @@ extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
 extern void image_surface_release_slot(ImageSurface* surface);
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
+extern ImageSurface* image_surface_decode_file(const char* path);
+extern ImageSurface* image_surface_decode_data(const unsigned char* data, size_t length);
+extern bool image_content_is_svg(const unsigned char* data, size_t length);
+extern uint64_t image_cache_resource_generation(struct UiContext* ui);
 extern bool image_surface_is_dom_owned(const ImageSurface* img_surface);
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
@@ -672,7 +697,8 @@ struct FontProp {
     CssEnum font_weight;
     CssEnum font_variant;  // CSS font-variant (normal, small-caps)
     CssEnum font_kerning;  // CSS font-kerning (auto/normal/none, 0 = auto)
-    CssEnum text_deco; // CSS text decoration
+    CssEnum text_deco; // first CSS text-decoration line, or none
+    uint8_t text_deco_extra; // additional decoration lines (CSS_TEXT_DECO_*)
     int16_t font_weight_numeric;  // CSS numeric weight 100-900 (0 = not set, use font_weight keyword)
     float letter_spacing;  // letter spacing in pixels (default 0)
     float word_spacing;  // word spacing in pixels (default 0)
@@ -693,11 +719,21 @@ struct FontProp {
     CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
     Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
     float text_deco_thickness;        // CSS text-decoration-thickness in px (0 = auto from font metrics)
-    float text_underline_offset;      // CSS text-underline-offset in px (0 = auto)
+    float text_underline_offset;      // px, or percent of used font size by mode
+    uint8_t text_underline_offset_mode; // 0=auto, 1=length, 2=percent
+    CssEnum text_deco_skip_ink;       // auto, none or all
+    CssEnum text_underline_position;  // auto, from-font or under
+    CssEnum text_underline_side;      // left or right for vertical text
     bool text_emphasis_enabled;       // CSS text-emphasis-style is not none
     bool text_emphasis_under;         // CSS text-emphasis-position uses under in horizontal flow
+    bool text_emphasis_left;          // CSS text-emphasis-position uses left in vertical flow
+    bool text_emphasis_color_current; // currentColor follows the text color after inheritance
+    uint32_t text_emphasis_mark;      // first codepoint of the computed mark, or zero
+    Color text_emphasis_color;
     lam::Up<const char> platform_fallback_family; // platform family used for UA glyph fallback
 };
+
+size_t font_text_decoration_names(const FontProp* font, char* out, size_t capacity);
 
 inline float font_prop_used_size(const FontProp* fp) {
     if (!fp) return 0.0f;
@@ -901,11 +937,18 @@ typedef struct FlexItemProp {
 // tier-2: view-pool, rebuilt each relayout
 struct InlineProp {
     CssEnum cursor;
+    CssEnum image_rendering;
     CssEnum caret_shape;
     Color color;
     Color accent_color;
+    Color caret_color;
+    Color selection_color;
+    Color selection_background_color;
     bool has_color;
     bool has_accent_color;
+    uint8_t caret_color_mode; // 0=inherited, 1=auto, 2=explicit color
+    bool has_selection_color;
+    bool has_selection_background_color;
     Color svg_fill_color;
     Color svg_stroke_color;
     CssEnum vertical_align;
@@ -1012,6 +1055,13 @@ typedef enum {
 
 typedef struct LinearGradient LinearGradient;
 
+enum BorderImageComponentKind : uint8_t {
+    BORDER_IMAGE_COMPONENT_NUMBER = 0,
+    BORDER_IMAGE_COMPONENT_LENGTH = 1,
+    BORDER_IMAGE_COMPONENT_PERCENT = 2,
+    BORDER_IMAGE_COMPONENT_AUTO = 3
+};
+
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Spacing width;
@@ -1036,9 +1086,18 @@ typedef struct {
     Corner radius;
     GradientType border_image_type;
     lam::Own<LinearGradient> border_image_linear_gradient;
-    float border_image_width;
+    lam::Own<char> border_image_url;
+    float border_image_width[4];
+    uint8_t border_image_width_type[4];
     bool has_border_image_width;
-    CssEnum border_image_repeat;
+    float border_image_outset[4];
+    bool border_image_outset_number[4];
+    bool has_border_image_outset;
+    float border_image_slice[4];
+    bool border_image_slice_percent[4];
+    bool has_border_image_slice;
+    bool border_image_slice_fill;
+    CssEnum border_image_repeat[2]; // horizontal, vertical
 } BorderProp;
 
 // physical side access is shared by cascade, layout, and table border code;
@@ -1211,7 +1270,7 @@ inline void radiant_border_side_set(RadiantBorderSide side, float width,
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     Color color;
-    float position;  // 0.0 to 1.0, or -1 for auto
+    float position;  // normalized stop coordinate (or CSS pixels); NaN for auto
 } GradientStop;
 
 // Linear gradient data
@@ -1222,6 +1281,7 @@ struct LinearGradient {
     int stop_count;
     uint8_t is_repeating : 1;  // true for repeating-linear-gradient
     uint8_t stops_in_px : 1;   // true if stop positions are in px (not fractions)
+    uint8_t corner : 3;        // 0: angle/side, 1: top-right, 2: bottom-right, 3: bottom-left, 4: top-left
 };
 
 // Radial gradient shape
@@ -1243,8 +1303,10 @@ typedef enum {
 typedef struct {
     RadialShape shape;     // circle or ellipse
     RadialSize size;       // size keyword
-    float cx, cy;          // center position (0.0-1.0 relative to box, default 0.5,0.5)
+    float cx, cy;          // fractions by default, CSS pixels when *_is_px is set
     bool cx_set, cy_set;   // whether center was explicitly set
+    bool cx_is_px, cy_is_px;
+    bool is_repeating;
     lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
 } RadialGradient;
@@ -1253,8 +1315,10 @@ typedef struct {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     float from_angle;      // starting angle in degrees (default 0)
-    float cx, cy;          // center position (0.0-1.0 relative to box, default 0.5,0.5)
+    float cx, cy;          // fractions by default, CSS pixels when *_is_px is set
     bool cx_set, cy_set;   // whether center was explicitly set
+    bool cx_is_px, cy_is_px;
+    bool is_repeating;
     lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
 } ConicGradient;
@@ -1519,6 +1583,7 @@ typedef struct MultiColumnProp {
     float rule_width;            // Rule width in pixels
     CssEnum rule_style;          // solid, dotted, dashed, etc.
     Color rule_color;            // Rule color
+    bool rule_color_is_current;  // omitted/currentColor follows the element color
 
     // Column behavior
     ColumnSpan span;             // column-span: none | all
@@ -1652,6 +1717,8 @@ inline RadiantInsetSide radiant_inset_side(PositionProp* position, CssBoxSide si
 // tier-2: view-pool, rebuilt each relayout
 typedef struct MarkerProp {
     CssEnum marker_type;     // CSS_VALUE_DISC, CSS_VALUE_CIRCLE, CSS_VALUE_SQUARE, CSS_VALUE_DECIMAL, etc.
+    Color color;             // ::marker color when explicitly resolved
+    bool has_color;
     float width;             // Marker inline advance, including an image separator when present
     float content_width;     // Painted image width; zero for text and bullet markers
     float height;            // Used marker box height; image markers can exceed line-height
@@ -1934,6 +2001,7 @@ static inline bool css_parse_place_content_alignment(const CssValue* value,
 typedef struct BlockProp {
     CssEnum text_align;
     CssEnum text_align_last;  // CSS text-align-last (auto, start, end, left, right, center, justify)
+    CssEnum text_justify;     // zero inherits the nearest computed text-justify
     CssEnum align_content;    // CSS Box Alignment align-content for block containers
     CssSelfAlignment align_content_detail;  // preserves align-content safe/unsafe modifiers
     CssSelfAlignment align_self;
@@ -1980,7 +2048,8 @@ typedef struct BlockProp {
     CssEnum break_inside;  // css fragmentation: auto, avoid
     int orphans;           // CSS Fragmentation: minimum lines before a break
     int widows;            // CSS Fragmentation: minimum lines after a break
-    int tab_size;           // CSS tab-size (number of spaces, default 8)
+    float tab_size;         // CSS tab-size number of spaces, default 8
+    float tab_size_length;  // absolute length in px; negative means number mode
     uint8_t margin_trim;     // bitmask: MARGIN_TRIM_BLOCK_START|END|INLINE_START|END
     uint8_t text_box_trim;   // bitmask: TEXT_BOX_TRIM_START|END (CSS Inline Level 3)
     uint8_t text_box_trim_applied; // bitmask of start/end trim actually applied during layout
@@ -2122,8 +2191,34 @@ typedef struct {
 } ScrollPane;
 
 // tier-2: view-pool, rebuilt each relayout
+typedef struct ScrollSpacingValue {
+    float pixels;
+    float percent;
+    const CssValue* expression;  // percentage math needs the final scrollport size
+} ScrollSpacingValue;
+
+typedef enum ScrollSnapAxis {
+    SCROLL_SNAP_AXIS_NONE,
+    SCROLL_SNAP_AXIS_X,
+    SCROLL_SNAP_AXIS_Y,
+    SCROLL_SNAP_AXIS_BOTH,
+    SCROLL_SNAP_AXIS_BLOCK,
+    SCROLL_SNAP_AXIS_INLINE,
+    SCROLL_SNAP_AXIS_PAIR
+} ScrollSnapAxis;
+
+// tier-2: view-pool, rebuilt each relayout
 typedef struct ScrollProp {
     CssEnum overflow_x, overflow_y;
+    CssEnum overscroll_x, overscroll_y;
+    CssEnum scroll_behavior;
+    CssEnum overflow_clip_box;
+    float overflow_clip_margin;
+    ScrollSpacingValue scroll_margin[4], scroll_padding[4];
+    ScrollSnapAxis snap_axis;
+    CssEnum snap_align_block, snap_align_inline;
+    bool snap_mandatory;
+    bool snap_strictness_explicit;
     lam::Own<ScrollPane> pane;
     bool has_hz_overflow, has_vt_overflow;
     bool has_hz_scroll, has_vt_scroll;
@@ -2657,28 +2752,6 @@ inline bool view_tree_contains_view(DomNode* node, View* view) {
     return false;
 }
 
-typedef enum HtmlVersion {
-    HTML5 = 1,              // HTML5
-    HTML4_01_STRICT,        // HTML4.01 Strict
-    HTML4_01_TRANSITIONAL,  // HTML4.01 Transitional
-    HTML4_01_FRAMESET,      // HTML4.01 Frameset
-    HTML_QUIRKS,            // Legacy HTML or missing DOCTYPE
-    HTML1_0,                // HTML 1.0 (1991) - uses <HEADER> as head, <NEXTID> void element
-    HTML_LIMITED_QUIRKS,    // WHATWG limited-quirks documents (for example XHTML 1.0 Transitional)
-} HtmlVersion;
-
-// WHATWG Quirks Mode: https://quirks.spec.whatwg.org/
-// In quirks mode (missing DOCTYPE, or Transitional/Frameset without system identifier),
-// certain CSS behaviors differ from standards mode.
-inline bool is_quirks_mode(HtmlVersion v) {
-    return v == HTML4_01_TRANSITIONAL || v == HTML4_01_FRAMESET ||
-           v == HTML_QUIRKS || v == HTML1_0;
-}
-
-inline bool is_limited_quirks_mode(HtmlVersion v) {
-    return v == HTML_LIMITED_QUIRKS;
-}
-
 struct MeasurementCacheEntry;
 struct CanonicalInlineEntry;
 
@@ -2938,7 +3011,7 @@ bool radiant_is_supported_web_font_source(const char* url, const char* format);
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
 
 // Process all @font-face rules from a stylesheet
-void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet, const char* base_path);
+void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet, const char* base_path, bool data_only = false);
 
 // Process all @font-face rules from all stylesheets in a document
 void process_document_font_faces(UiContext* uicon, struct DomDocument* doc);
@@ -3259,6 +3332,19 @@ struct FormControlProp {
     uint8_t placeholder_has_color : 1;
     uint8_t placeholder_has_opacity : 1;
     uint8_t heap_allocated : 1;
+
+    // The file button is a separate pseudo paint target; host declarations
+    // remain on the input view and these values are rebuilt on relayout.
+    FontProp* file_button_font;
+    Color file_button_color;
+    Color file_button_background_color;
+    Color file_button_border_color;
+    float file_button_border_width;
+    float file_button_padding_left;
+    float file_button_padding_right;
+    uint8_t file_button_has_color : 1;
+    uint8_t file_button_has_background_color : 1;
+    uint8_t file_button_draw_border : 1;
 
     // ------------------------------------------------------------------
     // Text-control selection state (input text-types and textarea only)
@@ -3696,12 +3782,19 @@ struct LayoutContext;
 float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
                                    CssPropertyCode prop_id);
 Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
+bool resolve_pseudo_color(LayoutContext* lycon, StyleTree* pseudo_style,
+                          Color* out_color);
+Color radiant_caret_color_for_view(ViewSpan* span);
 Color color_name_to_rgb(CssEnum color_name);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+float resolve_css_angle_value(const CssValue* value);
 float layout_effective_zoom(View* view);
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
+typedef const CssValue* (*CssVariableLookupFn)(void* context, const char* name);
+const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
+                                      CssVariableLookupFn lookup, void* context);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
@@ -3843,6 +3936,15 @@ extern void transform_point(float& x, float& y, const RdtMatrix& m);
 
 } // namespace radiant
 
+// typed CSS transform decoding shared by box and SVG coordinate resolution.
+typedef float (*TransformLengthResolver)(void* context, const CssValue* value);
+int css_value_count(const CssValue* value, int limit);
+const CssValue* css_value_at(const CssValue* value, int index);
+bool resolve_transform_function_value(const CssValue* value, TransformFunction* function,
+    TransformLengthResolver resolve_length, void* context);
+void resolve_transform_origin_value(const CssValue* value, TransformProp* transform,
+    TransformLengthResolver resolve_length, void* context);
+
 
 #ifndef LAMBDA_HEADLESS
 // tier-2: view-pool, rebuilt each relayout
@@ -3926,6 +4028,8 @@ typedef struct UiContext {
     void destroy_document();
     void destroy();
 } UiContext;
+
+void ui_context_init_default_fonts(UiContext* uicon);
 
 inline float ui_context_raster_scale(const UiContext* uicon) {
     if (!uicon) return 1.0f;
@@ -4023,14 +4127,16 @@ typedef struct HtmlLoadPhaseTiming {
 DomDocument* load_html_doc(Url *base, char* doc_filename, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config = nullptr,
                            struct CookieJar* top_level_cookie_jar = nullptr,
-                           bool defer_html_scripts = false);
+                           bool defer_html_scripts = false,
+                           bool print_media = false);
 void complete_deferred_html_scripts(DomDocument* doc);
 DomDocument* load_html_doc_profiled(Url* base, char* doc_filename, int viewport_width,
                                     int viewport_height,
                                     const DocumentJsHostConfig* js_host_config,
                                     struct CookieJar* top_level_cookie_jar,
                                     HtmlLoadPhaseTiming* timing,
-                                    struct DocumentScriptPhaseTiming* script_timing);
+                                    struct DocumentScriptPhaseTiming* script_timing,
+                                    bool print_media = false);
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
     const LambdaDocumentTransformConfig* transform,
     const LambdaDocumentTransformOption* options, int option_count,

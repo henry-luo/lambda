@@ -27,6 +27,7 @@
 #include "../lambda/input/css/css_style.hpp"
 #include "../lambda/input/css/css_value.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -2077,59 +2078,15 @@ static CssEnum specified_keyword(const DomElement* e, CssPropertyCode prop) {
 static CssEnum cascaded_keyword(const DomElement* e, CssPropertyCode prop) {
     if (!e || !e->doc) return (CssEnum)0;
     DomDocument* doc = e->doc;
-    if (!doc->stylesheets || doc->stylesheet_count <= 0) return (CssEnum)0;
     SelectorMatcher* matcher = selector_matcher_create(doc->document_pool);
     if (!matcher) return (CssEnum)0;
-    CssDeclaration* best = nullptr;
-    CssSpecificity best_spec = {0, 0, 0, 0, false};
-    for (int s = 0; s < doc->stylesheet_count; s++) {
-        CssStylesheet* sheet = doc->stylesheets[s];
-        if (!sheet || sheet->disabled) continue;
-        for (size_t r = 0; r < sheet->rule_count; r++) {
-            CssRule* rule = sheet->rules[r];
-            if (!rule || rule->type != CSS_RULE_STYLE) continue;
-            if (rule->data.style_rule.declaration_count == 0) continue;
-            bool matched = false;
-            CssSpecificity match_spec = {0, 0, 0, 0, false};
-            PseudoElementType matched_pseudo = PSEUDO_ELEMENT_NONE;
-            CssSelectorGroup* group = rule->data.style_rule.selector_group;
-            CssSelector* single_sel = rule->data.style_rule.selector;
-            if (group && group->selector_count > 0) {
-                for (size_t si = 0; si < group->selector_count; si++) {
-                    CssSelector* sel = group->selectors[si];
-                    if (!sel) continue;
-                    MatchResult result;
-                    if (selector_matcher_matches(matcher, sel, const_cast<DomElement*>(e), &result)) {
-                        matched = true;
-                        match_spec = result.specificity;
-                        matched_pseudo = result.pseudo_element;
-                        break;
-                    }
-                }
-            } else if (single_sel) {
-                MatchResult result;
-                if (selector_matcher_matches(matcher, single_sel, const_cast<DomElement*>(e), &result)) {
-                    matched = true;
-                    match_spec = result.specificity;
-                    matched_pseudo = result.pseudo_element;
-                }
-            }
-            if (!matched) continue;
-            // Only consider rules without a pseudo-element target — element
-            // style only.
-            if (matched_pseudo != PSEUDO_ELEMENT_NONE) continue;
-            for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
-                CssDeclaration* decl = rule->data.style_rule.declarations[d];
-                if (!decl || decl->property_code != prop) continue;
-                if (!decl->value || decl->value->type != CSS_VALUE_TYPE_KEYWORD) continue;
-                if (!best || css_specificity_compare(match_spec, best_spec) >= 0) {
-                    best = decl;
-                    best_spec = match_spec;
-                }
-            }
-        }
-    }
-    return best ? best->value->data.keyword : (CssEnum)0;
+    CssDeclaration result = {};
+    bool found = css_select_element_declaration((CssEngine*)doc->services.cached_css_engine,
+        matcher, const_cast<DomElement*>(e), doc->stylesheets,
+        (size_t)doc->stylesheet_count, nullptr, 0, css_property_spelling_from_code(prop), &result);
+    selector_matcher_destroy(matcher);
+    return found && result.value && result.value->type == CSS_VALUE_TYPE_KEYWORD
+        ? result.value->data.keyword : (CssEnum)0;
 }
 
 // `specified_keyword` first; if absent, fall back to a one-shot cascade

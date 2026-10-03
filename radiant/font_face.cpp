@@ -150,7 +150,7 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
 }
 
 // Process all @font-face rules from a stylesheet - uses css_font_face.hpp module
-void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* stylesheet, const char* base_path) {
+void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* stylesheet, const char* base_path, bool data_only) {
     if (!uicon || !stylesheet) {
         return;
     }
@@ -197,6 +197,17 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         if (radiant_url_is_http(css_desc->src_url)) {
             lam::Temp<char> dropped(css_desc->src_url);
             css_desc->src_url = nullptr;
+        }
+
+        // SVG image documents can use embedded font bytes without fetching external resources.
+        if (data_only) {
+            if (css_desc->src_url && strncmp(css_desc->src_url, "data:", 5) != 0) {
+                mem_free(css_desc->src_url); css_desc->src_url = nullptr;
+            }
+            for (int j = 0; css_desc->src_urls && j < css_desc->src_count; j++) {
+                char*& source = css_desc->src_urls[j].url;
+                if (source && strncmp(source, "data:", 5) != 0) { mem_free(source); source = nullptr; }
+            }
         }
 
         bool has_loadable_source = css_desc->src_url || css_desc->src_local;

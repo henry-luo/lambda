@@ -17,7 +17,7 @@ DEFAULT_JSON = "test/benchmark/benchmark_results_v3.json"
 DEFAULT_ENGINES = "mir,lambdajs,quickjs,nodejs"
 NODE_ENGINE = "nodejs"
 
-SUITE_ORDER = ["r7rs", "awfy", "beng", "kostya", "larceny", "jetstream", "text"]
+SUITE_ORDER = ["r7rs", "awfy", "beng", "kostya", "larceny", "julia", "jetstream", "text"]
 SUITE_LABELS = {
     "r7rs": "R7RS",
     "awfy": "AWFY",
@@ -26,6 +26,7 @@ SUITE_LABELS = {
     "larceny": "LARCENY",
     "jetstream": "JetStream",
     "text": "Text",
+    "julia": "Julia microbenchmarks",
 }
 ENGINE_LABELS = {
     "mir": "MIR (untyped)",
@@ -571,6 +572,9 @@ def write_report(args, data):
         w(f"- **Julia:** {julia.get('version') or 'unrecorded'}; one thread; {warmup} full warmup run(s) with fresh inputs. "
           "Execution excludes startup and warmup; the process column includes startup, compilation and warmup. "
           "Node's timer uses the checked-in script's own warmup policy.")
+    if "julia" in data:
+        w("- **Julia microbenchmark suite:** every language uses one complete warmup, then one measured workload; "
+          "formatted-output timing includes synchronous null-sink writes.")
     w(f"- **QuickJS:** {qjs_version}")
     timeout_text = f", timeout {timeout_s}s per run" if timeout_s else ""
     cooldown_s = metadata.get("suite_cooldown_seconds")

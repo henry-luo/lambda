@@ -1,0 +1,15 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}button{position:absolute;left:0;top:140px;width:100px;height:30px}</style></head><body>
+<!-- Explicit images and rectangles independently model the filter resource transitions. -->
+<svg width="380" height="120">
+ <rect id="first" x="20" y="20" width="80" height="40" fill="transparent"/>
+ <g id="images"><image x="20" y="20" width="80" height="40" href="../../ui/svg_image_assets/split.png" preserveAspectRatio="none"/><image x="150" y="20" width="80" height="40" href="../../ui/svg_image_assets/split.png" preserveAspectRatio="none"/></g>
+ <g id="tiles" display="none"><rect x="20" y="20" width="40" height="40" fill="#00ff00"/><rect x="60" y="20" width="40" height="40" fill="blue"/><rect x="150" y="20" width="40" height="40" fill="#00ff00"/><rect x="190" y="20" width="40" height="40" fill="blue"/></g>
+ <rect id="font-region" x="260" y="20" width="20" height="40" fill="red"/>
+</svg><button id="advance" data-step="0">advance</button><script>
+var step=0;document.getElementById('advance').addEventListener('click',function(){step++;
+document.getElementById('images').setAttribute('display',step===4?'inline':'none');
+document.getElementById('tiles').setAttribute('display',step===1?'inline':'none');
+// 2em resolves again after each resource font change: 20px, 5px, then 10px.
+document.getElementById('font-region').setAttribute('width',step===1?'40':step===4?'20':'10');
+this.setAttribute('data-step',String(step));});
+</script></body></html>

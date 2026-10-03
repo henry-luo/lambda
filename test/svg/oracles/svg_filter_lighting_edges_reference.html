@@ -1,0 +1,19 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}</style></head><body><svg width="840" height="160"><defs>
+<filter id="linear-diffuse" filterUnits="userSpaceOnUse" x="10" y="20" width="80" height="80"><feDiffuseLighting><feDistantLight elevation="30"/></feDiffuseLighting></filter>
+<filter id="linear-specular" filterUnits="userSpaceOnUse" x="110" y="20" width="80" height="80"><feSpecularLighting specularConstant=".5" lighting-color="#40a0ff"><feDistantLight elevation="90"/></feSpecularLighting></filter>
+<filter id="no-light" filterUnits="userSpaceOnUse" x="210" y="20" width="80" height="80"><feDiffuseLighting/></filter>
+<filter id="zero-diffuse" filterUnits="userSpaceOnUse" x="310" y="20" width="80" height="80"><feDiffuseLighting diffuseConstant="0"><feDistantLight elevation="90"/></feDiffuseLighting></filter>
+<filter id="zero-specular" filterUnits="userSpaceOnUse" x="410" y="20" width="80" height="80"><feFlood flood-opacity="0"/></filter>
+<filter id="rear-diffuse" filterUnits="userSpaceOnUse" x="510" y="20" width="80" height="80"><feDiffuseLighting><feDistantLight elevation="-30"/></feDiffuseLighting></filter>
+<filter id="rear-specular" filterUnits="userSpaceOnUse" x="610" y="20" width="80" height="80"><feSpecularLighting color-interpolation-filters="sRGB" lighting-color="blue"><feDistantLight elevation="-30"/></feSpecularLighting></filter>
+<filter id="default-kernel" filterUnits="userSpaceOnUse" x="710" y="20" width="80" height="80"><feDiffuseLighting color-interpolation-filters="sRGB" kernelUnitLength="0" lighting-color="red"><feDistantLight elevation="30"/></feDiffuseLighting></filter>
+</defs>
+<rect x="10" y="20" width="80" height="80" fill="red" filter="url(#linear-diffuse)"/>
+<rect x="110" y="20" width="80" height="80" fill="red" filter="url(#linear-specular)"/>
+<rect x="210" y="20" width="80" height="80" fill="red" filter="url(#no-light)"/>
+<rect x="310" y="20" width="80" height="80" fill="red" filter="url(#zero-diffuse)"/>
+<rect x="410" y="20" width="80" height="80" fill="red" filter="url(#zero-specular)"/>
+<rect x="510" y="20" width="80" height="80" fill="red" filter="url(#rear-diffuse)"/>
+<rect x="610" y="20" width="80" height="80" fill="red" filter="url(#rear-specular)"/>
+<rect x="710" y="20" width="80" height="80" fill="red" filter="url(#default-kernel)"/>
+</svg></body></html>

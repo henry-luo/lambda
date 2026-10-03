@@ -9,6 +9,64 @@
 #include <mpdecimal.h>
 #include <stdio.h>
 
+bool lambda_type_contract_has_binder(Type* type, bool include_refs, int depth) {
+    if (!type || depth > 64 || !lambda_binder_types_exist() ||
+            is_global_simple_type(type)) return false;
+    if (type->type_id == LMD_TYPE_TYPE) {
+        switch (type->kind) {
+        case TYPE_KIND_BINDER:
+            return true;
+        case TYPE_KIND_BOUND_REF:
+            return include_refs;
+        case TYPE_KIND_UNARY:
+            return lambda_type_contract_has_binder(((TypeUnary*)type)->operand,
+                include_refs, depth + 1);
+        case TYPE_KIND_BINARY: {
+            TypeBinary* binary = (TypeBinary*)type;
+            return lambda_type_contract_has_binder(binary->left, include_refs, depth + 1) ||
+                lambda_type_contract_has_binder(binary->right, include_refs, depth + 1);
+        }
+        case TYPE_KIND_CONSTRAINED:
+            return lambda_type_contract_has_binder(((TypeConstrained*)type)->base,
+                include_refs, depth + 1);
+        case TYPE_KIND_PARAM: {
+            TypeParam* parameter = (TypeParam*)type;
+            return parameter->binder || lambda_type_contract_has_binder(
+                parameter->contract_type ? parameter->contract_type : parameter->full_type,
+                include_refs, depth + 1);
+        }
+        default:
+            return false;
+        }
+    }
+    if (type->type_id == LMD_TYPE_ARRAY) {
+        // Generic `list` is a compact Type, unlike an inferred TypeArray.
+        // It cannot contain a binder and has no `nested` payload to inspect.
+        if (type == &TYPE_LIST || type == (Type*)&TYPE_ARRAY) return false;
+        return lambda_type_contract_has_binder(((TypeArray*)type)->nested,
+            include_refs, depth + 1);
+    }
+    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
+        // The generic container descriptors are compact Type prefixes. Casting
+        // one to TypeMap reads unrelated globals through `shape` (D3.3.3).
+        if (type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT) return false;
+        FOR_EACH_MAP_FIELD(type, field) {
+            if (lambda_type_contract_has_binder(field->type, include_refs, depth + 1)) return true;
+        }
+    }
+    if (TypeFunc* function = lambda_type_func_signature(type)) {
+        for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
+            if (parameter->binder || lambda_type_contract_has_binder(
+                    parameter->contract_type ? parameter->contract_type : parameter->full_type,
+                    include_refs, depth + 1)) return true;
+        }
+        return lambda_type_contract_has_binder(function->return_contract
+            ? function->return_contract : function->returned, include_refs, depth + 1);
+    }
+    return false;
+}
+
+
 // One spelling of the simple-TypeType unwrap: the core header's
 // type_field_unwrap_simple_decl (the three global meta-types are compact Type
 // values; it inspects `kind` only after excluding them).

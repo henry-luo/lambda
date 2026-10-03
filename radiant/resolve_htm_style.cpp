@@ -485,7 +485,7 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     DomElement* media_element = element && element->is_element()
         ? element->as_element() : nullptr;
     DomDocument* doc = lycon->ui_context ? lycon->ui_context->document : nullptr;
-    if (!doc || !doc->url) return;
+    if (!doc || !doc->url || doc->services.svg_image_document) return;
 
     if (!block->embed) {
         block->ensure_embed(lycon);
@@ -781,7 +781,10 @@ static void apply_html_heading_default(LayoutContext* lycon, DomNode* element,
 
     FontProp* font = block->ensure_font(lycon);
     float heading_size = lycon->font.style->font_size * font_scales[level];
-    apply_html_font_size(font, heading_size, false);
+    // UA heading sizes are relative to the inherited size; preserve its
+    // medium lineage for a descendant's monospace family change.
+    apply_html_font_size(font, heading_size,
+        lycon->font.style->font_size_from_medium);
     apply_html_font_weight(font, CSS_VALUE_BOLD, 700);
     block->ensure_boundary(lycon);
     radiant_spacing_set_pair(&block->boundary_mut()->margin,

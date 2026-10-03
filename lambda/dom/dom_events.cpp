@@ -332,6 +332,8 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_it
         &has_submitter, &submitter));
     if (has_submitter && !submitter) return make_js_undefined();
 
+    dom_form_mark_user_validity(form);
+
     if (dom_should_validate_submit(form, submitter)) {
         Item valid = dom_check_validity_bridge(form_item);
         if (!js_is_truthy(valid)) return make_js_undefined();
@@ -1093,6 +1095,7 @@ EVENT_SET_VALUE(event_set_bool, bool, (Item){.item = b2it(value ? 1 : 0)})
 EVENT_SET_VALUE(event_set_int, int, (Item){.item = i2it(value)})
 EVENT_SET_VALUE(event_set_double, double, js_make_number(value))
 EVENT_SET_VALUE(event_set_item, Item, value)
+
 #undef EVENT_SET_VALUE
 
 static void event_mark_non_writable(Item event, const char* key) {
@@ -1143,6 +1146,29 @@ extern "C" Item js_event_init_event(Item type_arg, Item b_arg, Item c_arg) {
     Item args[] = {type_arg, b_arg, c_arg};
     Item result = ItemNull;
     radiant_dom_event_call(ev, "initEvent", args, 3, &result);
+    return make_js_undefined();
+}
+
+extern "C" Item js_event_init_time_event(Item type_arg, Item view_arg, Item detail_arg) {
+    RootFrame roots(4);
+    Rooted<Item> event(roots, dom_realm_receiver());
+    Rooted<Item> type(roots, type_arg);
+    Rooted<Item> view(roots, view_arg);
+    Rooted<Item> detail_root(roots, detail_arg);
+    if (!js_event_is_object(event.get()) || event_flag_get(event.get(), "__dispatch_flag"))
+        return make_js_undefined();
+    // argument conversion can run JS or throw; finish it before mutating the event.
+    JS_ASSIGN_OR_RETURN(numeric, js_to_number(detail_root.get()));
+    double detail = 0;
+    item_try_to_double(numeric, &detail);
+    // TimeEvent.detail is an IDL long, including modulo conversion outside its signed range.
+    detail = isfinite(detail) ? fmod(trunc(detail), 4294967296.0) : 0;
+    if (detail < 0) detail += 4294967296.0;
+    if (detail >= 2147483648.0) detail -= 4294967296.0;
+    Item initialized = js_event_init_event(type.get(), Item{.item = ITEM_FALSE}, Item{.item = ITEM_FALSE});
+    if (item_is_error(initialized)) return initialized;
+    if (!view.get().item || get_type_id(view.get()) == LMD_TYPE_UNDEFINED) view.set(ItemNull);
+    radiant_dom_event_set_time_values(event.get(), view.get(), js_make_number(detail));
     return make_js_undefined();
 }
 
@@ -1241,6 +1267,17 @@ JS_FORWARD_ITEM(js_create_event_init,
     (type, bubbles, cancelable, composed, JS_CLASS_EVENT))
 JS_FORWARD_ITEM(js_create_event, (const char* type, bool bubbles, bool cancelable),
     js_create_event_init, (type, bubbles, cancelable, false))
+
+Item js_create_time_event_init(const char* type, double detail, Item view) {
+    RootFrame roots(4);
+    Rooted<Item> view_root(roots, view);
+    Rooted<Item> event(roots, js_create_event(type, false, false));
+    Rooted<Item> key(roots, js_name_item("initTimeEvent"));
+    Rooted<Item> method(roots, dom_realm_new_function(js_event_init_time_event));
+    dom_realm_set(event.get(), key.get(), method.get());
+    radiant_dom_event_set_time_values(event.get(), view_root.get(), js_make_number(detail));
+    return event.get();
+}
 
 Item js_create_text_event_init(const char* type, bool bubbles, bool cancelable,
                                bool composed, Item view, const char* data) {
@@ -1768,6 +1805,14 @@ extern "C" Item js_create_native_event(const char* type, bool bubbles,
     return event_root.get();
 }
 
+extern "C" Item js_create_native_svg_time_event(const char* type, double detail, double seconds) {
+    RootFrame roots(1);
+    Rooted<Item> event(roots, js_create_time_event_init(type, detail, dom_realm_global()));
+    event_set_bool(event.get(), "isTrusted", true);
+    event_set_double(event.get(), "timeStamp", seconds * 1000.0);
+    return event.get();
+}
+
 static void stamp_modifier_init(Item init, bool ctrl, bool shift, bool alt, bool meta) {
     event_set_bool(init, "ctrlKey",  ctrl);
     event_set_bool(init, "shiftKey", shift);
@@ -2290,6 +2335,27 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
+
+    // unwrapping also returns text/comment nodes; the SMIL seam accepts only elements.
+    DomNode* target_node = (DomNode*)dom_unwrap_element(elem_root.get());
+    if (DomElement* target = target_node ? target_node->as_element() : nullptr) {
+        double detail = 0;
+        item_try_to_double(event_get_item(event_root.get(), "detail"), &detail);
+        dom_engine_svg_timing_event(target, type, bubbles, detail);
+        if (js_is_truthy(event_get_item(event_root.get(), "isTrusted"))) {
+            double x, y;
+            if (item_try_to_double(event_get_item(event_root.get(), "clientX"), &x) &&
+                item_try_to_double(event_get_item(event_root.get(), "clientY"), &y)) {
+                dom_svg_dispatch_use_timing_event(target, (float)x, (float)y, type, bubbles, detail);
+            }
+        }
+        // accessKey timing observes user character input independently of the focused element.
+        if (strcmp(type, "keydown") == 0 && js_is_truthy(event_get_item(event_root.get(), "isTrusted"))) {
+            RootFrame key_roots(1);
+            Rooted<Item> key_root(key_roots, event_get_item(event_root.get(), "key"));
+            dom_engine_svg_timing_key(target, fn_to_cstr(key_root.get()));
+        }
+    }
 
     // Per DOM spec, the propagation flags (stop, stop-immediate, canceled)
     // are NOT reset at the start of dispatch. They persist whether set

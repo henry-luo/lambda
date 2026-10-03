@@ -1,0 +1,73 @@
+{
+  "name": "SMIL running document clock emits begin/repeat/end events and resolves qualified repeat timing",
+  "html": "test/ui/svg_smil_running.html",
+  "viewport": {
+    "width": 260,
+    "height": 180
+  },
+  "events": [
+    {
+      "type": "click",
+      "x": 40,
+      "y": 145
+    },
+    {
+      "type": "advance_time",
+      "ms": 1000
+    },
+    {
+      "type": "click",
+      "x": 150,
+      "y": 145
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-events",
+      "equals": "begin,repeat1,repeat2,end"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-paused",
+      "equals": "true"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 85,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ]
+}

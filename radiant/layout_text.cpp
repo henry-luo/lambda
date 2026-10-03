@@ -429,7 +429,8 @@ CssEnum get_text_transform_from_node(DomNode* node) {
 static int count_justify_opportunities_impl(const char* str, int len,
                                             bool collapse_spaces,
                                             bool collapse_newlines,
-                                            bool trim_trailing_space) {
+                                            bool trim_trailing_space,
+                                            bool allow_cjk) {
     if (!str || len <= 0) return 0;
 
     int count = 0;
@@ -463,7 +464,7 @@ static int count_justify_opportunities_impl(const char* str, int len,
             in_collapsible_space = false;
             ends_in_collapsible_space = false;
             prev_was_id = false;
-        } else if (has_id_line_break_class(cp)) {
+        } else if (allow_cjk && has_id_line_break_class(cp)) {
             if (prev_was_id) {
                 count++;
             }
@@ -482,7 +483,7 @@ static int count_justify_opportunities_impl(const char* str, int len,
 }
 
 int count_justify_opportunities(const char* str, int len) {
-    return count_justify_opportunities_impl(str, len, false, false, false);
+    return count_justify_opportunities_impl(str, len, false, false, false, true);
 }
 
 static inline CssEnum get_text_spacing_trim(LayoutContext* lycon, DomNode* text_node) {
@@ -617,98 +618,6 @@ static inline bool is_lang_japanese(const char* lang) {
     return false;
 }
 
-/**
- * Check if a codepoint has UAX#14 line break class ID (Ideographic).
- * Characters with ID class allow line breaks before and after them
- * under normal wrapping (CSS Text 3 §5.2, UAX #14).
- * Covers: CJK ideographs, Kana, Hangul, emoji, Yi, CJK symbols/radicals,
- * CJK compatibility ideographs, and other ID-class characters.
- */
-bool has_id_line_break_class(uint32_t cp) {
-    if (cp >= 0x3400 && cp <= 0x9FFF) return true;   // Extension A + main block
-    if (cp >= 0xF900 && cp <= 0xFAFF) return true;   // CJK Compatibility Ideographs
-    if (cp >= 0x20000 && cp <= 0x2CEAF) return true;  // Extensions B/C/D/E
-    if (cp >= 0x2CEB0 && cp <= 0x2EBE0) return true;  // Extension F
-    if (cp >= 0x2EBF0 && cp <= 0x2F7FF) return true;  // Extension I + nearby
-    if (cp >= 0x2F800 && cp <= 0x2FA1F) return true;  // CJK Compat Ideographs Supplement
-    if (cp >= 0x30000 && cp <= 0x3FFFD) return true;  // Extensions G/H + Plane 3
-
-    if (cp >= 0x3040 && cp <= 0x30FF) return true;   // Hiragana + Katakana
-    if (cp >= 0x31F0 && cp <= 0x31FF) return true;   // Katakana Phonetic Extensions
-    if (cp >= 0xAC00 && cp <= 0xD7AF) return true;   // Hangul Syllables
-    if (cp >= 0xFF65 && cp <= 0xFF9F) return true;   // Halfwidth Katakana
-    if (cp >= 0x1B000 && cp <= 0x1B2FF) return true;  // Kana Supplement + Extended-A + B
-
-    if (cp >= 0x2E80 && cp <= 0x2FFF) return true;   // CJK Radicals + Kangxi + IDC
-    if (cp >= 0x3003 && cp <= 0x3007) return true;   // Ditto mark, JIS, Closing, Number Zero
-    if (cp >= 0x3012 && cp <= 0x3013) return true;   // Postal Mark, Geta Mark
-    if (cp >= 0x3020 && cp <= 0x303F) return true;   // Postal Mark Face through IDHFS
-    if (cp >= 0x3200 && cp <= 0x33FF) return true;   // Enclosed CJK + CJK Compatibility
-    if (cp >= 0x3105 && cp <= 0x312F) return true;   // Bopomofo
-    if (cp >= 0x3131 && cp <= 0x318E) return true;   // Hangul Compatibility Jamo
-    if (cp >= 0x3190 && cp <= 0x31EF) return true;   // Kanbun + Bopomofo Ext + CJK Strokes
-
-    if (cp >= 0xA000 && cp <= 0xA4CF) return true;   // Yi Syllables + Yi Radicals
-
-    if (cp >= 0xFE30 && cp <= 0xFE6F) return true;   // CJK Compatibility Forms + Small Forms
-    if (cp >= 0xFF01 && cp <= 0xFF60) return true;   // Fullwidth ASCII variants
-    if (cp >= 0xFFA0 && cp <= 0xFFDC) return true;   // Halfwidth Hangul
-
-    if (cp >= 0x17000 && cp <= 0x18DF2) return true;  // Tangut Ideographs + Components
-
-    if (cp >= 0x1B170 && cp <= 0x1B2FB) return true;  // Nushu Characters
-
-    if (cp >= 0x1F000 && cp <= 0x1FAFF) return true;  // Mahjong..Symbols Extended-A
-    if (cp >= 0x1FC00 && cp <= 0x1FFFD) return true;  // Reserved (default ID)
-
-    if (cp == 0x231A || cp == 0x231B) return true;   // Watch, Hourglass
-    if (cp >= 0x23E9 && cp <= 0x23F3) return true;   // Media controls, timers
-    if (cp >= 0x23F8 && cp <= 0x23FA) return true;   // Pause, stop, record
-    if (cp == 0x2614 || cp == 0x2615) return true;   // Umbrella, Hot Beverage
-    if (cp == 0x2648) return true;                     // Aries (start of zodiac)
-    if (cp >= 0x2648 && cp <= 0x2653) return true;   // Zodiac symbols
-    if (cp == 0x267F) return true;                     // Wheelchair
-    if (cp >= 0x2693 && cp <= 0x2694) return true;   // Anchor, Swords
-    if (cp == 0x26A1) return true;                     // High Voltage
-    if (cp >= 0x26AA && cp <= 0x26AB) return true;   // Medium circles
-    if (cp >= 0x26BD && cp <= 0x26C8) return true;   // Soccer..Thunder Cloud
-    if (cp >= 0x26CE && cp <= 0x26D4) return true;   // Ophiuchus..No Entry
-    if (cp >= 0x26D5 && cp <= 0x26EA) return true;   // Various symbols..Church
-    if (cp >= 0x26F0 && cp <= 0x26F5) return true;   // Mountain..Sailboat
-    if (cp >= 0x26F7 && cp <= 0x26FA) return true;   // Skier..Tent
-    if (cp == 0x26FD) return true;                     // Fuel Pump
-    if (cp == 0x2702) return true;                     // Scissors
-    if (cp == 0x2705) return true;                     // Check Mark
-    if (cp >= 0x2708 && cp <= 0x270D) return true;   // Airplane..Writing Hand
-    if (cp == 0x270F) return true;                     // Pencil
-    if (cp == 0x2712) return true;                     // Black Nib
-    if (cp == 0x2714) return true;                     // Heavy Check Mark
-    if (cp == 0x2716) return true;                     // Heavy Multiplication X
-    if (cp == 0x271D) return true;                     // Latin Cross
-    if (cp == 0x2721) return true;                     // Star of David
-    if (cp == 0x2728) return true;                     // Sparkles
-    if (cp >= 0x2733 && cp <= 0x2734) return true;   // Asterisk, Star
-    if (cp == 0x2744) return true;                     // Snowflake
-    if (cp == 0x2747) return true;                     // Sparkle
-    if (cp == 0x274C) return true;                     // Cross Mark
-    if (cp == 0x274E) return true;                     // Cross Mark squared
-    if (cp >= 0x2753 && cp <= 0x2755) return true;   // Question marks, Exclamation
-    if (cp == 0x2757) return true;                     // Heavy Exclamation
-    if (cp >= 0x2763 && cp <= 0x2764) return true;   // Heart Exclamation, Heavy Heart
-    if (cp >= 0x2795 && cp <= 0x2797) return true;   // Plus, Minus, Division
-    if (cp == 0x27A1) return true;                     // Rightwards Arrow
-    if (cp == 0x27B0) return true;                     // Curly Loop
-    if (cp == 0x27BF) return true;                     // Double Curly Loop
-    if (cp >= 0x2934 && cp <= 0x2935) return true;   // Arrow up-right, down-right
-    if (cp >= 0x2B05 && cp <= 0x2B07) return true;   // Leftwards/Upwards/Downwards Arrow
-    if (cp >= 0x2B1B && cp <= 0x2B1C) return true;   // Black/White Large Square
-    if (cp == 0x2B50) return true;                     // White Medium Star
-    if (cp == 0x2B55) return true;                     // Heavy Large Circle
-    if (cp == 0x3297) return true;                     // Circled Ideograph Congratulation
-    if (cp == 0x3299) return true;                     // Circled Ideograph Secret
-
-    return false;
-}
 // Unicode Line Break Class Helpers (UAX #14 / CSS Text 3 §5.2)
 
 /**
@@ -1711,6 +1620,17 @@ CssEnum get_text_wrap_mode_value(DomNode* node) {
     return CSS_VALUE_WRAP;
 }
 
+CssEnum text_justify_computed_value(DomNode* node) {
+    // Zero is an untouched block prop; keep walking so unrelated block styles
+    // do not mask an inherited text-justify value.
+    for (DomNode* current = node; current; current = current->parent) {
+        DomElement* element = current->as_element();
+        if (element && element->blk && element->block()->text_justify)
+            return element->block()->text_justify;
+    }
+    return CSS_VALUE_AUTO;
+}
+
 int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
                                          bool trim_trailing_space,
                                          bool* out_suppressed) {
@@ -1719,22 +1639,10 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
     const char* text_data = (const char*)text->text_data();
     if (!text_data) return 0;
 
-    for (DomNode* node = static_cast<DomNode*>(text)->parent; node; node = node->parent) {
-        DomElement* element = node->as_element();
-        if (!element || !element->specified_style) continue;
-        CssDeclaration* declaration = style_tree_get_declaration(
-            element->specified_style, CSS_PROPERTY_TEXT_JUSTIFY);
-        if (!declaration || !declaration->value ||
-            declaration->value->type != CSS_VALUE_TYPE_KEYWORD) {
-            continue;
-        }
-        CssEnum value = declaration->value->data.keyword;
-        if (value == CSS_VALUE_INHERIT || value == CSS_VALUE_UNSET) continue;
-        if (value == CSS_VALUE_NONE) {
-            if (out_suppressed) *out_suppressed = true;
-            return 0;
-        }
-        break;
+    CssEnum mode = text_justify_computed_value(text->parent);
+    if (mode == CSS_VALUE_NONE) {
+        if (out_suppressed) *out_suppressed = true;
+        return 0;
     }
 
     CssEnum white_space = get_white_space_value(static_cast<DomNode*>(text));
@@ -1743,7 +1651,8 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
     return count_justify_opportunities_impl(
         text_data + rect->start_index, rect->length,
         collapse_spaces, collapse_newlines,
-        collapse_spaces && trim_trailing_space);
+        collapse_spaces && trim_trailing_space,
+        mode != CSS_VALUE_INTER_WORD);
 }
 
 /**
@@ -4245,13 +4154,15 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             if (codepoint == '\t' && !collapse_spaces) {
                 // CSS Text 3 §4.2: tab-size <number> — tab stops occur at points
                 // not the inline element's font (CSS Text 3 §4.2: "the advance
-                int ts = 8;
+                float tab_size = 8.0f;
+                float tab_size_length = -1.0f;
                 ViewElement* ancestor = lycon->view->parent_view();
                 while (ancestor) {
                     if (ancestor->is_element()) {
                         DomElement* elem = lam::dom_require_element(ancestor);
-                        if (elem->blk && elem->block_mut()->tab_size >= 0) {
-                            ts = elem->block()->tab_size;
+                        if (elem->blk) {
+                            tab_size = elem->block()->tab_size;
+                            tab_size_length = elem->block()->tab_size_length;
                             break;
                         }
                     }
@@ -4259,7 +4170,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 }
                 FontProp* block_font = lycon->block.block_container_font;
                 if (!block_font) block_font = lycon->font.style;
-                if (ts == 0) {
+                if (tab_size == 0.0f && tab_size_length < 0.0f) {
                     wd = 0;
                 } else {
                     float raw_space_advance = layout_measure_space_advance(
@@ -4267,14 +4178,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     float space_advance = raw_space_advance
                         + block_font->word_spacing
                         + block_font->letter_spacing;
-                    float tab_period = space_advance * ts;
+                    float tab_period = tab_size_length >= 0.0f
+                        ? tab_size_length : space_advance * tab_size;
                     float current_x = rect->x + rect->width;
                     float current_offset = current_x - lycon->line.left;
                     // CSS Text 3 §4.2: if the distance to the next tab stop is less
                     float half_ch = raw_space_advance * 0.5f;
-                    float next_tab_offset = tab_period *
-                        ceilf((current_offset + half_ch) / tab_period);
-                    wd = next_tab_offset - current_offset;
+                    if (tab_period > 0.0f) {
+                        float next_tab_offset = tab_period *
+                            ceilf((current_offset + half_ch) / tab_period);
+                        wd = next_tab_offset - current_offset;
+                    } else {
+                        wd = 0.0f;
+                    }
                 }
             } else {
                 wd += lycon->font.style->word_spacing;

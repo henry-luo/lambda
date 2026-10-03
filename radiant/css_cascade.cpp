@@ -6,34 +6,236 @@
 #include "../lambda/input/css/style_epoch.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_factory.h"
+#include <string.h>
 
 // CSS-only targets do not link StateStore; their matcher keeps default state.
 __attribute__((weak)) void state_configure_selector_matcher(
         DocState* /*state*/, SelectorMatcher* /*matcher*/) {}
+
+typedef struct CssLayerNode {
+    const char* name;
+    struct CssLayerNode* first_child;
+    struct CssLayerNode* last_child;
+    struct CssLayerNode* next_sibling;
+    uint32_t order;
+} CssLayerNode;
+
+typedef struct CssLayerRuleRef {
+    CssRule* rule;
+    CssLayerNode* layer;
+    struct CssLayerRuleRef* next;
+} CssLayerRuleRef;
+
+typedef struct CssLayerRegistry {
+    Arena* scratch;
+    CssLayerNode roots[CSS_ORIGIN_TRANSITION + 1];
+    CssLayerRuleRef* rules;
+    bool valid;
+} CssLayerRegistry;
+
+static bool css_import_rule_is_active(CssRule* rule, CssEngine* engine) {
+    if (!rule || rule->type != CSS_RULE_IMPORT ||
+        rule->data.import_rule.invalid) return false;
+    if (rule->data.import_rule.supports &&
+        !css_evaluate_supports_condition(engine,
+            rule->data.import_rule.supports)) return false;
+    return !rule->data.import_rule.media ||
+        css_evaluate_media_query(engine, rule->data.import_rule.media);
+}
+
+static CssLayerNode* css_layer_child(CssLayerRegistry* registry,
+                                     CssLayerNode* parent, const char* name) {
+    if (!registry || !parent) return nullptr;
+    if (name) {
+        for (CssLayerNode* child = parent->first_child; child;
+             child = child->next_sibling) {
+            if (child->name && strcmp(child->name, name) == 0) return child;
+        }
+    }
+    CssLayerNode* node = (CssLayerNode*)arena_alloc(
+        registry->scratch, sizeof(CssLayerNode));
+    if (!node) {
+        registry->valid = false;
+        return nullptr;
+    }
+    *node = {};
+    node->name = name;
+    if (parent->last_child) parent->last_child->next_sibling = node;
+    else parent->first_child = node;
+    parent->last_child = node;
+    return node;
+}
+
+static CssLayerNode* css_layer_name_node(CssLayerRegistry* registry,
+                                         CssLayerNode* parent,
+                                         const CssLayerName* name) {
+    if (!registry || !parent || !name) return nullptr;
+    for (size_t i = 0; i < name->part_count; i++) {
+        parent = css_layer_child(registry, parent, name->parts[i]);
+        if (!parent) return nullptr;
+    }
+    return parent;
+}
+
+static void css_layer_collect_rule(CssLayerRegistry* registry,
+                                   CssRule* rule, CssLayerNode* layer,
+                                   CssEngine* engine) {
+    if (!registry || !rule || !registry->valid) return;
+    if (rule->type == CSS_RULE_STYLE ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS) {
+        CssLayerRuleRef* ref = (CssLayerRuleRef*)arena_alloc(
+            registry->scratch, sizeof(CssLayerRuleRef));
+        if (!ref) {
+            registry->valid = false;
+            return;
+        }
+        ref->rule = rule;
+        ref->layer = layer;
+        ref->next = registry->rules;
+        registry->rules = ref;
+        if (rule->type == CSS_RULE_STYLE) {
+            for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+                css_layer_collect_rule(registry,
+                    rule->data.style_rule.nested_rules[i], layer, engine);
+            }
+        }
+        return;
+    }
+    if (rule->type == CSS_RULE_IMPORT) {
+        if (!css_import_rule_is_active(rule, engine)) return;
+        if (rule->data.import_rule.has_layer) {
+            CssLayerNode* parent = layer ? layer :
+                &registry->roots[rule->origin];
+            layer = rule->data.import_rule.anonymous_layer
+                ? css_layer_child(registry, parent, nullptr)
+                : css_layer_name_node(registry, parent,
+                    &rule->data.import_rule.layer_name);
+            if (!layer) return;
+        }
+        CssStylesheet* imported = rule->data.import_rule.stylesheet;
+        if (imported && !imported->disabled) {
+            for (size_t i = 0; i < imported->rule_count; i++) {
+                css_layer_collect_rule(registry, imported->rules[i], layer, engine);
+            }
+        }
+        return;
+    }
+    if (rule->type == CSS_RULE_LAYER) {
+        if (rule->data.conditional_rule.invalid_layer) return;
+        CssLayerNode* parent = layer ? layer :
+            &registry->roots[rule->origin];
+        if (rule->data.conditional_rule.layer_statement) {
+            for (size_t i = 0;
+                 i < rule->data.conditional_rule.layer_name_count; i++) {
+                css_layer_name_node(registry, parent,
+                    &rule->data.conditional_rule.layer_names[i]);
+            }
+            return;
+        }
+        layer = rule->data.conditional_rule.layer_name_count
+            ? css_layer_name_node(registry, parent,
+                &rule->data.conditional_rule.layer_names[0])
+            : css_layer_child(registry, parent, nullptr);
+        if (!layer) return;
+    } else if (rule->type == CSS_RULE_MEDIA) {
+        if (!css_evaluate_media_query(engine,
+                rule->data.conditional_rule.condition)) return;
+    } else if (rule->type == CSS_RULE_SUPPORTS) {
+        if (!css_evaluate_supports_condition(engine,
+                rule->data.conditional_rule.condition)) return;
+    } else {
+        return;
+    }
+    for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+        css_layer_collect_rule(registry, rule->data.conditional_rule.rules[i],
+            layer, engine);
+    }
+}
+
+static void css_layer_number_children(CssLayerNode* parent, uint32_t* next) {
+    for (CssLayerNode* child = parent->first_child; child;
+         child = child->next_sibling) {
+        css_layer_number_children(child, next);
+        child->order = ++*next;
+    }
+}
+
+static void css_layer_rank_stylesheets(DomDocument* doc,
+                                       CssStylesheet** stylesheets, int count,
+                                       CssEngine* engine) {
+    if (!doc || !stylesheets || count <= 0 || !engine) return;
+    Arena* scratch = mem_arena_create((MemContext*)doc->services.mem_ctx,
+        MEM_ROLE_TEMP, "css.layer.registry");
+    if (!scratch) return;
+    CssLayerRegistry registry = {};
+    registry.scratch = scratch;
+    registry.valid = true;
+    for (int i = 0; i < count; i++) {
+        CssStylesheet* sheet = stylesheets[i];
+        if (!sheet || sheet->disabled || sheet->is_import_child) continue;
+        for (size_t j = 0; j < sheet->rule_count; j++) {
+            css_layer_collect_rule(&registry, sheet->rules[j], nullptr, engine);
+        }
+    }
+    if (registry.valid) {
+        for (int origin = CSS_ORIGIN_USER_AGENT;
+             origin <= CSS_ORIGIN_TRANSITION; origin++) {
+            uint32_t next = 0;
+            css_layer_number_children(&registry.roots[origin], &next);
+        }
+        for (CssLayerRuleRef* ref = registry.rules; ref; ref = ref->next) {
+            uint32_t order = ref->layer ? ref->layer->order : 0;
+            for (size_t d = 0; d < ref->rule->data.style_rule.declaration_count; d++) {
+                CssDeclaration* declaration = ref->rule->data.style_rule.declarations[d];
+                if (declaration) declaration->layer_order = order;
+            }
+        }
+    }
+    mem_arena_destroy(scratch);
+}
+
+static void apply_rule_to_element_with_nested(DomElement* element, CssRule* rule,
+                                              SelectorMatcher* matcher, Pool* pool,
+                                              CssEngine* engine, int depth);
 
 static void apply_rule_to_element(DomElement* element, CssRule* rule,
                                   SelectorMatcher* matcher, Pool* pool,
                                   CssEngine* engine) {
     if (!element || !rule || !matcher || !pool) return;
 
+    if (rule->type == CSS_RULE_IMPORT) {
+        if (!css_import_rule_is_active(rule, engine)) return;
+        CssStylesheet* imported = rule->data.import_rule.stylesheet;
+        if (imported && !imported->disabled) {
+            for (size_t i = 0; i < imported->rule_count; i++) {
+                apply_rule_to_element_with_nested(element, imported->rules[i],
+                    matcher, pool, engine, 0);
+            }
+        }
+        return;
+    }
+
     bool nested_rule = rule->type == CSS_RULE_MEDIA ||
         rule->type == CSS_RULE_SUPPORTS || rule->type == CSS_RULE_LAYER;
     if (nested_rule) {
         // Conditional and layer blocks preserve source order while applying
         // their nested selector rules.
-        bool enabled = rule->type == CSS_RULE_LAYER ||
+        bool enabled = (rule->type == CSS_RULE_LAYER &&
+                !rule->data.conditional_rule.invalid_layer) ||
             (rule->type == CSS_RULE_MEDIA
                 ? css_evaluate_media_query(engine, rule->data.conditional_rule.condition)
                 : css_evaluate_supports_condition(engine, rule->data.conditional_rule.condition));
         if (enabled) {
             for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
                 CssRule* nested = rule->data.conditional_rule.rules[i];
-                if (nested) apply_rule_to_element(element, nested, matcher, pool, engine);
+                if (nested) apply_rule_to_element_with_nested(element, nested,
+                    matcher, pool, engine, 0);
             }
         }
         return;
     }
-    if (rule->type != CSS_RULE_STYLE) return;
+    if (rule->type != CSS_RULE_STYLE &&
+        rule->type != CSS_RULE_NESTED_DECLARATIONS) return;
 
     CssSelector* selector = rule->data.style_rule.selector;
     CssSelectorGroup* group = rule->data.style_rule.selector_group;
@@ -57,7 +259,9 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
                     dom_element_apply_pseudo_element_rule(element, rule,
                         result.specificity, (int)result.pseudo_element);
                 }
-            } else if (!matched_selector) {
+            } else if (!matched_selector ||
+                       css_specificity_compare(result.specificity, best_specificity) > 0) {
+                // a selector list contributes its most specific matching branch.
                 matched_selector = true;
                 best_specificity = result.specificity;
             }
@@ -87,15 +291,30 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
     }
 }
 
+static void apply_rule_to_element_with_nested(DomElement* element, CssRule* rule,
+                                              SelectorMatcher* matcher, Pool* pool,
+                                              CssEngine* engine, int depth) {
+    if (!rule || depth > 128) return;
+    apply_rule_to_element(element, rule, matcher, pool, engine);
+    if (rule->type == CSS_RULE_STYLE) {
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            apply_rule_to_element_with_nested(element,
+                rule->data.style_rule.nested_rules[i], matcher, pool, engine,
+                depth + 1);
+        }
+    }
+}
+
 void radiant_apply_css_rule_to_element(DomElement* element, CssRule* rule,
                                        SelectorMatcher* matcher, Pool* pool,
                                        CssEngine* engine) {
-    apply_rule_to_element(element, rule, matcher, pool, engine);
+    apply_rule_to_element_with_nested(element, rule, matcher, pool, engine, 0);
 }
 
 static bool conditional_rule_is_active(CssRule* rule, CssEngine* engine) {
     if (!rule) return false;
-    if (rule->type == CSS_RULE_LAYER) return true;
+    if (rule->type == CSS_RULE_LAYER)
+        return !rule->data.conditional_rule.invalid_layer;
     if (rule->type == CSS_RULE_MEDIA) {
         return css_evaluate_media_query(engine, rule->data.conditional_rule.condition);
     }
@@ -107,7 +326,24 @@ static bool conditional_rule_is_active(CssRule* rule, CssEngine* engine) {
 
 static size_t active_rule_count(CssRule* rule, CssEngine* engine) {
     if (!rule) return 0;
-    if (rule->type == CSS_RULE_STYLE) return 1;
+    if (rule->type == CSS_RULE_NESTED_DECLARATIONS) return 1;
+    if (rule->type == CSS_RULE_STYLE) {
+        size_t count = 1;
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            count += active_rule_count(rule->data.style_rule.nested_rules[i], engine);
+        }
+        return count;
+    }
+    if (rule->type == CSS_RULE_IMPORT) {
+        if (!css_import_rule_is_active(rule, engine)) return 0;
+        CssStylesheet* imported = rule->data.import_rule.stylesheet;
+        if (!imported || imported->disabled) return 0;
+        size_t count = 0;
+        for (size_t i = 0; i < imported->rule_count; i++) {
+            count += active_rule_count(imported->rules[i], engine);
+        }
+        return count;
+    }
     if (!conditional_rule_is_active(rule, engine)) return 0;
     size_t count = 0;
     for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
@@ -119,8 +355,26 @@ static size_t active_rule_count(CssRule* rule, CssEngine* engine) {
 static void active_rule_collect(CssRule* rule, CssEngine* engine,
                                 CssRule** rules, size_t capacity, size_t* count) {
     if (!rule || !rules || !count) return;
-    if (rule->type == CSS_RULE_STYLE) {
+    if (rule->type == CSS_RULE_STYLE ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS) {
         if (*count < capacity) rules[(*count)++] = rule;
+        if (rule->type == CSS_RULE_STYLE) {
+            for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+                active_rule_collect(rule->data.style_rule.nested_rules[i],
+                                    engine, rules, capacity, count);
+            }
+        }
+        return;
+    }
+    if (rule->type == CSS_RULE_IMPORT) {
+        if (!css_import_rule_is_active(rule, engine)) return;
+        CssStylesheet* imported = rule->data.import_rule.stylesheet;
+        if (imported && !imported->disabled) {
+            for (size_t i = 0; i < imported->rule_count; i++) {
+                active_rule_collect(imported->rules[i], engine,
+                    rules, capacity, count);
+            }
+        }
         return;
     }
     if (!conditional_rule_is_active(rule, engine)) return;
@@ -161,7 +415,8 @@ static void apply_stylesheet_reference_to_tree(DomElement* root,
 
     if (!root->is_table_fixup()) {
         for (size_t i = 0; i < stylesheet->rule_count; i++) {
-            apply_rule_to_element(root, stylesheet->rules[i], matcher, pool, engine);
+            apply_rule_to_element_with_nested(root, stylesheet->rules[i], matcher,
+                                               pool, engine, 0);
         }
     }
     for (DomNode* child = root->first_child; child; child = child->next_sibling) {
@@ -213,6 +468,7 @@ void radiant_apply_css_stylesheet_to_tree(DomElement* root,
         return;
     }
 
+    css_layer_rank_stylesheets(root->doc, &stylesheet, 1, engine);
     bool epoch_scope = style_epoch_cascade_begin_extend(root->doc, root, engine);
     apply_stylesheet_to_tree(root, stylesheet, matcher, pool, engine, 0);
     if (epoch_scope) style_epoch_cascade_end(root->doc);
@@ -226,10 +482,12 @@ void radiant_apply_css_stylesheets_to_tree(DomDocument* doc, DomElement* root,
     if (!matcher) matcher = selector_matcher_create(pool);
     if (!matcher) return;
 
+    css_layer_rank_stylesheets(doc, stylesheets, count, engine);
     bool epoch_scope = style_epoch_cascade_begin_replace(doc, root, engine);
     for (int i = 0; i < count; i++) {
         CssStylesheet* stylesheet = stylesheets[i];
-        if (stylesheet && !stylesheet->disabled && stylesheet->rule_count > 0) {
+        if (stylesheet && !stylesheet->disabled && !stylesheet->is_import_child &&
+            stylesheet->rule_count > 0) {
             apply_stylesheet_to_tree(root, stylesheet, matcher, pool, engine, 0);
         }
     }
@@ -248,12 +506,13 @@ void radiant_cascade_styles_for_element_with_matcher(DomElement* element,
 
     CssEngine* engine = (CssEngine*)doc->services.cached_css_engine;
     if (!engine || doc->stylesheet_count <= 0) return;
+    css_layer_rank_stylesheets(doc, doc->stylesheets, doc->stylesheet_count, engine);
     // CSSOM reads must see the same live form and interaction state as layout.
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets[i];
-        if (!stylesheet || stylesheet->disabled) continue;
+        if (!stylesheet || stylesheet->disabled || stylesheet->is_import_child) continue;
         for (size_t j = 0; j < stylesheet->rule_count; j++) {
             CssRule* rule = stylesheet->rules[j];
             if (rule) apply_rule_to_element(element, rule, matcher, pool, engine);

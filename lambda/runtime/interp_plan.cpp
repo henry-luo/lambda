@@ -291,6 +291,7 @@ typedef struct ScanCtx {
     bool indexed;
     const AstIndex* index;
     AstNodeId skip_end;
+    bool strict_interp;
 } ScanCtx;
 
 // An outer write to an N-D ArrayNum replaces a row slice, not one scalar leaf.
@@ -382,23 +383,27 @@ static bool interp_direct_ndim_indices(AstNode* object, AstNode* first_index) {
     return count >= 2;
 }
 
-// `a[i] = v` normally needs a statically integral subscript before it can use
-// T0's int64 COW bridge. A `to` source may be either an exact-integer range or
-// a character range, but one explicit integer bound rules out the latter; any
-// non-integer opposite bound then errors before the loop body. Range iteration
-// yields an int on every successful such step. Keep the proof structural so
-// another dynamic `any` binding cannot accidentally reach machine conversion.
-static bool interp_range_loop_index_expr(AstNode* node) {
+// Scalar stores retain boxed keys through the checked COW setter (S7.1.3v2).
+// Arithmetic over an admitted dynamic binding uses that same runtime check;
+// it need not acquire a declared int type to enter T0. Keep character loops
+// and vector/slice syntax outside this path; their store shapes differ.
+static bool interp_checked_scalar_index_expr(AstNode* node) {
+    if (node && node->type &&
+            (node->type->type_id == LMD_TYPE_INT ||
+             node->type->type_id == LMD_TYPE_INT64)) return true;
     if (interp_integer_literal(node)) return true;
     node = ast_unwrap_primary(node);
     if (!node) return false;
     if (node->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (!entry || !entry->node || entry->node->node_type != AST_NODE_FOR_CLAUSE) {
-            return false;
-        }
+        if (!entry) return false;
+        if (!entry->declared_type && (!entry->node ||
+                (entry->node->node_type != AST_NODE_FOR_CLAUSE &&
+                 entry->node->node_type != AST_NODE_FOR_INDEX))) return true;
+        if (!entry->node || entry->node->node_type != AST_NODE_FOR_CLAUSE) return false;
         AstLoopNode* loop = (AstLoopNode*)entry->node;
         AstNode* source = ast_unwrap_primary(loop->as);
+        // one integer `to` bound excludes a character range on every success
         return source && source->node_type == AST_NODE_BINARY &&
             ((AstBinaryNode*)source)->op == OPERATOR_TO &&
             (interp_integer_literal(((AstBinaryNode*)source)->left) ||
@@ -410,8 +415,8 @@ static bool interp_range_loop_index_expr(AstNode* node) {
             binary->op != OPERATOR_MUL) {
         return false;
     }
-    return interp_range_loop_index_expr(binary->left) &&
-        interp_range_loop_index_expr(binary->right);
+    return interp_checked_scalar_index_expr(binary->left) &&
+        interp_checked_scalar_index_expr(binary->right);
 }
 
 // The native concurrency analysis must conservatively classify an indirect
@@ -694,7 +699,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         InterpSyncProcScan sync_scan = {.ok = true};
         bool task_backed = fn->analysis && (fn->analysis->may_await ||
             fn->analysis->needs_task_context);
-        bool async_satellite = task_backed &&
+        // forced T0 must reject a body that needs MIR's suspension transform
+        bool async_satellite = !sc->strict_interp && task_backed &&
             interp_async_proc_satellite_supported(fn);
         if (task_backed && async_satellite) {
             interp_visit_children(fn->body, interp_mark_task_entry, NULL);
@@ -730,26 +736,10 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         NameEntry* entry = has_path && path.root &&
                 path.root->node_type == AST_NODE_IDENT
             ? ((AstIdentNode*)path.root)->entry : NULL;
-        // A mask or slice (`arr[arr gt 25] = 0`) is not a scalar index. A
         // The shared COW setters dispatch by the runtime owner layout. A
         // direct binding to a markup-derived Element can therefore use the
         // same map/array replacement path as a literal without assuming its
         // input-pool allocation or field representation.
-        AstNode* key_expr = ast_unwrap_primary(ca->key);
-        NameEntry* dynamic_index_entry = key_expr &&
-                key_expr->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)key_expr)->entry : NULL;
-        // A direct untyped non-loop binding reaches the same runtime int64
-        // conversion in T0 and MIR. Loop values stay with the range proof
-        // below: `to` also produces character ranges, so admitting an
-        // AST_NODE_FOR_CLAUSE here would turn a character key into an int index.
-        // Derived expressions remain outside this bridge to keep mask/slice
-        // keys from entering the scalar COW setter.
-        bool direct_untyped_binding_index = dynamic_index_entry &&
-            !dynamic_index_entry->declared_type &&
-            (!dynamic_index_entry->node ||
-             (dynamic_index_entry->node->node_type != AST_NODE_FOR_CLAUSE &&
-              dynamic_index_entry->node->node_type != AST_NODE_FOR_INDEX));
         // MIR routes a typed numeric-array key through fn_index_assign, whose
         // runtime mask validation owns the bool-lane and shape checks. Source
         // numeric literals retain ARRAY AST type until their ArrayNum builds.
@@ -760,10 +750,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             ca->key && ca->key->next &&
             interp_direct_ndim_indices(ca->object, ca->key);
         bool indexed_key = node->node_type != AST_NODE_INDEX_ASSIGN_STAM ||
-            (ca->key && ca->key->type &&
-             (ca->key->type->type_id == LMD_TYPE_INT ||
-              ca->key->type->type_id == LMD_TYPE_INT64)) ||
-            direct_untyped_binding_index || interp_range_loop_index_expr(ca->key);
+            (ca->key && !ca->key->next &&
+             interp_checked_scalar_index_expr(ca->key));
         // A multi-coordinate scalar store has already proved each key is an
         // integral coordinate; treating its linked key list as an unsupported
         // dynamic index forced the whole T0 module to fall back despite the
@@ -939,13 +927,24 @@ static AstIndexProfileSupport interp_profile_support_node(
 
 bool interp_scan_supported(Script* script, AstNodeType* reject) {
     if (!script || !script->ast_root) return false;
-    ScanCtx sc = {true, AST_NODE_NULL};
+    ScanCtx sc = {true, script->interp_reject_kind};
     AstIndex* index = &script->ast_index;
+    sc.strict_interp = lambda_tier_selected() == LAMBDA_TIER_INTERP;
     if (index->graph_published) {
         sc.indexed = true;
         sc.index = index;
-        sc.ok = ast_index_scan_profile_support(index,
-            interp_profile_support_node, &sc);
+        // the cached profile permits AUTO satellites; enforce this run's pin
+        // on indexed definitions without changing the shared template's facts
+        if (sc.strict_interp) {
+            for (uint32_t i = 0; sc.ok && i < index->function_count; i++) {
+                interp_scan_visit(index->functions[i].node, &sc);
+            }
+        }
+        sc.strict_interp = false;
+        if (sc.ok) {
+            sc.ok = ast_index_scan_profile_support(index,
+                interp_profile_support_node, &sc);
+        }
     } else {
         interp_scan_visit(script->ast_root, &sc);
     }
@@ -1034,9 +1033,75 @@ static void plan_mark_cow_owned(NameEntry* entry) {
     entry->cow_owned = ast_expr_produces_owned_container(init);
 }
 
+// A destination is a written contract, never the current value's inferred tag.
+// Only fresh result positions adopt it; argument evaluation keeps its own order.
+static void plan_destination(AstNode* node, Type* contract, int depth = 0) {
+    node = ast_unwrap_primary(node);
+    if (!node || !contract || depth > 64 ||
+            lambda_type_contract_has_binder(contract, true)) return;
+    switch (node->node_type) {
+    case AST_NODE_MAP: {
+        AstMapNode* literal = (AstMapNode*)node;
+        TypeMap* target = (TypeMap*)lambda_type_nonnull_map_contract(contract);
+        if (!target || !target->is_trusted_contract || literal->has_computed_key ||
+                !ast_map_contract_storage_valid(target) ||
+                !ast_map_literal_keys_follow_contract(literal, target)) return;
+        literal->interp_destination = target;
+        ShapeEntry* field = target->shape;
+        for (AstNode* item = literal->item; item;
+                item = item->next, field = typemap_next_field(target, field)) {
+            plan_destination(((AstNamedNode*)item)->as, field->type, depth + 1);
+        }
+        return;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        plan_destination(branch->then, contract, depth + 1);
+        plan_destination(branch->otherwise, contract, depth + 1);
+        return;
+    }
+    case AST_NODE_MATCH_EXPR:
+        for (AstMatchArm* arm = ((AstMatchNode*)node)->first_arm; arm;
+                arm = (AstMatchArm*)arm->next)
+            plan_destination(arm->body, contract, depth + 1);
+        return;
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST: {
+        int values = 0, declarations = 0, statements = 0;
+        AstNode* result = interp_proc_block_last_value((AstListNode*)node,
+            &values, &declarations, &statements);
+        if (values == 1) plan_destination(result, contract, depth + 1);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+static void plan_place(PlanCtx* pc, AstCompoundAssignNode* assignment) {
+    if (assignment->interp_place) return;
+    InterpPlacePlan* place = (InterpPlacePlan*)pool_calloc(pc->script->pool,
+        sizeof(InterpPlacePlan));
+    if (!place) { pc->failed = true; return; }
+    if (!ast_collect_cow_path(&place->path, assignment->object) || !place->path.root ||
+            place->path.root->node_type != AST_NODE_IDENT) return;
+    place->root = ((AstIdentNode*)place->path.root)->entry;
+    if (!place->root) return;
+    int64_t index_mask = 0;
+    place->leaf_contract = lambda_type_contract_has_binder(place->root->declared_type, true)
+        ? NULL : ast_map_path_leaf_contract(place->root->declared_type,
+        &place->path, assignment->key,
+        assignment->node_type == AST_NODE_MEMBER_ASSIGN_STAM, &index_mask);
+    place->key_shape = (uint64_t)(place->path.count + 1) |
+        ((uint64_t)place->root->is_var_param << 8) | ((uint64_t)index_mask << 16);
+    assignment->interp_place = place;
+}
+
 static void plan_assign_entry(PlanCtx* pc, NameEntry* entry) {
     if (!entry || entry->storage_assigned) return;
     plan_mark_cow_owned(entry);
+    entry->interp_boundary = interp_boundary_plan_create(pc->script->pool,
+        entry->declared_type);
     if (pc->next_slot > UINT16_MAX) { pc->failed = true; return; }
     entry->slot = (int32_t)pc->next_slot++;
     entry->binding_storage = pc->storage;
@@ -1109,6 +1174,7 @@ static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
 static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
     if (!ident) return;
     ident->interp_capture_owner = NULL;
+    ident->interp_frame_slot_read = false;
     if (!pc || !pc->function || !ident->entry) return;
     uint16_t slot = 0;
     for (FnCapture* capture = pc->function->captures; capture;
@@ -1118,6 +1184,20 @@ static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
         ident->interp_capture_slot = slot;
         return;
     }
+    // Not a capture: a register binding read here is one of this function's
+    // own frame slots, unless it names something the generic read resolves
+    // elsewhere (eval_expr's IDENT arm and interp_read_binding_at_capture_slot).
+    NameEntry* entry = ident->entry;
+    AstNode* decl = entry->node;
+    bool special_decl = decl && (decl->node_type == AST_NODE_KEY_EXPR ||
+        decl->node_type == AST_NODE_OBJECT_TYPE ||
+        decl->node_type == AST_NODE_STRING_PATTERN ||
+        decl->node_type == AST_NODE_SYMBOL_PATTERN ||
+        (decl->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+            ((AstDeclaratorNode*)decl)->is_type_definition));
+    ident->interp_frame_slot_read = entry->storage_assigned &&
+        entry->binding_storage == BINDING_STORAGE_REGISTER &&
+        !entry->is_binder && !entry->import && !special_decl && entry->slot >= 0;
 }
 
 static void plan_link_call_shape(AstCallNode* call) {
@@ -1711,6 +1791,65 @@ static void plan_finish(PlanCtx* pc) {
     plan->planned = true;
 }
 
+// A procedural block's value is its LAST value expression; every earlier one,
+// and every declaration, loop and side-effect statement, runs as a statement.
+// Returns that item (NULL when the block has none) and the three counts.
+AstNode* interp_proc_block_last_value(AstListNode* list_node,
+        int* value_count, int* decl_count, int* stam_count) {
+    AstNode* last_executable = NULL;
+    for (AstNode* scan = list_node->item; scan; scan = scan->next) {
+        if (!is_declaration_node(scan->node_type)) last_executable = scan;
+    }
+    AstNode* last_value = NULL;
+    for (AstNode* item = list_node->item; item; item = item->next) {
+        if (is_declaration_node(item->node_type)) { (*decl_count)++; continue; }
+        if (is_side_effect_stam(item->node_type) ||
+                is_proc_flow_side_effect_node(item, last_executable) ||
+                item->node_type == AST_NODE_LOOP ||
+                ast_for_discards_result(item)) {
+            (*stam_count)++;
+            continue;
+        }
+        (*value_count)++;
+        last_value = item;
+    }
+    return last_value;
+}
+
+// Record a block's procedural shape once; eval_content read it from the
+// items at every evaluation (3% of a loop-heavy T0 profile). Counts that do
+// not fit the fields leave the block unscanned, so it keeps the live scan.
+static void plan_scan_proc_block(AstListNode* list_node) {
+    int values = 0, decls = 0, stams = 0;
+    AstNode* last_value = interp_proc_block_last_value(list_node, &values, &decls, &stams);
+    if (values > UINT16_MAX || decls > UINT16_MAX || stams > UINT16_MAX) return;
+    list_node->interp_proc_last_value = last_value;
+    list_node->interp_proc_value_count = (uint16_t)values;
+    list_node->interp_proc_decl_count = (uint16_t)decls;
+    list_node->interp_proc_stam_count = (uint16_t)stams;
+    list_node->interp_proc_scanned = true;
+}
+
+// D8.1.1v14: a `while` that is a direct statement of a `pn` body can hand the
+// running activation to compiled code at its head test. There T0's whole live
+// state is the frame's named slots, and the statements from the loop to the
+// end of the body form a function of them (the continuation). Nested loops
+// are not numbered: their back-edges count toward the enclosing handoff loop.
+static void plan_mark_handoff_loops(AstFuncNode* fn) {
+    if (((AstNode*)fn)->node_type != AST_NODE_PROC) return;
+    AstNode* body = ast_unwrap_primary(fn->body);
+    if (!body || (body->node_type != AST_NODE_CONTENT &&
+            body->node_type != AST_NODE_LIST)) return;
+    uint8_t ordinal = 0;
+    for (AstNode* item = ((AstListNode*)body)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_LOOP) continue;
+        AstLoopControlNode* loop = (AstLoopControlNode*)item;
+        if (loop->form != LOOP_FORM_WHILE) continue;
+        if (ordinal >= INTERP_HANDOFF_LOOP_MAX) break;
+        loop->interp_handoff_ordinal = ++ordinal;
+    }
+}
+
 // Enter a nested function definition: a fresh plan, a fresh slot space.
 static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     if (!fn || !fn->body) return;
@@ -1745,7 +1884,13 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     }
     pc.param_count = (uint32_t)param_index;
 
+    if (signature && signature->has_explicit_return_contract) {
+        pc.plan->return_boundary = interp_boundary_plan_create(pc.script->pool,
+            signature->return_contract);
+        plan_destination(fn->body, signature->return_contract);
+    }
     plan_walk(fn->body, &pc);
+    plan_mark_handoff_loops(fn);
     // should_use_tco is lowering's own eligibility test (named, not a closure,
     // has a tail-recursive call), so both tiers turn the same functions into
     // loops and a deep tail recursion cannot overflow in only one of them (R8).
@@ -1793,8 +1938,25 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_EVENT_HANDLER:
         // The owning view plans handlers after its body bindings.
         return;
-    case AST_NODE_VARIABLE_DECLARATOR:
-        plan_assign_entry(pc, ((AstDeclaratorNode*)node)->entry);
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        plan_assign_entry(pc, declaration->entry);
+        plan_destination(declaration->init, declaration->declared_type);
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assignment = (AstAssignStamNode*)node;
+        plan_destination(assignment->value, assignment->target_entry
+            ? assignment->target_entry->declared_type : NULL);
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        plan_destination(((AstReturnNode*)node)->value, pc->plan->return_boundary
+            ? pc->plan->return_boundary->contract : NULL);
+        break;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+        plan_place(pc, (AstCompoundAssignNode*)node);
         break;
     case AST_NODE_PARAM:
     case AST_NODE_KEY_EXPR:
@@ -1803,6 +1965,7 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_LIST:
     case AST_NODE_CONTENT:
         plan_assign_scope(pc, ((AstListNode*)node)->vars);
+        plan_scan_proc_block((AstListNode*)node);
         break;
     case AST_NODE_FOR_EXPR:
         plan_assign_scope(pc, ((AstForNode*)node)->vars);

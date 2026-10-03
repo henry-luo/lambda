@@ -11,6 +11,29 @@
 
 static RadiantCssomUsedValueSync s_cssom_used_value_sync = nullptr;
 
+size_t font_text_decoration_names(const FontProp* font, char* out, size_t capacity) {
+    if (!out || capacity == 0) return 0;
+    out[0] = '\0';
+    bool underline = font && (font->text_deco == CSS_VALUE_UNDERLINE ||
+        (font->text_deco_extra & CSS_TEXT_DECO_UNDERLINE));
+    bool overline = font && (font->text_deco == CSS_VALUE_OVERLINE ||
+        (font->text_deco_extra & CSS_TEXT_DECO_OVERLINE));
+    bool line_through = font && (font->text_deco == CSS_VALUE_LINE_THROUGH ||
+        (font->text_deco_extra & CSS_TEXT_DECO_LINE_THROUGH));
+    bool blink = font && (font->text_deco == CSS_VALUE_BLINK ||
+        (font->text_deco_extra & CSS_TEXT_DECO_BLINK));
+    size_t used = 0;
+    const char* names[] = {"underline", "overline", "line-through", "blink"};
+    bool selected[] = {underline, overline, line_through, blink};
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (!selected[i]) continue;
+        if (used) used = str_cat(out, used, capacity, " ", 1);
+        used = str_cat(out, used, capacity, names[i], strlen(names[i]));
+    }
+    if (!used) used = str_copy(out, capacity, "none", 4);
+    return used;
+}
+
 static const CssPropertyRuntimeMetadata kCssPropertyRuntimeMetadata[] = {
     {CSS_PROPERTY_OPACITY, ANIM_VAL_FLOAT, true, false},
     {CSS_PROPERTY_TRANSFORM, ANIM_VAL_TRANSFORM, false, false},
@@ -86,11 +109,13 @@ bool css_property_runtime_inherited(CssPropertyCode property) {
         CSS_PROPERTY_TEXT_SPACING_TRIM, CSS_PROPERTY_HYPHENATE_CHARACTER,
         CSS_PROPERTY_DOMINANT_BASELINE, CSS_PROPERTY_LETTER_SPACING,
         CSS_PROPERTY_WORD_SPACING, CSS_PROPERTY_WHITE_SPACE,
+        CSS_PROPERTY_TAB_SIZE,
         CSS_PROPERTY_FILL, CSS_PROPERTY_STROKE, CSS_PROPERTY_STROKE_WIDTH,
         CSS_PROPERTY_ACCENT_COLOR, CSS_PROPERTY_VISIBILITY,
         CSS_PROPERTY_EMPTY_CELLS, CSS_PROPERTY_DIRECTION,
         CSS_PROPERTY_LIST_STYLE_POSITION, CSS_PROPERTY_LIST_STYLE_TYPE,
-        CSS_PROPERTY_LIST_STYLE, CSS_PROPERTY_RUBY_POSITION
+        CSS_PROPERTY_LIST_STYLE, CSS_PROPERTY_RUBY_POSITION,
+        CSS_PROPERTY_IMAGE_RENDERING
     };
     for (size_t i = 0; i < sizeof(resolver_inherited) / sizeof(resolver_inherited[0]); i++) {
         if (resolver_inherited[i] == property) return true;
@@ -469,23 +494,20 @@ static bool cssom_resolve_font_size_value(DomElement* element,
         } else {
             float viewport_width = element->doc ? element->doc->viewport.width : 0.0f;
             float viewport_height = element->doc ? element->doc->viewport.height : 0.0f;
-            double factor = value->data.length.value / 100.0;
+            double viewport_pixels = 0.0;
+            WritingMode mode = element->blk ? element->block()->writing_mode
+                : WM_HORIZONTAL_TB;
+            if (css_viewport_length_to_px(value->data.length.unit,
+                    value->data.length.value, viewport_width, viewport_height,
+                    mode == WM_VERTICAL_LR || mode == WM_VERTICAL_RL,
+                    &viewport_pixels)) {
+                resolved = (float)viewport_pixels;
+            } else {
             switch (value->data.length.unit) {
                 case CSS_UNIT_EM: resolved = (float)value->data.length.value * parent_font_size; break;
                 case CSS_UNIT_REM: resolved = (float)value->data.length.value * root_font_size; break;
-                case CSS_UNIT_VW:
-                case CSS_UNIT_VI:
-                case CSS_UNIT_SVW:
-                case CSS_UNIT_LVW:
-                case CSS_UNIT_DVW: resolved = (float)(factor * viewport_width); break;
-                case CSS_UNIT_VH:
-                case CSS_UNIT_VB:
-                case CSS_UNIT_SVH:
-                case CSS_UNIT_LVH:
-                case CSS_UNIT_DVH: resolved = (float)(factor * viewport_height); break;
-                case CSS_UNIT_VMIN: resolved = (float)(factor * fmin(viewport_width, viewport_height)); break;
-                case CSS_UNIT_VMAX: resolved = (float)(factor * fmax(viewport_width, viewport_height)); break;
                 default: return false;
+            }
             }
         }
     } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -919,6 +941,55 @@ static bool serialize_transition(const CssPropAccessor* accessor, DomElement* el
     return true;
 }
 
+static const char* scroll_snap_axis_name(ScrollSnapAxis axis) {
+    switch (axis) {
+        case SCROLL_SNAP_AXIS_X: return "x";
+        case SCROLL_SNAP_AXIS_Y: return "y";
+        case SCROLL_SNAP_AXIS_BOTH: return "both";
+        case SCROLL_SNAP_AXIS_BLOCK: return "block";
+        case SCROLL_SNAP_AXIS_INLINE: return "inline";
+        case SCROLL_SNAP_AXIS_PAIR: return "pair";
+        case SCROLL_SNAP_AXIS_NONE: default: return "none";
+    }
+}
+
+static bool serialize_scroll_snap(const CssPropAccessor* accessor,
+                                  DomElement* element, int pseudo_type,
+                                  char* out, size_t out_size) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    const ScrollProp* scroll = element->scroll();
+    if (accessor->id == CSS_PROPERTY_SCROLL_SNAP_TYPE) {
+        const char* axis = scroll_snap_axis_name(scroll->snap_axis);
+        if (scroll->snap_axis == SCROLL_SNAP_AXIS_NONE ||
+            !scroll->snap_strictness_explicit) {
+            return copy_text(out, out_size, axis);
+        }
+        snprintf(out, out_size, "%s %s", axis,
+                 scroll->snap_mandatory ? "mandatory" : "proximity");
+        return true;
+    }
+    const CssEnumInfo* block = css_enum_info(scroll->snap_align_block);
+    const CssEnumInfo* inline_axis = css_enum_info(scroll->snap_align_inline);
+    snprintf(out, out_size, "%s %s",
+             block && block->name ? block->name : "none",
+             inline_axis && inline_axis->name ? inline_axis->name : "none");
+    return true;
+}
+
+static bool serialize_overscroll_behavior(const CssPropAccessor* accessor,
+                                          DomElement* element, int pseudo_type,
+                                          char* out, size_t out_size) {
+    if (!accessor || !element || pseudo_type != 0) return false;
+    const ScrollProp* scroll = element->scroll();
+    const CssEnumInfo* x = css_enum_info(scroll->overscroll_x);
+    const CssEnumInfo* y = css_enum_info(scroll->overscroll_y);
+    const char* x_name = x && x->name ? x->name : "auto";
+    const char* y_name = y && y->name ? y->name : "auto";
+    if (strcmp(x_name, y_name) == 0) return copy_text(out, out_size, x_name);
+    snprintf(out, out_size, "%s %s", x_name, y_name);
+    return true;
+}
+
 #define DIRECT_ROW(prop_id, group, type, field, kind, row_flags) \
     {prop_id, group, (uint16_t)offsetof(type, field), kind, row_flags, serialize_direct, nullptr}
 #define DERIVED_ROW(prop_id, fn, row_flags) \
@@ -937,6 +1008,12 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     DIRECT_ROW(CSS_PROPERTY_CLEAR, PROP_GROUP_POSITION, PositionProp, clear, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_OVERFLOW_X, PROP_GROUP_SCROLL, ScrollProp, overflow_x, CSS_PROP_VALUE_ENUM, 0),
     DIRECT_ROW(CSS_PROPERTY_OVERFLOW_Y, PROP_GROUP_SCROLL, ScrollProp, overflow_y, CSS_PROP_VALUE_ENUM, 0),
+    DIRECT_ROW(CSS_PROPERTY_SCROLL_BEHAVIOR, PROP_GROUP_SCROLL, ScrollProp, scroll_behavior, CSS_PROP_VALUE_ENUM, 0),
+    DIRECT_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X, PROP_GROUP_SCROLL, ScrollProp, overscroll_x, CSS_PROP_VALUE_ENUM, 0),
+    DIRECT_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y, PROP_GROUP_SCROLL, ScrollProp, overscroll_y, CSS_PROP_VALUE_ENUM, 0),
+    DERIVED_ROW(CSS_PROPERTY_OVERSCROLL_BEHAVIOR, serialize_overscroll_behavior, 0),
+    DERIVED_ROW(CSS_PROPERTY_SCROLL_SNAP_TYPE, serialize_scroll_snap, 0),
+    DERIVED_ROW(CSS_PROPERTY_SCROLL_SNAP_ALIGN, serialize_scroll_snap, 0),
     DERIVED_ROW(CSS_PROPERTY_VISIBILITY, serialize_visibility, 0),
     DERIVED_ROW(CSS_PROPERTY_WIDTH, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_HEIGHT, serialize_used_size, CSS_PROP_ACCESSOR_USED_VALUE),

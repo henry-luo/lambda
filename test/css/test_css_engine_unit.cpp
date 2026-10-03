@@ -43,6 +43,19 @@ protected:
     }
 };
 
+TEST_F(CssEngineTest, SupportsUsesSelectorAndDeclarationValidation) {
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_TRUE(css_evaluate_supports_condition(engine, "(display: grid)"));
+    EXPECT_FALSE(css_evaluate_supports_condition(engine, "(display: bogus)"));
+    EXPECT_TRUE(css_evaluate_supports_condition(engine, "not (display: bogus)"));
+    EXPECT_TRUE(css_evaluate_supports_condition(engine, "selector(:is(.a, .b))"));
+    EXPECT_TRUE(css_evaluate_supports_condition(engine, "selector(div > .a)"));
+    EXPECT_FALSE(css_evaluate_supports_condition(engine, "selector(div:bogus)"));
+    EXPECT_FALSE(css_evaluate_supports_condition(engine, "selector(.a, .b:bogus)"));
+}
+
 // ============================================================================
 // Category 1: Stylesheet Parsing - Single/Multiple Rules (15 tests)
 // ============================================================================
@@ -1058,6 +1071,60 @@ TEST_F(CssEngineTest, Feature_VendorPrefixes) {
 // Category 6: Media Query Evaluation (15 tests)
 // ============================================================================
 
+TEST_F(CssEngineTest, MediaQueryRangeBooleanAndOrUseFeatureValues) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+    // The fixture viewport is 1920 by 1080 CSS pixels.
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(width >= 1920px)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(width > 1920px)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(1000px < width <= 1920px)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(1900px < width < 1920px)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine,
+        "(orientation: portrait) or (width >= 1900px)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine,
+        "((width >= 1900px) and (color))"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "SCREEN and (WIDTH >= 1920PX)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(width)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(bogus-feature)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(width >= 1920)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(width >= bad)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "tv"));
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@media (width >= 100px) { div { color: green } }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_GT(sheet->rule_count, 0);
+    EXPECT_TRUE(css_evaluate_media_query(engine,
+        sheet->rules[0]->data.conditional_rule.condition))
+        << sheet->rules[0]->data.conditional_rule.condition;
+    CssStylesheet* commented = css_parse_stylesheet(engine,
+        "@media (width/**/>=/**/100px) { div { color: green } }", nullptr);
+    ASSERT_NE(commented, nullptr);
+    ASSERT_GT(commented->rule_count, 0);
+    EXPECT_TRUE(css_evaluate_media_query(engine,
+        commented->rules[0]->data.conditional_rule.condition));
+}
+
+TEST_F(CssEngineTest, MediaRatioAndResolutionUseTypedRangeValues) {
+    auto engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(aspect-ratio: 16/9)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine,
+        "(1/1 < aspect-ratio <= 16 / 9)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(aspect-ratio < 4/3)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(aspect-ratio)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(min-resolution: 96dpi)"));
+    EXPECT_TRUE(css_evaluate_media_query(engine,
+        "(37dpcm < resolution <= 1dppx)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(resolution > 1x)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(resolution: 1px)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(aspect-ratio: 16/0)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine,
+        "(1dppx < aspect-ratio)"));
+    engine->context.device_pixel_ratio = 2.0;
+    EXPECT_TRUE(css_evaluate_media_query(engine, "(resolution >= 2dppx)"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "(resolution: 96dpi)"));
+}
+
 // Test 6.1: Basic min-width media query - match
 TEST_F(CssEngineTest, MediaQuery_MinWidthMatch) {
     auto engine = CreateEngine();
@@ -1134,6 +1201,22 @@ TEST_F(CssEngineTest, MediaQuery_PrintTypeNoMatch) {
 
     bool result = css_evaluate_media_query(engine, "print");
     EXPECT_FALSE(result) << "print media type should not match by default";
+}
+
+TEST_F(CssEngineTest, MediaQueryPrintContextInvalidatesCachedResults) {
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+
+    EXPECT_TRUE(css_evaluate_media_query(engine, "screen"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "print"));
+    engine->context.print_media = true;
+    EXPECT_FALSE(css_evaluate_media_query(engine, "screen"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "print"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "not screen"));
+    EXPECT_TRUE(css_evaluate_media_query(engine, "all"));
+    engine->context.print_media = false;
+    EXPECT_TRUE(css_evaluate_media_query(engine, "screen"));
+    EXPECT_FALSE(css_evaluate_media_query(engine, "print"));
 }
 
 // Test 6.9: Media query with 'all' type - match

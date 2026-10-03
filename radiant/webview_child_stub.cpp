@@ -3,7 +3,7 @@
 // Compiled on Windows (until that backend is implemented) and headless builds.
 // Linux uses webview_child_linux.cpp; macOS uses webview_child_mac.mm.
 
-#if !defined(__APPLE__) && !defined(__linux__)
+#if defined(LAMBDA_NO_GUI) || (!defined(__APPLE__) && !defined(__linux__))
 
 #include "radiant.hpp"
 
@@ -45,4 +45,4 @@ void webview_platform_set_visible(WebViewHandle* handle, bool visible) {
     (void)handle; (void)visible;
 }
 
-#endif // !defined(__APPLE__) && !defined(__linux__)
+#endif // LAMBDA_NO_GUI || (!__APPLE__ && !__linux__)

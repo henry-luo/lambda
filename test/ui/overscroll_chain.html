@@ -1,0 +1,36 @@
+<!doctype html>
+<style>
+  body { margin: 0; }
+  .outer { width: 200px; height: 100px; overflow: auto; }
+  .inner { width: 150px; height: 60px; overflow: auto; }
+  .inner-content { height: 200px; background: linear-gradient(red, blue); }
+  .tail { height: 200px; }
+  #contained { overscroll-behavior: auto contain; }
+  #override { overscroll-behavior: contain; overscroll-behavior-y: auto; }
+  #hidden-inner { overflow: hidden; }
+  #horizontal-outer { width: 100px; height: 70px; overflow: auto; display: flex; }
+  #horizontal-inner { width: 60px; height: 60px; flex: none; overflow: auto;
+                      overscroll-behavior: contain auto; }
+  #horizontal-inner > div { width: 200px; height: 60px; }
+  #horizontal-tail { width: 200px; height: 60px; flex: none; }
+</style>
+<div class="outer" id="auto-outer">
+  <div class="inner" id="auto-inner"><div class="inner-content"></div></div>
+  <div class="tail"></div>
+</div>
+<div class="outer" id="contained-outer">
+  <div class="inner" id="contained"><div class="inner-content"></div></div>
+  <div class="tail"></div>
+</div>
+<div class="outer" id="override-outer">
+  <div class="inner" id="override"><div class="inner-content"></div></div>
+  <div class="tail"></div>
+</div>
+<div class="outer" id="hidden-outer">
+  <div class="inner" id="hidden-inner"><div class="inner-content"></div></div>
+  <div class="tail"></div>
+</div>
+<div id="horizontal-outer">
+  <div id="horizontal-inner"><div></div></div>
+  <div id="horizontal-tail"></div>
+</div>

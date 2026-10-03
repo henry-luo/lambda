@@ -19,6 +19,7 @@ extern "C" const char* __lsan_default_options() { return "exitcode=0"; }
 #include "../../lambda/input/css/css_parser.hpp"
 #include "../../lambda/input/css/css_engine.hpp"
 #include "../../lambda/io/mark_builder.hpp"
+#include "../../lambda/io/mark_editor.hpp"
 #include "../../lambda/input/input.hpp"
 #include "../../lambda/format/format.h"
 #include "helpers/css_test_helpers.hpp"
@@ -1835,6 +1836,55 @@ TEST_F(DomIntegrationTest, CRUD_AttributeAndContent_Simultaneous) {
     EXPECT_EQ(root->get_attribute("data-priority"), nullptr);
     EXPECT_EQ(dom_element_to_element(root)->length, 1);
     EXPECT_STREQ(dom_element_to_element(root)->items[0].get_string()->chars, "Updated body text");
+}
+
+TEST_F(DomIntegrationTest, UiChildRelinkRetainsCommentIdentity) {
+    input->ui_mode = true;
+    const char* tags[] = {"#comment", "!--", "!DOCTYPE"};
+    for (const char* tag : tags) {
+        MarkBuilder builder(input);
+        Item comment_item = builder.element(tag).child(builder.createStringItem("original")).final();
+        Item span_item = builder.element("span").final();
+        Item root_item = builder.element("div").child(comment_item).child(span_item).final();
+        input->root = root_item;
+        DomElement* root = build_dom_tree_from_element(root_item.element, doc, nullptr);
+        ASSERT_NE(root, nullptr);
+        DomNode* original = root->first_child;
+        ASSERT_NE(original, nullptr);
+        ASSERT_TRUE(original->is_comment());
+        DomNode* span = original->next_sibling;
+        ASSERT_NE(span, nullptr);
+
+        // a sibling edit must preserve the comment wrapper and its generation (D4.5.1v4).
+        MarkEditor editor(input, EDIT_MODE_INLINE);
+        Item prefix = editor.builder()->createStringItem("prefix");
+        ASSERT_EQ(editor.dom_insert_child(root_item, 0, prefix).element, root_item.element);
+        ASSERT_TRUE(root->first_child->is_text());
+        EXPECT_EQ(root->first_child->next_sibling, original);
+        EXPECT_EQ(original->next_sibling, span);
+        EXPECT_EQ(span->next_sibling, nullptr);
+        ASSERT_TRUE(dom_text_remove(root->first_child->as_text()));
+        ASSERT_TRUE(dom_comment_remove(original->as_comment()));
+        EXPECT_EQ(root->first_child, span);
+        EXPECT_EQ(root->last_child, span);
+        EXPECT_EQ(root_item.element->length, 1);
+
+        Item inserted = builder.element(tag).child(builder.createStringItem("inserted")).final();
+        ASSERT_EQ(editor.dom_insert_child(root_item, 0, inserted).element, root_item.element);
+        ASSERT_TRUE(root->first_child->is_comment());
+        EXPECT_EQ(root->first_child->as_comment()->native_element, inserted.element);
+        EXPECT_EQ(root->first_child->next_sibling, span);
+        ASSERT_TRUE(dom_comment_remove(root->first_child->as_comment()));
+        EXPECT_EQ(root->first_child, span);
+        EXPECT_EQ(root->last_child, span);
+        DomComment* appended = root->append_comment("appended");
+        ASSERT_NE(appended, nullptr);
+        EXPECT_EQ(span->next_sibling, appended);
+        EXPECT_EQ(root->last_child, appended);
+        EXPECT_EQ(appended->next_sibling, nullptr);
+        ASSERT_TRUE(dom_comment_remove(appended));
+        EXPECT_EQ(root->last_child, span);
+    }
 }
 
 TEST_F(DomIntegrationTest, CRUD_EmptyToFull_FullToEmpty) {

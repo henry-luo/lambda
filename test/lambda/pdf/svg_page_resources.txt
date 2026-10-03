@@ -1,0 +1,1 @@
+{ first_clip: true, second_clip: true, separate: true, page0: true, page1: true, pattern: true, no_unscoped: true}

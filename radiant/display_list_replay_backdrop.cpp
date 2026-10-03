@@ -97,8 +97,9 @@ void dl_replay_backdrop_composite_opacity(DisplayReplayBackdropStack* stack,
     int by = region.y;
     int bw = region.w;
     int bh = region.h;
-    if (opacity->premultiplied_source && opacity->opacity >= 0.999f) {
-        render_composite_source_over_premul(surface, backdrop, bx, by, bw, bh);
+    if (opacity->premultiplied_source) {
+        render_composite_source_over_premul(surface, backdrop, bx, by, bw, bh,
+            clamp_byte_round(clamp_unit(opacity->opacity) * 255.0f));
     } else {
         render_composite_opacity(surface, backdrop, bx, by, bw, bh,
                                  opacity->opacity);

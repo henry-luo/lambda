@@ -588,7 +588,11 @@ static Item parse_value(InputContext& ctx, const char **mark, int depth) {
         case '<':
             return mark_item_from_pointer(parse_element(ctx, mark, depth + 1));
         case '"':
-            return {.item = s2it(parse_string(ctx, mark))};
+            {
+                // s2it evaluates its argument twice; parse before boxing to advance only once.
+                String* str = parse_string(ctx, mark);
+                return {.item = s2it(str)};
+            }
         case '\'':
             {
                 String* str = parse_symbol(ctx, mark);

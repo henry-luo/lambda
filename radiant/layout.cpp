@@ -20,6 +20,7 @@ extern "C" {
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/dom/dom_observers.h"
+#include "../lambda/dom/dom.h"
 
 double g_style_resolve_time = 0;
 
@@ -293,7 +294,7 @@ static void layout_reresolve_ua_em_margins(DomElement* dom_elem, float font_size
     }
 }
 
-static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
+float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
     float value = x_axis ? elem->x : elem->y;
 
@@ -318,7 +319,7 @@ static float layout_scroll_document_coord(DomElement* elem, bool x_axis) {
     return value;
 }
 
-static float layout_scrollport_start(DomElement* elem, bool x_axis) {
+float layout_scrollport_start(DomElement* elem, bool x_axis) {
     if (!elem) return 0.0f;
     float value = layout_scroll_document_coord(elem, x_axis);
     if (elem->bound && elem->boundary_mut()->border) {
@@ -354,6 +355,67 @@ static float layout_scroll_aligned_position(float target_start, float target_siz
                                           current_position, viewport_size);
 }
 
+float layout_scroll_spacing_used(LayoutContext* lycon, DomElement* owner,
+                                 const ScrollSpacingValue& spacing,
+                                 float scrollport_size) {
+    if (spacing.expression && lycon && owner) {
+        View* saved_view = lycon->view;
+        DomNode* saved_element = lycon->elmt;
+        FontProp* saved_font = lycon->font.style;
+        float saved_font_size = lycon->font.current_font_size;
+        float saved_base = lycon->scroll_percentage_base;
+        FontProp owner_font = *owner->fontp();
+        lycon->view = lam::up(static_cast<View*>(owner));
+        lycon->elmt = lam::up(owner);
+        lycon->font.style = lam::up(&owner_font);
+        lycon->font.current_font_size = owner_font.font_size;
+        lycon->scroll_percentage_base = scrollport_size;
+        float resolved = resolve_length_value(
+            lycon, CSS_PROPERTY_SCROLL_PADDING, spacing.expression);
+        lycon->scroll_percentage_base = saved_base;
+        lycon->font.current_font_size = saved_font_size;
+        lycon->font.style = lam::up(saved_font);
+        lycon->elmt = lam::up(saved_element);
+        lycon->view = lam::up(saved_view);
+        return isfinite(resolved) && resolved >= 0.0f ? resolved : 0.0f;
+    }
+    return spacing.pixels + spacing.percent * scrollport_size;
+}
+
+static float layout_scroll_into_view_axis(LayoutContext* lycon,
+                                          DomElement* scrollport_owner,
+                                          float target_start, float target_size,
+                                          float current_position, float scrollport_size,
+                                          const ScrollProp* target_style,
+                                          const ScrollProp* scrollport_style,
+                                          bool horizontal, DomScrollAlign align,
+                                          bool center, bool if_needed) {
+    int start_side = horizontal ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_TOP;
+    int end_side = horizontal ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_BOTTOM;
+    float margin_start = target_style->scroll_margin[start_side].pixels;
+    float margin_end = target_style->scroll_margin[end_side].pixels;
+    float padding_start = layout_scroll_spacing_used(lycon, scrollport_owner,
+        scrollport_style->scroll_padding[start_side], scrollport_size);
+    float padding_end = layout_scroll_spacing_used(lycon, scrollport_owner,
+        scrollport_style->scroll_padding[end_side], scrollport_size);
+    // Scroll Snap 1 uses the expanded target area and the inset optimal view
+    // region for scrollIntoView, even when snapping itself is disabled.
+    float expanded_start = target_start - margin_start;
+    float expanded_size = target_size + margin_start + margin_end;
+    float optimal_size = max(0.0f, scrollport_size - padding_start - padding_end);
+    float optimal_current = current_position + padding_start;
+    if (if_needed) {
+        float nearest = layout_scroll_nearest_position(
+            expanded_start, expanded_size, optimal_current, optimal_size);
+        if (!center || nearest == optimal_current) return nearest - padding_start;
+    }
+    if (center) {
+        return expanded_start + (expanded_size - optimal_size) * 0.5f - padding_start;
+    }
+    return layout_scroll_aligned_position(expanded_start, expanded_size,
+        optimal_current, optimal_size, align) - padding_start;
+}
+
 static DomElement* layout_nearest_scroll_container(DomElement* target,
                                                    DomElement* root) {
     if (!target) return nullptr;
@@ -375,16 +437,25 @@ static DomElement* layout_nearest_scroll_container(DomElement* target,
     return nullptr;
 }
 
-static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
+static bool layout_scroll_request_is_smooth(DomScrollBehavior behavior,
+                                             DomElement* scrollport) {
+    return behavior == DOM_SCROLL_BEHAVIOR_SMOOTH ||
+        (behavior == DOM_SCROLL_BEHAVIOR_AUTO && scrollport &&
+         scrollport->scroll()->scroll_behavior == CSS_VALUE_SMOOTH);
+}
+
+static bool layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
                                                     DomDocument* doc,
                                                     ViewBlock* root_block) {
-    if (!lycon || !doc || !root_block || !doc->pending_scroll_into_view_target) return;
+    if (!lycon || !doc || !root_block || !doc->pending_scroll_into_view_target)
+        return false;
 
     DomElement* target = doc->pending_scroll_into_view_target;
     bool center = doc->pending_scroll_into_view_center;
     bool if_needed = doc->pending_scroll_into_view_if_needed;
     DomScrollAlign block_align = doc->pending_scroll_into_view_block;
     DomScrollAlign inline_align = doc->pending_scroll_into_view_inline;
+    DomScrollBehavior behavior = doc->pending_scroll_into_view_behavior;
     DomNodeRef target_ref = {(DomNode*)target,
                              doc->pending_scroll_into_view_target_id};
     doc->pending_scroll_into_view_target = nullptr;
@@ -393,16 +464,18 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
     doc->pending_scroll_into_view_if_needed = false;
     doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
     doc->pending_scroll_into_view_inline = DOM_SCROLL_ALIGN_NEAREST;
+    doc->pending_scroll_into_view_behavior = DOM_SCROLL_BEHAVIOR_AUTO;
 
     // A zero-area inline has no scrollable target rectangle. In particular,
     // focusable empty spans must not reset their ancestor's current scroll.
     if (if_needed && (target->width <= 0.0f || target->height <= 0.0f)) {
         dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
-        return;
+        return false;
     }
 
     float target_x = layout_scroll_document_coord(target, true);
     float target_y = layout_scroll_document_coord(target, false);
+    const ScrollProp* target_scroll_style = target->scroll();
     DomElement* root_elem = lam::dom_require_element(static_cast<View*>(root_block));
     // Layout coordinates omit ancestor scroll offsets. Subtract each applied
     // offset before aligning the target in the next outer scrollport.
@@ -411,8 +484,6 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
          scroll_container = layout_nearest_scroll_container(scroll_container, root_elem)) {
         float local_x = target_x - layout_scrollport_start(scroll_container, true);
         float local_y = target_y - layout_scrollport_start(scroll_container, false);
-        float scroll_x = local_x;
-        float scroll_y = local_y;
         float old_scroll_x = 0.0f;
         float old_scroll_y = 0.0f;
         ViewBlock* scroll_block = lam::view_require_block(
@@ -424,46 +495,58 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
         scroll_state_get_position_for_view(doc->state,
             static_cast<View*>(scroll_container), scroll_container->scroll()->pane,
             &old_scroll_x, &old_scroll_y, nullptr, nullptr);
-        if (if_needed) {
-            float nearest_x = layout_scroll_nearest_position(
-                local_x, target->width, old_scroll_x, scrollport_width);
-            float nearest_y = layout_scroll_nearest_position(
-                local_y, target->height, old_scroll_y, scrollport_height);
-            scroll_x = center && nearest_x != old_scroll_x
-                ? local_x + (target->width - scrollport_width) * 0.5f : nearest_x;
-            scroll_y = center && nearest_y != old_scroll_y
-                ? local_y + (target->height - scrollport_height) * 0.5f : nearest_y;
-        } else if (center) {
-            scroll_x += (target->width - scrollport_width) * 0.5f;
-            scroll_y += (target->height - scrollport_height) * 0.5f;
-        } else {
-            scroll_x = layout_scroll_aligned_position(
-                local_x, target->width, old_scroll_x, scrollport_width, inline_align);
-            scroll_y = layout_scroll_aligned_position(
-                local_y, target->height, old_scroll_y, scrollport_height, block_align);
-        }
+        float scroll_x = layout_scroll_into_view_axis(lycon, scroll_container,
+            local_x, target->width,
+            old_scroll_x, scrollport_width, target_scroll_style,
+            scroll_container->scroll(), true, inline_align, center, if_needed);
+        float scroll_y = layout_scroll_into_view_axis(lycon, scroll_container,
+            local_y, target->height,
+            old_scroll_y, scrollport_height, target_scroll_style,
+            scroll_container->scroll(), false, block_align, center, if_needed);
         if (scroll_x < 0.0f) scroll_x = 0.0f;
         if (scroll_y < 0.0f) scroll_y = 0.0f;
+        scroll_snap_adjust_position(scroll_block, &scroll_x, &scroll_y, true);
+        DocState* state = doc->state;
+        bool smooth = state && state->lifecycle == DOC_LIFECYCLE_COMMITTED &&
+            layout_scroll_request_is_smooth(behavior, scroll_container) &&
+            scroll_state_begin_smooth_for_view(state,
+                static_cast<View*>(scroll_container), scroll_container->scroll()->pane,
+                scroll_x, scroll_y);
         // The script-time provisional view pool has no persistent DocState.
         // Keep the DOM request until the final layout has a state-backed pane.
-        scroll_container->set_pending_scroll_x(scroll_x);
-        scroll_container->set_pending_scroll_y(scroll_y);
-        scroll_container->set_has_pending_element_scroll_x(true);
-        scroll_container->set_has_pending_element_scroll_y(true);
-        DocState* state = doc->state;
-        scroll_state_set_position_for_view(state, static_cast<View*>(scroll_container),
-            scroll_container->scroll()->pane, scroll_x, scroll_y, false);
+        scroll_container->set_has_pending_element_scroll_x(false);
+        scroll_container->set_has_pending_element_scroll_y(false);
+        if (!smooth) {
+            scroll_container->set_pending_scroll_x(scroll_x);
+            scroll_container->set_pending_scroll_y(scroll_y);
+            scroll_container->set_has_pending_element_scroll_x(true);
+            scroll_container->set_has_pending_element_scroll_y(true);
+            scroll_state_cancel_smooth_for_view(state,
+                static_cast<View*>(scroll_container));
+            scroll_state_set_position_for_view(state, static_cast<View*>(scroll_container),
+                scroll_container->scroll()->pane, scroll_x, scroll_y, false);
+        }
         dom_notify_scroll_position_change(scroll_container, old_scroll_x, old_scroll_y);
         float applied_x = 0.0f;
         float applied_y = 0.0f;
-        scroll_state_get_position_for_view(state, static_cast<View*>(scroll_container),
-            scroll_container->scroll()->pane, &applied_x, &applied_y, nullptr, nullptr);
+        if (smooth) {
+            float min_x = 0.0f, max_x = 0.0f, min_y = 0.0f, max_y = 0.0f;
+            scroll_state_get_range_for_view(state, static_cast<View*>(scroll_container),
+                scroll_container->scroll()->pane,
+                &min_x, &max_x, &min_y, &max_y);
+            applied_x = max(min_x, min(max_x, scroll_x));
+            applied_y = max(min_y, min(max_y, scroll_y));
+        } else {
+            scroll_state_get_position_for_view(state, static_cast<View*>(scroll_container),
+                scroll_container->scroll()->pane, &applied_x, &applied_y, nullptr, nullptr);
+        }
         target_x -= applied_x;
         target_y -= applied_y;
         log_info("layout_scrollIntoView: applied element scroll (%.1f, %.1f) on <%s>",
                  applied_x, applied_y,
                  scroll_container->tag_name ? scroll_container->tag_name : "?");
     }
+    bool smooth_viewport = false;
     {
         float old_viewport_x = doc->pending_viewport_scroll_x;
         float old_viewport_y = doc->pending_viewport_scroll_y;
@@ -479,34 +562,37 @@ static void layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
         float viewport_height = lycon->height;
         target_x -= layout_scrollport_start(root_elem, true);
         target_y -= layout_scrollport_start(root_elem, false);
-        if (if_needed) {
-            float nearest_x = layout_scroll_nearest_position(
-                target_x, target->width, current_scroll_x, viewport_width);
-            float nearest_y = layout_scroll_nearest_position(
-                target_y, target->height, current_scroll_y, viewport_height);
-            target_x = center && nearest_x != current_scroll_x
-                ? target_x + (target->width - viewport_width) * 0.5f : nearest_x;
-            target_y = center && nearest_y != current_scroll_y
-                ? target_y + (target->height - viewport_height) * 0.5f : nearest_y;
-        } else if (center) {
-            // HTML focus() uses center alignment on both viewport axes.
-            target_x += (target->width - viewport_width) * 0.5f;
-            target_y += (target->height - viewport_height) * 0.5f;
-        } else {
-            target_x = layout_scroll_aligned_position(
-                target_x, target->width, current_scroll_x, viewport_width, inline_align);
-            target_y = layout_scroll_aligned_position(
-                target_y, target->height, current_scroll_y, viewport_height, block_align);
-        }
+        target_x = layout_scroll_into_view_axis(lycon, root_elem,
+            target_x, target->width,
+            current_scroll_x, viewport_width, target_scroll_style, root_elem->scroll(),
+            true, inline_align, center, if_needed);
+        target_y = layout_scroll_into_view_axis(lycon, root_elem,
+            target_y, target->height,
+            current_scroll_y, viewport_height, target_scroll_style, root_elem->scroll(),
+            false, block_align, center, if_needed);
         if (target_x < 0.0f) target_x = 0.0f;
         if (target_y < 0.0f) target_y = 0.0f;
-        doc->pending_viewport_scroll_x = target_x;
-        doc->pending_viewport_scroll_y = target_y;
+        scroll_snap_adjust_position(root_block, &target_x, &target_y, true);
+        DocState* state = doc->state;
+        smooth_viewport = state && state->lifecycle == DOC_LIFECYCLE_COMMITTED &&
+            layout_scroll_request_is_smooth(behavior, root_elem) &&
+            root_block->scroller && root_block->scroll()->pane &&
+            scroll_state_begin_smooth_for_view(state, static_cast<View*>(root_block),
+                root_block->scroll()->pane, target_x, target_y);
+        if (smooth_viewport) {
+            doc->pending_viewport_scroll_x = current_scroll_x;
+            doc->pending_viewport_scroll_y = current_scroll_y;
+        } else {
+            scroll_state_cancel_smooth_for_view(state, static_cast<View*>(root_block));
+            doc->pending_viewport_scroll_x = target_x;
+            doc->pending_viewport_scroll_y = target_y;
+        }
         dom_notify_scroll_position_change(root_elem, old_viewport_x, old_viewport_y);
         log_info("layout_scrollIntoView: queued viewport scroll (%.1f, %.1f)",
                  target_x, target_y);
     }
     dom_node_unpin(doc, target_ref, DOM_NODE_PIN_RECONCILE);
+    return smooth_viewport;
 }
 
 static bool root_child_margins_are_self_collapsing(ViewBlock* block) {
@@ -627,6 +713,28 @@ void layout_reset_color_background_style_cache(LayoutContext* lycon, ViewSpan* v
 static void reset_non_inherited_style_cache(LayoutContext* lycon, ViewSpan* view) {
     if (!lycon || !view) return;
 
+    if (view->scroller) {
+        // Retained recascade must discard removed overflow declarations before
+        // HTML defaults and the current logical/physical cascade are applied.
+        view->scroller->overflow_x = SCROLL_PROP_DEFAULT.overflow_x;
+        view->scroller->overflow_y = SCROLL_PROP_DEFAULT.overflow_y;
+        view->scroller->overscroll_x = SCROLL_PROP_DEFAULT.overscroll_x;
+        view->scroller->overscroll_y = SCROLL_PROP_DEFAULT.overscroll_y;
+        view->scroller->scroll_behavior = SCROLL_PROP_DEFAULT.scroll_behavior;
+        view->scroller->overflow_clip_box = SCROLL_PROP_DEFAULT.overflow_clip_box;
+        view->scroller->overflow_clip_margin = SCROLL_PROP_DEFAULT.overflow_clip_margin;
+        view->scroller->snap_axis = SCROLL_PROP_DEFAULT.snap_axis;
+        view->scroller->snap_align_block = SCROLL_PROP_DEFAULT.snap_align_block;
+        view->scroller->snap_align_inline = SCROLL_PROP_DEFAULT.snap_align_inline;
+        view->scroller->snap_mandatory = SCROLL_PROP_DEFAULT.snap_mandatory;
+        view->scroller->snap_strictness_explicit =
+            SCROLL_PROP_DEFAULT.snap_strictness_explicit;
+        memcpy(view->scroller->scroll_margin, SCROLL_PROP_DEFAULT.scroll_margin,
+               sizeof(view->scroller->scroll_margin));
+        memcpy(view->scroller->scroll_padding, SCROLL_PROP_DEFAULT.scroll_padding,
+               sizeof(view->scroller->scroll_padding));
+    }
+
     if (view->position) {
         // Removed positioning declarations otherwise survive retained recascade
         // and leave a now-static table cell excluded from normal row sizing.
@@ -665,7 +773,8 @@ CssEnum layout_element_css_all_reset_keyword(DomElement* element) {
     if (!declaration || !declaration->value ||
         declaration->value->type != CSS_VALUE_TYPE_KEYWORD) return CSS_VALUE__UNDEF;
     CssEnum keyword = declaration->value->data.keyword;
-    return keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_UNSET
+    return keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_UNSET ||
+        keyword == CSS_VALUE_INHERIT
         ? keyword : CSS_VALUE__UNDEF;
 }
 
@@ -673,7 +782,12 @@ static void reset_css_all_visual_style(LayoutContext* lycon, ViewSpan* view) {
     if (!lycon || !view) return;
 
     if (view->blk) {
+        // CSS Cascade excludes direction and unicode-bidi from `all`.
+        CssEnum direction = view->block()->direction;
+        CssEnum unicode_bidi = view->block()->unicode_bidi;
         memcpy(view->blk, &BLOCK_PROP_DEFAULT, sizeof(BlockProp));
+        view->blk->direction = direction;
+        view->blk->unicode_bidi = unicode_bidi;
     }
     if (view->font) {
         font_prop_release_handle(view->font);
@@ -1810,6 +1924,7 @@ void layout_setup_block_font_metrics(LayoutContext* lycon) {
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
+
 }
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
@@ -1867,7 +1982,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
             apply_element_default_style(lycon, dom_elem);
             if (layout_element_css_all_reset_keyword(dom_elem) != CSS_VALUE__UNDEF) {
                 // CSS Cascade: HTML defaults remain available for control semantics,
-                // while all:initial/unset resets the visual property state.
+                // while a winning all keyword resets the visual property state.
                 reset_css_all_visual_style(lycon,
                     lam::view_require_element(lycon->view));
             }
@@ -4519,6 +4634,14 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
 
+    if (elmt->is_element() && elmt->tag() == MARKUP_NAME_SVG && dom_element_is_svg(elmt->as_element())) {
+        // SVG2 §12.2: only foreignObject descendants establish CSS formatting contexts.
+        html->width = html->content_width = physical_width;
+        html->height = html->content_height = physical_height;
+        layout_svg_foreign_objects(lycon, elmt->as_element());
+        return;
+    }
+
     DomNode* body_node = nullptr;
     // CSS 2.1 §10.3, §9.3: Root element explicit sizing and positioning.
     bool root_is_abspos = layout_block_is_out_of_flow_positioned(html);
@@ -5256,12 +5379,17 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
         if (has_scroll_into_view_target) {
             layout_apply_sticky_positions(&lycon, static_cast<View*>(root_block));
         }
-        layout_resolve_pending_scroll_into_view(&lycon, doc, root_block);
+        bool smooth_viewport_scroll = layout_resolve_pending_scroll_into_view(
+            &lycon, doc, root_block);
         if (root_block->scroller && root_block->scroll_mut()->pane) {
             ScrollPane* pane = root_block->scroll()->pane;
             float target_x = doc->pending_viewport_scroll_x;
             float target_y = doc->pending_viewport_scroll_y;
             DocState* state = (DocState*)doc->state;
+            if (!smooth_viewport_scroll) {
+                scroll_snap_adjust_position(root_block, &target_x, &target_y,
+                                            has_scroll_into_view_target);
+            }
             scroll_state_set_position_for_view(state, static_cast<View*>(root_block), pane, target_x, target_y, true);
             scroll_state_get_position_for_view(state, (View*)root_block, pane,
                                                &target_x, &target_y, NULL, NULL);

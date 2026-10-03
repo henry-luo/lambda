@@ -1,9 +1,36 @@
 #include "selector_matcher.hpp"
+#include "../../core/well_known_markup_names.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/arraylist.h"
+#include "../../../lib/mem.h"
 #include "../../../lib/str.h"
+#include "../../../lib/url.h"
+#include <limits.h>
 #include <string.h>
 #include <stdlib.h>
+
+// CSS-only targets do not host a custom-element registry.
+extern "C" __attribute__((weak)) bool dom_css_custom_element_defined(const char* /*name*/) {
+    return false;
+}
+extern "C" __attribute__((weak)) bool dom_css_element_is_default(void* /*element*/) {
+    return false;
+}
+extern "C" __attribute__((weak)) bool dom_css_element_is_indeterminate(void* /*element*/) {
+    return false;
+}
+extern "C" __attribute__((weak)) bool dom_css_element_matches_range(
+        void* /*element*/, bool /*out_of_range*/) {
+    return false;
+}
+extern "C" __attribute__((weak)) int dom_css_element_matches_validity(
+        void* /*element*/, bool /*invalid*/, bool /*user*/) {
+    return -1;
+}
+extern "C" __attribute__((weak)) int dom_css_element_placeholder_shown(
+        void* /*element*/) {
+    return -1;
+}
 
 // ============================================================================
 // Helper Functions
@@ -193,6 +220,10 @@ SelectorEntry* selector_matcher_get_entry(SelectorMatcher* matcher, CssSimpleSel
 // Primary Matching Functions
 // ============================================================================
 
+static bool selector_matcher_matches_column(SelectorMatcher* matcher,
+    DomElement* cell, CssSelector* selector, int compound_index,
+    CssCompoundSelector* left_compound);
+
 static bool selector_matcher_matches_complex_at(SelectorMatcher* matcher,
                                                 CssSelector* selector,
                                                 int compound_index,
@@ -238,9 +269,179 @@ static bool selector_matcher_matches_complex_at(SelectorMatcher* matcher,
             }
             return false;
         }
+        case CSS_COMBINATOR_COLUMN:
+            return selector_matcher_matches_column(matcher, element, selector,
+                compound_index - 1, nullptr);
         default:
             return false;
     }
+}
+
+struct SelectorColumnOccupation {
+    int first;
+    int end;
+    int until_row;
+};
+
+static int selector_html_table_span(DomElement* element, const char* attribute,
+                                    int maximum, bool allow_zero = false) {
+    const char* text = element->get_attribute(attribute);
+    if (!text || !*text) return 1;
+    char* end = nullptr;
+    long value = strtol(text, &end, 10);
+    if (end == text || *end || value < 0 || (!allow_zero && value == 0)) return 1;
+    return value > maximum ? maximum : (int)value;
+}
+
+static void selector_column_occupations_clear(ArrayList* occupations) {
+    if (!occupations) return;
+    for (int i = 0; i < occupations->length; i++)
+        mem_free(occupations->data[i]);
+    occupations->length = 0;
+}
+
+static bool selector_table_cell_columns(DomElement* table, DomElement* cell,
+                                        int* first, int* end) {
+    ArrayList* occupations = arraylist_new(4);
+    if (!occupations) return false;
+    DomNode* row_group = nullptr;
+    int row_index = 0;
+    bool found = false;
+    // HTML table membership is structural, so the result is available before layout.
+    for (DomNode* node = table->first_child; node && !found;) {
+        DomNode* next = node->next_sibling;
+        DomElement* element = node->is_element() ? node->as_element() : nullptr;
+        bool nested_table = element && element->tag() == MARKUP_NAME_TABLE;
+        if (element && element->tag() == MARKUP_NAME_TR) {
+            if (row_group != node->parent) {
+                // HTML rowspans stop at their row-group boundary.
+                selector_column_occupations_clear(occupations);
+                row_group = node->parent;
+                row_index = 0;
+            }
+            int active_count = 0;
+            for (int i = 0; i < occupations->length; i++) {
+                SelectorColumnOccupation* span =
+                    (SelectorColumnOccupation*)occupations->data[i];
+                if (span->until_row <= row_index) mem_free(span);
+                else occupations->data[active_count++] = span;
+            }
+            occupations->length = active_count;
+            int column = 0;
+            for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+                if (!child->is_element()) continue;
+                DomElement* candidate = child->as_element();
+                if (candidate->tag() != MARKUP_NAME_TD &&
+                    candidate->tag() != MARKUP_NAME_TH) continue;
+                bool occupied = true;
+                while (occupied) {
+                    occupied = false;
+                    for (int i = 0; i < occupations->length; i++) {
+                        SelectorColumnOccupation* span =
+                            (SelectorColumnOccupation*)occupations->data[i];
+                        if (row_index < span->until_row && column >= span->first &&
+                            column < span->end) {
+                            column = span->end;
+                            occupied = true;
+                            break;
+                        }
+                    }
+                }
+                int colspan = selector_html_table_span(candidate, "colspan", 1000);
+                if (candidate == cell) {
+                    *first = column;
+                    *end = column + colspan;
+                    found = true;
+                    break;
+                }
+                int rowspan = selector_html_table_span(candidate, "rowspan", 65534, true);
+                if (rowspan != 1) {
+                    SelectorColumnOccupation* span = (SelectorColumnOccupation*)
+                        mem_alloc(sizeof(SelectorColumnOccupation), MEM_CAT_TEMP);
+                    if (!span) break;
+                    span->first = column;
+                    span->end = column + colspan;
+                    span->until_row = rowspan == 0 || row_index > INT_MAX - rowspan
+                        ? INT_MAX : row_index + rowspan;
+                    if (!arraylist_append(occupations, span)) {
+                        mem_free(span);
+                        break;
+                    }
+                }
+                column += colspan;
+            }
+            row_index++;
+        }
+        if (!nested_table && element && element->first_child) {
+            node = element->first_child;
+            continue;
+        }
+        while (!next && node->parent != table) {
+            node = node->parent;
+            next = node->next_sibling;
+        }
+        node = next;
+    }
+    selector_column_occupations_clear(occupations);
+    arraylist_free(occupations);
+    return found;
+}
+
+static bool selector_column_left_matches(SelectorMatcher* matcher,
+    DomElement* column, CssSelector* selector, int compound_index,
+    CssCompoundSelector* left_compound) {
+    return selector
+        ? selector_matcher_matches_complex_at(matcher, selector, compound_index, column)
+        : selector_matcher_matches_compound(matcher, left_compound, column);
+}
+
+static bool selector_matcher_matches_column(SelectorMatcher* matcher,
+    DomElement* cell, CssSelector* selector, int compound_index,
+    CssCompoundSelector* left_compound) {
+    if (!cell || (cell->tag() != MARKUP_NAME_TD && cell->tag() != MARKUP_NAME_TH))
+        return false;
+    DomElement* table = nullptr;
+    for (DomNode* ancestor = cell->parent; ancestor; ancestor = ancestor->parent) {
+        if (ancestor->is_element() && ancestor->as_element()->tag() == MARKUP_NAME_TABLE) {
+            table = ancestor->as_element();
+            break;
+        }
+    }
+    if (!table) return false;
+    int cell_first = 0, cell_end = 0;
+    if (!selector_table_cell_columns(table, cell, &cell_first, &cell_end)) return false;
+    int column = 0;
+    for (DomNode* node = table->first_child; node; node = node->next_sibling) {
+        if (!node->is_element()) continue;
+        DomElement* group = node->as_element();
+        if (group->tag() == MARKUP_NAME_COL) {
+            int end = column + selector_html_table_span(group, "span", 1000);
+            if (column < cell_end && end > cell_first &&
+                selector_column_left_matches(matcher, group, selector,
+                    compound_index, left_compound)) return true;
+            column = end;
+        } else if (group->tag() == MARKUP_NAME_COLGROUP) {
+            int start = column;
+            bool has_columns = false;
+            for (DomNode* child = group->first_child; child; child = child->next_sibling) {
+                if (!child->is_element() || child->as_element()->tag() != MARKUP_NAME_COL)
+                    continue;
+                has_columns = true;
+                DomElement* col = child->as_element();
+                int end = column + selector_html_table_span(col, "span", 1000);
+                if (column < cell_end && end > cell_first &&
+                    selector_column_left_matches(matcher, col, selector,
+                        compound_index, left_compound)) return true;
+                column = end;
+            }
+            if (!has_columns)
+                column += selector_html_table_span(group, "span", 1000);
+            if (start < cell_end && column > cell_first &&
+                selector_column_left_matches(matcher, group, selector,
+                    compound_index, left_compound)) return true;
+        }
+    }
+    return false;
 }
 
 bool selector_matcher_matches(SelectorMatcher* matcher,
@@ -489,6 +690,68 @@ static bool selector_matcher_matches_slotted(SelectorMatcher* matcher,
         element);
 }
 
+static bool selector_matcher_matches_nth_filtered(SelectorMatcher* matcher,
+        const CssNthFormula* formula, DomElement* element, bool from_end,
+        bool of_type, CssSelector** filter, size_t filter_count);
+
+static bool selector_matcher_type_namespace_matches(
+        const CssSimpleSelector* selector, DomElement* element) {
+    if (selector->namespace_prefix && selector->namespace_prefix[0] &&
+        strcmp(selector->namespace_prefix, "*") != 0 &&
+        !selector->namespace_url) return false;
+    return !selector->namespace_url ||
+        strcmp(dom_element_namespace_uri(element), selector->namespace_url) == 0;
+}
+
+static bool selector_matcher_matches_attribute_value(
+    SelectorMatcher* matcher, const char* element_value, bool exists,
+    const char* attr_value, CssSelectorType attr_type, bool case_insensitive,
+    bool case_sensitive);
+
+static bool selector_matcher_matches_namespaced_attribute(
+    SelectorMatcher* matcher, CssSimpleSelector* selector, DomElement* element) {
+    const char* wanted_uri = selector->namespace_url;
+    if (selector->namespace_prefix && selector->namespace_prefix[0] &&
+        strcmp(selector->namespace_prefix, "*") != 0 && !wanted_uri) return false;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
+         attr; attr = attr->next) {
+        if (!attr->active ||
+            (wanted_uri && strcmp(attr->namespace_uri, wanted_uri) != 0) ||
+            strcmp(attr->local_name, selector->attribute.name) != 0) continue;
+        if (selector_matcher_matches_attribute_value(matcher, attr->value, true,
+                selector->attribute.value, selector->type,
+                selector->attribute.case_insensitive,
+                selector->attribute.case_sensitive)) return true;
+    }
+    if (wanted_uri && !*wanted_uri &&
+        !dom_element_namespaced_attributes(element)) {
+        const char* name = selector->attribute.name;
+        return selector_matcher_matches_attribute_value(matcher,
+            element->get_attribute(name), element->has_attribute(name),
+            selector->attribute.value, selector->type,
+            selector->attribute.case_insensitive,
+            selector->attribute.case_sensitive);
+    }
+    int count = 0;
+    const char** names = element->attribute_names(&count);
+    if (!names) return false;
+    bool html = strcmp(dom_element_namespace_uri(element),
+        "http://www.w3.org/1999/xhtml") == 0;
+    for (int i = 0; i < count; i++) {
+        const char* local = nullptr;
+        const char* uri = dom_element_attribute_namespace_uri(element, names[i], &local);
+        if (!uri || (wanted_uri && strcmp(uri, wanted_uri) != 0)) continue;
+        if (html ? str_icmp_cstr(local, selector->attribute.name) != 0
+                 : strcmp(local, selector->attribute.name) != 0) continue;
+        if (selector_matcher_matches_attribute_value(matcher,
+                element->get_attribute(names[i]), element->has_attribute(names[i]),
+                selector->attribute.value, selector->type,
+                selector->attribute.case_insensitive,
+                selector->attribute.case_sensitive)) return true;
+    }
+    return false;
+}
+
 bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                                      CssSimpleSelector* simple_selector,
                                      DomElement* element) {
@@ -501,14 +764,20 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
     switch (simple_selector->type) {
         case CSS_SELECTOR_TYPE_ELEMENT:
             // Match element type
+            if (!selector_matcher_type_namespace_matches(simple_selector, element)) {
+                return false;
+            }
             if (simple_selector->value) {
                 // safety check for NULL or invalid tag_name
                 if (!element->tag_name || (uintptr_t)element->tag_name.get() < 0x1000) {
                     log_error("Invalid tag_name pointer in element: %p", element->tag_name);
                     return false;
                 }
-                // Use case-insensitive comparison for HTML element names (standard)
-                return str_icmp_cstr(element->tag_name, simple_selector->value) == 0;
+                // Prefixes identify namespaces; the type selector compares local names.
+                return strcmp(dom_element_namespace_uri(element),
+                    "http://www.w3.org/1999/xhtml") == 0
+                    ? str_icmp_cstr(element->local_name(), simple_selector->value) == 0
+                    : strcmp(element->local_name(), simple_selector->value) == 0;
             }
             return true; // No type specified matches any element
 
@@ -528,12 +797,12 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
             return element->id && strcmp(element->id, simple_selector->value) == 0;
 
         case CSS_SELECTOR_TYPE_UNIVERSAL:
-            // Universal selector matches everything
-            return true;
+            return selector_matcher_type_namespace_matches(simple_selector, element);
 
         case CSS_SELECTOR_ATTR_EXISTS:
             // Attribute exists
-            return element->has_attribute(simple_selector->attribute.name);
+            return selector_matcher_matches_namespaced_attribute(
+                matcher, simple_selector, element);
 
         case CSS_SELECTOR_ATTR_EXACT:
         case CSS_SELECTOR_ATTR_CONTAINS:
@@ -544,17 +813,8 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
         case CSS_SELECTOR_ATTR_CASE_INSENSITIVE:
         case CSS_SELECTOR_ATTR_CASE_SENSITIVE:
             {
-                // Use case insensitivity from selector or matcher configuration
-                bool case_insensitive = simple_selector->attribute.case_insensitive
-                    || !matcher->case_sensitive_attrs;
-                return selector_matcher_matches_attribute(
-                    matcher,
-                    simple_selector->attribute.name,
-                    simple_selector->attribute.value,
-                    simple_selector->type,
-                    case_insensitive,
-                    element
-                );
+                return selector_matcher_matches_namespaced_attribute(
+                    matcher, simple_selector, element);
             }
 
         // Pseudo-elements (::before, ::after, etc.) - always return true
@@ -567,10 +827,14 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
         case CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP:
         case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:
         case CSS_SELECTOR_PSEUDO_ELEMENT_MARKER:
-        case CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON:
             // Pseudo-elements are matched at a higher level (compound/selector matching)
             // Here we just return true to not block the match
             return true;
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON:
+            return element->tag_name &&
+                str_icmp_cstr(element->tag_name, "input") == 0 &&
+                element->get_attribute("type") &&
+                str_icmp_cstr(element->get_attribute("type"), "file") == 0;
 
         // Functional pseudo-classes: :not(), :is(), :where(), :has()
         case CSS_SELECTOR_PSEUDO_NOT:
@@ -596,15 +860,34 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
         case CSS_SELECTOR_PSEUDO_SLOTTED:
             return selector_matcher_matches_slotted(matcher, simple_selector, element);
 
+        case CSS_SELECTOR_PSEUDO_NTH_CHILD:
+        case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
+        case CSS_SELECTOR_PSEUDO_NTH_OF_TYPE:
+        case CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE: {
+            bool from_end = simple_selector->type == CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD ||
+                            simple_selector->type == CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
+            bool of_type = simple_selector->type == CSS_SELECTOR_PSEUDO_NTH_OF_TYPE ||
+                           simple_selector->type == CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
+            return selector_matcher_matches_nth_filtered(matcher,
+                &simple_selector->nth_formula, element, from_end, of_type,
+                simple_selector->function_selectors,
+                simple_selector->function_selector_count);
+        }
+
         case CSS_SELECTOR_PSEUDO_SCOPE:
             // Element query APIs must bind :scope to their receiver; jQuery
             // uses this form to evaluate relative selectors such as "> h3".
-            return matcher->scope_element == element;
+            return matcher->scope_element
+                ? matcher->scope_element == element
+                : element->doc && element->doc->root == element;
 
         // Other pseudo-classes
         default:
             if (simple_selector->type >= CSS_SELECTOR_PSEUDO_ROOT &&
-                simple_selector->type <= CSS_SELECTOR_PSEUDO_OUT_OF_RANGE) {
+                (simple_selector->type <= CSS_SELECTOR_PSEUDO_POPOVER_OPEN ||
+                 simple_selector->type == CSS_SELECTOR_PSEUDO_DEFINED ||
+                 simple_selector->type == CSS_SELECTOR_PSEUDO_USER_INVALID ||
+                 simple_selector->type == CSS_SELECTOR_PSEUDO_USER_VALID)) {
                 return selector_matcher_matches_pseudo_class(
                     matcher,
                     simple_selector->type,
@@ -641,6 +924,8 @@ static PseudoElementType get_pseudo_element_from_compound(CssCompoundSelector* c
                 return PSEUDO_ELEMENT_MARKER;
             case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:
                 return PSEUDO_ELEMENT_PLACEHOLDER;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON:
+                return PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
             default:
                 break;
         }
@@ -676,34 +961,29 @@ bool selector_matcher_matches_compound(SelectorMatcher* matcher,
 
     return true;
 }
-bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
-                                        const char* attr_name,
-                                        const char* attr_value,
-                                        CssSelectorType attr_type,
-                                        bool case_insensitive,
-                                        DomElement* element) {
-    if (!matcher || !attr_name || !element) {
-        return false;
-    }
-
+static bool selector_matcher_matches_attribute_value(
+    SelectorMatcher* matcher, const char* element_attr, bool exists,
+    const char* attr_value, CssSelectorType attr_type, bool case_insensitive,
+    bool case_sensitive) {
+    if (!matcher) return false;
     // For existence check (no value specified), use has_attribute
     // This handles the case where attribute exists but has empty value (stored as null)
     if (!attr_value || attr_type == CSS_SELECTOR_ATTR_EXISTS) {
-        return element->has_attribute(attr_name);
+        return exists;
     }
-
-    const char* element_attr = element->get_attribute(attr_name);
+    if (!exists) return false;
     if (!element_attr) {
         // Empty attributes may be stored without a value pointer; exact-empty
         // selectors must still distinguish them from absent attributes.
         if (attr_type == CSS_SELECTOR_ATTR_EXACT && attr_value[0] == '\0') {
-            return element->has_attribute(attr_name);
+            return true;
         }
         return false;
     }
 
     // Determine comparison function - respect both parameter AND matcher configuration
-    bool use_case_insensitive = case_insensitive || !matcher->case_sensitive_attrs;
+    bool use_case_insensitive = !case_sensitive &&
+        (case_insensitive || !matcher->case_sensitive_attrs);
     int (*compare_func)(const char*, const char*) = use_case_insensitive ? str_icmp_cstr : strcmp;
 
     switch (attr_type) {
@@ -789,9 +1069,93 @@ bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
     }
 }
 
+bool selector_matcher_matches_attribute(SelectorMatcher* matcher,
+                                        const char* attr_name,
+                                        const char* attr_value,
+                                        CssSelectorType attr_type,
+                                        bool case_insensitive,
+                                        DomElement* element) {
+    if (!matcher || !attr_name || !element) return false;
+    return selector_matcher_matches_attribute_value(matcher,
+        element->get_attribute(attr_name), element->has_attribute(attr_name),
+        attr_value, attr_type, case_insensitive, false);
+}
+
 // ============================================================================
 // Pseudo-Class Matching
 // ============================================================================
+
+static bool selector_matcher_matches_lang(const char* argument, DomElement* element) {
+    if (!argument || !element) return false;
+    const char* language = nullptr;
+    for (DomElement* current = element; current; current = current->parent_element()) {
+        language = current->get_attribute("lang");
+        if (!language) language = current->get_attribute("xml:lang");
+        if (language) break;
+    }
+    if (!language || !language[0]) return false;
+    size_t language_len = strlen(language);
+    for (const char* item = argument; *item;) {
+        const char* comma = strchr(item, ',');
+        const char* end = comma ? comma : item + strlen(item);
+        if (end > item + 1 &&
+            ((*item == '"' && end[-1] == '"') ||
+             (*item == '\'' && end[-1] == '\''))) {
+            item++;
+            end--;
+        }
+        size_t length = (size_t)(end - item);
+        if ((length == 1 && item[0] == '*') ||
+            (length > 0 && language_len >= length &&
+             str_ieq(language, length, item, length) &&
+             (language_len == length || language[length] == '-'))) return true;
+        item = comma ? comma + 1 : end;
+    }
+    return false;
+}
+
+static bool selector_matcher_matches_dir(const char* argument, DomElement* element) {
+    if (!argument || !element) return false;
+    bool want_rtl = str_icmp_cstr(argument, "rtl") == 0;
+    for (DomElement* current = element; current;
+         current = current->parent_element()) {
+        const char* dir = current->get_attribute("dir");
+        if (dir && str_icmp_cstr(dir, "rtl") == 0) return want_rtl;
+        if (dir && str_icmp_cstr(dir, "ltr") == 0) return !want_rtl;
+        bool auto_dir = dir && str_icmp_cstr(dir, "auto") == 0;
+        if (!dir && current->tag_name &&
+            str_icmp_cstr(current->tag_name, "bdi") == 0) auto_dir = true;
+        if (!auto_dir) continue;
+        for (DomNode* child = current->first_child; child;
+             child = child->next_sibling) {
+            int strong = dom_find_strong_direction(child, true, true);
+            if (strong != 0) return want_rtl ? strong > 0 : strong < 0;
+        }
+        return !want_rtl;
+    }
+    return !want_rtl;
+}
+
+static bool selector_matcher_matches_local_link(SelectorMatcher* matcher,
+                                                 DomElement* element) {
+    if (!selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_LINK) ||
+        !element->doc || !element->doc->url) return false;
+    const char* href = element->get_attribute("href");
+    if (!href) return false;
+    Url* target = url_parse_with_base(href, element->doc->url);
+    if (!target || !url_is_valid(target)) {
+        if (target) url_destroy(target);
+        return false;
+    }
+    String* target_page = url_serialize_without_fragment(target);
+    String* document_page = url_serialize_without_fragment(element->doc->url);
+    bool matches = target_page && document_page &&
+        string_eq(target_page, document_page);
+    url_free_string(target_page);
+    url_free_string(document_page);
+    url_destroy(target);
+    return matches;
+}
 
 bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
                                            CssSelectorType pseudo_type,
@@ -819,6 +1183,14 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_VISITED);
         case CSS_SELECTOR_PSEUDO_LINK:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_LINK);
+        case CSS_SELECTOR_PSEUDO_ANY_LINK:
+            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_LINK);
+        case CSS_SELECTOR_PSEUDO_LOCAL_LINK:
+            return selector_matcher_matches_local_link(matcher, element);
+        case CSS_SELECTOR_PSEUDO_LANG:
+            return selector_matcher_matches_lang(pseudo_arg, element);
+        case CSS_SELECTOR_PSEUDO_DIR:
+            return selector_matcher_matches_dir(pseudo_arg, element);
         case CSS_SELECTOR_PSEUDO_TARGET:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_TARGET);
 
@@ -840,18 +1212,51 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
             // :optional matches when NOT required
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_OPTIONAL);
         case CSS_SELECTOR_PSEUDO_VALID:
-            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_VALID);
-        case CSS_SELECTOR_PSEUDO_INVALID:
-            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_INVALID);
+        case CSS_SELECTOR_PSEUDO_INVALID: {
+            bool invalid = pseudo_type == CSS_SELECTOR_PSEUDO_INVALID;
+            int native_match = dom_css_element_matches_validity(element, invalid, false);
+            return native_match >= 0 ? native_match != 0 :
+                selector_matcher_get_pseudo_state(matcher, element,
+                    invalid ? PSEUDO_STATE_INVALID : PSEUDO_STATE_VALID);
+        }
+        case CSS_SELECTOR_PSEUDO_USER_INVALID:
+        case CSS_SELECTOR_PSEUDO_USER_VALID:
+            return dom_css_element_matches_validity(element,
+                pseudo_type == CSS_SELECTOR_PSEUDO_USER_INVALID, true) > 0;
         case CSS_SELECTOR_PSEUDO_OPEN:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_OPEN);
+        case CSS_SELECTOR_PSEUDO_MODAL:
+            return element->tag_name &&
+                str_icmp_cstr(element->tag_name, "dialog") == 0 &&
+                element->has_attribute("open") && element->is_dialog_modal();
+        case CSS_SELECTOR_PSEUDO_POPOVER_OPEN:
+            return element->has_attribute("popover") &&
+                element->is_popover_open();
+        case CSS_SELECTOR_PSEUDO_DEFINED:
+            // Built-in/foreign elements are defined without a registry entry;
+            // autonomous custom elements become defined on registration.
+            return !element->tag_name || !strchr(element->tag_name, '-') ||
+                dom_css_custom_element_defined(element->tag_name);
         case CSS_SELECTOR_PSEUDO_READ_ONLY:
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_READ_ONLY);
         case CSS_SELECTOR_PSEUDO_READ_WRITE:
             // :read-write matches when NOT read-only
             return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_READ_WRITE);
         case CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN:
-            return selector_matcher_get_pseudo_state(matcher, element, PSEUDO_STATE_PLACEHOLDER_SHOWN);
+        {
+            int native_match = dom_css_element_placeholder_shown(element);
+            return native_match >= 0 ? native_match != 0 :
+                selector_matcher_get_pseudo_state(matcher, element,
+                    PSEUDO_STATE_PLACEHOLDER_SHOWN);
+        }
+        case CSS_SELECTOR_PSEUDO_DEFAULT:
+            return dom_css_element_is_default(element);
+        case CSS_SELECTOR_PSEUDO_INDETERMINATE:
+            return dom_css_element_is_indeterminate(element);
+        case CSS_SELECTOR_PSEUDO_IN_RANGE:
+            return dom_css_element_matches_range(element, false);
+        case CSS_SELECTOR_PSEUDO_OUT_OF_RANGE:
+            return dom_css_element_matches_range(element, true);
 
         // Structural pseudo-classes
         case CSS_SELECTOR_PSEUDO_ROOT:
@@ -874,7 +1279,10 @@ bool selector_matcher_matches_pseudo_class(SelectorMatcher* matcher,
                 if (selector_matcher_parse_nth_formula(pseudo_arg, &formula)) {
                     bool from_end = (pseudo_type == CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD ||
                                     pseudo_type == CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE);
-                    bool result = selector_matcher_matches_nth_child(matcher, &formula, element, from_end);
+                    bool of_type = pseudo_type == CSS_SELECTOR_PSEUDO_NTH_OF_TYPE ||
+                                   pseudo_type == CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE;
+                    bool result = selector_matcher_matches_nth_filtered(
+                        matcher, &formula, element, from_end, of_type, nullptr, 0);
                     return result;
                 }
             }
@@ -902,7 +1310,11 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
 
         case CSS_SELECTOR_PSEUDO_EMPTY: {
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-                if (!child->is_element() || !child->as_element()->is_synthetic()) return false;
+                if (child->is_comment()) continue;
+                if (child->is_text() && child->as_text()->length == 0) continue;
+                if (child->is_element() && child->as_element()->is_synthetic()) continue;
+                // Comments and empty text nodes do not contribute content.
+                return false;
             }
             return true;
         }
@@ -978,51 +1390,56 @@ bool selector_matcher_matches_structural(SelectorMatcher* matcher,
     }
 }
 
+static bool selector_matcher_matches_nth_index(const CssNthFormula* formula, int index) {
+    int a = formula->odd || formula->even ? 2 : formula->a;
+    int b = formula->odd ? 1 : formula->even ? 0 : formula->b;
+    if (a == 0) return index == b;
+    int diff = index - b;
+    return diff % a == 0 && diff / a >= 0;
+}
+
+static bool selector_matcher_matches_nth_filtered(SelectorMatcher* matcher,
+        const CssNthFormula* formula, DomElement* element, bool from_end,
+        bool of_type, CssSelector** filter, size_t filter_count) {
+    if (!matcher || !formula || !element) {
+        return false;
+    }
+    if (!element->parent) {
+        return filter_count == 0 && selector_matcher_matches_nth_index(formula, 1);
+    }
+
+    // Count within the filtered sibling list before applying An+B.
+    int total = 0;
+    int selected_index = 0;
+    DomElement* parent = static_cast<DomElement*>(element->parent);
+    for (DomNode* node = parent->first_child; node; node = node->next_sibling) {
+        if (!dom_is_css_element_child(node)) continue;
+        DomElement* sibling = static_cast<DomElement*>(node);
+        if (of_type && !selector_matcher_same_tag(sibling, element)) continue;
+        if (filter_count > 0) {
+            bool included = false;
+            for (size_t i = 0; i < filter_count; i++) {
+                if (selector_matcher_matches(matcher, filter[i], sibling, nullptr)) {
+                    included = true;
+                    break;
+                }
+            }
+            if (!included) continue;
+        }
+        total++;
+        if (sibling == element) selected_index = total;
+    }
+    if (selected_index == 0) return false;
+    int index = from_end ? total - selected_index + 1 : selected_index;
+    return selector_matcher_matches_nth_index(formula, index);
+}
+
 bool selector_matcher_matches_nth_child(SelectorMatcher* matcher,
                                         CssNthFormula* formula,
                                         DomElement* element,
                                         bool from_end) {
-    if (!matcher || !formula || !element) {
-        return false;
-    }
-
-    // Handle general an+b formula (including special odd/even cases)
-    if (from_end) {
-        // For nth-last-child, we need to count from the end
-        int total_children = element->parent
-            ? static_cast<DomElement*>(element->parent)->count_child_elements()
-            : 1;
-        int index = element->child_index();
-        int reverse_index = total_children - index;
-
-        // Handle special cases with reverse counting
-        int a = formula->a;
-        int b = formula->b;
-        if (formula->odd) {
-            a = 2;
-            b = 1;
-        } else if (formula->even) {
-            a = 2;
-            b = 0;
-        }
-
-        if (a == 0) {
-            return reverse_index == b;
-        }
-
-        int diff = reverse_index - b;
-        if (diff < 0) return false;
-        return (diff % a) == 0;
-    } else {
-        // For nth-child, use forward counting
-        if (formula->odd) {
-            return element->matches_nth_child(2, 1);
-        }
-        if (formula->even) {
-            return element->matches_nth_child(2, 0);
-        }
-        return element->matches_nth_child(formula->a, formula->b);
-    }
+    return selector_matcher_matches_nth_filtered(
+        matcher, formula, element, from_end, false, nullptr, 0);
 }
 
 // ============================================================================
@@ -1053,6 +1470,9 @@ bool selector_matcher_matches_combinator(SelectorMatcher* matcher,
             return selector_matcher_has_prev_sibling(matcher, left_selector, element);
         case CSS_COMBINATOR_SUBSEQUENT_SIBLING:
             return selector_matcher_has_preceding_sibling(matcher, left_selector, element, nullptr);
+        case CSS_COMBINATOR_COLUMN:
+            return selector_matcher_matches_column(matcher, element, nullptr, 0,
+                left_selector);
         default:
             return false;
     }
@@ -1173,28 +1593,84 @@ bool selector_matcher_matches_not(SelectorMatcher* matcher,
     return !selector_matcher_match_list(matcher, selectors, count, element, true);
 }
 
+static bool selector_matcher_relative_from(SelectorMatcher* matcher,
+        CssSelector* selector, DomElement* anchor, size_t index);
+
+static bool selector_matcher_relative_candidate(SelectorMatcher* matcher,
+        CssSelector* selector, DomNode* node, size_t index) {
+    if (!node || !node->is_element()) return false;
+    DomElement* element = node->as_element();
+    return selector_matcher_matches_compound(
+        matcher, selector->compound_selectors[index], element) &&
+        (index + 1 == selector->compound_selector_count ||
+         selector_matcher_relative_from(matcher, selector, element, index + 1));
+}
+
+static bool selector_matcher_relative_from(SelectorMatcher* matcher,
+        CssSelector* selector, DomElement* anchor, size_t index) {
+    CssCombinator relation = index == 0 ? selector->leading_combinator
+        : selector->combinators[index - 1];
+    if (relation == CSS_COMBINATOR_NONE) relation = CSS_COMBINATOR_DESCENDANT;
+    if (relation == CSS_COMBINATOR_CHILD) {
+        for (DomNode* child = anchor->first_child; child; child = child->next_sibling) {
+            if (selector_matcher_relative_candidate(matcher, selector, child, index)) return true;
+        }
+        return false;
+    }
+    if (relation == CSS_COMBINATOR_NEXT_SIBLING ||
+        relation == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
+        for (DomNode* sibling = anchor->next_sibling; sibling;
+             sibling = sibling->next_sibling) {
+            if (!sibling->is_element()) continue;
+            if (selector_matcher_relative_candidate(matcher, selector, sibling, index)) return true;
+            if (relation == CSS_COMBINATOR_NEXT_SIBLING) return false;
+        }
+        return false;
+    }
+    if (relation != CSS_COMBINATOR_DESCENDANT) return false;
+    // Walk the anchored subtree so a compound before a descendant combinator
+    // cannot match an ancestor outside the :has() candidate.
+    for (DomNode* node = anchor->first_child; node;) {
+        if (selector_matcher_relative_candidate(matcher, selector, node, index)) return true;
+        DomNode* first_child = node->is_element()
+            ? node->as_element()->first_child : nullptr;
+        if (first_child) {
+            node = first_child;
+            continue;
+        }
+        while (node != anchor && !node->next_sibling) node = node->parent;
+        node = node == anchor ? nullptr : node->next_sibling;
+    }
+    return false;
+}
+
 bool selector_matcher_matches_has(SelectorMatcher* matcher,
                                   CssSelector** selectors,
                                   int count,
                                   DomElement* element) {
-    if (!matcher || !selectors || count <= 0 || !element) {
-        return false;
-    }
-
-    // Check if element has any descendant matching any of the selectors
+    if (!matcher || !selectors || count <= 0 || !element) return false;
     for (int i = 0; i < count; i++) {
-        DomElement* match = selector_matcher_find_first(matcher, selectors[i], element);
-        if (match && match != element) {
-            return true;
-        }
+        CssSelector* selector = selectors[i];
+        if (selector && selector->compound_selector_count > 0 &&
+            selector_matcher_relative_from(matcher, selector, element, 0)) return true;
     }
-
     return false;
 }
 
 // ============================================================================
 // Specificity Calculation
 // ============================================================================
+
+static CssSpecificity selector_matcher_function_max_specificity(
+        SelectorMatcher* matcher, const CssSimpleSelector* simple) {
+    CssSpecificity max_spec = {0, 0, 0, 0, false};
+    for (size_t i = 0; i < simple->function_selector_count; i++) {
+        CssSpecificity candidate = selector_matcher_calculate_specificity(
+            matcher, simple->function_selectors[i]);
+        if (css_specificity_compare(candidate, max_spec) > 0) max_spec = candidate;
+    }
+    return max_spec;
+}
 
 CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
                                                       CssSelector* selector) {
@@ -1236,31 +1712,11 @@ CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
                     spec.classes++;
                     break;
 
-                // Pseudo-classes count as classes
-                case CSS_SELECTOR_PSEUDO_HOVER:
-                case CSS_SELECTOR_PSEUDO_ACTIVE:
-                case CSS_SELECTOR_PSEUDO_FOCUS:
-                case CSS_SELECTOR_PSEUDO_VISITED:
-                case CSS_SELECTOR_PSEUDO_LINK:
-                case CSS_SELECTOR_PSEUDO_SELECTED:
-                case CSS_SELECTOR_PSEUDO_FIRST_CHILD:
-                case CSS_SELECTOR_PSEUDO_LAST_CHILD:
-                case CSS_SELECTOR_PSEUDO_NTH_CHILD:
-                case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD:
-                    spec.classes++;
-                    break;
-
                 case CSS_SELECTOR_PSEUDO_NOT:
                 case CSS_SELECTOR_PSEUDO_IS:
                 case CSS_SELECTOR_PSEUDO_HAS: {
-                    CssSpecificity argument_spec = {0, 0, 0, 0, false};
-                    for (size_t k = 0; k < simple->function_selector_count; k++) {
-                        CssSpecificity candidate = selector_matcher_calculate_specificity(
-                            matcher, simple->function_selectors[k]);
-                        if (css_specificity_compare(candidate, argument_spec) > 0) {
-                            argument_spec = candidate;
-                        }
-                    }
+                    CssSpecificity argument_spec = selector_matcher_function_max_specificity(
+                        matcher, simple);
                     // Selectors 4: these functional pseudo-classes take the
                     // specificity of their most specific complex argument.
                     spec.ids += argument_spec.ids;
@@ -1270,17 +1726,21 @@ CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
                 }
 
                 case CSS_SELECTOR_PSEUDO_SLOTTED: {
-                    CssSpecificity argument_spec = {0, 0, 0, 0, false};
-                    for (size_t k = 0; k < simple->function_selector_count; k++) {
-                        CssSpecificity candidate = selector_matcher_calculate_specificity(
-                            matcher, simple->function_selectors[k]);
-                        if (css_specificity_compare(candidate, argument_spec) > 0) {
-                            argument_spec = candidate;
-                        }
-                    }
+                    CssSpecificity argument_spec = selector_matcher_function_max_specificity(
+                        matcher, simple);
                     spec.ids += argument_spec.ids;
                     spec.classes += argument_spec.classes;
                     spec.elements += argument_spec.elements + 1;
+                    break;
+                }
+
+                case CSS_SELECTOR_PSEUDO_NTH_CHILD:
+                case CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD: {
+                    CssSpecificity argument_spec = selector_matcher_function_max_specificity(
+                        matcher, simple);
+                    spec.ids += argument_spec.ids;
+                    spec.classes += argument_spec.classes + 1;
+                    spec.elements += argument_spec.elements;
                     break;
                 }
 
@@ -1294,6 +1754,25 @@ CssSpecificity selector_matcher_calculate_specificity(SelectorMatcher* matcher,
                     break;
 
                 default:
+                    // enum ranges cover every ordinary pseudo without a second
+                    // hand-maintained list that silently loses specificity.
+                    if (simple->type >= CSS_SELECTOR_PSEUDO_ROOT &&
+                        (simple->type < CSS_SELECTOR_PSEUDO_GENERIC ||
+                         simple->type == CSS_SELECTOR_PSEUDO_DEFINED ||
+                         simple->type == CSS_SELECTOR_PSEUDO_USER_INVALID ||
+                         simple->type == CSS_SELECTOR_PSEUDO_USER_VALID)) {
+                        spec.classes++;
+                    } else if ((simple->type == CSS_SELECTOR_PSEUDO_GENERIC ||
+                                simple->type == CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) &&
+                               css_selector_generic_pseudo_is_known(simple)) {
+                        // Known but unrendered pseudo selectors still carry
+                        // their ordinary specificity in selector lists.
+                        if (simple->type == CSS_SELECTOR_PSEUDO_GENERIC) spec.classes++;
+                        else spec.elements++;
+                    } else if (simple->type >= CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE &&
+                               simple->type < CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC) {
+                        spec.elements++;
+                    }
                     break;
             }
         }

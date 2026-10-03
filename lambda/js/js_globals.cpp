@@ -13029,7 +13029,10 @@ extern "C" Item js_option_new(Item text_arg, Item value_arg) {
 
 // DOMException(message, nameOrOptions) constructor
 extern "C" Item js_domexception_new(Item message, Item name_arg) {
-    Item obj = js_new_object_with_class(JS_CLASS_DOM_EXCEPTION);
+    RootFrame roots(1);
+    Rooted<Item> object_root(roots, js_new_object_with_class(JS_CLASS_DOM_EXCEPTION));
+    // D5.3.3: constructing the exception's names and fields may collect its receiver.
+    Item obj = object_root.get();
 
     // message (default: "")
     if (get_type_id(message) == LMD_TYPE_STRING) {

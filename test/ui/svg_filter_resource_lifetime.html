@@ -1,0 +1,18 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}button{position:absolute;left:0;top:140px;width:100px;height:30px}</style></head><body>
+<svg width="380" height="120"><defs>
+ <g id="tile"><rect id="tile-left" width="40" height="40" fill="red"/><rect x="40" width="40" height="40" fill="blue"/></g>
+ <filter id="resource" filterUnits="userSpaceOnUse" x="20" y="20" width="80" height="40" color-interpolation-filters="sRGB"><feImage id="picture" href="svg_image_assets/split.png" preserveAspectRatio="none"/></filter>
+ <filter id="font" filterUnits="userSpaceOnUse" x="260" y="20" width="80" height="40"><feFlood id="font-flood" x="260" y="20" width="2em" height="40" style="font-size:10px" flood-color="red"/></filter>
+</defs>
+<rect id="first" x="20" y="20" width="80" height="40" filter="url(#resource)"/>
+<g transform="translate(130 0)"><rect x="20" y="20" width="80" height="40" filter="url(#resource)"/></g>
+<rect x="260" y="20" width="80" height="40" font-size="30" filter="url(#font)"/>
+</svg><button id="advance" data-step="0">advance</button><script>
+var step=0;document.getElementById('advance').addEventListener('click',function(){step++;
+var picture=document.getElementById('picture'),flood=document.getElementById('font-flood');
+if(step===1){picture.setAttribute('href','#tile');document.getElementById('tile-left').setAttribute('fill','#00ff00');flood.setAttribute('style','font-size:20px');}
+if(step===2){picture.setAttribute('href','#first');flood.setAttribute('style','font-size:5px');}
+if(step===3){picture.setAttribute('href','svg_image_assets/missing-filter-image.png');}
+if(step===4){picture.setAttribute('href','svg_image_assets/split.png');flood.setAttribute('style','font-size:10px');}
+this.setAttribute('data-step',String(step));});
+</script></body></html>

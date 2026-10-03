@@ -5,7 +5,8 @@
   "viewport": {"width": 560, "height": 380},
   "events": [
     {"type": "assert_hit_test", "x": 80, "y": 70, "expected_selector": "#translated-rect"},
-    {"type": "assert_hit_test", "x": 290, "y": 56, "expected_selector": "#rotated-stroke"},
+    {"type": "assert_hit_test", "x": 290, "y": 56, "expected_selector": "#hit-surface"},
+    {"type": "assert_hit_test", "x": 290, "y": 60, "expected_selector": "#rotated-stroke"},
     {"type": "assert_hit_test", "x": 415, "y": 80, "expected_selector": "#front-path"},
     {"type": "assert_hit_test", "x": 300, "y": 230, "expected_selector": "#hit-surface"},
     {"type": "assert_hit_test", "x": 250, "y": 230, "expected_selector": "#group-left"}

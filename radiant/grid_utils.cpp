@@ -62,7 +62,7 @@ void destroy_grid_track_list(Pool* pool, GridTrackList* track_list) {
 }
 
 // Create a new grid track size
-GridTrackSize* create_grid_track_size(Pool* pool, GridTrackSizeType type, int value) {
+GridTrackSize* create_grid_track_size(Pool* pool, GridTrackSizeType type, float value) {
     if (!pool) return nullptr;
     GridTrackSize* track_size = (GridTrackSize*)pool_calloc(pool, sizeof(GridTrackSize));
     if (!track_size) return nullptr;

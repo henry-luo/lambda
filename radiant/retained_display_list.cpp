@@ -107,12 +107,20 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                     in->fill_linear_gradient.path)) return false;
             if (!retained_dl_copy_gradient_stops(dst, &out->fill_linear_gradient.stops,
                     in->fill_linear_gradient.stops, in->fill_linear_gradient.stop_count)) return false;
+            out->fill_linear_gradient.options.dash_array = dl_copy_dashes(dst,
+                in->fill_linear_gradient.options.dash_array, in->fill_linear_gradient.options.dash_count);
+            if (in->fill_linear_gradient.options.dash_count > 0 &&
+                !out->fill_linear_gradient.options.dash_array) return false;
             break;
         case DL_FILL_RADIAL_GRADIENT:
             if (!retained_dl_clone_path(&out->fill_radial_gradient.path,
                     in->fill_radial_gradient.path)) return false;
             if (!retained_dl_copy_gradient_stops(dst, &out->fill_radial_gradient.stops,
                     in->fill_radial_gradient.stops, in->fill_radial_gradient.stop_count)) return false;
+            out->fill_radial_gradient.options.dash_array = dl_copy_dashes(dst,
+                in->fill_radial_gradient.options.dash_array, in->fill_radial_gradient.options.dash_count);
+            if (in->fill_radial_gradient.options.dash_count > 0 &&
+                !out->fill_radial_gradient.options.dash_array) return false;
             break;
         case DL_DRAW_PICTURE:
             out->draw_picture.picture = lam::own(in->draw_picture.picture ?
@@ -131,6 +139,9 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                                               &in->blit_surface_scaled.clip_shapes);
             break;
         case DL_BEGIN_ELEMENT:
+            if (!dl_copy_semantic_group(dst, &out->element_marker.semantics,
+                &in->element_marker.semantics)) return false;
+            [[fallthrough]];
         case DL_END_ELEMENT:
             if (in->element_marker.matching_index >= source_start) {
                 out->element_marker.matching_index =

@@ -1,0 +1,10 @@
+{
+  "name": "Scroll snap resolves mixed scroll padding against the scrollport",
+  "html": "test/ui/scroll_snap_math.html",
+  "viewport": {"width": 240, "height": 240},
+  "events": [
+    {"type": "scroll", "target": {"selector": "#pane"}, "dx": 0, "dy": -1.2},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 80, "tolerance": 1}
+  ]
+}

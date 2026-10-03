@@ -158,6 +158,8 @@ Item js_create_native_touch_event(const char* type,
 
 Item js_create_native_css_event(const char* type, const char* detail_name,
     const char* detail_value, double elapsed_time);
+Item js_create_native_svg_time_event(const char* type, double detail, double seconds);
+Item js_create_time_event_init(const char* type, double detail, Item view);
 
 Item js_create_native_keyboard_event(const char* type,
     const char* key, const char* code,

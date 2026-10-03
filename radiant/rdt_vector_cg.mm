@@ -59,6 +59,7 @@ struct RdtPicture {
     float height;
     RdtMatrix transform;
     bool has_transform;
+    double animation_time;
 };
 
 static pthread_mutex_t g_svg_shared_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -265,7 +266,7 @@ static void cg_end_draw_state(RdtVectorImpl* cg) {
 }
 
 static uint32_t* cg_copy_premul_image_data(const uint32_t* pixels, int src_w,
-                                           int src_h, int src_stride) {
+                                           int src_h, int src_stride, bool straight_alpha) {
     if (!pixels || src_w <= 0 || src_h <= 0 || src_stride <= 0) return nullptr;
     uint32_t* copy = (uint32_t*)malloc((size_t)src_w * (size_t)src_h * sizeof(uint32_t));
     if (!copy) return nullptr;
@@ -273,7 +274,7 @@ static uint32_t* cg_copy_premul_image_data(const uint32_t* pixels, int src_w,
         const uint32_t* src = pixels + y * src_stride;
         uint32_t* dst = copy + y * src_w;
         for (int x = 0; x < src_w; x++) {
-            dst[x] = cg_convert_pixel(src[x], true);
+            dst[x] = cg_convert_pixel(src[x], straight_alpha);
         }
     }
     return copy;
@@ -632,7 +633,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
 void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
                      RdtStrokeCap cap, RdtStrokeJoin join,
                      const float* dash_array, int dash_count, float dash_phase,
-                     const RdtMatrix* transform) {
+                     const RdtMatrix* transform, float miter_limit) {
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* cg = vec->impl;
 
@@ -646,6 +647,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
         color.r / 255.0, color.g / 255.0,
         color.b / 255.0, color.a / 255.0);
     CGContextSetLineWidth(cg->ctx, width);
+    CGContextSetMiterLimit(cg->ctx, miter_limit);
 
     // line cap
     CGLineCap cg_cap;
@@ -813,7 +815,7 @@ void rdt_clip_restore_depth(int saved_depth) {
 
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation) {
+                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha) {
     (void)resource_generation;
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* cg = vec->impl;
@@ -828,7 +830,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         CGContextSetAlpha(cg->ctx, opacity / 255.0);
     }
 
-    uint32_t* premul_src = cg_copy_premul_image_data(pixels, src_w, src_h, src_stride);
+    uint32_t* premul_src = cg_copy_premul_image_data(pixels, src_w, src_h, src_stride, straight_alpha);
     if (!premul_src) {
         cg_end_draw_state(cg);
         return;
@@ -1124,7 +1126,13 @@ RdtPicture* rdt_picture_dup(RdtPicture* pic) {
     dup->height = pic->height;
     dup->transform = pic->transform;
     dup->has_transform = pic->has_transform;
+    dup->animation_time = pic->animation_time;
     return dup;
+}
+
+double rdt_picture_animation_time(RdtPicture* pic) { return pic ? pic->animation_time : 0; }
+void rdt_picture_set_animation_time(RdtPicture* pic, double seconds) {
+    if (pic && isfinite(seconds) && seconds >= 0) pic->animation_time = seconds;
 }
 
 Element* rdt_picture_get_svg_root(RdtPicture* pic) {
@@ -1202,7 +1210,7 @@ void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
         render_svg_to_vec_via_display_list(vec, pic->svg->svg_root, pic->width, pic->height,
                           pic->svg->pool, 1.0f, g_picture_font_ctx, &base,
                           nullptr, nullptr, pic->source_path,
-                          (float)opacity / 255.0f);
+                          (float)opacity / 255.0f, false, nullptr, true, -1.0f, nullptr, pic->animation_time);
         return;
     }
 

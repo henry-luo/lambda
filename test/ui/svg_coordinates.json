@@ -1,0 +1,200 @@
+{
+  "name": "svg coordinates",
+  "html": "test/ui/svg_coordinates.html",
+  "viewport": {
+    "width": 500,
+    "height": 160
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 30,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 30,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 65,
+      "y": 30,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 110,
+      "y": 30,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 110,
+      "y": 65,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 170,
+      "y": 30,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 195,
+      "y": 30,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 250,
+      "y": 20,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 10,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 310,
+      "y": 10,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 295,
+      "y": 30,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 285,
+      "y": 30,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 80,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 365,
+      "y": 25,
+      "min_r": 245,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 415,
+      "y": 25,
+      "max_r": 10,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 465,
+      "y": 85,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 30,
+      "expected_selector": "#percent"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 110,
+      "y": 30,
+      "expected_selector": "#font-relative"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 170,
+      "y": 30,
+      "expected_selector": "#nested-percent"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 250,
+      "y": 20,
+      "expected_selector": "#css-translated"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 295,
+      "y": 30,
+      "expected_selector": "#css-scaled"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 280,
+      "y": 80,
+      "expected_selector": "#css-percent"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 365,
+      "y": 25,
+      "expected_selector": "#link-shape"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 415,
+      "y": 25,
+      "expected_selector": "#css-none"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#link-shape"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#link-container"
+      },
+      "attribute": "data-clicked",
+      "equals": "yes"
+    }
+  ]
+}

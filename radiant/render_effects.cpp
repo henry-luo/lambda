@@ -23,14 +23,17 @@ static RenderEffectBackdrop render_effect_backdrop_begin(RenderContext* rdcon,
         return backdrop;
     }
 
-    int bx0 = (int)x0;
-    int by0 = (int)y0;
-    int bx1 = (int)x1;
-    int by1 = (int)y1;
-    if (bx0 < 0) bx0 = 0;
-    if (by0 < 0) by0 = 0;
-    if (bx1 > surface->width) bx1 = surface->width;
-    if (by1 > surface->height) by1 = surface->height;
+    // a recorded subtree's coordinates belong to its capture, not the host pixel surface.
+    Bound limits = rdcon->dl ? rdcon->block.clip
+        : Bound{0.0f, 0.0f, (float)surface->width, (float)surface->height};
+    x0 = fmaxf(x0, limits.left); y0 = fmaxf(y0, limits.top);
+    x1 = fminf(x1, limits.right); y1 = fminf(y1, limits.bottom);
+    if (!isfinite(x0) || !isfinite(y0) || !isfinite(x1) || !isfinite(y1) ||
+        x1 <= x0 || y1 <= y0) return backdrop;
+    int bx0 = (int)floorf(x0); // INT_CAST_OK: physical backdrop pixel coverage.
+    int by0 = (int)floorf(y0); // INT_CAST_OK: physical backdrop pixel coverage.
+    int bx1 = (int)ceilf(x1); // INT_CAST_OK: physical backdrop pixel coverage.
+    int by1 = (int)ceilf(y1); // INT_CAST_OK: physical backdrop pixel coverage.
 
     int width = bx1 - bx0;
     int height = by1 - by0;
@@ -52,25 +55,22 @@ static bool render_effect_backdrop_active(const RenderEffectBackdrop* backdrop) 
     return backdrop && backdrop->active && backdrop->width > 0 && backdrop->height > 0;
 }
 
-static void render_effect_backdrop_finish_source_over(RenderEffectBackdrop* backdrop) {
-    if (!render_effect_backdrop_active(backdrop)) {
-        return;
-    }
-    RenderContext* rdcon = backdrop->context;
-    rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
-                         backdrop->width, backdrop->height, 1.0f);
-    backdrop->active = false;
-}
-
 static void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop,
                                                   float opacity) {
     if (!render_effect_backdrop_active(backdrop)) {
         return;
     }
     RenderContext* rdcon = backdrop->context;
+    // vector replay produces premultiplied source pixels, including transparent SVG HTML captures.
+    bool premultiplied = rdcon->ui_context && rdcon->ui_context->surface &&
+        rdcon->ui_context->surface->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED;
     rc_composite_opacity(rdcon, backdrop->x, backdrop->y,
-                         backdrop->width, backdrop->height, opacity);
+                         backdrop->width, backdrop->height, opacity, premultiplied);
     backdrop->active = false;
+}
+
+static void render_effect_backdrop_finish_source_over(RenderEffectBackdrop* backdrop) {
+    render_effect_backdrop_finish_opacity(backdrop, 1.0f);
 }
 
 static void render_effect_backdrop_finish_blend(RenderEffectBackdrop* backdrop,

@@ -1,10 +1,10 @@
 # Lambda Implementation Plan: AST Interpreter Tuning, Round 2
 
 **Date:** 2026-10-02
-**Status:** PROPOSED — analysis and plan only; nothing in this document is
-implemented. Loop-head handoff, its threshold and the retirement of the
-first-entry trigger were ruled by the user on 2026-10-02 (§4) and are recorded
-as **D8.1.1v14** (spec 16.0.0) and AI23.
+**Status:** IN PROGRESS — Items 1–3 implemented and Items 5–6 partly, on
+branch `worktree-interp-tune2` (§12); Item 4 not started. Loop-head handoff,
+its threshold and the retirement of the first-entry trigger were ruled by the
+user on 2026-10-02 (§4) and are recorded as **D8.1.1v14** and AI23.
 **Source baseline:** `c886322fd` (source reading and profile attribution);
 archived release executable `test/benchmark/exe/lambda-v50-a9489bc329`
 (timings). `interp.cpp` differs by 11 lines between the two.
@@ -323,7 +323,9 @@ Reading:
 - 1,024 is below every measured crossover.
 - The crossover moves when T0 gets faster. Items 2–5 target a 1.3–2× lower
   per-iteration cost for typed bodies, which raises the crossover by the same
-  factor. Re-run this measurement after they land.
+  factor. Re-run this measurement after they land. *(Re-run 2026-10-03,
+  §12.6: crossovers 6,300–9,500 on the post-Tune2 release, and a whole-suite
+  sweep of 2,500–50,000 finds 10,000 on the flat optimum. The default stands.)*
 
 The probes are small definitions. A long definition costs more to compile for
 the same loop, so its crossover is higher; the Phase 1.1 census covers that
@@ -795,10 +797,360 @@ capture are in `temp/interp_perf/` (`cpu.sh`, `prof.sh`, `agg.py`,
 
 | Item | Status |
 |---|---|
-| 1 Loop-head handoff | Ruled 2026-10-02 and recorded as D8.1.1v14 / AI23 (Phase 1.0 done); Phases 1.1–1.7 not started |
-| 2 Lazy boundary diagnostics | Proposed |
-| 3 Contract plan | Proposed |
-| 4 Planned call sites, direct entry | Proposed |
-| 5 Walker hot path | Proposed |
-| 6 Static path writes | Proposed |
-| 7 Guarded scalar operations | Conditional on a reprofile |
+| 1 Loop-head handoff | Implemented 2026-10-02 (§12.2), narrower than the §6 plan; census done (§12.5); benchmark round and threshold evidence (§12.6) |
+| 2 Lazy boundary diagnostics | Implemented 2026-10-02 (§12.1) |
+| 3 Contract plan | Implemented 2026-10-02 as a tag fast path, not a stored plan (§12.1) |
+| 4 Planned call sites, direct entry | Declined on the reprofile (§12.4): the layer it removes is 3–5% |
+| 5 Walker hot path | Implemented (§12.3, §12.4) |
+| 6 Static path writes | Partial: key array sized once; key-span form not used (§12.3) |
+| 7 Guarded scalar operations | Implemented for int/float `+ - *` in the shared helper (§12.4) |
+
+## 12. Implementation record (2026-10-02)
+
+Branch `worktree-interp-tune2`, based on `800ff396d`. Timings are user+system
+CPU of the debug configuration (`-O3 -g`), minimum of 3 interleaved runs on a
+machine with load average 20–60, so only ratios are meaningful. Correctness
+gates are differentials over the 1,092 golden-tested scripts under
+`test/lambda`, run with `temp/edits/diffrun.py` (not tracked).
+
+### 12.1 Items 2 and 3 — commit `a20db7803`
+
+- `LambdaBoundary` (lambda.h) carries a label's parts; `lambda_type_check_lazy`
+  formats it only on failure. T0's declaration, assignment and argument sites
+  pass descriptors; the parameter loops stop recomputing indices.
+- `unwrap_simple_type_type` delegates to `type_field_unwrap_simple_decl`. Under
+  `type_id == LMD_TYPE_TYPE` only the four meta-types are compact globals, so
+  the ~35-compare `is_global_simple_type` chain was redundant; it was 7.9% of
+  T0 time on `mandelbrot2` after Item 2.
+- Item 3 became a tag fast path in `interp_coerce_declared_binding`: a plain
+  `int`, `float` or `string` contract admits a value of its own kind
+  unchanged, which is what admission computes (an int Item is int53 by
+  construction). With the unwrap fix, classification is three pointer
+  compares, so the stored per-binding plan of §6 was not needed.
+- Interpreter CPU against the baseline: `ack2` 0.59×, `mandelbrot2` 0.47×,
+  `matmul2` 0.60×, `richards2` 0.65×, `ack` 0.54×, `mandelbrot` 0.79×.
+- Gates: interpreter and JIT corpus differentials 1,092/1,092 identical; the
+  29 goldens that pin boundary texts identical in both tiers.
+
+### 12.2 Item 1 — loop-head handoff
+
+**Shape changed from the §6 plan.** §6 entered a second lowering of the whole
+definition at an interior loop label. An inventory of the transpiler's flow
+facts ruled that out: facts proven only at one program point (counter sign,
+a descending-sum accumulator interval with no runtime guard), loops lowered
+in several copies (fast and generic siblings, nested copies inheriting outer
+guards), and root write-back that requires every GC register to be defined on
+the new entry path. The implementation instead synthesizes the continuation
+as its own procedure, whose parameters are the live-in locals. Entering it
+through its `_b` wrapper gives each live-in the admission an unknown caller's
+argument gets, with the slow body on a shape miss.
+
+- **Eligibility.** A `while` that is a direct statement of a `pn` body, at
+  most 8 per body (`interp_handoff_ordinal`, frame-plan pass). Back-edges of
+  its nested loops, including fast integer loops, count toward it. The
+  definition must have no captures, binders, variadic or suspension state,
+  the block's last value expression may not precede the loop, at most 16
+  live-ins, and the continuation must pass `interp_satellite_refusal`.
+  Anything else pins the loop to T0 with a logged reason. A loop nested in an
+  `if`, or a `for`, is never a handoff loop.
+- **Continuation.** `interp_build_loop_continuation`: the body's statements
+  from the loop onward (shared nodes, not copied), parameters reusing the
+  live-ins' binding entries so the shared identifiers already name them, a
+  copied signature returning boxed `any` (T0's epilogue keeps the declared
+  return check), a fresh zeroed analysis record, and
+  `AstFuncNode::is_loop_continuation`. Its nodes live in a pool the image
+  owns.
+- **MIR changes for continuations only.** Parameters are snapshot-marked at
+  entry and treated as owners (`cow_owned`), since a live-in container may be
+  shared with other T0 bindings. An untyped parameter passed to an untyped
+  `var` parameter stays boxed and rooted, the rule declarations already
+  follow.
+- **Handoff.** At a head test of the handoff loop, if its continuation is
+  published and the frame is at a statement boundary (no scratch, signal,
+  method receiver, binder slots, view bindings or marked `var` parameter),
+  T0 calls the continuation's `_b` entry with the live-in slots. A
+  definition's own `var` parameters travel as CW33 homes pointing at the T0
+  frame slots. T0 then signals `RETURNED` with the result.
+- **Publication.** Loop jobs use the existing worker queue; a finished image
+  is adopted at interpreted function entries and every 256 back-edges of the
+  queued loop.
+- **Retired:** the v7 loop-owner first-entry trigger and the per-definition
+  back-edge marking. `LAMBDA_JIT_BACKEDGE` defaults to 10,000.
+- **Not done from §6:** the Phase 1.1 census, and carrying the definition's
+  own boxed entry in the loop-triggered image (it still promotes by its call
+  and self-tail thresholds).
+
+Measured under default AUTO against the baseline: `mandelbrot2` 12.04 →
+0.10 s, `matmul2` 6.33 → 0.11 s, `levenshtein2` 0.60 → 0.14 s, `pnpoly2`
+0.20 → 0.09 s, `nbody2` 0.21 → 0.17 s, `deltablue2` 0.83 → 0.78 s;
+`richards2` and `ack2` unchanged. Eager JIT on the same binary:
+`mandelbrot2` 0.06 s, `matmul2` 0.05 s.
+
+**Gates.** AUTO corpus differential against the baseline 1,092/1,092
+identical. Stress differential (`LAMBDA_JIT_BACKEDGE=1
+LAMBDA_SATELLITE_SYNC=1`, every eligible loop hands off at its second head
+test) against the interpreter: 1,091/1,092, the exception being pre-existing
+(defect 3 below). New regression `test/lambda/proc/interp_loop_handoff.ls`
+covers aliasing, `return`/`break`/`continue`, a `var` parameter, the block
+value and repeated activations; it matches under `interp`, `jit` and the
+stress mode, and the log confirms each function handed off.
+
+**Defects found by the stress differential:**
+
+1. Fixed — an alias of a live-in container (`keep = c`) skipped its COW mark,
+   so a later write showed through the alias (`cow_flow_join`). Continuation
+   parameters are now owners.
+2. Pre-existing on eager JIT, at first fixed for continuations only and then
+   in the shared inference (§12.5) — an untyped
+   parameter that the body uses arithmetically and passes to an untyped `var`
+   parameter gets a native lane with no CW33 home, and the callee's writes
+   are lost (`pn f(x) { x = x + 10; bump(x) ... }` returns 160 on `jit`
+   against 166 on `interp`). Applying the declaration rule in the callee's own
+   lowering is not a general fix: direct native callers choose the argument
+   lane elsewhere, and the result became `inf`. It belongs in the shared
+   parameter inference.
+3. Pre-existing, fixed in §12.5 — `tune23_record_constructor.ls` aborts under
+   `LAMBDA_SATELLITE_SYNC=1` alone, on the baseline binary too ("mir-value:
+   unavailable representation transition 1 -> 2 in `_forward_column_150`").
+   Default AUTO and eager JIT pass.
+
+### 12.3 Items 5 and 6, partial
+
+- Binder-contract walks are skipped when the frame has no binder slots: a
+  binder or bound reference only occurs in a generic function's own
+  contracts, and with no slots the environment is NULL, so the general path
+  reaches the same checker. It was 5.5% of `richards2`.
+- `InterpBorrowedScratch` makes one allocation instead of three per `var`
+  call.
+- Nested-path key arrays are sized once (`array_reserve_append_slots`). A
+  key-span `cow_path_set` was not used: `richards2`'s writes take the typed-map
+  arm, whose span form needs a compiler-resolved leaf contract T0 lacks.
+- Interpreter CPU against the Item 1 binary: `richards2` 0.85×,
+  `deltablue2` 0.92×, `ack2` 0.97×, `nbody2` 0.99×.
+- Recording a procedure block's last value expression in the plan was first
+  deferred over in-place node morphing; §12.4 checked that no node is morphed
+  into a list and landed it.
+
+### 12.4 Second round: walker and scalar operations
+
+Reprofiled after §12.2–12.3. Interpreter CPU against the §12.3 binary:
+`mandelbrot2` 0.73×, `ack2` 0.76×, `richards2` 0.87×, `matmul2` 0.88×,
+`deltablue2` 0.88×, `nbody2` 0.90×; the scalar fast path then adds
+`mandelbrot2` 0.90×, `matmul2` 0.88×, `nbody2` 0.80× (`ack2` neutral).
+
+- **Empty block value.** A procedural block with no value expression
+  allocated an empty list only to finish it as `null` (or the item-position
+  marker); it now returns that constant. One allocation per loop-body
+  iteration.
+- **Block shape in the plan.** `AstListNode` records the block's procedural
+  last value and counts (`plan_scan_proc_block`); `eval_content` falls back to
+  the live scan for a block the plan never reached. No code converts another
+  node kind into a list, and every list allocation is `sizeof(AstListNode)`.
+- **Planned local reads.** `AstIdentNode::interp_frame_slot_read`, set by the
+  capture-link pass, marks an occurrence that reads a plain frame slot of the
+  function it was planned in. `eval_expr` loads it directly when the node has
+  no const fact, the mode is `RUNTIME` and no view binding is active. The flag
+  sits in the node's tail padding (a `static_assert` pins the size) because
+  identifiers are also produced by morphing other nodes in place.
+- **Smaller `eval_expr` frame.** The member/index assignment arm and the N-D
+  index read moved to `noinline` helpers; their coordinate arrays and COW path
+  descriptor had made every node evaluation reserve 752 bytes beyond the
+  saved registers. It is now 192.
+- **Scalar operations (Item 7).** `fn_numeric_binary` answers int and float
+  `+ - *` of two same-kind operands before its null, complex, vector and
+  classification probes. These are exactly the classifier's int and float
+  cells, computed with the same helpers, so both tiers' boxed paths gain and
+  nothing is duplicated. Comparisons were left alone: their total order and
+  merged-poison rules are not a plain IEEE compare.
+- **Item 4 declined.** In `richards2`, `lambda_dynamic_call`'s signature
+  check and root span, `interp_call` and frame setup together are 3–5%; a
+  direct entry would need its own argument-rooting protocol for that.
+- Remaining large costs: member reads by name (`map_get_for_owner_keyed`,
+  ~10% of `richards2`, a runtime lookup that D8.4.1v2 keeps uncached) and
+  `eval_expr`'s own dispatch.
+
+### 12.5 Open items: defects, census, release timings
+
+**Defect 2 fixed generally.** `infer_param_types_batched` keeps an untyped,
+non-`var` parameter boxed when the body passes it to an untyped `var`
+parameter, the rule `var` declarations already follow. Because all three
+callers of the shared inference see it, direct native callers agree on the
+argument lane (the callee-only attempt had printed `inf`). It replaces the
+continuation-only override of §12.2. A `var` parameter is excluded: it
+already owns its caller's home, and forwarding it keeps its inferred array
+witness (`test/mir/lambda/tune21_var_witness_forward` pins that). Regression
+`test/lambda/proc/var_arg_param_lane.ls`: base JIT printed `160 2.5`, all
+tiers now print `166 15`.
+
+**Defect 3 fixed, and it was not sync-mode-only.** A satellite of a native-int
+function whose body ends in a direct call to a function outside its image
+received an `any` Item from the dynamic edge and asked `em_require_rep` for
+the int lane, which aborts by design. With 20,000 iterations plain AUTO
+aborted on the base binary every time. `mir_require_native_return` applies the
+declared-return admission instead (checked boundary, error exit, unbox) when
+the produced Item's contract does not cover the lane, at the content tail and
+the body-result conversion; every value the lane covers keeps the plain
+conversion, and the MIR emission suite is unchanged (235/235). Regression
+`test/lambda/proc/satellite_open_call_return.ls`.
+
+**Handoff eligibility.** A body ending in an unconditional `return` or
+`raise` never yields its block value, so the "value before the loop" pin no
+longer applies to it. That was 10 of the 13 pins in the census
+(`nbody`'s `benchmark`, `fasta`, `revcomp`, `havlak`). The remaining pins are
+an object-field identifier (`hyphen`) and a variadic signature.
+
+**Phase 1.1 census** (`LAMBDA_LOOP_CENSUS=1`, 1,250 scripts: the golden
+corpus plus `test/benchmark`, before the eligibility change):
+
+| Measure | Value |
+|---|---:|
+| Handoff loop sites executed | 639 |
+| … reaching 1,024 / 10,000 / 50,000 / 100,000 back-edges | 251 / 147 / 14 / 6 |
+| Loop states at exit: published / still compiling / pinned | 96 / 53 / 17 |
+| Definitions that handed off | 81 |
+| Satellite images queued, base → new | 22,216 → 17,210 (−23%) |
+
+The 53 still compiling at exit are continuations the script finished before
+using: worker CPU spent, never the execution thread's time. The image count
+falls because the first-entry trigger is gone.
+
+**Release timings** (both binaries `build-release-compile`, minimum of 3
+interleaved runs, load average 37–57):
+
+| Fixture | interp base → new | AUTO base → new | JIT base → new |
+|---|---|---|---|
+| ack2 | 1.75 → 0.59 s | 0.022 → 0.022 s | 0.021 → 0.021 s |
+| mandelbrot2 | 6.31 → 2.35 s | 6.35 → 0.053 s | 0.030 → 0.030 s |
+| matmul2 | 4.05 → 2.09 s | 4.07 → 0.064 s | 0.024 → 0.024 s |
+| richards2 | 4.35 → 2.25 s | 0.388 → 0.382 s | 0.129 → 0.129 s |
+| deltablue2 | 1.57 → 0.84 s | 0.417 → 0.402 s | 0.137 → 0.137 s |
+| nbody2 | 1.41 → 0.89 s | 0.115 → 0.099 s | 0.051 → 0.051 s |
+| pnpoly2 | 2.13 → 0.76 s | 0.104 → 0.043 s | 0.019 → 0.019 s |
+| levenshtein2 | 1.13 → 0.42 s | 0.287 → 0.069 s | 0.025 → 0.024 s |
+
+Eager JIT is unchanged, as it should be: the shared-helper and lowering
+changes alter only paths it reaches through boxed calls.
+
+### 12.6 Benchmark round and threshold evidence (2026-10-03)
+
+Branch `fix-continuation-param-inference` (based on `2b2339b88`, commit
+`551d9cd3e`). Release binaries from `make build-release-compile`. Timings were
+taken only when the 1-minute load average was below 4 and no other
+`lambda.exe` ran. An earlier attempt at load 26–47 read 1.55× slower on every
+row, eager JIT included, and was discarded. The eager-JIT column serves as the
+control: typed JIT against v50 is 0.985× geomean, so the machine matches the
+v50 capture.
+
+**Elevation census** (126 benchmark scripts, default AUTO,
+`LAMBDA_LOOP_CENSUS=1`): 70 scripts have a loop reaching 10,000 back-edges;
+73 continuations published, 64 handoffs, 34 still queued at exit (18 because
+the function itself had compiled by call count first, 16 because the loop
+ended before its image arrived), 6 pinned (fasta, revcomp, hyphen,
+three_way_merge2).
+
+**Defects found and fixed.** Each was caught by a differential against
+`interp` in stress mode (`LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1`) or
+under forced call promotion (`LAMBDA_JIT_THRESHOLD=2 LAMBDA_SATELLITE_SYNC=1`).
+Regression cases (g)–(i) are in `test/lambda/proc/interp_loop_handoff.ls`.
+
+1. A continuation skips batched parameter-type inference. It has no call
+   sites, so the body alone inferred an int live-in as float; the result was
+   invalid MIR in `awfy/mandelbrot` and `r7rs/fft`.
+2. A local's simple `TypeType` annotation is unwrapped before it becomes the
+   live-in's contract (`pidigits2`'s `string` read as a type value).
+3. Pre-existing. The native `string` parameter lane is the raw pointer
+   (D2.4.1). The owned-concat path `s = s ++ x` unboxed it blindly and direct
+   calls passed a boxed local through, so wrapper, literal-argument and
+   function-value entries printed `<error>`.
+4. Pre-existing. The finite-loop plan accepted a `float` bound and range-checked
+   it as an int lane: invalid MIR in eager JIT.
+5. Pre-existing. A dynamic cross-image call passed a `var` place argument
+   (`vec_add(arr.vals, x)`) by value, so the callee's push detached a private
+   copy. It now borrows the place like the direct edge (CW25, S9.2.2). This,
+   not the entry snapshot, was the cause of `awfy/json`'s lost pushes.
+
+**AUTO end to end against v50** (wall clock including startup and compile;
+geomean of new/v50 over 63 rows): untyped **0.74×**, typed **0.64×**. By suite,
+untyped/typed: AWFY 0.64/0.58, BENG 1.06/0.71, KOSTYA 0.51/0.29, LARCENY
+0.75/0.69, R7RS 0.79/0.77, JetStream 0.80/0.77, Text 0.80/0.89. The largest
+moves are loops that now hand off: `mandelbrot2` 7,455 → 61 ms, `matmul2`
+3,965 → 51 ms, `primes2` 943 → 104 ms, `levenshtein2` 276 → 63 ms. Three rows
+are slower, none because of the handoff:
+
+- `knucleotide` (untyped) 32 → 318 ms: the script was rewritten after v50
+  (`c839925ca`), and the new version spends ~300 ms compiling a 9-member
+  `main` image. The v50 binary shows the same on it.
+- `base64`, `json_gen`: ~12 ms slower. Unchanged with handoff disabled and
+  present on `2b2339b88`, so the cause is a master change since v50; not
+  bisected.
+
+**AST (`LAMBDA_TIER=interp`) against the v50 binary** (one run per row, same
+quiet machine): untyped **0.61×**, typed **0.55×**. R7RS gained most
+(0.39–0.45; `tak` 45 → 12 ms, `divrec` 492 → 127 ms), from §12.1–12.4.
+
+**Break-even, re-measured** (the §4.3 probes on this release). The "buy" side
+is now `LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1`, so it pays for exactly
+what the threshold decides, one continuation image:
+
+| Probe | T0 per iteration, v50 → now | Continuation compile | Crossover N |
+|---|---|---:|---:|
+| A: typed `float[]` inner product | 0.74 → 0.23 µs | 1.9 ms | 8,100 |
+| B: typed float recurrence | 1.41 → 0.33 µs | 2.1 ms | 6,300 |
+| C: untyped integer counter | 0.28 → 0.14 µs | 1.0 ms | 9,500 |
+| D: map member updates and a call | 1.51 → 0.61 µs | 3.7 ms | 7,500 |
+
+T0 got 2–4× faster, which raises the crossover. A continuation compiles in a
+third to a quarter of a whole definition's time, which lowers it. The two
+roughly cancel. All four crossovers lie at 6,300–9,500, and at N = 10,000 the
+two strategies are within 0.6 ms of each other on every probe. Triggering at
+break-even is the rent-or-buy rule: total cost at most twice the optimum
+whatever the loop's eventual length.
+
+**Threshold sweep** (whole AUTO suite, `LAMBDA_JIT_BACKEDGE` at each value,
+3 runs each, quiet machine). Geomean is against 10,000 over 58 rows. Excluded
+are `larceny/array1` (see below) and four Text rows whose 50,000 runs hit a
+load spike. Image counts are over the 126 benchmark scripts.
+
+| Threshold | Untyped geo | Typed geo | Loop images queued | Handoffs | Unused images |
+|---:|---:|---:|---:|---:|---:|
+| 2,500 | 0.998 | 0.987 | 139 | 88 | 51 |
+| 5,000 | 1.012 | 1.002 | 121 | 79 | 42 |
+| **10,000** | **1.000** | **1.000** | **100** | **71** | **29** |
+| 20,000 | 1.012 | 1.011 | 77 | 69 | 8 |
+| 50,000 | 1.063 | 1.079 | 54 | 44 | 10 |
+
+- **Why not lower.** 2,500 and 5,000 buy nothing measurable (within ±1.3%)
+  and queue 21–39% more images, of which 42–51 are never used: worker CPU and
+  one private MIR context each (§5). Below the measured crossovers, compiling
+  costs more than the interpreting it saves. Individual rows split both ways
+  (`fft`, `fannkuch2`, `base642` faster; `collatz` +18%, `nqueens2`,
+  `cube3d2` slower), so the rows do not show a systematic gain either.
+- **Why not higher.** 20,000 is 1.1–1.2% slower. It loses on loops of
+  10,000–20,000 back-edges that now finish in T0: `navier_stokes` +25%/+28%,
+  `matmul2` +30%, `fannkuch2`, `havlak2`, `base642`. Its advantage is image
+  economy: 77 images and only 8 unused, against 100 and 29. 50,000 is 6–8%
+  slower, with 13–14 rows above +10%: the long-loop rows (`mandelbrot`,
+  `spectralnorm`, `fannkuch`) start compiling 40,000 back-edges later.
+- **Reading.** The suite optimum is flat from 2,500 to 20,000, and 10,000
+  sits on it, just above every measured crossover. It is the lowest value
+  that wastes no time on loops below break-even. 20,000 would trade ~1% of
+  time for ~70% fewer unused images. That is a trade the D8.1.1v14 ruling did
+  not make, and this data does not force it. The default stays 10,000.
+
+**Found by the sweep: a definition's single loop image goes to its first hot
+loop.** `larceny/array1`'s `benchmark` runs a 10,000-iteration fill loop and
+then a 1,000,100-iteration loop. At 10,000 the first loop queues the
+definition's continuation, bound to itself, and exits before the image is
+published. The second loop then runs entirely in T0, because the definition
+is already queued once (D8.1.1v14 ruling 1). At 20,000 the first loop never
+qualifies, and the run takes 9.6 ms instead of 131 ms. This is independent of
+the threshold value: any value equal to an early loop's trip count reproduces
+it. Remedies (re-queue when the bound loop has exited, or one image per loop
+site) change the "once per definition" rule and need a ruling.
+
+**Open.** The one-image-per-definition case above; `test/lambda/interp_variadic.ls`
+SIGSEGV under forced call promotion (master too); the post-v50
+`base64`/`json_gen` regression; `knucleotide`'s compile cost. Scratch tooling
+in the main checkout's `temp/bench_auto/` (`diffrun.py`, `ast_time.py`,
+`th_compare.py`, `imgcount.py`) and `temp/interp_perf/be/` (`sweep2.py`,
+`fit2.py`), not tracked.

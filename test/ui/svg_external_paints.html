@@ -1,0 +1,12 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white;}svg{position:absolute;left:0;top:0}.external-stop,.external-tile{fill:lime;stop-color:lime}</style></head><body><svg width="600" height="230">
+<defs><linearGradient id="import" href="svg_paint_assets/paint.svg#half"/><linearGradient id="chain" href="svg_paint_assets/paint.svg#next"/><linearGradient id="cycle" href="svg_paint_assets/paint.svg#cycle"/><pattern id="tile" href="svg_paint_assets/paint.svg#tile"/><pattern id="image" href="svg_paint_assets/paint.svg#next-tile"/><linearGradient id="host"><stop offset=".5" stop-color="red"/><stop offset=".5" stop-color="blue"/></linearGradient></defs>
+<rect x="10" y="10" width="80" height="40" fill="url(#import)"/>
+<rect x="110" y="10" width="80" height="40" fill="url(svg_paint_assets/paint.svg#half)"/>
+<rect x="210" y="10" width="80" height="40" fill="url(#chain)"/>
+<rect x="310" y="10" width="80" height="40" fill="url(#cycle) red"/>
+<rect x="410" y="10" width="80" height="40" fill="url(#tile)"/>
+<rect x="510" y="10" width="80" height="40" fill="url(#image)"/>
+<use href="svg_paint_assets/paint.svg#pair" x="10" y="70" fill="url(#host)"/>
+<use href="svg_paint_assets/paint.svg#pair" x="110" y="70" fill="url(svg_paint_assets/paint.svg#half)"/>
+<rect x="210" y="70" width="80" height="40" fill="url(svg_paint_assets/missing.svg#bad) lime"/>
+</svg></body></html>

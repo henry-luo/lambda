@@ -210,10 +210,10 @@ static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void
                 PaintSvgSubscene subscene = {};
                 render_svg_build_subscene(
                     &subscene, entry->layer->content, block->width, block->height,
-                    block->doc ? block->doc->document_pool : nullptr, 1.0f,
+                    block->doc ? block->doc->document_pool : nullptr, ui_context_raster_scale(state->ui_context),
                     state->ui_context ? state->ui_context->font_ctx : nullptr,
                     &transform, &clip, &state->color, nullptr, nullptr, 1.0f,
-                    false, nullptr, true, -1.0f);
+                    false, nullptr, true, -1.0f, state->ui_context);
                 backend->render_svg_subscene(backend->ctx, &subscene);
             }
             radiant_stack_free_custom_layout_paint(&paint);

@@ -731,7 +731,7 @@ static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElem
     if (!element || !element->specified_style || !start || !end) return;
 
     float side_width[2] = {*start, *end};
-    int64_t priority[2] = {-1, -1};
+    const CssDeclaration* winners[2] = {nullptr, nullptr};
     const CssPropertyCode side_property[2] = {
         horizontal ? (border ? CSS_PROPERTY_BORDER_LEFT_WIDTH : CSS_PROPERTY_PADDING_LEFT)
                    : (border ? CSS_PROPERTY_BORDER_TOP_WIDTH : CSS_PROPERTY_PADDING_TOP),
@@ -747,10 +747,10 @@ static void get_intrinsic_box_side_widths_from_css(LayoutContext* lycon, DomElem
 
     auto apply_width = [&](const CssDeclaration* decl, float width, int side) {
         if (!decl || !decl->value) return;
-        int64_t declaration_priority = get_cascade_priority(decl);
-        if (declaration_priority >= priority[side]) {
+        if (!winners[side] ||
+            css_declaration_cascade_compare(decl, winners[side]) >= 0) {
             side_width[side] = width;
-            priority[side] = declaration_priority;
+            winners[side] = decl;
         }
     };
 
@@ -1346,7 +1346,7 @@ static float intrinsic_loaded_glyph_advance(LayoutContext* lycon,
 static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const char* text,
                                                     size_t length, float start_offset,
                                                     CssEnum text_transform, CssEnum font_variant,
-                                                    float tab_size) {
+                                                    float tab_size, float tab_size_length) {
     if (!text || length == 0) return 0.0f;
 
     float width = 0.0f;
@@ -1359,7 +1359,8 @@ static float measure_preserved_line_width_with_tabs(LayoutContext* lycon, const 
         if (ch == '\t') {
             float raw_space = layout_measure_space_advance(
                 lycon, font_box_handle(&lycon->font), lycon->font.style);
-            float tab_period = raw_space * tab_size;
+            float tab_period = tab_size_length >= 0.0f
+                ? tab_size_length : raw_space * tab_size;
             if (tab_period > 0.0f) {
                 float current_x = start_offset + width;
                 float half_ch = raw_space * 0.5f;
@@ -5089,6 +5090,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 float vertical_text_extent = 0.0f;
                 float tab_size = (view_block->blk && view_block->block_mut()->tab_size >= 0)
                     ? view_block->block()->tab_size : 8.0f;
+                float tab_size_length = view_block->blk
+                    ? view_block->block()->tab_size_length : -1.0f;
                 if (preserve_newlines) {
                     // For pre/pre-wrap/break-spaces/pre-line: newlines create forced line breaks.
                     // Measure each line separately; max-content = widest line.
@@ -5109,7 +5112,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                                 float start_offset = (line_count == 0) ? inline_max_sum : 0.0f;
                                 lw.max_content = measure_preserved_line_width_with_tabs(
                                     lycon, line_start, line_len, start_offset,
-                                    text_transform, font_variant, tab_size);
+                                    text_transform, font_variant, tab_size,
+                                    tab_size_length);
                             }
                             if (lw.max_content > text_widths.max_content)
                                 text_widths.max_content = lw.max_content;
@@ -5150,7 +5154,8 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                     if (preserve_spaces && text_line_has_tab(normalized_buffer, out_pos)) {
                         text_widths.max_content = measure_preserved_line_width_with_tabs(
                             lycon, normalized_buffer, out_pos, inline_max_sum,
-                            text_transform, font_variant, tab_size);
+                            text_transform, font_variant, tab_size,
+                            tab_size_length);
                     }
                     if (element_inline_axis_is_vertical) {
                         vertical_text_extent = layout_vertical_text_block_extent(

@@ -1,0 +1,11 @@
+<!doctype html><html><head><style>html,body{margin:0;width:420px;height:140px;background:white}</style></head><body><svg id="scene" width="420" height="140">
+<defs><filter id="offset" filterUnits="userSpaceOnUse" x="0" y="0" width="160" height="50"><feOffset dx="0"><animate attributeName="dx" from="0" to="100" dur="2s" fill="freeze"/></feOffset></filter><filter id="flood" filterUnits="userSpaceOnUse" x="200" y="70" width="30" height="20" color-interpolation-filters="sRGB"><feFlood flood-color="red"><animate attributeName="flood-color" from="red" to="blue" begin="-3s" dur="2s" fill="freeze"/></feFlood></filter></defs>
+<rect x="10" y="10" width="20" height="20" fill="red"><animate attributeName="x" from="10" to="110" begin="-1s" dur="2s" fill="freeze"/></rect>
+<rect x="10" y="40" width="20" height="20" fill="blue" filter="url(#offset)"/>
+<g><animateTransform attributeName="transform" type="translate" from="0 0" to="100 0" begin="-1s" dur="2s" fill="freeze"/><rect x="10" y="80" width="20" height="20" fill="blue"/></g>
+<rect x="200" y="10" width="20" height="20" fill="blue" visibility="hidden"><set attributeName="visibility" to="visible" begin="0.5s"/></rect>
+<rect x="280" y="10" width="20" height="20" fill="green"><animate attributeName="x" to="380" calcMode="discrete" dur="2s" fill="freeze"/></rect>
+<rect x="200" y="70" width="30" height="20" filter="url(#flood)"/>
+<use href="svg_image_assets/smil-instance-filter.svg#shape" x="280" y="70"/>
+<image x="350" y="70" width="50" height="40" href="svg_image_assets/smil.svg"/>
+</svg><script>var scene=document.getElementById("scene");scene.pauseAnimations();scene.setCurrentTime(0);</script></body></html>

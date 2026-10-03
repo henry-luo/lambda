@@ -1,0 +1,45 @@
+<!doctype html>
+<style>
+  body { margin: 0; }
+  .pane { width: 160px; height: 100px; overflow: auto; }
+  #styled { scroll-behavior: smooth; }
+  .before { height: 200px; }
+  .target { height: 100px; }
+  .after { height: 100px; }
+</style>
+<button id="auto">Use CSS smooth behavior</button>
+<button id="explicit">Use explicit smooth behavior</button>
+<button id="instant">Override CSS with instant</button>
+<span id="auto-mid"></span><span id="explicit-mid"></span>
+<div id="styled" class="pane">
+  <div class="before"></div><div id="styled-target" class="target"></div>
+  <div class="after"></div>
+</div>
+<div id="plain" class="pane">
+  <div class="before"></div><div id="plain-target" class="target"></div>
+  <div class="after"></div>
+</div>
+<script>
+  function sampleMidpoint(pane, id) {
+    setTimeout(() => {
+      const position = pane.scrollTop;
+      document.getElementById(id).textContent =
+        position > 0 && position < 200 ? 'in-flight' : 'outside';
+    }, 150);
+  }
+  document.getElementById('auto').addEventListener('click', () => {
+    const target = document.getElementById('styled-target');
+    target.scrollIntoView({block: 'start'});
+    sampleMidpoint(document.getElementById('styled'), 'auto-mid');
+  });
+  document.getElementById('explicit').addEventListener('click', () => {
+    const target = document.getElementById('plain-target');
+    target.scrollIntoView({behavior: 'smooth', block: 'start'});
+    sampleMidpoint(document.getElementById('plain'), 'explicit-mid');
+  });
+  document.getElementById('instant').addEventListener('click', () => {
+    const pane = document.getElementById('styled');
+    pane.scrollTo({top: 0, behavior: 'instant'});
+    document.getElementById('styled-target').scrollIntoView({behavior: 'instant', block: 'start'});
+  });
+</script>

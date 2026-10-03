@@ -1,19 +1,28 @@
 {
   "schema_version": 1,
-  "description": "Tune13 audited abs/min result facts preserve the native int lane from indexed reads through typed locals and return.",
+  "description": "Tune13 audited abs/min result facts preserve the native int lane from indexed reads through typed locals and return. Typed-performance audit: abs keeps the integer lane and its poison/null sentinels directly (S7.10.5v3, D2.2.2).",
   "checks": [
     {
       "in_func": "_tune13_native_fact_#",
       "expect": [
         "call\tlambda_type_check_p, lambda_type_check",
-        "call\tfn_abs_p, fn_abs",
+        "neg\t",
         "call\tfn_min2_p, fn_min2",
         "mov\t{{r}}, i64:({{r}})"
       ],
       "expect_seq": [
-        { "pattern": "mov\t{{r}}, i64:({{r}})" },
-        { "pattern": "call\tfn_abs_p, fn_abs" },
-        { "pattern": "call\tfn_min2_p, fn_min2" }
+        {
+          "pattern": "mov\t{{r}}, i64:({{r}})"
+        },
+        {
+          "pattern": "neg\t"
+        },
+        {
+          "pattern": "call\tfn_min2_p, fn_min2"
+        }
+      ],
+      "forbid": [
+        "call\tfn_abs_p, fn_abs"
       ]
     }
   ]

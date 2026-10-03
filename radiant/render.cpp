@@ -84,6 +84,12 @@ Color render_document_canvas_background(View* root_view) {
     return background;
 }
 
+Color render_document_output_background(View* root_view) {
+    Color background = render_document_canvas_background(root_view);
+    if (!background.a) background.c = 0xFFFFFFFF;
+    return background;
+}
+
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }

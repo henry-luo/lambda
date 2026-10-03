@@ -29,6 +29,12 @@ typedef struct StylePayloadEntry {
     struct StylePayloadEntry* bucket_next;
 } StylePayloadEntry;
 
+typedef struct StyleSelectionEntry {
+    DomElement* element;
+    CssSelectionStyle style;
+    struct StyleSelectionEntry* next;
+} StyleSelectionEntry;
+
 typedef struct StyleCanonicalEntry {
     uint64_t entry_id;
     uint64_t hash;
@@ -85,6 +91,10 @@ typedef enum StyleEpochCascadeMode {
 
 typedef struct StyleEpochManager {
     DomDocument* doc;
+    Pool* selection_pool;
+    StyleSelectionEntry** selection_buckets;
+    size_t selection_bucket_count;
+    size_t selection_count;
     StyleEpoch* current;
     StyleEpoch* epochs;
     uint64_t next_epoch_id;
@@ -109,6 +119,100 @@ static StyleEpochManager* style_manager(DomDocument* doc) {
 
 static uint64_t style_hash_mix(uint64_t hash, uint64_t value) {
     return hash_combine_u64(hash, value) * UINT64_C(0xbf58476d1ce4e5b9);
+}
+
+static size_t style_selection_bucket(const StyleEpochManager* manager,
+                                     const DomElement* element) {
+    return (size_t)(style_hash_mix(UINT64_C(0x73656c656374696f),
+        (uintptr_t)element) & (manager->selection_bucket_count - 1u));
+}
+
+static bool style_selection_resize(StyleEpochManager* manager, size_t bucket_count) {
+    if (!manager->selection_pool) {
+        manager->selection_pool = mem_pool_create(
+            (MemContext*)manager->doc->services.mem_ctx, MEM_ROLE_CSS,
+            "style.selection.pool");
+        if (!manager->selection_pool) return false;
+    }
+    StyleSelectionEntry** buckets = (StyleSelectionEntry**)pool_calloc(
+        manager->selection_pool, bucket_count * sizeof(StyleSelectionEntry*));
+    if (!buckets) return false;
+    StyleSelectionEntry** old = manager->selection_buckets;
+    size_t old_count = manager->selection_bucket_count;
+    manager->selection_buckets = buckets;
+    manager->selection_bucket_count = bucket_count;
+    for (size_t i = 0; i < old_count; i++) {
+        StyleSelectionEntry* entry = old[i];
+        while (entry) {
+            StyleSelectionEntry* next = entry->next;
+            size_t bucket = style_selection_bucket(manager, entry->element);
+            entry->next = buckets[bucket];
+            buckets[bucket] = entry;
+            entry = next;
+        }
+    }
+    pool_free(manager->selection_pool, old);
+    return true;
+}
+
+static void style_selection_clear_all(StyleEpochManager* manager) {
+    if (!manager || !manager->selection_buckets) return;
+    for (size_t i = 0; i < manager->selection_bucket_count; i++) {
+        StyleSelectionEntry* entry = manager->selection_buckets[i];
+        while (entry) {
+            StyleSelectionEntry* next = entry->next;
+            pool_free(manager->selection_pool, entry);
+            entry = next;
+        }
+        manager->selection_buckets[i] = nullptr;
+    }
+    manager->selection_count = 0;
+}
+
+CssSelectionStyle* style_epoch_selection_style(DomElement* element, bool create) {
+    StyleEpochManager* manager = element ? style_manager(element->doc) : nullptr;
+    if (!manager) return nullptr;
+    if (!manager->selection_buckets) {
+        if (!create || !style_selection_resize(manager, 64)) return nullptr;
+    }
+    size_t bucket = style_selection_bucket(manager, element);
+    for (StyleSelectionEntry* entry = manager->selection_buckets[bucket];
+         entry; entry = entry->next) {
+        if (entry->element == element) return &entry->style;
+    }
+    if (!create) return nullptr;
+    if ((manager->selection_count + 1u) * 4u >
+        manager->selection_bucket_count * 3u) {
+        if (!style_selection_resize(manager, manager->selection_bucket_count * 2u)) {
+            return nullptr;
+        }
+        bucket = style_selection_bucket(manager, element);
+    }
+    StyleSelectionEntry* entry = (StyleSelectionEntry*)pool_calloc(
+        manager->selection_pool, sizeof(StyleSelectionEntry));
+    if (!entry) return nullptr;
+    entry->element = element;
+    entry->next = manager->selection_buckets[bucket];
+    manager->selection_buckets[bucket] = entry;
+    manager->selection_count++;
+    return &entry->style;
+}
+
+void style_epoch_selection_clear_element(DomElement* element) {
+    StyleEpochManager* manager = element ? style_manager(element->doc) : nullptr;
+    if (!manager || !manager->selection_buckets) return;
+    size_t bucket = style_selection_bucket(manager, element);
+    StyleSelectionEntry** link = &manager->selection_buckets[bucket];
+    while (*link) {
+        if ((*link)->element == element) {
+            StyleSelectionEntry* removed = *link;
+            *link = removed->next;
+            pool_free(manager->selection_pool, removed);
+            manager->selection_count--;
+            return;
+        }
+        link = &(*link)->next;
+    }
 }
 
 static uint64_t style_hash_text(const char* text) {
@@ -214,6 +318,7 @@ static bool style_epoch_start_new(StyleEpochManager* manager,
         manager->current = prior;
         return false;
     }
+    style_selection_clear_all(manager);
     style_epoch_try_release(manager, prior);
     manager->pending_global_change = false;
     return true;
@@ -257,6 +362,7 @@ void style_epoch_manager_destroy(DomDocument* doc) {
     StyleEpochManager* manager = style_manager(doc);
     if (!manager) return;
     doc->services.style_epoch_manager = nullptr;
+    if (manager->selection_pool) mem_pool_destroy(manager->selection_pool);
     style_builder_release_all(manager);
     StyleEpoch* epoch = manager->epochs;
     while (epoch) {
@@ -333,7 +439,9 @@ static bool style_builder_append(StyleEpochManager* manager,
 }
 
 static bool style_rule_is_shareable(CssRule* rule, CssSpecificity specificity) {
-    if (!rule || rule->type != CSS_RULE_STYLE || specificity.inline_style) return false;
+    if (!rule || (rule->type != CSS_RULE_STYLE &&
+                  rule->type != CSS_RULE_NESTED_DECLARATIONS) ||
+        specificity.inline_style) return false;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
         CssDeclaration* declaration = rule->data.style_rule.declarations[i];
         if (!declaration || (declaration->property_name &&
@@ -435,7 +543,8 @@ static bool style_apply_canonical_recipe_entries(StyleEpochManager* manager,
     if (!manager || !tree || !pool) return false;
     for (size_t i = 0; i < count; i++) {
         CssRule* rule = entries[i].rule;
-        if (!rule || rule->type != CSS_RULE_STYLE) return false;
+        if (!rule || (rule->type != CSS_RULE_STYLE &&
+                      rule->type != CSS_RULE_NESTED_DECLARATIONS)) return false;
         for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
             CssDeclaration* source = rule->data.style_rule.declarations[d];
             CssDeclaration* copy = style_epoch_clone_declaration(
@@ -455,7 +564,8 @@ static bool style_apply_recipe_entries(StyleTree* tree,
     if (!tree || !pool) return false;
     for (size_t i = 0; i < count; i++) {
         CssRule* rule = entries[i].rule;
-        if (!rule || rule->type != CSS_RULE_STYLE) return false;
+        if (!rule || (rule->type != CSS_RULE_STYLE &&
+                      rule->type != CSS_RULE_NESTED_DECLARATIONS)) return false;
         for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
             CssDeclaration* source = rule->data.style_rule.declarations[d];
             CssDeclaration* copy = css_declaration_clone_owned(
@@ -829,6 +939,9 @@ static bool style_epoch_cascade_begin_mode(DomDocument* doc, DomElement* root,
     if (global_change) manager->pending_global_change = true;
     if (manager->pending_global_change &&
         !style_epoch_start_new(manager, mode_key)) return false;
+    if (mode == STYLE_EPOCH_CASCADE_REPLACE) {
+        style_selection_clear_all(manager);
+    }
 
     size_t bucket_count = 64;
     size_t desired = doc->services.element_count > 0

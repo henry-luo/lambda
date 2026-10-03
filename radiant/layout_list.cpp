@@ -367,39 +367,18 @@ static float list_marker_bullet_inline_size(float font_size, bool is_outside,
 static FontHandle* resolve_marker_font_for_layout(LayoutContext* lycon,
                                                   DomElement* list_elem,
                                                   float* marker_font_size,
-                                                  FontProp* temporary_font) {
-    if (!lycon || !list_elem || !marker_font_size || !temporary_font) return nullptr;
+                                                  FontProp* marker_font) {
+    if (!lycon || !list_elem || !marker_font_size || !marker_font) return nullptr;
     FontProp* base_font = list_elem->font ? list_elem->font : lycon->font.style;
     if (!base_font) return font_box_handle(&lycon->font);
-
-    StyleTree* marker_style = list_elem->pseudo_style(PSEUDO_STYLE_MARKER);
-    CssDeclaration* font_size_decl = marker_style
-        ? style_tree_get_declaration(marker_style, CSS_PROPERTY_FONT_SIZE) : nullptr;
-    if (!font_size_decl || !font_size_decl->value) {
-        *marker_font_size = base_font->font_size;
-        if (base_font->used_zoom > 0.0f && base_font->used_zoom != 1.0f) {
-            *temporary_font = *base_font;
-            temporary_font->font_handle = nullptr;
-            FontBox marker_box = {};
-            setup_font(lycon->ui_context, &marker_box, temporary_font);
-            return font_box_handle(&marker_box);
-        }
-        return base_font->font_handle ? base_font->font_handle : font_box_handle(&lycon->font);
-    }
-
-    *temporary_font = *base_font;
-    temporary_font->font_handle = nullptr;
-    LayoutFontSizeResult resolved = layout_resolve_font_size_value(
-        lycon, font_size_decl->value, base_font, true);
-    if (resolved.value < 0.0f || isnan(resolved.value)) {
-        *marker_font_size = base_font->font_size;
-        return base_font->font_handle ? base_font->font_handle : font_box_handle(&lycon->font);
-    }
-    temporary_font->font_size = resolved.value;
-    temporary_font->font_size_from_medium = resolved.from_medium;
+    layout_apply_pseudo_font(lycon, list_elem->pseudo_style(PSEUDO_STYLE_MARKER),
+                              base_font, marker_font);
+    // Marker font props borrow inherited text shadows; marker painting does
+    // not consume them, and the element font teardown owns only local shadows.
+    marker_font->text_shadow = nullptr;
     FontBox marker_box = {};
-    setup_font(lycon->ui_context, &marker_box, temporary_font);
-    *marker_font_size = temporary_font->font_size;
+    setup_font(lycon->ui_context, &marker_box, marker_font);
+    *marker_font_size = marker_font->font_size;
     return font_box_handle(&marker_box);
 }
 
@@ -681,9 +660,12 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     float effective_zoom = layout_effective_zoom((View*)block);
     if (block->font) block->font->used_zoom = effective_zoom;
     DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
-    FontProp temporary_marker_font = {};
+    DomElement* current_marker = block->pseudo->marker_generated
+        ? block->pseudo->marker : nullptr;
+    FontProp* marker_font_prop = current_marker && current_marker->font
+        ? current_marker->font : (FontProp*)alloc_prop(lycon, sizeof(FontProp));
     FontHandle* marker_font_handle = resolve_marker_font_for_layout(
-        lycon, parent_elem, &marker_font_size, &temporary_marker_font);
+        lycon, parent_elem, &marker_font_size, marker_font_prop);
     // CSS Viewport 1 applies the effective zoom to the marker's used font and
     // image object size after the marker's computed font size is resolved.
     marker_font_size *= effective_zoom;
@@ -733,6 +715,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             marker_font_handle, image);
 
         if (marker_elem) {
+            marker_elem->font = marker_font_prop;
             block->pseudo->marker = lam::up(marker_elem);
             block->pseudo->marker_generated = true;
             MarkerProp* marker_prop = marker_elem->marker_prop();
@@ -749,5 +732,18 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                                     marker_font_size);
         }
     }
-    font_prop_release_handle(&temporary_marker_font);
+    if (current_marker && !current_marker->font) {
+        current_marker->font = marker_font_prop;
+    } else if (!block->pseudo->marker && marker_font_prop) {
+        // A failed generated-node allocation must release its transient font.
+        font_prop_release_handle(marker_font_prop);
+        pool_free(lycon->doc->view_tree->prop_pool, marker_font_prop);
+        marker_font_prop = nullptr;
+    }
+    if (block->pseudo->marker && block->pseudo->marker->blk) {
+        MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(
+            block->pseudo->marker->blk);
+        marker_prop->has_color = resolve_pseudo_color(lycon,
+            list_elem->pseudo_style(PSEUDO_STYLE_MARKER), &marker_prop->color);
+    }
 }

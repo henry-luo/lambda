@@ -1,0 +1,77 @@
+{
+  "name": "SVG UTF16 addressable characters",
+  "html": "test/ui/svg_text_utf16.html",
+  "viewport": {
+    "width": 300,
+    "height": 120
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 175,
+      "y": 30,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 30,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 90,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 90,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 175,
+      "y": 30,
+      "expected_selector": "#after-emoji"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 95,
+      "y": 90,
+      "expected_selector": "#after-symbol"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 135,
+      "y": 90,
+      "expected_selector": "#after-symbol"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 90,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 30,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    }
+  ],
+  "oracle": "SVG 2 11.1.1 UTF16 addresses, with the generated rectangular test font. Chromium 143 advances x-list entries by code point; the following B differs."
+}

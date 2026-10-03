@@ -26,6 +26,37 @@ uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha) {
     return (uint8_t)(value > 255u ? 255u : value);
 }
 
+uint32_t render_pixel_premultiply_abgr(uint32_t pixel) {
+    uint8_t alpha = (uint8_t)(pixel >> 24);
+    return raster_pack_pixel(render_pixel_premultiply_channel((uint8_t)pixel, alpha),
+        render_pixel_premultiply_channel((uint8_t)(pixel >> 8), alpha),
+        render_pixel_premultiply_channel((uint8_t)(pixel >> 16), alpha), alpha);
+}
+
+uint32_t render_pixel_unpremultiply_abgr(uint32_t pixel) {
+    uint8_t alpha = (uint8_t)(pixel >> 24);
+    return render_pixel_pack_abgr(render_pixel_unpremultiply_channel((uint8_t)pixel, alpha),
+        render_pixel_unpremultiply_channel((uint8_t)(pixel >> 8), alpha),
+        render_pixel_unpremultiply_channel((uint8_t)(pixel >> 16), alpha), alpha);
+}
+
+uint32_t render_pixel_scale_premultiplied(uint32_t pixel, uint8_t opacity) {
+    return raster_pack_pixel(render_pixel_premultiply_channel(pixel & 255u, opacity),
+        render_pixel_premultiply_channel((pixel >> 8) & 255u, opacity),
+        render_pixel_premultiply_channel((pixel >> 16) & 255u, opacity),
+        render_pixel_premultiply_channel(pixel >> 24, opacity));
+}
+
+float render_color_srgb_to_linear(float channel) {
+    channel = clamp_unit(channel);
+    return channel <= .04045f ? channel / 12.92f : powf((channel + .055f) / 1.055f, 2.4f);
+}
+
+float render_color_linear_to_srgb(float channel) {
+    channel = clamp_unit(channel);
+    return channel <= .0031308f ? channel * 12.92f : 1.055f * powf(channel, 1.0f / 2.4f) - .055f;
+}
+
 uint32_t render_pixel_source_over_opaque(uint32_t destination, uint32_t source) {
     uint32_t sa = source >> 24;
     if (sa == 0) return destination;
@@ -78,7 +109,7 @@ uint32_t render_pixel_source_over_premultiplied(uint32_t destination, uint32_t s
         (bp * 255u + result_a / 2u) / result_a, result_a);
 }
 
-uint32_t render_pixel_source_over_premultiplied_opaque(uint32_t destination, uint32_t source) {
+uint32_t render_pixel_source_over_premultiplied_pair(uint32_t destination, uint32_t source) {
     uint32_t sa = source >> 24;
     if (sa == 0) return destination;
     if (sa == 255) return source | 0xFF000000u;
@@ -99,6 +130,22 @@ uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint3
         ((destination >> 8) & 0xFFu) + (((source >> 8) & 0xFFu) * inv + 127u) / 255u,
         ((destination >> 16) & 0xFFu) + (((source >> 16) & 0xFFu) * inv + 127u) / 255u,
         destination_a + ((source >> 24) * inv + 127u) / 255u);
+}
+
+uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
+                                  const uint8_t* p12, const uint8_t* p22,
+                                  float fx, float fy, bool round_channels) {
+    float w11 = (1.0f - fx) * (1.0f - fy);
+    float w21 = fx * (1.0f - fy);
+    float w12 = (1.0f - fx) * fy;
+    float w22 = fx * fy;
+    float rounding = round_channels ? 0.5f : 0.0f;
+    uint8_t c0 = (uint8_t)(p11[0] * w11 + p21[0] * w21 + p12[0] * w12 + p22[0] * w22 + rounding);
+    uint8_t c1 = (uint8_t)(p11[1] * w11 + p21[1] * w21 + p12[1] * w12 + p22[1] * w22 + rounding);
+    uint8_t c2 = (uint8_t)(p11[2] * w11 + p21[2] * w21 + p12[2] * w12 + p22[2] * w22 + rounding);
+    uint8_t c3 = (uint8_t)(p11[3] * w11 + p21[3] * w21 + p12[3] * w12 + p22[3] * w22 + rounding);
+    return (uint32_t)c0 | ((uint32_t)c1 << 8) |
+        ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
 }
 
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
@@ -126,17 +173,8 @@ uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int heig
     const uint8_t* p21 = pixels + y1 * pitch + x2 * 4;
     const uint8_t* p12 = pixels + y2 * pitch + x1 * 4;
     const uint8_t* p22 = pixels + y2 * pitch + x2 * 4;
-    float w11 = (1.0f - fx) * (1.0f - fy);
-    float w21 = fx * (1.0f - fy);
-    float w12 = (1.0f - fx) * fy;
-    float w22 = fx * fy;
-    float rounding = round_channels ? 0.5f : 0.0f;
-    uint8_t c0 = (uint8_t)(p11[0] * w11 + p21[0] * w21 + p12[0] * w12 + p22[0] * w22 + rounding);
-    uint8_t c1 = (uint8_t)(p11[1] * w11 + p21[1] * w21 + p12[1] * w12 + p22[1] * w22 + rounding);
-    uint8_t c2 = (uint8_t)(p11[2] * w11 + p21[2] * w21 + p12[2] * w12 + p22[2] * w22 + rounding);
-    uint8_t c3 = (uint8_t)(p11[3] * w11 + p21[3] * w21 + p12[3] * w12 + p22[3] * w22 + rounding);
-    return (uint32_t)c0 | ((uint32_t)c1 << 8) |
-        ((uint32_t)c2 << 16) | ((uint32_t)c3 << 24);
+    return render_pixel_bilinear_mix(p11, p21, p12, p22, fx, fy,
+                                     round_channels);
 }
 
 void render_pixel_source_over_coverage(uint8_t* destination, Color color,

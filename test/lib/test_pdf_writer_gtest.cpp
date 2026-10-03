@@ -18,6 +18,7 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <math.h>
 
 extern "C" {
 #include "../../lib/pdf_writer.h"
@@ -293,6 +294,22 @@ TEST_F(PdfWriterTest, GSaveGRestore) {
     status = HPDF_Page_GRestore(page);
     EXPECT_EQ(status, HPDF_OK);
     
+    HPDF_Free(doc);
+}
+
+TEST_F(PdfWriterTest, ConcatenatedTransformPrecedesLogicalPaint) {
+    const char* filename = "./temp/test_pdf_concat.pdf";
+    HPDF_Doc doc = HPDF_New(NULL, NULL);
+    ASSERT_NE(doc, nullptr);
+    HPDF_Page page = HPDF_AddPage(doc);
+    ASSERT_NE(page, nullptr);
+    EXPECT_EQ(HPDF_Page_Concat(page, 2, 0, 0, 2, 0, 0), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_Rectangle(page, 10, 20, 30, 40), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_Fill(page), HPDF_OK);
+    EXPECT_EQ(HPDF_Page_Concat(page, NAN, 0, 0, 1, 0, 0), HPDF_ERROR_INVALID_PARAM);
+    EXPECT_EQ(HPDF_Page_Concat(nullptr, 1, 0, 0, 1, 0, 0), HPDF_ERROR_INVALID_PARAM);
+    ASSERT_EQ(HPDF_SaveToFile(doc, filename), HPDF_OK);
+    EXPECT_TRUE(file_contains(filename, "2 0 0 2 0 0 cm\n10 20 30 40 re\nf\n"));
     HPDF_Free(doc);
 }
 

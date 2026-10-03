@@ -58,6 +58,12 @@ static DomNode* mark_editor_take_relinked_ui_child(DomNode* old_first,
     TypeId type_id = get_type_id(child);
     for (DomNode* candidate = old_first; candidate; candidate = candidate->next_sibling) {
         if (candidate->parent != parent) continue;
+        // comments use Element backing but keep a distinct, stable DOM wrapper.
+        if (type_id == LMD_TYPE_ELEMENT && candidate->is_comment() &&
+            candidate->as_comment()->native_element == child.element) {
+            candidate->parent = nullptr;
+            return candidate;
+        }
         if (type_id == LMD_TYPE_ELEMENT && child.element && candidate->is_element() &&
             candidate == static_cast<DomNode*>(
                 mark_editor_lookup_ui_element_child(parent, child.element))) {
@@ -109,9 +115,13 @@ static DomNode* mark_editor_create_relinked_ui_child(DomElement* parent, Item ch
     if (!parent || !parent->doc) return nullptr;
     TypeId type_id = get_type_id(child);
     if (type_id == LMD_TYPE_ELEMENT && child.element) {
-        DomElement* element = mark_editor_lookup_ui_element_child(parent, child.element);
         TypeElmt* type = (TypeElmt*)child.element->type;
         const char* tag_name = type ? type->name.str : nullptr;
+        // creating an element wrapper for a comment duplicates its backing identity.
+        if (dom_is_comment_tag(tag_name)) {
+            return DomComment::create_detached(child.element, parent->doc);
+        }
+        DomElement* element = mark_editor_lookup_ui_element_child(parent, child.element);
         if (!element) {
             DomElement* storage = element_to_dom_element(child.element);
             if (dom_document_owns_node_storage(parent->doc, storage) &&

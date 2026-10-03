@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "svg_animation.hpp"
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
@@ -5002,6 +5003,8 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
 }
 
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
+    // SVG image documents do not create nested browsing contexts, including srcdoc/data frames.
+    if (lycon->doc && lycon->doc->services.svg_image_document) return;
     DomDocument* doc = NULL;
     if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {
         log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
@@ -5100,7 +5103,29 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     }
 }
 
+static void layout_apply_svg_animated_dimensions(LayoutContext* lycon, ViewBlock* block) {
+    DomElement* element = block->as_element();
+    svg_animation_prepare(element);
+    SvgLengthContext lengths = dom_svg_length_context(element);
+    lengths.viewport_width = lycon->block.content_width;
+    lengths.viewport_height = lycon->block.content_height;
+    for (LayoutAxis axis : layout_axes()) {
+        bool horizontal = layout_axis_is_horizontal(axis);
+        const char* name = horizontal ? "width" : "height";
+        if (!svg_animation_value(element, name)) continue;
+        char buffer[256];
+        const char* value = svg_get_dom_presentation_property(element, name, false, buffer, sizeof(buffer));
+        float used = svg_resolve_length(value, &lengths, horizontal ? SVG_LENGTH_X : SVG_LENGTH_Y, NAN);
+        if (!isfinite(used) || used < 0.0f) continue;
+        // used animation values enter layout without rewriting base DOM attributes or stylesheet declarations.
+        block->ensure_block(lycon);
+        layout_store_given_axis(lycon, block, used, horizontal, false);
+    }
+}
+
 void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
+    SvgAnimationSourceScope animation_sources(block->as_element()->doc);
+    layout_apply_svg_animated_dimensions(lycon, block);
     Element* native_elem = dom_element_backing(lam::dom_require_element(block));
     if (!native_elem) {
         block->width = 300;  // HTML default for SVG
@@ -5245,6 +5270,7 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     if (specified.y && is_border_box) {
         block->height = authored.y;
     }
+    layout_svg_foreign_objects(lycon, block->as_element());
 }
 
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
@@ -6058,6 +6084,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             layout_iframe(lycon, block, block->display);
         }
         else if (elmt_name == MARKUP_NAME_WEBVIEW) {
+            if (lycon->doc && lycon->doc->services.svg_image_document) return;
             if (!block->embed) {
                 block->ensure_embed(lycon);
             }
@@ -6382,6 +6409,55 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             }
         }
         finalize_block_flow(lycon, block, block->display.outer);
+    }
+}
+
+void layout_svg_foreign_object(LayoutContext* lycon, DomElement* element, float width, float height) {
+    if (!lycon || !element || width <= 0.0f || height <= 0.0f) return;
+    LayoutViewScope view_scope(lycon); LayoutFontScope font_scope(lycon);
+    BlockContext saved_block = lycon->block; Linebox saved_line = lycon->line;
+    AvailableSpace saved_space = lycon->available_space;
+    ViewBlock* block = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, element));
+    dom_node_resolve_style(element, lycon);
+    // SVG2 §12.2: the positioning rectangle supplies a definite, independent CSS containing block.
+    block->display.outer = CSS_VALUE_BLOCK; block->display.inner = CSS_VALUE_FLOW_ROOT;
+    block->ensure_block(lycon); block->ensure_position(lycon);
+    block->x = block->y = 0.0f;
+    block->width = block->content_width = width; block->height = block->content_height = height;
+    layout_store_given_axis(lycon, block, width, true, true);
+    layout_store_given_axis(lycon, block, height, false, true);
+    block_context_init(&lycon->block, block, lycon->pool);
+    lycon->block.parent = lam::up(&saved_block);
+    lycon->block.content_width = lycon->block.given_width = width;
+    lycon->block.content_height = lycon->block.given_height = height;
+    lycon->block.max_width = width; lycon->block.float_right_edge = width;
+    lycon->available_space = AvailableSpace::make_width_definite(width);
+    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+    setup_line_height(lycon, block); layout_setup_block_font_metrics(lycon);
+    line_init(lycon, 0.0f, width);
+    layout_block_inner_content(lycon, block);
+    block->width = block->content_width = width; block->height = block->content_height = height;
+    lycon->block = saved_block; lycon->line = saved_line; lycon->available_space = saved_space;
+}
+
+void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsigned depth) {
+    if (!element || depth >= MAX_LAYOUT_DEPTH || !dom_svg_element_is_eligible(element)) return;
+    if (!depth) svg_animation_prepare(element);
+    if (element->tag() == MARKUP_NAME_FOREIGNOBJECT) {
+        float x, y, width, height;
+        if (dom_svg_foreign_object_rectangle(element, &x, &y, &width, &height))
+            layout_svg_foreign_object(lycon, element, width, height);
+        return;
+    }
+    const char* tag = element->tag_name;
+    bool is_switch = tag && strcmp(tag, "switch") == 0;
+    if (!tag || (strcmp(tag, "svg") != 0 && strcmp(tag, "g") != 0 && strcmp(tag, "a") != 0 && !is_switch)) return;
+    if (depth) layout_init_display_contents_view(lycon, element);
+    if (layout_display_is_none(resolve_display_value(element))) return;
+    DomNode* selected = is_switch ? (DomNode*)dom_svg_switch_selected_child(element) : nullptr;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!child->is_element() || (is_switch && child != selected)) continue;
+        layout_svg_foreign_objects(lycon, child->as_element(), depth + 1);
     }
 }
 
@@ -7872,6 +7948,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     if (elmt_name == MARKUP_NAME_SVG &&
         !(block->blk && block->block()->content_visibility_hidden)) {
+        SvgAnimationSourceScope animation_sources(block->as_element()->doc);
+        layout_apply_svg_animated_dimensions(lycon, block);
         ReplacedIntrinsicFacts svg_facts =
             layout_replaced_intrinsic_facts(lycon, block);
         float preferred_aspect_ratio = layout_used_preferred_aspect_ratio(block);
@@ -7881,7 +7959,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 bool horizontal = layout_axis_is_horizontal(axis);
                 CssDeclaration* declaration =
                     layout_specified_physical_size_declaration(svg_element, horizontal);
-                const char* attribute = block->get_attribute(horizontal ? "width" : "height");
+                const char* attribute = svg_animation_attribute(svg_element, horizontal ? "width" : "height");
                 if (!declaration && attribute && strchr(attribute, '%')) {
                     float percent = (float)atof(attribute);
                     if (percent >= 0.0f) {

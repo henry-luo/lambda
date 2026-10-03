@@ -1,0 +1,6 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}</style></head><body><svg width="500" height="180"><defs>
+<filter id="merge" filterUnits="userSpaceOnUse" x="10" y="20" width="100" height="80" color-interpolation-filters="sRGB"><feFlood flood-color="red" flood-opacity=".5" result="a"/><feFlood flood-color="blue" flood-opacity=".25" result="b"/><feMerge><feMergeNode in="a"/><feMergeNode in="b"/></feMerge></filter>
+<filter id="shadow" color-interpolation-filters="sRGB"><feDropShadow stdDeviation="0" dx="0" dy="0" flood-color="blue" flood-opacity=".5"/></filter>
+<filter id="masked" filterUnits="userSpaceOnUse" x="320" y="20" width="100" height="80" color-interpolation-filters="sRGB"><feFlood flood-color="red" flood-opacity=".5" result="a"/><feFlood flood-color="blue" flood-opacity=".25" result="b"/><feMerge><feMergeNode in="a"/><feMergeNode in="b"/></feMerge></filter>
+<mask id="half" mask-type="alpha"><rect width="500" height="180" fill="white" fill-opacity=".5"/></mask>
+</defs><rect x="10" y="20" width="100" height="80" fill="none" filter="url(#merge)"/><rect x="170" y="20" width="100" height="80" fill="red" fill-opacity=".5" filter="url(#shadow)"/><rect x="320" y="20" width="100" height="80" fill="none" filter="url(#masked)" mask="url(#half)"/></svg></body></html>

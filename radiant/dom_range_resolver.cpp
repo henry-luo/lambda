@@ -1156,13 +1156,22 @@ extern "C" void dom_range_for_each_rect_in_text(DomRange* range,
 extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
     DomText* target_text, TextRect* target_rect, UiContext* uicon,
     DomRangeRectCb cb, void* userdata) {
+    if (!cb) return;
+    int bo_lo = 0;
+    int bo_hi = 0;
+    if (!dom_range_text_byte_span(range, target_text, &bo_lo, &bo_hi)) return;
+    emit_text_rects(target_text, bo_lo, bo_hi, target_rect, uicon, false,
+                    cb, userdata);
+}
 
-    if (!range || !cb || !target_text) return;
-    if (!range->layout_valid && !dom_range_resolve_layout(range)) return;
+extern "C" bool dom_range_text_byte_span(DomRange* range,
+    DomText* target_text, int* start_byte, int* end_byte) {
+    if (!range || !target_text || !start_byte || !end_byte) return false;
+    if (!range->layout_valid && !dom_range_resolve_layout(range)) return false;
 
     View* sv = static_cast<View*>(range->start_view);
     View* ev = static_cast<View*>(range->end_view);
-    if (!sv || !ev) return;
+    if (!sv || !ev) return false;
 
     int bo_lo = 0;
     int bo_hi = (target_text->length > 0)
@@ -1179,7 +1188,7 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
         bo_hi = range->end_byte_offset;
         include = true;
     } else if (sv == ev) {
-        return;
+        return false;
     } else {
         DomText* cur = sv->is_text()
             ? dom_range_next_text_after_any(static_cast<DomNode*>(sv)) : NULL;
@@ -1189,8 +1198,8 @@ extern "C" void dom_range_for_each_rect_in_text_rect(DomRange* range,
             cur = dom_range_next_text_after_any(static_cast<DomNode*>(cur));
         }
     }
-    if (!include || bo_lo >= bo_hi) return;
-
-    emit_text_rects(target_text, bo_lo, bo_hi, target_rect, uicon, false,
-                    cb, userdata);
+    if (!include || bo_lo >= bo_hi) return false;
+    *start_byte = bo_lo;
+    *end_byte = bo_hi;
+    return true;
 }

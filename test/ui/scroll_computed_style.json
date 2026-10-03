@@ -1,0 +1,19 @@
+{
+  "name": "Computed scrolling properties reflect resolved axes and inheritance",
+  "html": "test/ui/scroll_computed_style.html",
+  "viewport": {"width": 300, "height": 240},
+  "events": [
+    {"type": "assert_style", "target": {"selector": "#snap"},
+     "property": "scroll-snap-type", "equals": "y proximity"},
+    {"type": "assert_style", "target": {"selector": "#snap-child"},
+     "property": "scroll-snap-type", "equals": "y proximity"},
+    {"type": "assert_style", "target": {"selector": "#snap-child"},
+     "property": "scroll-snap-align", "equals": "start start"},
+    {"type": "assert_style", "target": {"selector": "#overscroll"},
+     "property": "overscroll-behavior", "equals": "contain auto"},
+    {"type": "assert_style", "target": {"selector": "#overscroll"},
+     "property": "overscroll-behavior-x", "equals": "contain"},
+    {"type": "assert_style", "target": {"selector": "#overscroll"},
+     "property": "overscroll-behavior-y", "equals": "auto"}
+  ]
+}

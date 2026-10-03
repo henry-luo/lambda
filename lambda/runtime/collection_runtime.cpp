@@ -3,6 +3,7 @@
 #include "lambda-number-runtime.hpp"
 #include "../core/collection_storage.h"
 #include "../io/input-allocation-context.h"
+#include "../io/mark_output_builder.hpp"
 #include "heap_api.h"
 #include "render_map.h"
 #include "../../lib/log.h"
@@ -431,6 +432,11 @@ static void bind_spread_fragment_range(Item fragment, List* parent, int64_t firs
 }
 
 void list_push(List* list, Item item) {
+    if (container_is_virtual_list(list)) {
+        MarkOutputBuilder* builder = virtual_output_builder(list);
+        if (builder) builder->ops->append(builder, item);
+        return;
+    }
     TypeId type_id = get_type_id(item);
     if (type_id == LMD_TYPE_NULL) return;
 
@@ -557,6 +563,11 @@ void list_push(List* list, Item item) {
 }
 
 void list_push_spread(List* list, Item item) {
+    if (container_is_virtual_list(list)) {
+        // Virtual destinations own spreading and have no concrete child ranges.
+        list_push(list, item);
+        return;
+    }
     TypeId type_id = get_type_id(item);
     if (item.item == ITEM_NULL_SPREADABLE) return;
     if (type_id == LMD_TYPE_ARRAY) {

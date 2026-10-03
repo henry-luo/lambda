@@ -767,6 +767,14 @@ typedef struct AstListNode : AstArrayNode {
     AstNode *declare;  // declarations in the list
     NameScope *vars;  // scope for the variables in the list
     TypeList* list_type;
+    // T0 frame-plan fact: the block's value item and counts when it runs as a
+    // procedural block (interp_proc_block_last_value), scanned once rather
+    // than at every evaluation. Unset when the plan never reached the block.
+    AstNode* interp_proc_last_value;
+    uint16_t interp_proc_value_count;
+    uint16_t interp_proc_decl_count;
+    uint16_t interp_proc_stam_count;
+    bool interp_proc_scanned;
 } AstListNode;
 
 typedef struct AstElementNode : AstMapNode {

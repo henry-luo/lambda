@@ -769,14 +769,16 @@ fn _image_opacity_group(children, opacity_value) {
 
 pub fn render_page(pdf, page, ops, page_h) {
     let fonts = _resolve_fonts(pdf, page, ops)
-    let r = _run_ops(pdf, page, ops, util.IDENTITY, fonts, page_h)
-    let texts = [for (t in r.texts) t]
-    let paths = [for (p in r.paths) p]
-    { texts: texts, paths: paths }
+    render_page_with_prefix(pdf, page, ops, page_h, fonts, "clip")
 }
 
 pub fn render_page_with_fonts(pdf, page, ops, page_h, fonts) {
-    let r = _run_ops(pdf, page, ops, util.IDENTITY, fonts, page_h)
+    render_page_with_prefix(pdf, page, ops, page_h, fonts, "clip")
+}
+
+// each embedded page owns a distinct SVG resource namespace; form prefixes extend it.
+pub fn render_page_with_prefix(pdf, page, ops, page_h, fonts, clip_prefix) {
+    let r = _run_ops_with_clip_prefix(pdf, page, ops, util.IDENTITY, fonts, page_h, clip_prefix)
     let texts = [for (t in r.texts) t]
     let paths = [for (p in r.paths) p]
     { texts: texts, paths: paths }
@@ -921,9 +923,10 @@ fn _step_pending_clip(ctx, rule) {
     else { ctx }
 }
 
-fn _step_shading(ctx, operands, pdf, page) {
+fn _step_shading(ctx, operands, pdf, page, clip_prefix) {
     let mb = _media_box(page)
-    let s = shading.from_sh_op(pdf, page, ctx.st.ctm, operands, mb.w, mb.h, ctx.def_ctr)
+    let counter = if (clip_prefix == "clip") ctx.def_ctr else clip_prefix ++ (ctx.def_ctr)
+    let s = shading.from_sh_op(pdf, page, ctx.st.ctm, operands, mb.w, mb.h, counter)
     let paths1 = _append_all(ctx.paths, s.defs)
     let paths2 = if (len(s.emit) > 0) { paths1 ++ _wrap_emit_with_ctm(s.emit, ctx.st.ctm, ctx.active_clip_ids) }
                  else { paths1 }
@@ -1053,7 +1056,7 @@ fn _run_ops_step(ctx, op, i, pdf, page, fonts, page_h, clip_prefix) {
     else if (opr == "gs") { _ctx_with_st(ctx, _apply_gs(ctx.st, operands, pdf, page)) }
     else if (opr == "W") { _step_pending_clip(ctx, "nonzero") }
     else if (opr == "W*") { _step_pending_clip(ctx, "evenodd") }
-    else if (opr == "sh") { _step_shading(ctx, operands, pdf, page) }
+    else if (opr == "sh") { _step_shading(ctx, operands, pdf, page, clip_prefix) }
     else if (_is_noop_op(opr)) { ctx }
     else if (opr == "BI" or opr == "ID" or opr == "EI") { ctx }
     else if (opr == "inline_image") {

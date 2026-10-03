@@ -183,6 +183,46 @@ TEST_F(StateStoreDomMutationTest, DetachedPointerPhasesDoNotRecreatePrunedState)
     EXPECT_EQ(state_store_prune_after_reflow(doc_state), 0u);
 }
 
+TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRetirement) {
+    Input input = {};
+    DomDocument doc = {};
+    ASSERT_TRUE(doc.init(&input));
+    Element* backing = elmt_arena(doc.node_arena);
+    ASSERT_NE(backing, nullptr);
+    DomElement* root = DomElement::create(&doc, "div", backing);
+    DomElement* control = DomElement::create(&doc, "input", backing);
+    ASSERT_NE(root, nullptr); ASSERT_NE(control, nullptr);
+    doc.root = root;
+    ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(control));
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    control->view_type = RDT_VIEW_BLOCK;
+    FormControlProp original{}, rebuilt{};
+    original.control_type = rebuilt.control_type = FORM_CONTROL_TEXT;
+    control->form = &original;
+    ASSERT_TRUE(form_control_store_text_value(doc.state, static_cast<View*>(control), "svg", 3, 3));
+    ASSERT_TRUE(root->remove_child(control));
+    // D4.5.1v3: layout properties are temporary; the registered DOM control owns its value.
+    control->form = nullptr; control->view_type = RDT_VIEW_NONE;
+    state_store_prune_after_reflow(doc.state);
+    uint32_t length = 0;
+    EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), &length), "svg");
+    EXPECT_EQ(length, 3u);
+    ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(control));
+    control->view_type = RDT_VIEW_BLOCK; control->form = &rebuilt;
+    state_store_prune_after_reflow(doc.state);
+    EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), nullptr), "svg");
+    control->form = nullptr;
+    DomNodeRef detached_ref = dom_node_ref(control);
+    ASSERT_TRUE(root->remove_child(control));
+    ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, detached_ref), nullptr);
+    EXPECT_GT(state_store_prune_after_reflow(doc.state), 0u);
+    ViewStateEntry query = {.view_id = detached_ref.expected_id, .kind = VIEW_STATE_FORM_CONTROL};
+    EXPECT_EQ(hashmap_get(doc.state->view_state_map, &query), nullptr);
+    state_store_destroy(&doc);
+    doc.destroy();
+}
+
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);

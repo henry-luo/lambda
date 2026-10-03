@@ -11,6 +11,7 @@
 #include "pdf_writer.h"
 #include "memtrack.h"
 #include "strbuf.h"
+#include "escape.h"
 #include "arraylist.h"
 #include "mempool.h"
 #include "arena.h"
@@ -201,28 +202,7 @@ static void record_obj_offset(HPDF_Doc doc, int obj_id, long offset, PdfObjType 
 
 // escape text for pdf string
 static void pdf_escape_text(StrBuf* buf, const char* text) {
-    strbuf_append_char(buf, '(');
-    for (const char* p = text; *p; p++) {
-        switch (*p) {
-            case '(':
-            case ')':
-            case '\\':
-                strbuf_append_char(buf, '\\');
-                strbuf_append_char(buf, *p);
-                break;
-            default:
-                if ((unsigned char)*p < 32 || (unsigned char)*p > 126) {
-                    // escape as octal
-                    char octal[8];
-                    snprintf(octal, sizeof(octal), "\\%03o", (unsigned char)*p);
-                    strbuf_append_str(buf, octal);
-                } else {
-                    strbuf_append_char(buf, *p);
-                }
-                break;
-        }
-    }
-    strbuf_append_char(buf, ')');
+    escape_append_pdf_literal(buf, text, strlen(text));
 }
 
 // format float for pdf (avoid unnecessary precision)
@@ -240,6 +220,24 @@ static void pdf_format_float(StrBuf* buf, float value) {
         tmp[len] = '\0';
         strbuf_append_str(buf, tmp);
     }
+}
+
+static void pdf_append_matrix(StrBuf* buf, float a, float b, float c,
+                               float d, float e, float f) {
+    const float values[] = {a, b, c, d, e, f};
+    for (int i = 0; i < 6; i++) {
+        if (i) strbuf_append_char(buf, ' ');
+        pdf_format_float(buf, values[i]);
+    }
+}
+
+HPDF_STATUS HPDF_Page_Concat(HPDF_Page page, float a, float b, float c,
+                            float d, float e, float f) {
+    if (!page || !isfinite(a) || !isfinite(b) || !isfinite(c) ||
+        !isfinite(d) || !isfinite(e) || !isfinite(f)) return HPDF_ERROR_INVALID_PARAM;
+    pdf_append_matrix(page->content, a, b, c, d, e, f);
+    strbuf_append_str(page->content, " cm\n");
+    return HPDF_OK;
 }
 
 static void pdf_append_hex_byte(StrBuf* buf, uint8_t value) {
@@ -761,18 +759,7 @@ HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
     }
 
     strbuf_append_str(page->content, "q\n");
-    pdf_format_float(page->content, a);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, b);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, c);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, d);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, e);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, f);
-    strbuf_append_str(page->content, " cm\n");
+    HPDF_Page_Concat(page, a, b, c, d, e, f);
     strbuf_append_str(page->content, "BI\n/W ");
     strbuf_append_int(page->content, width);
     strbuf_append_str(page->content, "\n/H ");
@@ -858,18 +845,8 @@ HPDF_STATUS HPDF_Page_DrawABGRImageWithAlpha(HPDF_Page page, const uint32_t* pix
     }
 
     strbuf_append_str(page->content, "q\n");
-    pdf_format_float(page->content, a);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, b);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, c);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, d);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, e);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, f);
-    strbuf_append_str(page->content, " cm\n/");
+    HPDF_Page_Concat(page, a, b, c, d, e, f);
+    strbuf_append_char(page->content, '/');
     strbuf_append_str(page->content, image->resource_name);
     strbuf_append_str(page->content, " Do\nQ\n");
 
@@ -953,17 +930,7 @@ HPDF_STATUS HPDF_Page_SetTextMatrix(HPDF_Page page,
     if (!page) return HPDF_ERROR_INVALID_PARAM;
     if (!page->in_text_object) return HPDF_ERROR_INVALID_STATE;
 
-    pdf_format_float(page->content, a);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, b);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, c);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, d);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, e);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, f);
+    pdf_append_matrix(page->content, a, b, c, d, e, f);
     strbuf_append_str(page->content, " Tm\n");
 
     return HPDF_OK;

@@ -42,6 +42,9 @@ typedef struct LayoutContext LayoutContext;  // From radiant/layout.hpp
 typedef struct DocState DocState;  // From radiant/state_store.h
 typedef struct StateStore StateStore;  // From radiant/state_store.hpp
 typedef struct Url Url;  // From lib/url.h
+
+// Shared HTML first-strong scan used by dir=auto layout and :dir() matching.
+int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir, bool first);
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct MarkerProp MarkerProp;  // From radiant/view.hpp
@@ -50,10 +53,34 @@ typedef struct CssWebAnimationState CssWebAnimationState;  // From radiant/view.
 typedef struct CustomLayoutPaintState CustomLayoutPaintState;  // From radiant/layout.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
+const char* dom_element_namespace_uri(struct DomElement* element);
+const char* dom_element_lookup_namespace_uri(struct DomElement* element, const char* prefix);
+const char* dom_element_attribute_namespace_uri(struct DomElement* element,
+    const char* qualified_name, const char** local_name);
 
 // ============================================================================
 // DOM Document
 // ============================================================================
+
+typedef enum HtmlVersion {
+    HTML5 = 1,
+    HTML4_01_STRICT,
+    HTML4_01_TRANSITIONAL,
+    HTML4_01_FRAMESET,
+    HTML_QUIRKS,
+    HTML1_0,
+    HTML_LIMITED_QUIRKS,
+} HtmlVersion;
+
+inline bool is_quirks_mode(HtmlVersion version) {
+    return version == HTML4_01_TRANSITIONAL ||
+        version == HTML4_01_FRAMESET || version == HTML_QUIRKS ||
+        version == HTML1_0;
+}
+
+inline bool is_limited_quirks_mode(HtmlVersion version) {
+    return version == HTML_LIMITED_QUIRKS;
+}
 
 typedef enum DomJsMutationKind {
     DOM_JS_MUTATION_UNKNOWN = 0,
@@ -190,12 +217,17 @@ struct DomDocumentServices {
     void* style_epoch_manager; // versioned canonical specified-style pools
     void* canvas_registry;     // document-owned HTMLCanvasElement backing surfaces
     void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
+    void* svg_filter_registry; // document-owned compiled SVG filter programs
+    void* svg_animation_registry; // document-owned SMIL clocks and sampled values
+    void* svg_use_resource_cache; // retained external-use DOM/style owners
+    char* preferred_languages; // document-owned UI preference snapshot, refreshed by the host setter
+    bool svg_image_document; // SVG image processing forbids external subordinate resources
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
         keyframe_registry(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), canvas_registry(nullptr),
-        svg_layer_registry(nullptr) {}
+        svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
@@ -242,6 +274,12 @@ enum DomScrollAlign : uint8_t {
     DOM_SCROLL_ALIGN_CENTER,
     DOM_SCROLL_ALIGN_END,
     DOM_SCROLL_ALIGN_NEAREST,
+};
+
+enum DomScrollBehavior : uint8_t {
+    DOM_SCROLL_BEHAVIOR_AUTO,
+    DOM_SCROLL_BEHAVIOR_SMOOTH,
+    DOM_SCROLL_BEHAVIOR_INSTANT,
 };
 
 struct DomDocument {
@@ -391,6 +429,7 @@ struct DomDocument {
     bool pending_scroll_into_view_if_needed;
     DomScrollAlign pending_scroll_into_view_block;
     DomScrollAlign pending_scroll_into_view_inline;
+    DomScrollBehavior pending_scroll_into_view_behavior;
 
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
@@ -421,7 +460,8 @@ struct DomDocument {
                     behavior_init_controls(nullptr), owns_input_resources(false),
                     pending_scroll_into_view_if_needed(false),
                     pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
-                    pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST) {}
+                    pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST),
+                    pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO) {}
 
     bool init(Input* input);
     void destroy();
@@ -579,6 +619,7 @@ enum DomElementFlag : uint32_t {
     // resolution; it is not a rendered form box unless CSS authoring overrides it.
     ELMT_FLAG_PARSER_INSERTED_TABLE_FORM = 1u << 27,
     ELMT_FLAG_SCROLL_EVENT_PENDING = 1u << 28,
+    ELMT_FLAG_USER_VALIDITY = 1u << 29,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -608,6 +649,7 @@ enum PseudoStyleKind : uint8_t {
     // keep existing slot indices stable; first-line was added after the
     // originally supported pseudo-style slots.
     PSEUDO_STYLE_FIRST_LINE,
+    PSEUDO_STYLE_FILE_SELECTOR_BUTTON,
     PSEUDO_STYLE_COUNT,
 };
 
@@ -623,6 +665,36 @@ struct DomSyntheticAttribute {
     lam::Own<const char> name;   // document-pool copies
     lam::Own<const char> value;
 };
+
+// Highlight declarations borrow stylesheet values while preserving the
+// element-specific cascade inputs without allocating a full style tree.
+struct CssSelectionCascadeValue {
+    CssDeclaration* source;
+    CssSpecificity specificity;
+    CssOrigin origin;
+};
+
+struct CssSelectionStyle {
+    CssSelectionCascadeValue color;
+    CssSelectionCascadeValue background_color;
+};
+
+struct DomNamespacedAttribute {
+    const char* namespace_uri;
+    const char* local_name;
+    const char* qualified_name;
+    const char* value;
+    bool active;
+    DomNamespacedAttribute* next;
+};
+
+DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element);
+bool dom_element_record_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* qualified_name, const char* value);
+void dom_element_remove_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* local_name);
+const char* dom_element_get_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* local_name);
 
 // tier-1: doc-pool, survives relayout
 struct DomElementExt {
@@ -655,6 +727,7 @@ struct DomElementExt {
     lam::OwnArr<DomSyntheticAttribute> synthetic_attributes;
     int synthetic_attribute_count;
     int synthetic_attribute_capacity;
+    DomNamespacedAttribute* namespaced_attributes;
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
     float ruby_column_anchor_x;
@@ -870,6 +943,8 @@ struct DomElement : DomNode {
     void set_option_dirty(bool v) { set_flag(ELMT_FLAG_OPTION_DIRTY, v); }
     bool select_dirty() const { return flag(ELMT_FLAG_SELECT_DIRTY); }
     void set_select_dirty(bool v) { set_flag(ELMT_FLAG_SELECT_DIRTY, v); }
+    bool user_validity() const { return flag(ELMT_FLAG_USER_VALIDITY); }
+    void set_user_validity(bool v) { set_flag(ELMT_FLAG_USER_VALIDITY, v); }
     bool has_option_selectedness() const { return flag(ELMT_FLAG_OPTION_SELECTEDNESS_SET); }
     bool option_selectedness() const { return flag(ELMT_FLAG_OPTION_SELECTEDNESS_VALUE); }
     void set_option_selectedness(bool value) {
@@ -967,6 +1042,7 @@ struct DomElement : DomNode {
     bool set_attribute(NameId name_id, const char* value);
     const char* get_attribute(const char* name);
     const char* get_attribute(NameId name_id);
+    const char* local_name() const;
     bool remove_attribute(const char* name);
     bool remove_attribute(NameId name_id);
     bool has_attribute(const char* name);
@@ -1230,7 +1306,7 @@ inline const Element* dom_element_render_source(const DomElement* de) {
 inline DomElement* dom_find_element_for_source(DomElement* root,
                                                const Element* source) {
     if (!root || !source) return nullptr;
-    if (dom_element_render_source(root) == source) return root;
+    if (dom_element_to_element(root) == source || dom_element_render_source(root) == source) return root;
     for (DomNode* child = root->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* found = dom_find_element_for_source(child->as_element(), source);
@@ -1304,6 +1380,7 @@ static_assert(offsetof(DomElement, elmt) % 8 == 0,
 #define PSEUDO_STATE_DRAG           (1 << 23)  // element being dragged
 #define PSEUDO_STATE_DRAG_OVER      (1 << 24)  // element is a drag-over target
 #define PSEUDO_STATE_OPEN           (1 << 25)  // open disclosure or picker
+#define PSEUDO_STATE_VALUE_DEPENDENT (1u << 26) // stylesheet dependency query for live values
 
 // ============================================================================
 // DOM Document Creation and Destruction

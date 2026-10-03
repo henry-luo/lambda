@@ -34,6 +34,7 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
     float x = run->x;
     const char* cursor = run->text;
     const char* end = run->text + text_len;
+    uint32_t previous_codepoint = 0;
     while (cursor < end) {
         uint32_t codepoint = 0;
         if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) {
@@ -46,8 +47,13 @@ static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
         }
         if (codepoint == (uint32_t)' ') {
             x += adjusted_space_width;
+            previous_codepoint = 0;
             continue;
         }
+        if (run->cjk_spacing > 0.0f &&
+            text_justify_cjk_gap(previous_codepoint, codepoint))
+            x += run->cjk_spacing;
+        previous_codepoint = codepoint;
 
         bool emoji_presentation = utf_is_emoji_presentation_default(codepoint);
         if (cursor < end) {

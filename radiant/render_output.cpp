@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "../lib/base64.h"
 #include "layout.hpp"
 #include "event.hpp"
 
@@ -62,7 +63,8 @@ static DomDocument* render_export_load_html_document(RenderExportSession* sessio
     RenderExportHtmlRequest* html_request = (RenderExportHtmlRequest*)request;
     return html_request && html_request->html_file
         ? load_html_doc(session->base_url, (char*)html_request->html_file,
-            layout_width, layout_height)
+            layout_width, layout_height, nullptr, nullptr, false,
+            session->print_media)
         : nullptr;
 }
 
@@ -175,65 +177,11 @@ void render_output_target_apply_session(RenderOutputTarget* target,
     target->device_scale = session->device_scale;
 }
 
-static void render_png_write_to_strbuf(png_structp png_ptr,
-                                       png_bytep data, png_size_t length) {
-    StrBuf* out = (StrBuf*)png_get_io_ptr(png_ptr);
-    if (!out || !data || length == 0) return;
-    if (!strbuf_ensure_cap(out, out->length + length + 1)) return;
-    memcpy(out->str + out->length, data, length);
-    out->length += length;
-    out->str[out->length] = '\0';
-}
-
-StrBuf* render_encode_surface_png(ImageSurface* surface) {
-    if (!surface || !surface->pixels || surface->width <= 0 || surface->height <= 0) {
-        return nullptr;
-    }
-    StrBuf* png_bytes = strbuf_new_cap((size_t)surface->width * (size_t)surface->height);
-    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-    if (!png_ptr) {
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-    png_infop info_ptr = png_create_info_struct(png_ptr);
-    if (!info_ptr) {
-        png_destroy_write_struct(&png_ptr, NULL);
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-    if (setjmp(png_jmpbuf(png_ptr))) {
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-    png_set_write_fn(png_ptr, png_bytes, render_png_write_to_strbuf, NULL);
-    png_set_IHDR(png_ptr, info_ptr, surface->width, surface->height,
-                 8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
-                 PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-    png_write_info(png_ptr, info_ptr);
-    // libpng owns the row table: png_malloc/png_free, since a longjmp out of
-    // png_write_image must not cross a destructor
-    png_bytep* rows = (png_bytep*)png_malloc(png_ptr, sizeof(png_bytep) * surface->height);
-    if (!rows) {
-        png_destroy_write_struct(&png_ptr, &info_ptr);
-        strbuf_free(png_bytes);
-        return nullptr;
-    }
-    for (int y = 0; y < surface->height; y++) {
-        rows[y] = (png_bytep)((uint8_t*)surface->pixels + y * surface->pitch);
-    }
-    png_write_image(png_ptr, rows);
-    png_write_end(png_ptr, NULL);
-    png_free(png_ptr, rows);
-    png_destroy_write_struct(&png_ptr, &info_ptr);
-    return png_bytes;
-}
-
 static bool render_export_session_begin_internal(
         RenderExportSession* session,
         int viewport_width, int viewport_height,
         int fallback_width, int fallback_height, float output_scale,
-        float device_scale, bool raster_surface,
+        float device_scale, bool raster_surface, bool print_media,
         RenderExportDocumentLoader loader, void* request) {
     if (!session || !loader) return false;
     memset(session, 0, sizeof(*session));
@@ -249,6 +197,7 @@ static bool render_export_session_begin_internal(
     session->viewport_height = viewport_height;
     session->auto_width = auto_width;
     session->auto_height = auto_height;
+    session->print_media = print_media;
 
     session->ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
@@ -318,11 +267,13 @@ static bool render_export_session_begin_internal(
 
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
-                                 int fallback_width, int fallback_height, float output_scale) {
+                                 int fallback_width, int fallback_height, float output_scale,
+                                 bool print_media) {
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height,
-        output_scale, 1.0f, false, render_export_load_html_document, &request);
+        output_scale, 1.0f, false, print_media,
+        render_export_load_html_document, &request);
 }
 
 bool render_export_session_begin_raster(RenderExportSession* session,
@@ -332,7 +283,7 @@ bool render_export_session_begin_raster(RenderExportSession* session,
     RenderExportHtmlRequest request = {html_file};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, 1200, 800, output_scale,
-        device_scale, true, render_export_load_html_document, &request);
+        device_scale, true, false, render_export_load_html_document, &request);
 }
 
 bool render_export_session_begin_document_transform(RenderExportSession* session,
@@ -343,7 +294,8 @@ bool render_export_session_begin_document_transform(RenderExportSession* session
     RenderExportTransformRequest request = {document_file, transform, options, option_count};
     return render_export_session_begin_internal(session,
         viewport_width, viewport_height, fallback_width, fallback_height, output_scale,
-        device_scale, raster_surface, render_export_load_transform_document, &request);
+        device_scale, raster_surface, false,
+        render_export_load_transform_document, &request);
 }
 
 void render_export_session_end(RenderExportSession* session) {
@@ -463,8 +415,7 @@ RenderFrameScope::~RenderFrameScope() {
 }
 
 static uint32_t render_output_canvas_background(View* root_view) {
-    Color background = render_document_canvas_background(root_view);
-    return background.a > 0 ? background.c : 0xFFFFFFFF;
+    return render_document_output_background(root_view).c;
 }
 
 static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTree* view_tree,

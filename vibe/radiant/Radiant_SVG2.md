@@ -29,7 +29,7 @@ This proposal makes the following decisions explicit:
 
 ## Implementation Status
 
-Status as of 2026-10-02: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table retains the 2026-05-07 architecture audit; the latest SVG behavior work is recorded below.
+Status as of 2026-10-03: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table below reconciles the earlier architecture audit with the current SVG behavior work. The larger resource/cache design remains separate from the support proposal.
 
 The [SVG support implementation plan](../impl/Lambda_Impl_SVG_Support.md#74-progress-record)
 records six repaired gaps: rectangle radius fallback, default line stroke,
@@ -38,26 +38,55 @@ and object-bounding-box gradients on paths/polygons/polylines. These changes
 continue through Radiant parsing, PaintIR and the ThorVG adapter. They preserve
 the existing retained document/resource ownership (**D4.2.2v2–D4.2.4** in
 [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)); the full cascade,
-typed paints, advanced effects, animation and export remain planned.
+typed paints, advanced effects, animation and macOS export were completed in the subsequent support proposal records below.
+
+**2026-10-03 P7/P10 audit.** The
+[current implementation record](../impl/Lambda_Impl_SVG_Support.md#714-p7p10-final-stroke-oracle-and-filter-resource-audit)
+supersedes the earlier behavior checkpoint above: stroke/marker geometry and
+the F1–F4 filter graph inventory pass their final coordinate/resource checks.
+Filter font-relative regions resolve from their declaration while viewport and
+bounding-box bases remain target-specific. Resource mutation, cycle/missing
+recovery, graph pin/reclamation and retained-output teardown are validated
+under **D4.2.2v2–D4.2.6/D4.5.1v4**. Radiant still records paint through the
+ThorVG adapter; no vendor source changed. Broader SVG2 vector effects, component
+transfer/convolution, motion/discard animation and Linux/Windows export smoke are
+explicit residue; this does not complete the larger resource/cache proposal.
+
+**2026-10-03 P12 audit.** The
+[SMIL implementation record](../impl/Lambda_Impl_SVG_Support.md#715-p12-smil-clock-dependency-default-and-lifetime-audit)
+adds clock-aware style/filter cache keys, external-use source scope, typed unit
+dependencies, XML implicit values, fragment clocks across HTML integration,
+detach driver guards and deterministic initial exports. Sampled strings are copied
+into longer-lived caches; pinned filter snapshots survive retirement under
+**D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check, copy-as-value). Interpolation/timing
+continue on the Lambda side of the ThorVG adapter. The
+[final P12 closeout](../impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout)
+adds access-key/wallclock values, expired-interval filtering, private local/
+external/nested use controls and timing events, animation queries and TimeEvent
+initialization. Source documents retain parsed owners until host controls are
+released (**D4.2.6/D4.5.1v4**); interface hooks and precise roots follow
+**D7.4.4/D5.3.3**. N1's inventory is implemented. Motion/discard, broader SVG DOM
+and unavailable renderer features keep the broad SMIL row partial; Linux/Windows
+P13 runtime smoke remains open.
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Parse external SVG through HTML/SVG path | Done | `html5_parse_svg_document()` parses external SVG through the HTML5 SVG correction path. `rdt_picture_load()` now uses this instead of `parse_xml()` for SVG pictures. |
+| Parse external SVG as XML | Done | `parse_svg_document()` uses the shared XML parser for case, namespaces, CDATA and self-closing XHTML boundaries. Inline SVG retains the HTML5 foreign-content path. |
 | Standalone `.svg` rendering | Done | Standalone SVG keeps its prebuilt SVG/image view tree and renders through `RdtPicture` / `render_svg_to_vec()`. |
 | `<img src="foo.svg">` vector-first rendering | Done | `render_image_content()` draws SVG images as `RdtPicture` vector content instead of forcing `render_svg()` rasterization first. |
 | `background-image: url(foo.svg)` vector path | Mostly done | Background SVG tiles draw through duplicated `RdtPicture` instances and `rc_draw_picture()`. It still uses the current `ImageSurface` compatibility wrapper. |
 | Nested SVG `<image href="nested.svg">` | Done for local files/data URIs | SVG data URIs and local `.svg` hrefs route through `RdtPicture`; raster image hrefs still use the existing ThorVG image loader path. Relative file resolution is now source-path aware. |
 | External `<use href="external.svg#id">` | Done for synchronous local files | The renderer splits file/fragment, loads the external SVG DOM, finds the referenced id, and renders by reference with the `<use>` transform/viewport behavior. It does not yet use a shared async resource cache. |
-| Embedded `<style>` inside external SVG | Partial | A lightweight scoped style bridge handles simple selectors (`tag`, `.class`, `#id`, and simple combinations) for presentation properties used by the SVG renderer. It is not yet routed through the full HTML CSS parser/cascade engine. |
-| Inline SVG host CSS inheritance/selectors | Existing/partial | Inline SVG remains in the host DOM path. Full spec-grade CSS/SVG cascade normalization is still future work. |
+| Embedded `<style>` inside external SVG | Done for the support inventory | Shared CSS parser, selector matcher and cascade, with isolated style/font ownership. |
+| Inline SVG host CSS inheritance/selectors | Done for the support inventory | Host stylesheets, specificity/importance, inherited paint/fonts/visibility and mutation invalidation use the shared cascade. General CSS limits remain in the support matrix. |
 | `SvgDocument` / `SvgDocumentRef` API | Not yet | Current implementation extends `RdtPicture` as the compatibility document wrapper instead of introducing the formal structs. |
 | Shared `SvgResourceManager`, URL cache, async/network integration | Not yet | External SVG loads are still synchronous in the render/resource paths that were touched. Cache-by-canonical-URL and async repaint/reflow are pending. |
 | Central id table | Not yet | Id lookup is recursive or render-time defs based. A persistent document-level id table is still pending. |
 | Renderer API rename/split (`svg_render_document`, `svg_render_element`) | Not yet | `render_svg_to_vec()` remains the shared lower-level renderer; `render_svg_inline.cpp` still contains general SVG rendering logic. |
 | Cycle detection for recursive SVG references | Partial | Local file SVG recursion now has a thread-local render stack guard. Recursive external `<use>` and file-based nested SVG `<image>` references are skipped with a debug log; broader async/cache-cycle detection is still pending. |
-| Full CSS parser integration for SVG `<style>` | Not yet | The current bridge is intentionally narrow; full selector/cascade support remains part of the style cleanup phase. |
+| Full CSS parser integration for SVG `<style>` | Done | The shared parser/cascade replaced the earlier lightweight bridge; this does not imply that every CSS feature is implemented. |
 
-So, no: **not every designed action item has been implemented**. The implemented slice covers the high-impact behavior requested first: parser unification for external SVG pictures, vector-first external image rendering, nested SVG image support, local external `<use>` render-by-reference, and basic scoped embedded styles.
+So, no: **not every designed action item has been implemented**. The implemented slice covers the high-impact behavior requested first: parser unification for external SVG pictures, vector-first external image rendering, nested SVG image support, local external `<use>` render-by-reference, shared isolated/host CSS, typed paints, effects, text, embedded HTML, the N1 animation inventory and macOS exports. The formal resource manager/API redesign and platform gates remain open.
 
 ## Current State
 
@@ -159,68 +188,35 @@ struct SvgDocumentRef {
 
 The renderer should operate on a document/ref abstraction instead of directly caring whether the source was inline, an image, a background, or a standalone file.
 
-## Parse External SVG Through Input HTML
+## Parse External SVG as XML
 
-External SVG should be parsed through the HTML5/input-html stack, not `parse_xml()`.
-
-Add an explicit SVG document parse helper near the HTML parser API:
+External SVG uses `parse_svg_document()` in `lambda/input/input-xml.cpp`.
+It invokes the shared XML parser and returns the SVG root while keeping the
+parsed document in its Input owner (D4.1.3/D4.2.6). Inline SVG continues through
+HTML5 foreign-content parsing. Both parsers produce Lambda Elements for the
+same renderer; parser choice follows the embedding document's syntax.
 
 ```cpp
-Element* html5_parse_svg_document(Input* input, const char* svg_source, Html5ParseOptions* opts);
+Element* parse_svg_document(Input* input, const char* svg_source);
 ```
 
-This helper should reuse the same tokenizer/tree-builder code as `html5_parse()` and the same SVG foreign-content correction tables. It should differ only in setup and extraction:
-
-- Treat the source as a document whose meaningful root is the first `<svg>` element.
-- Preserve SVG namespace behavior and SVG tag/attribute correction.
-- Ignore or safely retain XML declaration, doctype, comments, and processing instructions.
-- Return the `<svg>` root directly, or return a document wrapper with a predictable accessor.
-- Build the same Lambda `Element` data model that inline SVG uses.
-
-Implementation options:
-
-1. **Synthetic HTML wrapper**
-
-   Wrap SVG bytes in a minimal HTML body before parsing:
-
-   ```html
-   <!doctype html><html><body>...svg source...</body></html>
-   ```
-
-   Then extract the first `<svg>` element from the body. This is simple and reuses current parser behavior, but XML declarations and leading doctypes should be stripped or tolerated.
-
-2. **HTML fragment mode with SVG root extraction**
-
-   Feed the source through a fragment parser and extract the `<svg>` root. This avoids creating full html/head/body wrappers if the fragment API is already reliable enough.
-
-3. **Dedicated SVG mode in HTML5 parser**
-
-   Add `Html5ParseOptions::svg_document_mode`. The parser can parse a root `<svg>` while keeping normal SVG foreign-content correction. This is the cleanest long-term option if synthetic wrapping exposes edge cases.
-
-Preferred path: start with option 1 or 2 for low risk, then graduate to option 3 if SVG document parsing needs more precise error recovery.
-
-### Remove XML Parser Dependency From SVG Image Loading
-
-Replace the current `rdt_picture_load()` SVG parsing path:
+XML preserves element/attribute case, namespace declarations, CDATA, and
+self-closing XHTML content. The earlier synthetic HTML wrapper was incorrect:
+an XHTML self-closing tag inside foreignObject could absorb the next SVG
+sibling. The P11 namespace/type-selector fixtures reproduce that defect and
+verify the shared XML path. Namespace prefixes remain authored data; layout
+and CSS type selectors use the HTML element's local name.
 
 ```text
-rdt_picture_load(path)
-  -> read bytes
-  -> parse_xml(input, bytes)
-  -> find first <svg>
+rdt_picture_load(path) / rdt_picture_load_data(bytes)
+  -> parse_svg_document(input, bytes)
+  -> isolated SVG style/document context
+  -> shared SVG PaintIR traversal
 ```
 
-with:
-
-```text
-svg_resource_load(url)
-  -> read/fetch bytes through resource backend
-  -> html5_parse_svg_document(input, bytes)
-  -> build SvgDocument
-  -> cache by canonical URL
-```
-
-`rdt_picture_load()` should either disappear from external SVG paths or become a thin compatibility shim over `SvgResourceManager`.
+`rdt_picture_load()` remains the compatibility owner. A future
+`SvgResourceManager` can provide canonical-URL caching and asynchronous loading
+without changing the parser or introducing a second renderer.
 
 ## Unified Resource Backend
 
@@ -429,7 +425,7 @@ Normative inheritance policy:
 Embedded `<style>` in SVG resources should be supported rather than deferred. The implementation should reuse the HTML style pipeline where possible:
 
 ```text
-html5_parse_svg_document()
+parse_svg_document()
    -> collect <style> children from the SVG document
    -> parse CSS with the existing CSS parser
    -> attach stylesheet list to SvgDocument
@@ -517,8 +513,8 @@ Do not cache rendered pixels as the primary representation. Rendered/rasterized 
 
 ### Phase 1: Parser Unification
 
-- Add `html5_parse_svg_document()`.
-- Update external SVG load path to use input-html instead of `parse_xml()`.
+- Add `parse_svg_document()`.
+- Route external SVG through shared XML parsing; retain HTML5 parsing for inline SVG.
 - Keep `rdt_picture_load()` as a compatibility wrapper initially.
 - Add regression tests comparing inline SVG and external SVG with the same markup.
 
@@ -655,3 +651,61 @@ All SVG bytes/elements
 ```
 
 Inline SVG and external SVG should differ only in source ownership, resource isolation, and placement context. They should not differ in parser semantics, attribute normalization, text/font APIs, or drawing backend behavior.
+
+
+## SVG support implementation progress (2026-10-02)
+
+The [SVG support plan](../impl/Lambda_Impl_SVG_Support.md#74-progress-record)
+records verified packages separately from outstanding phases. P2 replaces the
+SVG-local stylesheet parser/matcher with the shared host/isolated DOM adapter.
+Host selectors, selector lists, combinators, importance, inherited group fonts,
+visibility overrides and styled gradient stops have Chromium pixel/input
+regressions. Host class changes, stylesheet text replacement and definitions
+outside the painted SVG root invalidate retained paint; font-resource and glyph
+cache generations also enter the layer key. The adapter's per-walk metadata
+obeys **D4.2.2v2–D4.2.4**, and document generation checks obey **D4.5.1v3**.
+P3 shares viewport/length/transform geometry with DOM bounds and hit testing.
+P4 shares raster decoders and resource generations, preserves image fitting,
+and separates standalone document DOMs from isolated referenced images. Deferred
+payloads honor **D4.2.2v2-D4.2.4/D4.5.1v3**. Text, paint servers, effects,
+embedded HTML, animation and export phases remain in progress; the full proposal
+is not complete.
+
+
+**2026-10-02 P5 text increment.** Full character-position lists and repeated
+rotation, inherited spacing/baselines, nested textLength, glyph outline/bitmap
+coverage painting, text opacity and decoration enter the shared paint pipeline.
+Font resources have isolated registry ownership (**D4.2.2v2-D4.2.4, D4.5.1v3**),
+and DOM text bounds/hits share the placed character cells. Static text pixels
+pass 756/756 at both scales/cache policies; text interactions pass 210/210 with
+layers off and eager. Existing SVG hits and document image/PDF previews remain
+green. The implementation record identifies Chromium 143 disagreements with
+normative UTF-16 indexing, descendant length calibration and decoration style/
+color behavior. Text paint servers and complete effects remain in P6/P8/P10;
+general shaping remains existing font-engine debt. See
+[SVG implementation plan](../impl/Lambda_Impl_SVG_Support.md) §7.4.
+
+
+**2026-10-02 P6 paint increment.** Typed inherited fill/stroke/currentColor and
+recursive use context paint share geometry frames. Gradients carry spread,
+focal circles, transforms and owned dash arrays through PaintIR/DisplayList/
+retained caches; dynamic stops use shared styles. Local/external templates retain
+isolated document/font owners and relative bases under **D4.1.3, D4.2.2v2-D4.2.4,
+D4.2.6**. Pattern tiles and radial-cone fallbacks share offscreen path coverage
+and preserve suspended clip ownership. Focused scale/cache validation passes
+936/936, vector 24/24, DisplayList 77/77 and retained storage 24/24. Chromium
+normative differences and the running aggregate gate are recorded in
+[SVG implementation plan](../impl/Lambda_Impl_SVG_Support.md) §7.4.
+Later phases and their current gates are recorded in
+[SVG implementation plan](../impl/Lambda_Impl_SVG_Support.md) §§7.5–7.10.
+
+**2026-10-03 conditional-content increment.** SVG2 §§5.7.1–5.7.5 governs first
+eligible-child selection, empty-attribute presence, preference-prefix language
+matching and obsolete `requiredFeatures`. The evaluator is shared by painting,
+text collection, geometry and input. Preferred languages have document ownership
+under **D4.2.2v2–D4.2.6**. Static cases pass 16/16 at both densities/cache modes;
+live transformed pointer/mutation cases pass 25/25 with caching off and eager.
+Chromium's stale dynamic conditions are retained alongside a 25/25 ordinary
+display reference. Embedded HTML is being connected to the existing layout/paint
+engine under the SVG2 §12.2 containing rectangle (**RSC1/RSC6/RSC11–RSC12**);
+its interaction, isolated-image and export gates remain open.
