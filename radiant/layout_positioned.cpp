@@ -565,6 +565,8 @@ ViewBlock* find_positioned_containing_block(ViewElement* view) {
             }
         } else if (ancestor->is_block()) {
             ViewBlock* ancestor_block = lam::view_require_block(ancestor);
+            // SVG's positioning rectangle is the containing block for embedded HTML abspos children.
+            if (ancestor_block->tag() == MARKUP_NAME_FOREIGNOBJECT) return ancestor_block;
             if (ancestor_block->position &&
                 ancestor_block->positionp()->position != CSS_VALUE_STATIC) {
                 return ancestor_block;

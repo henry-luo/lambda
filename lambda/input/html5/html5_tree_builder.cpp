@@ -455,86 +455,6 @@ Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts)
     return parser->document;
 }
 
-static const char* html5_svg_skip_ws(const char* ptr) {
-    while (*ptr == ' ' || *ptr == '\t' || *ptr == '\n' || *ptr == '\r' || *ptr == '\f') {
-        ptr++;
-    }
-    return ptr;
-}
-
-static const char* html5_svg_skip_preamble(const char* source) {
-    if (!source) return nullptr;
-    const char* ptr = source;
-    if ((unsigned char)ptr[0] == 0xEF && (unsigned char)ptr[1] == 0xBB && (unsigned char)ptr[2] == 0xBF) {
-        ptr += 3;
-    }
-
-    bool advanced = true;
-    while (advanced) {
-        advanced = false;
-        ptr = html5_svg_skip_ws(ptr);
-        if (strncmp(ptr, "<?xml", 5) == 0) {
-            const char* end = strstr(ptr, "?>");
-            if (end) {
-                ptr = end + 2;
-                advanced = true;
-            }
-        }
-        else if (str_istarts_with(ptr, strlen(ptr), "<!DOCTYPE", 9)) {
-            const char* end = strchr(ptr, '>');
-            if (end) {
-                ptr = end + 1;
-                advanced = true;
-            }
-        }
-    }
-    return ptr;
-}
-
-static Element* html5_find_first_svg(Element* elem) {
-    if (!elem || !elem->type) return nullptr;
-    TypeElmt* elem_type = (TypeElmt*)elem->type;
-    if (elem_type && elem_type->name.str && strcmp(elem_type->name.str, "svg") == 0) {
-        return elem;
-    }
-    for (int64_t i = 0; i < elem->length; i++) {
-        Item child = elem->items[i];
-        if (!child.item || get_type_id(child) != LMD_TYPE_ELEMENT) continue;
-        Element* found = html5_find_first_svg((Element*)child.item);
-        if (found) return found;
-    }
-    return nullptr;
-}
-
-Element* html5_parse_svg_document(Input* input, const char* svg_source, Html5ParseOptions* opts) {
-    if (!input || !svg_source) return nullptr;
-
-    const char* svg_body = html5_svg_skip_preamble(svg_source);
-    if (!svg_body || !*svg_body) {
-        input->root = (Item){.item = ITEM_NULL};
-        return nullptr;
-    }
-
-    static const char* prefix = "<!doctype html><html><body>";
-    static const char* suffix = "</body></html>";
-    size_t prefix_len = strlen(prefix);
-    size_t body_len = strlen(svg_body);
-    size_t suffix_len = strlen(suffix);
-    char* html = mem_join3(prefix, prefix_len, svg_body, body_len, suffix, suffix_len,
-                           MEM_CAT_INPUT_HTML);
-    if (!html) return nullptr;
-
-    Element* doc = html5_parse_ex(input, html, opts);
-    mem_free(html);
-
-    input->root = (Item){.element = doc};
-    Element* svg_root = html5_find_first_svg(doc);
-    if (!svg_root) {
-        log_error("html5_svg: no <svg> root found in external SVG document");
-    }
-    return svg_root;
-}
-
 // ============================================================================
 // FRAGMENT PARSING
 // For parsing HTML fragments in body context (used by markdown parser)
@@ -551,7 +471,8 @@ Element* html5_parse_svg_document(Input* input, const char* svg_source, Html5Par
  * @param input Input context
  * @return Initialized parser, or nullptr on error
  */
-Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input) {
+Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input,
+                                         const char* context_tag, bool svg_namespace) {
     Html5Parser* parser = html5_parser_create(pool, arena, input);
     if (!parser) return nullptr;
 
@@ -572,6 +493,21 @@ Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input
     // Push html and body onto the open elements stack
     html5_push_element(parser, parser->html_element);
     html5_push_element(parser, body);
+
+    parser->fragment_root = body;
+    if (svg_namespace) {
+        // preserve foreign-content parsing instead of converting SVG image to HTML img.
+        Element* svg = builder.element("svg").final().element;
+        array_append(body, Item{.element = svg}, pool, arena);
+        html5_push_element(parser, svg);
+        parser->fragment_root = svg;
+        if (context_tag && strcmp(context_tag, "svg") != 0) {
+            Element* context = builder.element(context_tag).final().element;
+            array_append(svg, Item{.element = context}, pool, arena);
+            html5_push_element(parser, context);
+            parser->fragment_root = context;
+        }
+    }
 
     // Start in body mode (fragments are parsed as body content)
     parser->mode = HTML5_MODE_IN_BODY;
@@ -646,6 +582,7 @@ bool html5_fragment_parse(Html5Parser* parser, const char* html) {
  */
 Element* html5_fragment_get_body(Html5Parser* parser) {
     if (!parser || !parser->html_element) return nullptr;
+    if (parser->fragment_root) return parser->fragment_root;
 
     // Body is the second child of html (after head if present, or first if no head)
     for (size_t i = 0; i < (size_t)parser->html_element->length; i++) {

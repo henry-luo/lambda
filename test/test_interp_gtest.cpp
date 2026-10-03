@@ -15,6 +15,7 @@
 //==============================================================================
 
 #include <gtest/gtest.h>
+#include "test_lambda_tier_helpers.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -82,6 +83,7 @@ RunResult run_script(const std::string& script, const char* tier,
              interp_test_process_id(), ++interp_gtest_run_sequence);
     std::string command;
     if (tier) command += std::string("LAMBDA_TIER=") + tier + " ";
+    command += "LAMBDA_RSS_REPORT=1 ";
     command += LAMBDA_EXE;
     if (procedural) command += " run";
     command += " " + script + " 2>" + err_path;
@@ -686,15 +688,80 @@ TEST(InterpWalker, ImmutableProcAliasWithTaskStaysPinned) {
     // MIR satellite. Since the AUTO landing that membrane fails closed on
     // indirect Lambda calls -- the boxed dispatcher has no caller-root
     // write-back channel for a target it cannot name (D8.1.1v4, D3.3.1). The
-    // module is therefore a counted whole-module fallback, which is what R4
-    // requires: never a silently half-interpreted run.
-    const std::string path = "temp/interp_case_proc_alias_task.ls";
+    // AUTO retains its counted fallback; explicit T0 rejects before execution
+    // because the task continuation requires MIR (D8.1.1v15).
+    const char* path = "temp/interp_case_proc_alias_task.ls";
     write_script(path,
-        "pn worker() { sleep(1) }\n"
+        "pn worker() { sleep(1)^ }\n"
         "pn main() { let run = worker\n run() }\n");
-    RunResult interp = run_script(path, "interp", /*procedural=*/true);
-    EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 0);
-    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 1);
+    write_script("temp/interp_case_proc_alias_task.txt", "");
+    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_PROC");
+    RunResult automatic = run_script(path, "auto", /*procedural=*/true);
+    EXPECT_EQ(automatic.exit_code, 0);
+    EXPECT_EQ(summary_field(automatic.stderr_text, "fallback="), 1);
+}
+
+TEST(InterpFallback, ExplicitInterpreterRejectsTaskSatellite) {
+    // this body used to pass the scan and compile a satellite despite the pin
+    const char* path = "temp/interp_case_strict_task.ls";
+    write_script(path, "pn main() { sleep(1)^; print(\"task executed\\n\") }\n");
+    write_script("temp/interp_case_strict_task.txt", "task executed\n");
+    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_PROC");
+    RunResult jit = run_script(path, "jit", true);
+    EXPECT_EQ(jit.exit_code, 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text),
+        trim_trailing(read_file("temp/interp_case_strict_task.txt")));
+}
+
+TEST(InterpFallback, ExplicitInterpreterRejectsUnsupportedImport) {
+    // imports can arrive through prebuilt AST templates; neither path may JIT
+    write_script("temp/interp_case_strict_provider.ls",
+        "pub pn worker() { sleep(1)^ }\n");
+    write_script("temp/interp_case_strict_provider.txt", "");
+    const char* path = "temp/interp_case_strict_import.ls";
+    write_script(path, "import .interp_case_strict_provider\n"
+        "pn main() { worker(); print(\"import executed\\n\") }\n");
+    write_script("temp/interp_case_strict_import.txt", "import executed\n");
+    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_PROC");
+    RunResult jit = run_script(path, "jit", true);
+    EXPECT_EQ(jit.exit_code, 0);
+    EXPECT_EQ(trim_trailing(jit.stdout_text),
+        trim_trailing(read_file("temp/interp_case_strict_import.txt")));
+}
+
+TEST(InterpWalker, QueensRunsEntirelyUnderInterpreter) {
+    // both source variants must solve and validate the board under strict T0
+    const char* scripts[] = {
+        "test/benchmark/awfy/queens.ls", "test/benchmark/awfy/queens2.ls"
+    };
+    for (const char* script : scripts) {
+        auto interp = run_script(script, "interp", true);
+        ASSERT_EQ(interp.exit_code, 0) << script << interp.stderr_text;
+        EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 1) << script;
+        EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0) << script;
+        EXPECT_EQ(summary_field(interp.stderr_text, "excluded="), 0) << script;
+        auto timing = interp.stdout_text.find("__TIMING__:");
+        ASSERT_LT(timing, interp.stdout_text.size()) << script;
+        EXPECT_EQ(trim_trailing(interp.stdout_text.substr(0, timing)),
+            trim_trailing(read_file("test/benchmark/awfy/queens.txt"))) << script;
+    }
+}
+
+TEST(InterpWalker, DerivedUntypedIndicesKeepCheckedStoresAndSnapshots) {
+    // dynamic arithmetic keys keep S7.1.3v2 checks and S9.1.2/S9.1.3 COW
+    const char* script = "test/lambda/proc/proc_derived_untyped_index.ls";
+    for (const char* tier : {"interp", "jit"}) {
+        auto result = run_script(script, tier, true);
+        ASSERT_EQ(result.exit_code, 0) << tier << result.stderr_text;
+        EXPECT_EQ(trim_trailing(result.stdout_text),
+            trim_trailing(read_file("test/lambda/proc/proc_derived_untyped_index.txt")))
+            << tier;
+        if (strcmp(tier, "interp") == 0) {
+            EXPECT_EQ(summary_field(result.stderr_text, "executed="), 1);
+            EXPECT_EQ(summary_field(result.stderr_text, "fallback="), 0);
+            EXPECT_EQ(summary_field(result.stderr_text, "excluded="), 0);
+        }
+    }
 }
 
 //==============================================================================
@@ -858,6 +925,7 @@ TEST(InterpFallback, ExcludedScriptsAreCountedNotInterpreted) {
         long executed = summary_field(interp.stderr_text, "executed=");
         EXPECT_LE(executed, 0) << entry.script
             << " is on the exclusion list but ran under T0";
+        EXPECT_LE(summary_field(interp.stderr_text, "fallback="), 0) << entry.script;
     }
 }
 
@@ -902,8 +970,25 @@ TEST(InterpFallback, CharacterRangeIndexRemainsPinned) {
         "    var values = [null, null, null]\n"
         "    for c in \"a\" to \"c\" { values[c] = c }\n"
         "}\n");
-    RunResult interp = run_script(path, "interp", /*procedural=*/true);
-    EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 1);
+    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_INDEX_ASSIGN_STAM");
+}
+
+TEST(InterpFallback, DerivedDynamicNdimCoordinatesRemainUnsupported) {
+    // a scalar arithmetic key must not admit an unplanned coordinate list
+    const char* path = "temp/interp_case_derived_ndim_index.ls";
+    write_script(path,
+        "pn write_coords(var values, i, j) { values[i + 0, j + 0] = 99 }\n"
+        "pn main() {\n"
+        "    var values = [[1, 2], [3, 4]]\n"
+        "    write_coords(values, 0, 1)\n"
+        "    print(values[0, 1] ++ \"\\n\")\n"
+        "}\n");
+    write_script("temp/interp_case_derived_ndim_index.txt", "99\n");
+    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_INDEX_ASSIGN_STAM");
+    auto jit = run_script(path, "jit", true);
+    ASSERT_EQ(jit.exit_code, 0) << jit.stderr_text;
+    EXPECT_EQ(trim_trailing(jit.stdout_text),
+        trim_trailing(read_file("temp/interp_case_derived_ndim_index.txt")));
 }
 
 }  // namespace

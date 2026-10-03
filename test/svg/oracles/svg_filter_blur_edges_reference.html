@@ -1,0 +1,29 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}canvas{display:block;width:440px;height:180px}</style></head><body><canvas id="reference"></canvas><script>
+// independent double-precision evaluation of Filter Effects 1 §9.14 on an opaque red/blue input.
+const density=devicePixelRatio, canvas=document.getElementById('reference');
+canvas.width=440*density;canvas.height=180*density;
+const context=canvas.getContext('2d'), image=context.createImageData(canvas.width,canvas.height);
+image.data.fill(255);
+const sigma=2*density, radius=Math.ceil(3*sigma), weights=[];
+let normalization=0;
+for(let offset=-radius;offset<=radius;offset++){const weight=Math.exp(-offset*offset/(2*sigma*sigma));weights.push(weight);normalization+=weight;}
+['none','duplicate','wrap'].forEach((mode,index)=>{
+  const left=(10+140*index)*density, start=left+20*density, width=80*density;
+  for(let x=left;x<left+120*density;x++){
+    let red=0,blue=0,alpha=0;
+    for(let offset=-radius;offset<=radius;offset++){
+      let sample=x-start+offset;
+      if(mode==='duplicate')sample=Math.max(0,Math.min(width-1,sample));
+      if(mode==='wrap')sample=((sample%width)+width)%width;
+      if(sample<0||sample>=width)continue;
+      const amount=weights[offset+radius]/normalization;
+      alpha+=amount;if(sample<width/2)red+=amount;else blue+=amount;
+    }
+    const white=255-Math.round(alpha*255), r=Math.round(red*255)+white, b=Math.round(blue*255)+white;
+    for(let y=20*density;y<100*density;y++){
+      const pixel=4*(y*canvas.width+x);image.data[pixel]=r;image.data[pixel+1]=white;image.data[pixel+2]=b;
+    }
+  }
+});
+context.putImageData(image,0,0);
+</script></body></html>

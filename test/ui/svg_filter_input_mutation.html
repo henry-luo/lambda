@@ -1,0 +1,14 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}#advance{position:absolute;left:0;top:160px;width:100px;height:30px}</style></head><body><svg width="520" height="140"><defs>
+<linearGradient id="gradient"><stop id="start" stop-color="red"/><stop id="end" offset="1" stop-color="blue"/></linearGradient>
+<filter id="background" filterUnits="userSpaceOnUse" x="0" y="0" width="180" height="100" color-interpolation-filters="sRGB"><feOffset id="offset" in="BackgroundImage" dx="60"/></filter>
+<filter id="fill" filterUnits="userSpaceOnUse" x="200" y="20" width="120" height="80" color-interpolation-filters="sRGB"><feOffset in="FillPaint"/></filter>
+<filter id="stroke" filterUnits="userSpaceOnUse" x="340" y="20" width="120" height="80" color-interpolation-filters="sRGB"><feOffset in="StrokePaint"/></filter>
+</defs><rect id="source" x="10" y="20" width="40" height="40" fill="red"/><rect x="140" y="20" width="30" height="40" filter="url(#background)"/>
+<rect id="fill-target" x="220" y="30" width="80" height="40" fill="url(#gradient)" fill-opacity=".1" filter="url(#fill)"/>
+<g id="stroke-parent" stroke="blue" stroke-opacity=".25"><rect id="stroke-target" x="360" y="30" width="80" height="40" fill="none" filter="url(#stroke)"/></g>
+</svg><button id="advance" data-step="0">advance</button><script>
+var step=0;document.getElementById('advance').addEventListener('click',function(){step++;
+var source=document.getElementById('source'),offset=document.getElementById('offset'),fill=document.getElementById('fill-target'),parent=document.getElementById('stroke-parent');
+if(step===1){source.setAttribute('fill','#00ff00');offset.setAttribute('dx','80');document.getElementById('start').setAttribute('stop-color','blue');parent.setAttribute('stroke','currentColor');parent.setAttribute('color','#00ff00');fill.setAttribute('fill-opacity','.9');}
+if(step===2){source.setAttribute('fill','blue');offset.setAttribute('dx','40');fill.setAttribute('fill','currentColor');fill.setAttribute('color','red');parent.setAttribute('stroke','none');}
+this.setAttribute('data-step',String(step));});</script></body></html>

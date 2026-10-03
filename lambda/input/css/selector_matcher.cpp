@@ -508,7 +508,8 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                     return false;
                 }
                 // Use case-insensitive comparison for HTML element names (standard)
-                return str_icmp_cstr(element->tag_name, simple_selector->value) == 0;
+                // XML namespace prefixes do not participate in a CSS type selector's local name.
+                return str_icmp_cstr(element->local_name(), simple_selector->value) == 0;
             }
             return true; // No type specified matches any element
 

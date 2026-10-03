@@ -1,0 +1,18 @@
+<!doctype html><html><head><style>@font-face{font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}html,body{margin:0;background:white}svg{display:block}text{font-family:Ahem;font-size:40px}</style></head><body><svg width="840" height="440"><defs>
+<filter id="diffuse" color-interpolation-filters="sRGB"><feDiffuseLighting lighting-color="red" surfaceScale="2" kernelUnitLength="1"><feDistantLight elevation="90"/></feDiffuseLighting><feComposite in2="SourceAlpha" operator="in"/></filter>
+<filter id="specular" color-interpolation-filters="sRGB"><feSpecularLighting lighting-color="blue" surfaceScale="2" specularConstant=".5" specularExponent="4" kernelUnitLength="1"><feDistantLight elevation="90"/></feSpecularLighting><feComposite in2="SourceAlpha" operator="in"/></filter>
+<rect id="piece" width="40" height="40" fill="green"/>
+<filter id="bbox" primitiveUnits="objectBoundingBox" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB"><feDiffuseLighting surfaceScale=".1" lighting-color="#40a0ff"><fePointLight x=".5" y=".5" z="1"/></feDiffuseLighting></filter>
+<clipPath id="clip"><rect x="10" width="20" height="40"/></clipPath><mask id="mask" mask-type="alpha" x="0" y="0" width="1" height="1"><rect width="840" height="440" fill="white" fill-opacity=".5"/></mask>
+</defs>
+<g transform="translate(20 20)"><g filter="url(#diffuse)"><g><rect width="40" height="40" fill="red"/><rect y="50" width="40" height="30" fill="blue"/></g></g></g>
+<g transform="translate(220 20)"><g filter="url(#diffuse)"><text x="0" y="40" fill="black">AA</text></g></g>
+<g transform="translate(420 20)"><g filter="url(#diffuse)"><image width="80" height="40" href="svg_image_assets/split.png"/></g></g>
+<g transform="translate(620 20)"><g filter="url(#diffuse)"><use href="#piece"/></g></g>
+<g transform="translate(20 140)"><g filter="url(#specular)"><g><rect width="40" height="40" fill="red"/><rect y="50" width="40" height="30" fill="blue"/></g></g></g>
+<g transform="translate(220 140)"><g filter="url(#specular)"><text x="0" y="40" fill="black">AA</text></g></g>
+<g transform="translate(420 140)"><g filter="url(#specular)"><image width="80" height="40" href="svg_image_assets/split.png"/></g></g>
+<g transform="translate(620 140)"><g filter="url(#specular)"><use href="#piece"/></g></g>
+<g transform="translate(100 280) rotate(90) scale(2 1)"><rect width="40" height="40" filter="url(#specular)" clip-path="url(#clip)" mask="url(#mask)" opacity=".5"/></g>
+<rect x="250" y="280" width="100" height="100" filter="url(#bbox)"/>
+</svg></body></html>

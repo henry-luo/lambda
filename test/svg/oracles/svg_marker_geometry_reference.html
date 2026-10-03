@@ -1,0 +1,52 @@
+<!DOCTYPE html><html><head><style>
+html,body{margin:0;background:white}svg{position:absolute;left:0;top:0}
+.shorthand{marker:url(#dotRed)} .shorthand{marker-end:url(#dotBlue)}
+</style></head><body><svg width="800" height="620">
+<defs>
+ <marker id="dotRed" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="6" refY="6"><circle cx="6" cy="6" r="5" fill="red"/></marker>
+ <marker id="dotGreen" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="6" refY="6"><circle cx="6" cy="6" r="5" fill="lime"/></marker>
+ <marker id="dotBlue" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" viewBox="0 0 12 12" refX="6" refY="6"><circle cx="6" cy="6" r="5" fill="blue"/></marker>
+ <marker id="plain" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="10" refY="10"><rect width="20" height="20"/></marker>
+ <marker id="context" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="10" refY="10"><rect width="20" height="20" fill="context-fill"/></marker>
+ <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" viewBox="0 0 10 10" refX="5" refY="5" orient="auto"><path d="M2 2L8 5L2 8Z" fill="red"/></marker>
+ <marker id="hidden" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="5" refY="5"><rect x="-15" y="-15" width="40" height="40" fill="red"/></marker>
+ <marker id="visible" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="5" refY="5" overflow="visible"><rect x="-15" y="-15" width="40" height="40" fill="blue"/></marker>
+ <marker id="offset" markerUnits="userSpaceOnUse" markerWidth="30" markerHeight="10" viewBox="10 20 10 10" refX="15" refY="25" preserveAspectRatio="none"><rect x="10" y="20" width="10" height="10" fill="lime"/></marker>
+ <marker id="meet" markerUnits="userSpaceOnUse" markerWidth="30" markerHeight="10" viewBox="10 20 10 10" refX="15" refY="25"><rect x="10" y="20" width="10" height="10" fill="lime"/></marker>
+ <marker id="zero" markerWidth="0" markerHeight="20" markerUnits="userSpaceOnUse"><rect width="50" height="50" fill="red"/></marker>
+ <marker id="order" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="10" refY="10"><rect width="20" height="20" fill="red"/></marker>
+ <marker id="scaled" markerWidth="4" markerHeight="4" viewBox="0 0 10 10" refX="5" refY="5"><rect width="10" height="10" fill="red"/></marker>
+ <linearGradient id="split"><stop offset=".5" stop-color="red"/><stop offset=".5" stop-color="blue"/></linearGradient>
+ <path id="instance" d="M0 0H100"/>
+</defs>
+<path d="M30 30L90 30" fill="lime" stroke="blue" stroke-width="8" marker-end="url(#plain)"/>
+<path d="M160 30V60H240V30" fill="url(#split)" stroke="none" marker-start="url(#context)" marker-end="url(#context)"/>
+<path d="M310 30C310 30 370 30 370 30" fill="none" stroke="blue" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+<path d="M440 30A40 40 0 1 1 520 30L560 30" fill="none" stroke="blue" marker-mid="url(#dotRed)"/>
+<path d="M620 30Q650 60 680 30T740 30" fill="none" stroke="blue" marker-mid="url(#arrow)"/>
+<g fill="none" stroke="black" marker-start="url(#dotRed)" marker-mid="url(#dotGreen)" marker-end="url(#dotBlue)">
+ <path d="M30 130H70V170Z M130 130H170V170Z M230 130H270V170Z"/>
+ <path d="M330 130M370 130L410 130"/>
+ <path d="M460 130L460 130L500 130L500 130"/>
+</g>
+<path class="shorthand" d="M580 130H620L660 170" fill="none" stroke="black"/>
+<g fill="none" stroke="black"><path d="M30 240H80" marker-end="url(#hidden)"/><path d="M130 240H180" marker-end="url(#visible)"/><path d="M230 240H280" marker-end="url(#offset)"/><path d="M330 240H380" marker-end="url(#meet)"/><path d="M430 240H480" marker-end="url(#zero)"/></g>
+<g fill="lime" stroke="blue" stroke-width="14" marker-start="url(#order)">
+ <path transform="translate(30 330)" d="M0 0H50V50H0Z" paint-order="fill stroke markers"/>
+ <path transform="translate(150 330)" d="M0 0H50V50H0Z" paint-order="fill markers stroke"/>
+ <path transform="translate(270 330)" d="M0 0H50V50H0Z" paint-order="stroke fill markers"/>
+ <path transform="translate(390 330)" d="M0 0H50V50H0Z" paint-order="stroke markers fill"/>
+ <path transform="translate(510 330)" d="M0 0H50V50H0Z" paint-order="markers fill stroke"/>
+ <path transform="translate(630 330)" d="M0 0H50V50H0Z" paint-order="markers stroke fill"/>
+</g>
+<g fill="none" stroke="blue" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 20" marker-start="url(#dotRed)" marker-end="url(#dotGreen)">
+ <use href="#instance" x="30" y="440"/><use href="#instance" x="180" y="440" stroke-linecap="butt" stroke-dasharray="none"/>
+</g>
+<g fill="none" stroke="blue" font-size="20" stroke-width=".5em"><path d="M350 440H450" font-size="40"/></g>
+<path d="M490 440H690" fill="none" stroke="blue" stroke-width="10" stroke-dasharray="1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 20 40"/>
+<g transform="translate(40 520) scale(3 1)"><path d="M0 0H40V30" fill="none" stroke="url(#split)" stroke-width="8" vector-effect="non-scaling-stroke"/></g>
+<g transform="translate(250 520) scale(3 1)"><path d="M0 0H40V30" fill="none" stroke="blue" stroke-width="6" vector-effect="non-scaling-stroke"/></g>
+<!-- SVG2 13.7.1: 4 marker units times 6px non-scaling stroke = 24px squares. -->
+<rect x="238" y="508" width="24" height="24" fill="red"/><rect x="358" y="538" width="24" height="24" fill="red"/>
+<g transform="translate(490 520) scale(3 1)"><path d="M0 0H50" fill="none" stroke="blue" stroke-width="8" stroke-dasharray="10 10" vector-effect="non-scaling-stroke"/></g>
+</svg></body></html>

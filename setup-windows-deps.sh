@@ -164,6 +164,7 @@ install_msys2_package "${TOOLCHAIN_PREFIX}-glfw" "GLFW window management"
 install_msys2_package "${TOOLCHAIN_PREFIX}-libpng" "PNG image library"
 install_msys2_package "${TOOLCHAIN_PREFIX}-libjpeg-turbo" "JPEG image library"
 install_msys2_package "${TOOLCHAIN_PREFIX}-giflib" "GIF image library"
+install_msys2_package "${TOOLCHAIN_PREFIX}-libwebp" "WebP image library"
 
 # HTTP/networking libraries - minimal setup for libcurl only
 # Note: nghttp2 removed - building minimal libcurl without HTTP/2 support

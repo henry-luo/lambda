@@ -29,7 +29,8 @@ def run(script, tier, timeout, procedural=False):
     stats = FALLBACK_RE.search(result.stderr or "")
     fallback = int(stats.group(2)) if stats else 0
     executed = int(stats.group(1)) if stats else 0
-    return result.stdout, (executed, fallback), result.status
+    excluded = int(stats.group(3)) if stats else 0
+    return result.stdout, (executed, fallback, excluded), result.status
 
 
 def main():
@@ -67,8 +68,7 @@ def main():
     # parallelizes cleanly. It was serial back when almost everything fell back
     # in milliseconds; every slice that lands converts a rejection into a full
     # interpreted run, so the serial cost grew with coverage. These runs read
-    # only stderr — nothing here depends on the shared log.txt, which is why
-    # refresh_lists.py (which does) must stay serial.
+    # only stderr — nothing here depends on the shared log.txt.
     def verdict_for(entry):
         script, procedural = entry
         jit_out, _, jit_status = run(script, "jit", args.timeout, procedural)
@@ -82,11 +82,14 @@ def main():
             long_timeout = args.timeout * 3
             jit_out, _, jit_status = run(script, "jit", long_timeout, procedural)
             int_out, stats, int_status = run(script, "interp", long_timeout, procedural)
-        executed, fallback = stats if stats else (0, 0)
+        executed, fallback, excluded = stats if stats else (0, 0, 0)
         if "timeout" in (jit_status, int_status):
             verdict = "timeout"
-        elif fallback or not executed:
-            verdict = "fallback"
+        elif fallback:
+            # D8.1.1v15: a forced interpreter run must never compile MIR.
+            verdict = "mismatch"
+        elif excluded or not executed:
+            verdict = "excluded"
         elif jit_out != int_out or jit_status != int_status:
             # Confirm before accusing. Every genuine T0 divergence found so far
             # reproduces on a direct re-run; a one-off under N-way load does not
@@ -100,7 +103,7 @@ def main():
                        else "match")
         else:
             verdict = "match"
-        return (script, verdict, jit_status, int_status, executed, fallback)
+        return (script, verdict, jit_status, int_status, executed, fallback, excluded)
 
     # `pool.map()` yields in submission order. One early renderer fixture can
     # therefore hide hundreds of completed classifications behind it and make
@@ -121,17 +124,17 @@ def main():
                 print(f"progress={completed}/{len(scripts)}", flush=True)
 
     supported = [r[0] for r in rows if r[1] == "match"]
-    fell_back = [r[0] for r in rows if r[1] == "fallback"]
+    excluded = [r[0] for r in rows if r[1] == "excluded"]
     mismatched = [r[0] for r in rows if r[1] == "mismatch"]
     timed_out = [r[0] for r in rows if r[1] == "timeout"]
 
     with open(args.out, "w") as f:
-        f.write("# script\tverdict\tjit_status\tinterp_status\texecuted\tfallback\n")
+        f.write("# script\tverdict\tjit_status\tinterp_status\texecuted\tfallback\texcluded\n")
         for row in rows:
             f.write("\t".join(str(c) for c in row) + "\n")
 
     print(f"scripts={len(scripts)} match={len(supported)} "
-          f"fallback={len(fell_back)} mismatch={len(mismatched)} "
+          f"excluded={len(excluded)} mismatch={len(mismatched)} "
           f"timeout={len(timed_out)}")
     if timed_out:
         # R4: never a silent cap -- an unproven script is named, not absorbed.
@@ -143,7 +146,7 @@ def main():
         print("mismatched:")
         for s in mismatched:
             print("  " + s)
-    return 0
+    return 1 if mismatched else 0
 
 
 if __name__ == "__main__":

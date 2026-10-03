@@ -9,6 +9,7 @@
  */
 
 #include "dom.h"
+#include "../../radiant/svg_animation.hpp"
 #include "dom_core.h"
 #include "realm/dom_realm.h"
 #include "dom_engine.h"
@@ -178,14 +179,16 @@ static Item dom_svg_create_transform_from_matrix(Item matrix);
 static RdtMatrix dom_svg_transform_from_element(DomElement* elem);
 DomElement* dom_find_element_by_id(DomElement* root, const char* id);
 
-static Html5Parser* dom_create_fragment_parser(DomDocument* doc) {
+static Html5Parser* dom_create_fragment_parser(DomDocument* doc,
+                                               DomElement* context = nullptr) {
     if (!doc || !doc->document_pool || !doc->input || !doc->input->arena) {
         return nullptr;
     }
     // Fragment backing is inserted into the Mark tree, so keep it in the
     // document Input arena rather than the separate DOM-wrapper arena.
     return html5_fragment_parser_create(doc->document_pool, doc->input->arena,
-                                       doc->input);
+        doc->input, context ? context->tag_name : nullptr,
+        context && dom_element_is_svg(context));
 }
 
 static bool dom_replace_inner_html(DomElement* elem, const char* html_str,
@@ -313,6 +316,12 @@ static void dom_mark_dirty_ancestors(DomNode* node) {
             if (!elem->is_table_fixup()) elem->set_styles_resolved(false);
         }
     }
+}
+
+extern "C" void dom_invalidate_layout_subtree(void* node) {
+    DomNode* root = (DomNode*)node;
+    dom_mark_dirty_subtree(root);
+    dom_mark_dirty_ancestors(root);
 }
 
 static inline uint32_t dom_mutation_bit(DomJsMutationKind kind) {
@@ -533,8 +542,7 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
     }
 
     if (target) {
-        dom_mark_dirty_subtree(target);
-        dom_mark_dirty_ancestors(target);
+        dom_invalidate_layout_subtree(target);
     }
     if (parent) {
         dom_mark_dirty_ancestors(parent);
@@ -2049,20 +2057,153 @@ static const char* dom_html_interface_name(DomElement* elem) {
     return nullptr;
 }
 
-static bool dom_element_is_svg(DomElement* elem) {
-    if (!elem || !elem->tag_name) return false;
-    const char* namespace_uri = elem->get_attribute("__lambda_ns_uri");
-    if (namespace_uri && strcmp(namespace_uri, "http://www.w3.org/2000/svg") == 0) {
-        return true;
+extern "C" const char* dom_element_lookup_namespace_uri(void* element, const char* prefix) {
+    DomElement* elem = (DomElement*)element;
+    if (!elem) return nullptr;
+    if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
+    if (prefix && strcmp(prefix, "xmlns") == 0) return "http://www.w3.org/2000/xmlns/";
+    char declaration[128] = "xmlns";
+    if (prefix && *prefix) {
+        size_t length = strlen(prefix);
+        if (!length || length + 7 > sizeof(declaration)) return nullptr;
+        declaration[5] = ':';
+        memcpy(declaration + 6, prefix, length);
+        declaration[6 + length] = '\0';
     }
+    // XML namespace declarations inherit independently of HTML parser integration points.
+    for (DomNode* node = elem; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        const char* namespace_uri = node->as_element()->get_attribute(declaration);
+        if (namespace_uri) return *namespace_uri ? namespace_uri : nullptr;
+    }
+    return nullptr;
+}
+
+extern "C" const char* dom_element_attribute_ns(void* element, const char* namespace_uri, const char* local_name) {
+    DomElement* elem = (DomElement*)element;
+    if (!elem || !local_name) return nullptr;
+    if (!namespace_uri || !*namespace_uri) return elem->get_attribute(local_name);
+    char mirror_name[128];
+    if (strcmp(namespace_uri, "http://www.w3.org/1999/xlink") == 0) {
+        snprintf(mirror_name, sizeof(mirror_name), "__lambda_xlink_%s", local_name);
+        const char* mirror = elem->get_attribute(mirror_name);
+        if (mirror) return mirror;
+    }
+    int count = 0;
+    const char** names = elem->attribute_names(&count);
+    for (int i = 0; names && i < count; i++) {
+        const char* colon = strchr(names[i], ':');
+        if (!colon || strcmp(colon + 1, local_name) != 0) continue;
+        char prefix[128]; size_t length = colon - names[i];
+        if (!length || length >= sizeof(prefix)) continue;
+        memcpy(prefix, names[i], length); prefix[length] = 0;
+        const char* uri = dom_element_lookup_namespace_uri(elem, prefix);
+        if (uri && strcmp(uri, namespace_uri) == 0) return elem->get_attribute(names[i]);
+    }
+    return nullptr;
+}
+
+extern "C" const char* dom_element_namespace_uri(void* element) {
+    DomElement* elem = (DomElement*)element;
+    if (!elem || !elem->tag_name) return nullptr;
+    const char* namespace_uri = elem->get_attribute("__lambda_ns_uri");
+    if (namespace_uri) return *namespace_uri ? namespace_uri : nullptr;
+    const char* colon = strchr(elem->tag_name, ':');
+    char prefix[128] = {};
+    if (colon) {
+        size_t length = colon - elem->tag_name;
+        if (!length || length >= sizeof(prefix)) return nullptr;
+        memcpy(prefix, elem->tag_name, length);
+    }
+    namespace_uri = dom_element_lookup_namespace_uri(elem, prefix);
+    if (namespace_uri) return namespace_uri;
+    if (colon) return nullptr;
     for (DomNode* current = (DomNode*)elem; current; current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* ancestor = current->as_element();
+        // HTML integration points stop SVG namespace inheritance; nested svg starts it again.
+        if (current != (DomNode*)elem && ancestor && ancestor->tag_name &&
+            (str_icmp_cstr(ancestor->tag_name, "foreignObject") == 0 ||
+             str_icmp_cstr(ancestor->tag_name, "desc") == 0 || str_icmp_cstr(ancestor->tag_name, "title") == 0)) break;
         if (ancestor && ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "svg") == 0) {
-            return true;
+            return "http://www.w3.org/2000/svg";
         }
     }
+    return "http://www.w3.org/1999/xhtml";
+}
+
+extern "C" bool dom_element_is_svg(void* element) {
+    const char* uri = dom_element_namespace_uri(element);
+    return uri && strcmp(uri, "http://www.w3.org/2000/svg") == 0;
+}
+
+extern "C" const char* dom_document_preferred_languages(void* document) {
+    DomDocument* doc = (DomDocument*)document;
+    if (!doc) return "";
+    if (!doc->services.preferred_languages) doc->services.preferred_languages = dom_platform_preferred_languages();
+    return doc->services.preferred_languages ? doc->services.preferred_languages : "";
+}
+
+extern "C" bool dom_document_set_preferred_languages(void* document, const char* languages) {
+    DomDocument* doc = (DomDocument*)document; if (!doc) return false;
+    char* replacement = languages ? mem_strdup(languages, MEM_CAT_LAYOUT) : dom_platform_preferred_languages();
+    if (!replacement) return false;
+    const char* previous = dom_document_preferred_languages(doc);
+    if (strcmp(previous, replacement) == 0) { mem_free(replacement); return true; }
+    mem_free(doc->services.preferred_languages); doc->services.preferred_languages = replacement;
+    // preference changes invalidate the same paint/resource generations as authored SVG mutations.
+    if (doc->root) dom_notify_mutation(DOM_JS_MUTATION_STYLE, doc->root, nullptr);
+    else doc->mutation_epoch++;
+    if (doc->state) doc_state_request_repaint(doc->state);
+    return true;
+}
+
+extern "C" bool dom_svg_conditions_match(const char* extensions, const char* languages, const char* preferences) {
+    // no proprietary SVG extensions are implemented; an authored requirement (including empty) fails.
+    if (extensions) return false;
+    if (!languages) return true;
+    for (const char* language = languages; *language;) {
+        const char* end = strchr(language, ','); if (!end) end = language + strlen(language);
+        while (language < end && str_char_is_ascii_space(*language)) language++;
+        const char* trimmed = end;
+        while (trimmed > language && str_char_is_ascii_space(trimmed[-1])) trimmed--;
+        size_t length = (size_t)(trimmed - language);
+        for (const char* preference = preferences ? preferences : ""; *preference;) {
+            const char* next = strchr(preference, ','); if (!next) next = preference + strlen(preference);
+            while (preference < next && str_char_is_ascii_space(*preference)) preference++;
+            const char* finish = next;
+            while (finish > preference && str_char_is_ascii_space(finish[-1])) finish--;
+            size_t prefix = (size_t)(finish - preference);
+            // SVG2 §5.7.5: the preferred tag is the prefix, followed by a hyphen boundary.
+            if (prefix && length >= prefix && str_icmp(language, prefix, preference, prefix) == 0 &&
+                (length == prefix || language[prefix] == '-')) return true;
+            preference = *next ? next + 1 : next;
+        }
+        language = *end ? end + 1 : end;
+    }
     return false;
+}
+
+extern "C" bool dom_svg_element_is_eligible(void* element) {
+    DomElement* elem = (DomElement*)element;
+    if (!elem || !elem->tag_name) return false;
+    // conditional attributes on never-rendered definitions do not disable their referenced contents.
+    static const char* const definitions[] = {"defs", "symbol", "clipPath", "mask", "marker", "pattern",
+        "linearGradient", "radialGradient", "filter", "style", "script", "title", "desc", "metadata"};
+    for (const char* name : definitions) if (strcmp(elem->tag_name, name) == 0) return true;
+    if (elem->has_attribute("requiredExtensions")) return false;
+    const char* languages = elem->get_attribute("systemLanguage");
+    // HTML's empty attribute value is stored as Lambda null, but its presence still fails the test.
+    if (!languages && elem->has_attribute("systemLanguage")) languages = "";
+    return dom_svg_conditions_match(nullptr, languages,
+        dom_document_preferred_languages(elem->doc));
+}
+
+extern "C" void* dom_svg_switch_selected_child(void* element) {
+    DomElement* elem = (DomElement*)element; if (!elem) return nullptr;
+    for (DomNode* child = elem->first_child; child; child = child->next_sibling)
+        if (child->is_element() && dom_svg_element_is_eligible(child)) return child;
+    return nullptr;
 }
 
 static const char* dom_svg_interface_name(DomElement* elem) {
@@ -4758,95 +4899,35 @@ extern "C" Item dom_computed_style_get_property(Item style_item, Item prop_name)
  */
 static CssDeclaration* js_match_custom_property(DomElement* elem, const char* prop_name) {
     if (!elem || !elem->doc || !prop_name) return nullptr;
-
     DomDocument* doc = elem->doc;
-    Pool* pool = doc->document_pool;
-
-    CssDeclaration* best_decl = nullptr;
-    CssSpecificity best_spec = {0, 0, 0, 0, false};
-
-    // check inline custom properties first (highest specificity: 1,0,0,0)
-    // inline styles are stored in elem->css_variables as a linked list
-    // created by dom_element_apply_declaration when style.setProperty("--name", value) is called
-    if (elem->css_variables) {
-        CssCustomProp* prop = elem->css_variables;
-        while (prop) {
-            if (prop->name && strcmp(prop->name, prop_name) == 0) {
-                // create a synthetic CssDeclaration for the inline custom property
-                CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
-                if (decl) {
-                    decl->property_name = prop->name;
-                    decl->value = (CssValue*)prop->value;
-                    decl->value_text = prop->value_text;
-                    decl->value_text_len = prop->value_text_len;
-                    decl->specificity = {1, 0, 0, 0, false};  // inline style
-                    decl->valid = true;
-                    best_decl = decl;
-                    best_spec = decl->specificity;
-                }
-                break;  // linked list: first match is the most recent (prepended)
-            }
-            prop = prop->next;
+    SelectorMatcher* matcher = dom_create_selector_matcher(doc);
+    if (!matcher) return nullptr;
+    CssDeclaration selected = {};
+    bool found = css_select_element_declaration((CssEngine*)doc->services.cached_css_engine,
+        matcher, elem, doc->stylesheets, (size_t)doc->stylesheet_count,
+        nullptr, 0, prop_name, &selected);
+    // custom-property storage retains declaration priority for CSSOM writes.
+    for (CssCustomProp* prop = elem->css_variables; prop; prop = prop->next) {
+        if (!prop->name || strcmp(prop->name, prop_name) != 0) continue;
+        CssDeclaration candidate = prop->declaration ? *prop->declaration : CssDeclaration{};
+        if (!prop->declaration) {
+            candidate.property_name = prop->name;
+            candidate.value = (CssValue*)prop->value;
+            candidate.value_text = prop->value_text;
+            candidate.value_text_len = prop->value_text_len;
+            candidate.specificity = {1, 0, 0, 0, false};
+            candidate.origin = CSS_ORIGIN_AUTHOR;
+            candidate.valid = true;
+        }
+        if (!found || css_declaration_cascade_compare(&candidate, &selected) >= 0) {
+            selected = candidate;
+            found = true;
         }
     }
-
-    // search stylesheets (lower specificity than inline)
-    if (doc->stylesheets && doc->stylesheet_count > 0) {
-        SelectorMatcher* matcher = dom_create_selector_matcher(doc);
-        if (matcher) {
-            for (int s = 0; s < doc->stylesheet_count; s++) {
-                CssStylesheet* sheet = doc->stylesheets[s];
-                if (!sheet || sheet->disabled) continue;
-
-                for (size_t r = 0; r < sheet->rule_count; r++) {
-                    CssRule* rule = sheet->rules[r];
-                    if (!rule || rule->type != CSS_RULE_STYLE) continue;
-                    if (rule->data.style_rule.declaration_count == 0) continue;
-
-                    bool matched = false;
-                    CssSpecificity match_spec = {0, 0, 0, 0, false};
-
-                    CssSelectorGroup* group = rule->data.style_rule.selector_group;
-                    CssSelector* single_sel = rule->data.style_rule.selector;
-
-                    if (group && group->selector_count > 0) {
-                        for (size_t si = 0; si < group->selector_count; si++) {
-                            CssSelector* sel = group->selectors[si];
-                            if (!sel) continue;
-                            MatchResult result;
-                            if (selector_matcher_matches(matcher, sel, elem, &result)) {
-                                matched = true;
-                                match_spec = result.specificity;
-                                break;
-                            }
-                        }
-                    } else if (single_sel) {
-                        MatchResult result;
-                        if (selector_matcher_matches(matcher, single_sel, elem, &result)) {
-                            matched = true;
-                            match_spec = result.specificity;
-                        }
-                    }
-
-                    if (!matched) continue;
-
-                    // find matching custom property by name
-                    for (size_t d = 0; d < rule->data.style_rule.declaration_count; d++) {
-                        CssDeclaration* decl = rule->data.style_rule.declarations[d];
-                        if (!decl || !decl->property_name) continue;
-                        if (strcmp(decl->property_name, prop_name) != 0) continue;
-
-                        if (!best_decl || css_specificity_compare(match_spec, best_spec) >= 0) {
-                            best_decl = decl;
-                            best_spec = match_spec;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    return best_decl;
+    selector_matcher_destroy(matcher);
+    CssDeclaration* result = found ? (CssDeclaration*)pool_calloc(doc->document_pool, sizeof(CssDeclaration)) : nullptr;
+    if (result) *result = selected;
+    return result;
 }
 
 // ============================================================================
@@ -6019,10 +6100,10 @@ static bool dom_remove_backed_child(DomElement* parent, DomNode* child);
 // nodes to `target`. Shared by the innerHTML setter and dom_core_parse_fragment
 // (ES39 core `parse_fragment`): one parse loop, two callers.
 static bool dom_parse_markup_into(DomElement* target, const char* html_str,
-                                  bool notify_mutation) {
+                                  bool notify_mutation, DomElement* context = nullptr) {
     DomDocument* doc = target ? target->doc : nullptr;
     if (!doc || !doc->input) return false;
-    Html5Parser* parser = dom_create_fragment_parser(doc);
+    Html5Parser* parser = dom_create_fragment_parser(doc, context ? context : target);
     if (!parser) return false;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -6105,7 +6186,7 @@ extern "C" Item dom_core_parse_fragment(Item context, Item markup) {
     if (!doc || get_type_id(markup) != LMD_TYPE_STRING) return ItemNull;
     DomElement* fragment = dom_element_create(doc, "#document-fragment", nullptr);
     if (!fragment) return ItemNull;
-    if (!dom_parse_markup_into(fragment, fn_to_cstr(markup), false)) return ItemNull;
+    if (!dom_parse_markup_into(fragment, fn_to_cstr(markup), false, ctx->as_element())) return ItemNull;
     return dom_wrap_element(fragment);
 }
 
@@ -6120,6 +6201,8 @@ static bool dom_replace_text_content(DomElement* elem, const char* text) {
     // Stylesheet text changes CSS globally; ordinary text is subtree-local.
     DomJsMutationKind kind = elem->tag_name && str_icmp_cstr(elem->tag_name, "style") == 0
         ? DOM_JS_MUTATION_STYLE : DOM_JS_MUTATION_TEXT;
+    // style text needs reparsing even though its mutation is classified as STYLE.
+    if (kind == DOM_JS_MUTATION_STYLE) dom_record_inline_stylesheet_owner(elem->doc, elem);
     dom_mutation_notify(kind, (DomNode*)elem, (DomNode*)elem);
     return true;
 }
@@ -9972,10 +10055,9 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = s2it(uppercase_tag_name(elem->tag_name))};
     }
 
-    // localName (lowercased per spec; tag names are stored lowercase already).
+    // localName excludes the qualified XML prefix while preserving parsed name case.
     if (prop_id == JS_DOM_PROP_LOCAL_NAME) {
-        const char* tn = elem->tag_name ? elem->tag_name : "";
-        return js_name_item(tn);
+        return js_name_item(elem->local_name());
     }
 
     // html requires template contents to be exposed through a detached
@@ -9989,14 +10071,8 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // reserved internal attribute); otherwise HTML elements live in the XHTML
     // namespace. The direct createElementNS Document binding records this URI.
     if (prop_id == JS_DOM_PROP_NAMESPACE_URI) {
-        const char* ns = elem->get_attribute("__lambda_ns_uri");
-        if (ns && ns[0] != '\0') {
-            return js_name_item(ns);
-        }
-        if (dom_element_is_svg(elem)) {
-            return js_name_item("http://www.w3.org/2000/svg");
-        }
-        return js_name_item("http://www.w3.org/1999/xhtml");
+        const char* ns = dom_element_namespace_uri(elem);
+        return ns ? js_name_item(ns) : ItemNull;
     }
 
     if (prop_id == JS_DOM_PROP_OWNER_SVGELEMENT) {
@@ -12300,141 +12376,222 @@ static void dom_svg_bounds_apply_transform(JsDomSvgBounds* bounds,
     bounds->bottom = bottom;
 }
 
-static float dom_svg_attribute_number(DomElement* elem, const char* name,
-                                         float fallback) {
+static void dom_svg_apply_css_viewport_size(DomElement* elem, float* width, float* height) {
+    if (elem->parent && elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element())) return;
+    // SVG descendants have no CSS box; the outer viewport uses committed layout.
+    LayoutContentBox content = layout_content_box((ViewBlock*)elem);
+    if (content.width > 0.0f) *width = content.width;
+    if (content.height > 0.0f) *height = content.height;
+}
+
+// the synchronous SVG hit walk borrows a linked stack of instance style scopes.
+static thread_local const SvgDomStyleScope* g_dom_svg_style_scope = nullptr;
+
+SvgLengthContext dom_svg_length_context(DomElement* elem) {
+    SvgLengthContext lengths = {0.0f, 0.0f, 16.0f, 8.0f};
+    if (!elem) return lengths;
+    DomElement* chain[64];
+    int count = 0;
+    for (DomNode* node = elem; node && count < 64; node = svg_dom_style_parent(node, g_dom_svg_style_scope)) {
+        if (node->is_element()) chain[count++] = node->as_element();
+    }
+    UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
+    FontContext* fonts = ui ? ui->font_ctx : nullptr;
+    char family[256] = "Arial";
+    FontStyleDesc font = {}; font.family = family; font.size_px = 16.0f; font.weight = FONT_WEIGHT_NORMAL;
+    bool in_svg = false;
+    for (int index = count - 1; index >= 0; index--) {
+        DomElement* current = chain[index];
+        bool svg = current->tag_name && str_icmp_cstr(current->tag_name, "svg") == 0;
+        if (svg) in_svg = true;
+        char buffer[64];
+        if (in_svg) {
+            const char* size = svg_get_dom_presentation_property(current, "font-size", false,
+                buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+            if (size) lengths.font_size = svg_font_size_value(size, lengths.font_size, svg_font_x_height(fonts, &font));
+            font.size_px = lengths.font_size;
+        } else if (current->font && current->font->font_size > 0.0f) {
+            lengths.font_size = current->font->font_size;
+            font = font_style_desc_from_prop(current->font);
+            str_copy(family, sizeof(family), font.family ? font.family : "Arial", strlen(font.family ? font.family : "Arial")); font.family = family;
+        }
+        if (in_svg) {
+            char own_family[256];
+            const char* value = svg_get_dom_presentation_property(current, "font-family", false, own_family, sizeof(own_family), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+            if (value) str_copy(family, sizeof(family), value, strlen(value));
+            value = svg_get_dom_presentation_property(current, "font-weight", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+            if (value) font.weight = (FontWeight)svg_font_weight_value(value, font.weight);
+            value = svg_get_dom_presentation_property(current, "font-style", false, buffer, sizeof(buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+            if (value) font.slant = strcmp(value, "italic") == 0 ? FONT_SLANT_ITALIC
+                : strcmp(value, "oblique") == 0 ? FONT_SLANT_OBLIQUE : FONT_SLANT_NORMAL;
+        }
+        const SvgDomStyleScope* viewport_scope = g_dom_svg_style_scope;
+        while (viewport_scope && viewport_scope->root != current) viewport_scope = viewport_scope->previous;
+        if (viewport_scope && viewport_scope->has_viewport) {
+            lengths.viewport_width = viewport_scope->viewport_width;
+            lengths.viewport_height = viewport_scope->viewport_height;
+            continue;
+        }
+        if (!svg || current == elem) continue;
+        const char* viewbox = svg_animation_attribute(current, "viewBox");
+        if (!viewbox) viewbox = svg_animation_attribute(current, "viewbox");
+        SvgViewBox box = svg_parse_viewbox(viewbox);
+        if (box.has_viewbox && box.width > 0.0f && box.height > 0.0f) {
+            lengths.viewport_width = box.width; lengths.viewport_height = box.height;
+        } else {
+            float width = svg_resolve_length(svg_animation_attribute(current, "width"), &lengths, SVG_LENGTH_X,
+                current->width > 0.0f ? current->width : lengths.viewport_width);
+            float height = svg_resolve_length(svg_animation_attribute(current, "height"), &lengths, SVG_LENGTH_Y,
+                current->height > 0.0f ? current->height : lengths.viewport_height);
+            dom_svg_apply_css_viewport_size(current, &width, &height);
+            lengths.viewport_width = width; lengths.viewport_height = height;
+        }
+    }
+    lengths.x_height = svg_font_x_height(fonts, &font);
+    return lengths;
+}
+
+SvgLengthAxis dom_svg_length_axis(const char* name) {
+    if (strcmp(name, "x") == 0 || strcmp(name, "x1") == 0 || strcmp(name, "x2") == 0 ||
+        strcmp(name, "cx") == 0 || strcmp(name, "width") == 0 || strcmp(name, "rx") == 0) return SVG_LENGTH_X;
+    if (strcmp(name, "y") == 0 || strcmp(name, "y1") == 0 || strcmp(name, "y2") == 0 ||
+        strcmp(name, "cy") == 0 || strcmp(name, "height") == 0 || strcmp(name, "ry") == 0) return SVG_LENGTH_Y;
+    return SVG_LENGTH_DIAGONAL;
+}
+
+static float dom_svg_attribute_number(DomElement* elem, const char* name, float fallback) {
     if (!elem || !name) return fallback;
-    const char* value = elem->get_attribute(name);
-    if (!value || !*value) return fallback;
-    char* end = nullptr;
-    float parsed = strtof(value, &end);
-    return end != value ? parsed : fallback;
+    SvgLengthContext lengths = dom_svg_length_context(elem);
+    return svg_resolve_length(svg_animation_attribute(elem, name), &lengths, dom_svg_length_axis(name), fallback);
+}
+
+extern "C" bool dom_svg_foreign_object_rectangle(void* element, float* x, float* y, float* width, float* height) {
+    DomElement* elem = (DomElement*)element;
+    if (!elem || !x || !y || !width || !height) return false;
+    SvgLengthContext lengths = dom_svg_length_context(elem);
+    static const char* const names[] = {"x", "y", "width", "height"};
+    float* values[] = {x, y, width, height};
+    Element* backing = dom_element_to_element(elem);
+    for (unsigned index = 0; index < 4; index++) {
+        char buffer[256] = {}; bool from_css = false;
+        const char* value = svg_get_dom_presentation_property(elem, names[index], false,
+            buffer, sizeof(buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
+        double number = 0.0;
+        Item attribute = backing ? Item{.item = backing->get_attr(names[index]).item} : ItemNull;
+        *values[index] = !from_css && !svg_animation_value(elem, names[index]) && item_try_to_double(attribute, &number) ? (float)number :
+            svg_resolve_length(value, &lengths, index % 2 ? SVG_LENGTH_Y : SVG_LENGTH_X, 0.0f);
+        if (!isfinite(*values[index])) return false;
+    }
+    return *width >= 0.0f && *height >= 0.0f;
+}
+
+extern "C" bool dom_svg_foreign_object_clips(void* element) {
+    DomElement* elem = (DomElement*)element; if (!elem) return true;
+    char buffer[64] = {}; bool from_css = false;
+    const char* overflow = svg_get_dom_presentation_property(elem, "overflow", false,
+        buffer, sizeof(buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
+    // SVG's UA overflow:hidden applies unless the author supplies an overflow value.
+    return (!from_css && !elem->has_attribute("overflow")) || !overflow || str_icmp_cstr(overflow, "visible") != 0;
 }
 
 static RdtMatrix dom_svg_transform_from_element(DomElement* elem) {
     RdtMatrix transform = rdt_matrix_identity();
     if (!elem) return transform;
-    const char* transform_attr = elem->get_attribute("transform");
-    if (transform_attr && *transform_attr) {
-        float components[6];
-        if (svg_parse_transform(transform_attr, components)) {
-            transform.e11 = components[0];
-            transform.e21 = components[1];
-            transform.e12 = components[2];
-            transform.e22 = components[3];
-            transform.e13 = components[4];
-            transform.e23 = components[5];
+    SvgLengthContext lengths = dom_svg_length_context(elem);
+    Bound box = {0.0f, 0.0f, lengths.viewport_width, lengths.viewport_height};
+    for (DomNode* node = svg_dom_style_parent(elem, g_dom_svg_style_scope); node && node->is_element(); node = svg_dom_style_parent(node, g_dom_svg_style_scope)) {
+        DomElement* parent = node->as_element();
+        if (!parent->tag_name || str_icmp_cstr(parent->tag_name, "svg") != 0) continue;
+        const char* viewbox = svg_animation_attribute(parent, "viewBox");
+        if (!viewbox) viewbox = svg_animation_attribute(parent, "viewbox");
+        SvgViewBox parent_box = svg_parse_viewbox(viewbox);
+        if (parent_box.has_viewbox) {
+            box = {parent_box.min_x, parent_box.min_y, parent_box.min_x + parent_box.width,
+                parent_box.min_y + parent_box.height};
         }
+        break;
     }
-    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "svg") == 0 && elem->parent) {
+    char box_buffer[64];
+    const char* reference = svg_get_dom_presentation_property(elem, "transform-box", false,
+        box_buffer, sizeof(box_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+    if (reference && (strcmp(reference, "fill-box") == 0 || strcmp(reference, "stroke-box") == 0)) {
+        dom_svg_element_geometry_bounds(elem, &box.left, &box.top, &box.right, &box.bottom);
+    }
+    char value_buffer[512];
+    bool from_css = false;
+    const char* value = svg_get_dom_presentation_property(elem, "transform", false,
+        value_buffer, sizeof(value_buffer), &from_css, nullptr, nullptr, g_dom_svg_style_scope);
+    char origin_buffer[128];
+    const char* origin = svg_get_dom_presentation_property(elem, "transform-origin", false,
+        origin_buffer, sizeof(origin_buffer), nullptr, nullptr, nullptr, g_dom_svg_style_scope);
+    transform = svg_resolve_local_transform(value, from_css, origin, &box, &lengths);
+    if (elem->tag_name && str_icmp_cstr(elem->tag_name, "svg") == 0 && elem->parent &&
+        elem->parent->is_element() && dom_element_is_svg(elem->parent->as_element())) {
         RdtMatrix viewport_offset = rdt_matrix_translate(
-            dom_svg_attribute_number(elem, "x", 0.0f),
-            dom_svg_attribute_number(elem, "y", 0.0f));
-        transform = rdt_matrix_multiply(&viewport_offset, &transform);
+            dom_svg_attribute_number(elem, "x", 0.0f), dom_svg_attribute_number(elem, "y", 0.0f));
+        transform = rdt_matrix_multiply(&transform, &viewport_offset);
     }
     return transform;
 }
 
-static void dom_svg_bounds_from_points(const char* points, JsDomSvgBounds* bounds) {
-    const char* cursor = points;
-    while (cursor && *cursor) {
-        float point[2];
-        if (str_parse_float_list(cursor, ", \t\n\r\f\v", point, 2, &cursor) != 2) break;
-        dom_svg_bounds_include_point(bounds, point[0], point[1]);
-    }
+
+static bool dom_svg_is_text(DomElement* elem) {
+    return elem && elem->tag_name && (str_icmp_cstr(elem->tag_name, "text") == 0 ||
+        str_icmp_cstr(elem->tag_name, "tspan") == 0 || str_icmp_cstr(elem->tag_name, "textPath") == 0);
 }
 
-static int dom_svg_font_weight(DomElement* elem) {
-    const char* attr = elem ? elem->get_attribute("font-weight") : nullptr;
-    if (!attr || !*attr || strcmp(attr, "normal") == 0) return 400;
-    if (strcmp(attr, "bold") == 0 || strcmp(attr, "bolder") == 0) return 700;
-    if (strcmp(attr, "lighter") == 0) return 300;
-    int weight = atoi(attr);
-    return weight > 0 ? weight : 400;
+static RdtPath* dom_svg_text_geometry_path(DomElement* elem) {
+    SvgLengthContext lengths = dom_svg_length_context(elem);
+    UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
+    return svg_text_geometry_path(elem, &lengths, ui ? ui->font_ctx : nullptr);
 }
 
-static FontSlant dom_svg_font_slant(DomElement* elem) {
-    const char* attr = elem ? elem->get_attribute("font-style") : nullptr;
-    if (attr && strcmp(attr, "italic") == 0) return FONT_SLANT_ITALIC;
-    if (attr && strcmp(attr, "oblique") == 0) return FONT_SLANT_OBLIQUE;
-    return FONT_SLANT_NORMAL;
-}
+static RdtPath* dom_svg_basic_shape_path(DomElement* elem);
+static bool dom_svg_is_basic_shape(DomElement* elem);
 
-static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem) {
+static DomElement* dom_svg_use_reference(DomElement* elem);
+
+static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem, int depth = 0) {
+    SvgAnimationSourceScope animation_sources(elem ? elem->doc : nullptr);
     JsDomSvgBounds bounds = {};
-    if (!elem || !elem->tag_name) return bounds;
+    if (!elem || !elem->tag_name || depth >= SVG_USE_DEPTH_MAX) return bounds;
     const char* tag = elem->tag_name;
-    if (str_icmp_cstr(tag, "rect") == 0 || str_icmp_cstr(tag, "image") == 0 ||
-        str_icmp_cstr(tag, "foreignObject") == 0) {
-        dom_svg_bounds_include_rect(&bounds,
-            dom_svg_attribute_number(elem, "x", 0.0f),
-            dom_svg_attribute_number(elem, "y", 0.0f),
-            dom_svg_attribute_number(elem, "width", 0.0f),
-            dom_svg_attribute_number(elem, "height", 0.0f));
-    } else if (str_icmp_cstr(tag, "circle") == 0) {
-        float radius = dom_svg_attribute_number(elem, "r", 0.0f);
-        dom_svg_bounds_include_rect(&bounds,
-            dom_svg_attribute_number(elem, "cx", 0.0f) - radius,
-            dom_svg_attribute_number(elem, "cy", 0.0f) - radius,
-            radius * 2.0f, radius * 2.0f);
-    } else if (str_icmp_cstr(tag, "ellipse") == 0) {
-        float rx = dom_svg_attribute_number(elem, "rx", 0.0f);
-        float ry = dom_svg_attribute_number(elem, "ry", 0.0f);
-        dom_svg_bounds_include_rect(&bounds,
-            dom_svg_attribute_number(elem, "cx", 0.0f) - rx,
-            dom_svg_attribute_number(elem, "cy", 0.0f) - ry,
-            rx * 2.0f, ry * 2.0f);
-    } else if (str_icmp_cstr(tag, "line") == 0) {
-        dom_svg_bounds_include_point(&bounds,
-            dom_svg_attribute_number(elem, "x1", 0.0f),
-            dom_svg_attribute_number(elem, "y1", 0.0f));
-        dom_svg_bounds_include_point(&bounds,
-            dom_svg_attribute_number(elem, "x2", 0.0f),
-            dom_svg_attribute_number(elem, "y2", 0.0f));
-    } else if (str_icmp_cstr(tag, "polyline") == 0 || str_icmp_cstr(tag, "polygon") == 0) {
-        dom_svg_bounds_from_points(elem->get_attribute("points"), &bounds);
-    } else if (str_icmp_cstr(tag, "path") == 0) {
-        // `getBBox()` is consumed immediately by SVG callers; preserve the
-        // renderer's path parser so malformed geometry cannot turn into a
-        // latent ItemError in an unrelated constructor call.
-        RdtPath* path = svg_parse_path_d(elem->get_attribute("d"));
+    if (dom_svg_is_basic_shape(elem)) {
+        RdtPath* path = dom_svg_basic_shape_path(elem);
         if (path) {
-            float left = 0.0f;
-            float top = 0.0f;
-            float right = 0.0f;
-            float bottom = 0.0f;
-            if (rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
-                dom_svg_bounds_include_rect(&bounds, left, top,
-                                                right - left, bottom - top);
-            }
+            bounds.valid = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
             rdt_path_free(path);
         }
-    } else if (str_icmp_cstr(tag, "text") == 0 || str_icmp_cstr(tag, "tspan") == 0) {
-        StrBuf* text = strbuf_new_cap(32);
-        collect_text_content((DomNode*)elem, text);
-        float font_size = dom_svg_attribute_number(elem, "font-size",
-            elem->font && elem->font->font_size > 0.0f ? elem->font->font_size : 16.0f);
-        const char* family = elem->get_attribute("font-family");
-        if (!family && elem->font) family = elem->font->family;
-        UiContext* ui_context = elem->doc
-            ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
-        SvgTextMetrics metrics = {};
-        svg_measure_text_metrics(text && text->str ? text->str : "", font_size,
-            ui_context ? ui_context->font_ctx : nullptr, family,
-            dom_svg_font_weight(elem), dom_svg_font_slant(elem), &metrics);
-        float x = dom_svg_attribute_number(elem, "x", 0.0f);
-        const char* anchor = elem->get_attribute("text-anchor");
-        if (anchor && strcmp(anchor, "middle") == 0) x -= metrics.width * 0.5f;
-        else if (anchor && strcmp(anchor, "end") == 0) x -= metrics.width;
-        float y = dom_svg_attribute_number(elem, "y", 0.0f);
-        dom_svg_bounds_include_rect(&bounds, x, y - metrics.ascent,
-                                        metrics.width, metrics.ascent + metrics.descent);
-        if (text) strbuf_free(text);
+    } else if (str_icmp_cstr(tag, "foreignObject") == 0) {
+        float x, y, width, height;
+        if (dom_svg_foreign_object_rectangle(elem, &x, &y, &width, &height))
+            dom_svg_bounds_include_rect(&bounds, x, y, width, height);
+    } else if (str_icmp_cstr(tag, "image") == 0) {
+        dom_svg_bounds_include_rect(&bounds, dom_svg_attribute_number(elem, "x", 0.0f),
+            dom_svg_attribute_number(elem, "y", 0.0f), dom_svg_attribute_number(elem, "width", 0.0f),
+            dom_svg_attribute_number(elem, "height", 0.0f));
+    } else if (dom_svg_is_text(elem)) {
+        RdtPath* path = dom_svg_text_geometry_path(elem);
+        if (path) {
+            bounds.valid = rdt_path_get_bounds(path, &bounds.left, &bounds.top, &bounds.right, &bounds.bottom);
+            rdt_path_free(path);
+        }
+    } else if (str_icmp_cstr(tag, "use") == 0) {
+        DomElement* reference = dom_svg_use_reference(elem);
+        bounds = dom_svg_bounds_for_element(reference, depth + 1);
+        RdtMatrix reference_transform = reference ? dom_svg_transform_from_element(reference) : rdt_matrix_identity();
+        dom_svg_bounds_apply_transform(&bounds, &reference_transform);
+        RdtMatrix offset = rdt_matrix_translate(dom_svg_attribute_number(elem, "x", 0.0f),
+            dom_svg_attribute_number(elem, "y", 0.0f));
+        dom_svg_bounds_apply_transform(&bounds, &offset);
     } else if (str_icmp_cstr(tag, "g") == 0 || str_icmp_cstr(tag, "svg") == 0 ||
-               str_icmp_cstr(tag, "a") == 0 || str_icmp_cstr(tag, "switch") == 0) {
+               str_icmp_cstr(tag, "a") == 0 || str_icmp_cstr(tag, "switch") == 0 ||
+               str_icmp_cstr(tag, "symbol") == 0 || str_icmp_cstr(tag, "clipPath") == 0) {
         for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
             if (!child->is_element()) continue;
+            if (str_icmp_cstr(tag, "switch") == 0 && child != dom_svg_switch_selected_child(elem)) continue;
             DomElement* child_elem = child->as_element();
-            JsDomSvgBounds child_bounds = dom_svg_bounds_for_element(child_elem);
+            JsDomSvgBounds child_bounds = dom_svg_bounds_for_element(child_elem, depth + 1);
             RdtMatrix child_transform = dom_svg_transform_from_element(child_elem);
             dom_svg_bounds_apply_transform(&child_bounds, &child_transform);
             dom_svg_bounds_include_bounds(&bounds, &child_bounds);
@@ -12443,7 +12600,17 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem) {
     return bounds;
 }
 
+bool dom_svg_element_geometry_bounds(void* element, float* left, float* top, float* right, float* bottom) {
+    if (!element || !left || !top || !right || !bottom) return false;
+    SvgAnimationSourceScope animation_sources(((DomElement*)element)->doc);
+    JsDomSvgBounds bounds = dom_svg_bounds_for_element((DomElement*)element);
+    if (!bounds.valid) return false;
+    *left = bounds.left; *top = bounds.top; *right = bounds.right; *bottom = bounds.bottom;
+    return true;
+}
+
 static Item dom_svg_get_bbox_for_element(DomElement* elem) {
+    SvgAnimationSourceScope animation_sources(elem ? elem->doc : nullptr);
     JsDomSvgBounds bounds = dom_svg_bounds_for_element(elem);
     if (!bounds.valid) return dom_make_rect_object(0.0f, 0.0f, 0.0f, 0.0f);
     return dom_make_rect_object(bounds.left, bounds.top,
@@ -12452,15 +12619,11 @@ static Item dom_svg_get_bbox_for_element(DomElement* elem) {
 }
 
 static bool dom_svg_parse_viewbox(const char* value, float* min_x, float* min_y,
-                                     float* width, float* height) {
+    float* width, float* height) {
     if (!value || !min_x || !min_y || !width || !height) return false;
-    float values[4] = {};
-    if (str_parse_float_list(value, ", \t\n\r\f\v", values, 4, nullptr) != 4) return false;
-    if (values[2] <= 0.0f || values[3] <= 0.0f) return false;
-    *min_x = values[0];
-    *min_y = values[1];
-    *width = values[2];
-    *height = values[3];
+    SvgViewBox box = svg_parse_viewbox(value);
+    if (!box.has_viewbox || box.width <= 0.0f || box.height <= 0.0f) return false;
+    *min_x = box.min_x; *min_y = box.min_y; *width = box.width; *height = box.height;
     return true;
 }
 
@@ -12471,13 +12634,14 @@ static RdtMatrix dom_svg_viewbox_transform(DomElement* elem) {
     float min_y = 0.0f;
     float viewbox_width = 0.0f;
     float viewbox_height = 0.0f;
-    const char* viewbox = elem->get_attribute("viewBox");
-    if (!viewbox) viewbox = elem->get_attribute("viewbox");
+    const char* viewbox = svg_animation_attribute(elem, "viewBox");
+    if (!viewbox) viewbox = svg_animation_attribute(elem, "viewbox");
     if (!dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &viewbox_width, &viewbox_height)) {
         return transform;
     }
     float viewport_width = dom_svg_attribute_number(elem, "width", 0.0f);
     float viewport_height = dom_svg_attribute_number(elem, "height", 0.0f);
+    dom_svg_apply_css_viewport_size(elem, &viewport_width, &viewport_height);
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) {
         // hit-testing already has committed CSS geometry; flushing through the
         // generic DOM path can rebuild this element before the second axis.
@@ -12493,23 +12657,9 @@ static RdtMatrix dom_svg_viewbox_transform(DomElement* elem) {
         }
     }
     if (viewport_width <= 0.0f || viewport_height <= 0.0f) return transform;
-    float scale_x = viewport_width / viewbox_width;
-    float scale_y = viewport_height / viewbox_height;
-    float offset_x = 0.0f;
-    float offset_y = 0.0f;
-    const char* preserve = elem->get_attribute("preserveAspectRatio");
-    if (!preserve || strstr(preserve, "none") == nullptr) {
-        float scale = LMB_MIN(scale_x, scale_y);
-        offset_x = (viewport_width - viewbox_width * scale) * 0.5f;
-        offset_y = (viewport_height - viewbox_height * scale) * 0.5f;
-        scale_x = scale;
-        scale_y = scale;
-    }
-    transform.e11 = scale_x;
-    transform.e22 = scale_y;
-    transform.e13 = offset_x - min_x * scale_x;
-    transform.e23 = offset_y - min_y * scale_y;
-    return transform;
+    SvgViewBox box = {min_x, min_y, viewbox_width, viewbox_height, true};
+    return svg_viewbox_transform(&box, viewport_width, viewport_height,
+        svg_animation_attribute(elem, "preserveAspectRatio"));
 }
 
 static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
@@ -12522,6 +12672,8 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
          current = current->parent) {
         if (!current->is_element()) continue;
         DomElement* candidate = current->as_element();
+        // an HTML integration point starts a new CSS-positioned SVG viewport.
+        if (!dom_element_is_svg(candidate)) break;
         chain[count++] = candidate;
         if (candidate && candidate->tag_name && str_icmp_cstr(candidate->tag_name, "svg") == 0) {
             outermost_svg = candidate;
@@ -12531,23 +12683,49 @@ static RdtMatrix dom_svg_ctm(DomElement* elem, bool screen_space) {
     for (int i = count - 1; i >= 0; i--) {
         DomElement* current = chain[i];
         if (!current || !current->tag_name) continue;
-        if (str_icmp_cstr(current->tag_name, "svg") == 0) {
-            in_svg = true;
-            RdtMatrix viewbox_transform = dom_svg_viewbox_transform(current);
-            matrix = rdt_matrix_multiply(&matrix, &viewbox_transform);
-        }
+        bool svg = str_icmp_cstr(current->tag_name, "svg") == 0;
+        if (svg) in_svg = true;
         if (in_svg) {
-            RdtMatrix local_transform = dom_svg_transform_from_element(current);
-            matrix = rdt_matrix_multiply(&matrix, &local_transform);
+            RdtMatrix local = dom_svg_transform_from_element(current);
+            matrix = rdt_matrix_multiply(&matrix, &local);
+        }
+        if (svg) {
+            RdtMatrix viewbox = dom_svg_viewbox_transform(current);
+            matrix = rdt_matrix_multiply(&matrix, &viewbox);
         }
     }
     if (screen_space && outermost_svg) {
-        RdtLogicalPoint origin = view_geometry_node_viewport_origin(
-            static_cast<View*>(outermost_svg));
-        RdtMatrix layout_transform = rdt_matrix_translate(origin.x, origin.y);
+        RdtMatrix layout_transform;
+        if (!view_get_foreign_object_matrix(static_cast<View*>(outermost_svg), &layout_transform, false)) {
+            RdtLogicalPoint origin = view_geometry_node_viewport_origin(static_cast<View*>(outermost_svg));
+            layout_transform = rdt_matrix_translate(origin.x, origin.y);
+        }
         matrix = rdt_matrix_multiply(&layout_transform, &matrix);
     }
     return matrix;
+}
+
+extern "C" bool dom_svg_foreign_object_client_transform(void* element, float matrix[6]) {
+    DomElement* elem = (DomElement*)element;
+    float x, y, width, height;
+    if (!elem || !matrix || !dom_svg_foreign_object_rectangle(elem, &x, &y, &width, &height)) return false;
+    RdtMatrix ctm = dom_svg_ctm(elem, true), offset = rdt_matrix_translate(x, y);
+    ctm = rdt_matrix_multiply(&ctm, &offset);
+    matrix[0] = ctm.e11; matrix[1] = ctm.e12; matrix[2] = ctm.e13;
+    matrix[3] = ctm.e21; matrix[4] = ctm.e22; matrix[5] = ctm.e23;
+    return true;
+}
+
+extern "C" bool dom_svg_foreign_object_local_point(void* element, float x, float y,
+                                                   float* local_x, float* local_y) {
+    float values[6];
+    if (!local_x || !local_y || !dom_svg_foreign_object_client_transform(element, values)) return false;
+    RdtMatrix frame = {values[0], values[1], values[2], values[3], values[4], values[5], 0, 0, 1}, inverse;
+    if (!rdt_matrix_invert_affine(&frame, &inverse)) return false;
+    rdt_matrix_transform_point(&inverse, x, y, local_x, local_y);
+    float rx, ry, width, height;
+    return dom_svg_foreign_object_rectangle(element, &rx, &ry, &width, &height) && width > 0 && height > 0 &&
+        (!dom_svg_foreign_object_clips(element) || (*local_x >= 0 && *local_y >= 0 && *local_x < width && *local_y < height));
 }
 
 extern "C" bool dom_svg_element_client_bounds(void* dom_elem, float* x, float* y,
@@ -12577,7 +12755,6 @@ extern "C" bool dom_svg_element_client_bounds(void* dom_elem, float* x, float* y
     return true;
 }
 
-static const float JS_DOM_SVG_STROKE_HIT_AIM_SLOP_PX = 3.0f;
 static const int JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH = 10;
 
 typedef struct JsDomSvgPathHitContext {
@@ -12585,7 +12762,7 @@ typedef struct JsDomSvgPathHitContext {
     float point_y;
     float curve_flatness;
     float stroke_radius;
-    float stroke_dash[32];
+    float* stroke_dash;          // query-owned computed lengths; released after contour inspection
     float stroke_dash_total;
     float stroke_dash_offset;
     float subpath_stroke_length;
@@ -12619,26 +12796,7 @@ typedef struct JsDomSvgPathHitContext {
     float subpath_start_y;
 } JsDomSvgPathHitContext;
 
-static float dom_svg_point_segment_distance_sq(float point_x, float point_y,
-                                                  float start_x, float start_y,
-                                                  float end_x, float end_y) {
-    float dx = end_x - start_x;
-    float dy = end_y - start_y;
-    float length_sq = dx * dx + dy * dy;
-    if (length_sq <= 0.000001f) {
-        float px = point_x - start_x;
-        float py = point_y - start_y;
-        return px * px + py * py;
-    }
-    float projection = ((point_x - start_x) * dx + (point_y - start_y) * dy) /
-        length_sq;
-    projection = clamp_unit(projection);
-    float closest_x = start_x + dx * projection;
-    float closest_y = start_y + dy * projection;
-    float px = point_x - closest_x;
-    float py = point_y - closest_y;
-    return px * px + py * py;
-}
+
 
 static bool dom_svg_point_in_triangle(float point_x, float point_y,
                                          float ax, float ay, float bx, float by,
@@ -12659,8 +12817,11 @@ static bool dom_svg_stroke_segment_contains(const JsDomSvgPathHitContext* contex
     float dy = end_y - start_y;
     float length = hypotf(dx, dy);
     if (length <= 0.000001f) {
+        if (context->stroke_cap == RDT_CAP_BUTT || (!start_cap && !end_cap)) return false;
         float px = context->point_x - start_x;
         float py = context->point_y - start_y;
+        if (context->stroke_cap == RDT_CAP_SQUARE)
+            return fabsf(px) <= context->stroke_radius && fabsf(py) <= context->stroke_radius;
         return px * px + py * py <= context->stroke_radius * context->stroke_radius;
     }
     float ux = dx / length;
@@ -12725,11 +12886,9 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     if (prev_length <= 0.000001f || next_length <= 0.000001f) return;
     float vertex_dx = context->point_x - vertex_x;
     float vertex_dy = context->point_y - vertex_y;
-    // Flattened closed curves share this vertex between two butt strips. Keep
-    // the shared centerline covered so an epsilon at move/close cannot create
-    // a false gap in an otherwise continuous stroke.
-    if (vertex_dx * vertex_dx + vertex_dy * vertex_dy <=
-        context->stroke_radius * context->stroke_radius) {
+    if (context->stroke_join == RDT_JOIN_ROUND &&
+        vertex_dx * vertex_dx + vertex_dy * vertex_dy <=
+            context->stroke_radius * context->stroke_radius) {
         context->stroke_hit = true;
         return;
     }
@@ -12748,18 +12907,10 @@ static void dom_svg_path_hit_add_join(JsDomSvgPathHitContext* context,
     float outer_prev_y = vertex_y + prev_normal_y * context->stroke_radius;
     float outer_next_x = vertex_x + next_normal_x * context->stroke_radius;
     float outer_next_y = vertex_y + next_normal_y * context->stroke_radius;
-    if (context->stroke_join == RDT_JOIN_ROUND) {
-        float point_dx = context->point_x - vertex_x;
-        float point_dy = context->point_y - vertex_y;
-        context->stroke_hit = point_dx * point_dx + point_dy * point_dy <=
-            context->stroke_radius * context->stroke_radius;
-        return;
-    }
-    if (context->stroke_join == RDT_JOIN_BEVEL) {
-        context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
-            vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
-        return;
-    }
+    // segment strips already cover the inner corner; the outer bevel triangle is common to bevel and miter joins.
+    context->stroke_hit = dom_svg_point_in_triangle(context->point_x, context->point_y,
+        vertex_x, vertex_y, outer_prev_x, outer_prev_y, outer_next_x, outer_next_y);
+    if (context->stroke_hit || context->stroke_join != RDT_JOIN_MITER) return;
     float determinant = prev_x * -next_y - prev_y * -next_x;
     if (fabsf(determinant) <= 0.000001f) return;
     float delta_x = outer_next_x - outer_prev_x;
@@ -12788,7 +12939,11 @@ static void dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
     float dx = end_x - start_x;
     float dy = end_y - start_y;
     float length = hypotf(dx, dy);
-    if (length <= 0.000001f) return;
+    if (length <= 0.000001f) {
+        if (context->stroke_dash_count == 0 && dom_svg_stroke_segment_contains(context,
+            start_x, start_y, end_x, end_y, true, true)) context->stroke_hit = true;
+        return;
+    }
     if (!context->has_first_stroke_segment) {
         context->first_stroke_start_x = start_x;
         context->first_stroke_start_y = start_y;
@@ -12802,6 +12957,24 @@ static void dom_svg_path_hit_add_stroke_segment(JsDomSvgPathHitContext* context,
             context->stroke_hit = true;
         }
     } else {
+        // zero-length on-dashes have cap geometry even though their interval is empty.
+        if (context->stroke_cap != RDT_CAP_BUTT && context->stroke_dash_total > 0.0f) {
+            float cumulative = 0.0f;
+            for (int index = 0; index < context->stroke_dash_count; index++) {
+                if (!(index & 1) && context->stroke_dash[index] == 0.0f) {
+                    float base = cumulative - context->stroke_dash_offset;
+                    float start = context->subpath_stroke_length;
+                    float first = base + ceilf((start - base) / context->stroke_dash_total) * context->stroke_dash_total;
+                    for (float distance = first; distance <= start + length; distance += context->stroke_dash_total) {
+                        float fraction = (distance - start) / length;
+                        float x = start_x + dx * fraction;
+                        float y = start_y + dy * fraction;
+                        if (dom_svg_stroke_segment_contains(context, x, y, x, y, true, true)) context->stroke_hit = true;
+                    }
+                }
+                cumulative += context->stroke_dash[index];
+            }
+        }
         float segment_offset = 0.0f;
         while (segment_offset < length) {
             float remaining = 0.0f;
@@ -12911,106 +13084,15 @@ static void dom_svg_path_hit_finish_subpath(JsDomSvgPathHitContext* context) {
     }
 }
 
+static bool dom_svg_path_hit_curve_line(void* data, float x0, float y0, float x1, float y1) {
+    dom_svg_path_hit_add_segment((JsDomSvgPathHitContext*)data, x0, y0, x1, y1, true);
+    return true;
+}
+
 static void dom_svg_path_hit_flatten_cubic(JsDomSvgPathHitContext* context,
-                                              float start_x, float start_y,
-                                              float control1_x, float control1_y,
-                                              float control2_x, float control2_y,
-                                              float end_x, float end_y,
-                                              int depth) {
-    if (!context) return;
-    float flatness_sq = context->curve_flatness * context->curve_flatness;
-    float control1_distance_sq = dom_svg_point_segment_distance_sq(
-        control1_x, control1_y, start_x, start_y, end_x, end_y);
-    float control2_distance_sq = dom_svg_point_segment_distance_sq(
-        control2_x, control2_y, start_x, start_y, end_x, end_y);
-    if (depth >= JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH ||
-        (control1_distance_sq <= flatness_sq && control2_distance_sq <= flatness_sq)) {
-        dom_svg_path_hit_add_segment(context, start_x, start_y, end_x, end_y, true);
-        return;
-    }
-    float start_control1_x = (start_x + control1_x) * 0.5f;
-    float start_control1_y = (start_y + control1_y) * 0.5f;
-    float controls_x = (control1_x + control2_x) * 0.5f;
-    float controls_y = (control1_y + control2_y) * 0.5f;
-    float control2_end_x = (control2_x + end_x) * 0.5f;
-    float control2_end_y = (control2_y + end_y) * 0.5f;
-    float middle_control1_x = (start_control1_x + controls_x) * 0.5f;
-    float middle_control1_y = (start_control1_y + controls_y) * 0.5f;
-    float middle_control2_x = (controls_x + control2_end_x) * 0.5f;
-    float middle_control2_y = (controls_y + control2_end_y) * 0.5f;
-    float middle_x = (middle_control1_x + middle_control2_x) * 0.5f;
-    float middle_y = (middle_control1_y + middle_control2_y) * 0.5f;
-    dom_svg_path_hit_flatten_cubic(context, start_x, start_y,
-        start_control1_x, start_control1_y, middle_control1_x, middle_control1_y,
-        middle_x, middle_y, depth + 1);
-    dom_svg_path_hit_flatten_cubic(context, middle_x, middle_y,
-        middle_control2_x, middle_control2_y, control2_end_x, control2_end_y,
-        end_x, end_y, depth + 1);
-}
-
-static void dom_svg_path_add_ellipse(RdtPath* path, float cx, float cy,
-                                        float rx, float ry) {
-    if (!path || rx <= 0.0f || ry <= 0.0f) return;
-    const float kappa = 0.5522847498307936f;
-    rdt_path_move_to(path, cx + rx, cy);
-    rdt_path_cubic_to(path, cx + rx, cy + kappa * ry,
-        cx + kappa * rx, cy + ry, cx, cy + ry);
-    rdt_path_cubic_to(path, cx - kappa * rx, cy + ry,
-        cx - rx, cy + kappa * ry, cx - rx, cy);
-    rdt_path_cubic_to(path, cx - rx, cy - kappa * ry,
-        cx - kappa * rx, cy - ry, cx, cy - ry);
-    rdt_path_cubic_to(path, cx + kappa * rx, cy - ry,
-        cx + rx, cy - kappa * ry, cx + rx, cy);
-    rdt_path_close(path);
-}
-
-static void dom_svg_path_add_rect(RdtPath* path, float x, float y,
-                                     float width, float height,
-                                     float rx, float ry) {
-    if (!path || width <= 0.0f || height <= 0.0f) return;
-    rx = LMB_MIN(fabsf(rx), width * 0.5f);
-    ry = LMB_MIN(fabsf(ry), height * 0.5f);
-    if (rx <= 0.0f || ry <= 0.0f) {
-        rdt_path_move_to(path, x, y);
-        rdt_path_line_to(path, x + width, y);
-        rdt_path_line_to(path, x + width, y + height);
-        rdt_path_line_to(path, x, y + height);
-        rdt_path_close(path);
-        return;
-    }
-    const float kappa = 0.5522847498307936f;
-    float right = x + width;
-    float bottom = y + height;
-    rdt_path_move_to(path, x + rx, y);
-    rdt_path_line_to(path, right - rx, y);
-    rdt_path_cubic_to(path, right - rx + kappa * rx, y,
-        right, y + ry - kappa * ry, right, y + ry);
-    rdt_path_line_to(path, right, bottom - ry);
-    rdt_path_cubic_to(path, right, bottom - ry + kappa * ry,
-        right - rx + kappa * rx, bottom, right - rx, bottom);
-    rdt_path_line_to(path, x + rx, bottom);
-    rdt_path_cubic_to(path, x + rx - kappa * rx, bottom,
-        x, bottom - ry + kappa * ry, x, bottom - ry);
-    rdt_path_line_to(path, x, y + ry);
-    rdt_path_cubic_to(path, x, y + ry - kappa * ry,
-        x + rx - kappa * rx, y, x + rx, y);
-    rdt_path_close(path);
-}
-
-static bool dom_svg_path_add_points(RdtPath* path, const char* points,
-                                       bool close_path) {
-    if (!path || !points) return false;
-    bool has_point = false;
-    const char* cursor = points;
-    while (cursor && *cursor) {
-        float point[2];
-        if (str_parse_float_list(cursor, ", \t\n\r\f\v", point, 2, &cursor) != 2) break;
-        if (has_point) rdt_path_line_to(path, point[0], point[1]);
-        else rdt_path_move_to(path, point[0], point[1]);
-        has_point = true;
-    }
-    if (has_point && close_path) rdt_path_close(path);
-    return has_point;
+    float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3) {
+    render_path_flatten_cubic(x0, y0, x1, y1, x2, y2, x3, y3, context->curve_flatness,
+        JS_DOM_SVG_PATH_HIT_MAX_CUBIC_DEPTH, dom_svg_path_hit_curve_line, context);
 }
 
 static bool dom_svg_is_basic_shape(DomElement* elem) {
@@ -13024,57 +13106,11 @@ static bool dom_svg_is_basic_shape(DomElement* elem) {
 
 static RdtPath* dom_svg_basic_shape_path(DomElement* elem) {
     if (!dom_svg_is_basic_shape(elem)) return nullptr;
-    const char* tag = elem->tag_name;
-    if (str_icmp_cstr(tag, "path") == 0) {
-        const char* d = elem->get_attribute("d");
-        return d && *d ? svg_parse_path_d(d) : nullptr;
-    }
+    if (str_icmp_cstr(elem->tag_name, "path") == 0) return svg_parse_path_d(svg_animation_attribute(elem, "d"));
     RdtPath* path = rdt_path_new();
-    if (!path) return nullptr;
-    bool valid = false;
-    if (str_icmp_cstr(tag, "rect") == 0) {
-        float width = dom_svg_attribute_number(elem, "width", 0.0f);
-        float height = dom_svg_attribute_number(elem, "height", 0.0f);
-        const char* rx_attr = elem->get_attribute("rx");
-        const char* ry_attr = elem->get_attribute("ry");
-        float rx = rx_attr ? dom_svg_attribute_number(elem, "rx", 0.0f)
-            : (ry_attr ? dom_svg_attribute_number(elem, "ry", 0.0f) : 0.0f);
-        float ry = ry_attr ? dom_svg_attribute_number(elem, "ry", 0.0f) : rx;
-        if (width > 0.0f && height > 0.0f) {
-            dom_svg_path_add_rect(path,
-                dom_svg_attribute_number(elem, "x", 0.0f),
-                dom_svg_attribute_number(elem, "y", 0.0f), width, height, rx, ry);
-            valid = true;
-        }
-    } else if (str_icmp_cstr(tag, "circle") == 0) {
-        float radius = dom_svg_attribute_number(elem, "r", 0.0f);
-        if (radius > 0.0f) {
-            dom_svg_path_add_ellipse(path,
-                dom_svg_attribute_number(elem, "cx", 0.0f),
-                dom_svg_attribute_number(elem, "cy", 0.0f), radius, radius);
-            valid = true;
-        }
-    } else if (str_icmp_cstr(tag, "ellipse") == 0) {
-        float rx = dom_svg_attribute_number(elem, "rx", 0.0f);
-        float ry = dom_svg_attribute_number(elem, "ry", 0.0f);
-        if (rx > 0.0f && ry > 0.0f) {
-            dom_svg_path_add_ellipse(path,
-                dom_svg_attribute_number(elem, "cx", 0.0f),
-                dom_svg_attribute_number(elem, "cy", 0.0f), rx, ry);
-            valid = true;
-        }
-    } else if (str_icmp_cstr(tag, "line") == 0) {
-        rdt_path_move_to(path, dom_svg_attribute_number(elem, "x1", 0.0f),
-                         dom_svg_attribute_number(elem, "y1", 0.0f));
-        rdt_path_line_to(path, dom_svg_attribute_number(elem, "x2", 0.0f),
-                         dom_svg_attribute_number(elem, "y2", 0.0f));
-        valid = true;
-    } else {
-        valid = dom_svg_path_add_points(path, elem->get_attribute("points"),
-            str_icmp_cstr(tag, "polygon") == 0);
-    }
-    if (!valid) {
-        rdt_path_free(path);
+    SvgLengthContext lengths = dom_svg_length_context(elem);
+    if (!path || !svg_append_basic_shape_path(dom_element_to_element(elem), path, &lengths)) {
+        if (path) rdt_path_free(path);
         return nullptr;
     }
     return path;
@@ -13117,7 +13153,7 @@ static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
             context->current_y + (args[1] - context->current_y) * (2.0f / 3.0f),
             args[2] + (args[0] - args[2]) * (2.0f / 3.0f),
             args[3] + (args[1] - args[3]) * (2.0f / 3.0f),
-            args[2], args[3], 0);
+            args[2], args[3]);
         context->current_x = args[2];
         context->current_y = args[3];
         context->subpath_has_draw = true;
@@ -13126,7 +13162,7 @@ static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
     case RDT_PATH_CUBIC:
         if (arg_count < 6 || !context->has_current) return false;
         dom_svg_path_hit_flatten_cubic(context, context->current_x, context->current_y,
-            args[0], args[1], args[2], args[3], args[4], args[5], 0);
+            args[0], args[1], args[2], args[3], args[4], args[5]);
         context->current_x = args[4];
         context->current_y = args[5];
         context->subpath_has_draw = true;
@@ -13158,55 +13194,22 @@ static bool dom_svg_path_hit_visit(void* userdata, RdtPathCommand command,
     return false;
 }
 
-static const char* dom_svg_cascaded_property_value(DomElement* elem,
-                                                       const char* name,
-                                                       char* buffer,
-                                                       size_t buffer_size) {
-    if (!elem || !name || !buffer || buffer_size == 0 || !elem->doc) return nullptr;
-    // This selector matcher returns only real stylesheet declarations.  The
-    // resolved style tree also contains SVG initial values (notably
-    // stroke:none), which must not mask a presentation attribute.
-    CssDeclaration* declaration = js_match_custom_property(elem, name);
-    if (!declaration || (!declaration->value &&
-            (!declaration->value_text || declaration->value_text_len == 0))) return nullptr;
-    const char* serialized = css_serialize_declaration_value(declaration,
-        elem->doc->document_pool);
-    if (!serialized || !*serialized) return nullptr;
-    size_t length = strlen(serialized);
-    if (length >= buffer_size) length = buffer_size - 1;
-    str_copy(buffer, buffer_size, serialized, length);
-    return buffer;
-}
-
 static const char* dom_svg_presentation_value(DomElement* elem, const char* name,
-                                                  bool inherits, char* buffer,
-                                                  size_t buffer_size) {
-    if (!elem || !name || !buffer || buffer_size == 0) return nullptr;
-    for (DomNode* node = (DomNode*)elem; node && node->is_element();
-         node = node->parent) {
-        DomElement* current = node->as_element();
-        const char* inline_value = svg_get_inline_style_property(
-            current->get_attribute("style"), name, buffer, buffer_size);
-        if (inline_value) return inline_value;
-        const char* cascaded_value = dom_svg_cascaded_property_value(current, name,
-            buffer, buffer_size);
-        if (cascaded_value) return cascaded_value;
-        const char* attribute = current->get_attribute(name);
-        if (attribute) return attribute;
-        if (!inherits) break;
-    }
-    return nullptr;
+    bool inherits, char* buffer, size_t buffer_size) {
+    return svg_get_dom_presentation_property(elem, name, inherits, buffer, buffer_size,
+        nullptr, nullptr, nullptr, g_dom_svg_style_scope);
 }
 
 static float dom_svg_presentation_number(DomElement* elem, const char* name,
-                                            float fallback, bool inherits) {
-    char value_buffer[64] = {};
-    const char* value = dom_svg_presentation_value(elem, name, inherits,
-        value_buffer, sizeof(value_buffer));
-    if (!value) return fallback;
-    char* end = nullptr;
-    float parsed = strtof(value, &end);
-    return end != value ? parsed : fallback;
+    float fallback, bool inherits) {
+    char value_buffer[64];
+    DomElement* declaration = nullptr;
+    const char* value = svg_get_dom_presentation_property(elem, name, inherits, value_buffer,
+        sizeof(value_buffer), nullptr, nullptr, &declaration, g_dom_svg_style_scope);
+    SvgLengthContext lengths = dom_svg_length_context(declaration ? declaration : elem);
+    SvgLengthContext used = dom_svg_length_context(elem);
+    lengths.viewport_width = used.viewport_width; lengths.viewport_height = used.viewport_height;
+    return svg_resolve_length(value, &lengths, dom_svg_length_axis(name), fallback);
 }
 
 static bool dom_svg_paint_is_present(DomElement* elem, const char* paint_name,
@@ -13223,21 +13226,22 @@ typedef struct JsDomSvgShapeHit {
     bool fill;
     bool stroke;
     bool bounding_box;
+    bool fill_painted;
+    bool stroke_painted;
 } JsDomSvgShapeHit;
 
-static void dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
-                                            JsDomSvgPathHitContext* context) {
+static void dom_svg_configure_stroke_hit(DomElement* elem, JsDomSvgPathHitContext* context) {
     if (!context) return;
     float stroke_width = dom_svg_presentation_number(elem, "stroke-width", 1.0f, true);
     context->stroke_enabled = stroke_width > 0.0f;
     if (!context->stroke_enabled) return;
-    context->stroke_radius = stroke_width * 0.5f + JS_DOM_SVG_STROKE_HIT_AIM_SLOP_PX / min_scale;
+    // SVG pointer-events uses painted geometry; a device-space aiming expansion picks blank pixels.
+    context->stroke_radius = stroke_width * 0.5f;
     context->stroke_cap = RDT_CAP_BUTT;
     context->stroke_join = RDT_JOIN_MITER;
     context->stroke_miter_limit = 4.0f;
     char cap_buffer[64] = {};
     char join_buffer[64] = {};
-    char dash_buffer[256] = {};
     const char* cap = dom_svg_presentation_value(elem, "stroke-linecap", true,
         cap_buffer, sizeof(cap_buffer));
     const char* join = dom_svg_presentation_value(elem, "stroke-linejoin", true,
@@ -13251,22 +13255,20 @@ static void dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
     if (context->stroke_miter_limit < 1.0f) context->stroke_miter_limit = 1.0f;
     context->stroke_dash_offset = dom_svg_presentation_number(elem,
         "stroke-dashoffset", 0.0f, true);
-    const char* dasharray = dom_svg_presentation_value(elem, "stroke-dasharray", true,
-        dash_buffer, sizeof(dash_buffer));
-    if (!dasharray || !*dasharray || str_icmp_cstr(dasharray, "none") == 0) return;
-    size_t dash_count = str_parse_float_list(dasharray, ", \t\n\r\f\v",
-        context->stroke_dash, 16, nullptr);
-    for (size_t index = 0; index < dash_count; index++) {
-        if (context->stroke_dash[index] > 0.0f) {
-            context->stroke_dash[context->stroke_dash_count++] = context->stroke_dash[index];
-        }
+    char* dasharray = nullptr;
+    DomElement* declaration = nullptr;
+    svg_get_dom_presentation_property(elem, "stroke-dasharray", true, nullptr, 0,
+        nullptr, &dasharray, &declaration, g_dom_svg_style_scope);
+    SvgLengthContext lengths = dom_svg_length_context(declaration ? declaration : elem);
+    SvgLengthContext used = dom_svg_length_context(elem);
+    lengths.viewport_width = used.viewport_width; lengths.viewport_height = used.viewport_height;
+    context->stroke_dash_count = svg_resolve_dash_array(dasharray, &lengths, nullptr, 0);
+    if (context->stroke_dash_count > 0) {
+        context->stroke_dash = (float*)mem_alloc((size_t)context->stroke_dash_count * sizeof(float), MEM_CAT_RENDER);
+        context->stroke_dash_count = context->stroke_dash
+            ? svg_resolve_dash_array(dasharray, &lengths, context->stroke_dash, context->stroke_dash_count) : 0;
     }
-    if (context->stroke_dash_count & 1) {
-        int original_count = context->stroke_dash_count;
-        for (int index = 0; index < original_count && context->stroke_dash_count < 32; index++) {
-            context->stroke_dash[context->stroke_dash_count++] = context->stroke_dash[index];
-        }
-    }
+    mem_free(dasharray);
     for (int index = 0; index < context->stroke_dash_count; index++) {
         context->stroke_dash_total += context->stroke_dash[index];
     }
@@ -13276,18 +13278,23 @@ static void dom_svg_configure_stroke_hit(DomElement* elem, float min_scale,
 static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
                                                                float local_x,
                                                                float local_y,
-                                                               float min_scale) {
+                                                               float min_scale,
+                                                               const RdtMatrix* stroke_frame = nullptr) {
     JsDomSvgShapeHit result = {};
     if (!elem) return result;
     // Every basic SVG primitive is lowered to the same contour visitor.  Its
     // bounding box contains non-painted gaps, so it cannot decide a hit.
-    RdtPath* path = dom_svg_basic_shape_path(elem);
+    bool text = dom_svg_is_text(elem);
+    RdtPath* path = text ? dom_svg_text_geometry_path(elem) : dom_svg_basic_shape_path(elem);
     if (!path) return result;
     JsDomSvgPathHitContext context = {};
     context.point_x = local_x;
     context.point_y = local_y;
     context.curve_flatness = 0.5f / min_scale;
-    dom_svg_configure_stroke_hit(elem, min_scale, &context);
+    char effect_buffer[64];
+    const char* effect = dom_svg_presentation_value(elem, "vector-effect", false, effect_buffer, sizeof(effect_buffer));
+    bool non_scaling = !text && stroke_frame && effect && strcmp(effect, "non-scaling-stroke") == 0;
+    if (!non_scaling) dom_svg_configure_stroke_hit(elem, &context);
     bool visited = rdt_path_visit(path, dom_svg_path_hit_visit, &context);
     if (visited) dom_svg_path_hit_finish_subpath(&context);
     float left = 0.0f;
@@ -13296,8 +13303,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
     float bottom = 0.0f;
     result.bounding_box = rdt_path_get_bounds(path, &left, &top, &right, &bottom) &&
         local_x >= left && local_x <= right && local_y >= top && local_y <= bottom;
-    rdt_path_free(path);
-    if (!visited) return result;
+    if (!visited) { mem_free(context.stroke_dash); rdt_path_free(path); return result; }
     {
         char fill_rule_buffer[64] = {};
         const char* fill_rule = dom_svg_presentation_value(elem, "fill-rule", true,
@@ -13309,7 +13315,25 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_local_point(DomElement* elem,
             result.fill = true;
         }
     }
-    result.stroke = context.stroke_enabled && context.stroke_hit;
+    // SVG text fill and stroke targeting both use the character cell (SVG 2 §17.5.1).
+    result.stroke = context.stroke_enabled && (text ? result.fill : context.stroke_hit);
+    if (non_scaling) {
+        RdtPath* transformed = rdt_path_new();
+        if (transformed && render_path_append_transformed(transformed, path, stroke_frame)) {
+            JsDomSvgPathHitContext target = {};
+            rdt_matrix_transform_point(stroke_frame, local_x, local_y, &target.point_x, &target.point_y);
+            target.curve_flatness = 0.5f;
+            // the same affine contour as painting is stroked in CSS viewport units.
+            dom_svg_configure_stroke_hit(elem, &target);
+            bool inspected = rdt_path_visit(transformed, dom_svg_path_hit_visit, &target);
+            if (inspected) dom_svg_path_hit_finish_subpath(&target);
+            result.stroke = inspected && target.stroke_enabled && target.stroke_hit;
+            mem_free(target.stroke_dash);
+        }
+        if (transformed) rdt_path_free(transformed);
+    }
+    mem_free(context.stroke_dash);
+    rdt_path_free(path);
     return result;
 }
 
@@ -13329,7 +13353,7 @@ static JsDomSvgShapeHit dom_svg_basic_shape_hit_viewport_point(DomElement* elem,
     float scale_y = hypotf(screen_ctm.e12, screen_ctm.e22);
     float min_scale = LMB_MIN(scale_x, scale_y);
     if (min_scale < 0.0001f) min_scale = 0.0001f;
-    return dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale);
+    return dom_svg_basic_shape_hit_local_point(elem, local_x, local_y, min_scale, &screen_ctm);
 }
 JS_FORWARD_STATIC_EXPRESSION(bool, dom_svg_tag_is, (DomElement* elem, const char* tag), (elem && elem->tag_name && tag && str_icmp_cstr(elem->tag_name, tag) == 0))
 
@@ -13340,8 +13364,8 @@ static bool dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* 
     float min_y = 0.0f;
     float width = 0.0f;
     float height = 0.0f;
-    const char* viewbox = elem->get_attribute("viewBox");
-    if (!viewbox) viewbox = elem->get_attribute("viewbox");
+    const char* viewbox = svg_animation_attribute(elem, "viewBox");
+    if (!viewbox) viewbox = svg_animation_attribute(elem, "viewbox");
     if (dom_svg_parse_viewbox(viewbox, &min_x, &min_y, &width, &height)) {
         *left = min_x;
         *top = min_y;
@@ -13351,6 +13375,7 @@ static bool dom_svg_viewport_local_bounds(DomElement* elem, float* left, float* 
     }
     width = dom_svg_attribute_number(elem, "width", elem->width);
     height = dom_svg_attribute_number(elem, "height", elem->height);
+    dom_svg_apply_css_viewport_size(elem, &width, &height);
     if (width <= 0.0f || height <= 0.0f) return false;
     *left = 0.0f;
     *top = 0.0f;
@@ -13403,67 +13428,111 @@ static DomElement* dom_svg_use_reference(DomElement* elem) {
     return dom_find_element_by_id(elem->doc->root, href + 1);
 }
 
-static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* reference,
-                                                                 const RdtMatrix* reference_ctm,
-                                                                 float viewport_x,
-                                                                 float viewport_y) {
-    JsDomSvgShapeHit result = {};
-    if (!reference || !reference_ctm) return result;
-    if (dom_svg_is_basic_shape(reference)) {
-        float local_x = 0.0f;
-        float local_y = 0.0f;
-        if (!rdt_matrix_unproject_affine_point(reference_ctm, viewport_x, viewport_y,
-                                                &local_x, &local_y)) {
-            return result;
-        }
-        float scale_x = hypotf(reference_ctm->e11, reference_ctm->e21);
-        float scale_y = hypotf(reference_ctm->e12, reference_ctm->e22);
-        float min_scale = LMB_MIN(scale_x, scale_y);
-        if (min_scale < 0.0001f) min_scale = 0.0001f;
-        return dom_svg_basic_shape_hit_local_point(reference, local_x, local_y, min_scale);
+static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
+    const RdtMatrix* instance_ctm, float viewport_x, float viewport_y);
+static bool dom_svg_element_skips_hit_test(DomElement* elem);
+
+static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule, void* data) {
+    const RdtLogicalPoint* point = (const RdtLogicalPoint*)data;
+    RdtPath* contour = rdt_path_new();
+    if (!contour || !render_path_append_transformed(contour, path, frame)) {
+        if (contour) rdt_path_free(contour);
+        return false;
     }
-    if (!dom_svg_tag_is(reference, "g") && !dom_svg_tag_is(reference, "a") &&
-        !dom_svg_tag_is(reference, "symbol")) {
+    JsDomSvgPathHitContext query = {};
+    query.point_x = point->x; query.point_y = point->y; query.curve_flatness = .05f;
+    bool valid = rdt_path_visit(contour, dom_svg_path_hit_visit, &query);
+    if (valid) dom_svg_path_hit_finish_subpath(&query);
+    bool hit = valid && (query.fill_on_edge || (rule == RDT_FILL_EVEN_ODD ? (query.fill_crossings & 1) != 0 : query.fill_winding != 0));
+    rdt_path_free(contour);
+    return hit;
+}
+
+static bool dom_svg_clip_contains(DomElement* elem, const RdtMatrix* frame, float x, float y) {
+    char buffer[512];
+    const char* clip = dom_svg_presentation_value(elem, "clip-path", false, buffer, sizeof(buffer));
+    if (!clip || strcmp(clip, "none") == 0) return true;
+    SvgLengthContext lengths = dom_svg_length_context(elem);
+    UiContext* ui = elem->doc ? (UiContext*)elem->doc->js.host_ui_context : nullptr;
+    RdtLogicalPoint point = {x, y};
+    return svg_dom_clip_contains_point(elem, &lengths, ui ? ui->font_ctx : nullptr, frame,
+        dom_svg_clip_path_contains, &point, g_dom_svg_style_scope);
+}
+
+static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* reference,
+    const RdtMatrix* reference_ctm, float viewport_x, float viewport_y) {
+    JsDomSvgShapeHit result = {};
+    if (!reference || !reference_ctm || dom_svg_element_skips_hit_test(reference) ||
+        !dom_svg_clip_contains(reference, reference_ctm, viewport_x, viewport_y)) return result;
+    if (dom_svg_is_basic_shape(reference) || dom_svg_is_text(reference)) {
+        float local_x = 0.0f, local_y = 0.0f;
+        if (!rdt_matrix_unproject_affine_point(reference_ctm, viewport_x, viewport_y, &local_x, &local_y)) return result;
+        float min_scale = LMB_MAX(0.0001f, LMB_MIN(hypotf(reference_ctm->e11, reference_ctm->e21),
+            hypotf(reference_ctm->e12, reference_ctm->e22)));
+        result = dom_svg_basic_shape_hit_local_point(reference, local_x, local_y, min_scale, reference_ctm);
+        result.fill_painted = result.fill && dom_svg_paint_is_present(reference, "fill", true);
+        result.stroke_painted = result.stroke && dom_svg_paint_is_present(reference, "stroke", false);
         return result;
     }
+    if (dom_svg_tag_is(reference, "use"))
+        return dom_svg_use_instance_hit(reference, reference_ctm, viewport_x, viewport_y);
+    if (!dom_svg_tag_is(reference, "g") && !dom_svg_tag_is(reference, "a") &&
+        !dom_svg_tag_is(reference, "symbol") && !dom_svg_tag_is(reference, "switch")) return result;
     for (DomNode* child = reference->last_child; child; child = child->prev_sibling) {
         if (!child->is_element()) continue;
+        if (dom_svg_tag_is(reference, "switch") && child != dom_svg_switch_selected_child(reference)) continue;
         DomElement* child_elem = child->as_element();
         RdtMatrix child_transform = dom_svg_transform_from_element(child_elem);
         RdtMatrix child_ctm = rdt_matrix_multiply(reference_ctm, &child_transform);
-        JsDomSvgShapeHit child_hit = dom_svg_reference_hit_viewport_point(child_elem,
-            &child_ctm, viewport_x, viewport_y);
-        result.fill = result.fill || child_hit.fill;
-        result.stroke = result.stroke || child_hit.stroke;
-        result.bounding_box = result.bounding_box || child_hit.bounding_box;
+        JsDomSvgShapeHit hit = dom_svg_reference_hit_viewport_point(child_elem, &child_ctm, viewport_x, viewport_y);
+        result.fill |= hit.fill; result.stroke |= hit.stroke; result.bounding_box |= hit.bounding_box;
+        result.fill_painted |= hit.fill_painted; result.stroke_painted |= hit.stroke_painted;
     }
     return result;
 }
 
-static JsDomSvgShapeHit dom_svg_use_hit_viewport_point(DomElement* elem,
-                                                           float viewport_x,
-                                                           float viewport_y) {
+static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
+    const RdtMatrix* instance_ctm, float viewport_x, float viewport_y) {
     JsDomSvgShapeHit result = {};
     DomElement* reference = dom_svg_use_reference(elem);
-    if (!reference) return result;
-    RdtMatrix instance_ctm = dom_svg_ctm(elem, true);
-    RdtMatrix offset = rdt_matrix_translate(
-        dom_svg_attribute_number(elem, "x", 0.0f),
+    if (!reference || !instance_ctm) return result;
+    size_t depth = 0;
+    for (const SvgDomStyleScope* scope = g_dom_svg_style_scope; scope; scope = scope->previous) {
+        if (scope->root == reference || ++depth >= 16) return result;
+    }
+    for (DomNode* node = elem; node; node = node->parent) if (node == reference) return result;
+    SvgLengthContext lengths = dom_svg_length_context(elem);
+    RdtMatrix offset = rdt_matrix_translate(dom_svg_attribute_number(elem, "x", 0.0f),
         dom_svg_attribute_number(elem, "y", 0.0f));
-    instance_ctm = rdt_matrix_multiply(&instance_ctm, &offset);
-    RdtMatrix reference_transform = dom_svg_transform_from_element(reference);
-    RdtMatrix reference_ctm = rdt_matrix_multiply(&instance_ctm, &reference_transform);
-    result = dom_svg_reference_hit_viewport_point(reference, &reference_ctm,
-        viewport_x, viewport_y);
+    RdtMatrix frame = rdt_matrix_multiply(instance_ctm, &offset);
+    SvgDomStyleScope scope = {reference, elem, g_dom_svg_style_scope, 0.0f, 0.0f, false};
+    const SvgDomStyleScope* saved_scope = g_dom_svg_style_scope;
+    g_dom_svg_style_scope = &scope;
+    RdtMatrix local = dom_svg_transform_from_element(reference);
+    frame = rdt_matrix_multiply(&frame, &local);
+    if (dom_svg_tag_is(reference, "symbol")) {
+        SvgViewBox box = svg_parse_viewbox(svg_animation_attribute(reference, "viewBox"));
+        float width = svg_resolve_length(svg_animation_attribute(elem, "width"), &lengths, SVG_LENGTH_X, lengths.viewport_width);
+        float height = svg_resolve_length(svg_animation_attribute(elem, "height"), &lengths, SVG_LENGTH_Y, lengths.viewport_height);
+        if (box.has_viewbox && box.width > 0.0f && box.height > 0.0f && width > 0.0f && height > 0.0f) {
+            RdtMatrix mapping = svg_viewbox_transform(&box, width, height, svg_animation_attribute(reference, "preserveAspectRatio"));
+            frame = rdt_matrix_multiply(&frame, &mapping);
+            scope.has_viewport = true; scope.viewport_width = box.width; scope.viewport_height = box.height;
+        }
+    }
+    result = dom_svg_reference_hit_viewport_point(reference, &frame, viewport_x, viewport_y);
     JsDomSvgBounds bounds = dom_svg_bounds_for_element(reference);
-    float local_x = 0.0f;
-    float local_y = 0.0f;
-    if (bounds.valid && rdt_matrix_unproject_affine_point(&reference_ctm, viewport_x,
-            viewport_y, &local_x, &local_y)) {
+    float local_x = 0.0f, local_y = 0.0f;
+    if (bounds.valid && rdt_matrix_unproject_affine_point(&frame, viewport_x, viewport_y, &local_x, &local_y))
         result.bounding_box = local_x >= bounds.left && local_x <= bounds.right &&
             local_y >= bounds.top && local_y <= bounds.bottom;
-    }
+    g_dom_svg_style_scope = saved_scope;
     return result;
+}
+
+static JsDomSvgShapeHit dom_svg_use_hit_viewport_point(DomElement* elem, float viewport_x, float viewport_y) {
+    RdtMatrix frame = dom_svg_ctm(elem, true);
+    return dom_svg_use_instance_hit(elem, &frame, viewport_x, viewport_y);
 }
 
 typedef enum JsDomSvgPointerEventsMode {
@@ -13539,7 +13608,7 @@ static bool dom_svg_pointer_events_selects_geometry(JsDomSvgPointerEventsMode mo
 }
 
 static bool dom_svg_element_skips_hit_test(DomElement* elem) {
-    if (!elem || !elem->tag_name) return true;
+    if (!elem || !elem->tag_name || !dom_svg_element_is_eligible(elem)) return true;
     const char* tag = elem->tag_name;
     if (str_icmp_cstr(tag, "defs") == 0 || str_icmp_cstr(tag, "clipPath") == 0 ||
         str_icmp_cstr(tag, "mask") == 0 || str_icmp_cstr(tag, "marker") == 0 ||
@@ -13582,24 +13651,34 @@ static bool dom_svg_point_is_within_viewports(DomElement* elem, float x, float y
     return true;
 }
 
+static bool dom_svg_point_is_within_clips(DomElement* elem, float x, float y) {
+    for (DomNode* node = elem; node && node->is_element(); node = node->parent) {
+        DomElement* current = node->as_element();
+        if (!dom_element_is_svg(current)) break;
+        RdtMatrix frame = dom_svg_ctm(current, true);
+        if (!dom_svg_clip_contains(current, &frame, x, y)) return false;
+    }
+    return true;
+}
+
 static bool dom_svg_element_contains_viewport_point(DomElement* elem,
                                                        float x, float y) {
     if (!elem || dom_svg_element_skips_hit_test(elem) ||
-        !dom_svg_point_is_within_viewports(elem, x, y)) return false;
+        !dom_svg_point_is_within_viewports(elem, x, y) ||
+        !dom_svg_point_is_within_clips(elem, x, y)) return false;
     JsDomSvgPointerEventsMode pointer_events = dom_svg_pointer_events_mode(elem);
     if (pointer_events == JS_DOM_SVG_POINTER_EVENTS_NONE) return false;
     JsDomSvgShapeHit hit = {};
     bool fill_painted = false;
     bool stroke_painted = false;
-    if (dom_svg_is_basic_shape(elem)) {
+    if (dom_svg_is_basic_shape(elem) || dom_svg_is_text(elem)) {
         hit = dom_svg_basic_shape_hit_viewport_point(elem, x, y);
         fill_painted = dom_svg_paint_is_present(elem, "fill", true);
         stroke_painted = dom_svg_paint_is_present(elem, "stroke", false);
     } else if (dom_svg_tag_is(elem, "use")) {
-        DomElement* reference = dom_svg_use_reference(elem);
         hit = dom_svg_use_hit_viewport_point(elem, x, y);
-        fill_painted = dom_svg_paint_is_present(reference ? reference : elem, "fill", true);
-        stroke_painted = dom_svg_paint_is_present(reference ? reference : elem, "stroke", false);
+        fill_painted = hit.fill_painted;
+        stroke_painted = hit.stroke_painted;
     } else if (dom_svg_tag_is(elem, "g") || dom_svg_tag_is(elem, "a") ||
                dom_svg_tag_is(elem, "switch")) {
         // Container bounds are only a union for getBBox(); blank union gaps
@@ -13622,15 +13701,29 @@ static bool dom_svg_element_contains_viewport_point(DomElement* elem,
 
 static DomElement* dom_svg_element_from_point_walk(DomElement* elem,
                                                        float x, float y) {
+    SvgAnimationSourceScope animation_sources(elem ? elem->doc : nullptr);
     if (!elem || dom_svg_element_skips_hit_test(elem) ||
         !dom_svg_point_is_within_viewports(elem, x, y)) return nullptr;
+    if (dom_svg_tag_is(elem, "foreignObject")) {
+        if (!dom_svg_point_is_within_clips(elem, x, y)) return nullptr;
+        float local_x, local_y;
+        if (!dom_svg_foreign_object_local_point(elem, x, y, &local_x, &local_y)) return nullptr;
+        // HTML targeting uses the existing CSS paint order, controls and overflow walker.
+        DomElement* hit = (DomElement*)dom_engine_subtree_element_from_point(elem, local_x, local_y);
+        return hit ? hit : (dom_svg_element_contains_viewport_point(elem, x, y) ? elem : nullptr);
+    }
     for (DomNode* child = elem->last_child; child; child = child->prev_sibling) {
         if (!child->is_element()) continue;
+        if (dom_svg_tag_is(elem, "switch") && child != dom_svg_switch_selected_child(elem)) continue;
         DomElement* child_elem = child->as_element();
         DomElement* hit = dom_svg_element_from_point_walk(child_elem, x, y);
         if (hit) return hit;
     }
     return dom_svg_element_contains_viewport_point(elem, x, y) ? elem : nullptr;
+}
+
+extern "C" void* dom_svg_element_from_point(void* element, float x, float y) {
+    return dom_svg_element_from_point_walk((DomElement*)element, x, y);
 }
 
 static DomElement* dom_svg_element_from_document_point_walk(DomNode* node,
@@ -15999,13 +16092,7 @@ extern "C" Item dom_core_get_attribute_ns(Item n, Item ns, Item local) {
     const char* namespace_uri = fn_to_cstr(ns);
     const char* local_name = fn_to_cstr(local);
     if (!local_name) return ItemNull;
-    char xlink_name[128];
-    const char* lookup_name = local_name;
-    if (namespace_uri && strcmp(namespace_uri, "http://www.w3.org/1999/xlink") == 0) {
-        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", local_name);
-        lookup_name = xlink_name;
-    }
-    const char* value = elem->get_attribute(lookup_name);
+    const char* value = dom_element_attribute_ns(elem, namespace_uri, local_name);
     return value ? js_name_item(value) : ItemNull;
 }
 
@@ -16723,6 +16810,29 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     }
     if (dom_element_is_svg(elem) && operation == JUBE_DOM_GET_SCREEN_CTM) {
         return dom_core_svg_screen_ctm(elem_item);
+    }
+    if (elem->tag() == MARKUP_NAME_SVG) {
+        if (operation == JUBE_DOM_PAUSE_ANIMATIONS || operation == JUBE_DOM_UNPAUSE_ANIMATIONS) {
+            svg_animation_pause(elem, operation == JUBE_DOM_PAUSE_ANIMATIONS);
+            return ItemNull;
+        }
+        if (operation == JUBE_DOM_ANIMATIONS_PAUSED) return Item{.item = svg_animation_paused(elem) ? ITEM_TRUE : ITEM_FALSE};
+        if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(svg_animation_current_time(elem));
+        if (operation == JUBE_DOM_SET_CURRENT_TIME) {
+            double seconds = 0.0;
+            if (argc && item_try_to_double(args[0], &seconds)) svg_animation_set_time(elem, seconds);
+            return ItemNull;
+        }
+    }
+    if (dom_element_is_svg(elem) && (operation == JUBE_DOM_BEGIN_ELEMENT ||
+        operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT ||
+        operation == JUBE_DOM_END_ELEMENT_AT)) {
+        double offset = 0.0;
+        if ((operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT_AT) &&
+            (!argc || !item_try_to_double(args[0], &offset))) return ItemNull;
+        svg_animation_begin_end(elem, operation == JUBE_DOM_END_ELEMENT ||
+            operation == JUBE_DOM_END_ELEMENT_AT, offset);
+        return ItemNull;
     }
 
     // getBoundingClientRect() — returns {top, left, right, bottom, width, height}

@@ -1,0 +1,80 @@
+{
+  "name": "SMIL external use instances follow the host timeline while directly referenced paint resources remain static",
+  "html": "test/ui/svg_smil_external.html",
+  "viewport": {
+    "width": 250,
+    "height": 90
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 115,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 195,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "advance_time",
+      "ms": 2200
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 25,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 115,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 195,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    }
+  ]
+}

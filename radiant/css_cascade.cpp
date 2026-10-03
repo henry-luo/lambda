@@ -57,7 +57,8 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
                     dom_element_apply_pseudo_element_rule(element, rule,
                         result.specificity, (int)result.pseudo_element);
                 }
-            } else if (!matched_selector) {
+            } else if (!matched_selector ||
+                       css_specificity_compare(result.specificity, best_specificity) > 0) {
                 matched_selector = true;
                 best_specificity = result.specificity;
             }

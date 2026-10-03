@@ -1182,6 +1182,7 @@ HOMEBREW_DEPS=(
 RADIANT_DEPS=(
     "glfw"       # OpenGL window and context management
     "libpng"     # PNG image format support
+    "webp"       # shared raster WebP decoder
     "zlib"       # Compression library
     "bzip2"      # Alternative compression library
 )

@@ -1,6 +1,7 @@
 #include "event.hpp"
 #include "state_store_internal.hpp"
 #include "view.hpp"
+#include "layout.hpp"
 #include "../lib/log.h"
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
@@ -2439,7 +2440,7 @@ View* view_state_entry_resolve_view(DocState* state, const ViewStateEntry* entry
             // keeps its ViewState value until the document retires the node.
             if (entry->kind == VIEW_STATE_FORM_CONTROL && owner->is_element()) {
                 DomElement* element = lam::dom_require_element(owner);
-                if (element && element->form) return static_cast<View*>(owner);
+                if (element && (element->form || is_form_control(element))) return static_cast<View*>(owner);
             }
             // layout may wrap the DOM root in a synthetic view; connection is
             // established by reaching doc->root anywhere on the parent path.
@@ -3001,7 +3002,8 @@ uint32_t view_state_prune_orphans(DocState* state) {
             bool invalid_live_kind = false;
             if (entry->state && key_live && entry->kind == VIEW_STATE_FORM_CONTROL) {
                 DomElement* elem = key_live->is_element() ? lam::dom_require_element(key_live) : NULL;
-                invalid_live_kind = !elem || !elem->form;
+                // D4.5.1v3: clearing pass-local form properties does not retire the DOM value owner.
+                invalid_live_kind = !elem || (!elem->form && !is_form_control(elem));
             }
             if (!entry->state || !key_live || !state_live || invalid_live_kind) {
                 ViewStateEntry query = { .view_id = entry->view_id, .kind = entry->kind, .state = NULL };

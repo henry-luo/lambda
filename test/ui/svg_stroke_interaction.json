@@ -1,0 +1,427 @@
+{
+  "name": "SVG non-scaling stroke miter cap dash and marker pointer geometry",
+  "html": "test/ui/svg_stroke_interaction.html",
+  "viewport": {
+    "width": 600,
+    "height": 220
+  },
+  "events": [
+    {
+      "type": "assert_hit_test",
+      "x": 62,
+      "y": 40,
+      "expected_selector": "#affine"
+    },
+    {
+      "type": "click",
+      "x": 62,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "affine"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 40,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 50,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 280,
+      "y": 40,
+      "expected_selector": "#skew"
+    },
+    {
+      "type": "click",
+      "x": 280,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "skew"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 268,
+      "y": 40,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 268,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 440,
+      "y": 8,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 440,
+      "y": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 440,
+      "y": 25,
+      "expected_selector": "#join"
+    },
+    {
+      "type": "click",
+      "x": 440,
+      "y": 25
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "join"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 70,
+      "y": 150,
+      "expected_selector": "#round"
+    },
+    {
+      "type": "click",
+      "x": 70,
+      "y": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "round"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 80,
+      "y": 150,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 80,
+      "y": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 146,
+      "y": 156,
+      "expected_selector": "#square"
+    },
+    {
+      "type": "click",
+      "x": 146,
+      "y": 156
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "square"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 150,
+      "y": 160,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 150,
+      "y": 160
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 210,
+      "y": 150,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 210,
+      "y": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 355,
+      "y": 145,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 355,
+      "y": 145
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 345,
+      "y": 150,
+      "expected_selector": "#marked"
+    },
+    {
+      "type": "click",
+      "x": 345,
+      "y": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "marked"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 440,
+      "y": 150,
+      "expected_selector": "#dashes"
+    },
+    {
+      "type": "click",
+      "x": 440,
+      "y": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "dashes"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 450,
+      "y": 150,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 450,
+      "y": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 62,
+      "y": 40,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 40,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 268,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 440,
+      "y": 8,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 440,
+      "y": 25,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 150,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 146,
+      "y": 156,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 150,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 355,
+      "y": 145,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 440,
+      "y": 150,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 450,
+      "y": 150,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ]
+}

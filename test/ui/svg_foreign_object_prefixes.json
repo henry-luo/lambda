@@ -1,0 +1,54 @@
+{
+  "name": "XML XHTML local names match type selectors regardless of namespace prefix",
+  "html": "test/ui/svg_foreign_object_prefixes.html",
+  "viewport": {
+    "width": 260,
+    "height": 100
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 110,
+      "y": 40,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 190,
+      "y": 40,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 245,
+      "y": 40,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 120,
+      "max_g": 136,
+      "min_b": 120,
+      "max_b": 136
+    }
+  ]
+}

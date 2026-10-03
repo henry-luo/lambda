@@ -19,7 +19,7 @@
 
 typedef enum LambdaTier {
     LAMBDA_TIER_JIT = 0,   // today's eager whole-module MIR Direct pipeline
-    LAMBDA_TIER_INTERP,    // T0 only, never promote
+    LAMBDA_TIER_INTERP,    // T0 only; unsupported scripts fail, never compile MIR
     LAMBDA_TIER_AUTO,      // T0 + per-function satellite promotion (P2)
 } LambdaTier;
 

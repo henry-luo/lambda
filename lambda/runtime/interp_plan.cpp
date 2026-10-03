@@ -291,6 +291,7 @@ typedef struct ScanCtx {
     bool indexed;
     const AstIndex* index;
     AstNodeId skip_end;
+    bool strict_interp;
 } ScanCtx;
 
 // An outer write to an N-D ArrayNum replaces a row slice, not one scalar leaf.
@@ -382,23 +383,27 @@ static bool interp_direct_ndim_indices(AstNode* object, AstNode* first_index) {
     return count >= 2;
 }
 
-// `a[i] = v` normally needs a statically integral subscript before it can use
-// T0's int64 COW bridge. A `to` source may be either an exact-integer range or
-// a character range, but one explicit integer bound rules out the latter; any
-// non-integer opposite bound then errors before the loop body. Range iteration
-// yields an int on every successful such step. Keep the proof structural so
-// another dynamic `any` binding cannot accidentally reach machine conversion.
-static bool interp_range_loop_index_expr(AstNode* node) {
+// Scalar stores retain boxed keys through the checked COW setter (S7.1.3v2).
+// Arithmetic over an admitted dynamic binding uses that same runtime check;
+// it need not acquire a declared int type to enter T0. Keep character loops
+// and vector/slice syntax outside this path; their store shapes differ.
+static bool interp_checked_scalar_index_expr(AstNode* node) {
+    if (node && node->type &&
+            (node->type->type_id == LMD_TYPE_INT ||
+             node->type->type_id == LMD_TYPE_INT64)) return true;
     if (interp_integer_literal(node)) return true;
     node = ast_unwrap_primary(node);
     if (!node) return false;
     if (node->node_type == AST_NODE_IDENT) {
         NameEntry* entry = ((AstIdentNode*)node)->entry;
-        if (!entry || !entry->node || entry->node->node_type != AST_NODE_FOR_CLAUSE) {
-            return false;
-        }
+        if (!entry) return false;
+        if (!entry->declared_type && (!entry->node ||
+                (entry->node->node_type != AST_NODE_FOR_CLAUSE &&
+                 entry->node->node_type != AST_NODE_FOR_INDEX))) return true;
+        if (!entry->node || entry->node->node_type != AST_NODE_FOR_CLAUSE) return false;
         AstLoopNode* loop = (AstLoopNode*)entry->node;
         AstNode* source = ast_unwrap_primary(loop->as);
+        // one integer `to` bound excludes a character range on every success
         return source && source->node_type == AST_NODE_BINARY &&
             ((AstBinaryNode*)source)->op == OPERATOR_TO &&
             (interp_integer_literal(((AstBinaryNode*)source)->left) ||
@@ -410,8 +415,8 @@ static bool interp_range_loop_index_expr(AstNode* node) {
             binary->op != OPERATOR_MUL) {
         return false;
     }
-    return interp_range_loop_index_expr(binary->left) &&
-        interp_range_loop_index_expr(binary->right);
+    return interp_checked_scalar_index_expr(binary->left) &&
+        interp_checked_scalar_index_expr(binary->right);
 }
 
 // The native concurrency analysis must conservatively classify an indirect
@@ -694,7 +699,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         InterpSyncProcScan sync_scan = {.ok = true};
         bool task_backed = fn->analysis && (fn->analysis->may_await ||
             fn->analysis->needs_task_context);
-        bool async_satellite = task_backed &&
+        // forced T0 must reject a body that needs MIR's suspension transform
+        bool async_satellite = !sc->strict_interp && task_backed &&
             interp_async_proc_satellite_supported(fn);
         if (task_backed && async_satellite) {
             interp_visit_children(fn->body, interp_mark_task_entry, NULL);
@@ -730,26 +736,10 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         NameEntry* entry = has_path && path.root &&
                 path.root->node_type == AST_NODE_IDENT
             ? ((AstIdentNode*)path.root)->entry : NULL;
-        // A mask or slice (`arr[arr gt 25] = 0`) is not a scalar index. A
         // The shared COW setters dispatch by the runtime owner layout. A
         // direct binding to a markup-derived Element can therefore use the
         // same map/array replacement path as a literal without assuming its
         // input-pool allocation or field representation.
-        AstNode* key_expr = ast_unwrap_primary(ca->key);
-        NameEntry* dynamic_index_entry = key_expr &&
-                key_expr->node_type == AST_NODE_IDENT
-            ? ((AstIdentNode*)key_expr)->entry : NULL;
-        // A direct untyped non-loop binding reaches the same runtime int64
-        // conversion in T0 and MIR. Loop values stay with the range proof
-        // below: `to` also produces character ranges, so admitting an
-        // AST_NODE_FOR_CLAUSE here would turn a character key into an int index.
-        // Derived expressions remain outside this bridge to keep mask/slice
-        // keys from entering the scalar COW setter.
-        bool direct_untyped_binding_index = dynamic_index_entry &&
-            !dynamic_index_entry->declared_type &&
-            (!dynamic_index_entry->node ||
-             (dynamic_index_entry->node->node_type != AST_NODE_FOR_CLAUSE &&
-              dynamic_index_entry->node->node_type != AST_NODE_FOR_INDEX));
         // MIR routes a typed numeric-array key through fn_index_assign, whose
         // runtime mask validation owns the bool-lane and shape checks. Source
         // numeric literals retain ARRAY AST type until their ArrayNum builds.
@@ -760,10 +750,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             ca->key && ca->key->next &&
             interp_direct_ndim_indices(ca->object, ca->key);
         bool indexed_key = node->node_type != AST_NODE_INDEX_ASSIGN_STAM ||
-            (ca->key && ca->key->type &&
-             (ca->key->type->type_id == LMD_TYPE_INT ||
-              ca->key->type->type_id == LMD_TYPE_INT64)) ||
-            direct_untyped_binding_index || interp_range_loop_index_expr(ca->key);
+            (ca->key && !ca->key->next &&
+             interp_checked_scalar_index_expr(ca->key));
         // A multi-coordinate scalar store has already proved each key is an
         // integral coordinate; treating its linked key list as an unsupported
         // dynamic index forced the whole T0 module to fall back despite the
@@ -939,13 +927,24 @@ static AstIndexProfileSupport interp_profile_support_node(
 
 bool interp_scan_supported(Script* script, AstNodeType* reject) {
     if (!script || !script->ast_root) return false;
-    ScanCtx sc = {true, AST_NODE_NULL};
+    ScanCtx sc = {true, script->interp_reject_kind};
     AstIndex* index = &script->ast_index;
+    sc.strict_interp = lambda_tier_selected() == LAMBDA_TIER_INTERP;
     if (index->graph_published) {
         sc.indexed = true;
         sc.index = index;
-        sc.ok = ast_index_scan_profile_support(index,
-            interp_profile_support_node, &sc);
+        // the cached profile permits AUTO satellites; enforce this run's pin
+        // on indexed definitions without changing the shared template's facts
+        if (sc.strict_interp) {
+            for (uint32_t i = 0; sc.ok && i < index->function_count; i++) {
+                interp_scan_visit(index->functions[i].node, &sc);
+            }
+        }
+        sc.strict_interp = false;
+        if (sc.ok) {
+            sc.ok = ast_index_scan_profile_support(index,
+                interp_profile_support_node, &sc);
+        }
     } else {
         interp_scan_visit(script->ast_root, &sc);
     }

@@ -16,6 +16,12 @@
 extern "C" {
 #endif
 
+bool dom_element_is_svg(void* element);
+const char* dom_element_namespace_uri(void* element);
+const char* dom_element_lookup_namespace_uri(void* element, const char* prefix);
+const char* dom_element_attribute_ns(void* element, const char* namespace_uri, const char* local_name);
+void dom_invalidate_layout_subtree(void* node);
+
 #include "../lambda.h"
 
 // =============================================================================
@@ -82,6 +88,22 @@ bool dom_ensure_geometry_snapshot(struct DomDocument* dom_doc);
  * each own a CSS layout box.
  */
 void* dom_document_svg_element_from_point(void* dom_doc, float x, float y);
+void* dom_svg_element_from_point(void* element, float x, float y);
+// geometry bounds in the element's local SVG user coordinate system.
+bool dom_svg_element_geometry_bounds(void* element, float* left, float* top,
+    float* right, float* bottom);
+// SVG2 conditional processing uses user preferences; requiredFeatures is obsolete and ignored.
+bool dom_svg_conditions_match(const char* extensions, const char* languages, const char* preferences);
+bool dom_svg_element_is_eligible(void* element);
+void* dom_svg_switch_selected_child(void* element);
+const char* dom_document_preferred_languages(void* document);
+bool dom_document_set_preferred_languages(void* document, const char* languages);
+// shared SVG positioning rectangle for HTML layout, paint and geometry.
+bool dom_svg_foreign_object_rectangle(void* element, float* x, float* y, float* width, float* height);
+bool dom_svg_foreign_object_clips(void* element);
+// six affine coefficients map the CSS containing rectangle to viewport coordinates.
+bool dom_svg_foreign_object_client_transform(void* element, float matrix[6]);
+bool dom_svg_foreign_object_local_point(void* element, float x, float y, float* local_x, float* local_y);
 
 /**
  * Viewport bounds of an element drawn by an <svg> (not the outer <svg>, nor

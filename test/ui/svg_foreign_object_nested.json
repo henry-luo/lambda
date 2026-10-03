@@ -1,0 +1,142 @@
+{
+  "name": "Nested SVG inside transformed foreignObject composes CSS placement with SVG CTMs for paint, bounds and actual pointer targets",
+  "html": "test/ui/svg_foreign_object_nested.html",
+  "viewport": {
+    "width": 500,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 120,
+      "y": 80,
+      "expected_selector": "#nested-hit"
+    },
+    {
+      "type": "click",
+      "x": 120,
+      "y": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "nested-hit"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 425,
+      "y": 60,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 425,
+      "y": 60,
+      "expected_selector": "#turned-hit"
+    },
+    {
+      "type": "click",
+      "x": 425,
+      "y": 60
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "turned-hit"
+    },
+    {
+      "type": "click",
+      "x": 60,
+      "y": 275
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-bounds",
+      "equals": "110,70,160,80"
+    },
+    {
+      "type": "click",
+      "x": 160,
+      "y": 275
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 160,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 160,
+      "y": 80,
+      "expected_selector": "#nested-hit"
+    },
+    {
+      "type": "click",
+      "x": 160,
+      "y": 80
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "nested-hit"
+    },
+    {
+      "type": "click",
+      "x": 60,
+      "y": 275
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-bounds",
+      "equals": "150,70,160,80"
+    }
+  ]
+}

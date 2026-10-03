@@ -140,7 +140,7 @@ typedef struct FontMetrics {
     float space_width;          // advance width of U+0020 SPACE
     float average_char_width;   // OS/2 average character width, in CSS pixels
     float em_size;              // units per em (typically 1000 or 2048)
-    float underline_position;   // underline position below baseline (positive = down)
+    float underline_position;   // underline position in font coordinates (negative = below)
     float underline_thickness;  // underline stroke thickness
     float strikeout_position;   // strikeout position above baseline (in CSS pixels)
     float strikeout_size;       // strikeout line thickness (in CSS pixels)
@@ -171,6 +171,17 @@ GlyphInfo font_get_glyph(FontHandle* handle, uint32_t codepoint);
 
 // get the glyph index for a codepoint (0 if not present)
 uint32_t font_get_glyph_index(FontHandle* handle, uint32_t codepoint);
+
+// outlines use CSS pixels, Y-down, relative to the glyph's alphabetic baseline.
+typedef enum FontPathCommand {
+    FONT_PATH_MOVE, FONT_PATH_LINE, FONT_PATH_CUBIC, FONT_PATH_CLOSE
+} FontPathCommand;
+typedef bool (*FontPathVisitFn)(void* context, FontPathCommand command,
+    const float* args, int count);
+// callbacks borrow command values only; TrueType scratch belongs to the caller.
+// false indicates a glyph without an outline; coverage remains available below.
+bool font_visit_glyph_path(FontHandle* handle, uint32_t codepoint,
+    FontPathVisitFn visitor, void* context, struct Arena* arena);
 
 // get the font's .notdef advance when no face covers a codepoint
 float font_get_missing_glyph_advance(FontHandle* handle);
@@ -215,6 +226,11 @@ typedef struct GlyphBitmap {
     GlyphRenderMode mode;
     GlyphPixelMode  pixel_mode; // actual pixel format of buffer data
 } GlyphBitmap;
+
+// quantized outer coverage and hole contours for bitmap-only glyph strokes.
+// points are baseline-relative; the caller supplies the bitmap-to-CSS scale.
+bool font_visit_bitmap_contours(const GlyphBitmap* bitmap, float pixel_to_css,
+    FontPathVisitFn visitor, void* context, struct Arena* arena);
 
 // a fully loaded glyph ready for rendering — combines bitmap + advance.
 // returned by font_load_glyph().
@@ -283,6 +299,9 @@ char* font_platform_find_fallback(const char* font_name, int* out_face_index);
 // returns NULL if no font covers this codepoint.
 FontHandle* font_resolve_for_codepoint(FontContext* ctx, const FontStyleDesc* style,
                                         uint32_t codepoint);
+
+// resolve the shared emoji-presentation face; the caller releases the retained handle.
+FontHandle* font_resolve_for_emoji(FontContext* ctx, const FontStyleDesc* style, uint32_t codepoint);
 
 // check whether a handle supports a codepoint (without loading glyph)
 bool font_has_codepoint(FontHandle* handle, uint32_t codepoint);
@@ -424,6 +443,8 @@ void font_context_reset_glyph_caches(FontContext* ctx);
 // generation for cached glyph bitmap buffers. Increments whenever the glyph
 // arena is reset, invalidating borrowed GlyphBitmap::buffer pointers.
 uint64_t font_context_glyph_cache_generation(FontContext* ctx);
+// Font-source decisions affect retained text paint even if glyph storage survives.
+uint64_t font_context_resource_generation(FontContext* ctx);
 
 // ============================================================================
 // Direct Font Loading — for non-CSS use cases (PDF, CLI, tests)

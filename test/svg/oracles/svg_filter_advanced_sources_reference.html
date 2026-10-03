@@ -1,0 +1,15 @@
+<!doctype html><html><head><style>@font-face{font-family:Ahem;src:url('../../layout/data/font/Ahem.ttf')}html,body{margin:0;background:white}svg{display:block}text{font-family:Ahem;font-size:20px;fill:blue}</style></head><body><svg id="scene" width="640" height="480">
+<defs><filter id="offset" filterUnits="userSpaceOnUse" x="0" y="0" width="640" height="480"><feMorphology radius="2" operator="dilate" result="grow"/><feComposite in="SourceGraphic" in2="grow" operator="over" result="combined"/><feFlood flood-opacity="0" result="empty"/><feBlend in="combined" in2="empty" mode="normal" result="blend"/><feFlood flood-color="#808080" result="map"/><feOffset in="blend" dx="1.1372549019607843" dy="1.1372549019607843"/><feOffset dx="40"/></filter>
+<filter id="bbox" primitiveUnits="objectBoundingBox" x="-100%" y="-100%" width="300%" height="300%"><feOffset dx=".5" dy=".5"/></filter>
+<rect id="piece" width="40" height="40" fill="red"/>
+<clipPath id="clip"><rect x="100" y="300" width="20" height="40"/></clipPath>
+<mask id="mask" mask-type="alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="640" height="480"><rect width="640" height="480" fill="white" fill-opacity=".5"/></mask>
+</defs>
+<g id="group" filter="url(#offset)"><rect x="20" y="20" width="40" height="40" fill="red"/><rect x="20" y="70" width="40" height="40" fill="blue"/></g>
+<text id="label" x="300" y="60" filter="url(#offset)">AA</text>
+<image id="image" x="20" y="150" width="80" height="40" href="../../ui/svg_image_assets/split.png" filter="url(#offset)"/>
+<use id="instance" href="#piece" x="300" y="150" filter="url(#offset)"/>
+<rect x="20" y="220" width="40" height="40" fill="red" filter="url(#bbox)"/>
+<g transform="translate(500 220) rotate(90)"><rect width="40" height="40" fill="blue" filter="url(#bbox)"/></g>
+<rect x="60" y="300" width="40" height="40" fill="red" filter="url(#offset)" clip-path="url(#clip)" mask="url(#mask)" opacity=".5"/>
+</svg></body></html>

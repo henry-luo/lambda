@@ -6,6 +6,9 @@
 #include <png.h>
 #include <turbojpeg.h>
 #include <gif_lib.h>
+#include <webp/decode.h>
+#include <limits.h>
+#include "file.h"
 #include "log.h"
 #include "str.h"
 #include "memtrack.h"
@@ -15,7 +18,8 @@ typedef enum {
     IMAGE_TYPE_UNKNOWN,
     IMAGE_TYPE_PNG,
     IMAGE_TYPE_JPEG,
-    IMAGE_TYPE_GIF
+    IMAGE_TYPE_GIF,
+    IMAGE_TYPE_WEBP
 } ImageType;
 
 typedef struct GifMemoryReader {
@@ -61,6 +65,9 @@ static ImageType get_image_type(const char* filename) {
     ext = filename + len - 4;
     if (str_ieq_const(ext, strlen(ext), ".gif")) {
         return IMAGE_TYPE_GIF;
+    }
+    if (len >= 5 && str_ieq_const(filename + len - 5, 5, ".webp")) {
+        return IMAGE_TYPE_WEBP;
     }
 
     return IMAGE_TYPE_UNKNOWN;
@@ -455,9 +462,38 @@ static unsigned char* load_gif_from_memory(const unsigned char* data, size_t len
     return image_data;
 }
 
+static unsigned char* load_webp_from_memory(const unsigned char* data, size_t length,
+                                            int* width, int* height, int* channels) {
+    int w, h;
+    if (!WebPGetInfo(data, length, &w, &h) || w <= 0 || h <= 0 ||
+        w > INT_MAX / 4 || (size_t)h > SIZE_MAX / ((size_t)w * 4)) return NULL;
+    size_t size = (size_t)w * (size_t)h * 4;
+    unsigned char* pixels = mem_alloc(size, MEM_CAT_IMAGE);
+    if (!pixels) return NULL;
+    // decode into the shared image allocator so all codecs have the same owner.
+    if (!WebPDecodeRGBAInto(data, length, pixels, size, w * 4)) {
+        mem_free(pixels);
+        return NULL;
+    }
+    *width = w; *height = h; *channels = 4;
+    return pixels;
+}
+
+static unsigned char* load_webp(const char* filename, int* width, int* height, int* channels) {
+    char* data = NULL;
+    size_t length = 0;
+    if (!file_read_all(filename, MEM_CAT_IMAGE, &data, &length)) return NULL;
+    unsigned char* pixels = load_webp_from_memory((unsigned char*)data, length, width, height, channels);
+    mem_free(data);
+    return pixels;
+}
+
 // Determine image type from magic bytes
 static ImageType get_image_type_from_memory(const unsigned char* data, size_t length) {
     if (!data || length < 8) return IMAGE_TYPE_UNKNOWN;
+    if (length >= 12 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "WEBP", 4) == 0) {
+        return IMAGE_TYPE_WEBP;
+    }
 
     // PNG signature: 89 50 4E 47 0D 0A 1A 0A
     if (length >= 8 && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 &&
@@ -687,6 +723,9 @@ unsigned char* image_load_from_memory(const unsigned char* data, size_t length, 
             // use the same giflib path as file-backed images instead of falling back.
             return load_gif_from_memory(data, length, width, height, channels);
 
+        case IMAGE_TYPE_WEBP:
+            return load_webp_from_memory(data, length, width, height, channels);
+
         default:
             log_error("Unsupported or unrecognized image format in memory buffer");
             return NULL;
@@ -711,6 +750,9 @@ unsigned char* image_load(const char* filename, int* width, int* height, int* ch
 
         case IMAGE_TYPE_GIF:
             return load_gif(filename, width, height, channels, req_channels);
+
+        case IMAGE_TYPE_WEBP:
+            return load_webp(filename, width, height, channels);
 
         default:
             // Optional web images can use formats this backend does not decode;
@@ -1096,6 +1138,14 @@ int image_get_dimensions(const char* filename, int* width, int* height) {
         case IMAGE_TYPE_PNG:  return get_png_dimensions(filename, width, height);
         case IMAGE_TYPE_JPEG: return get_jpeg_dimensions(filename, width, height);
         case IMAGE_TYPE_GIF:  return get_gif_dimensions(filename, width, height);
+        case IMAGE_TYPE_WEBP: {
+            char* data = NULL;
+            size_t length = 0;
+            if (!file_read_all(filename, MEM_CAT_IMAGE, &data, &length)) return 0;
+            int ok = WebPGetInfo((unsigned char*)data, length, width, height);
+            mem_free(data);
+            return ok;
+        }
         default: return 0;
     }
 }
@@ -1141,6 +1191,7 @@ int image_get_dimensions_from_memory(const unsigned char* data, size_t length, i
         case IMAGE_TYPE_PNG:  return get_png_dimensions_from_memory(data, length, width, height);
         case IMAGE_TYPE_JPEG: return get_jpeg_dimensions_from_memory(data, length, width, height);
         case IMAGE_TYPE_GIF:  return get_gif_dimensions_from_memory(data, length, width, height);
+        case IMAGE_TYPE_WEBP: return WebPGetInfo(data, length, width, height);
         default: return 0;
     }
 }

@@ -1,0 +1,154 @@
+{
+  "name": "SVG document and isolated picture text use local font scopes",
+  "html": "test/ui/svg_text_resources.html",
+  "viewport": {
+    "width": 400,
+    "height": 100
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 60,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 75,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 60,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 75,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 55,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 75,
+      "y": 75,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 215,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 295,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 215,
+      "y": 60,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 260,
+      "y": 75,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 295,
+      "y": 60,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 275,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 255,
+      "y": 55,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 275,
+      "y": 75,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    }
+  ]
+}

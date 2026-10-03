@@ -1,0 +1,17 @@
+<!DOCTYPE html><html><head><style>
+@font-face{font-family:SVG-Ahem;src:url('../layout/data/font/Ahem.ttf');}html,body{margin:0;background:white;}svg{position:absolute;font-family:SVG-Ahem;font-size:20px;}
+</style></head><body><svg width="500" height="320">
+<text id="spacing" x="10" y="35" textLength="100" fill="red">ABC</text>
+<text id="stretch" x="150" y="35" textLength="100" lengthAdjust="spacingAndGlyphs" fill="blue">ABC</text>
+<text id="nested" x="300" y="35" textLength="120" fill="lime">A<tspan id="fixed" textLength="40">BC</tspan>D</text>
+<text id="nested-space" x="10" y="100" textLength="140" fill="red">A<tspan textLength="60">BC</tspan>D</text>
+<text id="nested-stretch" x="200" y="100" textLength="140" lengthAdjust="spacingAndGlyphs" fill="blue">A<tspan textLength="60" lengthAdjust="spacingAndGlyphs">BC</tspan>D</text>
+<text id="tracking-length" x="10" y="160" textLength="100" letter-spacing="10" fill="red">ABC</text>
+<text id="dx-length" x="150" y="160" dx="0 10 20" textLength="100" fill="blue">ABC</text>
+<text id="span-only" x="300" y="160" fill="lime">A<tspan textLength="70">BC</tspan>D</text>
+<text id="anchor-length" x="100" y="225" textLength="100" text-anchor="middle" fill="red">ABC</text>
+<text id="length-units" x="200" y="225" textLength="20%" fill="blue">ABC</text>
+<text id="space-length" x="350" y="225" textLength="100" word-spacing="10" fill="lime">A B</text>
+<text id="position-length" x="10 60 130" y="290" textLength="100" fill="red">ABC</text>
+<text id="nested-deep" x="200" y="290" textLength="160" fill="blue">A<tspan textLength="100">B<tspan textLength="40">CD</tspan>E</tspan>F</text>
+</svg></body></html>

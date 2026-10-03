@@ -1,0 +1,277 @@
+{
+  "name": "SVG clip and mask definitions outside the cached root invalidate paint and hits",
+  "html": "test/ui/svg_effect_mutation.html",
+  "viewport": {
+    "width": 320,
+    "height": 180
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#clipped"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#clipped"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#clipped"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#clipped"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "3"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 50,
+      "min_r": 119,
+      "max_r": 135,
+      "min_g": 119,
+      "max_g": 135,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 50,
+      "min_r": 119,
+      "max_r": 135,
+      "min_g": 119,
+      "max_g": 135,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#clipped"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#clipped"
+    }
+  ],
+  "oracle": "CSS Masking 1 sections 6.1 and 9.1 keep never-rendered clipPath/mask resources available. Chromium 143 ignores the display:none cross-root references in the first two states (21/27). The zero-size companion passes 25/27: computed mask-type becomes alpha but its cached luminance mask remains stale, as recorded by the computed-style probe. Native assertions retain the specified behavior."
+}
