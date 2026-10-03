@@ -1,0 +1,23 @@
+<!doctype html><html><head><style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+html,body { margin:0; background:white; }
+svg { display:block; }
+text { font-family:Ahem; font-size:20px; fill:blue; }
+</style></head><body><svg width="640" height="500">
+<defs>
+ <path id="negative" d="M20 60H220"/>
+ <path id="absolute" d="M280 60H480"/>
+ <circle id="circle" cx="120" cy="180" r="50"/>
+ <circle id="reverse-circle" cx="360" cy="180" r="50"/>
+ <rect id="rectangle" x="20" y="300" width="160" height="100"/>
+ <path id="curve" d="M280 350Q380 250 480 350"/>
+ <path id="continuation" d="M280 440H480"/>
+</defs>
+<text><textPath href="#negative" startOffset="-20">AAA</textPath></text>
+<text x="50" y="420"><textPath href="#absolute" startOffset="20">AA</textPath></text>
+<text><textPath href="#circle">AA</textPath></text>
+<text><textPath href="#reverse-circle" side="right">AA</textPath></text>
+<text><textPath href="#rectangle">AAAAAAAAAAAAAA</textPath></text>
+<text text-anchor="middle"><textPath href="#curve" startOffset="50%">AAAAAA</textPath></text>
+<text><textPath href="#continuation">AA</textPath>A</text>
+</svg></body></html>

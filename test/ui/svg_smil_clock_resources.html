@@ -1,0 +1,23 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}button{position:absolute;top:155px;width:65px;height:30px}</style></head><body>
+<svg id="scene" width="420" height="140"><defs>
+ <filter id="offset" filterUnits="userSpaceOnUse" x="0" y="0" width="160" height="50" color-interpolation-filters="sRGB"><feOffset dx="0"><animate attributeName="dx" from="0" to="100" dur="2s" fill="freeze"/></feOffset></filter>
+ <filter id="color" filterUnits="userSpaceOnUse" x="180" y="10" width="40" height="20" color-interpolation-filters="sRGB"><feFlood flood-color="red"><animate attributeName="flood-color" from="red" to="blue" dur="2s" fill="freeze"/></feFlood></filter>
+ <filter id="region" filterUnits="userSpaceOnUse" x="260" y="10" width="100" height="30"><feFlood x="260" y="10" width="20" height="20" flood-color="red"><animate attributeName="width" from="20" to="60" dur="2s" fill="freeze"/></feFlood></filter>
+ <pattern id="tile" patternUnits="userSpaceOnUse" width="20" height="20"><rect width="20" height="20" fill="red"><animate attributeName="fill" from="red" to="blue" dur="2s" fill="freeze"/></rect></pattern>
+ <marker id="head" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="10" refY="10"><rect width="20" height="20" fill="red"><animate attributeName="fill" from="red" to="blue" dur="2s" fill="freeze"/></rect></marker>
+</defs>
+<rect id="source" x="10" y="10" width="20" height="20" fill="blue" filter="url(#offset)"/>
+<rect x="180" y="10" width="40" height="20" filter="url(#color)"/>
+<rect x="260" y="10" width="100" height="30" filter="url(#region)"/>
+<rect x="10" y="80" width="80" height="30" fill="url(#tile)"/>
+<path d="M180 95H210" stroke="black" marker-end="url(#head)"/>
+</svg>
+<button id="zero" style="left:0">0s</button><button id="one" style="left:80px">1s</button><button id="two" style="left:160px">2s</button><button id="rewind" style="left:240px">rewind</button>
+<script>
+var scene=document.getElementById('scene');scene.pauseAnimations();scene.setCurrentTime(0);
+// Only the document clock changes; no DOM mutation can invalidate resource caches for these samples.
+document.getElementById('zero').onclick=function(){scene.setCurrentTime(0);};
+document.getElementById('one').onclick=function(){scene.setCurrentTime(1);};
+document.getElementById('two').onclick=function(){scene.setCurrentTime(2);};
+document.getElementById('rewind').onclick=function(){scene.setCurrentTime(0);};
+</script></body></html>

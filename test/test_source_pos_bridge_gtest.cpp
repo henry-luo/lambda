@@ -366,8 +366,8 @@ protected:
         arena = arena_create_default();
         // fixtures must initialize canonical document ownership after the
         // legacy pool/arena aliases were removed.
-        doc_storage.document_pool = pool;
-        doc_storage.node_arena = arena;
+        doc_storage.document_pool = lam::own(pool);
+        doc_storage.node_arena = lam::own(arena);
 
         root  = make_element();
         para  = make_element();
@@ -418,13 +418,13 @@ protected:
         DomElement* e = new DomElement{};
         e->node_type = DOM_NODE_ELEMENT;
         e->set_synthetic(true);
-        e->doc = &doc_storage;
+        e->doc = lam::up(&doc_storage);
         return e;
     }
     DomText* make_text(const char* s, size_t len) {
         DomText* t = new DomText{};
         t->node_type = DOM_NODE_TEXT;
-        t->text = s;
+        t->text = lam::up(s);
         t->length = len;
         return t;
     }

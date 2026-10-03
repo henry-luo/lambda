@@ -1,0 +1,51 @@
+<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:white}canvas{display:block;width:740px;height:160px}</style><canvas id="noise"></canvas>
+<!-- Independent, double-precision canvas oracle for Filter Effects 1 §9.21.
+     The published lattice algorithm rejects zero and outside-unit-disk vectors.
+     This file does not load or inspect Lambda's implementation or rendered pixels. -->
+<script>
+const cases = [{"id": "fractal", "x": 20, "y": 20, "width": 140, "height": 100, "freq": [0.037, 0.053], "seed": 3, "octaves": 2, "fractal": true, "stitch": false}, {"id": "stitch", "x": 200, "y": 20, "width": 140, "height": 100, "freq": [0.032, 0.041], "seed": -4.8, "octaves": 3, "fractal": false, "stitch": true}, {"id": "zero", "x": 380, "y": 20, "width": 140, "height": 100, "freq": [0, 0], "seed": 0, "octaves": 1, "fractal": true, "stitch": false}, {"id": "bbox", "x": 560, "y": 20, "width": 140, "height": 100, "freq": [4, 3], "seed": 5, "octaves": 2, "fractal": true, "stitch": false, "bbox": true}];
+function gradients(seed) {
+  seed=Math.trunc(seed); if(seed<=0) seed=-(seed%2147483646)+1;
+  seed=Math.min(seed,2147483646);
+  const random=()=>{seed=16807*(seed%127773)-2836*Math.trunc(seed/127773);if(seed<=0)seed+=2147483647;return seed;};
+  const values=Array.from({length:4},()=>[]), order=Array.from({length:256},(_,i)=>i);
+  for(let k=0;k<4;k++) for(let i=0;i<256;i++) {
+    let x,y,length;
+    do {x=(random()%512-256)/256;y=(random()%512-256)/256;length=Math.hypot(x,y);} while(!length||length>1);
+    values[k].push([x/length,y/length]);
+  }
+  for(let i=255;i>0;i--) {const j=random()%256;[order[i],order[j]]=[order[j],order[i]];}
+  const at=i=>order[((i%256)+256)%256];
+  return (channel,x,y,stitch)=>{
+    const left=Math.floor(x+4096),top=Math.floor(y+4096),rx=x+4096-left,ry=y+4096-top;
+    const wrap=(i,axis)=>stitch&&i>=stitch.wrap[axis]?i-stitch.size[axis]:i;
+    const dot=(dx,dy)=>{const ix=wrap(left+dx,0),iy=wrap(top+dy,1),g=values[channel][at(at(ix)+((iy%256)+256)%256)];return (rx-dx)*g[0]+(ry-dy)*g[1];};
+    const sx=rx*rx*(3-2*rx),sy=ry*ry*(3-2*ry),a=dot(0,0)*(1-sx)+dot(1,0)*sx,b=dot(0,1)*(1-sx)+dot(1,1)*sx;
+    return a*(1-sy)+b*sy;
+  };
+}
+function sample(c,x,y) {
+  let [fx,fy]=c.freq,region=c.bbox?[0,0,1,1]:[c.x,c.y,c.width,c.height],stitch=null;
+  if(c.stitch) {
+    const choose=(f,n)=>!f?0:(f/(Math.floor(n*f)/n)<(Math.ceil(n*f)/n)/f?Math.floor(n*f)/n:Math.ceil(n*f)/n);
+    fx=choose(fx,region[2]);fy=choose(fy,region[3]);
+    stitch={size:[Math.floor(region[2]*fx+.5),Math.floor(region[3]*fy+.5)],wrap:[Math.trunc(region[0]*fx+4096+Math.floor(region[2]*fx+.5)),Math.trunc(region[1]*fy+4096+Math.floor(region[3]*fy+.5))]};
+  }
+  if(c.bbox){x=(x-c.x)/c.width;y=(y-c.y)/c.height;}
+  const sums=[0,0,0,0];let amplitude=1;
+  for(let octave=0;octave<c.octaves;octave++) {
+    for(let channel=0;channel<4;channel++){let value=c.noise(channel,x*fx,y*fy,stitch);sums[channel]+=amplitude*(c.fractal?value:Math.abs(value));}
+    x*=2;y*=2;amplitude/=2;
+    if(stitch){stitch.size=stitch.size.map(v=>2*v);stitch.wrap=stitch.wrap.map(v=>2*v-4096);}
+  }
+  return sums.map(v=>Math.max(0,Math.min(1,c.fractal?(v+1)/2:v)));
+}
+const density=devicePixelRatio,canvas=document.getElementById('noise');canvas.width=740*density;canvas.height=160*density;
+const ctx=canvas.getContext('2d'),pixels=ctx.createImageData(canvas.width,canvas.height);
+for(let i=0;i<pixels.data.length;i+=4)pixels.data.fill(255,i,i+4);
+for(const c of cases){c.noise=gradients(c.seed);for(let row=c.y*density;row<(c.y+c.height)*density;row++)for(let col=c.x*density;col<(c.x+c.width)*density;col++){
+ const values=sample(c,(col+.5)/density,(row+.5)/density),alpha=Math.round(values[3]*255),offset=4*(row*canvas.width+col);
+ for(let k=0;k<3;k++)pixels.data[offset+k]=Math.round(values[k]*values[3]*255)+255-alpha;
+}}
+ctx.putImageData(pixels,0,0);
+</script>

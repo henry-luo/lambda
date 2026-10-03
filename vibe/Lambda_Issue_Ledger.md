@@ -1647,16 +1647,25 @@ No new decisions needed; each has an owning design doc.
 
 ### 15.3 Radiant SVG support residue
 
-<a id="rad14-svg-support"></a>**RAD14 SVG support · PARTIAL · 2026-10-02.**
+<a id="rad14-svg-support"></a>**RAD14 SVG support · PARTIAL · 2026-10-03.**
 The [SVG support matrix](../doc/HTML_CSS_SVG_Support.md#15-svg) is mapped to
 reproducers and implementation phases in the
 [SVG implementation plan](impl/Lambda_Impl_SVG_Support.md#3-coverage-map).
-G3–G5, C4, G2 and A1 are repaired. Remaining work covers the shared CSS cascade,
-viewport/length/transform semantics, images/text, typed paint resources,
-stroke/markers, clips/masks, textPath, filter graphs, conditional/HTML content,
-SMIL and SVG/PDF export. These are SVG behavior gaps, not new Lambda rulings;
-retained document resources remain subject to **D4.2.2v2–D4.2.4** and **D4.5.1v3**.
-The plan records the implemented cases separately from packages awaiting reproduction.
+The P7 stroke/marker oracle review and P10 F1–F4 coordinate/resource audit pass,
+including resource font units, mutation recovery and output survival after
+scratch/program teardown. macOS SVG/PDF exports and the complete Radiant gate
+pass. P12's clock dependency/default/fragment/detach audits and initial-time export
+contract are implemented. The plan's §7.16 closes access-key/wallclock timing,
+local/external/nested use event state, qualified broadcasts, clone timing events
+and animation DOM queries/TimeEvents. N1 is implemented; the broad SMIL row stays
+partial for motion/discard, general SVG DOM expansion and unavailable renderer
+features. Linux/Windows P13 runtime smoke remains open. Broader SVG2 vector effects
+(`non-scaling-size`, `non-rotation`, `fixed-position`, combinations and explicit
+viewport/screen selectors), filter component transfer/convolution and the larger
+SVG document/cache architecture remain explicit limits rather than full support
+claims. These are SVG behavior gaps; no Lambda ruling changed. Retained resources
+follow **D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check, copy-as-value).
+The plan separates implemented cases, historical checkpoints and open gates.
 
 ---
 

@@ -1,0 +1,76 @@
+{
+  "name": "SVG merge, overlapping drop shadow and final mask preserve premultiplied intermediate colors",
+  "html": "test/ui/svg_filter_alpha_graph.html",
+  "viewport": {
+    "width": 500,
+    "height": 180
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 50,
+      "min_r": 183,
+      "max_r": 199,
+      "min_g": 88,
+      "max_g": 104,
+      "min_b": 151,
+      "max_b": 167
+    },
+    {
+      "type": "assert_pixel",
+      "x": 115,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 220,
+      "y": 50,
+      "min_r": 215,
+      "max_r": 231,
+      "min_g": 87,
+      "max_g": 103,
+      "min_b": 119,
+      "max_b": 135
+    },
+    {
+      "type": "assert_pixel",
+      "x": 285,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 370,
+      "y": 50,
+      "min_r": 215,
+      "max_r": 231,
+      "min_g": 167,
+      "max_g": 183,
+      "min_b": 199,
+      "max_b": 215
+    },
+    {
+      "type": "assert_pixel",
+      "x": 425,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ]
+}

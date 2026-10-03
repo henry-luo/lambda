@@ -941,6 +941,14 @@ void memtrack_set_limits(size_t soft_limit, size_t hard_limit, size_t critical_l
     unlock_tracker();
 }
 
+void memtrack_get_limits(size_t* soft_limit, size_t* hard_limit, size_t* critical_limit) {
+    lock_tracker();
+    if (soft_limit) *soft_limit = g_memtrack.soft_limit;
+    if (hard_limit) *hard_limit = g_memtrack.hard_limit;
+    if (critical_limit) *critical_limit = g_memtrack.critical_limit;
+    unlock_tracker();
+}
+
 MemPressureLevel memtrack_get_pressure_level(void) {
     return compute_pressure_level(memtrack_get_current_usage());
 }

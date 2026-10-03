@@ -56,6 +56,35 @@ float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count) {
     return copy;
 }
 
+bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
+                            const RenderSemanticGroup* source) {
+    if (!dl || !out || !source || source->attribute_count < 0 ||
+        (source->attribute_count && !source->attributes)) return false;
+    RenderSemanticGroup copy = {};
+    auto copy_string = [&](const char* value) -> const char* {
+        if (!value) return nullptr;
+        size_t bytes = strlen(value) + 1;
+        char* result = (char*)scratch_alloc(&dl->arena, bytes);
+        if (result) memcpy(result, value, bytes);
+        return result;
+    };
+    if (source->attribute_count) {
+        RenderSemanticAttribute* attrs = (RenderSemanticAttribute*)scratch_calloc(
+            &dl->arena, (size_t)source->attribute_count * sizeof(RenderSemanticAttribute));
+        if (!attrs) return false;
+        for (int i = 0; i < source->attribute_count; i++) {
+            attrs[i] = {lam::up(copy_string(source->attributes[i].name)), lam::up(copy_string(source->attributes[i].value))};
+            if (!attrs[i].name || !attrs[i].value) return false;
+        }
+        copy.attributes = lam::up(attrs);
+        copy.attribute_count = source->attribute_count;
+    }
+    copy.title = lam::up(copy_string(source->title));
+    if (source->title && !copy.title) return false;
+    *out = copy;
+    return true;
+}
+
 void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
                           ClipShape** clip_shapes, int clip_depth) {
     if (!dst) return;
@@ -144,7 +173,7 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                 }
             }
             shapes[out_depth].type = CLIP_SHAPE_POLYGON;
-            shapes[out_depth].polygon = {vx, vy, count};
+            shapes[out_depth].polygon = {lam::own_arr(vx), lam::own_arr(vy), count};
         } else {
             shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
             dl_offset_clip_shape(&shapes[out_depth], offset_x, offset_y);
@@ -244,7 +273,7 @@ static void dl_validation_set(DisplayListValidationResult* result, bool valid,
     if (!result) return;
     result->valid = valid;
     result->first_error_index = index;
-    result->message = message;
+    result->message = lam::up(message);
     result->clip_depth = clip_depth;
     result->backdrop_depth = backdrop_depth;
     result->shadow_clip_depth = shadow_clip_depth;
@@ -345,13 +374,15 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
                 break;
             case DL_FILL_LINEAR_GRADIENT:
                 if (!item->fill_linear_gradient.path || !item->fill_linear_gradient.stops ||
-                    item->fill_linear_gradient.stop_count <= 0) {
+                    item->fill_linear_gradient.stop_count <= 0 ||
+                    !rdt_gradient_options_valid(&item->fill_linear_gradient.options)) {
                     return fail("linear gradient payload is invalid");
                 }
                 break;
             case DL_FILL_RADIAL_GRADIENT:
                 if (!item->fill_radial_gradient.path || !item->fill_radial_gradient.stops ||
                     item->fill_radial_gradient.stop_count <= 0 ||
+                    !rdt_gradient_options_valid(&item->fill_radial_gradient.options) ||
                     item->fill_radial_gradient.r < 0.0f) {
                     return fail("radial gradient payload is invalid");
                 }
@@ -614,6 +645,17 @@ static bool dl_union_item_bounds(float* left, float* top,
     if (r > *right) *right = r;
     if (b > *bottom) *bottom = b;
     return true;
+}
+
+Bound dl_content_bounds(const DisplayList* dl) {
+    Bound bounds = {};
+    bool valid = false;
+    if (dl) for (int index = 0; index < dl->item_count(); index++) {
+        const DisplayItem* item = &dl->data()[index];
+        if (dl_op_has_flags(item->op, DL_OP_FLAG_PRESERVES_REPLAY_STATE)) continue;
+        valid = dl_union_item_bounds(&bounds.left, &bounds.top, &bounds.right, &bounds.bottom, item, valid);
+    }
+    return bounds;
 }
 
 int dl_begin_element(DisplayList* dl, uint32_t view_id,

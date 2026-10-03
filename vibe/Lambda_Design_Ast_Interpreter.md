@@ -1,8 +1,8 @@
 # AST Interpreter — Tier-0 Execution for Lambda and LambdaJS
 
 **Date:** 2026-08-15 (rev 2 — DECIDED by user ruling; spec revision landed same day)
-**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.1.1v10, D8.1.3v12, D8.5.1v4).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. Loop-head handoff was ruled on 2026-10-02 (**AI23**, **D8.1.1v14**) and is partially implemented (top-level `while` loops of a `pn` body); JS P2 promotion and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI23** remains the design record; the formal rulings named above win on disagreement.
-**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v10**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v3), S15.3.
+**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.1.1v10, D8.1.3v12, D8.5.1v4).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. Loop-head handoff was ruled on 2026-10-02 (**AI23**, **D8.1.1v14**) and is partially implemented (top-level `while` loops of a `pn` body); JS P2 promotion and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI24** remains the design record; the formal rulings named above win on disagreement.
+**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v15**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v3), S15.3.
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` (§12/U26 — amended by this doc), `vibe/Lambda_Repl.md`, `vibe/Lambda_Design_MIR_Cache.md` + `_L3`, `vibe/Lambda_Design_Stack_Rooting.md`, `vibe/Lambda_Design_Compiling_Return_Value.md`, `vibe/Lambda_Design_Stack_Frame.md`.
 **Scope:** Stage 1 = Lambda core (§3–§8, §10–§11). Stage 2 = LambdaJS (§9). C2MIR is untouched per D1.6 and CLAUDE rule 14.
 
@@ -188,6 +188,21 @@ The full walker, by node family (the complete per-kind inventory is the P1 check
 | `start`, async, generators | **not interpreted in v1** — definitions whose analysis says `may_await` / `is_generator` / `needs_task_context` / contains `AST_NODE_START` promote at first call (threshold 0), because suspension today is a MIR-level state-machine transform; interpreter-level continuations (heapified frames à la `LambdaAsyncFrame`) are future work (AI11) |
 | Views / templates | modules containing `AST_NODE_VIEW` keep whole-module eager compilation in v1 — registration reaches into the compiled context (`_view_<N>` lookup) (AI12) |
 | Error-recovery nodes | T0 refuses to execute a script with `error_count > 0`, same gate as lowering |
+
+Explicit `LAMBDA_EXEC_BACKEND=interp` is a strict T0 pin (**D8.1.1v15**, AI24,
+user ruling 2026-10-03). The support scan rejects any script or import that
+needs MIR, including a suspension-capable procedure that would otherwise
+receive a task satellite. It reports an unsupported-feature error before
+execution; the rejection is counted as `excluded`, never `fallback`.
+Whole-module fallback and task satellites in the table above apply to AUTO.
+An AST template prepared by an import worker must obey the same pin when
+the execution runtime activates it.
+
+**Support checkpoint (2026-10-03):** untyped arithmetic store keys compose the
+same checked binding path as direct keys; Queens executes entirely in T0.
+Keys remain boxed through the existing setter, preserving **S7.1.3v2** errors
+and **S9.1.2/S9.1.3** snapshot/borrow semantics. Mask, character-range and N-D
+admission remain separate. Evidence: [typed performance audit §9](impl/Lambda_Impl_Typed_Performance_Audit.md#9-untyped-queens-interpreter-support-2026-10-03).
 
 ## 5. Tier-up: per-function MIR compilation
 
@@ -788,6 +803,7 @@ Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes
 | **AI21** | Stage 2 extends the tier model to LambdaJS over `JsAstNode`, sharing frames/tiering/hooks; JS semantics stay in the JS helper layer; the size-based interp policy is replaced | **confirmed** |
 | **AI22** | No bytecode IR; tree-walk over the typed AST is the only sub-MIR executable form; revisit only with T0 profiles | **confirmed** |
 | **AI23** | Loop-head handoff: a running T0 activation may enter its published image at a head test of the loop that triggered it, as a one-way whole-function continuation; eligibility is limited to loops whose live state is entirely named frame slots; the loop-owner first-entry trigger is retired (§5.1.1; D8.1.1v14) | **confirmed (user, 2026-10-02); partially implemented 2026-10-02** |
+| **AI24** | Explicit `interp` executes only T0. Unsupported modules/imports and task-backed bodies fail before execution; whole-module fallback and MIR satellites are AUTO-only (D8.1.1v15). | **confirmed (user, 2026-10-03)** |
 
 ## 15. Spec impact
 

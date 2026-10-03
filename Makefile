@@ -27,6 +27,7 @@ ifeq ($(OS),Darwin)
 	NPROCS := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.mac.lua
 	PREMAKE_CLI_FILE := premake5.cli.mac.lua
+	PREMAKE_HEADLESS_FILE := premake5.headless.mac.lua
 	PREMAKE_JUBE_FILE := premake5.jube.mac.lua
 	MACOS_DEPLOYMENT_TARGET ?= $(or $(MACOSX_DEPLOYMENT_TARGET),15.0)
 	MACOS_CMAKE_FLAGS := -DCMAKE_OSX_DEPLOYMENT_TARGET=$(MACOS_DEPLOYMENT_TARGET) -DCMAKE_OSX_SYSROOT=$(shell xcrun --show-sdk-path)
@@ -34,12 +35,14 @@ else ifeq ($(OS),Linux)
 	NPROCS := $(shell nproc 2>/dev/null || echo 1)
 	PREMAKE_FILE := premake5.lin.lua
 	PREMAKE_CLI_FILE := premake5.cli.lin.lua
+	PREMAKE_HEADLESS_FILE := premake5.headless.lin.lua
 	PREMAKE_JUBE_FILE := premake5.jube.lin.lua
 else
 	# Windows/MSYS2 detection
 	NPROCS := $(shell nproc 2>/dev/null || echo 4)
 	PREMAKE_FILE := premake5.win.lua
 	PREMAKE_CLI_FILE := premake5.cli.win.lua
+	PREMAKE_HEADLESS_FILE := premake5.headless.win.lua
 	PREMAKE_JUBE_FILE := premake5.jube.win.lua
 endif
 
@@ -573,8 +576,8 @@ tree-sitter-libs: tree-sitter-jube-libs
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
-	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
+	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -601,6 +604,7 @@ help:
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
 	@echo "  lambda-cli    - Build runtime-only CLI (release; no Radiant, JS, Jube or serve; outputs lambda-cli.exe)"
+	@echo "  lambda-headless - Build headless full engine (release; no GLFW/GUI, no view/edit; outputs lambda-headless.exe)"
 	@echo "  lambda-cst    - Build the Tree-sitter Lambda/JS/TS CST differential verifier"
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
@@ -650,6 +654,9 @@ help:
 	@echo "  test-input-baseline - Run HTML5 WPT, CommonMark, YAML, ASCII Math, and LaTeX Math parser tests"
 	@echo "  test-mathlive - Run the full strict MathLive markup adapter corpus"
 	@echo "  test-radiant-baseline - Run shared layout baselines ($(LAYOUT_BASELINE_SUITES)) + render visual + other checks"
+	@echo "  test-svg-export     - Verify portable SVG/PDF fixture exports at 1x and 2x"
+	@echo "  test-svg-paint      - Verify P7/P10 raster fixtures at 1x and 2x (ARGS=--browser --references)"
+	@echo "  test-svg-smil       - Verify controlled-time SMIL UI fixtures at 1x and 2x"
 	@echo "  test-layout-baseline - Run the shared layout baseline suites only"
 	@echo "  test-radiant-online - Run Radiant online URL smoke tests"
 	@echo "  test-css-cascade-memory - Run CSS cascade memory regression with the baseline host build"
@@ -908,6 +915,26 @@ else
 endif
 	@echo "✅ CLI build completed. Executable: lambda-cli.exe"
 	@ls -lh lambda-cli.exe 2>/dev/null || true
+
+# Headless full build (Lambda + Radiant + JS, no GLFW/OpenGL/native GUI toolkits)
+# Produces lambda-headless.exe (release build); no view/edit commands
+lambda-headless: build-headless
+
+build-headless:
+	@echo "Building Lambda headless (full engine, release) using Premake build system..."
+	@echo "Excluded: GLFW, OpenGL, native GUI toolkits and webview; view and edit commands"
+	$(PYTHON) utils/generate_premake.py --variant lambda-headless --output $(PREMAKE_HEADLESS_FILE)
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake --file=$(PREMAKE_HEADLESS_FILE)
+	@echo "Building lambda-headless executable (release) with $(JOBS) parallel jobs..."
+	$(call run_make_with_error_summary,lambda-headless,release_native,-s CFLAGS="-w" CXXFLAGS="-w")
+ifeq ($(OS),Darwin)
+	@strip -x lambda-headless.exe 2>/dev/null || true
+else
+	@strip lambda-headless.exe 2>/dev/null || true
+endif
+	@echo "✅ Headless build completed. Executable: lambda-headless.exe"
+	@ls -lh lambda-headless.exe 2>/dev/null || true
 
 # Compatibility name for the former polyglot executable. It is a link to the
 # normal host, never a separately compiled runtime.
@@ -2137,6 +2164,17 @@ run-layout-baseline-suites:
 
 test-radiant-baseline: build-radiant-baseline
 	@$(MAKE) --no-print-directory run-radiant-baseline
+
+# Requires test/render Node dependencies, Chromium and Poppler's pdftocairo/pdfimages.
+test-svg-export: build
+	@node test/svg/test_svg_export.cjs $(ARGS)
+
+# Static P7/P10 paint audit; --browser --references selects independent browser references.
+test-svg-paint: build
+	@node test/svg/test_svg_paint.cjs $(ARGS)
+
+test-svg-smil: build
+	@node test/svg/test_svg_smil.cjs $(ARGS)
 
 # Run radiant tests without rebuilding (use when test executables are already built).
 # Commands wait directly on their child process; periodic polling used to round

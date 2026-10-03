@@ -16,6 +16,7 @@ extern "C" const char* __lsan_default_options() { return "exitcode=0"; }
 #include "../../lambda/input/css/css_style.hpp"
 #include "../../lambda/input/css/css_style_node.hpp"
 #include "../../lambda/input/css/css_parser.hpp"
+#include "../../lambda/input/css/css_engine.hpp"
 #include "../../lambda/io/mark_builder.hpp"
 #include "../../lambda/input/input.hpp"
 #include "helpers/css_test_helpers.hpp"
@@ -168,6 +169,18 @@ protected:
 
         CssSpecificity spec = css_specificity_create(0, ids, classes, elements, false);
         return css_declaration_create(prop_id, val, spec, CSS_ORIGIN_AUTHOR, pool);
+    }
+
+    CssDeclaration* create_parsed_declaration(const char* declaration_text,
+            uint8_t ids = 0, uint8_t classes = 0, uint8_t elements = 0) {
+        CssDeclaration* declaration = css_parse_declaration_text(
+            declaration_text, strlen(declaration_text), pool);
+        if (declaration) {
+            declaration->specificity = css_specificity_create(
+                0, ids, classes, elements, false);
+            declaration->origin = CSS_ORIGIN_AUTHOR;
+        }
+        return declaration;
     }
 
     // Helper: Create simple selector
@@ -788,6 +801,472 @@ TEST_F(DomIntegrationTest, NthLastChild) {
     EXPECT_TRUE(selector_matcher_matches_nth_child(matcher, &formula_odd, last_child, true));
 }
 
+TEST_F(DomIntegrationTest, NthOfTypeCountsOnlyMatchingElementNames) {
+    DomElement* parent = create_element_with_backing("div");
+    const char* names[] = {"span", "em", "span", "em", "span"};
+    DomElement* children[5] = {};
+    for (size_t i = 0; i < 5; i++) {
+        children[i] = create_element_with_backing(names[i]);
+        parent->append_child(children[i]);
+    }
+
+    CssSelectorGroup* second = css_parse_selector_group_text(
+        ":nth-of-type(2)", strlen(":nth-of-type(2)"), pool);
+    ASSERT_NE(second, nullptr);
+    ASSERT_EQ(second->selector_count, 1u);
+    EXPECT_FALSE(selector_matcher_matches(matcher, second->selectors[0], children[0], nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, second->selectors[0], children[1], nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, second->selectors[0], children[2], nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, second->selectors[0], children[3], nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, second->selectors[0], children[4], nullptr));
+
+    CssSelectorGroup* last = css_parse_selector_group_text(
+        ":nth-last-of-type(1)", strlen(":nth-last-of-type(1)"), pool);
+    ASSERT_NE(last, nullptr);
+    EXPECT_FALSE(selector_matcher_matches(matcher, last->selectors[0], children[2], nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, last->selectors[0], children[3], nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, last->selectors[0], children[4], nullptr));
+}
+
+TEST_F(DomIntegrationTest, NthChildOfSelectorFiltersSiblings) {
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* children[4] = {};
+    for (size_t i = 0; i < 4; i++) {
+        children[i] = create_element_with_backing(i == 1 ? "em" : "span");
+        parent->append_child(children[i]);
+    }
+    ASSERT_TRUE(children[0]->add_class("selected"));
+    ASSERT_TRUE(children[1]->add_class("selected"));
+    ASSERT_TRUE(children[3]->add_class("selected"));
+
+    const char* selector_text = ":nth-child(2 of .selected)";
+    CssSelectorGroup* second = css_parse_selector_group_text(
+        selector_text, strlen(selector_text), pool);
+    ASSERT_NE(second, nullptr);
+    ASSERT_EQ(second->selector_count, 1u);
+    EXPECT_FALSE(selector_matcher_matches(matcher, second->selectors[0], children[0], nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, second->selectors[0], children[1], nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, second->selectors[0], children[2], nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, second->selectors[0], children[3], nullptr));
+
+    selector_text = ":nth-last-child(1 of .selected)";
+    CssSelectorGroup* last = css_parse_selector_group_text(
+        selector_text, strlen(selector_text), pool);
+    ASSERT_NE(last, nullptr);
+    EXPECT_TRUE(selector_matcher_matches(matcher, last->selectors[0], children[3], nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, last->selectors[0], children[2], nullptr));
+
+    CssSpecificity specificity = selector_matcher_calculate_specificity(
+        matcher, second->selectors[0]);
+    EXPECT_EQ(specificity.classes, 2);
+}
+
+TEST_F(DomIntegrationTest, HasMatchesAnchoredRelativeSelectors) {
+    DomElement* outer = create_element_with_backing("div");
+    DomElement* root = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("section");
+    DomElement* nested = create_element_with_backing("span");
+    DomElement* adjacent = create_element_with_backing("p");
+    DomElement* later = create_element_with_backing("p");
+    outer->append_child(root);
+    outer->append_child(adjacent);
+    outer->append_child(later);
+    root->append_child(child);
+    child->append_child(nested);
+    ASSERT_TRUE(outer->add_class("outside"));
+    ASSERT_TRUE(child->add_class("a"));
+    ASSERT_TRUE(nested->add_class("b"));
+    ASSERT_TRUE(adjacent->add_class("adj"));
+    ASSERT_TRUE(later->add_class("late"));
+
+    auto matches = [&](const char* text) {
+        CssSelectorGroup* group = css_parse_selector_group_text(text, strlen(text), pool);
+        EXPECT_NE(group, nullptr) << text;
+        return group && group->selector_count == 1 &&
+            selector_matcher_matches(matcher, group->selectors[0], root, nullptr);
+    };
+    EXPECT_TRUE(matches(":has(> .a)"));
+    EXPECT_FALSE(matches(":has(> .b)"));
+    EXPECT_TRUE(matches(":has(+ .adj)"));
+    EXPECT_FALSE(matches(":has(+ .late)"));
+    EXPECT_TRUE(matches(":has(~ .late)"));
+    EXPECT_TRUE(matches(":has(> .missing, + .adj)"));
+    EXPECT_TRUE(matches(":has(> .a > .b)"));
+    EXPECT_TRUE(matches(":has(.b)"));
+    EXPECT_FALSE(matches(":has(.outside .b)"));
+    EXPECT_EQ(css_parse_selector_group_text(
+        ":has(> .a, :bogus)", strlen(":has(> .a, :bogus)"), pool), nullptr);
+
+    EXPECT_FALSE(matches(":has(> .fresh)"));
+    DomElement* fresh = create_element_with_backing("span");
+    ASSERT_TRUE(fresh->add_class("fresh"));
+    root->append_child(fresh);
+    EXPECT_TRUE(matches(":has(> .fresh)"));
+    ASSERT_TRUE(root->remove_child(fresh));
+    EXPECT_FALSE(matches(":has(> .fresh)"));
+}
+
+TEST_F(DomIntegrationTest, EmptyIgnoresCommentsButCountsText) {
+    DomElement* element = create_element_with_backing("div");
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        ":empty", strlen(":empty"), pool);
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->selector_count, 1u);
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], element, nullptr));
+    ASSERT_NE(element->append_comment("marker"), nullptr);
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], element, nullptr));
+    ASSERT_NE(element->append_text(" "), nullptr);
+    EXPECT_FALSE(selector_matcher_matches(matcher, group->selectors[0], element, nullptr));
+}
+
+TEST_F(DomIntegrationTest, ColumnCombinatorUsesTableSlotsAndLiveSpans) {
+    DomElement* table = create_element_with_backing("table");
+    DomElement* group = create_element_with_backing("colgroup");
+    DomElement* leading = create_element_with_backing("col");
+    DomElement* selected = create_element_with_backing("col");
+    ASSERT_TRUE(leading->set_attribute("span", "2"));
+    ASSERT_TRUE(selected->add_class("selected"));
+    table->append_child(group);
+    group->append_child(leading);
+    group->append_child(selected);
+
+    DomElement* body = create_element_with_backing("tbody");
+    DomElement* first_row = create_element_with_backing("tr");
+    DomElement* second_row = create_element_with_backing("tr");
+    table->append_child(body);
+    body->append_child(first_row);
+    body->append_child(second_row);
+    DomElement* spanning = create_element_with_backing("td");
+    DomElement* first_middle = create_element_with_backing("td");
+    DomElement* first_selected = create_element_with_backing("td");
+    ASSERT_TRUE(spanning->set_attribute("rowspan", "2"));
+    first_row->append_child(spanning);
+    first_row->append_child(first_middle);
+    first_row->append_child(first_selected);
+    DomElement* second_middle = create_element_with_backing("td");
+    DomElement* second_selected = create_element_with_backing("td");
+    ASSERT_TRUE(second_selected->set_attribute("colspan", "2"));
+    second_row->append_child(second_middle);
+    second_row->append_child(second_selected);
+
+    const char* text = "col.selected || td";
+    CssSelectorGroup* selectors = css_parse_selector_group_text(text, strlen(text), pool);
+    ASSERT_NE(selectors, nullptr);
+    ASSERT_EQ(selectors->selector_count, 1u);
+    CssSelector* selector = selectors->selectors[0];
+    ASSERT_EQ(selector->combinators[0], CSS_COMBINATOR_COLUMN);
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, spanning, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, first_middle, nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, selector, first_selected, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, second_middle, nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, selector, second_selected, nullptr));
+    const char* group_text = "table > colgroup || td";
+    CssSelectorGroup* group_selector = css_parse_selector_group_text(
+        group_text, strlen(group_text), pool);
+    ASSERT_NE(group_selector, nullptr);
+    EXPECT_TRUE(selector_matcher_matches(matcher, group_selector->selectors[0],
+        spanning, nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, group_selector->selectors[0],
+        second_selected, nullptr));
+
+    ASSERT_TRUE(selected->remove_class("selected"));
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, first_selected, nullptr));
+    ASSERT_TRUE(leading->add_class("selected"));
+    EXPECT_TRUE(selector_matcher_matches(matcher, selector, first_middle, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, first_selected, nullptr));
+
+    ASSERT_TRUE(second_middle->set_attribute("colspan", "2"));
+    EXPECT_TRUE(selector_matcher_matches(matcher, selector, second_middle, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, second_selected, nullptr));
+    EXPECT_EQ(css_parse_selector_group_text("col ||", strlen("col ||"), pool), nullptr);
+}
+
+TEST_F(DomIntegrationTest, QualifiedTypeSelectorsMatchElementNamespaces) {
+    CssEngine* engine = css_engine_create(pool);
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@namespace h \"http://www.w3.org/1999/xhtml\";"
+        "h|*, |div, *|div, *|rect { color: red }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 2u);
+    CssSelectorGroup* group = sheet->rules[1]->data.style_rule.selector_group;
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->selector_count, 4u);
+
+    DomElement* html_div = create_element_with_backing("div");
+    DomElement* null_div = create_element_with_backing("div");
+    DomElement* svg_rect = create_element_with_backing("rect");
+    ASSERT_NE(html_div, nullptr);
+    ASSERT_NE(null_div, nullptr);
+    ASSERT_NE(svg_rect, nullptr);
+    ASSERT_TRUE(null_div->set_attribute("__lambda_ns_uri", ""));
+    ASSERT_TRUE(svg_rect->set_attribute("__lambda_ns_uri",
+        "http://www.w3.org/2000/svg"));
+
+    auto matches = [&](size_t index, DomElement* element) {
+        return selector_matcher_matches(matcher, group->selectors[index],
+            element, nullptr);
+    };
+    EXPECT_TRUE(matches(0, html_div));
+    EXPECT_FALSE(matches(0, null_div));
+    EXPECT_FALSE(matches(0, svg_rect));
+    EXPECT_FALSE(matches(1, html_div));
+    EXPECT_TRUE(matches(1, null_div));
+    EXPECT_FALSE(matches(1, svg_rect));
+    EXPECT_TRUE(matches(2, html_div));
+    EXPECT_TRUE(matches(2, null_div));
+    EXPECT_FALSE(matches(2, svg_rect));
+    EXPECT_TRUE(matches(3, svg_rect));
+    EXPECT_FALSE(matches(3, html_div));
+    css_engine_destroy(engine);
+}
+
+TEST_F(DomIntegrationTest, AttributeNamespacesMatchQualifiedAndNullAttributes) {
+    CssEngine* engine = css_engine_create(pool);
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@namespace x \"urn:test\";"
+        "@namespace \"http://www.w3.org/2000/svg\";"
+        "[x|href='#icon'], [x|href='#plain'], [|href='#plain'],"
+        "[*|href='#icon'], [href='#plain'], [href='#icon'] {color:red}",
+        nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 3u);
+    CssSelectorGroup* group = sheet->rules[2]->data.style_rule.selector_group;
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->selector_count, 6u);
+    MarkBuilder builder(input);
+    Item item = builder.element("use")
+        .attr("xmlns:x", "urn:test")
+        .attr("x:href", "#icon")
+        .attr("href", "#plain").final();
+    DomElement* element = build_element(item);
+    ASSERT_NE(element, nullptr);
+    const bool expected[] = {true, false, true, true, true, false};
+    for (size_t i = 0; i < 6; i++) {
+        EXPECT_EQ(selector_matcher_matches(matcher, group->selectors[i],
+            element, nullptr), expected[i]) << i;
+    }
+    css_engine_destroy(engine);
+}
+
+TEST_F(DomIntegrationTest, ExplicitAttributeCaseFlagOverridesMatcherMode) {
+    DomElement* element = create_element_with_backing("div");
+    ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(element->set_attribute("data-code", "AbC"));
+    selector_matcher_set_case_sensitive_attributes(matcher, false);
+    auto matches = [&](const char* text) {
+        CssSelectorGroup* group = css_parse_selector_group_text(
+            text, strlen(text), pool);
+        return group && group->selector_count == 1 &&
+            selector_matcher_matches(matcher, group->selectors[0], element, nullptr);
+    };
+    EXPECT_TRUE(matches("[data-code=abc]"));
+    EXPECT_TRUE(matches("[data-code=abc i]"));
+    EXPECT_FALSE(matches("[data-code=abc s]"));
+    EXPECT_TRUE(matches("[data-code=AbC s]"));
+}
+
+TEST_F(DomIntegrationTest, HiddenAttributeMatchesChildCombinator) {
+    DomElement* container = create_element_with_backing("div");
+    DomElement* pre = create_element_with_backing("pre");
+    ASSERT_NE(container, nullptr);
+    ASSERT_NE(pre, nullptr);
+    ASSERT_TRUE(container->set_attribute("id", "link-snippet-container"));
+    ASSERT_TRUE(pre->set_attribute("hidden", ""));
+    container->append_child(pre);
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        "#link-snippet-container>pre[hidden]", 35, pool);
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->selector_count, 1u);
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], pre, nullptr));
+}
+
+TEST_F(DomIntegrationTest, FileSelectorButtonKeepsStyleOffHost) {
+    CssEngine* engine = css_engine_create(pool);
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "input::file-selector-button { color: green; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssRule* rule = sheet->rules[0];
+    ASSERT_NE(rule->data.style_rule.selector_group, nullptr);
+    CssSelector* selector = rule->data.style_rule.selector_group->selectors[0];
+    DomElement* file = create_element_with_backing("input");
+    DomElement* text_input = create_element_with_backing("input");
+    ASSERT_NE(file, nullptr);
+    ASSERT_NE(text_input, nullptr);
+    ASSERT_TRUE(file->set_attribute("type", "file"));
+    ASSERT_TRUE(text_input->set_attribute("type", "text"));
+
+    MatchResult result = {};
+    ASSERT_TRUE(selector_matcher_matches(matcher, selector, file, &result));
+    EXPECT_EQ(result.pseudo_element, PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON);
+    EXPECT_FALSE(selector_matcher_matches(matcher, selector, text_input, nullptr));
+    EXPECT_EQ(dom_element_apply_pseudo_element_rule(file, rule,
+        result.specificity, (int)result.pseudo_element), 1);
+    EXPECT_EQ(dom_element_get_specified_value(file, CSS_PROPERTY_COLOR), nullptr);
+    EXPECT_NE(dom_element_get_pseudo_element_value(file, CSS_PROPERTY_COLOR,
+        (int)PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON), nullptr);
+    css_engine_destroy(engine);
+}
+
+TEST_F(DomIntegrationTest, SelectionColorsCascadeWithoutHostDeclarations) {
+    CssEngine* engine = css_engine_create(pool);
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "::selection { color: red; background: blue; }"
+        ".hot::selection { color: green; }"
+        "::selection { color: yellow !important; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 3u);
+    DomElement* element = create_element_with_backing("p");
+    ASSERT_NE(element, nullptr);
+    ASSERT_TRUE(element->set_attribute("class", "hot"));
+
+    for (size_t index = 0; index < sheet->rule_count; index++) {
+        CssRule* rule = sheet->rules[index];
+        CssSelector* selector = rule->data.style_rule.selector_group->selectors[0];
+        MatchResult result = {};
+        ASSERT_TRUE(selector_matcher_matches(matcher, selector, element, &result));
+        ASSERT_EQ(result.pseudo_element, PSEUDO_ELEMENT_SELECTION);
+        dom_element_apply_pseudo_element_rule(element, rule,
+            result.specificity, (int)result.pseudo_element);
+    }
+    EXPECT_EQ(dom_element_get_specified_value(element, CSS_PROPERTY_COLOR), nullptr);
+    CssDeclaration* color = dom_element_get_pseudo_element_value(element,
+        CSS_PROPERTY_COLOR, (int)PSEUDO_ELEMENT_SELECTION);
+    CssDeclaration* background = dom_element_get_pseudo_element_value(element,
+        CSS_PROPERTY_BACKGROUND_COLOR, (int)PSEUDO_ELEMENT_SELECTION);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(background, nullptr);
+    EXPECT_STREQ(color->value_text, "yellow");
+    EXPECT_STREQ(background->value_text, "blue");
+    EXPECT_TRUE(dom_element_clear_pseudo_styles(element));
+    EXPECT_EQ(dom_element_get_pseudo_element_value(element,
+        CSS_PROPERTY_COLOR, (int)PSEUDO_ELEMENT_SELECTION), nullptr);
+    css_engine_destroy(engine);
+}
+
+TEST_F(DomIntegrationTest, ScopeUsesDocumentRootOrQueryReceiver) {
+    DomElement* root = create_element_with_backing("html");
+    DomElement* child = create_element_with_backing("div");
+    root->append_child(child);
+    doc->root = root;
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        ":scope", strlen(":scope"), pool);
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->selector_count, 1u);
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], root, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, group->selectors[0], child, nullptr));
+    selector_matcher_set_scope_element(matcher, child);
+    EXPECT_FALSE(selector_matcher_matches(matcher, group->selectors[0], root, nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], child, nullptr));
+}
+
+TEST_F(DomIntegrationTest, NestingSelectorUsesQueryScopeOutsideRules) {
+    DomElement* root = create_element_with_backing("html");
+    DomElement* child = create_element_with_backing("div");
+    ASSERT_TRUE(child->set_attribute("class", "active"));
+    root->append_child(child);
+    doc->root = root;
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        "&.active, .other", strlen("&.active, .other"), pool);
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->selector_count, 2u);
+    selector_matcher_set_scope_element(matcher, child);
+    EXPECT_TRUE(selector_matcher_matches_group(matcher, group, child, nullptr));
+    selector_matcher_set_scope_element(matcher, root);
+    EXPECT_FALSE(selector_matcher_matches_group(matcher, group, child, nullptr));
+}
+
+TEST_F(DomIntegrationTest, LangInheritsAndAnyLinkUsesLinkState) {
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("a");
+    parent->append_child(child);
+    ASSERT_TRUE(parent->set_attribute("lang", "en-US"));
+    ASSERT_TRUE(child->set_attribute("href", "/local"));
+
+    const char* selector_text = "a:lang(en):any-link";
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        selector_text, strlen(selector_text), pool);
+    ASSERT_NE(group, nullptr);
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], child, nullptr));
+    ASSERT_TRUE(child->set_attribute("lang", "fr"));
+    EXPECT_FALSE(selector_matcher_matches(matcher, group->selectors[0], child, nullptr));
+}
+
+TEST_F(DomIntegrationTest, ModalAndPopoverSelectorsUseElementState) {
+    DomElement* dialog = create_element_with_backing("dialog");
+    DomElement* popover = create_element_with_backing("div");
+    CssSelectorGroup* modal = css_parse_selector_group_text(
+        "dialog:modal", strlen("dialog:modal"), pool);
+    CssSelectorGroup* open = css_parse_selector_group_text(
+        "div:popover-open", strlen("div:popover-open"), pool);
+    ASSERT_NE(modal, nullptr);
+    ASSERT_NE(open, nullptr);
+    EXPECT_FALSE(selector_matcher_matches(matcher, modal->selectors[0], dialog, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, open->selectors[0], popover, nullptr));
+
+    ASSERT_TRUE(dialog->set_attribute("open", ""));
+    dialog->set_dialog_modal(true);
+    ASSERT_TRUE(popover->set_attribute("popover", "auto"));
+    popover->set_popover_open(true);
+    EXPECT_TRUE(selector_matcher_matches(matcher, modal->selectors[0], dialog, nullptr));
+    EXPECT_TRUE(selector_matcher_matches(matcher, open->selectors[0], popover, nullptr));
+    EXPECT_EQ(selector_matcher_calculate_specificity(matcher,
+        modal->selectors[0]).classes, 1);
+
+    dialog->remove_attribute("open");
+    popover->set_popover_open(false);
+    EXPECT_FALSE(selector_matcher_matches(matcher, modal->selectors[0], dialog, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, open->selectors[0], popover, nullptr));
+}
+
+TEST_F(DomIntegrationTest, DirUsesInheritedAttributeAndFirstStrongText) {
+    DomElement* parent = create_element_with_backing("div");
+    DomElement* child = create_element_with_backing("span");
+    parent->append_child(child);
+    ASSERT_TRUE(parent->set_attribute("dir", "rtl"));
+    CssSelectorGroup* rtl = css_parse_selector_group_text(
+        ":dir( rtl )", strlen(":dir( rtl )"), pool);
+    CssSelectorGroup* ltr = css_parse_selector_group_text(
+        ":dir(ltr)", strlen(":dir(ltr)"), pool);
+    ASSERT_NE(rtl, nullptr);
+    ASSERT_NE(ltr, nullptr);
+    EXPECT_TRUE(selector_matcher_matches(matcher, rtl->selectors[0], child, nullptr));
+    EXPECT_FALSE(selector_matcher_matches(matcher, ltr->selectors[0], child, nullptr));
+
+    ASSERT_TRUE(parent->set_attribute("dir", "auto"));
+    ASSERT_NE(parent->append_text("\xD8\xA7"), nullptr);
+    EXPECT_TRUE(selector_matcher_matches(matcher, rtl->selectors[0], child, nullptr));
+    ASSERT_TRUE(parent->set_attribute("dir", "ltr"));
+    EXPECT_TRUE(selector_matcher_matches(matcher, ltr->selectors[0], child, nullptr));
+
+    DomElement* bdi = create_element_with_backing("bdi");
+    ASSERT_NE(bdi->append_text("\xD8\xA7"), nullptr);
+    EXPECT_TRUE(selector_matcher_matches(matcher, rtl->selectors[0], bdi, nullptr));
+    EXPECT_EQ(css_parse_selector_group_text(
+        ":dir(sideways)", strlen(":dir(sideways)"), pool), nullptr);
+}
+
+TEST_F(DomIntegrationTest, LocalLinkComparesDocumentUrlWithoutFragment) {
+    ASSERT_TRUE(dom_document_replace_url(doc,
+        url_parse("https://example.test/docs/page.html#current")));
+    DomElement* link = create_element_with_backing("a");
+    CssSelectorGroup* group = css_parse_selector_group_text(
+        "a:local-link", strlen("a:local-link"), pool);
+    ASSERT_NE(group, nullptr);
+    ASSERT_TRUE(link->set_attribute("href", "#next"));
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], link, nullptr));
+    ASSERT_TRUE(link->set_attribute("href", "page.html#other"));
+    EXPECT_TRUE(selector_matcher_matches(matcher, group->selectors[0], link, nullptr));
+    ASSERT_TRUE(link->set_attribute("href", "page.html?q=1"));
+    EXPECT_FALSE(selector_matcher_matches(matcher, group->selectors[0], link, nullptr));
+    ASSERT_TRUE(link->set_attribute("href", "https://other.test/docs/page.html"));
+    EXPECT_FALSE(selector_matcher_matches(matcher, group->selectors[0], link, nullptr));
+}
+
 TEST_F(DomIntegrationTest, CompoundSelectors) {
     // Test compound selectors like "div.container#main"
     MarkBuilder builder(input);
@@ -1095,7 +1574,7 @@ TEST_F(DomIntegrationTest, EdgeCase_EmptyStrings) {
     EXPECT_FALSE(element->has_class(""));  // Empty classes shouldn't match
 
     // Empty attribute
-    element->set_attribute("", "value");
+    EXPECT_FALSE(element->set_attribute("", "value"));
     EXPECT_FALSE(element->has_attribute(""));
 }
 
@@ -1238,7 +1717,7 @@ TEST_F(DomIntegrationTest, CompleteStyleApplication) {
     // Apply multiple declarations
     CssDeclaration* color = create_declaration(CSS_PROPERTY_COLOR, "red", 1, 0, 0);
     CssDeclaration* bg = create_declaration(CSS_PROPERTY_BACKGROUND_COLOR, "blue", 0, 1, 0);
-    CssDeclaration* font = create_declaration(CSS_PROPERTY_FONT_SIZE, "16px", 0, 0, 1);
+    CssDeclaration* font = create_parsed_declaration("font-size: 16px", 0, 0, 1);
 
     dom_element_apply_declaration(element, color);
     dom_element_apply_declaration(element, bg);
@@ -1544,9 +2023,9 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_EqualSpecificity)
     element->add_class("box");
 
     // All have same specificity (0,1,1)
-    CssDeclaration* decl1 = create_declaration(CSS_PROPERTY_WIDTH, "100px", 0, 1, 1);
-    CssDeclaration* decl2 = create_declaration(CSS_PROPERTY_WIDTH, "200px", 0, 1, 1);
-    CssDeclaration* decl3 = create_declaration(CSS_PROPERTY_WIDTH, "300px", 0, 1, 1);
+    CssDeclaration* decl1 = create_parsed_declaration("width: 100px", 0, 1, 1);
+    CssDeclaration* decl2 = create_parsed_declaration("width: 200px", 0, 1, 1);
+    CssDeclaration* decl3 = create_parsed_declaration("width: 300px", 0, 1, 1);
 
     dom_element_apply_declaration(element, decl1);
     dom_element_apply_declaration(element, decl2);
@@ -1555,7 +2034,7 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexSpecificity_EqualSpecificity)
     // Last one should win (source order)
     CssDeclaration* width = dom_element_get_specified_value(element, CSS_PROPERTY_WIDTH);
     ASSERT_NE(width, nullptr);
-    EXPECT_STREQ((char*)width->value, "300px");
+    EXPECT_STREQ(width->value_text, "300px");
 }
 
 TEST_F(DomIntegrationTest, AdvancedSelector_HierarchyWithAttributes) {
@@ -1743,11 +2222,11 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexCascade_MultipleProperties) {
     dom_element_apply_declaration(element, create_declaration(CSS_PROPERTY_BACKGROUND_COLOR, "yellow", 0, 1, 1));
 
     // Font-size: element wins (only one rule)
-    dom_element_apply_declaration(element, create_declaration(CSS_PROPERTY_FONT_SIZE, "16px", 0, 0, 1));
+    dom_element_apply_declaration(element, create_parsed_declaration("font-size: 16px", 0, 0, 1));
 
     // Width: equal specificity, last wins
-    dom_element_apply_declaration(element, create_declaration(CSS_PROPERTY_WIDTH, "100px", 0, 1, 0));
-    dom_element_apply_declaration(element, create_declaration(CSS_PROPERTY_WIDTH, "200px", 0, 1, 0));
+    dom_element_apply_declaration(element, create_parsed_declaration("width: 100px", 0, 1, 0));
+    dom_element_apply_declaration(element, create_parsed_declaration("width: 200px", 0, 1, 0));
 
     // Verify each property
     CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
@@ -1760,11 +2239,11 @@ TEST_F(DomIntegrationTest, AdvancedSelector_ComplexCascade_MultipleProperties) {
 
     CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
     ASSERT_NE(font_size, nullptr);
-    EXPECT_STREQ((char*)font_size->value, "16px");
+    EXPECT_STREQ(font_size->value_text, "16px");
 
     CssDeclaration* width = dom_element_get_specified_value(element, CSS_PROPERTY_WIDTH);
     ASSERT_NE(width, nullptr);
-    EXPECT_STREQ((char*)width->value, "200px");
+    EXPECT_STREQ(width->value_text, "200px");
 }
 
 TEST_F(DomIntegrationTest, AdvancedSelector_AttributeVariations) {
@@ -1941,21 +2420,22 @@ TEST_F(DomIntegrationTest, AdvancedSelector_SpecificityTieBreaker_SourceOrder) {
     element->add_class("widget");
 
     // All have specificity (0,2,0) - two classes
-    CssDeclaration* decl1 = create_declaration(CSS_PROPERTY_MARGIN, "10px", 0, 2, 0);
-    CssDeclaration* decl2 = create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 2, 0);
-    CssDeclaration* decl3 = create_declaration(CSS_PROPERTY_MARGIN, "30px", 0, 2, 0);
-    CssDeclaration* decl4 = create_declaration(CSS_PROPERTY_MARGIN, "40px", 0, 2, 0);
+    // Use parsed value nodes because shorthand validation reads their CSS type.
+    CssDeclaration* decl1 = create_parsed_declaration("margin: 10px", 0, 2, 0);
+    CssDeclaration* decl2 = create_parsed_declaration("margin: 20px", 0, 2, 0);
+    CssDeclaration* decl3 = create_parsed_declaration("margin: 30px", 0, 2, 0);
+    CssDeclaration* decl4 = create_parsed_declaration("margin: 40px", 0, 2, 0);
 
     // Apply in order
-    dom_element_apply_declaration(element, decl1);
-    dom_element_apply_declaration(element, decl2);
-    dom_element_apply_declaration(element, decl3);
-    dom_element_apply_declaration(element, decl4);
+    ASSERT_TRUE(dom_element_apply_declaration(element, decl1));
+    ASSERT_TRUE(dom_element_apply_declaration(element, decl2));
+    ASSERT_TRUE(dom_element_apply_declaration(element, decl3));
+    ASSERT_TRUE(dom_element_apply_declaration(element, decl4));
 
     // Last declaration should win
     CssDeclaration* margin = dom_element_get_specified_value(element, CSS_PROPERTY_MARGIN);
     ASSERT_NE(margin, nullptr);
-    EXPECT_STREQ((char*)margin->value, "40px");
+    EXPECT_STREQ(margin->value_text, "40px");
 }
 
 TEST_F(DomIntegrationTest, AdvancedSelector_TableStructure) {
@@ -2287,8 +2767,8 @@ TEST_F(DomIntegrationTest, MixedTree_ElementWithTextChild) {
 //     DomText* text = dom_text_create(pool, "Hello World");
 
     // Manually link text node as child
-    text->parent = div;
-    div->first_child = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
 
     EXPECT_EQ(text->parent, div);
     EXPECT_EQ(div->first_child, (void*)text);
@@ -2305,8 +2785,8 @@ TEST_F(DomIntegrationTest, MixedTree_ElementWithCommentChild) {
 //     DomComment* comment = dom_comment_create(pool, DOM_NODE_COMMENT, "comment", " TODO: Add content ");
 
     // Manually link comment node as child
-    comment->parent = div;
-    div->first_child = comment;
+    comment->parent = lam::up(div);
+    div->first_child = lam::own(comment);
 
     EXPECT_EQ(comment->parent, div);
     EXPECT_EQ(div->first_child, (void*)comment);
@@ -2325,13 +2805,13 @@ TEST_F(DomIntegrationTest, MixedTree_ElementTextElement) {
     // Manually link children
     div->append_child(span1);
 
-    text->parent = div;
-    span1->next_sibling = text;
-    text->prev_sibling = span1;
+    text->parent = lam::up(div);
+    span1->next_sibling = lam::own(text);
+    text->prev_sibling = lam::up(span1);
 
-    span2->parent = div;
-    text->next_sibling = span2;
-    span2->prev_sibling = text;
+    span2->parent = lam::up(div);
+    text->next_sibling = lam::own(span2);
+    span2->prev_sibling = lam::up(text);
 
     // dom_element_count_child_elements only counts DomElement* children (2 spans), not text nodes
     EXPECT_EQ(div->count_child_elements(), 2);
@@ -2353,20 +2833,20 @@ TEST_F(DomIntegrationTest, MixedTree_AllNodeTypes) {
 //     DomText* text2 = dom_text_create(pool, "Text after");
 
     // Manually link all children
-    comment->parent = div;
-    div->first_child = comment;
+    comment->parent = lam::up(div);
+    div->first_child = lam::own(comment);
 
-    text1->parent = div;
-    comment->next_sibling = text1;
-    text1->prev_sibling = comment;
+    text1->parent = lam::up(div);
+    comment->next_sibling = lam::own(text1);
+    text1->prev_sibling = lam::up(comment);
 
-    span->parent = div;
-    text1->next_sibling = span;
-    span->prev_sibling = text1;
+    span->parent = lam::up(div);
+    text1->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text1);
 
-    text2->parent = div;
-    span->next_sibling = text2;
-    text2->prev_sibling = span;
+    text2->parent = lam::up(div);
+    span->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(span);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees (it casts
     // first_child to DomElement* and reads next_sibling at wrong offset for DomText/DomComment).
@@ -2397,16 +2877,16 @@ TEST_F(DomIntegrationTest, MixedTree_NavigateSiblings) {
 //     DomText* text2 = dom_text_create(pool, "Second");
 
     // Manually link children
-    text1->parent = parent;
-    parent->first_child = text1;
+    text1->parent = lam::up(parent);
+    parent->first_child = lam::own(text1);
 
-    elem->parent = parent;
-    text1->next_sibling = elem;
-    elem->prev_sibling = text1;
+    elem->parent = lam::up(parent);
+    text1->next_sibling = lam::own(elem);
+    elem->prev_sibling = lam::up(text1);
 
-    text2->parent = parent;
-    elem->next_sibling = text2;
-    text2->prev_sibling = elem;
+    text2->parent = lam::up(parent);
+    elem->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(elem);
 
     // Forward navigation
     EXPECT_EQ(text1->next_sibling, (void*)elem);
@@ -2429,18 +2909,18 @@ TEST_F(DomIntegrationTest, MixedTree_RemoveTextNode) {
 //     DomElement* span = create_element_with_backing("span");
 
     // Manually link text and span as children
-    text->parent = div;
-    div->first_child = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
 
-    span->parent = div;
-    text->next_sibling = span;
-    span->prev_sibling = text;
+    span->parent = lam::up(div);
+    text->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text);
 
     // dom_element_count_child_elements only counts DomElement* children (1 span)
     EXPECT_EQ(div->count_child_elements(), 1);
 
     // Remove the text node manually
-    div->first_child = span;
+    div->first_child = lam::own(span);
     span->prev_sibling = nullptr;
     text->parent = nullptr;
     text->next_sibling = nullptr;
@@ -2462,10 +2942,10 @@ TEST_F(DomIntegrationTest, MixedTree_InsertTextBefore) {
     div->append_child(span);
 
     // Then manually insert text before span
-    text->parent = div;
-    div->first_child = text;
-    text->next_sibling = span;
-    span->prev_sibling = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
+    text->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text);
 
     EXPECT_EQ(div->first_child, (void*)text);
     EXPECT_EQ(text->next_sibling, (void*)span);
@@ -2482,16 +2962,16 @@ TEST_F(DomIntegrationTest, MixedTree_MultipleTextNodes) {
 //     DomText* text3 = dom_text_create(pool, "third.");
 
     // Manually link all text nodes
-    text1->parent = p;
-    p->first_child = text1;
+    text1->parent = lam::up(p);
+    p->first_child = lam::own(text1);
 
-    text2->parent = p;
-    text1->next_sibling = text2;
-    text2->prev_sibling = text1;
+    text2->parent = lam::up(p);
+    text1->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(text1);
 
-    text3->parent = p;
-    text2->next_sibling = text3;
-    text3->prev_sibling = text2;
+    text3->parent = lam::up(p);
+    text2->next_sibling = lam::own(text3);
+    text3->prev_sibling = lam::up(text2);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't test it
     EXPECT_EQ(text1->next_sibling, (void*)text2);
@@ -2511,20 +2991,20 @@ TEST_F(DomIntegrationTest, MixedTree_NestedWithText) {
 //     DomText* text2 = dom_text_create(pool, "Text2");
 
     // Link text1, span, text2 to div
-    text1->parent = div;
-    div->first_child = text1;
+    text1->parent = lam::up(div);
+    div->first_child = lam::own(text1);
 
-    span->parent = div;
-    text1->next_sibling = span;
-    span->prev_sibling = text1;
+    span->parent = lam::up(div);
+    text1->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(text1);
 
     // Link inner_text to span
-    inner_text->parent = span;
-    span->first_child = inner_text;
+    inner_text->parent = lam::up(span);
+    span->first_child = lam::own(inner_text);
 
-    text2->parent = div;
-    span->next_sibling = text2;
-    text2->prev_sibling = span;
+    text2->parent = lam::up(div);
+    span->next_sibling = lam::own(text2);
+    text2->prev_sibling = lam::up(span);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't test it
     EXPECT_EQ(div->count_child_elements(), 1);  // Only counts elements correctly
@@ -2547,21 +3027,21 @@ TEST_F(DomIntegrationTest, MixedTree_CommentsBetweenElements) {
     // Link all nodes as children of div
     div->append_child(h1);
 
-    comment1->parent = div;
-    h1->next_sibling = comment1;
-    comment1->prev_sibling = h1;
+    comment1->parent = lam::up(div);
+    h1->next_sibling = lam::own(comment1);
+    comment1->prev_sibling = lam::up(h1);
 
-    p1->parent = div;
-    comment1->next_sibling = p1;
-    p1->prev_sibling = comment1;
+    p1->parent = lam::up(div);
+    comment1->next_sibling = lam::own(p1);
+    p1->prev_sibling = lam::up(comment1);
 
-    comment2->parent = div;
-    p1->next_sibling = comment2;
-    comment2->prev_sibling = p1;
+    comment2->parent = lam::up(div);
+    p1->next_sibling = lam::own(comment2);
+    comment2->prev_sibling = lam::up(p1);
 
-    p2->parent = div;
-    comment2->next_sibling = p2;
-    p2->prev_sibling = comment2;
+    p2->parent = lam::up(div);
+    comment2->next_sibling = lam::own(p2);
+    p2->prev_sibling = lam::up(comment2);
 
     // dom_element_count_child_elements only counts DomElement* children (h1, p1, p2 = 3 elements)
     EXPECT_EQ(div->count_child_elements(), 3);
@@ -2638,16 +3118,16 @@ TEST_F(DomIntegrationTest, Memory_MixedTreeCleanup) {
 //     DomElement* span = create_element_with_backing("span");
 
     // Manually link nodes
-    text->parent = div;
-    div->first_child = text;
+    text->parent = lam::up(div);
+    div->first_child = lam::own(text);
 
-    comment->parent = div;
-    text->next_sibling = comment;
-    comment->prev_sibling = text;
+    comment->parent = lam::up(div);
+    text->next_sibling = lam::own(comment);
+    comment->prev_sibling = lam::up(text);
 
-    span->parent = div;
-    comment->next_sibling = span;
-    span->prev_sibling = comment;
+    span->parent = lam::up(div);
+    comment->next_sibling = lam::own(span);
+    span->prev_sibling = lam::up(comment);
 
     // dom_element_count_child_elements has undefined behavior on mixed trees - don't use it
 }

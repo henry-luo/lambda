@@ -15,6 +15,7 @@ typedef struct CssSelectorComponent CssSelectorComponent;
 typedef struct CssCalcNode CssCalcNode;
 typedef struct CssValue CssValue;
 struct DomElement;
+struct CssStylesheet;
 
 /**
  * CSS Style System
@@ -59,10 +60,22 @@ typedef enum CssUnit {
     // Small, large, and dynamic viewport units
     CSS_UNIT_SVW,             // small viewport width
     CSS_UNIT_SVH,             // small viewport height
+    CSS_UNIT_SVI,             // small viewport inline size
+    CSS_UNIT_SVB,             // small viewport block size
+    CSS_UNIT_SVMIN,           // smaller small viewport axis
+    CSS_UNIT_SVMAX,           // larger small viewport axis
     CSS_UNIT_LVW,             // large viewport width
     CSS_UNIT_LVH,             // large viewport height
+    CSS_UNIT_LVI,             // large viewport inline size
+    CSS_UNIT_LVB,             // large viewport block size
+    CSS_UNIT_LVMIN,           // smaller large viewport axis
+    CSS_UNIT_LVMAX,           // larger large viewport axis
     CSS_UNIT_DVW,             // dynamic viewport width
     CSS_UNIT_DVH,             // dynamic viewport height
+    CSS_UNIT_DVI,             // dynamic viewport inline size
+    CSS_UNIT_DVB,             // dynamic viewport block size
+    CSS_UNIT_DVMIN,           // smaller dynamic viewport axis
+    CSS_UNIT_DVMAX,           // larger dynamic viewport axis
 
     // Container query units
     CSS_UNIT_CQW,             // container query width
@@ -112,6 +125,11 @@ typedef enum CssUnit {
 // CSS Values §5.4 absolute lengths use the reference-pixel conversion shared
 // by cascade consumers that cannot depend on a layout context.
 bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels);
+bool css_viewport_length_to_px(CssUnit unit, double value, double width,
+                               double height, bool vertical_inline_axis,
+                               double* pixels);
+const char* css_math_token_name(const CssValue* value);
+bool css_value_contains_var_reference(const CssValue* value);
 
 // CSS Fonts §2.5 maps absolute font-size keywords before layout applies
 // inherited relative sizes such as larger and smaller.
@@ -256,11 +274,23 @@ typedef enum CssPropertyCode {
 
     // CSS Logical border properties (inline/block axis)
     CSS_PROPERTY_BORDER_INLINE,
+    CSS_PROPERTY_BORDER_INLINE_WIDTH,
+    CSS_PROPERTY_BORDER_INLINE_STYLE,
+    CSS_PROPERTY_BORDER_INLINE_COLOR,
     CSS_PROPERTY_BORDER_INLINE_START,
+    CSS_PROPERTY_BORDER_INLINE_START_WIDTH,
+    CSS_PROPERTY_BORDER_INLINE_START_STYLE,
+    CSS_PROPERTY_BORDER_INLINE_START_COLOR,
     CSS_PROPERTY_BORDER_INLINE_END,
+    CSS_PROPERTY_BORDER_INLINE_END_WIDTH,
+    CSS_PROPERTY_BORDER_INLINE_END_STYLE,
+    CSS_PROPERTY_BORDER_INLINE_END_COLOR,
     CSS_PROPERTY_BORDER_BLOCK,
+    CSS_PROPERTY_BORDER_BLOCK_STYLE,
     CSS_PROPERTY_BORDER_BLOCK_START,
+    CSS_PROPERTY_BORDER_BLOCK_START_STYLE,
     CSS_PROPERTY_BORDER_BLOCK_END,
+    CSS_PROPERTY_BORDER_BLOCK_END_STYLE,
     CSS_PROPERTY_BORDER_BLOCK_WIDTH,
     CSS_PROPERTY_BORDER_BLOCK_COLOR,
     CSS_PROPERTY_BORDER_BLOCK_START_WIDTH,
@@ -291,6 +321,10 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS,
     CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS,
     CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS,
+    CSS_PROPERTY_BORDER_START_START_RADIUS,
+    CSS_PROPERTY_BORDER_START_END_RADIUS,
+    CSS_PROPERTY_BORDER_END_START_RADIUS,
+    CSS_PROPERTY_BORDER_END_END_RADIUS,
 
     // Background Properties
     CSS_PROPERTY_BACKGROUND,
@@ -547,10 +581,32 @@ typedef enum CssPropertyCode {
     // Scrolling Properties
     CSS_PROPERTY_SCROLL_BEHAVIOR,
     CSS_PROPERTY_OVERSCROLL_BEHAVIOR,
+    CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X,
+    CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y,
     CSS_PROPERTY_SCROLL_SNAP_TYPE,
     CSS_PROPERTY_SCROLL_SNAP_ALIGN,
     CSS_PROPERTY_SCROLL_MARGIN,
     CSS_PROPERTY_SCROLL_PADDING,
+    CSS_PROPERTY_SCROLL_MARGIN_TOP,
+    CSS_PROPERTY_SCROLL_MARGIN_RIGHT,
+    CSS_PROPERTY_SCROLL_MARGIN_BOTTOM,
+    CSS_PROPERTY_SCROLL_MARGIN_LEFT,
+    CSS_PROPERTY_SCROLL_MARGIN_BLOCK,
+    CSS_PROPERTY_SCROLL_MARGIN_BLOCK_START,
+    CSS_PROPERTY_SCROLL_MARGIN_BLOCK_END,
+    CSS_PROPERTY_SCROLL_MARGIN_INLINE,
+    CSS_PROPERTY_SCROLL_MARGIN_INLINE_START,
+    CSS_PROPERTY_SCROLL_MARGIN_INLINE_END,
+    CSS_PROPERTY_SCROLL_PADDING_TOP,
+    CSS_PROPERTY_SCROLL_PADDING_RIGHT,
+    CSS_PROPERTY_SCROLL_PADDING_BOTTOM,
+    CSS_PROPERTY_SCROLL_PADDING_LEFT,
+    CSS_PROPERTY_SCROLL_PADDING_BLOCK,
+    CSS_PROPERTY_SCROLL_PADDING_BLOCK_START,
+    CSS_PROPERTY_SCROLL_PADDING_BLOCK_END,
+    CSS_PROPERTY_SCROLL_PADDING_INLINE,
+    CSS_PROPERTY_SCROLL_PADDING_INLINE_START,
+    CSS_PROPERTY_SCROLL_PADDING_INLINE_END,
 
     // Ruby Annotation Properties
     CSS_PROPERTY_RUBY_ALIGN,
@@ -622,6 +678,10 @@ typedef enum CssPropertyCode {
 
     // Global property reset
     CSS_PROPERTY_ALL,
+
+    CSS_PROPERTY_TEXT_UNDERLINE_OFFSET,
+    CSS_PROPERTY_TEXT_DECORATION_SKIP_INK,
+    CSS_PROPERTY_TEXT_UNDERLINE_POSITION,
 
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
@@ -767,6 +827,21 @@ typedef struct CssValue {
     } data;
 } CssValue;
 
+typedef struct CssBorderImageComponents {
+    const CssValue* source;
+    const CssValue* slice[5];
+    int slice_count;
+    const CssValue* width[4];
+    int width_count;
+    const CssValue* outset[4];
+    int outset_count;
+    const CssValue* repeat[2];
+    int repeat_count;
+} CssBorderImageComponents;
+
+bool css_split_border_image_shorthand(const CssValue* value,
+                                      CssBorderImageComponents* parts);
+
 // CSS shorthand expansion is part of the value model, not layout: one to
 // four components map clockwise to top, right, bottom, and left.
 static inline int css_quad_value_index(int count, int side) {
@@ -819,6 +894,7 @@ typedef struct CssDeclaration {
     CssSpecificity specificity;
     CssOrigin origin;
     uint32_t source_order;    // Declaration order within stylesheet
+    uint32_t layer_order;     // zero is unlayered; named layers follow declaration order
     bool important;           // !important flag
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
@@ -888,6 +964,11 @@ typedef enum CssRuleType {
     CSS_RULE_NESTED_DECLARATIONS  // CSSNestedDeclarations (declarations after nested rules)
 } CssRuleType;
 
+typedef struct CssLayerName {
+    const char** parts;
+    size_t part_count;
+} CssLayerName;
+
 // CSS Rule structure
 typedef struct CssRule {
     CssRuleType type;
@@ -898,6 +979,7 @@ typedef struct CssRule {
         struct {
             struct CssSelector* selector;          // Single selector (for backward compatibility)
             struct CssSelectorGroup* selector_group; // Selector group (comma-separated selectors)
+            const char* authored_selector_text; // nested CSSOM selector before & expansion
             CssDeclaration** declarations;
             size_t declaration_count;
             CssRule** nested_rules;
@@ -908,11 +990,21 @@ typedef struct CssRule {
             const char* condition;
             CssRule** rules;
             size_t rule_count;
+            CssLayerName* layer_names;
+            size_t layer_name_count;
+            bool layer_statement;
+            bool invalid_layer;
         } conditional_rule; // For @media, @supports, @container, etc.
 
         struct {
             const char* url;
             const char* media;
+            const char* supports;
+            CssLayerName layer_name;
+            bool has_layer;
+            bool anonymous_layer;
+            bool invalid;
+            struct CssStylesheet* stylesheet;
         } import_rule;
 
         struct {
@@ -963,6 +1055,7 @@ typedef struct CssStylesheet {
     const char* origin_url;      // URL where stylesheet was loaded from
     CssOrigin origin;
     bool disabled;
+    bool is_import_child;
     // Document sheets retain their owning <link> or <style> for source order.
     struct DomElement* owner_element;
 
@@ -1381,7 +1474,20 @@ typedef CssValueType CSSPropertyType;
 typedef CssDeclaration CSSProperty;
 
 // Function declarations (compatibility layer using css_style.h types)
-bool css_property_validate_value(CssPropertyCode id, CssValue* value);
+enum CssTextDecorationLineFlag : uint8_t {
+    CSS_TEXT_DECO_UNDERLINE = 1u << 0,
+    CSS_TEXT_DECO_OVERLINE = 1u << 1,
+    CSS_TEXT_DECO_LINE_THROUGH = 1u << 2,
+    CSS_TEXT_DECO_BLINK = 1u << 3
+};
+uint8_t css_text_decoration_line_flag(CssEnum keyword);
+bool css_property_validate_value(CssPropertyCode id, const CssValue* value);
+bool css_property_validate_value_mode(CssPropertyCode id,
+                                      const CssValue* value,
+                                      bool quirks_mode);
+bool css_text_emphasis_parse_style(const CssValue* value, bool vertical,
+                                   uint32_t* mark, const CssValue** color);
+bool css_display_legacy_keyword_supported(const char* name);
 bool css_property_validate_value_from_string(CssPropertyCode property_code,
     const char* value_str, void** parsed_value, Pool* pool);
 

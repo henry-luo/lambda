@@ -1,0 +1,15 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white}svg{position:absolute;left:0;top:0}</style></head><body>
+<svg id="scene" width="600" height="220" data-last="none">
+ <rect id="back" width="600" height="220" fill="white"/>
+ <defs><marker id="marker" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" refX="10" refY="10"><rect width="20" height="20" fill="red"/></marker></defs>
+ <rect id="affine" x="20" y="20" width="30" height="60" transform="scale(3 1)" fill="none" stroke="blue" stroke-width="10" vector-effect="non-scaling-stroke"/>
+ <rect id="skew" width="40" height="60" transform="translate(260 20) skewX(45)" fill="none" stroke="blue" stroke-width="10" vector-effect="non-scaling-stroke"/>
+ <path id="join" d="M410 100L440 20L470 100" fill="none" stroke="blue" stroke-width="12" stroke-miterlimit="1"/>
+ <path id="round" d="M70 150L70 150" fill="none" stroke="blue" stroke-width="14" stroke-linecap="round"/>
+ <path id="square" d="M140 150L140 150" fill="none" stroke="blue" stroke-width="14" stroke-linecap="square"/>
+ <path id="butt" d="M210 150L210 150" fill="none" stroke="blue" stroke-width="14" stroke-linecap="butt"/>
+ <path id="marked" d="M310 150H350" fill="none" stroke="blue" stroke-width="2" marker-end="url(#marker)"/>
+ <path id="dashes" d="M420 150H570" fill="none" stroke="blue" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 20"/>
+</svg><script>
+document.getElementById('scene').addEventListener('click',function(event){this.setAttribute('data-last',event.target.id);});
+</script></body></html>

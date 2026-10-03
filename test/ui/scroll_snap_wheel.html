@@ -1,0 +1,36 @@
+<!doctype html>
+<style>
+  body { margin: 0; }
+  #pane { width: 160px; height: 100px; overflow: auto;
+          scroll-snap-type: y mandatory; scroll-padding-top: 10px; }
+  .item { height: 100px; scroll-snap-align: start; }
+  #second { scroll-margin-top: 5px; }
+  #first { background: #faa; }
+  #second { background: #afa; }
+  #third { background: #aaf; }
+  #near { width: 160px; height: 100px; overflow: auto;
+          scroll-snap-type: y proximity; }
+  #near > div { height: 100px; scroll-snap-align: start; }
+  #horizontal { display: flex; width: 100px; height: 60px; overflow: auto;
+                scroll-snap-type: inline mandatory; }
+  #horizontal > div { flex: none; width: 100px; height: 60px;
+                      scroll-snap-align: none start; }
+</style>
+<button id="go">Align second snap area</button>
+<button id="set">Set scrollTop</button>
+<div id="pane">
+  <div id="first" class="item"></div>
+  <div id="second" class="item"></div>
+  <div id="third" class="item"></div>
+</div>
+<div id="near"><div></div><div></div><div></div></div>
+<div id="horizontal"><div></div><div></div><div></div></div>
+<script>
+  document.getElementById('go').addEventListener('click', () => {
+    document.getElementById('pane').scrollTop = 0;
+    document.getElementById('second').scrollIntoView({block: 'center'});
+  });
+  document.getElementById('set').addEventListener('click', () => {
+    document.getElementById('pane').scrollTop = 160;
+  });
+</script>

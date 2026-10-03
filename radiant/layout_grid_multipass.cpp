@@ -259,8 +259,8 @@ void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container) {
     log_enter();
 
     LayoutViewScope view_scope(lycon);
-    lycon->elmt = static_cast<DomNode*>(grid_container);
-    lycon->view = static_cast<View*>(grid_container);
+    lycon->elmt = lam::up(static_cast<DomNode*>(grid_container));
+    lycon->view = lam::up(static_cast<View*>(grid_container));
     // CACHE LOOKUP: Check if we have a cached result for these constraints
     // This avoids redundant layout for repeated measurements with same inputs
     DomElement* dom_elem = lam::dom_require<DOM_NODE_ELEMENT>(grid_container);
@@ -635,7 +635,7 @@ void init_grid_item_view(LayoutContext* lycon, DomNode* child) {
     // CRITICAL: Set lycon->view to this element so style resolution
     // applies properties to this element, not some other view
     LayoutViewScope view_scope(lycon);
-    lycon->view = static_cast<View*>(elem);
+    lycon->view = lam::up(static_cast<View*>(elem));
     // Resolve styles for this element (CSS cascade, inheritance, etc.)
     // This will now correctly apply padding/margin/border to elem->bound
     dom_node_resolve_style(child, lycon);
@@ -790,7 +790,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     // stale parent strut metrics otherwise shift text while breaks stay anchored.
     setup_line_height(lycon, grid_item);
     layout_setup_block_font_metrics(lycon);
-    lycon->block.block_container_font = lycon->font.style;
+    lycon->block.block_container_font = lam::up(lycon->font.style);
     // Calculate content area dimensions accounting for box model
     LayoutContentBox content = layout_content_box(grid_item);
     float content_width = content.width;
@@ -804,7 +804,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     lycon->block.given_height = -1;  // Auto height
     lycon->block.advance_y = content_y_offset;  // Start after padding/border top
     lycon->block.max_width = 0;
-    lycon->elmt = static_cast<DomNode*>(grid_item);
+    lycon->elmt = lam::up(static_cast<DomNode*>(grid_item));
     // CSS 2.1 §9.2.1: grid-item content establishes its own block direction;
     // final grid layout bypasses setup_inline, so copy it into this context.
     if (grid_item->blk) {
@@ -844,7 +844,7 @@ static void layout_grid_item_final_content_multipass(LayoutContext* lycon, ViewB
     } else if (grid_item->display.inner == CSS_VALUE_TABLE) {
         // A table keeps its own role while gi describes participation in this grid.
         LayoutViewScope view_scope(lycon);
-        lycon->view = grid_item;
+        lycon->view = lam::up(grid_item);
         bool has_table_max_constraint = false;
         if (grid_item->is_element() && grid_item->as_element()->specified_style) {
             CssDeclaration* max_width = style_tree_get_declaration(

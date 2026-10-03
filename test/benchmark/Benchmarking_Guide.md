@@ -1,6 +1,6 @@
 # Lambda Benchmark Guide
 
-This document describes how to prepare, run, and report Lambda benchmarks across six historical suites and the text-library suite.
+This document describes how to prepare, run, and report Lambda benchmarks across eight suites.
 
 **Canonical snapshot workflow:** use `python3 test/benchmark/run_standard_benchmarks.py --typed` from the project root (a variant flag is required — see [Choosing the Lambda variant](#choosing-the-lambda-variant-required-in-time-mode)). It refuses to run on battery power or against a debug build, rebuilds a clean release binary, verifies that JS execution profiling markers are absent from `lambda.exe`, runs the standardized benchmark matrix, writes a matching `benchmark_results_vN.json`, and can generate an `Overall_ResultN.md` report from that JSON. Afterwards, archive the binary into `test/benchmark/exe/` (§5).
 
@@ -24,8 +24,9 @@ This document describes how to prepare, run, and report Lambda benchmarks across
 | **Larceny** | `larceny/` | 12 | [Larceny/Gabriel](https://www.larcenists.org/) | Gabriel suite: search, symbolic, allocation |
 | **JetStream** | `jetstream/` | 9 | [JetStream](https://browserbench.org/JetStream/) | SunSpider/Octane classics: n-body, deltablue, richards, splay |
 | **Text libraries** | `text/` | 7 | Embedded JS library sources and AST fixture | fast-diff, microdiff, hyphen, Prettier AST, search, merge, and log-pipeline workloads |
+| **Julia microbenchmarks** | `julia/` | 4 | [Julia Microbenchmarks](https://github.com/JuliaLang/Microbenchmarks) | Integer conversion, small-matrix statistics, reciprocal-square summation and formatted output |
 
-**Total: 69 declared suite entries.** The runner keeps 63 report rows after
+**Total: 73 declared suite entries.** The runner keeps 67 report rows after
 deduplicating shared workloads across suites.
 
 Each registered benchmark has a Lambda script (`.ls`), a JavaScript equivalent
@@ -35,9 +36,13 @@ Each registered benchmark has a Lambda script (`.ls`), a JavaScript equivalent
 Its Go and Python ports use the same fixture data,
 round counts, algorithms, and checksums as the checked-in Node scripts.
 
-All 69 entries also have native Julia ports under `julia/<suite>/<name>.jl`.
+All 73 entries also have native Julia ports under `julia/<suite>/<name>.jl`.
 See [Julia ports](julia/README.md) for validation commands, typing choices,
 warmup accounting, and the documented Splay/DeltaBlue implementation differences.
+The `-s julia` suite has matching ports in Lambda (typed/untyped), JavaScript,
+Python, native C, Go and Julia. It uses explicit scalar algorithms, deterministic
+inputs, one complete warmup in every language, and synchronous output writes.
+See its [workload contract and independent verifier](julia/SUITE.md).
 
 ### File naming
 

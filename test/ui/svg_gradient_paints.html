@@ -1,0 +1,45 @@
+<!DOCTYPE html><html><head><style>
+@font-face{font-family:SVG-Ahem;src:url('../layout/data/font/Ahem.ttf');}
+html,body{margin:0;background:white;}svg{position:absolute;left:0;top:0;font-family:SVG-Ahem;font-size:20px;}
+.green-stop{stop-color:lime;} .styled-stop{stop-color:currentColor;stop-opacity:.5;}
+</style></head><body><svg width="540" height="360">
+<defs>
+ <linearGradient id="half"><stop offset=".5" stop-color="red"/><stop offset=".5" stop-color="blue"/></linearGradient>
+ <linearGradient id="template" href="#half"/>
+ <linearGradient id="vertical" href="#template" gradientTransform="rotate(90 .5 .5)"/>
+ <linearGradient id="repeat" href="#half" x2="25%" spreadMethod="repeat"/>
+ <linearGradient id="reflect" href="#half" x2="25%" spreadMethod="reflect"/>
+ <linearGradient id="user" href="#half" gradientUnits="userSpaceOnUse" x1="0" x2="100%"/>
+ <radialGradient id="focus" cx=".5" cy=".5" r=".5" fx=".25" fy=".5"><stop offset=".2" stop-color="red"/><stop offset=".2" stop-color="blue"/></radialGradient>
+ <radialGradient id="fr" cx=".5" cy=".5" r=".5" fx=".5" fy=".5" fr=".25"><stop offset="0" stop-color="red"/><stop offset=".5" stop-color="blue"/><stop offset=".5" stop-color="lime"/></radialGradient>
+ <linearGradient id="single"><stop offset=".8" stop-color="lime"/></linearGradient>
+ <linearGradient id="zero" href="#half" x2="0"/>
+ <linearGradient id="cyclic-a" href="#cyclic-b"/><linearGradient id="cyclic-b" href="#cyclic-a"/>
+ <linearGradient id="styled" color="lime"><stop class="styled-stop" offset="0"/><stop class="styled-stop" offset="1"/></linearGradient>
+ <linearGradient id="clamped"><stop offset="-1" stop-color="red"/><stop offset=".7" stop-color="blue"/><stop offset=".2" stop-color="lime"/><stop offset="2" stop-color="lime"/></linearGradient>
+</defs>
+<g fill="url(#half)"><rect x="10" y="10" width="80" height="40"/><path d="M110 10H190V50H110Z"/></g>
+<g fill="none" stroke="url(#half)" stroke-width="10"><rect x="210" y="15" width="80" height="30"/></g>
+<rect x="310" y="10" width="80" height="40" fill="url(#template)"/>
+<rect x="410" y="10" width="80" height="40" fill="url(#vertical)"/>
+<rect x="10" y="70" width="80" height="40" fill="url(#repeat)"/>
+<rect x="110" y="70" width="80" height="40" fill="url(#reflect)"/>
+<rect x="210" y="70" width="80" height="40" fill="url(#user)"/>
+<rect x="310" y="70" width="80" height="40" fill="url('#missing') lime"/>
+<g color="red" fill="currentColor"><rect x="410" y="70" width="80" height="40" color="blue"/></g>
+<rect x="10" y="130" width="80" height="40" fill="url(#focus)"/>
+<rect x="110" y="130" width="80" height="40" fill="url(#fr)"/>
+<rect x="210" y="130" width="80" height="40" fill="url(#single)"/>
+<rect x="310" y="130" width="80" height="40" fill="url(#zero)"/>
+<rect x="410" y="130" width="80" height="40" fill="url(#cyclic-a) red"/>
+<rect x="10" y="190" width="80" height="40" fill="url(#styled)"/>
+<rect x="110" y="190" width="80" height="40" fill="url(#clamped)"/>
+<rect x="210" y="190" width="80" height="40" fill="url(#half)" fill-opacity=".5"/>
+<path d="M310 230 C310 176 390 176 390 230Z" fill="url(#half)"/>
+<polyline points="410,230 450,190 490,230" fill="url(#half)"/>
+<text x="10" y="280" fill="url(#half)">ABCD</text>
+<text x="110" y="280" fill="none" stroke="url(#half)" stroke-width="4">ABCD</text>
+<g fill="url(#half)"><text x="210" y="280">AB<tspan>CD</tspan></text></g>
+<g transform="translate(310 0)" fill="url(#half)"><rect x="0" y="310" width="80" height="20" transform="skewX(20)"/></g>
+<rect x="410" y="260" width="80" height="20" fill="url(#missing)"/>
+</svg></body></html>

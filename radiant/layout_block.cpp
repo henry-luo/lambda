@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "svg_animation.hpp"
 #include "view.hpp"
 #include "render.hpp"
 #include "event.hpp"
@@ -1049,17 +1050,17 @@ static const char* pseudo_resolve_quote_char(DomElement* element, bool is_open_q
 
 static void pseudo_append_child(DomElement* parent, DomNode* child) {
     if (!parent || !child) return;
-    child->parent = parent;
+    child->parent = lam::up(parent);
     child->next_sibling = nullptr;
     if (!parent->first_child) {
         child->prev_sibling = nullptr;
-        parent->first_child = child;
-        parent->last_child = child;
+        parent->first_child = lam::own(child);
+        parent->last_child = lam::up(child);
         return;
     }
     child->prev_sibling = parent->last_child;
-    parent->last_child->next_sibling = child;
-    parent->last_child = child;
+    parent->last_child->next_sibling = lam::own(child);
+    parent->last_child = lam::up(child);
 }
 
 static void pseudo_append_text_child(DomElement* pseudo_elem, const char* text) {
@@ -1486,7 +1487,7 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     if (!lycon || !parent) return nullptr;
     DomElement* pseudo_elem = DomElement::create(parent->doc, is_before ? "::before" : "::after", nullptr);
     if (!pseudo_elem) return nullptr;
-    pseudo_elem->parent = parent;
+    pseudo_elem->parent = lam::up(parent);
     pseudo_elem->first_child = nullptr;
     pseudo_elem->last_child = nullptr;
     pseudo_elem->next_sibling = nullptr;
@@ -1601,12 +1602,12 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     if (has_before && !pseudo->before_generated) {
         log_info("%s [PSEUDO] Getting before content for <%s>", block->source_loc(), elem->tag_name ? elem->tag_name : "?");
         const char* before_content = resolve_pseudo_generated_content(lycon, elem, true);
-        pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true, block->font);
+        pseudo->before = lam::up(create_pseudo_element(lycon, elem, before_content ? before_content : "", true, block->font));
         pseudo->before_generated = true;
     }
     if (has_after && !pseudo->after_generated) {
         const char* after_content = resolve_pseudo_generated_content(lycon, elem, false);
-        pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font);
+        pseudo->after = lam::up(create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font));
         pseudo->after_generated = true;
     }
     return pseudo;
@@ -1757,23 +1758,23 @@ static void create_first_letter_pseudo(LayoutContext* lycon, ViewBlock* block) {
     if (!fl_text) return;
     DomText* fl_text_node = lam::pool_alloc_dom_text(pool);
     if (!fl_text_node) return;
-    fl_text_node->parent = fl_elem;
-    fl_text_node->text = fl_text;
+    fl_text_node->parent = lam::up(fl_elem);
+    fl_text_node->text = lam::up(fl_text);
     fl_text_node->length = first_letter_length;
-    fl_elem->first_child = fl_text_node;
+    fl_elem->first_child = lam::own(fl_text_node);
     int skip = ws_offset + boundary;
-    text_node->text = text_node->text + skip;
+    text_node->text = lam::up(text_node->text + skip);
     text_node->length = text_node->length > (size_t)skip ? text_node->length - skip : 0;
     DomNode* text_parent = text_node->parent;
-    fl_elem->parent = text_parent;
-    fl_elem->next_sibling = text_node;
+    fl_elem->parent = lam::up(text_parent);
+    fl_elem->next_sibling = lam::own(text_node);
     fl_elem->prev_sibling = text_node->prev_sibling;
     if (text_node->prev_sibling) {
-        text_node->prev_sibling->next_sibling = fl_elem;
+        text_node->prev_sibling->next_sibling = lam::own(fl_elem);
     } else if (text_parent && text_parent->is_element()) {
-        lam::dom_require<DOM_NODE_ELEMENT>(text_parent)->first_child = fl_elem;
+        lam::dom_require<DOM_NODE_ELEMENT>(text_parent)->first_child = lam::own(fl_elem);
     }
-    text_node->prev_sibling = fl_elem;
+    text_node->prev_sibling = lam::up(fl_elem);
 }
 
 static View* margin_collapse_last_in_flow_child(ViewBlock* block) {
@@ -1943,7 +1944,7 @@ bool layout_classify_vertical_flow_child(ViewBlock* parent, View* child,
     if (!parent || !child || !result || !child->is_block()) return false;
     ViewBlock* block = lam::view_require_block(child);
     if (!block) return false;
-    result->block = block;
+    result->block = lam::up(block);
     result->atomic_inline = is_inline_level_atomic_block(child, block);
     result->normal_block = block->display.outer == CSS_VALUE_BLOCK ||
         block->display.outer == CSS_VALUE_LIST_ITEM ||
@@ -3622,7 +3623,7 @@ static bool layout_resolve_percentage_width_constraints(
     containing_context.content_width = containing_width;
     containing_context.given_width = containing_width;
     LayoutContext resolve_context = *lycon;
-    resolve_context.block.parent = &containing_context;
+    resolve_context.block.parent = lam::up(&containing_context);
     bool resolved_any = false;
     DomElement* element = block->as_element();
     for (int i = 0; i < 2; i++) {
@@ -4918,7 +4919,12 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
                                            int viewport_width,
                                            int viewport_height) {
     if (!srcdoc || !*srcdoc) return nullptr;
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "iframe_srcdoc");
+    // The embedding element owns this document, but parenting it under the
+    // embedding document's context waits for the teardown-order audit: a
+    // cascade destroy of that context must not run before the iframe releases
+    // the embedded document.
+    Pool* pool = mem_pool_create(mem_context_process(MEM_ROLE_LAYOUT),
+                                 MEM_ROLE_LAYOUT, "iframe_srcdoc");
     if (!pool) {
         log_error("iframe_srcdoc_load: failed to create memory pool");
         return nullptr;
@@ -4997,6 +5003,8 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
 }
 
 void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
+    // SVG image documents do not create nested browsing contexts, including srcdoc/data frames.
+    if (lycon->doc && lycon->doc->services.svg_image_document) return;
     DomDocument* doc = NULL;
     if (lycon->ui_context->iframe_depth >= MAX_IFRAME_DEPTH) {
         log_warn("iframe: maximum nesting depth (%d) exceeded, skipping", MAX_IFRAME_DEPTH);
@@ -5039,7 +5047,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             } else {
                 radiant_document_ensure_state(doc, "layout_iframe");
                 if (!(block->embed)) block->ensure_embed(lycon);
-                block->embed->doc = doc; // assign loaded document to embed property
+                block->embed->doc = lam::own(doc); // assign loaded document to embed property
                 dom_document_set_embedding(doc, lycon->ui_context->document,
                                            (DomElement*)block);
                 layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
@@ -5095,7 +5103,29 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     }
 }
 
+static void layout_apply_svg_animated_dimensions(LayoutContext* lycon, ViewBlock* block) {
+    DomElement* element = block->as_element();
+    svg_animation_prepare(element);
+    SvgLengthContext lengths = dom_svg_length_context(element);
+    lengths.viewport_width = lycon->block.content_width;
+    lengths.viewport_height = lycon->block.content_height;
+    for (LayoutAxis axis : layout_axes()) {
+        bool horizontal = layout_axis_is_horizontal(axis);
+        const char* name = horizontal ? "width" : "height";
+        if (!svg_animation_value(element, name)) continue;
+        char buffer[256];
+        const char* value = svg_get_dom_presentation_property(element, name, false, buffer, sizeof(buffer));
+        float used = svg_resolve_length(value, &lengths, horizontal ? SVG_LENGTH_X : SVG_LENGTH_Y, NAN);
+        if (!isfinite(used) || used < 0.0f) continue;
+        // used animation values enter layout without rewriting base DOM attributes or stylesheet declarations.
+        block->ensure_block(lycon);
+        layout_store_given_axis(lycon, block, used, horizontal, false);
+    }
+}
+
 void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
+    SvgAnimationSourceScope animation_sources(block->as_element()->doc);
+    layout_apply_svg_animated_dimensions(lycon, block);
     Element* native_elem = dom_element_backing(lam::dom_require_element(block));
     if (!native_elem) {
         block->width = 300;  // HTML default for SVG
@@ -5240,6 +5270,7 @@ void layout_inline_svg(LayoutContext* lycon, ViewBlock* block) {
     if (specified.y && is_border_box) {
         block->height = authored.y;
     }
+    layout_svg_foreign_objects(lycon, block->as_element());
 }
 
 void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_before) {
@@ -5249,26 +5280,26 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
             // A DOM child replacement can unlink a generated node, then retain
             // its pseudo record for incremental layout. Reinsertion restores
             // the direct-child ownership required by later reset/teardown.
-            pseudo->parent = parent;
-            if (!pseudo->next_sibling) parent->last_child = pseudo;
+            pseudo->parent = lam::up(parent);
+            if (!pseudo->next_sibling) parent->last_child = lam::up(pseudo);
             return;
         }
         if (dom_subtree_contains_node(c, static_cast<DomNode*>(pseudo))) return;
     }
-    pseudo->parent = parent;
+    pseudo->parent = lam::up(parent);
     if (is_before) {
         DomNode* old_first = parent->first_child;
-        pseudo->next_sibling = old_first;
+        pseudo->next_sibling = lam::own(old_first);
         pseudo->prev_sibling = nullptr;
         if (old_first) {
-            old_first->prev_sibling = pseudo;
+            old_first->prev_sibling = lam::up(pseudo);
         } else {
-            parent->last_child = pseudo;
+            parent->last_child = lam::up(pseudo);
         }
-        parent->first_child = pseudo;
+        parent->first_child = lam::own(pseudo);
     } else {
         if (!parent->first_child) {
-            parent->first_child = pseudo;
+            parent->first_child = lam::own(pseudo);
             pseudo->prev_sibling = nullptr;
             pseudo->next_sibling = nullptr;
         } else {
@@ -5276,11 +5307,11 @@ void insert_pseudo_into_dom(DomElement* parent, DomElement* pseudo, bool is_befo
             while (last->next_sibling) {
                 last = last->next_sibling;
             }
-            last->next_sibling = pseudo;
-            pseudo->prev_sibling = last;
+            last->next_sibling = lam::own(pseudo);
+            pseudo->prev_sibling = lam::up(last);
             pseudo->next_sibling = nullptr;
         }
-        parent->last_child = pseudo;
+        parent->last_child = lam::up(pseudo);
     }
 }
 
@@ -5294,10 +5325,10 @@ static void remove_pseudo_from_dom(DomElement* parent, DomElement* pseudo) {
             continue;
         }
         DomNode* next = child->next_sibling;
-        if (previous) previous->next_sibling = next;
-        else parent->first_child = next;
-        if (next) next->prev_sibling = previous;
-        if (parent->last_child == child) parent->last_child = previous;
+        if (previous) previous->next_sibling = lam::own(next);
+        else parent->first_child = lam::own(next);
+        if (next) next->prev_sibling = lam::up(previous);
+        if (parent->last_child == child) parent->last_child = lam::up(previous);
         child->parent = nullptr;
         child->prev_sibling = nullptr;
         child->next_sibling = nullptr;
@@ -5323,7 +5354,7 @@ static void layout_restore_first_letter_source_text(DomElement* pseudo) {
     if (!text || !text->native_string) return;
     // ::first-letter advances its continuation into the backing string;
     // resetting the layout epoch must restore the authored text before retrying.
-    text->text = text->native_string->chars;
+    text->text = lam::up(text->native_string->chars);
     text->length = text->native_string->len;
 }
 
@@ -5400,13 +5431,13 @@ static void insert_pseudo_into_rendered_tree(DomElement* element,
     insert_pseudo_into_dom(shadow_root, pseudo, is_before);
     // Physical placement is in the shadow tree, while the host remains the
     // pseudo's CSS inheritance and counter owner.
-    pseudo->parent = element;
+    pseudo->parent = lam::up(element);
 }
 
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker, bool create_first_letter) {
     if (!lycon || !block || !block->is_element()) return;
-    block->pseudo = alloc_pseudo_content_prop(lycon, block);
+    block->pseudo = lam::own(alloc_pseudo_content_prop(lycon, block));
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
         if (block->pseudo->before) {
@@ -5756,7 +5787,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
     // CSS 2.1 §9.5: Floats belong to their nearest BFC ancestor, not to non-BFC
     if (!lycon->block.establishing_element && parent_block) {
         if (block_context_establishes_bfc(parent_block)) {
-            lycon->block.establishing_element = parent_block;
+            lycon->block.establishing_element = lam::up(parent_block);
             lycon->block.float_right_edge = parent_block->content_width > 0 ? parent_block->content_width : parent_block->width;
         }
     }
@@ -6053,6 +6084,7 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
             layout_iframe(lycon, block, block->display);
         }
         else if (elmt_name == MARKUP_NAME_WEBVIEW) {
+            if (lycon->doc && lycon->doc->services.svg_image_document) return;
             if (!block->embed) {
                 block->ensure_embed(lycon);
             }
@@ -6380,6 +6412,55 @@ void layout_block_inner_content(LayoutContext* lycon, ViewBlock* block) {
     }
 }
 
+void layout_svg_foreign_object(LayoutContext* lycon, DomElement* element, float width, float height) {
+    if (!lycon || !element || width <= 0.0f || height <= 0.0f) return;
+    LayoutViewScope view_scope(lycon); LayoutFontScope font_scope(lycon);
+    BlockContext saved_block = lycon->block; Linebox saved_line = lycon->line;
+    AvailableSpace saved_space = lycon->available_space;
+    ViewBlock* block = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, element));
+    dom_node_resolve_style(element, lycon);
+    // SVG2 §12.2: the positioning rectangle supplies a definite, independent CSS containing block.
+    block->display.outer = CSS_VALUE_BLOCK; block->display.inner = CSS_VALUE_FLOW_ROOT;
+    block->ensure_block(lycon); block->ensure_position(lycon);
+    block->x = block->y = 0.0f;
+    block->width = block->content_width = width; block->height = block->content_height = height;
+    layout_store_given_axis(lycon, block, width, true, true);
+    layout_store_given_axis(lycon, block, height, false, true);
+    block_context_init(&lycon->block, block, lycon->pool);
+    lycon->block.parent = lam::up(&saved_block);
+    lycon->block.content_width = lycon->block.given_width = width;
+    lycon->block.content_height = lycon->block.given_height = height;
+    lycon->block.max_width = width; lycon->block.float_right_edge = width;
+    lycon->available_space = AvailableSpace::make_width_definite(width);
+    if (block->font) setup_font(lycon->ui_context, &lycon->font, block->font);
+    setup_line_height(lycon, block); layout_setup_block_font_metrics(lycon);
+    line_init(lycon, 0.0f, width);
+    layout_block_inner_content(lycon, block);
+    block->width = block->content_width = width; block->height = block->content_height = height;
+    lycon->block = saved_block; lycon->line = saved_line; lycon->available_space = saved_space;
+}
+
+void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsigned depth) {
+    if (!element || depth >= MAX_LAYOUT_DEPTH || !dom_svg_element_is_eligible(element)) return;
+    if (!depth) svg_animation_prepare(element);
+    if (element->tag() == MARKUP_NAME_FOREIGNOBJECT) {
+        float x, y, width, height;
+        if (dom_svg_foreign_object_rectangle(element, &x, &y, &width, &height))
+            layout_svg_foreign_object(lycon, element, width, height);
+        return;
+    }
+    const char* tag = element->tag_name;
+    bool is_switch = tag && strcmp(tag, "switch") == 0;
+    if (!tag || (strcmp(tag, "svg") != 0 && strcmp(tag, "g") != 0 && strcmp(tag, "a") != 0 && !is_switch)) return;
+    if (depth) layout_init_display_contents_view(lycon, element);
+    if (layout_display_is_none(resolve_display_value(element))) return;
+    DomNode* selected = is_switch ? (DomNode*)dom_svg_switch_selected_child(element) : nullptr;
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        if (!child->is_element() || (is_switch && child != selected)) continue;
+        layout_svg_foreign_objects(lycon, child->as_element(), depth + 1);
+    }
+}
+
 void layout_publish_vertical_flow_geometry(LayoutContext* lycon, ViewBlock* block,
                                            float flow_height) {
     if (!lycon || !block || !block->first_child ||
@@ -6612,8 +6693,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         }
         bool has_outside_marker = block->display.list_item && block->pseudo &&
             block->pseudo->marker_generated && block->pseudo->marker &&
-            block->pseudo->marker->blk &&
-            reinterpret_cast<MarkerProp*>(block->pseudo->marker->blk)->is_outside;
+            block->pseudo->marker->marker_prop() &&
+            block->pseudo->marker->marker_prop()->is_outside;
         if (block->block()->unicode_bidi == CSS_VALUE_PLAINTEXT &&
             !has_outside_marker) {
             // CSS Writing Modes §2.2: plaintext derives the paragraph base
@@ -6633,7 +6714,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
     // CSS Text 3 §4.2: save the block container's font for tab-size calculation.
-    lycon->block.block_container_font = lycon->font.style;
+    lycon->block.block_container_font = lam::up(lycon->font.style);
     // CSS 2.1 §10.8.1: Update line_start_font to the block's own font, since
     lycon->line.line_start_font = lycon->font;
     setup_line_height(lycon, block);
@@ -6652,8 +6733,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     }
     if (block->is_element() && lycon->font.style) {
         DomElement* block_element = lam::dom_require<DOM_NODE_ELEMENT>(block);
-        lycon->block.first_line_font = layout_resolve_first_line_font(
-            lycon, block_element, lycon->font.style);
+        lycon->block.first_line_font = lam::up(layout_resolve_first_line_font(
+            lycon, block_element, lycon->font.style));
         lycon->block.first_line_style_active =
             lycon->block.first_line_font != nullptr;
     }
@@ -7078,7 +7159,7 @@ bool layout_block_is_self_collapsing(ViewBlock* vb) {
             } else {
                 if (child->view_type == RDT_VIEW_MARKER) {
                     // CSS 2.2 §12.5 + §8.3.1: An outside marker with visible content
-                    MarkerProp* mp = child->is_element() ? reinterpret_cast<MarkerProp*>(lam::dom_require<DOM_NODE_ELEMENT>(child)->blk) : nullptr;
+                    MarkerProp* mp = child->is_element() ? lam::dom_require<DOM_NODE_ELEMENT>(child)->marker_prop() : nullptr;
                     is_substantial = (mp != nullptr);  // marker exists = has content
                 } else {
                     is_substantial = true;
@@ -7800,7 +7881,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     if (establishes_bfc) {
         lycon->block.is_bfc_root = true;
-        lycon->block.establishing_element = block;
+        lycon->block.establishing_element = lam::up(block);
         block_context_reset_floats(&lycon->block);
         block_context_reset_initial_letters(&lycon->block);
     } else {
@@ -7867,6 +7948,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     if (elmt_name == MARKUP_NAME_SVG &&
         !(block->blk && block->block()->content_visibility_hidden)) {
+        SvgAnimationSourceScope animation_sources(block->as_element()->doc);
+        layout_apply_svg_animated_dimensions(lycon, block);
         ReplacedIntrinsicFacts svg_facts =
             layout_replaced_intrinsic_facts(lycon, block);
         float preferred_aspect_ratio = layout_used_preferred_aspect_ratio(block);
@@ -7876,7 +7959,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
                 bool horizontal = layout_axis_is_horizontal(axis);
                 CssDeclaration* declaration =
                     layout_specified_physical_size_declaration(svg_element, horizontal);
-                const char* attribute = block->get_attribute(horizontal ? "width" : "height");
+                const char* attribute = svg_animation_attribute(svg_element, horizontal ? "width" : "height");
                 if (!declaration && attribute && strchr(attribute, '%')) {
                     float percent = (float)atof(attribute);
                     if (percent >= 0.0f) {
@@ -9694,7 +9777,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     BlockContext pa_block = lycon->block;  Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
-    lycon->block.parent = &pa_block;  lycon->elmt = elmt;
+    lycon->block.parent = lam::up(&pa_block);  lycon->elmt = lam::up(elmt);
     lycon->block.content_width = lycon->block.content_height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
     lycon->block.saved_clear_y = -1;
@@ -9972,7 +10055,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
         // CSS 2.1 §9.7: Floats are blockified — a floated element that was
         if (is_inline_atomic && !is_float_element) {
-            if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(block);
+            if (!lycon->line.start_view) lycon->line.start_view = lam::up(static_cast<View*>(block));
             // CSS 2.1 §9.5.1: inline-blocks must account for floats across their
             float inline_block_height = block->height;
             update_line_for_bfc_floats(lycon, inline_block_height);
@@ -10084,7 +10167,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             line_start = static_cast<View*>(pe);
                             p = p->parent;
                         }
-                        lycon->line.start_view = line_start;
+                        lycon->line.start_view = lam::up(line_start);
                     }
                 } else if (lycon->line.has_float_intrusion) {
                     // CSS 2.1 §9.5: First item on line doesn't fit due to float —

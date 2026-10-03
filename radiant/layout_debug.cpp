@@ -173,7 +173,7 @@ void layout_profiler_record_node(LayoutProfiler* profiler, LayoutProfileBucket b
         profiler->top_nodes[insert_at] = profiler->top_nodes[insert_at - 1];
         insert_at--;
     }
-    profiler->top_nodes[insert_at].node = node;
+    profiler->top_nodes[insert_at].node = lam::up(node);
     profiler->top_nodes[insert_at].bucket = bucket;
     profiler->top_nodes[insert_at].elapsed_ms = elapsed_ms;
 }

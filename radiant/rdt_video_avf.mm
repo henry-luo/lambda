@@ -14,6 +14,7 @@
 #include "rdt_video.h"
 #include "../lib/log.h"
 #include "../lib/mem.h"
+#include "../lib/ownership.hpp"
 
 #include <math.h>
 #include <stdatomic.h>
@@ -232,12 +233,9 @@ void rdt_video_destroy(RdtVideo* video) {
     video->asset = nil;
 
     // free frame buffer
-    if (video->frame_buffer) {
-        mem_free(video->frame_buffer);
-        video->frame_buffer = NULL;
-    }
-
-    mem_free(video);
+    lam::Temp<uint8_t> frame_buffer(video->frame_buffer);
+    video->frame_buffer = NULL;
+    lam::Temp<RdtVideo> owned(video);  // destroy releases the backend handle
 }
 
 int rdt_video_open_file(RdtVideo* video, const char* file_path) {
@@ -472,7 +470,7 @@ int rdt_video_get_frame(RdtVideo* video, RdtVideoFrame* frame) {
         int out_stride = out_w * 4;
         int needed = out_stride * out_h;
         if (!video->frame_buffer || video->frame_width != out_w || video->frame_height != out_h) {
-            if (video->frame_buffer) mem_free(video->frame_buffer);
+            lam::Temp<uint8_t> previous(video->frame_buffer);  // the resized buffer replaces it
             video->frame_buffer = (uint8_t*)mem_alloc(needed, MEM_CAT_RENDER);
             video->frame_width = out_w;
             video->frame_height = out_h;

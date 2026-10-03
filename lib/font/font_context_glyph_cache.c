@@ -38,3 +38,7 @@ bool font_context_enforce_glyph_arena_limit(FontContext* ctx) {
 uint64_t font_context_glyph_cache_generation(FontContext* ctx) {
     return ctx ? ctx->glyph_cache_generation : 0;
 }
+
+uint64_t font_context_resource_generation(FontContext* ctx) {
+    return ctx ? ctx->resource_generation : 0;
+}

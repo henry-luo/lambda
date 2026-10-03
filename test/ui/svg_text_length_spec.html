@@ -1,0 +1,6 @@
+<!DOCTYPE html><html><head><style>@font-face{font-family:SVG-Ahem;src:url('../layout/data/font/Ahem.ttf');}html,body{margin:0;background:white;}svg{font-family:SVG-Ahem;font-size:20px;}</style></head><body><svg width="360" height="160">
+<!-- SVG 2 11.2.1: descendant textLength controls its glyphs exclusively. -->
+<text x="10" y="35" textLength="120" fill="red">A<tspan id="fixed" textLength="40">BC</tspan>D</text>
+<text x="160" y="35" textLength="140" lengthAdjust="spacingAndGlyphs" fill="blue">A<tspan id="fixed-scale" textLength="60" lengthAdjust="spacingAndGlyphs">BC</tspan>D</text>
+<text x="10" y="100" fill="lime">A<tspan textLength="70">BC</tspan><tspan id="after-fixed">D</tspan></text>
+</svg></body></html>

@@ -58,6 +58,54 @@ static inline uint8_t render_composite_blend_channel(uint8_t Cb_byte, uint8_t Cs
     return clamp_byte(value);
 }
 
+static float render_blend_luminosity(const float color[3]) {
+    return .3f * color[0] + .59f * color[1] + .11f * color[2];
+}
+
+static float render_blend_saturation(const float color[3]) {
+    return fmaxf(color[0], fmaxf(color[1], color[2])) - fminf(color[0], fminf(color[1], color[2]));
+}
+
+static void render_blend_set_luminosity(float color[3], float target) {
+    float shift = target - render_blend_luminosity(color);
+    for (unsigned channel = 0; channel < 3; channel++) color[channel] += shift;
+    float low = fminf(color[0], fminf(color[1], color[2])), high = fmaxf(color[0], fmaxf(color[1], color[2]));
+    // clip all channels around luminosity so gamut clipping preserves the selected component.
+    for (unsigned channel = 0; channel < 3; channel++) {
+        if (low < 0.0f) color[channel] = target + (color[channel] - target) * target / (target - low);
+        if (high > 1.0f) color[channel] = target + (color[channel] - target) * (1.0f - target) / (high - target);
+    }
+}
+
+static void render_blend_set_saturation(float color[3], float target) {
+    unsigned order[3] = {0, 1, 2};
+    for (unsigned index = 1; index < 3; index++) for (unsigned prior = index; prior && color[order[prior - 1]] > color[order[prior]]; prior--) {
+        unsigned swap = order[prior]; order[prior] = order[prior - 1]; order[prior - 1] = swap;
+    }
+    float range = color[order[2]] - color[order[0]];
+    color[order[1]] = range > 0.0f ? (color[order[1]] - color[order[0]]) * target / range : 0.0f;
+    color[order[2]] = range > 0.0f ? target : 0.0f; color[order[0]] = 0.0f;
+}
+
+void render_composite_blend_rgb(uint32_t backdrop, uint32_t source, CssEnum mode, float result[3]) {
+    float background[3], foreground[3];
+    for (unsigned channel = 0; channel < 3; channel++) {
+        background[channel] = (float)((backdrop >> (channel * 8)) & 255u) / 255.0f;
+        foreground[channel] = (float)((source >> (channel * 8)) & 255u) / 255.0f;
+        result[channel] = (mode == CSS_VALUE_SATURATION_BLEND || mode == CSS_VALUE_LUMINOSITY_BLEND) ? background[channel] : foreground[channel];
+    }
+    switch (mode) {
+    case CSS_VALUE_HUE_BLEND: render_blend_set_saturation(result, render_blend_saturation(background)); break;
+    case CSS_VALUE_SATURATION_BLEND: render_blend_set_saturation(result, render_blend_saturation(foreground)); break;
+    case CSS_VALUE_COLOR_BLEND: case CSS_VALUE_LUMINOSITY_BLEND: break;
+    default:
+        for (unsigned channel = 0; channel < 3; channel++) result[channel] = (float)render_composite_blend_channel(
+            (uint8_t)(backdrop >> (channel * 8)), (uint8_t)(source >> (channel * 8)), mode) / 255.0f;
+        return;
+    }
+    render_blend_set_luminosity(result, render_blend_luminosity(mode == CSS_VALUE_LUMINOSITY_BLEND ? foreground : background));
+}
+
 uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode) {
     uint8_t sa = (source >> 24) & 0xFF;
     if (sa == 0) return backdrop;
@@ -67,10 +115,11 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
     uint8_t sr = source & 0xFF, sg = (source >> 8) & 0xFF, sb = (source >> 16) & 0xFF;
     uint8_t br = backdrop & 0xFF, bg = (backdrop >> 8) & 0xFF, bb = (backdrop >> 16) & 0xFF;
 
+    float mixed[3]; render_composite_blend_rgb(backdrop, source, blend_mode, mixed);
     if (sa == 255 && ba == 255) {
-        uint8_t rr = render_composite_blend_channel(br, sr, blend_mode);
-        uint8_t rg = render_composite_blend_channel(bg, sg, blend_mode);
-        uint8_t rb = render_composite_blend_channel(bb, sb, blend_mode);
+        uint8_t rr = clamp_byte_round(mixed[0] * 255.0f);
+        uint8_t rg = clamp_byte_round(mixed[1] * 255.0f);
+        uint8_t rb = clamp_byte_round(mixed[2] * 255.0f);
         return render_pixel_pack_abgr(rr, rg, rb, 255u);
     }
 
@@ -82,15 +131,15 @@ uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnu
     float p = (1.0f - fa) * fsa;
     float q = (1.0f - fsa) * fa;
     float t = fa * fsa;
-    auto blendch = [&](uint8_t Cb_b, uint8_t Cs_b) -> uint8_t {
-        float Bb = render_composite_blend_channel(Cb_b, Cs_b, blend_mode) / 255.0f;
+    auto blendch = [&](uint8_t Cb_b, uint8_t Cs_b, unsigned channel) -> uint8_t {
+        float Bb = mixed[channel];
         float Co = (p * (Cs_b / 255.0f) + q * (Cb_b / 255.0f) + t * Bb) / ra;
         int value = (int)(Co * 255.0f + 0.5f);
         return clamp_byte(value);
     };
-    uint8_t rr = blendch(br, sr);
-    uint8_t rg = blendch(bg, sg);
-    uint8_t rb = blendch(bb, sb);
+    uint8_t rr = blendch(br, sr, 0);
+    uint8_t rg = blendch(bg, sg, 1);
+    uint8_t rb = blendch(bb, sb, 2);
     uint8_t new_a = clamp_byte_round(ra * 255.0f);
     return render_pixel_pack_abgr(rr, rg, rb, new_a);
 }
@@ -118,9 +167,15 @@ void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdr
             uint32_t* pixel = &pixels[(y0 + row) * pitch + (x0 + col)];
             uint32_t source = backdrop[row * width + col];
             if (mode == RENDER_COMPOSITE_REGION_BLEND) {
-                *pixel = render_composite_blend_pixel(source, *pixel, blend_mode);
+                // blend functions use straight channels; native opacity groups retain premultiplied pixels.
+                bool premultiplied = surface->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED;
+                uint32_t result = render_composite_blend_pixel(
+                    premultiplied ? render_pixel_unpremultiply_abgr(source) : source,
+                    premultiplied ? render_pixel_unpremultiply_abgr(*pixel) : *pixel, blend_mode);
+                *pixel = premultiplied ? render_pixel_premultiply_abgr(result) : result;
             } else if (mode == RENDER_COMPOSITE_REGION_PREMULTIPLIED) {
-                *pixel = render_pixel_source_over_premultiplied_opaque(source, *pixel);
+                *pixel = render_pixel_source_over_premultiplied_pair(source,
+                    render_pixel_scale_premultiplied(*pixel, opacity));
             } else if (mode == RENDER_COMPOSITE_REGION_PREMULTIPLIED_FULL) {
                 *pixel = render_pixel_source_over_premultiplied(*pixel, source);
             } else {
@@ -139,10 +194,10 @@ void render_composite_blend_surface(ImageSurface* surface, const uint32_t* backd
 }
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
-                                         int x0, int y0, int width, int height) {
+                                         int x0, int y0, int width, int height, uint8_t opacity) {
     render_composite_apply_region(surface, backdrop, x0, y0, width, height,
                                   RENDER_COMPOSITE_REGION_PREMULTIPLIED,
-                                  CSS_VALUE_NORMAL, 255);
+                                  CSS_VALUE_NORMAL, opacity);
 }
 
 void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,

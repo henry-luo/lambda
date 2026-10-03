@@ -2,6 +2,7 @@
 
 #include <utf8proc.h>
 
+
 bool text_codepoint_has_zero_advance(uint32_t codepoint) {
     if (codepoint >= 0x1F3FB && codepoint <= 0x1F3FF) return true;  // emoji modifiers
     if (codepoint >= 0xFE00 && codepoint <= 0xFE0F) return true;    // variation selectors
@@ -20,6 +21,26 @@ bool text_codepoint_has_zero_advance(uint32_t codepoint) {
 
     utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)codepoint);
     return cat == UTF8PROC_CATEGORY_MN || cat == UTF8PROC_CATEGORY_ME;
+}
+
+bool text_emphasis_marks_codepoint(uint32_t codepoint) {
+    if (!codepoint || text_codepoint_has_zero_advance(codepoint)) return false;
+    utf8proc_category_t cat = utf8proc_category((utf8proc_int32_t)codepoint);
+    if (cat == UTF8PROC_CATEGORY_ZS || cat == UTF8PROC_CATEGORY_ZL ||
+        cat == UTF8PROC_CATEGORY_ZP || cat == UTF8PROC_CATEGORY_CC ||
+        cat == UTF8PROC_CATEGORY_CF || cat == UTF8PROC_CATEGORY_CN) return false;
+    if (cat >= UTF8PROC_CATEGORY_PC && cat <= UTF8PROC_CATEGORY_PO) {
+        // CSS Text Decoration 3 retains marks on these punctuation symbols.
+        switch (codepoint) {
+            case '#': case '%': case '&': case '@':
+            case 0x0609: case 0x060A: case 0x066A:
+            case 0x00A7: case 0x00B6: case 0x2030: case 0x2031:
+            case 0x204A: case 0x204B: case 0x2053: case 0x303D:
+                return true;
+            default: return false;
+        }
+    }
+    return true;
 }
 
 float text_unicode_space_width_em(uint32_t codepoint) {

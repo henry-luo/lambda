@@ -36,6 +36,7 @@ void GifAnimation::tick(AnimationInstance* anim, float t) {
 
         // Swap the surface pixel pointer to the new frame
         surface->pixels = frame->pixels;
+        surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
         image_surface_bump_generation(surface);
 
         // Set next frame end time
@@ -58,8 +59,8 @@ void GifAnimation::finish(AnimationInstance* anim) {
     // The surface itself is not freed here — the caller owns it.
     // We reset to NULL so the renderer shows nothing (or the caller can re-set).
     image_surface_detach_pixels(surface);
-    mem_free(this);
     anim->state = NULL;
+    lam::Temp<GifAnimation> self(this);  // the finished animation releases its player
 }
 
 void gif_animation_tick(AnimationInstance* anim, float t) {
@@ -103,6 +104,7 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
     surface->decoded_width = gif_frames->width;
     surface->decoded_height = gif_frames->height;
     surface->pixels = gif_frames->frames[0].pixels;
+    surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
     image_surface_bump_generation(surface);
 
     AnimationInstance* inst = animation_instance_create(scheduler);

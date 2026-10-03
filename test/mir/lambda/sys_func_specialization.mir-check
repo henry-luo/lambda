@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "description": "Typed system-function calls under MIR-Direct. Tune6 L3 landed native math lowering: math.* transcendentals with statically-numeric scalar arguments now import the libm symbol (sin, sqrt) and call it with a d->d prototype instead of the boxed fn_math_* wrapper. Deliberate update -- before L3 this fixture expected 'import fn_math_sin' / 'import fn_math_sqrt'. The unboxed fn_*_u / fn_abs_i specializations remain C-transpiler-only and stay forbidden. fn_abs stays boxed on purpose: abs/round/floor/ceil/trunc/min/max are type preserving (abs(-5) is int 5), so lowering them to a double-returning native call would change the result type. fn_pow here is the ** operator, not math.pow.",
+  "description": "Native MIR math preserves the full numeric domain: integer abs uses guarded negation; float transcendental calls use libm (S7.10.5v3, D2.2.2). Legacy boxed/native C-text specializations remain forbidden.",
   "checks": [
     {
       "in_func": "*",
       "expect": [
         "import\tfn_pow",
-        "import\tfn_abs",
+        "neg\t",
         "import\tsin",
         "import\tsqrt"
       ],
@@ -18,7 +18,8 @@
         "import\tfn_min2_u",
         "import\tfn_max2_u",
         "import\tfn_sign_i",
-        "import\tfn_sign_f"
+        "import\tfn_sign_f",
+        "call\tfn_abs_p, fn_abs"
       ]
     }
   ]

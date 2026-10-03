@@ -1,0 +1,187 @@
+{
+  "name": "SVG fixed-seed fractal/turbulence, stitched tiles, zero frequency, and primitive bounding-box coordinates",
+  "html": "test/ui/svg_filter_noise.html",
+  "viewport": {
+    "width": 740,
+    "height": 160
+  },
+  "oracle": "Filter Effects 1 section 9.21, independent canvas oracle at test/svg/oracles/svg_filter_noise_reference.html. Chromium Skia retains rejected unit-disk vectors, so its original captures are diagnostic.",
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 40,
+      "min_r": 203,
+      "max_r": 219,
+      "min_g": 210,
+      "max_g": 226,
+      "min_b": 219,
+      "max_b": 235
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 60,
+      "min_r": 195,
+      "max_r": 211,
+      "min_g": 152,
+      "max_g": 168,
+      "min_b": 171,
+      "max_b": 187
+    },
+    {
+      "type": "assert_pixel",
+      "x": 100,
+      "y": 80,
+      "min_r": 206,
+      "max_r": 222,
+      "min_g": 187,
+      "max_g": 203,
+      "min_b": 185,
+      "max_b": 201
+    },
+    {
+      "type": "assert_pixel",
+      "x": 130,
+      "y": 100,
+      "min_r": 158,
+      "max_r": 174,
+      "min_g": 169,
+      "max_g": 185,
+      "min_b": 180,
+      "max_b": 196
+    },
+    {
+      "type": "assert_pixel",
+      "x": 220,
+      "y": 40,
+      "min_r": 170,
+      "max_r": 186,
+      "min_g": 171,
+      "max_g": 187,
+      "min_b": 178,
+      "max_b": 194
+    },
+    {
+      "type": "assert_pixel",
+      "x": 250,
+      "y": 60,
+      "min_r": 188,
+      "max_r": 204,
+      "min_g": 183,
+      "max_g": 199,
+      "min_b": 190,
+      "max_b": 206
+    },
+    {
+      "type": "assert_pixel",
+      "x": 280,
+      "y": 80,
+      "min_r": 212,
+      "max_r": 228,
+      "min_g": 215,
+      "max_g": 231,
+      "min_b": 211,
+      "max_b": 227
+    },
+    {
+      "type": "assert_pixel",
+      "x": 310,
+      "y": 100,
+      "min_r": 228,
+      "max_r": 244,
+      "min_g": 224,
+      "max_g": 240,
+      "min_b": 227,
+      "max_b": 243
+    },
+    {
+      "type": "assert_pixel",
+      "x": 400,
+      "y": 40,
+      "min_r": 183,
+      "max_r": 199,
+      "min_g": 183,
+      "max_g": 199,
+      "min_b": 183,
+      "max_b": 199
+    },
+    {
+      "type": "assert_pixel",
+      "x": 430,
+      "y": 60,
+      "min_r": 183,
+      "max_r": 199,
+      "min_g": 183,
+      "max_g": 199,
+      "min_b": 183,
+      "max_b": 199
+    },
+    {
+      "type": "assert_pixel",
+      "x": 460,
+      "y": 80,
+      "min_r": 183,
+      "max_r": 199,
+      "min_g": 183,
+      "max_g": 199,
+      "min_b": 183,
+      "max_b": 199
+    },
+    {
+      "type": "assert_pixel",
+      "x": 490,
+      "y": 100,
+      "min_r": 183,
+      "max_r": 199,
+      "min_g": 183,
+      "max_g": 199,
+      "min_b": 183,
+      "max_b": 199
+    },
+    {
+      "type": "assert_pixel",
+      "x": 580,
+      "y": 40,
+      "min_r": 214,
+      "max_r": 230,
+      "min_g": 202,
+      "max_g": 218,
+      "min_b": 220,
+      "max_b": 236
+    },
+    {
+      "type": "assert_pixel",
+      "x": 610,
+      "y": 60,
+      "min_r": 124,
+      "max_r": 140,
+      "min_g": 181,
+      "max_g": 197,
+      "min_b": 151,
+      "max_b": 167
+    },
+    {
+      "type": "assert_pixel",
+      "x": 640,
+      "y": 80,
+      "min_r": 190,
+      "max_r": 206,
+      "min_g": 175,
+      "max_g": 191,
+      "min_b": 194,
+      "max_b": 210
+    },
+    {
+      "type": "assert_pixel",
+      "x": 670,
+      "y": 100,
+      "min_r": 133,
+      "max_r": 149,
+      "min_g": 164,
+      "max_g": 180,
+      "min_b": 177,
+      "max_b": 193
+    }
+  ]
+}

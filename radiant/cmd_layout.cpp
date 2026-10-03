@@ -225,7 +225,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url,
     int viewport_width, int viewport_height,
     const DocumentJsHostConfig* js_host_config, CookieJar* top_level_cookie_jar,
     HtmlLoadPhaseTiming* timing, DocumentScriptPhaseTiming* script_timing,
-    bool defer_html_scripts);
+    bool defer_html_scripts, bool print_media);
 
 // Element-to-DOM map functions (from dom_element.cpp, Phase 12)
 HashMap* element_dom_map_create(void);
@@ -826,7 +826,12 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
     if (g_css_resource_manager) {
         for (size_t i = 0; i < stylesheet->rule_count; i++) {
             CssRule* rule = stylesheet->rules[i];
-            const char* import_url = rule && rule->type == CSS_RULE_IMPORT
+            bool eligible = rule && rule->type == CSS_RULE_IMPORT &&
+                !rule->data.import_rule.invalid &&
+                (!rule->data.import_rule.supports ||
+                 css_evaluate_supports_condition(engine,
+                     rule->data.import_rule.supports));
+            const char* import_url = eligible
                 ? rule->data.import_rule.url : nullptr;
             char import_path[1024];
             if (resolve_css_import_path(import_url, stylesheet_path,
@@ -839,7 +844,11 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
 
     for (size_t i = 0; i < stylesheet->rule_count; i++) {
         CssRule* rule = stylesheet->rules[i];
-        if (!rule || rule->type != CSS_RULE_IMPORT) continue;
+        if (!rule || rule->type != CSS_RULE_IMPORT ||
+            rule->data.import_rule.invalid ||
+            (rule->data.import_rule.supports &&
+             !css_evaluate_supports_condition(engine,
+                 rule->data.import_rule.supports))) continue;
 
         const char* import_url = rule->data.import_rule.url;
         // Resolve import path relative to the stylesheet or document URL.
@@ -866,6 +875,12 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
         CssStylesheet* imported = parse_and_collect_stylesheet(
             engine, css_pool_copy, import_path, import_path, pool,
             stylesheets, count, capacity, depth + 1);
+        if (imported) {
+            // Keep CSSOM's sheet list while nesting cascade order at the
+            // importing rule's source position.
+            imported->is_import_child = true;
+            rule->data.import_rule.stylesheet = imported;
+        }
         if (!imported || imported->rule_count == 0) {
             log_warn("[CSS @import] Failed to parse imported stylesheet: %s", import_path);
         }
@@ -1652,7 +1667,7 @@ static void store_document_stylesheets(DomDocument* dom_doc,
     for (int i = 0; !stylesheet_set_changed && i < count; i++) {
         stylesheet_set_changed = dom_doc->stylesheets[i] != merged[i];
     }
-    dom_doc->stylesheets = merged;
+    dom_doc->stylesheets = lam::own_arr(merged);
     dom_doc->stylesheet_count = count;
     dom_doc->stylesheet_capacity = count;
     // A new parsed sheet set invalidates the matching document-font registry.
@@ -2219,7 +2234,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts, HtmlLoadPhaseTiming* timing,
     DocumentScriptPhaseTiming* script_timing, const DocumentJsHostConfig* js_host_config,
-    CookieJar* top_level_cookie_jar) {
+    CookieJar* top_level_cookie_jar, bool print_media) {
     auto t_start = time_now_ns();
 
     log_mem_stage("load_html: enter");
@@ -2428,6 +2443,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Cache for runtime re-cascade (e.g. on pseudo-state changes like :hover)
     dom_doc->services.cached_css_engine = css_engine;
     css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+    // media selection precedes linked-sheet discovery and the first cascade.
+    css_engine->context.print_media = print_media;
+    css_engine->context.quirks_mode =
+        is_quirks_mode((HtmlVersion)dom_doc->html_version);
 
     // Create the page-owned scheduler before dependency discovery so CSS,
     // script, and later DOM consumers share request identities and cache data.
@@ -2508,7 +2527,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     log_mem_stage("load_html: after_inline_attrs");
     auto t_inline_style = timing ? time_now_ns() : t_stylesheet_setup;
 
-    dom_doc->root = dom_root;  // set root for CSSOM and JS DOM API access
+    dom_doc->root = lam::up(dom_root);  // set root for CSSOM and JS DOM API access
 
     // Scripts read computed styles during load, so the initial cascade is the
     // single ordering invariant; the retired pre-cascade mode made that state
@@ -2530,7 +2549,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
 
     if (execute_scripts) {
-        dom_doc->html_root = html_root;
+        dom_doc->html_root = lam::up(html_root);
         run_html_document_scripts(dom_doc, pool, timing, script_timing,
                                   profile_recascade_completed, script_prefetch_count,
                                   script_prefetch_start_ns, t_initial_cascade,
@@ -2600,18 +2619,19 @@ DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename,
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, html_source, track_source_lines, execute_scripts,
-                                         nullptr, nullptr, nullptr, nullptr);
+                                         nullptr, nullptr, nullptr, nullptr, false);
 }
 
 static DomDocument* load_lambda_html_doc_with_host_config(
     Url* html_url, const char* css_filename, int viewport_width, int viewport_height,
     Pool* pool, const DocumentJsHostConfig* js_host_config,
     CookieJar* top_level_cookie_jar, HtmlLoadPhaseTiming* timing,
-    DocumentScriptPhaseTiming* script_timing, bool execute_scripts) {
+    DocumentScriptPhaseTiming* script_timing, bool execute_scripts,
+    bool print_media) {
     return load_lambda_html_doc_profiled(html_url, css_filename, false,
                                          viewport_width, viewport_height,
                                          pool, nullptr, false, execute_scripts, timing, script_timing,
-                                         js_host_config, top_level_cookie_jar);
+                                         js_host_config, top_level_cookie_jar, print_media);
 }
 
 DomDocument* load_lambda_document_transform_doc(Url* document_url,
@@ -2735,7 +2755,8 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
                                               CookieJar* top_level_cookie_jar,
                                               HtmlLoadPhaseTiming* timing,
                                               DocumentScriptPhaseTiming* script_timing,
-                                              bool defer_html_scripts) {
+                                              bool defer_html_scripts,
+                                              bool print_media) {
     Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "cmd_layout");
     if (!pool) { log_error("Failed to create memory pool");  return NULL; }
 
@@ -2763,7 +2784,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
         log_info("[load_html_doc] HTTP/HTTPS URL detected, using HTML pipeline: %s", doc_url);
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,
-            !defer_html_scripts);
+            !defer_html_scripts, print_media);
         if (doc && defer_html_scripts) doc->html_scripts_deferred = true;
     } else {
     bool handled = false;
@@ -2773,7 +2794,7 @@ static DomDocument* load_html_doc_no_redirect(Url *base, char* doc_url, int view
     if (!handled) {
         doc = load_lambda_html_doc_with_host_config(full_url, NULL, viewport_width,
             viewport_height, pool, js_host_config, top_level_cookie_jar, timing, script_timing,
-            !defer_html_scripts);
+            !defer_html_scripts, print_media);
         if (doc && defer_html_scripts) doc->html_scripts_deferred = true;
     }
     }
@@ -2795,7 +2816,8 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_url, int viewport_width
                                     const DocumentJsHostConfig* js_host_config,
                                     CookieJar* top_level_cookie_jar,
                                     HtmlLoadPhaseTiming* timing,
-                                    DocumentScriptPhaseTiming* script_timing) {
+                                    DocumentScriptPhaseTiming* script_timing,
+                                    bool print_media) {
     const int max_redirects = 8;
     Url* current_base = base;
     char* current_doc_url = doc_url;
@@ -2804,7 +2826,7 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_url, int viewport_width
     for (int redirect_count = 0; redirect_count <= max_redirects; redirect_count++) {
         DomDocument* doc = load_html_doc_no_redirect(current_base, current_doc_url,
             viewport_width, viewport_height, js_host_config, top_level_cookie_jar,
-            timing, script_timing, false);
+            timing, script_timing, false, print_media);
         if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
             if (owned_doc_url) mem_free(owned_doc_url);
             return doc;
@@ -2843,14 +2865,16 @@ DomDocument* load_html_doc_profiled(Url* base, char* doc_url, int viewport_width
 
 DomDocument* load_html_doc(Url* base, char* doc_url, int viewport_width, int viewport_height,
                            const DocumentJsHostConfig* js_host_config,
-                           CookieJar* top_level_cookie_jar, bool defer_html_scripts) {
+                           CookieJar* top_level_cookie_jar, bool defer_html_scripts,
+                           bool print_media) {
     if (defer_html_scripts) {
         return load_html_doc_no_redirect(base, doc_url, viewport_width, viewport_height,
                                          js_host_config, top_level_cookie_jar,
-                                         nullptr, nullptr, true);
+                                         nullptr, nullptr, true, print_media);
     }
     return load_html_doc_profiled(base, doc_url, viewport_width, viewport_height,
-                                  js_host_config, top_level_cookie_jar, nullptr, nullptr);
+                                  js_host_config, top_level_cookie_jar, nullptr, nullptr,
+                                  print_media);
 }
 
 static char* escape_image_document_html_attr(const char* value) {
@@ -2935,10 +2959,26 @@ static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_
     return doc;
 }
 
-// load SVG through the DOM-backed image path.
+// standalone SVG owns a document DOM; referenced images retain isolated image mode.
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale) {
     (void)device_scale;
-    return load_dom_backed_image_document(svg_url, viewport_width, viewport_height, pool, "load_svg_doc");
+    if (!svg_url || !pool) return nullptr;
+    bool http = svg_url->scheme == URL_SCHEME_HTTP || svg_url->scheme == URL_SCHEME_HTTPS;
+    char* path = http ? nullptr : url_to_local_path(svg_url);
+    CssSourceBuffer source = {};
+    bool loaded = css_load_source(http ? url_get_href(svg_url) : path, http, false, &source);
+    if (path) mem_free(path);
+    if (!loaded) return nullptr;
+    StrBuf* html = strbuf_new_cap(source.length + 256);
+    if (!html) { mem_free(source.data); return nullptr; }
+    strbuf_append_str(html, "<!doctype html><html><head><style>html,body{margin:0;padding:0;background:white}body>svg{display:block}</style></head><body>");
+    strbuf_append_str_n(html, source.data, source.length);
+    strbuf_append_str(html, "</body></html>");
+    DomDocument* doc = load_lambda_html_doc(svg_url, nullptr, viewport_width,
+        viewport_height, pool, html->str);
+    strbuf_free(html);
+    mem_free(source.data);
+    return doc;
 }
 
 // load a raster image through the DOM-backed image path.
@@ -3010,8 +3050,8 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
                                       Element* html_root, HtmlVersion version,
                                       Url* url, Runtime* runtime) {
     if (!doc) return;
-    doc->root = root;
-    doc->html_root = html_root;
+    doc->root = lam::up(root);
+    doc->html_root = lam::up(html_root);
     doc->html_version = version;
     doc->url = url;
     // Load-time geometry reads may already have committed a ViewTree.
@@ -3203,7 +3243,7 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
     if (page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
-        document->element_dom_map = element_dom_map_create();
+        document->element_dom_map = lam::own(element_dom_map_create());
         if (!document->element_dom_map) {
             log_error("[LAYOUT DOC INIT] failed to create Lambda element map");
             dom_document_destroy(document);
@@ -3688,17 +3728,17 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
         return nullptr;
     }
 
-    html_elem->first_child = static_cast<DomNode*>(body_elem);
-    html_elem->last_child = static_cast<DomNode*>(body_elem);
-    body_elem->parent = static_cast<DomNode*>(html_elem);
+    html_elem->first_child = lam::own(static_cast<DomNode*>(body_elem));
+    html_elem->last_child = lam::up(static_cast<DomNode*>(body_elem));
+    body_elem->parent = lam::up(static_cast<DomNode*>(html_elem));
 
-    body_elem->first_child = static_cast<DomNode*>(xml_dom);
-    body_elem->last_child = static_cast<DomNode*>(xml_dom);
-    xml_dom->parent = static_cast<DomNode*>(body_elem);
+    body_elem->first_child = lam::own(static_cast<DomNode*>(xml_dom));
+    body_elem->last_child = lam::up(static_cast<DomNode*>(xml_dom));
+    xml_dom->parent = lam::up(static_cast<DomNode*>(body_elem));
 
 
-    dom_doc->root = html_elem;
-    dom_doc->html_root = xml_root;
+    dom_doc->root = lam::up(html_elem);
+    dom_doc->html_root = lam::up(xml_root);
 
     auto t_cascade = time_now_ns();
     log_info("[TIMING] load: build DOM: %.1fms",
@@ -4026,7 +4066,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
                                script_stylesheet ? 1 : 0,
                                inline_stylesheets, inline_stylesheet_count, pool);
     if (dom_doc->stylesheet_count > 0) {
-        dom_doc->cached_inline_sheets = inline_stylesheets;
+        dom_doc->cached_inline_sheets = lam::own_arr(inline_stylesheets);
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
         dom_doc->services.cached_css_engine = css_engine;
     }
@@ -4313,7 +4353,7 @@ static Element* layout_current_html_root(DomDocument* doc) {
     Item current_root = render_map_get_doc_root();
     if (current_root.item && current_root.element != html_root) {
         html_root = current_root.element;
-        doc->html_root = html_root;
+        doc->html_root = lam::up(html_root);
     }
     return html_root;
 }
@@ -4342,7 +4382,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     css_property_system_init(doc->document_pool);
 
     if (!doc->element_dom_map) {
-        doc->element_dom_map = element_dom_map_create();
+        doc->element_dom_map = lam::own(element_dom_map_create());
     } else {
         hashmap_clear(doc->element_dom_map, false);
     }
@@ -4354,7 +4394,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
     auto t_dom = time_now_ns();
 
-    doc->root = new_root;
+    doc->root = lam::up(new_root);
 
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
     int inline_count = doc->cached_inline_sheet_count;
@@ -4363,9 +4403,11 @@ void rebuild_lambda_doc(UiContext* uicon) {
     if (!inline_sheets) {
         css_engine = css_engine_create(doc->document_pool);
         if (css_engine) {
+            css_engine->context.quirks_mode =
+                is_quirks_mode((HtmlVersion)doc->html_version);
             inline_sheets = extract_and_collect_css(
                 html_elem, new_root, css_engine, nullptr, doc->document_pool, &inline_count);
-            doc->cached_inline_sheets = inline_sheets;
+            doc->cached_inline_sheets = lam::own_arr(inline_sheets);
             doc->cached_inline_sheet_count = inline_count;
             doc->services.cached_css_engine = css_engine;
         }
@@ -4509,18 +4551,18 @@ void rebuild_lambda_doc_incremental(UiContext* uicon, RetransformResult* results
         }
 
         if (new_dom == old_dom) {
-            new_dom->parent = parent_dom;
-            new_dom->prev_sibling = old_previous;
-            new_dom->next_sibling = old_next;
+            new_dom->parent = lam::up(parent_dom);
+            new_dom->prev_sibling = lam::up(old_previous);
+            new_dom->next_sibling = lam::own(old_next);
             if (old_previous) {
-                old_previous->next_sibling = static_cast<DomNode*>(new_dom);
+                old_previous->next_sibling = lam::own(static_cast<DomNode*>(new_dom));
             } else {
-                parent_dom->first_child = static_cast<DomNode*>(new_dom);
+                parent_dom->first_child = lam::own(static_cast<DomNode*>(new_dom));
             }
             if (old_next) {
-                old_next->prev_sibling = static_cast<DomNode*>(new_dom);
+                old_next->prev_sibling = lam::up(static_cast<DomNode*>(new_dom));
             } else {
-                parent_dom->last_child = static_cast<DomNode*>(new_dom);
+                parent_dom->last_child = lam::up(static_cast<DomNode*>(new_dom));
             }
         } else {
             // Rebase live Range endpoints before the old subtree is detached;
@@ -5160,7 +5202,7 @@ static bool layout_single_file(
                                                 track_source_lines, true,
                                                 timing_file ? &html_load_timing : nullptr,
                                                 timing_file ? &document_script_timing : nullptr,
-                                                &js_host_config, nullptr);
+                                                &js_host_config, nullptr, false);
             if (!doc || !doc->pending_navigation_url || !doc->pending_navigation_url[0]) {
                 break;
             }
@@ -5346,9 +5388,7 @@ static bool layout_single_file(
 
         if (doc->view_tree) {
             cleanup_phase_start = time_now_ns();
-            view_pool_destroy(doc->view_tree);
-            mem_free(doc->view_tree);
-            doc->view_tree = nullptr;
+            view_tree_shell_destroy(doc->view_tree);
             phase_timing.cleanup_view_ms += time_elapsed_ms_f(
                 cleanup_phase_start, time_now_ns());
         }

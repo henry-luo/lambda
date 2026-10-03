@@ -145,55 +145,12 @@ static uint32_t bidi_marker_representative_codepoint(CssEnum direction) {
     return direction == CSS_VALUE_RTL ? 0x0627 : 0x0041;
 }
 
-static int bidi_find_strong_direction(DomNode* node, bool skip_explicit_dir,
-                                      bool first) {
-    if (!node) return 0;
-    if (node->is_text()) {
-        DomText* text = node->as_text();
-        if (!text->text || text->length == 0) return 0;
-        int last_strong = 0;
-        const char* cursor = text->text;
-        const char* end = cursor + text->length;
-        while (cursor < end) {
-            uint32_t codepoint = 0;
-            if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
-            int strong_class = utf_bidi_strong_class(codepoint);
-            if (strong_class != 0) {
-                if (first) return strong_class;
-                last_strong = strong_class;
-            }
-        }
-        return last_strong;
-    }
-    if (!node->is_element()) return 0;
-    DomElement* element = node->as_element();
-    if (element->tag_id == MARKUP_NAME_SCRIPT ||
-        element->tag_id == MARKUP_NAME_STYLE ||
-        (element->tag_name && strcmp(element->tag_name, "::marker") == 0)) {
-        return 0;
-    }
-    // html form-control values are editing state, not descendant content for an
-    // ancestor's dir=auto scan; treating textarea's raw child as content flips
-    // the containing block direction when the value starts with Arabic text.
-    if (element->tag_id == MARKUP_NAME_TEXTAREA) return 0;
-    if (skip_explicit_dir && element->get_attribute("dir")) return 0;
-    int last_strong = 0;
-    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
-        int strong_class = bidi_find_strong_direction(child, skip_explicit_dir, first);
-        if (strong_class != 0) {
-            if (first) return strong_class;
-            last_strong = strong_class;
-        }
-    }
-    return last_strong;
-}
-
 int layout_find_first_strong_direction(DomNode* node, bool skip_explicit_dir) {
-    return bidi_find_strong_direction(node, skip_explicit_dir, true);
+    return dom_find_strong_direction(node, skip_explicit_dir, true);
 }
 
 int layout_find_last_strong_direction(DomNode* node, bool skip_explicit_dir) {
-    return bidi_find_strong_direction(node, skip_explicit_dir, false);
+    return dom_find_strong_direction(node, skip_explicit_dir, false);
 }
 
 CssEnum layout_resolve_plaintext_direction(DomElement* element, CssEnum fallback) {
@@ -319,7 +276,7 @@ static void bidi_count_views(View* view, int line_number, int depth,
             return true;
         }
         if (current->view_type == RDT_VIEW_MARKER) {
-            MarkerProp* marker = (MarkerProp*)current->as_element()->blk;
+            MarkerProp* marker = current->as_element()->marker_prop();
             if (marker && !marker->is_outside && marker->width > 0.0f) {
                 counts->chars++;
                 counts->has_bidi_trigger = counts->has_bidi_trigger ||
@@ -341,7 +298,8 @@ static void bidi_count_views(View* view, int line_number, int depth,
 }
 
 static float bidi_span_edge_width(ViewSpan* span, bool left) {
-    if (!span || !span->bound) return 0.0f;
+    // A display:contents span has no box, so its decorations cannot shift bidi text.
+    if (!span || !span->bound || span->display.outer == CSS_VALUE_CONTENTS) return 0.0f;
     BoundaryProp* boundary = span->boundary_mut();
     float border = 0.0f;
     if (boundary->border) {
@@ -539,7 +497,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             continue;
         }
         if (current->view_type == RDT_VIEW_MARKER) {
-            MarkerProp* marker = (MarkerProp*)current->as_element()->blk;
+            MarkerProp* marker = current->as_element()->marker_prop();
             if (marker && !marker->is_outside && marker->width > 0.0f) {
                 bidi_append_atomic_fragment(
                     chars, char_cursor, current,

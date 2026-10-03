@@ -1,0 +1,60 @@
+{
+  "name": "Standalone SVG resolves its image from the owning URL",
+  "html": "test/ui/svg_image_assets/standalone_relative.svg",
+  "viewport": {
+    "width": 100,
+    "height": 60
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 5,
+      "y": 15,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 15,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 65,
+      "y": 25,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 35,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 15,
+      "y": 15,
+      "expected_selector": "#relative-image"
+    }
+  ]
+}

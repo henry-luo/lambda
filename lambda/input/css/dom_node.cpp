@@ -109,11 +109,11 @@ static bool dom_node_is_generated_after(DomNode* node) {
 void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
     if (!parent || !child) return;
     dom_node_cancel_detached(parent->doc, child);
-    child->parent = parent;
+    child->parent = lam::up(parent);
     child->next_sibling = nullptr;
     if (!parent->first_child) {
-        parent->first_child = child;
-        parent->last_child = child;
+        parent->first_child = lam::own(child);
+        parent->last_child = lam::up(child);
         child->prev_sibling = nullptr;
         return;
     }
@@ -125,16 +125,16 @@ void dom_append_to_sibling_chain(DomElement* parent, DomNode* child) {
     }
     if (dom_node_is_generated_after(last)) {
         DomNode* previous = last->prev_sibling;
-        child->prev_sibling = previous;
-        child->next_sibling = last;
-        if (previous) previous->next_sibling = child;
-        else parent->first_child = child;
-        last->prev_sibling = child;
+        child->prev_sibling = lam::up(previous);
+        child->next_sibling = lam::own(last);
+        if (previous) previous->next_sibling = lam::own(child);
+        else parent->first_child = lam::own(child);
+        last->prev_sibling = lam::up(child);
         return;
     }
-    last->next_sibling = child;
-    child->prev_sibling = last;
-    parent->last_child = child;
+    last->next_sibling = lam::own(child);
+    child->prev_sibling = lam::up(last);
+    parent->last_child = lam::up(child);
 }
 
 void dom_move_generated_after_to_end(DomElement* parent) {
@@ -150,15 +150,15 @@ void dom_move_generated_after_to_end(DomElement* parent) {
 
     DomNode* previous = after->prev_sibling;
     DomNode* next = after->next_sibling;
-    if (previous) previous->next_sibling = next;
-    else parent->first_child = next;
-    if (next) next->prev_sibling = previous;
+    if (previous) previous->next_sibling = lam::own(next);
+    else parent->first_child = lam::own(next);
+    if (next) next->prev_sibling = lam::up(previous);
 
     DomNode* last = parent->last_child;
-    last->next_sibling = after;
-    after->prev_sibling = last;
+    last->next_sibling = lam::own(after);
+    after->prev_sibling = lam::up(last);
     after->next_sibling = nullptr;
-    parent->last_child = after;
+    parent->last_child = lam::up(after);
 }
 
 bool DomNode::append_child(DomNode* child) {
@@ -179,7 +179,7 @@ bool DomNode::append_child(DomNode* child) {
     dom_node_cancel_detached(doc, child);
 
     // Set parent relationship
-    child->parent = this;
+    child->parent = lam::up(this);
 
     // Cast to DomElement to access first_child
     DomElement* element = static_cast<DomElement*>(this);
@@ -279,20 +279,20 @@ bool DomNode::insert_before(DomNode* new_node, DomNode* ref_node) {
     dom_node_cancel_detached(element->doc, new_node);
 
     // Set parent relationship
-    new_node->parent = this;
+    new_node->parent = lam::up(this);
 
     // Insert before reference node
-    new_node->next_sibling = ref_node;
+    new_node->next_sibling = lam::own(ref_node);
     new_node->prev_sibling = ref_node->prev_sibling;
 
     if (ref_node->prev_sibling) {
-        ref_node->prev_sibling->next_sibling = new_node;
+        ref_node->prev_sibling->next_sibling = lam::own(new_node);
     } else {
         // Reference node was first child
-        element->first_child = new_node;
+        element->first_child = lam::own(new_node);
     }
 
-    ref_node->prev_sibling = new_node;
+    ref_node->prev_sibling = lam::up(new_node);
 
     return true;
 }
@@ -382,7 +382,7 @@ void DomNode::print(StrBuf* buf, int indent) const {
         if (this->is_element()) {
             const DomElement* elem = this->as_element();
             if (elem->id) {
-                printf(" id=\"%s\"", elem->id);
+                printf(" id=\"%s\"", elem->id.get());
             }
             if (elem->class_count > 0) {
                 printf(" class=\"");
@@ -399,9 +399,9 @@ void DomNode::print(StrBuf* buf, int indent) const {
                 printf(" \"");
                 size_t max_len = 40;
                 if (text->length <= max_len) {
-                    printf("%.*s", (int)text->length, text->text);
+                    printf("%.*s", (int)text->length, text->text.get());
                 } else {
-                    printf("%.*s...", (int)(max_len - 3), text->text);
+                    printf("%.*s...", (int)(max_len - 3), text->text.get());
                 }
                 printf("\"");
             }

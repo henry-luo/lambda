@@ -330,7 +330,7 @@ static bool radiant_custom_layout_parse_paint_layers(const CustomLayoutContext* 
         int z = 0;
         radiant_item_to_int(radiant_obj_get(layer_item, "z"), &z);
         roots[i] = content;
-        layers[i].content = content.element;
+        layers[i].content = lam::up(content.element);
         layers[i].z = z;
         layers[i].order = i;
     }
@@ -350,7 +350,7 @@ static bool radiant_custom_layout_parse_paint_layers(const CustomLayoutContext* 
     }
     resource->roots = roots;
     resource->root_count = layer_count;
-    resource->paint.layers = layers;
+    resource->paint.layers = lam::own_arr(layers);
     resource->paint.layer_count = layer_count;
     return true;
 }
@@ -900,7 +900,7 @@ static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context || !context->parent) return ItemNull;
     RadiantVelmt parent;
     memset(&parent, 0, sizeof(parent));
-    parent.view = (View*)context->parent;
+    parent.view = lam::up((View*)context->parent);
     parent.element = context->parent;
     parent.index = -1;
     parent.border_box.x = 0.0f;
@@ -3910,6 +3910,9 @@ extern "C" bool dom_engine_exec_command(void* d, const char* c, const char* v) {
 extern "C" void* dom_engine_element_from_point(DomDocument* d, float x, float y) {
     return radiant_document_element_from_point(d, x, y);
 }
+extern "C" void* dom_engine_subtree_element_from_point(DomElement* root, float x, float y) {
+    return radiant_subtree_element_from_point(root, x, y);
+}
 
 PROVIDE(bool, history_initialize, (DomDocument* d), (d))
 PROVIDE(int, history_length, (DomDocument* d), (d))
@@ -3926,6 +3929,8 @@ PROVIDE(bool, input_set_live_value, (DomElement* e, const char* v), (e, v))
 PROVIDE_VOID(input_reset_live_value, (DomElement* e), (e))
 PROVIDE(bool, input_value_sanitize,
         (const char* t, const char* v, char* out, size_t n), (t, v, out, n))
+PROVIDE(bool, input_value_as_number,
+        (const char* t, const char* v, double* out), (t, v, out))
 PROVIDE_VOID(input_value_validate,
         (const char* t, const char* v, const char* mn, const char* mx, const char* st,
          RadiantInputValidity* out), (t, v, mn, mx, st, out))

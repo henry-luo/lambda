@@ -26,6 +26,13 @@ static bool validate_time(const char* value_str, void** parsed_value, Pool* pool
 // Property Definitions
 // ============================================================================
 
+static CssPropertyCode text_align_longhands[] = {
+    CSS_PROPERTY_TEXT_ALIGN_ALL, CSS_PROPERTY_TEXT_ALIGN_LAST
+};
+static CssPropertyCode text_emphasis_longhands[] = {
+    CSS_PROPERTY_TEXT_EMPHASIS_STYLE, CSS_PROPERTY_TEXT_EMPHASIS_COLOR
+};
+
 static CssProperty property_definitions[] = {
     // Layout Properties
     {CSS_PROPERTY_DISPLAY, "display", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "block", false, false, NULL, 0, validate_keyword, NULL},
@@ -110,13 +117,25 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_BOTTOM, "border-bottom", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
 
-    // CSS Logical border properties (inline/block axis, horizontal writing mode assumed)
+    // CSS Logical border properties share the writing-mode side mapper.
     {CSS_PROPERTY_BORDER_INLINE, "border-inline", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_WIDTH, "border-inline-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, true, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_STYLE, "border-inline-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_COLOR, "border-inline-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, true, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_INLINE_START, "border-inline-start", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_START_WIDTH, "border-inline-start-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_START_STYLE, "border-inline-start-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_START_COLOR, "border-inline-start-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_INLINE_END, "border-inline-end", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_END_WIDTH, "border-inline-end-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_END_STYLE, "border-inline-end-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_INLINE_END_COLOR, "border-inline-end-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_BLOCK, "border-block", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_STYLE, "border-block-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_START, "border-block-start", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_START_STYLE, "border-block-start-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_END, "border-block-end", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BLOCK_END_STYLE, "border-block-end-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_WIDTH, "border-block-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", false, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_COLOR, "border-block-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", false, true, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_BORDER_BLOCK_START_WIDTH, "border-block-start-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
@@ -157,7 +176,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_WORD_SPACING, "word-spacing", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_TEXT_SHADOW, "text-shadow", PROP_TYPE_STRING, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_LINE_HEIGHT, "line-height", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_TEXT_ALIGN, "text-align", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "left", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_ALIGN, "text-align", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "start", false, true, text_align_longhands, 2, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_DECORATION, "text-decoration", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_TRANSFORM, "text-transform", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_INITIAL_LETTER, "initial-letter", PROP_TYPE_STRING, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_string, NULL},
@@ -227,6 +246,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, "border-top-right-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, "border-bottom-right-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, "border-bottom-left-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_START_START_RADIUS, "border-start-start-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_START_END_RADIUS, "border-start-end-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_END_START_RADIUS, "border-end-start-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_END_END_RADIUS, "border-end-end-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
 
     // Advanced Background Properties (Group 16)
     {CSS_PROPERTY_BACKGROUND_ATTACHMENT, "background-attachment", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "scroll", false, false, NULL, 0, validate_keyword, NULL},
@@ -310,7 +333,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TEXT_DECORATION_STYLE, "text-decoration-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "solid", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_DECORATION_COLOR, "text-decoration-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_TEXT_DECORATION_THICKNESS, "text-decoration-thickness", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_TEXT_EMPHASIS, "text-emphasis", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_UNDERLINE_OFFSET, "text-underline-offset", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_TEXT_DECORATION_SKIP_INK, "text-decoration-skip-ink", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_UNDERLINE_POSITION, "text-underline-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_EMPHASIS, "text-emphasis", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, true, text_emphasis_longhands, 2, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_EMPHASIS_STYLE, "text-emphasis-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_EMPHASIS_COLOR, "text-emphasis-color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "currentColor", true, false, NULL, 0, validate_color, NULL},
     {CSS_PROPERTY_TEXT_EMPHASIS_POSITION, "text-emphasis-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "over right", false, false, NULL, 0, validate_keyword, NULL},
@@ -437,16 +463,38 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_MASK_IMAGE, "mask-image", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_MASK_TYPE, "mask-type", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "luminance", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_NESTING, "nesting", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_OVERFLOW_BLOCK, "overflow-block", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OVERFLOW_BLOCK, "overflow-block", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_OVERFLOW_CLIP_MARGIN, "overflow-clip-margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0px", true, false, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_OVERFLOW_INLINE, "overflow-inline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OVERFLOW_INLINE, "overflow-inline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "visible", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_SCROLLBAR_GUTTER, "scrollbar-gutter", PROP_TYPE_STRING, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_OVERSCROLL_BEHAVIOR, "overscroll-behavior", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X, "overscroll-behavior-x", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y, "overscroll-behavior-y", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_RUBY_ALIGN, "ruby-align", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "space-around", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_RUBY_POSITION, "ruby-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "alternate", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_SCROLL_BEHAVIOR, "scroll-behavior", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_SCROLL_MARGIN, "scroll-margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_SCROLL_PADDING, "scroll-padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, true, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_TOP, "scroll-margin-top", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_RIGHT, "scroll-margin-right", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_BOTTOM, "scroll-margin-bottom", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_LEFT, "scroll-margin-left", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_BLOCK, "scroll-margin-block", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_BLOCK_START, "scroll-margin-block-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_BLOCK_END, "scroll-margin-block-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_INLINE, "scroll-margin-inline", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_INLINE_START, "scroll-margin-inline-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_MARGIN_INLINE_END, "scroll-margin-inline-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_TOP, "scroll-padding-top", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_RIGHT, "scroll-padding-right", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_BOTTOM, "scroll-padding-bottom", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_LEFT, "scroll-padding-left", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_BLOCK, "scroll-padding-block", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, true, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_BLOCK_START, "scroll-padding-block-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_BLOCK_END, "scroll-padding-block-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_INLINE, "scroll-padding-inline", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, true, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_INLINE_START, "scroll-padding-inline-start", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_SCROLL_PADDING_INLINE_END, "scroll-padding-inline-end", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_SCROLL_SNAP_ALIGN, "scroll-snap-align", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_SCROLL_SNAP_TYPE, "scroll-snap-type", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TRANSITION_DELAY, "transition-delay", PROP_TYPE_TIME, PROP_INHERIT_NO, "0s", false, false, NULL, 0, validate_time, NULL},
@@ -462,18 +510,1213 @@ static CssProperty property_definitions[] = {
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))
 
-bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
+typedef enum CssMathType {
+    CSS_MATH_INVALID,
+    CSS_MATH_NUMBER,
+    CSS_MATH_LENGTH,
+    CSS_MATH_PERCENT,
+    CSS_MATH_LENGTH_PERCENT,
+    CSS_MATH_ANGLE,
+    CSS_MATH_DEFERRED,
+} CssMathType;
+
+static CssMathType css_math_value_type(const CssValue* value, int depth);
+
+static CssMathType css_math_common_type(CssMathType left,
+                                         CssMathType right) {
+    if (left == CSS_MATH_INVALID || right == CSS_MATH_INVALID)
+        return CSS_MATH_INVALID;
+    if (left == CSS_MATH_DEFERRED || right == CSS_MATH_DEFERRED)
+        return CSS_MATH_DEFERRED;
+    if (left == right) return left;
+    bool left_length = left == CSS_MATH_LENGTH ||
+        left == CSS_MATH_PERCENT || left == CSS_MATH_LENGTH_PERCENT;
+    bool right_length = right == CSS_MATH_LENGTH ||
+        right == CSS_MATH_PERCENT || right == CSS_MATH_LENGTH_PERCENT;
+    return left_length && right_length ? CSS_MATH_LENGTH_PERCENT
+        : CSS_MATH_INVALID;
+}
+
+static CssMathType css_math_parse_sum(CssValue* const* items, int count,
+                                      int* pos, int depth);
+
+static CssMathType css_math_parse_atom(CssValue* const* items, int count,
+                                       int* pos, int depth) {
+    if (!items || !pos || *pos >= count || depth > 32) return CSS_MATH_INVALID;
+    const char* token = css_math_token_name(items[*pos]);
+    if (token && (strcmp(token, "+") == 0 || strcmp(token, "-") == 0)) {
+        (*pos)++;
+        return css_math_parse_atom(items, count, pos, depth + 1);
+    }
+    if (token && strcmp(token, "(") == 0) {
+        (*pos)++;
+        CssMathType inner = css_math_parse_sum(items, count, pos, depth + 1);
+        const char* closing = *pos < count
+            ? css_math_token_name(items[*pos]) : NULL;
+        if (!closing || strcmp(closing, ")") != 0) return CSS_MATH_INVALID;
+        (*pos)++;
+        return inner;
+    }
+    if (token && strcmp(token, ")") == 0) return CSS_MATH_INVALID;
+    return css_math_value_type(items[(*pos)++], depth + 1);
+}
+
+static CssMathType css_math_parse_product(CssValue* const* items, int count,
+                                           int* pos, int depth) {
+    CssMathType result = css_math_parse_atom(items, count, pos, depth);
+    while (*pos < count) {
+        const char* op = css_math_token_name(items[*pos]);
+        if (!op || (strcmp(op, "*") != 0 && strcmp(op, "/") != 0)) break;
+        bool divide = op[0] == '/';
+        (*pos)++;
+        CssMathType right = css_math_parse_atom(items, count, pos, depth);
+        if (result == CSS_MATH_INVALID || right == CSS_MATH_INVALID)
+            return CSS_MATH_INVALID;
+        if (result == CSS_MATH_DEFERRED || right == CSS_MATH_DEFERRED) {
+            result = CSS_MATH_DEFERRED;
+        } else if (divide) {
+            if (right != CSS_MATH_NUMBER) return CSS_MATH_INVALID;
+        } else if (result == CSS_MATH_NUMBER) {
+            result = right;
+        } else if (right != CSS_MATH_NUMBER) {
+            return CSS_MATH_INVALID;
+        }
+    }
+    return result;
+}
+
+static CssMathType css_math_parse_sum(CssValue* const* items, int count,
+                                      int* pos, int depth) {
+    CssMathType result = css_math_parse_product(items, count, pos, depth);
+    while (*pos < count) {
+        const char* op = css_math_token_name(items[*pos]);
+        if (!op || (strcmp(op, "+") != 0 && strcmp(op, "-") != 0)) break;
+        (*pos)++;
+        result = css_math_common_type(result,
+            css_math_parse_product(items, count, pos, depth));
+    }
+    return result;
+}
+
+static CssMathType css_math_function_type(const CssFunction* function,
+                                           int depth) {
+    if (!function || !function->name || !function->args ||
+        function->arg_count < 1 || depth > 32) return CSS_MATH_INVALID;
+    const char* name = function->name;
+    int count = function->arg_count;
+    if (strcmp(name, "calc") == 0) {
+        return count == 1 ? css_math_value_type(function->args[0], depth + 1)
+            : CSS_MATH_INVALID;
+    }
+    if (strcmp(name, "abs") == 0 || strcmp(name, "sign") == 0) {
+        if (count != 1) return CSS_MATH_INVALID;
+        CssMathType type = css_math_value_type(function->args[0], depth + 1);
+        return strcmp(name, "sign") == 0 && type != CSS_MATH_INVALID
+            ? CSS_MATH_NUMBER : type;
+    }
+    if (strcmp(name, "sin") == 0 || strcmp(name, "cos") == 0 ||
+        strcmp(name, "tan") == 0) {
+        if (count != 1) return CSS_MATH_INVALID;
+        CssMathType type = css_math_value_type(function->args[0], depth + 1);
+        return type == CSS_MATH_NUMBER || type == CSS_MATH_ANGLE ||
+            type == CSS_MATH_DEFERRED ? CSS_MATH_NUMBER : CSS_MATH_INVALID;
+    }
+    if (strcmp(name, "asin") == 0 || strcmp(name, "acos") == 0 ||
+        strcmp(name, "atan") == 0) {
+        if (count != 1) return CSS_MATH_INVALID;
+        CssMathType type = css_math_value_type(function->args[0], depth + 1);
+        return type == CSS_MATH_NUMBER || type == CSS_MATH_DEFERRED
+            ? CSS_MATH_ANGLE : CSS_MATH_INVALID;
+    }
+    if (strcmp(name, "atan2") == 0 && count == 2) {
+        CssMathType left = css_math_value_type(function->args[0], depth + 1);
+        CssMathType right = css_math_value_type(function->args[1], depth + 1);
+        return css_math_common_type(left, right) != CSS_MATH_INVALID
+            ? CSS_MATH_ANGLE : CSS_MATH_INVALID;
+    }
+    if (strcmp(name, "pow") == 0 || strcmp(name, "sqrt") == 0 ||
+        strcmp(name, "log") == 0 || strcmp(name, "exp") == 0) {
+        if ((strcmp(name, "pow") == 0 && count != 2) ||
+            (strcmp(name, "log") == 0 && (count < 1 || count > 2)) ||
+            ((strcmp(name, "sqrt") == 0 || strcmp(name, "exp") == 0) &&
+             count != 1)) return CSS_MATH_INVALID;
+        for (int i = 0; i < count; i++) {
+            CssMathType type = css_math_value_type(function->args[i], depth + 1);
+            if (type != CSS_MATH_NUMBER && type != CSS_MATH_DEFERRED)
+                return CSS_MATH_INVALID;
+        }
+        return CSS_MATH_NUMBER;
+    }
+    if (strcmp(name, "min") == 0 || strcmp(name, "max") == 0 ||
+        strcmp(name, "clamp") == 0 || strcmp(name, "hypot") == 0 ||
+        strcmp(name, "mod") == 0 || strcmp(name, "rem") == 0) {
+        if ((strcmp(name, "clamp") == 0 && count != 3) ||
+            ((strcmp(name, "mod") == 0 || strcmp(name, "rem") == 0) &&
+             count != 2)) return CSS_MATH_INVALID;
+        CssMathType type = css_math_value_type(function->args[0], depth + 1);
+        for (int i = 1; i < count; i++) {
+            type = css_math_common_type(type,
+                css_math_value_type(function->args[i], depth + 1));
+        }
+        return type;
+    }
+    if (strcmp(name, "round") == 0) {
+        const char* first_name = css_math_token_name(function->args[0]);
+        bool strategy = first_name &&
+            (strcmp(first_name, "nearest") == 0 ||
+             strcmp(first_name, "up") == 0 ||
+             strcmp(first_name, "down") == 0 ||
+             strcmp(first_name, "to-zero") == 0 ||
+             strcmp(first_name, "line-width") == 0);
+        int value_index = strategy ? 1 : 0;
+        if (count <= value_index || count > value_index + 2)
+            return CSS_MATH_INVALID;
+        CssMathType type = css_math_value_type(
+            function->args[value_index], depth + 1);
+        if (strategy && strcmp(first_name, "line-width") == 0 &&
+            type != CSS_MATH_LENGTH) return CSS_MATH_INVALID;
+        if (count == value_index + 1) {
+            return type == CSS_MATH_NUMBER ||
+                (strategy && strcmp(first_name, "line-width") == 0 &&
+                 type == CSS_MATH_LENGTH) ? type : CSS_MATH_INVALID;
+        }
+        return css_math_common_type(type,
+            css_math_value_type(function->args[value_index + 1], depth + 1));
+    }
+    return CSS_MATH_INVALID;
+}
+
+static CssMathType css_math_value_type(const CssValue* value, int depth) {
+    if (!value || depth > 32) return CSS_MATH_INVALID;
+    switch (value->type) {
+        case CSS_VALUE_TYPE_NUMBER: return CSS_MATH_NUMBER;
+        case CSS_VALUE_TYPE_PERCENTAGE: return CSS_MATH_PERCENT;
+        case CSS_VALUE_TYPE_LENGTH:
+            if (css_unit_is_length(value->data.length.unit)) return CSS_MATH_LENGTH;
+            if (value->data.length.unit >= CSS_UNIT_DEG &&
+                value->data.length.unit <= CSS_UNIT_TURN) return CSS_MATH_ANGLE;
+            return CSS_MATH_INVALID;
+        case CSS_VALUE_TYPE_VAR:
+        case CSS_VALUE_TYPE_ENV:
+        case CSS_VALUE_TYPE_ATTR: return CSS_MATH_DEFERRED;
+        case CSS_VALUE_TYPE_CUSTOM: {
+            const char* name = value->data.custom_property.name;
+            return name && (strcmp(name, "pi") == 0 || strcmp(name, "e") == 0 ||
+                strcmp(name, "infinity") == 0 || strcmp(name, "-infinity") == 0 ||
+                strcmp(name, "NaN") == 0) ? CSS_MATH_NUMBER : CSS_MATH_INVALID;
+        }
+        case CSS_VALUE_TYPE_FUNCTION:
+            if (value->data.function && value->data.function->name &&
+                (strcmp(value->data.function->name, "var") == 0 ||
+                 strcmp(value->data.function->name, "env") == 0 ||
+                 strcmp(value->data.function->name, "attr") == 0))
+                return CSS_MATH_DEFERRED;
+            return css_math_function_type(value->data.function, depth + 1);
+        case CSS_VALUE_TYPE_LIST: {
+            int pos = 0;
+            CssMathType type = css_math_parse_sum(value->data.list.values,
+                value->data.list.count, &pos, depth + 1);
+            return pos == value->data.list.count ? type : CSS_MATH_INVALID;
+        }
+        default: return CSS_MATH_INVALID;
+    }
+}
+
+static bool css_value_is_length_expression(const CssValue* value,
+                                            bool allow_percentage,
+                                            bool allow_fit_content) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_CALC) return true;
+    if (value->type == CSS_VALUE_TYPE_VAR || value->type == CSS_VALUE_TYPE_ENV ||
+        value->type == CSS_VALUE_TYPE_ATTR) return true;
+    if (value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function)
+        return false;
+    if (allow_fit_content && value->type == CSS_VALUE_TYPE_FUNCTION &&
+        value->data.function && value->data.function->name &&
+        strcmp(value->data.function->name, "fit-content") == 0) return true;
+    CssMathType type = css_math_value_type(value, 0);
+    return type == CSS_MATH_LENGTH || type == CSS_MATH_DEFERRED ||
+        (allow_percentage && (type == CSS_MATH_PERCENT ||
+                              type == CSS_MATH_LENGTH_PERCENT));
+}
+
+static bool css_value_is_text_indent_amount(const CssValue* value) {
+    if (!value) return false;
+    return value->type == CSS_VALUE_TYPE_PERCENTAGE ||
+        (value->type == CSS_VALUE_TYPE_LENGTH &&
+         css_unit_is_length(value->data.length.unit)) ||
+        (value->type == CSS_VALUE_TYPE_NUMBER &&
+         value->data.number.value == 0.0) ||
+        css_value_is_length_expression(value, true, false);
+}
+
+bool css_display_legacy_keyword_supported(const char* name) {
+    return name && strcmp(name, "-webkit-inline-box") == 0;
+}
+
+uint8_t css_text_decoration_line_flag(CssEnum keyword) {
+    switch (keyword) {
+        case CSS_VALUE_UNDERLINE: return CSS_TEXT_DECO_UNDERLINE;
+        case CSS_VALUE_OVERLINE: return CSS_TEXT_DECO_OVERLINE;
+        case CSS_VALUE_LINE_THROUGH: return CSS_TEXT_DECO_LINE_THROUGH;
+        case CSS_VALUE_BLINK: return CSS_TEXT_DECO_BLINK;
+        default: return 0;
+    }
+}
+
+static bool css_value_is_text_decoration_thickness(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        return value->data.length.value >= 0.0 &&
+            css_unit_is_length(value->data.length.unit);
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return value->data.percentage.value >= 0.0;
+    }
+    if (value->type == CSS_VALUE_TYPE_NUMBER) {
+        return value->data.number.value == 0.0;
+    }
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        CssEnum keyword = value->data.keyword;
+        const CssEnumInfo* info = css_enum_info(keyword);
+        return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_THIN ||
+            keyword == CSS_VALUE_MEDIUM || keyword == CSS_VALUE_THICK ||
+            keyword == CSS_VALUE_FROM_FONT ||
+            (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+    }
+    if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+        return value->data.custom_property.name &&
+            strcmp(value->data.custom_property.name, "from-font") == 0;
+    }
+    return css_value_is_length_expression(value, true, false);
+}
+
+static bool css_value_is_supported_color(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_COLOR) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info && (info->group == CSS_VALUE_GROUP_COLOR ||
+            info->group == CSS_VALUE_GROUP_SYSTEM_COLOR ||
+            info->group == CSS_VALUE_GROUP_GLOBAL);
+    }
+    if (value->type != CSS_VALUE_TYPE_FUNCTION ||
+        !value->data.function || !value->data.function->name) return false;
+    const char* name = value->data.function->name;
+    return strcmp(name, "rgb") == 0 || strcmp(name, "rgba") == 0 ||
+        strcmp(name, "hsl") == 0 || strcmp(name, "hsla") == 0 ||
+        strcmp(name, "hwb") == 0 ||
+        strcmp(name, "var") == 0 || strcmp(name, "env") == 0 ||
+        strcmp(name, "attr") == 0;
+}
+
+static const char* css_text_emphasis_name(const CssValue* value) {
+    if (!value) return NULL;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM)
+        return value->data.custom_property.name;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : NULL;
+    }
+    return NULL;
+}
+
+static bool css_text_emphasis_name_is(const CssValue* value, const char* name) {
+    const char* actual = css_text_emphasis_name(value);
+    return actual && str_ieq_cstr(actual, name);
+}
+
+bool css_text_emphasis_parse_style(const CssValue* value, bool vertical,
+                                   uint32_t* mark, const CssValue** color) {
+    if (mark) *mark = 0;
+    if (color) *color = NULL;
+    if (!value) return false;
+    bool shorthand = color != NULL;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > (shorthand ? 3 : 2)) return false;
+    bool seen_style = false, seen_fill = false, seen_shape = false;
+    bool open = false, none = false;
+    const char* shape = NULL;
+    uint32_t string_mark = 0;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item) return false;
+        if (shorthand && css_value_is_supported_color(item) &&
+            !(item->type == CSS_VALUE_TYPE_KEYWORD &&
+              css_enum_info(item->data.keyword)->group == CSS_VALUE_GROUP_GLOBAL)) {
+            if (*color) return false;
+            *color = item;
+            continue;
+        }
+        if (item->type == CSS_VALUE_TYPE_STRING) {
+            if (seen_style) return false;
+            seen_style = true;
+            const char* str = item->data.string;
+            if (str && str[0]) {
+                int bytes = str_utf8_decode(str, strlen(str), &string_mark);
+                if (bytes <= 0) return false;
+            }
+            continue;
+        }
+        const char* name = css_text_emphasis_name(item);
+        if (!name) return false;
+        if (str_ieq_cstr(name, "none")) {
+            if (seen_style || seen_fill || seen_shape) return false;
+            seen_style = none = true;
+        } else if (str_ieq_cstr(name, "filled") || str_ieq_cstr(name, "open")) {
+            if (seen_fill || seen_style) return false;
+            seen_fill = true;
+            open = str_ieq_cstr(name, "open");
+        } else if (str_ieq_cstr(name, "dot") || str_ieq_cstr(name, "circle") ||
+                   str_ieq_cstr(name, "double-circle") ||
+                   str_ieq_cstr(name, "triangle") || str_ieq_cstr(name, "sesame")) {
+            if (seen_shape || seen_style) return false;
+            seen_shape = true;
+            shape = name;
+        } else {
+            return false;
+        }
+    }
+    if (!seen_style && !seen_fill && !seen_shape && !shorthand) return false;
+    if (!mark) return true;
+    if (seen_style) {
+        *mark = none ? 0 : string_mark;
+        return true;
+    }
+    if (!seen_fill && !seen_shape) return true;
+    if (!shape) shape = vertical ? "sesame" : "circle";
+    if (str_ieq_cstr(shape, "dot")) *mark = open ? 0x25E6 : 0x2022;
+    else if (str_ieq_cstr(shape, "circle")) *mark = open ? 0x25CB : 0x25CF;
+    else if (str_ieq_cstr(shape, "double-circle")) *mark = open ? 0x25CE : 0x25C9;
+    else if (str_ieq_cstr(shape, "triangle")) *mark = open ? 0x25B3 : 0x25B2;
+    else *mark = open ? 0xFE46 : 0xFE45;
+    return true;
+}
+
+static bool css_text_emphasis_position_valid(const CssValue* value) {
+    if (!value) return false;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > 2) return false;
+    bool vertical_side = false, horizontal_side = false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (css_text_emphasis_name_is(item, "over") ||
+            css_text_emphasis_name_is(item, "under")) {
+            if (horizontal_side) return false;
+            horizontal_side = true;
+        } else if (css_text_emphasis_name_is(item, "right") ||
+                   css_text_emphasis_name_is(item, "left")) {
+            if (vertical_side) return false;
+            vertical_side = true;
+        } else return false;
+    }
+    return horizontal_side;
+}
+
+enum CssLogicalBorderPart : uint8_t {
+    CSS_LOGICAL_BORDER_WIDTH,
+    CSS_LOGICAL_BORDER_STYLE,
+    CSS_LOGICAL_BORDER_COLOR,
+};
+
+static bool css_value_is_logical_border_part(const CssValue* value,
+        CssLogicalBorderPart part, bool allow_global) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (!info) return false;
+        if (info->group == CSS_VALUE_GROUP_GLOBAL) return allow_global;
+        return part == CSS_LOGICAL_BORDER_WIDTH
+            ? info->group == CSS_VALUE_GROUP_BORDER_WIDTH
+            : part == CSS_LOGICAL_BORDER_STYLE
+                ? info->group == CSS_VALUE_GROUP_BORDER_STYLE
+                : css_value_is_supported_color(value);
+    }
+    if (part == CSS_LOGICAL_BORDER_WIDTH) {
+        if (value->type == CSS_VALUE_TYPE_LENGTH) {
+            return value->data.length.value >= 0.0 &&
+                css_unit_is_length(value->data.length.unit);
+        }
+        if (value->type == CSS_VALUE_TYPE_NUMBER) {
+            return value->data.number.value == 0.0;
+        }
+        return css_value_is_length_expression(value, false, false);
+    }
+    if (part == CSS_LOGICAL_BORDER_STYLE) {
+        return value->type == CSS_VALUE_TYPE_VAR ||
+            (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+             value->data.function->name &&
+             strcmp(value->data.function->name, "var") == 0);
+    }
+    return css_value_is_supported_color(value);
+}
+
+static bool css_value_is_logical_border(CssPropertyCode property,
+                                        const CssValue* value) {
+    CssLogicalBorderPart part = CSS_LOGICAL_BORDER_WIDTH;
+    bool pair = false;
+    switch (property) {
+        case CSS_PROPERTY_BORDER_INLINE_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_WIDTH: pair = true; break;
+        case CSS_PROPERTY_BORDER_INLINE_START_WIDTH:
+        case CSS_PROPERTY_BORDER_INLINE_END_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH: break;
+        case CSS_PROPERTY_BORDER_INLINE_STYLE:
+        case CSS_PROPERTY_BORDER_BLOCK_STYLE:
+            pair = true;
+            part = CSS_LOGICAL_BORDER_STYLE;
+            break;
+        case CSS_PROPERTY_BORDER_INLINE_START_STYLE:
+        case CSS_PROPERTY_BORDER_INLINE_END_STYLE:
+        case CSS_PROPERTY_BORDER_BLOCK_START_STYLE:
+        case CSS_PROPERTY_BORDER_BLOCK_END_STYLE:
+            part = CSS_LOGICAL_BORDER_STYLE;
+            break;
+        case CSS_PROPERTY_BORDER_INLINE_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_COLOR:
+            pair = true;
+            part = CSS_LOGICAL_BORDER_COLOR;
+            break;
+        case CSS_PROPERTY_BORDER_INLINE_START_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_END_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
+            part = CSS_LOGICAL_BORDER_COLOR;
+            break;
+        default: return false;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST) {
+        return css_value_is_logical_border_part(value, part, true);
+    }
+    if (!pair || !value->data.list.values || value->data.list.count != 2) return false;
+    return css_value_is_logical_border_part(value->data.list.values[0], part, false) &&
+        css_value_is_logical_border_part(value->data.list.values[1], part, false);
+}
+
+static bool css_value_is_corner_radius_component(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+        return value->data.length.value >= 0.0 &&
+            css_unit_is_length(value->data.length.unit);
+    }
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        return value->data.percentage.value >= 0.0;
+    }
+    return value->type == CSS_VALUE_TYPE_NUMBER &&
+        value->data.number.value == 0.0;
+}
+
+static bool css_value_is_logical_corner_radius(const CssValue* value) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info && info->group == CSS_VALUE_GROUP_GLOBAL;
+    }
+    if (value->type == CSS_VALUE_TYPE_VAR ||
+        (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+         value->data.function->name &&
+         strcmp(value->data.function->name, "var") == 0)) return true;
+    if (value->type != CSS_VALUE_TYPE_LIST) {
+        return css_value_is_corner_radius_component(value);
+    }
+    if (!value->data.list.values || value->data.list.count != 2) return false;
+    return css_value_is_corner_radius_component(value->data.list.values[0]) &&
+        css_value_is_corner_radius_component(value->data.list.values[1]);
+}
+
+static bool css_value_is_box_spacing_item(const CssValue* value,
+                                          bool allow_auto,
+                                          bool quirks_mode) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD)
+        return allow_auto && value->data.keyword == CSS_VALUE_AUTO;
+    if (value->type == CSS_VALUE_TYPE_NUMBER)
+        return value->data.number.value == 0.0 ||
+            (quirks_mode &&
+             (allow_auto || value->data.number.value >= 0.0));
+    if (value->type == CSS_VALUE_TYPE_LENGTH)
+        return (allow_auto || value->data.length.value >= 0.0) &&
+            css_unit_is_length(value->data.length.unit);
+    if (value->type == CSS_VALUE_TYPE_PERCENTAGE)
+        return allow_auto || value->data.percentage.value >= 0.0;
+    return css_value_is_length_expression(value, true, false);
+}
+
+static bool css_value_is_box_spacing_shorthand(const CssValue* value,
+                                                bool allow_auto,
+                                                bool quirks_mode) {
+    if (!value) return false;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+    }
+    if (value->type != CSS_VALUE_TYPE_LIST)
+        return css_value_is_box_spacing_item(value, allow_auto, quirks_mode);
+    if (!value->data.list.values || value->data.list.comma_separated ||
+        value->data.list.count < 1 || value->data.list.count > 4) return false;
+    for (int i = 0; i < value->data.list.count; i++) {
+        if (!css_value_is_box_spacing_item(value->data.list.values[i],
+                                           allow_auto, quirks_mode)) return false;
+    }
+    return true;
+}
+
+static bool css_value_is_scroll_spacing(CssPropertyCode property,
+                                        const CssValue* value) {
+    if (!value) return false;
+    if (css_value_contains_var_reference(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+    }
+    bool padding = property == CSS_PROPERTY_SCROLL_PADDING ||
+        (property >= CSS_PROPERTY_SCROLL_PADDING_TOP &&
+         property <= CSS_PROPERTY_SCROLL_PADDING_INLINE_END);
+    int limit = property == CSS_PROPERTY_SCROLL_MARGIN ||
+        property == CSS_PROPERTY_SCROLL_PADDING ? 4 :
+        property == CSS_PROPERTY_SCROLL_MARGIN_BLOCK ||
+        property == CSS_PROPERTY_SCROLL_MARGIN_INLINE ||
+        property == CSS_PROPERTY_SCROLL_PADDING_BLOCK ||
+        property == CSS_PROPERTY_SCROLL_PADDING_INLINE ? 2 : 1;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > limit ||
+        (value->type == CSS_VALUE_TYPE_LIST &&
+         (!value->data.list.values || value->data.list.comma_separated))) return false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item) return false;
+        if (item->type == CSS_VALUE_TYPE_KEYWORD) {
+            if (!padding || item->data.keyword != CSS_VALUE_AUTO) return false;
+        } else if (item->type == CSS_VALUE_TYPE_LENGTH) {
+            if (!css_unit_is_length(item->data.length.unit) ||
+                (padding && item->data.length.value < 0.0)) return false;
+        } else if (item->type == CSS_VALUE_TYPE_PERCENTAGE) {
+            if (!padding || item->data.percentage.value < 0.0) return false;
+        } else if (item->type == CSS_VALUE_TYPE_NUMBER) {
+            if (item->data.number.value != 0.0) return false;
+        } else if (!css_value_is_length_expression(item, padding, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool css_value_is_overflow_clip_margin(const CssValue* value) {
+    if (!value) return false;
+    if (css_value_contains_var_reference(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+    }
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > 2 ||
+        (value->type == CSS_VALUE_TYPE_LIST &&
+         (!value->data.list.values || value->data.list.comma_separated))) return false;
+    bool saw_box = false, saw_length = false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item) return false;
+        if (item->type == CSS_VALUE_TYPE_KEYWORD &&
+            (item->data.keyword == CSS_VALUE_CONTENT_BOX ||
+             item->data.keyword == CSS_VALUE_PADDING_BOX ||
+             item->data.keyword == CSS_VALUE_BORDER_BOX)) {
+            if (saw_box) return false;
+            saw_box = true;
+        } else if ((item->type == CSS_VALUE_TYPE_LENGTH &&
+                    css_unit_is_length(item->data.length.unit)) ||
+                   (item->type == CSS_VALUE_TYPE_NUMBER &&
+                    item->data.number.value == 0.0) ||
+                   css_value_is_length_expression(item, false, false)) {
+            if (saw_length) return false;
+            saw_length = true;
+        } else return false;
+    }
+    return saw_box || saw_length;
+}
+
+static bool css_value_is_scroll_snap(CssPropertyCode property,
+                                     const CssValue* value) {
+    if (!value) return false;
+    if (css_value_contains_var_reference(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+    }
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || count > 2 ||
+        (value->type == CSS_VALUE_TYPE_LIST &&
+         (!value->data.list.values || value->data.list.comma_separated))) return false;
+    if (property == CSS_PROPERTY_SCROLL_SNAP_ALIGN) {
+        for (int i = 0; i < count; i++) {
+            const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+                ? value->data.list.values[i] : value;
+            if (!item || item->type != CSS_VALUE_TYPE_KEYWORD ||
+                (item->data.keyword != CSS_VALUE_NONE &&
+                 item->data.keyword != CSS_VALUE_START &&
+                 item->data.keyword != CSS_VALUE_END &&
+                 item->data.keyword != CSS_VALUE_CENTER)) return false;
+        }
+        return true;
+    }
+    const CssValue* axis = value->type == CSS_VALUE_TYPE_LIST
+        ? value->data.list.values[0] : value;
+    const char* axis_name = css_text_emphasis_name(axis);
+    if (!axis_name) return false;
+    if (str_ieq_cstr(axis_name, "none")) return count == 1;
+    if (!str_ieq_cstr(axis_name, "x") &&
+        !str_ieq_cstr(axis_name, "y") &&
+        !str_ieq_cstr(axis_name, "block") &&
+        !str_ieq_cstr(axis_name, "inline") &&
+        !str_ieq_cstr(axis_name, "both") &&
+        !str_ieq_cstr(axis_name, "pair")) return false;
+    if (count == 1) return true;
+    const char* strictness = css_text_emphasis_name(value->data.list.values[1]);
+    return strictness && (str_ieq_cstr(strictness, "mandatory") ||
+        str_ieq_cstr(strictness, "proximity"));
+}
+
+static bool css_value_is_overscroll_behavior_keyword(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+        (value->data.keyword == CSS_VALUE_AUTO ||
+         value->data.keyword == CSS_VALUE_CONTAIN ||
+         value->data.keyword == CSS_VALUE_NONE ||
+         value->data.keyword == CSS_VALUE_CHAIN);
+}
+
+static bool css_value_is_overscroll_behavior(CssPropertyCode property,
+                                             const CssValue* value) {
+    if (css_value_contains_var_reference(value)) return true;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+    }
+    if (property != CSS_PROPERTY_OVERSCROLL_BEHAVIOR ||
+        value->type != CSS_VALUE_TYPE_LIST) {
+        return css_value_is_overscroll_behavior_keyword(value);
+    }
+    if (!value->data.list.values || value->data.list.comma_separated ||
+        value->data.list.count < 1 || value->data.list.count > 2) return false;
+    for (int i = 0; i < value->data.list.count; i++) {
+        if (!css_value_is_overscroll_behavior_keyword(
+                value->data.list.values[i])) return false;
+    }
+    return true;
+}
+
+static bool css_value_is_text_alignment(CssPropertyCode id, const CssValue* value) {
+    if (value->type == CSS_VALUE_TYPE_VAR || value->type == CSS_VALUE_TYPE_ENV ||
+        value->type == CSS_VALUE_TYPE_ATTR) return true;
+    if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+        value->data.function->name) {
+        const char* name = value->data.function->name;
+        return strcmp(name, "var") == 0 || strcmp(name, "env") == 0 ||
+            strcmp(name, "attr") == 0;
+    }
+    if (id == CSS_PROPERTY_TEXT_ALIGN && value->type == CSS_VALUE_TYPE_CUSTOM) {
+        const char* name = value->data.custom_property.name;
+        return name && (strcmp(name, "-webkit-left") == 0 ||
+            strcmp(name, "-webkit-center") == 0 ||
+            strcmp(name, "-webkit-right") == 0);
+    }
+    if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    CssEnum keyword = value->data.keyword;
+    const CssEnumInfo* info = css_enum_info(keyword);
+    if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+    if (keyword == CSS_VALUE_START || keyword == CSS_VALUE_END ||
+        keyword == CSS_VALUE_LEFT || keyword == CSS_VALUE_RIGHT ||
+        keyword == CSS_VALUE_CENTER || keyword == CSS_VALUE_JUSTIFY ||
+        keyword == CSS_VALUE_MATCH_PARENT) return true;
+    return id == CSS_PROPERTY_TEXT_ALIGN
+        ? keyword == CSS_VALUE_JUSTIFY_ALL : keyword == CSS_VALUE_AUTO &&
+            id == CSS_PROPERTY_TEXT_ALIGN_LAST;
+}
+
+static bool css_value_is_overflow_keyword(const CssValue* value) {
+    if (!value || value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+    CssEnum keyword = value->data.keyword;
+    return keyword == CSS_VALUE_VISIBLE || keyword == CSS_VALUE_HIDDEN ||
+        keyword == CSS_VALUE_CLIP || keyword == CSS_VALUE_SCROLL ||
+        keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_OVERLAY;
+}
+
+bool css_split_border_image_shorthand(const CssValue* value,
+                                      CssBorderImageComponents* parts) {
+    if (!value || !parts) return false;
+    *parts = {};
+    if (value->type == CSS_VALUE_TYPE_LIST && value->data.list.comma_separated)
+        return false;
+    int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+    if (count < 1 || (value->type == CSS_VALUE_TYPE_LIST &&
+                      !value->data.list.values)) return false;
+    int section = 0;
+    bool saw_slash = false;
+    bool saw_fill = false;
+    for (int i = 0; i < count; i++) {
+        const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+            ? value->data.list.values[i] : value;
+        if (!item) return false;
+        if (item->type == CSS_VALUE_TYPE_CUSTOM &&
+            item->data.custom_property.name &&
+            strcmp(item->data.custom_property.name, "/") == 0) {
+            if (section == 0 && parts->slice_count == 0) return false;
+            if (section >= 2) return false;
+            section++;
+            saw_slash = true;
+            continue;
+        }
+        if (item->type == CSS_VALUE_TYPE_KEYWORD &&
+            (item->data.keyword == CSS_VALUE_STRETCH ||
+             item->data.keyword == CSS_VALUE_REPEAT ||
+             item->data.keyword == CSS_VALUE_ROUND ||
+             item->data.keyword == CSS_VALUE_SPACE)) {
+            if (parts->repeat_count >= 2) return false;
+            parts->repeat[parts->repeat_count++] = item;
+            continue;
+        }
+        if (section == 0) {
+            bool source = item->type == CSS_VALUE_TYPE_URL ||
+                (item->type == CSS_VALUE_TYPE_KEYWORD &&
+                 item->data.keyword == CSS_VALUE_NONE);
+            if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
+                item->data.function->name) {
+                const char* name = item->data.function->name;
+                source = str_ieq_cstr(name, "url") ||
+                    str_ieq_cstr(name, "linear-gradient") ||
+                    str_ieq_cstr(name, "repeating-linear-gradient") ||
+                    str_ieq_cstr(name, "radial-gradient") ||
+                    str_ieq_cstr(name, "repeating-radial-gradient") ||
+                    str_ieq_cstr(name, "conic-gradient") ||
+                    str_ieq_cstr(name, "repeating-conic-gradient");
+            }
+            if (source && !parts->source) {
+                parts->source = item;
+            } else if (item->type == CSS_VALUE_TYPE_KEYWORD &&
+                       item->data.keyword == CSS_VALUE_FILL && !saw_fill &&
+                       parts->slice_count < 5) {
+                parts->slice[parts->slice_count++] = item;
+                saw_fill = true;
+            } else if (((item->type == CSS_VALUE_TYPE_NUMBER &&
+                         item->data.number.value >= 0.0) ||
+                        (item->type == CSS_VALUE_TYPE_PERCENTAGE &&
+                         item->data.percentage.value >= 0.0)) &&
+                       parts->slice_count - (saw_fill ? 1 : 0) < 4) {
+                parts->slice[parts->slice_count++] = item;
+            } else return false;
+        } else if (section == 1) {
+            if (parts->width_count >= 4) return false;
+            if ((item->type == CSS_VALUE_TYPE_NUMBER &&
+                 item->data.number.value >= 0.0) ||
+                (item->type == CSS_VALUE_TYPE_LENGTH &&
+                 item->data.length.value >= 0.0 &&
+                 css_unit_is_length(item->data.length.unit)) ||
+                (item->type == CSS_VALUE_TYPE_PERCENTAGE &&
+                 item->data.percentage.value >= 0.0) ||
+                (item->type == CSS_VALUE_TYPE_KEYWORD &&
+                 item->data.keyword == CSS_VALUE_AUTO)) {
+                parts->width[parts->width_count++] = item;
+            } else return false;
+        } else {
+            if (parts->outset_count >= 4) return false;
+            if ((item->type == CSS_VALUE_TYPE_NUMBER &&
+                 item->data.number.value >= 0.0) ||
+                (item->type == CSS_VALUE_TYPE_LENGTH &&
+                 item->data.length.value >= 0.0 &&
+                 css_unit_is_length(item->data.length.unit))) {
+                parts->outset[parts->outset_count++] = item;
+            } else return false;
+        }
+    }
+    if (saw_slash && parts->width_count == 0 && parts->outset_count == 0)
+        return false;
+    if (section == 2 && parts->outset_count == 0) return false;
+    if (saw_fill && parts->slice_count == 1) return false;
+    return parts->source || parts->slice_count || parts->repeat_count;
+}
+
+bool css_property_validate_value_mode(CssPropertyCode id,
+                                      const CssValue* value,
+                                      bool quirks_mode) {
     if (!value) return false;
 
     // Property-specific validation
     switch (id) {
+        case CSS_PROPERTY_SCROLL_SNAP_TYPE:
+        case CSS_PROPERTY_SCROLL_SNAP_ALIGN:
+            return css_value_is_scroll_snap(id, value);
+        case CSS_PROPERTY_OVERFLOW_CLIP_MARGIN:
+            return css_value_is_overflow_clip_margin(value);
+        case CSS_PROPERTY_SCROLL_MARGIN:
+        case CSS_PROPERTY_SCROLL_PADDING:
+        case CSS_PROPERTY_SCROLL_MARGIN_TOP:
+        case CSS_PROPERTY_SCROLL_MARGIN_RIGHT:
+        case CSS_PROPERTY_SCROLL_MARGIN_BOTTOM:
+        case CSS_PROPERTY_SCROLL_MARGIN_LEFT:
+        case CSS_PROPERTY_SCROLL_MARGIN_BLOCK:
+        case CSS_PROPERTY_SCROLL_MARGIN_BLOCK_START:
+        case CSS_PROPERTY_SCROLL_MARGIN_BLOCK_END:
+        case CSS_PROPERTY_SCROLL_MARGIN_INLINE:
+        case CSS_PROPERTY_SCROLL_MARGIN_INLINE_START:
+        case CSS_PROPERTY_SCROLL_MARGIN_INLINE_END:
+        case CSS_PROPERTY_SCROLL_PADDING_TOP:
+        case CSS_PROPERTY_SCROLL_PADDING_RIGHT:
+        case CSS_PROPERTY_SCROLL_PADDING_BOTTOM:
+        case CSS_PROPERTY_SCROLL_PADDING_LEFT:
+        case CSS_PROPERTY_SCROLL_PADDING_BLOCK:
+        case CSS_PROPERTY_SCROLL_PADDING_BLOCK_START:
+        case CSS_PROPERTY_SCROLL_PADDING_BLOCK_END:
+        case CSS_PROPERTY_SCROLL_PADDING_INLINE:
+        case CSS_PROPERTY_SCROLL_PADDING_INLINE_START:
+        case CSS_PROPERTY_SCROLL_PADDING_INLINE_END:
+            return css_value_is_scroll_spacing(id, value);
+        case CSS_PROPERTY_OVERSCROLL_BEHAVIOR:
+        case CSS_PROPERTY_OVERSCROLL_BEHAVIOR_X:
+        case CSS_PROPERTY_OVERSCROLL_BEHAVIOR_Y:
+            return css_value_is_overscroll_behavior(id, value);
+        case CSS_PROPERTY_MARGIN:
+            return css_value_is_box_spacing_shorthand(value, true, quirks_mode);
+        case CSS_PROPERTY_PADDING:
+            return css_value_is_box_spacing_shorthand(value, false, quirks_mode);
+        case CSS_PROPERTY_BORDER_IMAGE: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            }
+            CssBorderImageComponents parts = {};
+            return css_split_border_image_shorthand(value, &parts);
+        }
+        case CSS_PROPERTY_BORDER_IMAGE_WIDTH:
+        case CSS_PROPERTY_BORDER_IMAGE_OUTSET: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            }
+            int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+            if (count < 1 || count > 4) return false;
+            for (int i = 0; i < count; i++) {
+                const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+                    ? value->data.list.values[i] : value;
+                if (!item) return false;
+                if (item->type == CSS_VALUE_TYPE_NUMBER &&
+                    item->data.number.value >= 0.0) continue;
+                if (item->type == CSS_VALUE_TYPE_LENGTH &&
+                    item->data.length.value >= 0.0 &&
+                    css_unit_is_length(item->data.length.unit)) continue;
+                if (id == CSS_PROPERTY_BORDER_IMAGE_WIDTH &&
+                    ((item->type == CSS_VALUE_TYPE_PERCENTAGE &&
+                      item->data.percentage.value >= 0.0) ||
+                     (item->type == CSS_VALUE_TYPE_KEYWORD &&
+                      item->data.keyword == CSS_VALUE_AUTO))) continue;
+                return false;
+            }
+            return true;
+        }
+        case CSS_PROPERTY_BORDER_IMAGE_REPEAT: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            }
+            int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+            if (count < 1 || count > 2) return false;
+            for (int i = 0; i < count; i++) {
+                const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+                    ? value->data.list.values[i] : value;
+                if (!item || item->type != CSS_VALUE_TYPE_KEYWORD) return false;
+                CssEnum keyword = item->data.keyword;
+                if (keyword != CSS_VALUE_STRETCH && keyword != CSS_VALUE_REPEAT &&
+                    keyword != CSS_VALUE_ROUND && keyword != CSS_VALUE_SPACE)
+                    return false;
+            }
+            return true;
+        }
+        case CSS_PROPERTY_BORDER_IMAGE_SLICE: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            }
+            int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+            if (count < 1 || count > 5) return false;
+            int numeric_count = 0;
+            bool seen_fill = false;
+            for (int i = 0; i < count; i++) {
+                const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+                    ? value->data.list.values[i] : value;
+                if (!item) return false;
+                if (item->type == CSS_VALUE_TYPE_KEYWORD &&
+                    item->data.keyword == CSS_VALUE_FILL && !seen_fill) {
+                    seen_fill = true;
+                } else if (item->type == CSS_VALUE_TYPE_NUMBER &&
+                           item->data.number.value >= 0.0) {
+                    numeric_count++;
+                } else if (item->type == CSS_VALUE_TYPE_PERCENTAGE &&
+                           item->data.percentage.value >= 0.0) {
+                    numeric_count++;
+                } else return false;
+            }
+            return numeric_count >= 1 && numeric_count <= 4;
+        }
+        case CSS_PROPERTY_FLOAT:
+        case CSS_PROPERTY_CLEAR: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            const CssEnumInfo* info = css_enum_info(keyword);
+            return keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_LEFT ||
+                keyword == CSS_VALUE_RIGHT || keyword == CSS_VALUE_INLINE_START ||
+                keyword == CSS_VALUE_INLINE_END ||
+                (id == CSS_PROPERTY_CLEAR && keyword == CSS_VALUE_BOTH) ||
+                (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+        }
+        case CSS_PROPERTY_APPEARANCE: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum keyword = value->data.keyword;
+                const CssEnumInfo* info = css_enum_info(keyword);
+                return keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_AUTO ||
+                    keyword == CSS_VALUE_BASE_SELECT ||
+                    (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+            }
+            if (value->type != CSS_VALUE_TYPE_CUSTOM ||
+                !value->data.custom_property.name) return false;
+            static const char* compatible[] = {
+                "base", "searchfield", "textarea", "checkbox", "radio",
+                "menulist", "listbox", "meter", "progress-bar", "button",
+                "textfield", "menulist-button"
+            };
+            for (size_t i = 0; i < sizeof(compatible) / sizeof(compatible[0]); i++) {
+                if (str_ieq_cstr(value->data.custom_property.name, compatible[i]))
+                    return true;
+            }
+            return false;
+        }
+        case CSS_PROPERTY_TEXT_DECORATION_SKIP_INK: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            const CssEnumInfo* info = css_enum_info(keyword);
+            return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_NONE ||
+                keyword == CSS_VALUE_ALL ||
+                (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+        }
+        case CSS_PROPERTY_TEXT_UNDERLINE_POSITION: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            }
+            int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
+            if (count < 1 || count > 2) return false;
+            bool seen_base = false, seen_side = false;
+            for (int i = 0; i < count; i++) {
+                const CssValue* item = value->type == CSS_VALUE_TYPE_LIST
+                    ? value->data.list.values[i] : value;
+                if (!item || item->type != CSS_VALUE_TYPE_KEYWORD) return false;
+                CssEnum keyword = item->data.keyword;
+                if (keyword == CSS_VALUE_AUTO) return count == 1;
+                if (keyword == CSS_VALUE_FROM_FONT || keyword == CSS_VALUE_UNDER) {
+                    if (seen_base) return false;
+                    seen_base = true;
+                } else if (keyword == CSS_VALUE_LEFT || keyword == CSS_VALUE_RIGHT) {
+                    if (seen_side) return false;
+                    seen_side = true;
+                } else return false;
+            }
+            return true;
+        }
+        case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            const CssEnumInfo* info = css_enum_info(keyword);
+            return keyword == CSS_VALUE_SCROLL || keyword == CSS_VALUE_FIXED ||
+                keyword == CSS_VALUE_LOCAL ||
+                (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+        }
+        case CSS_PROPERTY_BORDER_INLINE_WIDTH:
+        case CSS_PROPERTY_BORDER_INLINE_STYLE:
+        case CSS_PROPERTY_BORDER_INLINE_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_START_WIDTH:
+        case CSS_PROPERTY_BORDER_INLINE_START_STYLE:
+        case CSS_PROPERTY_BORDER_INLINE_START_COLOR:
+        case CSS_PROPERTY_BORDER_INLINE_END_WIDTH:
+        case CSS_PROPERTY_BORDER_INLINE_END_STYLE:
+        case CSS_PROPERTY_BORDER_INLINE_END_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_STYLE:
+        case CSS_PROPERTY_BORDER_BLOCK_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_START_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_START_STYLE:
+        case CSS_PROPERTY_BORDER_BLOCK_START_COLOR:
+        case CSS_PROPERTY_BORDER_BLOCK_END_WIDTH:
+        case CSS_PROPERTY_BORDER_BLOCK_END_STYLE:
+        case CSS_PROPERTY_BORDER_BLOCK_END_COLOR:
+            return css_value_is_logical_border(id, value);
+        case CSS_PROPERTY_BORDER_START_START_RADIUS:
+        case CSS_PROPERTY_BORDER_START_END_RADIUS:
+        case CSS_PROPERTY_BORDER_END_START_RADIUS:
+        case CSS_PROPERTY_BORDER_END_END_RADIUS:
+            return css_value_is_logical_corner_radius(value);
+        case CSS_PROPERTY_OVERFLOW:
+        case CSS_PROPERTY_OVERFLOW_X:
+        case CSS_PROPERTY_OVERFLOW_Y:
+        case CSS_PROPERTY_OVERFLOW_BLOCK:
+        case CSS_PROPERTY_OVERFLOW_INLINE: {
+            if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                return value->data.function && value->data.function->name &&
+                    strcmp(value->data.function->name, "var") == 0;
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                return css_value_is_overflow_keyword(value) ||
+                    (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+            }
+            if (id != CSS_PROPERTY_OVERFLOW ||
+                value->type != CSS_VALUE_TYPE_LIST ||
+                value->data.list.count != 2) return false;
+            return css_value_is_overflow_keyword(value->data.list.values[0]) &&
+                css_value_is_overflow_keyword(value->data.list.values[1]);
+        }
+        case CSS_PROPERTY_TEXT_ALIGN:
+        case CSS_PROPERTY_TEXT_ALIGN_ALL:
+        case CSS_PROPERTY_TEXT_ALIGN_LAST:
+            return css_value_is_text_alignment(id, value);
+        case CSS_PROPERTY_TEXT_JUSTIFY: {
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+                const char* name = value->data.custom_property.name;
+                return name && str_ieq_cstr(name, "distribute");
+            }
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            const CssEnumInfo* info = css_enum_info(keyword);
+            return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_NONE ||
+                keyword == CSS_VALUE_INTER_WORD ||
+                keyword == CSS_VALUE_INTER_CHARACTER ||
+                (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+        }
+        case CSS_PROPERTY_TEXT_EMPHASIS:
+        case CSS_PROPERTY_TEXT_EMPHASIS_STYLE: {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            }
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            const CssValue* ignored_color = NULL;
+            return css_text_emphasis_parse_style(value, false, NULL,
+                id == CSS_PROPERTY_TEXT_EMPHASIS ? &ignored_color : NULL);
+        }
+        case CSS_PROPERTY_TEXT_EMPHASIS_COLOR:
+            return css_value_is_supported_color(value) ||
+                value->type == CSS_VALUE_TYPE_VAR;
+        case CSS_PROPERTY_TEXT_EMPHASIS_POSITION: {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            }
+            if (value->type == CSS_VALUE_TYPE_VAR) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
+                value->data.function->name &&
+                strcmp(value->data.function->name, "var") == 0) return true;
+            return css_text_emphasis_position_valid(value);
+        }
+        case CSS_PROPERTY_DISPLAY: {
+            // Substitution may replace one token with several display keywords;
+            // validate the complete grammar after variables resolve.
+            if (css_value_contains_var_reference(value)) return true;
+            if (value->type == CSS_VALUE_TYPE_FUNCTION &&
+                value->data.function && value->data.function->name) {
+                const char* name = value->data.function->name;
+                return strcmp(name, "var") == 0 ||
+                    strcmp(name, "env") == 0 || strcmp(name, "attr") == 0 ||
+                    (strcmp(name, "layout") == 0 &&
+                     value->data.function->arg_count >= 1);
+            }
+            if (value->type == CSS_VALUE_TYPE_CUSTOM) {
+                return css_display_legacy_keyword_supported(
+                    value->data.custom_property.name);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                if (value->data.keyword == CSS_VALUE_NONE ||
+                    value->data.keyword == CSS_VALUE_MATH) return true;
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                return info && (info->group == CSS_VALUE_GROUP_GLOBAL ||
+                    (info->group >= CSS_VALUE_GROUP_DISPLAY_OUTSIDE &&
+                     info->group <= CSS_VALUE_GROUP_DISPLAY_LEGACY));
+            }
+            if (value->type != CSS_VALUE_TYPE_LIST ||
+                value->data.list.count < 2 || value->data.list.count > 3) {
+                return false;
+            }
+            int outside = 0;
+            int inside = 0;
+            int list_item = 0;
+            for (int i = 0; i < value->data.list.count; i++) {
+                const CssValue* part = value->data.list.values[i];
+                if (!part || part->type != CSS_VALUE_TYPE_KEYWORD) return false;
+                const CssEnumInfo* info = css_enum_info(part->data.keyword);
+                if (!info) return false;
+                if (info->group == CSS_VALUE_GROUP_DISPLAY_OUTSIDE) outside++;
+                else if (info->group == CSS_VALUE_GROUP_DISPLAY_INSIDE ||
+                         part->data.keyword == CSS_VALUE_MATH) inside++;
+                else if (info->group == CSS_VALUE_GROUP_DISPLAY_LISTITEM) list_item++;
+                else return false;
+            }
+            return outside <= 1 && inside <= 1 && list_item <= 1 &&
+                (outside + inside + list_item == value->data.list.count);
+        }
+
+        case CSS_PROPERTY_ALL: {
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            const CssEnumInfo* info = css_enum_info(value->data.keyword);
+            return info && info->group == CSS_VALUE_GROUP_GLOBAL;
+        }
+
         case CSS_PROPERTY_FONT_SIZE: {
             // Font-size accepts a single value only
             if (value->type == CSS_VALUE_TYPE_LIST) return false;
             // Font-size must be non-negative
             // Per CSS spec: Negative values are not allowed
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                if (value->data.length.value < 0) {
+                if (value->data.length.value < 0 ||
+                    !css_unit_is_length(value->data.length.unit)) {
                     return false; // Negative font-size is invalid
                 }
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -484,6 +1727,12 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
                 // CSS Values permits a unitless number as a length only when
                 // it is zero, so nonzero font sizes must carry a unit.
                 if (value->data.number.value != 0.0) return false;
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (!info || (info->group != CSS_VALUE_GROUP_FONT_SIZE &&
+                              info->group != CSS_VALUE_GROUP_GLOBAL)) return false;
+            } else if (!css_value_is_length_expression(value, true, false)) {
+                return false;
             }
             break;
         }
@@ -534,7 +1783,8 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
                 return false;
             }
             if (value->type == CSS_VALUE_TYPE_LENGTH) {
-                if (value->data.length.value < 0) {
+                if (value->data.length.value < 0 ||
+                    !css_unit_is_length(value->data.length.unit)) {
                     return false;
                 }
             } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
@@ -547,6 +1797,18 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
                 if (value->data.number.value != 0.0) {
                     return false;
                 }
+            } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum keyword = value->data.keyword;
+                const CssEnumInfo* info = css_enum_info(keyword);
+                bool global = info && info->group == CSS_VALUE_GROUP_GLOBAL;
+                bool size = keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_MIN_CONTENT ||
+                    keyword == CSS_VALUE_MAX_CONTENT || keyword == CSS_VALUE_FIT_CONTENT ||
+                    keyword == CSS_VALUE_STRETCH;
+                bool maximum_none = (id == CSS_PROPERTY_MAX_WIDTH ||
+                    id == CSS_PROPERTY_MAX_HEIGHT) && keyword == CSS_VALUE_NONE;
+                if (!global && !size && !maximum_none) return false;
+            } else if (!css_value_is_length_expression(value, true, true)) {
+                return false;
             }
             break;
         }
@@ -588,12 +1850,222 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
 
         case CSS_PROPERTY_TEXT_INDENT: {
             // CSS Text 3 §8.1: text-indent: <length-percentage> && hanging? && each-line?
-            if (value->type == CSS_VALUE_TYPE_LIST) {
-                // the target Chromium references currently reject modifier
-                // lists, so keep the declaration invalid in the cascade.
-                return false;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                return info && info->group == CSS_VALUE_GROUP_GLOBAL;
             }
-            break;
+            if (value->type != CSS_VALUE_TYPE_LIST) {
+                return css_value_is_text_indent_amount(value);
+            }
+            if (!value->data.list.values || value->data.list.count < 2 ||
+                value->data.list.count > 3) return false;
+            bool has_indent = false;
+            bool has_hanging = false;
+            bool has_each_line = false;
+            for (int i = 0; i < value->data.list.count; i++) {
+                const CssValue* part = value->data.list.values[i];
+                if (!part) return false;
+                if (part->type == CSS_VALUE_TYPE_KEYWORD &&
+                    part->data.keyword == CSS_VALUE_HANGING && !has_hanging) {
+                    has_hanging = true;
+                } else if (part->type == CSS_VALUE_TYPE_KEYWORD &&
+                           part->data.keyword == CSS_VALUE_EACH_LINE && !has_each_line) {
+                    has_each_line = true;
+                } else if (!has_indent &&
+                           css_value_is_text_indent_amount(part)) {
+                    has_indent = true;
+                } else {
+                    return false;
+                }
+            }
+            return has_indent;
+        }
+
+        case CSS_PROPERTY_TAB_SIZE: {
+            // CSS Text 3 §4.2 accepts a non-negative number or length; a
+            // percentage and arbitrary keyword cannot replace a valid value.
+            if (value->type == CSS_VALUE_TYPE_NUMBER) {
+                return value->data.number.value >= 0.0;
+            }
+            if (value->type == CSS_VALUE_TYPE_LENGTH) {
+                return value->data.length.value >= 0.0 &&
+                    css_unit_is_length(value->data.length.unit);
+            }
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                return info && info->group == CSS_VALUE_GROUP_GLOBAL;
+            }
+            return css_value_is_length_expression(value, false, false);
+        }
+
+        case CSS_PROPERTY_COLUMN_RULE_COLOR: {
+            return css_value_is_supported_color(value);
+        }
+
+        case CSS_PROPERTY_CARET_COLOR: {
+            return (value->type == CSS_VALUE_TYPE_KEYWORD &&
+                    value->data.keyword == CSS_VALUE_AUTO) ||
+                css_value_is_supported_color(value);
+        }
+
+        case CSS_PROPERTY_SCROLL_BEHAVIOR: {
+            if (css_value_contains_var_reference(value)) return true;
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            const CssEnumInfo* info = css_enum_info(keyword);
+            return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_SMOOTH ||
+                (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+        }
+
+        case CSS_PROPERTY_IMAGE_RENDERING: {
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            const CssEnumInfo* info = css_enum_info(keyword);
+            return keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_SMOOTH ||
+                keyword == CSS_VALUE_HIGH_QUALITY ||
+                keyword == CSS_VALUE_PIXELATED ||
+                keyword == CSS_VALUE_CRISP_EDGES ||
+                keyword == CSS_VALUE_OPTIMIZE_SPEED ||
+                keyword == CSS_VALUE_OPTIMIZE_QUALITY ||
+                (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+        }
+
+        case CSS_PROPERTY_GRID_AUTO_FLOW: {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                CssEnum keyword = value->data.keyword;
+                const CssEnumInfo* info = css_enum_info(keyword);
+                return keyword == CSS_VALUE_ROW || keyword == CSS_VALUE_COLUMN ||
+                    keyword == CSS_VALUE_DENSE ||
+                    (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+            }
+            if (value->type != CSS_VALUE_TYPE_LIST ||
+                value->data.list.count != 2 || !value->data.list.values) return false;
+            const CssValue* first = value->data.list.values[0];
+            const CssValue* second = value->data.list.values[1];
+            if (!first || !second || first->type != CSS_VALUE_TYPE_KEYWORD ||
+                second->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum a = first->data.keyword;
+            CssEnum b = second->data.keyword;
+            return (a == CSS_VALUE_DENSE &&
+                    (b == CSS_VALUE_ROW || b == CSS_VALUE_COLUMN)) ||
+                   (b == CSS_VALUE_DENSE &&
+                    (a == CSS_VALUE_ROW || a == CSS_VALUE_COLUMN));
+        }
+
+        case CSS_PROPERTY_TEXT_UNDERLINE_OFFSET: {
+            if (value->type == CSS_VALUE_TYPE_LENGTH)
+                return css_unit_is_length(value->data.length.unit);
+            if (value->type == CSS_VALUE_TYPE_PERCENTAGE) return true;
+            if (value->type == CSS_VALUE_TYPE_NUMBER)
+                return value->data.number.value == 0.0;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                return value->data.keyword == CSS_VALUE_AUTO ||
+                    (info && info->group == CSS_VALUE_GROUP_GLOBAL);
+            }
+            return css_value_is_length_expression(value, true, false);
+        }
+
+        case CSS_PROPERTY_TEXT_DECORATION: {
+            // The shorthand combines four independent longhands; reject a
+            // duplicate component before it can replace an earlier declaration.
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                if (value->data.keyword == CSS_VALUE_NONE ||
+                    css_text_decoration_line_flag(value->data.keyword)) return true;
+                return info && (info->group == CSS_VALUE_GROUP_GLOBAL ||
+                    info->group == CSS_VALUE_GROUP_TEXT_DECO_STYLE ||
+                    info->group == CSS_VALUE_GROUP_COLOR ||
+                    info->group == CSS_VALUE_GROUP_SYSTEM_COLOR ||
+                    value->data.keyword == CSS_VALUE_SOLID ||
+                    value->data.keyword == CSS_VALUE_DOUBLE ||
+                    value->data.keyword == CSS_VALUE_DOTTED ||
+                    value->data.keyword == CSS_VALUE_DASHED ||
+                    value->data.keyword == CSS_VALUE_AUTO ||
+                    value->data.keyword == CSS_VALUE_THIN ||
+                    value->data.keyword == CSS_VALUE_MEDIUM ||
+                    value->data.keyword == CSS_VALUE_THICK ||
+                    value->data.keyword == CSS_VALUE_FROM_FONT);
+            }
+            if (value->type != CSS_VALUE_TYPE_LIST) {
+                return css_value_is_supported_color(value) ||
+                    css_value_is_text_decoration_thickness(value);
+            }
+            if (!value->data.list.values || value->data.list.count < 2) return false;
+            uint8_t lines = 0;
+            bool has_none = false;
+            bool has_style = false;
+            bool has_color = false;
+            bool has_thickness = false;
+            for (int i = 0; i < value->data.list.count; i++) {
+                const CssValue* part = value->data.list.values[i];
+                if (!part) return false;
+                if (part->type == CSS_VALUE_TYPE_KEYWORD) {
+                    CssEnum keyword = part->data.keyword;
+                    uint8_t bit = css_text_decoration_line_flag(keyword);
+                    if (bit) {
+                        if (has_none || (lines & bit)) return false;
+                        lines |= bit;
+                        continue;
+                    }
+                    if (keyword == CSS_VALUE_NONE) {
+                        if (has_none || lines) return false;
+                        has_none = true;
+                        continue;
+                    }
+                    const CssEnumInfo* info = css_enum_info(keyword);
+                    bool style = info && info->group == CSS_VALUE_GROUP_TEXT_DECO_STYLE;
+                    style = style || keyword == CSS_VALUE_SOLID ||
+                        keyword == CSS_VALUE_DOUBLE || keyword == CSS_VALUE_DOTTED ||
+                        keyword == CSS_VALUE_DASHED;
+                    if (style) {
+                        if (has_style) return false;
+                        has_style = true;
+                        continue;
+                    }
+                    if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return false;
+                }
+                if (css_value_is_supported_color(part)) {
+                    if (has_color) return false;
+                    has_color = true;
+                } else if (css_value_is_text_decoration_thickness(part)) {
+                    if (has_thickness) return false;
+                    has_thickness = true;
+                } else {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        case CSS_PROPERTY_TEXT_DECORATION_LINE: {
+            if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+                const CssEnumInfo* info = css_enum_info(value->data.keyword);
+                return info && (value->data.keyword == CSS_VALUE_NONE ||
+                    info->group == CSS_VALUE_GROUP_TEXT_DECO_LINE ||
+                    info->group == CSS_VALUE_GROUP_GLOBAL);
+            }
+            if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+                return value->data.function && value->data.function->name &&
+                    strcmp(value->data.function->name, "var") == 0;
+            }
+            if (value->type != CSS_VALUE_TYPE_LIST ||
+                !value->data.list.values || value->data.list.count < 2 ||
+                value->data.list.count > 4) return false;
+            uint8_t seen = 0;
+            for (int i = 0; i < value->data.list.count; i++) {
+                const CssValue* part = value->data.list.values[i];
+                if (!part || part->type != CSS_VALUE_TYPE_KEYWORD) return false;
+                uint8_t bit = css_text_decoration_line_flag(part->data.keyword);
+                if (!bit) return false;
+                if (seen & bit) return false;
+                seen |= bit;
+            }
+            return true;
+        }
+
+        case CSS_PROPERTY_TEXT_DECORATION_THICKNESS: {
+            return css_value_is_text_decoration_thickness(value);
         }
 
         default:
@@ -602,6 +2074,10 @@ bool css_property_validate_value(CssPropertyCode id, CssValue* value) {
     }
 
     return true;
+}
+
+bool css_property_validate_value(CssPropertyCode id, const CssValue* value) {
+    return css_property_validate_value_mode(id, value, false);
 }
 
 // Forward declarations
@@ -898,7 +2374,8 @@ bool css_property_validate_value_from_string(CssPropertyCode property_code,
     if (strcmp(value_str, "inherit") == 0 ||
         strcmp(value_str, "initial") == 0 ||
         strcmp(value_str, "unset") == 0 ||
-        strcmp(value_str, "revert") == 0) {
+        strcmp(value_str, "revert") == 0 ||
+        strcmp(value_str, "revert-layer") == 0) {
         CssKeyword* keyword = (CssKeyword*)pool_calloc(pool, sizeof(CssKeyword));
         keyword->value = value_str;
         keyword->enum_value = -1; // Special marker for global keywords

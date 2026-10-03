@@ -10,13 +10,12 @@
 //  - a self-referential record contract passes the adoption gate
 //    (mir_map_contract_storage_valid), so under the JIT tier every declared
 //    crossing is proven statically: ZERO runtime admissions;
-//  - under the interp tier the same crossings go through
-//    runtime_type_admit_value and must classify EXACT_TRUSTED or
-//    STORAGE_COMPATIBLE — never reify or copy;
-//  - an ANY-bearing contract (union field) is REFUSED by the gate and reifies
-//    at every declared crossing. If it ever stops reifying without the gate
-//    learning concrete storage for those fields, direct MIR reads would
-//    misaddress the shape (Tune19 §11.3) — so the control asserts the refusal.
+//  - under the interp tier fresh destination construction and immutable
+//    boundary plans reuse maintained proofs — never reify or copy;
+//  - an ANY-bearing construction (union field) is REFUSED by the gate and
+//    reifies at constructor boundaries; later crossings can reuse its admitted
+//    representation. Without concrete field storage, adopting the construction
+//    would misaddress direct MIR reads (Tune19 §11.3), so refusal stays pinned.
 //
 // The v33→v34 self-reference regression (type-pattern name degraded to ANY,
 // fixed 2026-08-25) inverted the recursive fixtures' signature: 20 admissions
@@ -28,6 +27,7 @@
 // test_mir_check_helpers.hpp.
 
 #include <gtest/gtest.h>
+#include "test_lambda_tier_helpers.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -556,7 +556,7 @@ static void expect_no_unresolved_type_warning(const FixtureRun& run, const char*
 // ANY-degradation signature for this fixture was calls=20, reifications=20;
 // an unreified literal shape behind a contract-shaped field read is still
 // what the warning check and the reification/copy counters guard against.
-// The interp tier (next test) keeps its 60 trusted crossings.
+// The interp tier reuses the same maintained representation proof.
 TEST(LambdaOptAdmission, RecursiveContractJitFullyStatic) {
     FixtureRun run = run_fixture("recursive_link", "jit", kRecursiveLinkSource, true);
     ASSERT_TRUE(run.ok);
@@ -573,16 +573,15 @@ TEST(LambdaOptAdmission, RecursiveContractJitFullyStatic) {
     EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 0u);
 }
 
-// Interp tier: the same crossings reach runtime_type_admit_value, and every
-// one must classify as trusted (exact or storage-compatible) — shape identity
-// holds, so nothing reifies and nothing is copied.
+// T0 destination construction and boundary plans reuse exact shape proofs
+// without entering admission or copying the recursive graph (D3.2.4v4).
 TEST(LambdaOptAdmission, RecursiveContractInterpAdmitsWithoutCopy) {
     FixtureRun run = run_fixture("recursive_link", "interp", kRecursiveLinkSource, true);
     ASSERT_TRUE(run.ok);
     EXPECT_EQ(run.std_out, "20\n");
-    EXPECT_EQ(run.profile.get("map_admit_calls"), 60u);
+    EXPECT_EQ(run.profile.get("map_admit_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits") +
-              run.profile.get("map_admit_storage_compatible_hits"), 60u);
+              run.profile.get("map_admit_storage_compatible_hits"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 0u);
@@ -1002,7 +1001,10 @@ TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
 // rotation's `var` admission, leaving one fewer shared map per rotation
 // (83 -> 43 copies, 206 -> 166 marks).
 TEST(LambdaOptCow, MoveOutBindsBorrow) {
-    static const char* const tiers[] = {"jit", "interp"};
+    // this construct needs MIR; a strict T0 pin must reject it (D8.1.1v15)
+    expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_move_out_bind.ls",
+        "AST_NODE_MEMBER_ASSIGN_STAM");
+    static const char* const tiers[] = {"jit", "auto"};
     for (int t = 0; t < 2; t++) {
         FixtureRun run = run_fixture("cow_move_out_bind", tiers[t],
             fixture_source("test/lambda/proc/cow_move_out_bind.ls"), true);
@@ -1016,7 +1018,10 @@ TEST(LambdaOptCow, MoveOutBindsBorrow) {
 // slot detaches exactly once; the 1,000 appends through one unique place
 // never copy (array_unique_mutations counts them).
 TEST(LambdaOptCow, PlaceMutatorDetachesEachAliasedSlotOnce) {
-    static const char* const tiers[] = {"jit", "interp"};
+    // this construct needs MIR; a strict T0 pin must reject it (D8.1.1v15)
+    expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_place_mutator.ls",
+        "AST_NODE_SYS_FUNC");
+    static const char* const tiers[] = {"jit", "auto"};
     for (int t = 0; t < 2; t++) {
         FixtureRun run = run_fixture("cow_place_mutator", tiers[t],
             fixture_source("test/lambda/proc/cow_place_mutator.ls"), true);
@@ -1086,14 +1091,12 @@ TEST(LambdaOptAdmission, RecursiveShapeIdentityInterpExactHits) {
     // contract (the reified carrier is also pointer-identical afterwards), so
     // the resolution warning check carries the regression sensitivity here.
     expect_no_unresolved_type_warning(run, "shape_identity");
-    EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits"), 10u);
+    EXPECT_EQ(run.profile.get("map_admit_exact_shape_hits"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
-    // Pinned current behavior: the `let a: Node = {val: 7, next: null}`
-    // initializer takes the runtime path on the interp tier and reifies once
-    // (48 bytes). If construction learns to adopt this literal statically,
-    // ratchet these to 10/0 — do not loosen them.
-    EXPECT_EQ(run.profile.get("map_admit_calls"), 11u);
-    EXPECT_EQ(run.profile.get("map_admit_reifications"), 1u);
+    // Fresh construction adopts Node, and immutable boundary plans reuse its
+    // certificate at all ten crossings; neither admission nor reification runs.
+    EXPECT_EQ(run.profile.get("map_admit_calls"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
 }
 
 // A nullable record-array path must not re-admit its owning graph after each
@@ -1151,10 +1154,10 @@ TEST(LambdaOptAdmission, AnyBearingContractRefusedInterp) {
     ASSERT_TRUE(run.ok);
     EXPECT_EQ(run.std_out, "n5\n");
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 5u);
-    // the describe(p) crossings see the already-reified carrier and pass as
-    // storage-compatible; only the let-boundary reifies
-    EXPECT_EQ(run.profile.get("map_admit_storage_compatible_hits"), 5u);
-    EXPECT_EQ(run.profile.get("map_admit_calls"), 10u);
+    // The five constructor boundaries still reify the unsupported layout;
+    // describe reuses the resulting storage proof through its immutable plan.
+    EXPECT_EQ(run.profile.get("map_admit_storage_compatible_hits"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_calls"), 5u);
 }
 
 // The reification guard, and the tier-pinned regression for the JIT segfault.
@@ -1364,3 +1367,28 @@ TEST(LambdaOptAdmission, BoxedUnionArrayAdmissionRetainsCarrier) {
 }
 
 }  // namespace
+
+TEST(LambdaOptAdmission, TypedConstructionPlanPreservesContainmentAndSnapshots) {
+    const char* tiers[] = {"interp", "jit"};
+    for (const char* tier : tiers) {
+        FixtureRun run = run_fixture_script("typed_construction_plan", tier,
+            "test/mir/lambda/typed_construction_plan.ls", true);
+        ASSERT_TRUE(run.ok);
+        EXPECT_EQ(run.std_out, "[2, 3, 2, 5][7, 5]error4\n");
+    }
+}
+
+TEST(LambdaOptAdmission, PreplannedInterpPathRetainsGraphProof) {
+    FixtureRun run = run_fixture("typed_path_interp", "interp", kTypedPathSource, true);
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "[100, 100]\n");
+    // only the initial nullable Row reifies; writes retain its graph proof
+    // and detach the shared leaf array once (D3.3.3v3, S9.1.3)
+    EXPECT_EQ(run.profile.get("map_admit_calls"), 1u);
+    EXPECT_EQ(run.profile.get("map_admit_reifications"), 1u);
+    EXPECT_EQ(run.profile.get("map_admit_deep_clone_calls"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 2u);
+    EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 48u);
+    EXPECT_EQ(run.profile.get("array_checked_store_calls"), 100u);
+    EXPECT_EQ(run.profile.get("array_checked_store_full_clone"), 1u);
+}

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html><head><style>
+html, body { margin: 0; background: white; }
+svg { position: absolute; }
+.translated { transform: translate(40px, 10px); }
+.scaled { transform: scale(2); transform-origin: 50% 50%; transform-box: fill-box; }
+.percent-transform { transform: translate(25%, 0); transform-box: view-box; }
+</style></head><body>
+<svg id="units" width="200" height="100" style="left:0;top:0" viewBox="0 0 100 50">
+  <rect id="percent" x="10%" y="20%" width="20%" height="40%" fill="red"/>
+  <g font-size="10"><rect id="font-relative" x="5em" y="1em" width="2em" height="2em" fill="blue"/></g>
+  <svg x="75%" y="20%" width="20%" height="40%" viewBox="0 0 10 10"><rect id="nested-percent" width="100%" height="100%" fill="lime"/></svg>
+</svg>
+<svg id="transforms" width="300" height="120" style="left:200px;top:0">
+  <rect id="css-translated" class="translated" width="20" height="20" fill="red" transform="translate(100,80)"/>
+  <rect id="css-scaled" class="scaled" x="100" y="20" width="20" height="20" fill="blue"/>
+  <g transform="translate(0,70)"><rect id="css-percent" class="percent-transform" width="20" height="20" fill="lime"/></g>
+  <a id="link-container" href="#anchor" transform="translate(160,20)" fill="magenta" onclick="this.setAttribute('data-clicked','yes')"><rect id="link-shape" width="20" height="20"/></a>
+  <rect id="css-none" x="210" y="20" width="20" height="20" fill="cyan" transform="translate(50,60)" style="transform:none"/>
+</svg>
+</body></html>

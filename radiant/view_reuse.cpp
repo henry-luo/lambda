@@ -28,8 +28,14 @@ uint64_t inline_prop_hash(const InlineProp* value) {
     INLINE_HASH_FIELD(caret_shape);
     INLINE_HASH_FIELD(color.c);
     INLINE_HASH_FIELD(accent_color.c);
+    INLINE_HASH_FIELD(caret_color.c);
+    INLINE_HASH_FIELD(selection_color.c);
+    INLINE_HASH_FIELD(selection_background_color.c);
     INLINE_HASH_FIELD(has_color);
     INLINE_HASH_FIELD(has_accent_color);
+    INLINE_HASH_FIELD(caret_color_mode);
+    INLINE_HASH_FIELD(has_selection_color);
+    INLINE_HASH_FIELD(has_selection_background_color);
     INLINE_HASH_FIELD(svg_fill_color.c);
     INLINE_HASH_FIELD(svg_stroke_color.c);
     INLINE_HASH_FIELD(vertical_align);
@@ -55,11 +61,18 @@ bool inline_prop_equal(const InlineProp* left, const InlineProp* right) {
     // Explicit semantic comparison keeps padding and future compiler layout out
     // of the canonicalization contract.
     return left->cursor == right->cursor &&
+           left->image_rendering == right->image_rendering &&
            left->caret_shape == right->caret_shape &&
            left->color.c == right->color.c &&
            left->accent_color.c == right->accent_color.c &&
+           left->caret_color.c == right->caret_color.c &&
+           left->selection_color.c == right->selection_color.c &&
+           left->selection_background_color.c == right->selection_background_color.c &&
            left->has_color == right->has_color &&
            left->has_accent_color == right->has_accent_color &&
+           left->caret_color_mode == right->caret_color_mode &&
+           left->has_selection_color == right->has_selection_color &&
+           left->has_selection_background_color == right->has_selection_background_color &&
            left->svg_fill_color.c == right->svg_fill_color.c &&
            left->svg_stroke_color.c == right->svg_stroke_color.c &&
            left->vertical_align == right->vertical_align &&
@@ -95,7 +108,7 @@ static bool canonical_inline_resize(ViewTree* tree, size_t bucket_count) {
             tree->prop_pool, tree->inline_canonical_buckets);
         pool_free(tree->prop_pool, tree->inline_canonical_buckets);
     }
-    tree->inline_canonical_buckets = buckets;
+    tree->inline_canonical_buckets = lam::own_arr(buckets);
     tree->inline_canonical_bucket_count = bucket_count;
     tree->canonical_stats.index_bytes += pool_allocation_size(tree->prop_pool, buckets);
     return true;
@@ -158,8 +171,8 @@ static InlineProp* canonical_inline_find_or_create(ViewTree* tree,
 
 void view_tree_canonical_init(ViewTree* tree) {
     if (!tree || !tree->prop_pool) return;
-    tree->canonical_prop_arena = mem_arena_create(
-        tree->mem_ctx, MEM_ROLE_VIEW, "view_tree.canonical_prop_arena");
+    tree->canonical_prop_arena = lam::own(mem_arena_create(
+        tree->mem_ctx, MEM_ROLE_VIEW, "view_tree.canonical_prop_arena"));
     tree->inline_canonical_buckets = nullptr;
     tree->inline_canonical_bucket_count = 0;
     tree->inline_canonical_count = 0;
@@ -199,7 +212,7 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
         canonical = canonical_inline_find_or_create(tree, parent->in_line);
         if (!canonical) return; // Capacity/index pressure deliberately falls back to owned storage.
         InlineProp* parent_owned = parent->in_line;
-        parent->in_line = canonical;
+        parent->in_line = lam::shared(canonical);
         parent->mark_inline_prop_shared();
         pool_free(tree->prop_pool, parent_owned);
         tree->canonical_stats.inline_promotions++;
@@ -209,7 +222,7 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
         if (!element->inline_prop_shared()) {
             pool_free(tree->prop_pool, element->in_line);
         }
-        element->in_line = canonical;
+        element->in_line = lam::shared(canonical);
         element->mark_inline_prop_shared();
         tree->canonical_stats.inline_promotions++;
     }

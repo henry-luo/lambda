@@ -147,8 +147,8 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         type, node->node_name(), node, node->parent, node->parent ? node->parent->node_name() : "null");
 
     // link the view
-    if (!lycon->line.start_view) lycon->line.start_view = view;
-    lycon->view = view;
+    if (!lycon->line.start_view) lycon->line.start_view = lam::up(view);
+    lycon->view = lam::up(view);
     return view;
 }
 
@@ -235,6 +235,12 @@ static void* view_prop_get_multicol(DomElement* elem) {
 static void view_prop_clear_multicol(DomElement* elem, ViewTree*) {
     if (elem) elem->set_multicol_prop(nullptr);
 }
+static void* view_prop_get_marker(DomElement* elem) {
+    return elem ? (void*)elem->marker_prop() : nullptr;
+}
+static void view_prop_clear_marker(DomElement* elem, ViewTree*) {
+    if (elem) elem->set_marker_prop(nullptr);
+}
 static void* view_prop_get_vpath(DomElement* elem) {
     return elem ? (void*)elem->vector_path() : nullptr;
 }
@@ -304,6 +310,7 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     free_background_prop(tree, elem->boundary()->background);
     if (elem->boundary()->border) {
         free_linear_gradient(tree, elem->boundary()->border->border_image_linear_gradient);
+        view_pool_free_ptr(tree, elem->boundary()->border->border_image_url);
     }
     view_pool_free_ptr(tree, elem->boundary()->border);
     view_pool_free_ptr(tree, elem->boundary()->mask);
@@ -386,25 +393,24 @@ static void release_media_prop(EmbedProp* embed) {
     embed->video = nullptr;
 }
 
-static void release_grid_prop(GridProp* grid) {
+static void release_grid_prop(Pool* pool, GridProp* grid) {
     if (!grid) {
         return;
     }
 
-    destroy_grid_track_list(grid->grid_template_rows);
+    destroy_grid_track_list(pool, grid->grid_template_rows);
     grid->grid_template_rows = nullptr;
-    destroy_grid_track_list(grid->grid_template_columns);
+    destroy_grid_track_list(pool, grid->grid_template_columns);
     grid->grid_template_columns = nullptr;
-    destroy_grid_track_list(grid->grid_auto_rows);
+    destroy_grid_track_list(pool, grid->grid_auto_rows);
     grid->grid_auto_rows = nullptr;
-    destroy_grid_track_list(grid->grid_auto_columns);
+    destroy_grid_track_list(pool, grid->grid_auto_columns);
     grid->grid_auto_columns = nullptr;
     if (grid->grid_areas) {
         for (int i = 0; i < grid->area_count; i++) {
-            destroy_grid_area(&grid->grid_areas[i]);
+            destroy_grid_area(pool, &grid->grid_areas[i]);
         }
-        mem_free(grid->grid_areas);
-        grid->grid_areas = nullptr;
+        lam::free_owned(pool, grid->grid_areas);
         grid->area_count = 0;
         grid->allocated_areas = 0;
     }
@@ -426,25 +432,26 @@ void release_dom_owned_embed_images(DomElement* elem) {
     }
 }
 
-static void release_embed_prop(DomElement* elem) {
+// the grid's track graph lives in the view tree's prop pool
+static void release_embed_prop(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
     release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
     release_embedded_document(elem);
-    release_grid_prop(elem->embedp()->grid);
+    release_grid_prop(tree ? tree->prop_pool : nullptr, elem->embedp()->grid);
 }
 
-static void release_embed_prop_entry(DomElement* elem, ViewTree*) {
-    release_embed_prop(elem);
+static void release_embed_prop_entry(DomElement* elem, ViewTree* tree) {
+    release_embed_prop(elem, tree);
 }
 
-static void release_embed_prop_for_reset(DomElement* elem, ViewTree*) {
+static void release_embed_prop_for_reset(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
     // A retained layout reset invalidates media and sizing data, not the
     // browsing context owned by the still-connected iframe element.
     release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
-    release_grid_prop(elem->embedp()->grid);
+    release_grid_prop(tree ? tree->prop_pool : nullptr, elem->embedp()->grid);
 }
 
 static void free_embed_payload(DomElement* elem, ViewTree* tree) {
@@ -458,7 +465,7 @@ static void reset_embed_prop(DomElement* elem, ViewTree* tree) {
     DomDocument* embedded_doc = elem->embedp()->doc;
     free_embed_payload(elem, tree);
     memcpy(elem->embed, &EMBED_PROP_DEFAULT, sizeof(EmbedProp));
-    elem->embed->doc = embedded_doc;
+    elem->embed->doc = lam::own(embedded_doc);
 }
 
 static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
@@ -476,11 +483,12 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
         font_prop_release_handle(form->placeholder_font);
         form->placeholder_font = nullptr;
     }
-    form_control_prop_release(elem, form);
-    if (form->heap_allocated) {
-        mem_free(form);
-        elem->form = nullptr;
+    if (form->file_button_font) {
+        font_prop_release_handle(form->file_button_font);
+        form->file_button_font = nullptr;
     }
+    form_control_prop_release(elem, form);
+    if (form->heap_allocated) lam::free_owned(elem->form);
 }
 
 static void clear_item_prop(DomElement* elem, ViewTree*) {
@@ -532,14 +540,8 @@ static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
     radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
 }
 
-static void reset_block_or_marker_prop(DomElement* elem, ViewTree*) {
-    if (!elem || !elem->blk) return;
-    if (view_element_uses_marker_prop(elem)) {
-        // ::marker stores MarkerProp in the shared blk slot; treating it as the
-        // larger BlockProp overwrites adjacent view-pool allocations.
-        return;
-    }
-    memcpy(elem->blk, &BLOCK_PROP_DEFAULT, sizeof(BlockProp));
+static void reset_marker_prop(DomElement*, ViewTree*) {
+    // a retained ::marker keeps its MarkerProp; list layout refreshes it in place
 }
 
 static void reset_pseudo_content_prop(DomElement*, ViewTree*) {
@@ -581,7 +583,8 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "font",            release_element_font_prop, free_element_font_payload, view_prop_get_font,            view_prop_clear_font,            nullptr,         nullptr,       &FONT_PROP_DEFAULT,          sizeof(FontProp),          nullptr },
     { "inline",          nullptr,                   nullptr,                   view_prop_get_in_line,         view_prop_clear_inline,          nullptr,         free_inline_prop, nullptr,                    sizeof(InlineProp),        reset_inline_prop },
     { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr,       &BOUNDARY_PROP_DEFAULT,      sizeof(BoundaryProp),      nullptr },
-    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       nullptr,                      sizeof(BlockProp),         reset_block_or_marker_prop },
+    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       &BLOCK_PROP_DEFAULT,         sizeof(BlockProp),         nullptr },
+    { "marker",          nullptr,                   nullptr,                   view_prop_get_marker,          view_prop_clear_marker,          nullptr,         nullptr,       nullptr,                      sizeof(MarkerProp),        reset_marker_prop },
     { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr,       &SCROLL_PROP_DEFAULT,        sizeof(ScrollProp),        nullptr },
     { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr,       &EMBED_PROP_DEFAULT,         sizeof(EmbedProp),         reset_embed_prop, release_embed_prop_for_reset },
     { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr,       &POSITION_PROP_DEFAULT,      sizeof(PositionProp),      nullptr },
@@ -696,10 +699,9 @@ static void view_teardown_apply_table(ViewTree* tree,
 
 static void view_teardown_clear_element_scalars(DomElement* elem) {
     if (!elem) return;
-    // Retained ::marker nodes must keep their discriminator because their blk
-    // slot is MarkerProp, and normal inline layout would cast it to BlockProp.
-    elem->view_type = view_element_uses_marker_prop(elem)
-        ? RDT_VIEW_MARKER : RDT_VIEW_NONE;
+    // Retained ::marker nodes keep their discriminator: list layout refreshes
+    // the MarkerProp in place and does not recreate the marker view.
+    elem->view_type = elem->marker_prop() ? RDT_VIEW_MARKER : RDT_VIEW_NONE;
     elem->content_width = 0.0f;
     elem->content_height = 0.0f;
     elem->set_has_cached_intrinsic_widths(false);
@@ -756,7 +758,9 @@ static bool release_should_walk_dom_children(DomElement* elem) {
     if (elem->display.inner == RDT_DISPLAY_REPLACED) {
         // Select, textarea, and button keep real DOM children/state that can own
         // layout handles; skipping them leaks fallback font handles on removal.
-        return tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_BUTTON;
+        // SVG's foreignObject descendants own ordinary CSS layout resources too.
+        return tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA ||
+            tag == MARKUP_NAME_BUTTON || tag == MARKUP_NAME_SVG;
     }
 
     return true;
@@ -846,7 +850,7 @@ void ViewTree::recycle_text_rects(TextRect* first) {
         TextRect* next = rect->next;
         memset(rect, 0, sizeof(TextRect));
         rect->next = free_text_rects;
-        free_text_rects = rect;
+        free_text_rects = lam::own(rect);
         rect = next;
     }
 }
@@ -876,7 +880,7 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
         // Writing-mode resolves independently of display order; preserve the
         // block axis already resolved before flex properties allocate this prop.
         prop->writing_mode = block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
-        block->embed->flex = prop;
+        block->embed->flex = lam::own(prop);
     }
 }
 
@@ -933,7 +937,7 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
         // Initialize gaps
         grid->row_gap = 0;
         grid->column_gap = 0;
-        block->embed->grid = grid;
+        block->embed->grid = lam::own(grid);
     }
 }
 
@@ -1003,17 +1007,17 @@ void ViewTree::init(MemContext* owner) {
     log_debug("init view pool");
     // The document context outlives the view tree: free_document destroys the
     // tree before it releases the document's Input context.
-    mem_ctx = owner;
-    prop_pool = mem_pool_create(owner, MEM_ROLE_VIEW, "view_tree.prop_pool");
+    mem_ctx = lam::up(owner);
+    prop_pool = lam::own(mem_pool_create(owner, MEM_ROLE_VIEW, "view_tree.prop_pool"));
     if (!prop_pool) {
         log_error("Failed to initialize view pool");
     }
     else {
         view_tree_canonical_init(this);
-        scratch_arena = mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
-        layout_pass_arena = mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.layout_pass_arena");
-        render_scratch_arena = mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.render_scratch_arena");
-        display_list_arena = mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.display_list_arena");
+        scratch_arena = lam::own(mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.scratch_arena"));
+        layout_pass_arena = lam::own(mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.layout_pass_arena"));
+        render_scratch_arena = lam::own(mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.render_scratch_arena"));
+        display_list_arena = lam::own(mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.display_list_arena"));
         free_text_rects = nullptr;
         if (layout_generation == 0) layout_generation = 1;
         log_debug("view pool initialized");
@@ -1080,6 +1084,16 @@ void ViewTree::destroy() {
 
 void view_pool_destroy(ViewTree* tree) {
     if (tree) tree->destroy();
+}
+
+lam::Own<ViewTree> view_tree_shell_create() {
+    return lam::own((ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT)); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets; see view_tree_shell_create.
+}
+
+void view_tree_shell_destroy(lam::Own<ViewTree>& tree) {
+    if (!tree) return;
+    view_pool_destroy(tree);
+    lam::free_owned(tree);
 }
 
 
@@ -1188,7 +1202,9 @@ static void subtract_block_scroll(ViewBlock* block, float* x, float* y) {
  * @param out_dy Output: vertical translation offset
  * @return true if a transform offset was calculated, false otherwise
  */
-static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y) {
+static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y,
+                                        View* boundary = nullptr) {
+    if (view == boundary) { *out_x = *out_y = 0.0f; return; }
     float abs_x = rect ? rect->x : view->x;
     float abs_y = rect ? rect->y : view->y;
     ViewBlock* block = view->is_block() ? lam::view_require_block(view) : nullptr;
@@ -1218,7 +1234,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
             float cb_abs_x = 0.0f;
             float cb_abs_y = 0.0f;
             calculate_absolute_position(
-                static_cast<View*>(cb), nullptr, &cb_abs_x, &cb_abs_y);
+                static_cast<View*>(cb), nullptr, &cb_abs_x, &cb_abs_y, boundary);
             float cb_x = cb->x;
             float cb_y = cb->y;
             if (cb->view_type == RDT_VIEW_INLINE) {
@@ -1256,7 +1272,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         // but then we need to continue walking up to find the absolute parent's
         // containing block and add those positions too.
         ViewElement* parent = view->parent_view();
-        while (parent) {
+        while (parent && parent != boundary) {
             if (parent->is_block()) {
                 ViewBlock* parent_block = lam::view_require_block(parent);
                 if (view_block_has_position(parent_block, CSS_VALUE_ABSOLUTE) ||
@@ -1267,7 +1283,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     // containing-block coordinate, not that ancestor's local y.
                     calculate_absolute_position(
                         static_cast<View*>(parent_block), nullptr,
-                        &parent_abs_x, &parent_abs_y);
+                        &parent_abs_x, &parent_abs_y, boundary);
                     abs_x += parent_abs_x;
                     abs_y += parent_abs_y;
                     if (parent_block != root) {
@@ -1293,14 +1309,14 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
     *out_y = abs_y;
 }
 
-static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
+static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, View* boundary = nullptr) {
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->transform || !block->transformp()->functions) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
-    calculate_absolute_position(view, nullptr, &abs_x, &abs_y);
+    calculate_absolute_position(view, nullptr, &abs_x, &abs_y, boundary);
     RdtLogicalPoint origin = radiant::transform_origin(
         block->transformp(), abs_x, abs_y, block->width, block->height);
 
@@ -1480,6 +1496,41 @@ bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix) {
     return get_transform_matrix_for_view(view, out_matrix);
 }
 
+// SVG2 §12.2: foreignObject is the boundary between CSS layout and SVG user space.
+bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform) {
+    if (!view || !out_matrix) return false;
+    View* chain[256]; unsigned count = 0;
+    ViewElement* foreign = nullptr;
+    for (ViewElement* parent = view->parent_view(); parent && count < 256; parent = parent->parent_view()) {
+        if (parent->tag() == MARKUP_NAME_FOREIGNOBJECT) { foreign = parent; break; }
+        chain[count++] = static_cast<View*>(parent);
+    }
+    float values[6];
+    if (!foreign || !dom_svg_foreign_object_client_transform(foreign, values)) return false;
+    float x, y;
+    calculate_absolute_position(view, nullptr, &x, &y, static_cast<View*>(foreign));
+    RdtMatrix frame = {values[0], values[1], values[2], values[3], values[4], values[5], 0, 0, 1};
+    while (count) {
+        RdtMatrix local;
+        if (get_transform_matrix_for_view(chain[--count], &local, static_cast<View*>(foreign)))
+            frame = rdt_matrix_multiply(&frame, &local);
+    }
+    RdtMatrix local;
+    if (include_self_transform && get_transform_matrix_for_view(view, &local, static_cast<View*>(foreign)))
+        frame = rdt_matrix_multiply(&frame, &local);
+    RdtMatrix position = rdt_matrix_translate(x, y);
+    *out_matrix = rdt_matrix_multiply(&frame, &position);
+    return true;
+}
+
+static bool view_foreign_object_bounds(View* view, float* x, float* y, float* width, float* height) {
+    RdtMatrix frame;
+    if (!view_get_foreign_object_matrix(view, &frame)) return false;
+    *x = *y = 0.0f; *width = view->width; *height = view->height;
+    apply_matrix_to_bounds(&frame, x, y, width, height);
+    return true;
+}
+
 void view_get_visual_bounds(View* view, float* out_x, float* out_y,
                             float* out_width, float* out_height) {
     if (!view) {
@@ -1499,6 +1550,13 @@ void view_get_visual_bounds(View* view, float* out_x, float* out_y,
     // is painted with, as getBoundingClientRect() and hit testing see it.
     if (view->is_element() &&
             dom_svg_element_client_bounds(view, &x, &y, &width, &height)) {
+        if (out_x) *out_x = x;
+        if (out_y) *out_y = y;
+        if (out_width) *out_width = width;
+        if (out_height) *out_height = height;
+        return;
+    }
+    if (view_foreign_object_bounds(view, &x, &y, &width, &height)) {
         if (out_x) *out_x = x;
         if (out_y) *out_y = y;
         if (out_width) *out_width = width;
@@ -2140,11 +2198,8 @@ static void append_font_json(DomElement* elem, StrBuf* buf, int indent,
                              weight_terminator);
     }
     if (include_decoration) {
-        const char* decoration = "none";
-        if (font) {
-            const CssEnumInfo* value = css_enum_info(font->text_deco);
-            if (value) decoration = (const char*)value->name;
-        }
+        char decoration[48];
+        font_text_decoration_names(font, decoration, sizeof(decoration));
         strbuf_append_char_n(buf, ' ', indent + 2);
         strbuf_append_format(buf, "\"decoration\": \"%s\"\n", decoration);
     }

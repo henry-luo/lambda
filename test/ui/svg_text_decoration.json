@@ -1,0 +1,139 @@
+{
+  "name": "SVG text decoration styles and paint ordering",
+  "html": "test/ui/svg_text_decoration.html",
+  "viewport": {
+    "width": 400,
+    "height": 320
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 32,
+      "y": 36,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 38,
+      "y": 36,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 44,
+      "y": 36,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 91,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 93,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 94,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 193,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 190,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 257,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 302,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 175,
+      "y": 256,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 173,
+      "y": 256,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 283,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 293,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 301,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 147,
+      "max_r": 220,
+      "max_g": 220,
+      "min_b": 245
+    }
+  ],
+  "oracle": "SVG 2 11.11 and CSS Text Decoration. Chromium 143 paints SVG decoration with legacy solid fill/stroke and ignores the style/color extensions."
+}

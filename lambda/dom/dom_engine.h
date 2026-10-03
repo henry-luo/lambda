@@ -61,6 +61,8 @@ bool dom_engine_input_set_live_value(DomElement* element, const char* value);
 void dom_engine_input_reset_live_value(DomElement* element);
 bool dom_engine_input_value_sanitize(const char* type, const char* value,
                                      char* output, size_t output_size);
+bool dom_engine_input_value_as_number(const char* type, const char* value,
+                                      double* output);
 void dom_engine_input_value_validate(const char* type, const char* value,
                                      const char* min_value, const char* max_value,
                                      const char* step_value,
@@ -76,6 +78,9 @@ bool dom_engine_event_cascade_active(void);
 // active layout, or refresh a pseudo-class flag
 void dom_engine_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void* dom_engine_element_from_point(DomDocument* doc, float x, float y);
+void* dom_engine_subtree_element_from_point(DomElement* root, float x, float y);
+void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail);
+void dom_engine_svg_timing_key(DomElement* target, const char* key);
 bool dom_engine_layout_active(DomDocument* doc);
 void dom_engine_sync_pseudo_state(void* view, uint32_t pseudo_flag, bool set);
 

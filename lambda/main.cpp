@@ -2249,7 +2249,7 @@ static int node_runner_main(int argc, char** argv) {
 // LAMBDA_EXEC_BACKEND selects the execution tier (D8.1.1v4). Unset selects the
 // shipped `auto` policy; `jit` explicitly requests eager whole-module
 // compilation, while `interp` runs T0 without promotion.
-#if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE)
+#if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE) || defined(LAMBDA_NO_GUI)
 // Commands compiled out of this build must fail clearly instead of being taken
 // for a script path by the default run handler.
 struct LambdaCliExcludedCommand {
@@ -2269,6 +2269,9 @@ static const LambdaCliExcludedCommand LAMBDA_CLI_EXCLUDED_COMMANDS[] = {
 #endif
 #ifdef LAMBDA_NO_SERVE
     {"serve", "the HTTP server"},
+#endif
+#ifdef LAMBDA_NO_GUI
+    {"view", "a display window"}, {"edit", "a display window"},
 #endif
 };
 
@@ -2465,7 +2468,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         print_help();
         return lambda_main_finish(0);
     }
-#if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE)
+#if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE) || defined(LAMBDA_NO_GUI)
     if (argc >= 2) {
         const char* excluded_feature = lambda_cli_excluded_feature(argv[1]);
         if (excluded_feature) {

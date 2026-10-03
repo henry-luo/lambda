@@ -82,7 +82,7 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
 
     PaintSvgLoweringOptions options = {};
     options.indent_level = ctx->indent_level;
-    options.caps = render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
+    options.caps = lam::up(render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG));
     options.resource_id_base = ctx->paint_resource_id;
     ctx->paint_svg_state.indent_level = ctx->indent_level;
     PaintSvgLoweringStats stats = {};
@@ -97,29 +97,16 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
     paint_list_clear(&ctx->paint_list);
 }
 
-static void svg_append_base64(StrBuf* out, const uint8_t* data, size_t len) {
-    if (!out || !data) return;
-    char* b64 = base64_encode_alloc(data, len, BASE64_STD);
-    if (!b64) return;
-    strbuf_append_str(out, b64);
-    mem_free(b64);
-}
-
-static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx,
-                                           ImageSurface* surface,
-                                           float x,
-                                           float y,
-                                           float width,
-                                           float height) {
-    StrBuf* png_bytes = render_encode_surface_png(surface);
-    if (!png_bytes) return false;
+static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx, ImageSurface* surface,
+                                           float x, float y, float width, float height) {
+    StrBuf* uri = render_encode_surface_data_uri(surface);
+    if (!uri) return false;
     svg_indent(ctx);
     strbuf_append_format(ctx->svg_content,
-        "<image data-radiant-fallback=\"effect-raster\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"data:image/png;base64,",
+        "<image data-radiant-fallback=\"effect-raster\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"",
         x, y, width, height);
-    svg_append_base64(ctx->svg_content, (const uint8_t*)png_bytes->str, png_bytes->length);
-    strbuf_append_str(ctx->svg_content, "\" />\n");
-    strbuf_free(png_bytes);
+    strbuf_append_str_n(ctx->svg_content, uri->str, uri->length);
+    strbuf_append_str(ctx->svg_content, "\" />\n"); strbuf_free(uri);
     return true;
 }
 
@@ -171,6 +158,51 @@ static void svg_color_to_string(Color color, char* result) {
     paint_svg_color_to_string(color, result, 32);
 }
 
+static void svg_render_text_emphasis_marks(SvgRenderContext* ctx,
+                                           const char* content, float x, float y,
+                                           float font_size, float word_spacing,
+                                           float cjk_spacing) {
+    if (!ctx || !content || !ctx->font.style ||
+        !ctx->font.style->text_emphasis_enabled ||
+        !font_box_handle(&ctx->font)) return;
+    const FontProp* font = ctx->font.style;
+    Color mark_color = font->text_emphasis_color_current
+        ? ctx->color : font->text_emphasis_color;
+    char color_string[32];
+    svg_color_to_string(mark_color, color_string);
+    FontStyleDesc style = font_style_desc_from_prop(font);
+    const char* cursor = content;
+    const char* end = content + strlen(content);
+    uint32_t previous = 0;
+    while (cursor < end) {
+        uint32_t codepoint = 0;
+        int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
+        if (bytes <= 0) { cursor++; continue; }
+        cursor += bytes;
+        if (text_codepoint_has_zero_advance(codepoint)) continue;
+        if (text_justify_cjk_gap(previous, codepoint)) x += cjk_spacing;
+        previous = codepoint;
+        float advance = font->space_width;
+        if (codepoint == ' ') advance += word_spacing;
+        else {
+            LoadedGlyph* glyph = font_load_glyph(
+                font_box_handle(&ctx->font), &style, codepoint, false);
+            if (glyph) advance = glyph->advance_x;
+        }
+        if (text_emphasis_marks_codepoint(codepoint)) {
+            svg_indent(ctx);
+            strbuf_append_format(ctx->svg_content,
+                "<text x=\"%.2f\" y=\"%.2f\" text-anchor=\"middle\" "
+                "font-family=\"%s\" font-size=\"%.2f\" fill=\"%s\">&#x%X;</text>\n",
+                x + advance * 0.5f,
+                y + (font->text_emphasis_under ? font_size * 1.35f : 0.0f),
+                font_handle_get_family_name(font_box_handle(&ctx->font)),
+                font_size * 0.5f, color_string, font->text_emphasis_mark);
+        }
+        x += advance + font->letter_spacing;
+    }
+}
+
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text || !text->text_data()) return;
     unsigned char* str = text->text_data();
@@ -180,8 +212,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     NEXT_RECT:
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
-    char* text_content = render_text_create_export_segment(
-        str, text_rect, text_transform, true);
+    lam::Temp<char> text_content(render_text_create_export_segment(
+        str, text_rect, text_transform, true));
 
     // Calculate natural text width and gap count for justify rendering.
     // NOTE: includes trailing spaces. The layout's count_justify_opportunities
@@ -192,9 +224,9 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     float natural_width = 0.0f;
     int space_count = 0;
     if (font_box_handle(&ctx->font)) {
-        size_t content_len = strlen(text_content);
+        size_t content_len = strlen(text_content.get());
 
-        unsigned char* scan = (unsigned char*)text_content;
+        unsigned char* scan = (unsigned char*)text_content.get();
         unsigned char* content_end = scan + content_len;
         while (scan < content_end) {  // Only scan up to content_end
             if (is_space(*scan)) {
@@ -234,12 +266,18 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         }
     }
 
-    // Calculate word-spacing for justified text
+    // Share the line's expansion across word and CJK gaps, as layout does.
     float word_spacing = 0.0f;
-    if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width) {
-        // This text is justified - calculate extra space per word
+    float cjk_spacing = 0.0f;
+    CssEnum justify_mode = text_justify_computed_value(text->parent);
+    int gap_count = count_rendered_justify_opportunities(text, text_rect, false);
+    if (justify_mode != CSS_VALUE_NONE && gap_count > 0 &&
+        natural_width > 0 && text_rect->width > natural_width) {
         float extra_space = text_rect->width - natural_width;
-        word_spacing = extra_space / space_count;
+        float gap_spacing = extra_space / gap_count;
+        if (space_count > 0) word_spacing = gap_spacing;
+        if (justify_mode != CSS_VALUE_INTER_WORD && gap_count > space_count)
+            cjk_spacing = gap_spacing;
     }
 
     // Use CSS font-size from style, fallback to 16 if not available
@@ -258,42 +296,46 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     }
 
     bool italic = ctx->font.style->font_style == CSS_VALUE_ITALIC;
-    bool has_text_deco = ctx->font.style->text_deco != CSS_VALUE_NONE &&
-                         ctx->font.style->text_deco != CSS_VALUE__UNDEF;
+    char deco_line[48];
+    font_text_decoration_names(ctx->font.style, deco_line, sizeof(deco_line));
+    bool has_text_deco = strcmp(deco_line, "none") != 0;
     DomElement* parent_elem = text->parent ? text->parent->as_element() : nullptr;
     bool has_text_shadow = parent_elem && parent_elem->font &&
                            parent_elem->fontp()->text_shadow;
 
     if (!has_text_deco && !has_text_shadow) {
         PaintGlyphRun run = {};
-        run.font = &ctx->font;
+        run.font = lam::up(&ctx->font);
         run.color = ctx->color;
-        run.text = text_content;
-        run.text_len = (int)strlen(text_content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+        run.text = text_content.get();
+        run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.
-        run.owns_text = ctx->effect_fallback.active;
-        run.font_family = font_box_handle(&ctx->font)
+        if (ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
+        run.font_family = lam::up(font_box_handle(&ctx->font)
             ? font_handle_get_family_name(font_box_handle(&ctx->font))
-            : "Arial";
+            : "Arial");
         run.font_size = font_size;
         run.x = x;
         run.baseline_y = baseline_y;
         run.word_spacing = word_spacing;
+        run.cjk_spacing = cjk_spacing;
         run.font_weight = font_weight;
         run.italic = italic;
         paint_glyph_run(svg_active_paint_list(ctx), &run);
         svg_lower_paint_list(ctx);
 
-        if (!run.owns_text) mem_free(text_content);
+        // run.text stays valid here: text_content, or the command's owned copy
+        svg_render_text_emphasis_marks(ctx, run.text, x, y,
+                                       font_size, word_spacing, cjk_spacing);
         text_rect = text_rect->next;
         if (text_rect) { goto NEXT_RECT; }
         return;
     }
 
-    size_t transformed_len = strlen(text_content);
+    size_t transformed_len = strlen(text_content.get());
     StrBuf* escaped_text = strbuf_new_cap(transformed_len * 2);
-    escape_append(escaped_text, text_content, transformed_len, ESCAPE_RULES_HTML_TEXT,
+    escape_append(escaped_text, text_content.get(), transformed_len, ESCAPE_RULES_HTML_TEXT,
                   ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
 
     svg_indent(ctx);
@@ -318,49 +360,78 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
     }
 
-    // Add text decoration (skip _UNDEF which means no decoration set)
-    if (ctx->font.style->text_deco != CSS_VALUE_NONE && ctx->font.style->text_deco != CSS_VALUE__UNDEF) {
-        const char* deco_line = nullptr;
-        if (ctx->font.style->text_deco == CSS_VALUE_UNDERLINE) deco_line = "underline";
-        else if (ctx->font.style->text_deco == CSS_VALUE_OVERLINE) deco_line = "overline";
-        else if (ctx->font.style->text_deco == CSS_VALUE_LINE_THROUGH) deco_line = "line-through";
-        if (deco_line) {
-            if (ctx->font.style->text_deco_color.a > 0) {
-                Color c = ctx->font.style->text_deco_color;
-                strbuf_append_format(ctx->svg_content,
-                    " style=\"text-decoration: %s; text-decoration-color: rgb(%d,%d,%d);\"",
-                    deco_line, c.r, c.g, c.b);
-            } else {
-                strbuf_append_format(ctx->svg_content, " text-decoration=\"%s\"", deco_line);
-            }
-        }
-    }
-
     // Add word-spacing for justified text
     if (word_spacing > 0.01f) {
         strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", word_spacing);
     }
+    paint_svg_append_cjk_dx(ctx->svg_content, text_content.get(),
+                            (int)strlen(text_content.get()), cjk_spacing); // INT_CAST_OK: export segment byte length is bounded by TextRect input.
 
-    // Add text-shadow as CSS style attribute
-    if (parent_elem && parent_elem->font && parent_elem->fontp()->text_shadow) {
-        strbuf_append_str(ctx->svg_content, " style=\"text-shadow:");
-        TextShadow* ts = parent_elem->fontp()->text_shadow;
-        bool first = true;
-        while (ts) {
-            if (!first) strbuf_append_char(ctx->svg_content, ',');
-            char ts_color[32];
-            svg_color_to_string(ts->color, ts_color);
-            strbuf_append_format(ctx->svg_content, " %.1fpx %.1fpx %.1fpx %s",
-                ts->offset_x, ts->offset_y, ts->blur_radius, ts_color);
-            first = false;
-            ts = ts->next;
+    // Keep decoration and shadow in one style attribute so both survive SVG parsing.
+    if (has_text_deco || has_text_shadow) {
+        strbuf_append_str(ctx->svg_content, " style=\"");
+        if (has_text_deco) {
+            strbuf_append_format(ctx->svg_content,
+                "text-decoration: %s;", deco_line);
+            if (ctx->font.style->text_deco_color.a > 0) {
+                Color c = ctx->font.style->text_deco_color;
+                strbuf_append_format(ctx->svg_content,
+                    " text-decoration-color: rgb(%d,%d,%d);", c.r, c.g, c.b);
+            }
+            if (ctx->font.style->text_underline_offset_mode == 1) {
+                strbuf_append_format(ctx->svg_content,
+                    " text-underline-offset: %.2fpx;",
+                    ctx->font.style->text_underline_offset);
+            } else if (ctx->font.style->text_underline_offset_mode == 2) {
+                strbuf_append_format(ctx->svg_content,
+                    " text-underline-offset: %.2f%%;",
+                    ctx->font.style->text_underline_offset);
+            }
+            CssEnum underline_position = ctx->font.style->text_underline_position;
+            CssEnum underline_side = ctx->font.style->text_underline_side;
+            if (underline_position != CSS_VALUE_AUTO ||
+                underline_side != CSS_VALUE__UNDEF) {
+                const CssEnumInfo* position_info = css_enum_info(underline_position);
+                const CssEnumInfo* side_info = css_enum_info(underline_side);
+                strbuf_append_str(ctx->svg_content, " text-underline-position:");
+                if (position_info && underline_position != CSS_VALUE_AUTO)
+                    strbuf_append_format(ctx->svg_content, " %s", position_info->name);
+                if (side_info && underline_side != CSS_VALUE__UNDEF)
+                    strbuf_append_format(ctx->svg_content, " %s", side_info->name);
+                strbuf_append_char(ctx->svg_content, ';');
+            }
+            if (ctx->font.style->text_deco_skip_ink == CSS_VALUE_NONE ||
+                ctx->font.style->text_deco_skip_ink == CSS_VALUE_ALL) {
+                strbuf_append_format(ctx->svg_content,
+                    " text-decoration-skip-ink: %s;",
+                    ctx->font.style->text_deco_skip_ink == CSS_VALUE_NONE
+                        ? "none" : "all");
+            }
+        }
+        if (has_text_shadow) {
+            strbuf_append_str(ctx->svg_content, " text-shadow:");
+            TextShadow* ts = parent_elem->fontp()->text_shadow;
+            bool first = true;
+            while (ts) {
+                if (!first) strbuf_append_char(ctx->svg_content, ',');
+                char ts_color[32];
+                svg_color_to_string(ts->color, ts_color);
+                strbuf_append_format(ctx->svg_content, " %.1fpx %.1fpx %.1fpx %s",
+                    ts->offset_x, ts->offset_y, ts->blur_radius, ts_color);
+                first = false;
+                ts = ts->next;
+            }
+            strbuf_append_char(ctx->svg_content, ';');
         }
         strbuf_append_char(ctx->svg_content, '"');
     }
 
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
 
-    mem_free(text_content);  strbuf_free(escaped_text);
+    svg_render_text_emphasis_marks(ctx, text_content.get(), x, y,
+                                   font_size, word_spacing, cjk_spacing);
+
+    text_content.reset();  strbuf_free(escaped_text);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -936,14 +1007,13 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
-    float img_width = content_rect.width;
-    float img_height = content_rect.height;
-
-
-    if (img->url && img->url->href) {
-        paint_draw_image_resource(svg_active_paint_list(ctx), img,
-                                  content_rect.x, content_rect.y,
-                                  img_width, img_height, 255, nullptr);
+    PaintList* paint = svg_active_paint_list(ctx);
+    if (render_media_paint_svg_picture(paint, ctx->ui_context, block, &content_rect)) {
+        svg_lower_paint_list(ctx);
+    } else if (img->url && img->url->href) {
+        Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
+        paint_draw_image_resource(paint, img, image_rect.x, image_rect.y,
+            image_rect.width, image_rect.height, 255, nullptr);
         svg_lower_paint_list(ctx);
     }
 }
@@ -985,8 +1055,8 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.fill_none,
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
-                              initial_paint.stroke_width);
-    subscene.id_scope = render_svg_reference_scope(dom_elem);
+                              initial_paint.stroke_width, ctx->ui_context);
+    subscene.id_scope = lam::up(render_svg_reference_scope(dom_elem));
     paint_svg_subscene(svg_active_paint_list(ctx), &subscene);
     svg_lower_paint_list(ctx);
     if (font) ctx->font = *font;
@@ -1146,8 +1216,12 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
-    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    MarkerProp* marker_prop = elem->marker_prop();
     if (!marker_prop) return;
+    if (marker_prop->has_color) color = marker_prop->color;
+    FontBox marker_font_box = elem->font
+        ? FontBox{lam::up(elem->font), font_prop_used_size(elem->font)} : *font;
+    font = &marker_font_box;
 
     float x = abs_x + marker->x;
     float y = abs_y + marker->y;
@@ -1224,9 +1298,21 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
                 svg_indent(ctx);
                 strbuf_append_format(ctx->svg_content,
                     "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%.0f\" "
-                    "fill=\"%s\" text-anchor=\"end\">%s</text>\n",
-                    text_x, baseline_y, family, font_size, color_str,
-                    escaped->str);
+                    "fill=\"%s\"",
+                    text_x, baseline_y, family, font_size, color_str);
+                int font_weight = font->style->font_weight_numeric > 0
+                    ? font->style->font_weight_numeric
+                    : font->style->font_weight == CSS_VALUE_BOLD ? 700 : 400;
+                if (font_weight != 400) {
+                    strbuf_append_format(ctx->svg_content,
+                        " font-weight=\"%d\"", font_weight);
+                }
+                if (font->style->font_style == CSS_VALUE_ITALIC ||
+                    font->style->font_style == CSS_VALUE_OBLIQUE) {
+                    strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
+                }
+                strbuf_append_format(ctx->svg_content,
+                    " text-anchor=\"end\">%s</text>\n", escaped->str);
                 strbuf_free(escaped);
             }
             break;
@@ -1323,8 +1409,8 @@ static void render_caret_svg(SvgRenderContext* ctx, DocState* state) {
 }
 
 // Main SVG rendering function
-char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, DocState* state) {
-    if (!root_view || !uicon) {
+char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, float height, DocState* state, float output_scale) {
+    if (!root_view || !uicon || !isfinite(output_scale) || output_scale <= 0) {
         return NULL;
     }
 
@@ -1337,7 +1423,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.ui_context = uicon;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg.backdrop.arena");
+    ctx.page_backdrop_arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.svg.backdrop.arena");
     if (ctx.page_backdrop_arena) {
         dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
         ctx.page_backdrop_ready = true;
@@ -1351,24 +1437,21 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.block.x = 0; ctx.block.y = 0;
 
     // Initialize font from default
-    ctx.font.style = &uicon->default_font;
+    ctx.font.style = lam::up(&uicon->default_font);
 
     // SVG header
     strbuf_append_format(ctx.svg_content,
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<svg xmlns=\"http://www.w3.org/2000/svg\" "
-        "width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\">\n",
-        width, height, width, height);
+        "width=\"%.6g\" height=\"%.6g\" viewBox=\"0 0 %.6g %.6g\">\n",
+        width * output_scale, height * output_scale, width, height);
 
     ctx.indent_level++;
 
     // Add background
-    Color white = {};
-    white.r = 255;
-    white.g = 255;
-    white.b = 255;
-    white.a = 255;
-    paint_fill_rect(&ctx.paint_list, 0.0f, 0.0f, width, height, white);
+    // the document canvas includes propagated root/body paint even when its layout box is empty.
+    Color background = render_document_output_background(root_view);
+    paint_fill_rect(&ctx.paint_list, 0.0f, 0.0f, width, height, background);
     svg_lower_paint_list(&ctx);
 
     // Render the root view via shared tree walker
@@ -1378,7 +1461,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     walk_state.y = 0;
     walk_state.font = ctx.font;
     walk_state.color = ctx.color;
-    walk_state.ui_context = uicon;
+    walk_state.ui_context = lam::up(uicon);
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
         render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
@@ -1395,9 +1478,9 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     strbuf_append_str(ctx.svg_content, "</svg>\n");
 
     RenderPathTrace trace = {};
-    trace.target = "svg";
-    trace.replay_mode = "paint_ir_svg";
-    trace.backend_name = "svg_export";
+    trace.target = lam::up("svg");
+    trace.replay_mode = lam::up("paint_ir_svg");
+    trace.backend_name = lam::up("svg_export");
     trace.display_list_recorded = false;
     trace.paint_ir_enabled = true;
     trace.surface_width = width;
@@ -1449,18 +1532,13 @@ static int render_export_session_to_svg(RenderExportSession* session, const char
 
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
-        // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
-        int svg_width = (int)(session->content_width * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
-        int svg_height = (int)(session->content_height * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
-        char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
-                                                   svg_width, svg_height, doc->state);
+        // only the outer dimensions scale; the viewBox retains CSS coordinates for every subscene.
+        lam::Temp<char> svg_content(render_view_tree_to_svg(ui_context, doc->view_tree->root,
+            (float)session->content_width, (float)session->content_height, doc->state, session->output_scale));
         if (svg_content) {
-            if (save_svg_to_file(svg_content, svg_file)) {
+            if (save_svg_to_file(svg_content.get(), svg_file)) {
                 log_info("Successfully rendered HTML to SVG: %s", svg_file);
-                mem_free(svg_content);
                 return 0;
-            } else {
-                mem_free(svg_content);
             }
         } else {
         }

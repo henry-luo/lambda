@@ -1,6 +1,6 @@
 # Radiant — SVG, Vector Graphics & Diagram Layout
 
-> **Last verified against tree:** 2026-10-02 (SVG geometry/paint changes; graph sections retain the 2026-09-30 audit)
+> **Last verified against tree:** 2026-10-03 (P7/P10 stroke/filter audit in §4.2, P12 SMIL in §4.5 and P13 exports in §5.3; other SVG geometry/paint sections retain the 2026-10-02 audit; graph sections retain the 2026-09-30 audit)
 
 > **Part of the [Radiant detailed-design set](RAD_00_Overview.md).** This document covers three cohesive sub-areas that share one paint pipeline: the `RdtVector` immediate-mode vector API and active ThorVG backend, with an excluded CoreGraphics implementation retained for future exploration; the inline-SVG renderer that walks a *Radiant-parsed* SVG element tree and records it into that API (plus the easily-confused opposite-direction view-tree→SVG-text serializer); and Lambda graph layout whose routed edges enter Radiant as generated SVG paint layers.
 >
@@ -55,7 +55,7 @@ In the active ThorVG backend, native `gaussian_blur` is advertised only under `#
 
 Two small files build geometry through the `RdtVector` API. `render_path.cpp` constructs clip/border geometry: `render_path_create_rounded_rect` (`render_path.cpp:7`) emits a per-corner rounded rectangle using the circle-approximation constant `RENDER_PATH_KAPPA` (`render_path.cpp:5`), and `render_path_create_clip_path` (`:65`) derives the current block's clip rectangle (honoring `has_clip_radius`). `render_vector_path.cpp` renders a CSS `VectorPathProp` — a block whose `vpath->segments` linked list carries `VPATH_MOVETO`/`LINETO`/`CURVETO`/`CLOSE` — into an `RdtPath` and then strokes/fills it through the render context (`render_vector_path`, `render_vector_path.cpp:6`).
 
-SVG *pictures* — standalone `.svg` files and offscreen scenes — are loaded through `rdt_picture_load`/`rdt_picture_load_data` (`render.hpp`). Critically, **Radiant parses the SVG itself**, not ThorVG's loader: `svg_picture_create` (`rdt_vector_tvg.cpp:1646`) calls `html5_parse_svg_document` (`:1667`) to produce a `KIND_SVG_DOM` picture holding a Radiant-parsed `Element` root plus an owned `Pool` (`RdtPicture::Kind`, `rdt_vector_tvg.cpp:60`; the file comment at `:1710` states "the SVG path is parsed by Radiant (not ThorVG)"). Loaded pictures are cached by path under `g_picture_cache_mutex` (`rdt_vector_tvg.cpp:101,286`). Drawn into a page (an `<img>`, a CSS background, or an SVG `<image>`), a `KIND_SVG_DOM` picture is painted into the recording on the recording thread by `render_svg_record_picture`, exactly like inline SVG and with its text as glyph items. It is never deferred to replay, where tile workers would run the painter concurrently ([RAD_12 §3](RAD_12_Paint_IR_Display_List.md)). Off-screen draws (`rdt_picture_draw`, e.g. rasterizing an image cache, the PDF raster fallback) record and replay a private DisplayList (`render_svg_to_vec_via_display_list`), so file-SVG, inline-SVG, and PDF export (`render_pdf.cpp`) all share one renderer. `rdt_picture_get_svg_root`/`rdt_picture_find_svg_element_by_id` (`render.hpp`) expose that parsed tree for scripting.
+SVG *pictures* — standalone `.svg` files and offscreen scenes — are loaded through `rdt_picture_load`/`rdt_picture_load_data` (`render.hpp`). Critically, **Radiant parses the SVG itself**, not ThorVG's loader: `svg_picture_create` (`rdt_vector_tvg.cpp:1646`) calls `parse_svg_document` in `lambda/input/input-xml.cpp` to produce a `KIND_SVG_DOM` picture holding a Radiant-parsed `Element` root plus an owned `Pool` (`RdtPicture::Kind`, `rdt_vector_tvg.cpp:60`; the file comment at `:1710` states "the SVG path is parsed by Radiant (not ThorVG)"). Loaded pictures are cached by path under `g_picture_cache_mutex` (`rdt_vector_tvg.cpp:101,286`). Drawn into a page (an `<img>`, a CSS background, or an SVG `<image>`), a `KIND_SVG_DOM` picture is painted into the recording on the recording thread by `render_svg_record_picture`, exactly like inline SVG and with its text as glyph items. It is never deferred to replay, where tile workers would run the painter concurrently ([RAD_12 §3](RAD_12_Paint_IR_Display_List.md)). Off-screen draws (`rdt_picture_draw`, e.g. rasterizing an image cache, the PDF raster fallback) record and replay a private DisplayList (`render_svg_to_vec_via_display_list`), so file-SVG, inline-SVG, and PDF export (`render_pdf.cpp`) all share one renderer. `rdt_picture_get_svg_root`/`rdt_picture_find_svg_element_by_id` (`render.hpp`) expose that parsed tree for scripting.
 
 ---
 
@@ -75,7 +75,60 @@ Path data is parsed by `parse_svg_path_d` (`render_svg_inline.cpp:2132`), which 
 
 Object-bounding-box resources consume `rdt_path_get_bounds` (`rdt_vector_tvg.cpp:1332`): cubic derivative extrema give the geometry box, isolated moves do not expand it, and closepath restores the subpath origin. Paths, polygons and polylines now supply that box to gradient/pattern painting. `parse_svg_color` (`render_svg_inline.cpp:682`) delegates to the shared `css_parse_color`, including percentage RGB, named colors and HSL; shared RGBA conversion lives in `lib/color.h`. Group-opacity capture (`svg_group_enter`, `render_svg_inline.cpp:4230`) uses the root target viewport and its placement transform before viewBox/group mapping, so missing or nonzero viewBox origins do not change the capture region. These values remain logical floats (**RSC1/RSC6** in [Radiant Scale](../../../vibe/radiant/Radiant_Scale.md)); retained paint ownership remains governed by **D4.2.2v2–D4.2.4** in [Lambda Formal Design](../../Lambda_Formal_Design.md). Coverage and remaining work are recorded in the [SVG implementation plan](../../../vibe/impl/Lambda_Impl_SVG_Support.md#74-progress-record).
 
-Paint dispatch is `draw_svg_fill_stroke` (`render_svg_inline.cpp:1445`), routing to solid fill, `draw_gradient_fill` (`:1329`), `draw_pattern_fill` (`:1377`), or stroke. Filters: `resolve_svg_solid_filter_tint` for `<feFlood>` (`:1182`) and `resolve_svg_gaussian_blur_filter` for `<feGaussianBlur>` (`:1219`), the latter bracketed by `svg_begin_gaussian_blur_filter`/`svg_finish_gaussian_blur_filter` (`:1309,1315`). Clip/mask handling: `resolve_svg_clip_path` (`:4350`) and `build_clip_path_from_def` (`:4276`), with a masked-source repaint path (`render_svg_masked_source_*`, `:4153-4214`) guarded against recursion by `suppress_masks`. Embedded CSS is collected by `collect_svg_style_rules` (`:3063`) + `parse_svg_style_text` (`:461`) and applied with `svg_apply_inherited_paint_attrs` (`:756`). Text is laid out as runs on one line (SVG 2 §11): `svg_text_collect` flattens `<text>`, `<tspan>` and `<a>` into runs that each keep their own element's font and fill, collapsing white space across element boundaries (`xml:space="preserve"` keeps it); `svg_text_place` advances the pen run by run, applies each element's x/y/dx/dy (first list value) to its first character, starts a text chunk at every absolute x or y, applies text-anchor per chunk, and scales all advances for `textLength`. Runs are measured with the glyph drawer's own advances (`svg_glyph_text_advance`), so they abut where the pen stops. They are drawn by Radiant glyph rasterization (`render_svg_text_with_radiant_glyphs`, `draw_glyph_affine`, with a cmap check `font_file_has_unicode_cmap` during font resolution) or, when no raster context is active (SVG pictures), by a ThorVG `tvg_text` run bridged into an `RdtPicture` via `rdt_picture_take_tvg_paint` (`svg_text_draw_tvg_run`).
+Paint dispatch uses `draw_svg_fill_stroke`, gradient/pattern lowering and the
+shared stroke-width/dash/order facts. Authored path topology places start/mid/end
+markers on paths, lines, polylines and polygons; marker instances resolve
+viewBox/PAR, units and context paints. Affine non-scaling strokes share the
+paint/hit geometry path. Broader SVG2 vector effects remain explicitly partial
+in the [support matrix](../../HTML_CSS_SVG_Support.md#152-attributes-styling-and-paint-servers).
+
+Filters use `svg_filter_compile` and `render_svg_filter_execute`
+(`render_svg_inline.cpp`, `render_svg_filter.cpp`) through the common
+`svg_render_effect_scope` boundary. Document-owned, mutation-keyed programs
+contain the F1–F4 graph facts; acquisition pins them against reclamation.
+Intermediate premultiplied surfaces and work counters are execution-owned;
+the final surface survives source/scratch/program teardown. Filter and primitive
+regions take viewport/geometry from the referencing target and current font
+metrics from the declaring resource through `RdtSvgFilterRun::resolve_lengths`.
+External resources use their isolated document and relative URL base. These
+ownership seams follow **D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check,
+copy-as-value). Component transfer and convolution remain unavailable.
+The [P7/P10 audit](../../../vibe/impl/Lambda_Impl_SVG_Support.md#714-p7p10-final-stroke-oracle-and-filter-resource-audit)
+records coordinate, mutation, teardown and browser-reference evidence.
+
+SVG authored styles use `svg_style_init`/`svg_style_property_value`, backed by
+`css_select_element_declaration`, the shared CSS parser/selector/cascade engine.
+Inline nodes use their live host DOM and stylesheet environment; external SVG
+images/use documents allocate isolated metadata for the paint walk. Inline
+importance and selector-list specificity follow the shared priority comparator.
+Group family/size/weight/slant and visibility inherit through traversal state;
+hidden containers still visit visible descendants. Gradient stops use the same
+adapter for color, currentColor and opacity. `svg_get_dom_presentation_property`
+serves interaction queries, so visibility paint and pointer targets agree.
+Stylesheet text replacement queues owner reparsing even for a STYLE-classified
+mutation. SVG layer keys include host document epochs, glyph-cache generations
+and font descriptor/source generations, retaining document ownership under
+**D4.2.2v2–D4.2.4/D4.5.1v3**.
+Text is laid out as addressable characters on one line (SVG 2 §11).
+`svg_text_collect` collapses whitespace across text/tspan/a boundaries and consumes
+full positioning lists in UTF-16 units; repeated rotation, inherited spacing,
+baseline facts, chunks, text-anchor and nested textLength feed `svg_text_place`.
+Logical font metrics and authored family-list fallback come from `lib/font`.
+`font_visit_glyph_path` shares TrueType outline conversion with font rasterization
+and uses the native CoreText outline visitor where available. Bitmap-only glyphs
+use coverage contours with preserved holes; empty outline stubs cannot suppress
+that fallback. Color glyph pixels are copied into an owned image resource.
+All glyph contours enter the shared SVG fill/stroke paint and text/tspan opacity
+scopes; paint servers and complete effects remain later work. Decoration paths
+share `render_path_create_decoration` with HTML text; underline/overline precede
+glyph paint and line-through follows it. `svg_text_geometry_path` derives DOM
+bounds and pointer cells from this same layout, preserving tracking but excluding
+positioned and calibrated gaps. Isolated SVG resources and geometry-only callers
+own their font registry and copy CSS metadata through the existing descriptor
+bridge (**D4.2.2v2-D4.2.4, D4.5.1v3**). ThorVG text remains a fallback for an
+unavailable font path. Normative UTF-16, nested-calibration and SVG 2 decoration
+fixtures record their specific disagreement with Chromium 143; general shaping
+is an existing font-engine limitation.
 
 ### 4.3 Record then replay
 
@@ -94,6 +147,66 @@ What this buys: a page whose static art sits in its own `<svg>` elements, with p
 
 ---
 
+### 4.5 SVG animation and clock dependencies
+
+`svg_animation.cpp`/`svg_animation.hpp` adapt the document scheduler to
+`animate`, `animateTransform` and `set`. Base DOM attributes remain unchanged;
+the document owns typed sampled values and generation-checked `DomNodeRef`
+controls. Pause/seek and begin/end methods feed the same interval evaluator as
+events and syncbases. Directly nested SVG shares its outer fragment's clock;
+SVG below an HTML integration point owns a separate clock. Detach prevents
+driver creation while a pinned node can retain its sampled state for reattachment.
+Nested SVG reads its outer fragment time; its pause/seek setters are inert,
+following [SVG Animations §5.8](https://svgwg.org/specs/animations/#InterfaceSVGSVGElement).
+
+Font, ancestor viewport, currentColor and filter type samples precede dependent attributes;
+priority within one attribute still follows begin time and document order.
+Equal relative units survive interpolation until used-value resolution. Mixed
+units use the shared SVG length resolver; opacity/offset percentages use a
+dimensionless basis. Discrete to-animation transitions follow SVG 1.1 §19.2.9,
+including XML initial values. Indefinite simple duration ignores keyTimes and
+retains the initial function value even when frozen.
+
+Style properties and compiled filter programs key both DOM epoch and effective
+animation generation. External use exposes samples only inside its active source
+subtree, follows the host clock, and keeps separately referenced resources static.
+Cached strings copy sampled values before another instance can replace sample
+storage. Pinned filter programs preserve their recorded facts until released.
+This follows **D4.2.2v2–D4.2.6/D4.5.1v4**, whose seam contract is
+**“pin, gen-check, copy-as-value.”** SVG image picture draw state is separate from
+the immutable parsed owner; every fragment in its private document receives
+the image time. HTML image copies sharing a cached URL share the surface clock,
+following [HTML §15.4.2](https://html.spec.whatwg.org/multipage/rendering.html#images).
+
+The supported value classes, explicit work/storage bounds, raw Chromium
+differences and final gates are in
+[the implementation record §7.16](../../../vibe/impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout).
+Access keys observe trusted character input independently of focus. Wallclock
+calendar/time/zone values resolve against one captured fragment origin, preserved
+across pause/seek; expired pre-zero intervals cannot freeze or feed syncbases.
+
+Use instances own private controls, samples and nested instance registries under
+the host document. Hit testing replays the actual use chain before resolving
+implicit event timing; qualified ID events and access keys also reach subsequent
+instances. Host clock ticks deliver private begin/repeat/end timing to dependent
+animations. External use source DOM/style/font documents retain their parsed
+picture owner until the host releases private controls (**D4.2.6/D4.5.1v4**).
+All instances share the host's work/storage limits.
+
+The animation DOM surface includes targetElement, getStartTime, getCurrentTime,
+getSimpleDuration and void begin/end methods, with finite float argument
+conversion and InvalidStateError/NotSupportedError DOMExceptions. TimeEvent
+creation and initialization preserve readonly view/detail, IDL long conversion,
+nonbubbling/noncancelable dispatch and initialization guards. These extend the
+record-owned host protocol (**D7.4.4**); exception/event construction uses precise
+roots (**D5.3.3**). Motion/discard and general SVG DOM reflection/prototypes are
+outside N1, and the broad SMIL matrix row remains partial.
+`make test-svg-smil` exercises controlled/running clocks through real UI input
+at 1×/2× with layers disabled/eager; its browser mode keeps independent reference
+pages distinguishable from the raw SVG captures.
+
+---
+
 ## 5. SVG output — the opposite-direction serializer (do not confuse with §4)
 
 `render_svg.cpp` is a different thing entirely and a frequent source of confusion: it is a `RenderBackend` that serializes the **already-laid-out view tree back out to an SVG *text* document**. It consumes views and produces SVG markup; §4 consumes SVG and produces pixels.
@@ -109,6 +222,27 @@ Effects SVG text cannot express (Gaussian blur, blend modes, color-matrix filter
 ### 5.3 Both SVG directions share the subscene builder
 
 `PaintSvgSubscene` (`render.hpp`) is the shared unit: raster (`render_raster_walk.cpp:53`), PDF (`render_pdf.cpp`), and this SVG-output backend (`render_svg.cpp:1387`) all defer inline-SVG through the same builder, which keeps one code path for SVG regardless of the final target.
+
+P13 export records resolved SVG paint through `render_svg_subscene_with_paint`.
+SVG lowers supported paths/gradients and embeds a transparent snapshot for other
+paint; PDF retains native opaque paths and uses density-aware transparent replay
+for the rest. SVG pictures use the same subscene and image-placement contract.
+Authored `data-*`, role/label and geometry metadata are copied into optional
+`DlElementMarker` snapshots; SVG text carries an accessible title alongside its
+glyph outlines. Semantic PaintIR groups retain those values without changing
+raster or PDF graphics state. The recording arena owns all copied strings until
+synchronous lowering finishes; retained marker copies use the same copy helper
+(**D4.2.2v2–D4.2.6/D4.5.1v4**). Both exports share native canvas-background
+resolution, and PDF applies output scale to its page CTM with logical tree
+coordinates. `make test-svg-export` verifies the portable output matrix.
+
+CLI exports create the document at time zero and resolve SMIL before recording.
+Negative begins and frozen intervals that ended before zero therefore contribute
+their initial sampled state. Delayed animations retain their base paint; SVG
+images start at their own initial time. PNG/SVG/PDF use the same snapshot,
+including external use and animated filter resources. No CLI sample-time option
+is currently exposed. `svg_smil_export_initial` verifies this contract in all
+three formats at both densities.
 
 ### 5.4 Important: SVG `<feGaussianBlur>` is not gated by the backend blur cap
 
@@ -181,3 +315,30 @@ Network-simplex ranking, dummy nodes for long edges, Brandes-Kopf coordinate ass
 - [RAD_12 — Paint IR & Display List](RAD_12_Paint_IR_Display_List.md) — the `paint_record_*` / DisplayList substrate the inline-SVG renderer records into and replays.
 - [RAD_13 — Render Walk & Painters](RAD_13_Render_Walk_Painters.md) — the render walk and `RenderBackend` seam that dispatch `render_inline_svg` and drive the SVG-output backend.
 - [RAD_07 — Fonts](RAD_07_Fonts.md) — the `FontContext` and glyph pipeline used by SVG `<text>` rendering.
+
+
+### SVG image resources (2026-10-02 verification)
+
+`render_svg_image` resolves the source URI in the document/resource context and
+uses the shared image cache and raster decoders, including GIF and static WebP.
+A single intrinsic-to-image-rectangle transform applies x/y and aspect fitting
+before the element transform. Nested SVG images record through the same SVG
+painter in isolated image mode; standalone SVG loads a DOM-backed document.
+GIF frames and decode promotion advance resource generation and invalidate layers.
+Deferred cache-owned images are checked by generation at replay; fallback decoded
+surfaces transfer to PaintIR and their pixels are copied into DisplayList storage
+before cleanup (**D4.2.2v2-D4.2.4/D4.5.1v3**). No vendored ThorVG loader/code is
+modified. The implementation plan records browser and cache/scale evidence.
+
+
+**2026-10-02 P6 paint increment.** Typed inherited fill/stroke/currentColor and
+recursive use context paint share geometry frames. Gradients carry spread,
+focal circles, transforms and owned dash arrays through PaintIR/DisplayList/
+retained caches; dynamic stops use shared styles. Local/external templates retain
+isolated document/font owners and relative bases under **D4.1.3, D4.2.2v2-D4.2.4,
+D4.2.6**. Pattern tiles and radial-cone fallbacks share offscreen path coverage
+and preserve suspended clip ownership. Focused scale/cache validation passes
+936/936, vector 24/24, DisplayList 77/77 and retained storage 24/24. Chromium
+normative differences and the running aggregate gate are recorded in
+[vibe SVG implementation plan](../../../vibe/impl/Lambda_Impl_SVG_Support.md) §7.4.
+This was the initial geometry checkpoint. Markers/effects/textPath/embedded HTML/animation and macOS exports are implemented in §§4–5 and the SVG closeout record; Linux/Windows P13 runtime smoke remains outstanding.

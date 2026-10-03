@@ -1,0 +1,15 @@
+id: no-retired-free-api
+language: cpp
+severity: error
+message: >-
+  scratch_free, arena_free and arena_realloc are retired (D4.1.4v5): scratch
+  memory is released by ending its scope, and arena memory is released in
+  bulk or retained for reuse with arena_retire, never freed individually.
+rule:
+  kind: call_expression
+  regex: "^(scratch_free|arena_free|arena_realloc)\\s*\\("
+files:
+  - "lib/**/*.{c,cpp,h,hpp}"
+  - "lambda/**/*.{c,cpp,h,hpp}"
+  - "radiant/**/*.{c,cpp,h,hpp,mm}"
+  - "test/**/*.{c,cpp,h,hpp}"

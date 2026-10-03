@@ -3,6 +3,7 @@
 #include "event.hpp"
 #include "state_store_internal.hpp"
 #include "view.hpp"
+#include "layout.hpp"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/tagged.hpp"
@@ -861,9 +862,10 @@ static void validate_view_state_registry(DocState* state,
                 }
                 if (live_view) {
                     DomElement* live_element = live_view->is_element() ? lam::dom_require_element(live_view) : NULL;
-                    if (!live_element || !live_element->form) {
-                        report_fail(report, "view form state is not attached to a form control");
-                    } else {
+                    // D4.5.1v3: a registered control owns its value while detached layout props are absent.
+                    if (!live_element || (!live_element->form && !is_form_control(live_element))) {
+                        report_fail(report, "view form state is not owned by a form control");
+                    } else if (live_element->form) {
                         FormControlProp* form = live_element->form;
                         if (form->form_state_ref && form->form_state_ref != view_state) {
                             report_fail(report, "form control cached ViewState ref is stale");

@@ -29,14 +29,14 @@ protected:
         arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
 
-        doc.document_pool = pool;
-        doc.node_arena = arena;
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena);
 
         root = make_element();
         live = make_element();
         orphan = make_element();
         drop = make_element();
-        doc.root = root;
+        doc.root = lam::up(root);
 
         ASSERT_TRUE(root->append_child(live));
         ASSERT_TRUE(root->append_child(orphan));
@@ -61,7 +61,7 @@ protected:
         DomElement* element = new DomElement{};
         element->node_type = DOM_NODE_ELEMENT;
         element->set_synthetic(true);
-        element->doc = &doc;
+        element->doc = lam::up(&doc);
         static_cast<DomNode*>(element)->id = doc.next_node_id++;
         element->view_type = RDT_VIEW_BLOCK;
         return element;
@@ -113,7 +113,7 @@ TEST_F(StateStoreDomMutationTest, DetachedRegisteredViewStopsResolvingBeforeReti
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(view_state_entry_resolve_view(doc_state, entry), static_cast<View*>(orphan));
     DomElement* layout_wrapper = make_element();
-    root->parent = layout_wrapper;
+    root->parent = lam::up(layout_wrapper);
     EXPECT_EQ(view_state_entry_resolve_view(doc_state, entry), static_cast<View*>(orphan));
     root->parent = nullptr;
     delete layout_wrapper;
@@ -133,7 +133,7 @@ TEST_F(StateStoreDomMutationTest, DetachedRegisteredViewStopsResolvingBeforeReti
     EXPECT_EQ(doc_state->hover_target, nullptr);
     EXPECT_EQ(view_state_get(doc_state, static_cast<View*>(orphan)), nullptr);
 
-    orphan->tag_name = "button";
+    orphan->tag_name = lam::up("button");
     orphan->tag_id = MARKUP_NAME_BUTTON;
     doc_state->active_cascade_depth++;
     focus_set_programmatic(doc_state, static_cast<View*>(orphan));
@@ -147,7 +147,7 @@ TEST_F(StateStoreDomMutationTest, DetachedPointerPhasesDoNotRecreatePrunedState)
     ASSERT_TRUE(dom_lifecycle_init(&doc));
     ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
 
-    orphan->tag_name = "button";
+    orphan->tag_name = lam::up("button");
     orphan->tag_id = MARKUP_NAME_BUTTON;
     doc_state_set_hover_target(doc_state, static_cast<View*>(orphan));
     doc_state_set_active_target(doc_state, static_cast<View*>(orphan));
@@ -183,6 +183,46 @@ TEST_F(StateStoreDomMutationTest, DetachedPointerPhasesDoNotRecreatePrunedState)
     EXPECT_EQ(state_store_prune_after_reflow(doc_state), 0u);
 }
 
+TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRetirement) {
+    Input input = {};
+    DomDocument doc = {};
+    ASSERT_TRUE(doc.init(&input));
+    Element* backing = elmt_arena(doc.node_arena);
+    ASSERT_NE(backing, nullptr);
+    DomElement* root = DomElement::create(&doc, "div", backing);
+    DomElement* control = DomElement::create(&doc, "input", backing);
+    ASSERT_NE(root, nullptr); ASSERT_NE(control, nullptr);
+    doc.root = lam::up(root);
+    ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(control));
+    ASSERT_NE(state_store_create(&doc), nullptr);
+    control->view_type = RDT_VIEW_BLOCK;
+    FormControlProp original{}, rebuilt{};
+    original.control_type = rebuilt.control_type = FORM_CONTROL_TEXT;
+    control->form = lam::own(&original);  // test-owned prop
+    ASSERT_TRUE(form_control_store_text_value(doc.state, static_cast<View*>(control), "svg", 3, 3));
+    ASSERT_TRUE(root->remove_child(control));
+    // D4.5.1v3: layout properties are temporary; the registered DOM control owns its value.
+    control->form = nullptr; control->view_type = RDT_VIEW_NONE;
+    state_store_prune_after_reflow(doc.state);
+    uint32_t length = 0;
+    EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), &length), "svg");
+    EXPECT_EQ(length, 3u);
+    ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(control));
+    control->view_type = RDT_VIEW_BLOCK; control->form = lam::own(&rebuilt);
+    state_store_prune_after_reflow(doc.state);
+    EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), nullptr), "svg");
+    control->form = nullptr;
+    DomNodeRef detached_ref = dom_node_ref(control);
+    ASSERT_TRUE(root->remove_child(control));
+    ASSERT_EQ(dom_retire_sweep(&doc), 1u);
+    EXPECT_EQ(dom_node_ref_validate(&doc, detached_ref), nullptr);
+    EXPECT_GT(state_store_prune_after_reflow(doc.state), 0u);
+    ViewStateEntry query = {.view_id = detached_ref.expected_id, .kind = VIEW_STATE_FORM_CONTROL};
+    EXPECT_EQ(hashmap_get(doc.state->view_state_map, &query), nullptr);
+    state_store_destroy(&doc);
+    doc.destroy();
+}
+
 TEST_F(StateStoreDomMutationTest, PruneAfterReflowKeepsLiveStateMapEntriesOnly) {
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);
@@ -205,7 +245,7 @@ TEST_F(StateStoreDomMutationTest, PruneAfterReflowRestoresFocusAssignedBeforeVie
     DocState* doc_state = state();
     ASSERT_NE(doc_state, nullptr);
 
-    live->tag_name = "input";
+    live->tag_name = lam::up("input");
     live->tag_id = MARKUP_NAME_INPUT;
     static_cast<DomNode*>(live)->id = 0;
     ASSERT_EQ(live->tag(), MARKUP_NAME_INPUT);
@@ -232,7 +272,7 @@ TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebu
     FormControlProp* original_prop = new FormControlProp{};
     ASSERT_NE(original_prop, nullptr);
     original_prop->control_type = FORM_CONTROL_TEXT;
-    live->form = original_prop;
+    live->form = lam::own(original_prop);
     ASSERT_TRUE(form_control_store_text_value(doc_state, static_cast<View*>(live),
                                               "state-owned", 11, 11));
 
@@ -246,7 +286,7 @@ TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebu
     FormControlProp* rebuilt_prop = new FormControlProp{};
     ASSERT_NE(rebuilt_prop, nullptr);
     rebuilt_prop->control_type = FORM_CONTROL_TEXT;
-    live->form = rebuilt_prop;
+    live->form = lam::own(rebuilt_prop);
 
     // Reflow must rebind the newly pooled prop without allocating a second value.
     state_store_prune_after_reflow(doc_state);
@@ -264,11 +304,11 @@ TEST_F(StateStoreDomMutationTest, DetachedTextControlRetainsValueAcrossReflow) {
     ASSERT_TRUE(dom_lifecycle_init(&doc));
     ASSERT_TRUE(dom_node_registry_register(&doc, orphan, sizeof(DomElement), false));
 
-    orphan->tag_name = "input";
+    orphan->tag_name = lam::up("input");
     orphan->tag_id = MARKUP_NAME_INPUT;
     FormControlProp* form = new FormControlProp{};
     form->control_type = FORM_CONTROL_TEXT;
-    orphan->form = form;
+    orphan->form = lam::own(form);
     ASSERT_TRUE(root->remove_child(orphan));
     ASSERT_TRUE(form_control_store_text_value(doc_state, static_cast<View*>(orphan),
                                                "detached value", 14, 14));

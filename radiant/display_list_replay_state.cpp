@@ -13,7 +13,7 @@ DisplayReplayDirtyClip dl_replay_push_dirty_clip(RdtVector* vec,
     if (!dirty_tracker_bounds(dirty_tracker, &clip.bounds, scale)) return clip;
     clip.active = true;
 
-    clip.path = rdt_path_new();
+    clip.path = lam::up(rdt_path_new());
     float left = clip.bounds.left;
     float top = clip.bounds.top;
     float right = clip.bounds.right;

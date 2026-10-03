@@ -1015,9 +1015,9 @@ static bool multicol_relayout_auto_height_spanner_flow(
     block_context_init(
         &lycon->block, spanner,
         lycon->doc && lycon->doc->view_tree ? lycon->doc->view_tree->prop_pool : nullptr);
-    lycon->block.parent = &containing;
-    lycon->elmt = static_cast<DomNode*>(spanner);
-    lycon->view = static_cast<View*>(spanner);
+    lycon->block.parent = lam::up(&containing);
+    lycon->elmt = lam::up(static_cast<DomNode*>(spanner));
+    lycon->view = lam::up(static_cast<View*>(spanner));
 
     LayoutContentBox content = layout_content_box(spanner);
     lycon->block.content_width = content.width;
@@ -2714,7 +2714,7 @@ static void multicol_init_flow_item(MulticolFlowItem* item,
                                     float inline_offset,
                                     bool spans_all) {
     if (!item) return;
-    item->block = child;
+    item->block = lam::up(child);
     item->height = height;
     item->balance_height = height;
     multicol_flow_margins(container, child,
@@ -5029,7 +5029,7 @@ static LayoutFragmentBox* multicol_append_layout_fragment(
     fragment->row_index = row_index;
     fragment->next = nullptr;
     if (!*first) *first = fragment;
-    if (*previous) (*previous)->next = fragment;
+    if (*previous) (*previous)->next = lam::own(fragment);
     *previous = fragment;
     elem->layout_fragments_count_ref()++;
     return fragment;
@@ -7213,7 +7213,7 @@ static float multicol_split_child_around_spanners(
 
         ColumnGroup group;
         FragmentedFlowCursor cursor;
-        group.fragments = group_scratch.fragments;
+        group.fragments = lam::up(group_scratch.fragments);
         // the nested split path applies its own child content offset after placement.
         multicol_group_init(&group, container, target_height, column_count,
                             column_width, column_gap, 0.0f);
@@ -7872,7 +7872,7 @@ static bool multicol_reflow_mixed_direct_flow(
             }
             MulticolMixedFlowItem& item = items[item_count++];
             item.flow = {};
-            item.flow.block = child_block;
+            item.flow.block = lam::up(child_block);
             item.flow.height = multicol_child_flow_extent(block, child_block);
             multicol_flow_margins(block, child_block,
                                   &item.flow.margin_before,
@@ -9106,7 +9106,7 @@ static void multicol_group_init(
     float row_gap = multicol_row_gap(container);
     if (row_gap < 0) row_gap = 0;
 
-    group->container = container;
+    group->container = lam::up(container);
     group->fragment_count = 1;
     group->logical_fragment_count = 1;
     group->column_count = column_count;
@@ -9152,7 +9152,7 @@ static void multicol_record_used_columns(
 }
 
 static void multicol_cursor_init(FragmentedFlowCursor* cursor, ColumnGroup* group) {
-    cursor->group = group;
+    cursor->group = lam::up(group);
     cursor->current_fragment = 0;
     cursor->block_offset = 0;
     cursor->pending_margin_after = 0.0f;
@@ -10713,7 +10713,7 @@ void layout_multicol_content(LayoutContext* lycon, ViewBlock* block) {
         // Distribute this group's blocks across columns
         ColumnGroup group;
         FragmentedFlowCursor cursor;
-        group.fragments = group_scratch.fragments;
+        group.fragments = lam::up(group_scratch.fragments);
         multicol_group_init(&group, block, group_target, column_count,
                             column_width, gap, column_group_origin_x);
         multicol_cursor_init(&cursor, &group);

@@ -155,6 +155,22 @@ MemContext* mem_context_create(MemContext* parent, MemRole role, const char* lab
     return ctx;
 }
 
+MemContext* mem_context_process(MemRole role) {
+    static MemContext* contexts[MEM_ROLE_COUNT];
+    static char labels[MEM_ROLE_COUNT][40];  // context labels are kept by pointer
+    static pthread_mutex_t process_mutex = PTHREAD_MUTEX_INITIALIZER;
+    if ((int)role < 0 || role >= MEM_ROLE_COUNT) role = MEM_ROLE_UNKNOWN;
+    // a separate lock: mem_context_create takes the registry lock itself
+    pthread_mutex_lock(&process_mutex);
+    if (!contexts[role]) {
+        snprintf(labels[role], sizeof(labels[role]), "process.%s", mem_role_name(role));
+        contexts[role] = mem_context_create(NULL, role, labels[role]);
+    }
+    MemContext* ctx = contexts[role];
+    pthread_mutex_unlock(&process_mutex);
+    return ctx;
+}
+
 // Remove `ctx` from its parent's child list. Lock held.
 static void detach_from_parent_locked(MemContext* ctx) {
     MemContext* p = ctx->parent;

@@ -1043,7 +1043,7 @@ static Item interp_coerce_declared_numeric(InterpFrame* f, Item value,
 }
 
 static Item interp_coerce_declared_array(InterpFrame* f, Item value,
-        Type* declared_type, const LambdaBoundary* boundary) {
+        Type* declared_type, const LambdaBoundary* boundary, bool* handled) {
     if (!f || item_is_error(value)) return value;
     LambdaArrayContractInfo info = {};
     if (!lambda_array_contract_info(declared_type, &info)) return value;
@@ -1055,6 +1055,7 @@ static Item interp_coerce_declared_array(InterpFrame* f, Item value,
     }
     Scratch source_root(f);
     source_root.set(value);
+    *handled = true;
     // TypeId-only coercion lost nested rank and named map layout. The shared
     // boundary validates/reifies every element once and installs its exact
     // certificate for both T0 and MIR consumers (D3.1.1v2, D3.3.3).
@@ -1070,91 +1071,81 @@ static bool interp_declared_optional_array(Type* type) {
     return base && base->type_id == LMD_TYPE_ARRAY;
 }
 
-static bool interp_contract_has_binder(Type* type, bool include_refs, int depth = 0) {
-    if (!type || depth > 64) return false;
-    if (type->type_id == LMD_TYPE_TYPE) {
-        switch (type->kind) {
-        case TYPE_KIND_BINDER:
-            return true;
-        case TYPE_KIND_BOUND_REF:
-            return include_refs;
-        case TYPE_KIND_UNARY:
-            return interp_contract_has_binder(((TypeUnary*)type)->operand,
-                include_refs, depth + 1);
-        case TYPE_KIND_BINARY: {
-            TypeBinary* binary = (TypeBinary*)type;
-            return interp_contract_has_binder(binary->left, include_refs, depth + 1) ||
-                interp_contract_has_binder(binary->right, include_refs, depth + 1);
-        }
-        case TYPE_KIND_CONSTRAINED:
-            return interp_contract_has_binder(((TypeConstrained*)type)->base,
-                include_refs, depth + 1);
-        case TYPE_KIND_PARAM: {
-            TypeParam* parameter = (TypeParam*)type;
-            return parameter->binder || interp_contract_has_binder(
-                parameter->contract_type ? parameter->contract_type : parameter->full_type,
-                include_refs, depth + 1);
-        }
-        default:
-            return false;
-        }
+
+InterpBoundaryPlan* interp_boundary_plan_create(Pool* pool, Type* contract) {
+    if (!contract) return NULL;
+    InterpBoundaryPlan* plan = (InterpBoundaryPlan*)pool_calloc(pool, sizeof(InterpBoundaryPlan));
+    if (!plan) return NULL;
+    plan->contract = contract;
+    plan->plain = type_field_unwrap_simple_decl(contract);
+    plan->uses_binder = lambda_type_contract_has_binder(contract, true);
+    plan->map_contract = lambda_type_nonnull_map_contract(contract);
+    plan->optional_open_array = interp_declared_optional_array(contract);
+    plan->numeric_kind = lambda_numeric_kind_from_type(plan->plain);
+    if (lambda_array_contract_info(contract, &plan->array)) {
+        plan->store_element = type_field_unwrap_simple_decl(plan->array.immediate_element);
+        plan->has_store_lane = lambda_type_array_lane_storage_desc(
+            plan->store_element, &plan->store_lane);
     }
-    if (type->type_id == LMD_TYPE_ARRAY) {
-        // Generic `list` is a compact Type, unlike an inferred TypeArray.
-        // It cannot contain a binder and has no `nested` payload to inspect.
-        if (type == &TYPE_LIST || type == (Type*)&TYPE_ARRAY) return false;
-        return interp_contract_has_binder(((TypeArray*)type)->nested,
-            include_refs, depth + 1);
-    }
-    if (type->type_id == LMD_TYPE_MAP || type->type_id == LMD_TYPE_ELEMENT) {
-        // The generic container descriptors are compact Type prefixes. Casting
-        // one to TypeMap reads unrelated globals through `shape` (D3.3.3).
-        if (type == &TYPE_MAP || type == &TYPE_OBJECT || type == &TYPE_ELMT) return false;
-        FOR_EACH_MAP_FIELD(type, field) {
-            if (interp_contract_has_binder(field->type, include_refs, depth + 1)) return true;
-        }
-    }
-    if (TypeFunc* function = lambda_type_func_signature(type)) {
-        for (TypeParam* parameter = function->param; parameter; parameter = parameter->next) {
-            if (parameter->binder || interp_contract_has_binder(
-                    parameter->contract_type ? parameter->contract_type : parameter->full_type,
-                    include_refs, depth + 1)) return true;
-        }
-        return interp_contract_has_binder(function->return_contract
-            ? function->return_contract : function->returned, include_refs, depth + 1);
-    }
-    return false;
+    return plan;
 }
 
 static bool interp_type_uses_binder(Type* type) {
-    return interp_contract_has_binder(type, true);
+    return lambda_type_contract_has_binder(type, true);
 }
 
 static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
-        Type* declared_type, const LambdaBoundary* boundary) {
+        Type* declared_type, const LambdaBoundary* boundary,
+        const InterpBoundaryPlan* plan = NULL) {
     if (!declared_type) return value;
-    // A plain `int`/`float`/`string` contract admits a value of its own kind
+    // A plain scalar contract admits a value of its own kind
     // unchanged: lambda_numeric_boundary_admit is the identity there (an int
     // Item is int53 by construction) and the string singleton is a membership
     // test. Answer from the tag before the general classification below.
-    Type* plain = type_field_unwrap_simple_decl(declared_type);
+    Type* plain = plan ? plan->plain : type_field_unwrap_simple_decl(declared_type);
     TypeId value_type = get_type_id(value);
     if ((plain == &TYPE_FLOAT && value_type == LMD_TYPE_FLOAT) ||
             (plain == &TYPE_INT && value_type == LMD_TYPE_INT) ||
-            (plain == &TYPE_STRING && value_type == LMD_TYPE_STRING)) {
+            (plain == &TYPE_STRING && value_type == LMD_TYPE_STRING) ||
+            (plain == &TYPE_BOOL && value_type == LMD_TYPE_BOOL)) {
         return value;
     }
     // A binder or bound reference only occurs in the contracts of a function
     // that declares binder slots; without them the env is NULL and the general
     // path below reaches the same checker, so skip the recursive type walk.
-    if (f && f->binder_count && interp_type_uses_binder(declared_type)) {
+    if (f && f->binder_count &&
+            (plan ? plan->uses_binder : interp_type_uses_binder(declared_type))) {
         Scratch source_root(f);
         source_root.set(value);
         return lambda_type_check_lazy(source_root.get(), declared_type,
             f->binder_env, boundary);
     }
-    value = interp_coerce_declared_array(f, value, declared_type, boundary);
-    if (item_is_error(value)) return value;
+    if (plan) {
+        // the plan resolved the destination; only its live representation can change
+        if (!plan->uses_binder &&
+                ((plan->map_contract && lambda_map_rep_proves_contract(value,
+                    (TypeMap*)plan->map_contract)) ||
+                 (plan->array.array_contract && lambda_array_rep_proves(value,
+                    plan->array.array_contract, true)))) return value;
+        if (plan->optional_open_array && (value_type == LMD_TYPE_NULL ||
+                value_type == LMD_TYPE_RANGE || value_type == LMD_TYPE_ARRAY ||
+                value_type == LMD_TYPE_ARRAY_NUM)) return value;
+        if (plan->numeric_kind != LAMBDA_NUM_INVALID ||
+                (plain && (plain->type_id == LMD_TYPE_NUM_SIZED ||
+                    plain->type_id == LMD_TYPE_UINT64))) {
+            Scratch source_root(f);
+            source_root.set(value);
+            return lambda_type_check_lazy(source_root.get(), plain, NULL, boundary);
+        }
+        Scratch source_root(f);
+        source_root.set(value);
+        return lambda_type_check_lazy(source_root.get(), declared_type, NULL, boundary);
+    }
+    bool array_handled = false;
+    value = interp_coerce_declared_array(f, value, declared_type, boundary,
+        &array_handled);
+    // the array boundary already validated and installed its full certificate
+    if (array_handled || item_is_error(value)) return value;
     if (ast_declared_type_is_map(declared_type)) {
         Scratch source_root(f);
         source_root.set(value);
@@ -1234,7 +1225,8 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         }
     }
     return interp_coerce_declared_binding(f, value, parameter->declared_type,
-        boundary ? boundary : &declared_parameter_label);
+        boundary ? boundary : &declared_parameter_label,
+        parameter->entry ? parameter->entry->interp_boundary : NULL);
 }
 
 static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
@@ -1242,7 +1234,7 @@ static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
     Type* contract = parameter_type && parameter_type->contract_type
         ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
     return parameter_type && (parameter_type->binder ||
-        interp_contract_has_binder(contract, false));
+        lambda_type_contract_has_binder(contract, false));
 }
 
 // "<kind> '<name>'" for a declaration or assignment; `owner` is the kind
@@ -1259,7 +1251,7 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     LambdaBoundary boundary = {NULL, interp_format_named_boundary, named->name,
         "declaration", 0};
     Item bound = interp_coerce_declared_binding(f, value, named->declared_type,
-        &boundary);
+        &boundary, named->entry ? named->entry->interp_boundary : NULL);
     // CW24v2 phase 2: a place-copy binding (`var row = m.rows[i]`) marks the
     // read value so the first write DETACHES -- a real S9.1.2 snapshot --
     // instead of aliasing a child a fresh literal never captured. All T0
@@ -2513,7 +2505,10 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
     // entry. T0 owns the surrounding module activation, but it must not turn
     // an async procedure into a synchronous AST call: publish the generated
     // boxed satellite before the function value escapes (D8.1.1v2 / D5.1.3).
-    if (fn_node->node_type == AST_NODE_PROC && fn_node->analysis &&
+    // the strict T0 scan admits conservatively marked procedures only when
+    // their bodies were proved synchronous; they need no generated entry
+    if (lambda_tier_selected() != LAMBDA_TIER_INTERP &&
+            fn_node->node_type == AST_NODE_PROC && fn_node->analysis &&
             (fn_node->analysis->may_await || fn_node->analysis->needs_task_context)) {
         InterpState* st = interp_current_state();
         void* entry = NULL;
@@ -2753,6 +2748,11 @@ static Item eval_array(InterpFrame* f, AstArrayNode* node) {
     return array_end(built);
 }
 
+static Item interp_fill_map(InterpFrame* frame, TypeMap* type, const Item* values, int count) {
+    Map* built = map_with_type_tl(type, frame->module->type_list);
+    return built ? interp_ptr_item(map_fill_items(built, values, count)) : ItemError;
+}
+
 // Same order as transpile_map's fallback path: every value is evaluated and
 // rooted first, then the map is allocated and filled. Allocating the map
 // before the values would keep a fresh container live across calls that can
@@ -2805,7 +2805,7 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
     int val_count = 0;
     for (AstNode* item = node->item; item; item = item->next) val_count++;
     if (val_count == 0) {
-        return interp_ptr_item(map_with_type_tl(map_type, f->module->type_list));
+        return interp_fill_map(f, map_type, NULL, 0);
     }
 
     RootSpan values((size_t)val_count);
@@ -2823,9 +2823,32 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         // values are rooted in the span, so the copy may collect)
         words[vi++] = slot_image(value).item;
     }
-    Map* built = map_with_type_tl(map_type, f->module->type_list);
-    if (!built) return ItemError;
-    return interp_ptr_item(map_fill_items(built, (const Item*)(void*)words, vi));
+    if (node->interp_destination) {
+        TypeMap* destination = node->interp_destination;
+        bool proven = true;
+        ShapeEntry* field = destination->shape;
+        for (int i = 0; proven && i < vi; i++, field = typemap_next_field(destination, field))
+            proven = lambda_value_rep_proves_contract(values.items()[i], field->type);
+        if (proven) {
+            // Exact field proofs need no second staging span or admission.
+            return interp_fill_map(f, destination, values.items(), vi);
+        }
+        RootSpan admitted((size_t)val_count);
+        bool valid = admitted.valid();
+        field = destination->shape;
+        for (int i = 0; valid && i < vi; i++, field = typemap_next_field(destination, field)) {
+            Item converted = values.items()[i];
+            valid = lambda_value_rep_proves_contract(converted, field->type) ||
+                lambda_type_try_admit(converted, field->type, NULL, &converted);
+            if (valid) admitted.items()[i] = converted;
+        }
+        if (valid) {
+            // D3.2.4v4: publish the exact layout only after every field admits.
+            return interp_fill_map(f, destination, admitted.items(), vi);
+        }
+        // The ordinary outer boundary retains its diagnostic and failure order.
+    }
+    return interp_fill_map(f, map_type, values.items(), vi);
 }
 
 static Item eval_object_literal(InterpFrame* f, AstObjectLiteralNode* node) {
@@ -5122,6 +5145,8 @@ static bool interp_const_folded_value(InterpFrame* f, AstNode* node, Item* out) 
     case AST_NODE_ARRAY: case AST_NODE_MAP: break;
     default: return false;
     }
+    if (node->node_type == AST_NODE_MAP && ((AstMapNode*)node)->interp_destination)
+        return false;  // the pooled inferred layout cannot certify the destination
     if (node->const_kind == AST_CONST_NONE) return false;
     Script* owner = f ? f->module : NULL;
     return interp_const_slot_value(owner, node, out);
@@ -5150,9 +5175,9 @@ static __attribute__((noinline)) Item exec_place_assign(InterpFrame* f, AstNode*
     // Nested paths use cow_path_set below, which detaches and relinks the
     // complete owner spine before its replacement root is published.
     AstCompoundAssignNode* ca = (AstCompoundAssignNode*)node;
-    AstCowPath path = {};
-    bool has_path = ast_collect_cow_path(&path, ca->object);
-    NameEntry* root = has_path && path.root &&
+    AstCowPath path = ca->interp_place ? ca->interp_place->path : AstCowPath{};
+    bool has_path = ca->interp_place || ast_collect_cow_path(&path, ca->object);
+    NameEntry* root = ca->interp_place ? ca->interp_place->root : has_path && path.root &&
             path.root->node_type == AST_NODE_IDENT
         ? ((AstIdentNode*)path.root)->entry : NULL;
     if (!root) {
@@ -5174,71 +5199,37 @@ static __attribute__((noinline)) Item exec_place_assign(InterpFrame* f, AstNode*
             interp_note_var_param_marked(f, ca->value);
         }
 
-        Scratch path_slot(f);
-        path_slot.set(interp_ptr_item(array_plain()));
-        // path segments plus the terminal key: one sizing of the rooted
-        // array instead of a growth step per pushed key
-        if (!array_reserve_append_slots((Array*)(uintptr_t)path_slot.get().item,
-                path.count + 1)) return ItemError;
-        for (int i = 0; i < path.count; i++) {
-            Scratch key_slot(f);
-            key_slot.set(interp_eval_cow_path_key(f, path.segment[i],
-                path.is_member[i]));
-            if (interp_frame_pending(f)) return key_slot.get();
-            Array* keys = (Array*)(uintptr_t)path_slot.get().item;
-            if (!keys) return ItemError;
-            array_push_verbatim(keys, key_slot.get());
+        RootSpan keys((size_t)(path.count + 1));
+        if (!keys.valid()) return ItemError;
+        for (int i = 0; i <= path.count; i++) {
+            AstNode* segment = i == path.count ? ca->key : path.segment[i];
+            bool is_member = i == path.count
+                ? node->node_type == AST_NODE_MEMBER_ASSIGN_STAM : path.is_member[i];
+            keys.items()[i] = interp_eval_cow_path_key(f, segment, is_member);
+            if (interp_frame_pending(f)) return keys.items()[i];
         }
-        Scratch terminal_slot(f);
-        terminal_slot.set(interp_eval_cow_path_key(f, ca->key,
-            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM));
-        if (interp_frame_pending(f)) return terminal_slot.get();
-        Array* keys = (Array*)(uintptr_t)path_slot.get().item;
-        if (!keys) return ItemError;
-        array_push_verbatim(keys, terminal_slot.get());
-
         Scratch owner_slot(f);
         owner_slot.set(interp_read_store_owner(f, root, ca));
         if (item_is_error(owner_slot.get())) return owner_slot.get();
-        // An untyped COW path validates no enclosing contract; a nested
-        // typed-map write must validate its rebuilt root before publish.
-        //
-        // NM-O8: a `var` parameter's root was detached by the caller, and a
-        // plain `pn` parameter writes through to the caller under the
-        // current pn ABI -- the same rule the FLAT store above applies via
-        // the in-place setter for `var` roots. Without it the nested store
-        // detached the callee's own root and published the replacement
-        // into the callee's binding, so `b.xs[0] = v` was visible inside
-        // the procedure and lost at the caller while `b.cur = v` was not.
-        //
-        // The TYPED arm stays transactional even for those roots: its
-        // publish runs `lambda_type_check` over the whole candidate, which
-        // CONVERTS (a 3.5 admitted into an int field becomes 2). An
-        // in-place write has no candidate to convert, so applying this
-        // there silently skipped the coercion —
-        // proc_type_numeric_structural_admission caught it. Typed nested
-        // writes through a parameter therefore still need the explicit
-        // read-modify-write-back spelling.
-        // CW29: only `var` borrows write through; a plain param's write
-        // stays local to the callee (S9.1.3).
-        bool writes_through_caller = root->is_var_param;
-        LambdaArrayContractInfo array_info = {};
-        Item replacement = ast_declared_type_is_map(root->declared_type)
-            ? lambda_map_path_set_checked(owner_slot.get(), path_slot.get(),
-                value_slot.get(), root->declared_type,
-                "typed nested map assignment")
-            : lambda_array_contract_info(root->declared_type, &array_info)
-                ? (writes_through_caller
-                    ? lambda_array_path_set_checked_inplace(owner_slot.get(),
-                        path_slot.get(), value_slot.get(), root->declared_type,
-                        "typed nested array assignment")
-                    : lambda_array_path_set_checked(owner_slot.get(), path_slot.get(),
-                        value_slot.get(), root->declared_type,
-                        "typed nested array assignment"))
-                : (writes_through_caller
-                    ? cow_path_set_inplace(owner_slot.get(), path_slot.get(),
-                        value_slot.get())
-                    : cow_path_set(owner_slot.get(), path_slot.get(), value_slot.get()));
+        const InterpBoundaryPlan* boundary_plan = root->interp_boundary;
+        bool typed_map = boundary_plan ? boundary_plan->map_contract != NULL
+            : ast_declared_type_is_map(root->declared_type);
+        bool typed_array = boundary_plan ? boundary_plan->array.array_contract != NULL
+            : lambda_array_contract_canonical(root->declared_type) != NULL;
+        Item replacement;
+        if (typed_map || typed_array) {
+            int64_t shape = ca->interp_place ? (int64_t)ca->interp_place->key_shape
+                : (path.count + 1) | ((int64_t)root->is_var_param << 8);
+            // Static contracts are a plan; the setter checks live keys/carriers
+            // before it may reuse them and keeps rejected writes transactional.
+            replacement = lambda_container_path_set_checked_keys(owner_slot.get(),
+                value_slot.get(), keys.items(), shape, root->declared_type,
+                ca->interp_place ? ca->interp_place->leaf_contract : NULL,
+                typed_map ? "typed nested map assignment" : "typed nested array assignment");
+        } else {
+            replacement = cow_path_set_keys(owner_slot.get(), value_slot.get(),
+                keys.items(), path.count + 1, root->is_var_param);
+        }
         if (item_is_error(replacement)) return replacement;
         interp_write_binding(f, root, replacement);
         return ItemNull;
@@ -5324,7 +5315,9 @@ static __attribute__((noinline)) Item exec_place_assign(InterpFrame* f, AstNode*
     // is an INDEX_ASSIGN over a map, and lowering picks the setter by owner
     // type too. Each *_cow entry rejects a mismatched owner itself.
     Item replacement;
-    Type* array_element = ast_declared_array_element(root->declared_type);
+    const InterpBoundaryPlan* boundary_plan = root->interp_boundary;
+    Type* array_element = boundary_plan ? boundary_plan->store_element
+        : ast_declared_array_element(root->declared_type);
     if (path.count == 0 && array_element &&
             array_element->type_id != LMD_TYPE_ANY) {
         // SI3v2: the two tiers must word one diagnostic identically, or a
@@ -5337,11 +5330,10 @@ static __attribute__((noinline)) Item exec_place_assign(InterpFrame* f, AstNode*
         // only is_var_param, so a plain `pn` parameter's typed write was
         // validated on a DETACHED candidate and republished to the callee's
         // own slot -- visible inside the procedure, lost to the caller.
-        replacement = root->is_var_param
-            ? lambda_array_set_checked_inplace_item(owner.get(), key_slot.get(),
-                value_slot.get(), root->declared_type, boundary)
-            : lambda_array_set_checked_item(owner.get(), key_slot.get(),
-                value_slot.get(), root->declared_type, boundary);
+        replacement = lambda_array_set_checked_preplanned(owner.get(), key_slot.get(),
+            value_slot.get(), root->declared_type, array_element,
+            boundary_plan && boundary_plan->has_store_lane ? &boundary_plan->store_lane : NULL,
+            boundary, root->is_var_param);
     } else if (ast_declared_type_is_map(root->declared_type)) {
         // a typed map write validates a detached candidate before it is
         // visible. Explicit `var` parameters were detached at the caller
@@ -5855,7 +5847,7 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                 assign->target, "assignment to", 0};
         }
         value = interp_coerce_declared_binding(f, value, target->declared_type,
-            &boundary);
+            &boundary, target->interp_boundary);
         if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
                 !lambda_type_accepts_error(target->declared_type)) {
             // A fresh checked-assignment failure returns before publishing the
@@ -6841,7 +6833,8 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
             static const LambdaBoundary return_label =
                 {"function return", NULL, NULL, NULL, 0};
             Item checked = interp_coerce_declared_binding(frame, result,
-                signature->return_contract, &return_label);
+                signature->return_contract, &return_label,
+                frame->fn->analysis->frame_plan.return_boundary);
             result = checked;
         }
         if (borrowed) {

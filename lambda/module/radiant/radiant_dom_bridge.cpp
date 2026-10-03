@@ -1238,6 +1238,7 @@ typedef struct RadiantDomEventRecord {
     bool dispatching;
     bool in_passive_listener;
     bool trusted;
+    bool time_event;
     int event_phase;
     int class_id;
     double timestamp;
@@ -1469,6 +1470,21 @@ RADIANT_C_API void radiant_dom_event_set_trusted(Item item, bool trusted) {
     if (record) record->trusted = trusted;
 }
 
+RADIANT_C_API void radiant_dom_event_set_time_values(Item event, Item view, Item detail) {
+    RootFrame roots(4);
+    Rooted<Item> event_root(roots, event);
+    Rooted<Item> view_root(roots, view);
+    Rooted<Item> detail_root(roots, detail);
+    Rooted<Item> key(roots, js_name_item("view"));
+    RadiantDomEventRecord* record = radiant_dom_event_record(event_root.get());
+    if (!record) return;
+    record->time_event = true;
+    // native initialization writes traced payloads directly; the host's public setter is readonly.
+    vmap_backing_set(event_root.get().vmap, key.get(), view_root.get());
+    key.set(js_name_item("detail"));
+    vmap_backing_set(event_root.get().vmap, key.get(), detail_root.get());
+}
+
 RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
                                                              Item prototype) {
     if (!radiant_dom_event_record(item) || !item.vmap) return;
@@ -1580,7 +1596,12 @@ RADIANT_C_API int radiant_dom_event_named_get(Item receiver, Item key, Item* out
 
 RADIANT_C_API int radiant_dom_event_named_set(Item receiver, Item key,
                                               Item value, Item* out) {
-    if (!radiant_dom_event_record(receiver) || !out) return 0;
+    RadiantDomEventRecord* record = radiant_dom_event_record(receiver);
+    if (!record || !out) return 0;
+    if (record->time_event && (radiant_dom_event_key_equals(key, "view") || radiant_dom_event_key_equals(key, "detail"))) {
+        *out = value;
+        return 1;
+    }
     const char* core_name = radiant_dom_event_core_name(key);
     if (core_name) return radiant_dom_event_member_set(receiver, core_name, value, out);
     if (!vmap_backing_set(receiver.vmap, key, value)) return 0;
@@ -1666,6 +1687,7 @@ RADIANT_C_API int radiant_dom_event_call(Item receiver, const char* name,
             return 1;
         }
         if (!record->dispatching && argc >= 1) {
+            record->trusted = false;
             Item ignored = ItemNull;
             radiant_dom_event_set_field(receiver, "type", args[0], &ignored);
             record->bubbles = argc >= 2 && radiant_dom_event_value_bool(args[1]);
@@ -2072,8 +2094,8 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,
         if (element->doc->view_tree) {
             element->ensure_embed(element->doc->view_tree);
         } else if (element->doc->document_pool) {
-            element->embed = (EmbedProp*)pool_calloc(
-                element->doc->document_pool, sizeof(EmbedProp));
+            element->embed = lam::own((EmbedProp*)pool_calloc(
+                element->doc->document_pool, sizeof(EmbedProp)));
             if (element->embed) *element->embed = EMBED_PROP_DEFAULT;
         }
     }

@@ -52,9 +52,9 @@ void TileGrid::init(int surface_w, int surface_h, float raster_scale) {
         return;
     }
 
-    tiles = (Tile*)mem_calloc(total, sizeof(Tile), MEM_CAT_RENDER);
+    tiles = lam::own_arr((Tile*)mem_calloc(total, sizeof(Tile), MEM_CAT_RENDER));
     // Tile buffers are slices of one slab so grid teardown cannot miss per-tile allocations.
-    pixel_slab = (uint32_t*)mem_calloc(pixel_count, sizeof(uint32_t), MEM_CAT_RENDER);
+    pixel_slab = lam::own_arr((uint32_t*)mem_calloc(pixel_count, sizeof(uint32_t), MEM_CAT_RENDER));
     pixel_slab_count = pixel_count;
     if (!tiles || !pixel_slab) {
         log_error("[TILE_GRID] failed to allocate %d tiles and %zu pixels", total, pixel_count);
@@ -78,7 +78,7 @@ void TileGrid::init(int surface_w, int surface_h, float raster_scale) {
             tile->w = (float)tile->pixel_w;
             tile->h = (float)tile->pixel_h;
             tile->stride = tile->pixel_w;
-            tile->pixels = next_pixels;
+            tile->pixels = lam::up(next_pixels);
             next_pixels += (size_t)tile->pixel_w * (size_t)tile->pixel_h;
         }
     }
@@ -88,14 +88,8 @@ void TileGrid::init(int surface_w, int surface_h, float raster_scale) {
 }
 
 void TileGrid::destroy() {
-    if (tiles) {
-        mem_free(tiles);
-        tiles = nullptr;
-    }
-    if (pixel_slab) {
-        mem_free(pixel_slab);
-        pixel_slab = nullptr;
-    }
+    lam::free_owned(tiles);
+    lam::free_owned(pixel_slab);
     pixel_slab_count = 0;
     total = 0;
 }
@@ -164,7 +158,7 @@ static void worker_init_local(Tile* tile) {
 
 void WorkerState::init(Tile* tile) {
     if (initialized) return;
-    arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "tile.arena");
+    arena = lam::own(mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "tile.arena"));
     mem_scratch_init(NULL, &scratch, arena, MEM_ROLE_RENDER, "tile.scratch");
     // Now safe to create ThorVG canvas (internally uses malloc/new)
     rdt_vector_init(&vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
@@ -262,7 +256,7 @@ void RenderPool::init(int threads) {
     }
 
     thread_count = threads;
-    this->threads = (pthread_t*)mem_calloc(threads, sizeof(pthread_t), MEM_CAT_SYSTEM);
+    this->threads = lam::own_arr((pthread_t*)mem_calloc(threads, sizeof(pthread_t), MEM_CAT_SYSTEM));
     // ensure workers block initially (next_job >= job_count when both are 0)
     job_count = 0;
     next_job = 0;
@@ -290,7 +284,7 @@ void RenderPool::destroy() {
         pthread_join(threads[i], nullptr);
     }
 
-    mem_free(threads);
+    lam::free_owned(threads);
     pthread_mutex_destroy(&mutex);
     pthread_cond_destroy(&work_available);
     pthread_cond_destroy(&all_done);
@@ -301,7 +295,7 @@ void RenderPool::destroy() {
 
 void RenderPool::dispatch(TileJob* jobs, int count) {
     pthread_mutex_lock(&mutex);
-    this->jobs = jobs;
+    this->jobs = lam::own_arr(jobs);
     job_count = count;
     next_job = 0;
     completed_jobs = 0;
@@ -333,7 +327,7 @@ void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count) {
 void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     ImageSurface* tile_surface, ScratchArena* scratch,
                     float tile_x, float tile_y, float tile_w, float tile_h,
-                    float scale) {
+                    float scale, int first_item) {
     DisplayReplayBackdropStack backdrop_stack;
     dl_replay_backdrop_init(&backdrop_stack);
 
@@ -352,7 +346,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
     rdt_vector_begin_batch(vec);
 
-    for (int i = 0; i < dl->item_count(); i++) {
+    // SVG backdrop capture replays the already recorded prefix from its isolation boundary.
+    for (int i = LMB_MAX(first_item, 0); i < dl->item_count(); i++) {
         DisplayItem* item = &dl->data()[i];
 
         // Cull draw work that doesn't intersect this tile; the skip path below

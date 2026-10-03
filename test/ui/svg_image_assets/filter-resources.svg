@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+ <filter id="external" filterUnits="userSpaceOnUse" x="35em" y="25em" width="10em" height="8em" style="font-size:10px" color-interpolation-filters="sRGB">
+  <feImage href="split.png" preserveAspectRatio="none"/>
+ </filter>
+</svg>

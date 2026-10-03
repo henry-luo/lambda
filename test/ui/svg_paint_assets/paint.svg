@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+<style>.external-stop{stop-color:blue}.external-tile{fill:blue}</style>
+<defs>
+ <linearGradient id="half"><stop offset=".5" stop-color="red"/><stop offset=".5" class="external-stop"/></linearGradient>
+ <linearGradient id="next" href="next.svg#green"/>
+ <linearGradient id="cycle" href="next.svg#cycle"/>
+ <pattern id="tile" patternUnits="userSpaceOnUse" width="20" height="20" viewBox="0 0 2 2"><rect width="1" height="2" fill="red"/><rect x="1" width="1" height="2" class="external-tile"/></pattern>
+ <pattern id="next-tile" href="next.svg#tile"/>
+ <g id="pair"><rect width="30" height="30" fill="context-fill"/><rect x="50" width="30" height="30" fill="context-fill"/></g>
+</defs>
+</svg>

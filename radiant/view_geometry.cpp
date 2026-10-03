@@ -346,8 +346,8 @@ bool view_geometry_find_text_at(View* view, RdtLogicalPoint point,
                 (include_trailing_edges ? point.y <= bottom : point.y < bottom);
             if (!inside_x || !inside_y) continue;
             if (out_hit) {
-                out_hit->text = text;
-                out_hit->rect = rect;
+                out_hit->text = lam::up(text);
+                out_hit->rect = lam::up(rect);
                 out_hit->local_x = point.x - left;
             }
             return true;

@@ -59,6 +59,7 @@ struct RdtPicture {
     float height;
     RdtMatrix transform;
     bool has_transform;
+    double animation_time;
 };
 
 static pthread_mutex_t g_svg_shared_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -137,7 +138,7 @@ static bool cg_ensure_clip_capacity(int needed_depth) {
         memcpy(grown, s_cg_clip_stack, (size_t)s_cg_clip_depth * sizeof(CGClipEntry));
     }
     if (s_cg_clip_stack != s_cg_clip_inline_stack) {
-        mem_free(s_cg_clip_stack);
+        lam::Temp<CGClipEntry> old_stack(s_cg_clip_stack);  // the grown stack replaces the heap one
     }
     s_cg_clip_stack = grown;
     s_cg_clip_capacity = new_capacity;
@@ -147,7 +148,7 @@ static bool cg_ensure_clip_capacity(int needed_depth) {
 
 static void cg_release_heap_clip_stack_if_empty() {
     if (s_cg_clip_depth != 0 || s_cg_clip_stack == s_cg_clip_inline_stack) return;
-    mem_free(s_cg_clip_stack);
+    lam::Temp<CGClipEntry> heap_stack(s_cg_clip_stack);
     s_cg_clip_stack = s_cg_clip_inline_stack;
     s_cg_clip_capacity = RDT_CG_INITIAL_CLIP_DEPTH;
 }
@@ -265,7 +266,7 @@ static void cg_end_draw_state(RdtVectorImpl* cg) {
 }
 
 static uint32_t* cg_copy_premul_image_data(const uint32_t* pixels, int src_w,
-                                           int src_h, int src_stride) {
+                                           int src_h, int src_stride, bool straight_alpha) {
     if (!pixels || src_w <= 0 || src_h <= 0 || src_stride <= 0) return nullptr;
     uint32_t* copy = (uint32_t*)malloc((size_t)src_w * (size_t)src_h * sizeof(uint32_t));
     if (!copy) return nullptr;
@@ -273,7 +274,7 @@ static uint32_t* cg_copy_premul_image_data(const uint32_t* pixels, int src_w,
         const uint32_t* src = pixels + y * src_stride;
         uint32_t* dst = copy + y * src_w;
         for (int x = 0; x < src_w; x++) {
-            dst[x] = cg_convert_pixel(src[x], true);
+            dst[x] = cg_convert_pixel(src[x], straight_alpha);
         }
     }
     return copy;
@@ -632,7 +633,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
 void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
                      RdtStrokeCap cap, RdtStrokeJoin join,
                      const float* dash_array, int dash_count, float dash_phase,
-                     const RdtMatrix* transform) {
+                     const RdtMatrix* transform, float miter_limit) {
     if (!vec || !vec->impl || !p) return;
     RdtVectorImpl* cg = vec->impl;
 
@@ -646,6 +647,7 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
         color.r / 255.0, color.g / 255.0,
         color.b / 255.0, color.a / 255.0);
     CGContextSetLineWidth(cg->ctx, width);
+    CGContextSetMiterLimit(cg->ctx, miter_limit);
 
     // line cap
     CGLineCap cg_cap;
@@ -687,12 +689,10 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
 static CGGradientRef create_cg_gradient(CGColorSpaceRef colorspace,
                                          const RdtGradientStop* stops, int count) {
     // Gradient stop counts can come from parsed SVG/CSS, so do not size stack buffers from them.
-    CGFloat* components = (CGFloat*)mem_calloc((size_t)count * 4, sizeof(CGFloat), MEM_CAT_RENDER);
-    CGFloat* locations = (CGFloat*)mem_calloc((size_t)count, sizeof(CGFloat), MEM_CAT_RENDER);
+    lam::Temp<CGFloat> components = lam::temp_array_zero<CGFloat>((size_t)count * 4, MEM_CAT_RENDER);
+    lam::Temp<CGFloat> locations = lam::temp_array_zero<CGFloat>((size_t)count, MEM_CAT_RENDER);
     if (!components || !locations) {
         log_error("RDT_CG_GRADIENT_ALLOC failed for %d gradient stop(s)", count);
-        mem_free(locations);
-        mem_free(components);
         return nullptr;
     }
     for (int i = 0; i < count; i++) {
@@ -702,10 +702,7 @@ static CGGradientRef create_cg_gradient(CGColorSpaceRef colorspace,
         components[i * 4 + 3] = stops[i].a / 255.0;
         locations[i] = stops[i].offset;
     }
-    CGGradientRef gradient = CGGradientCreateWithColorComponents(colorspace, components, locations, count);
-    mem_free(locations);
-    mem_free(components);
-    return gradient;
+    return CGGradientCreateWithColorComponents(colorspace, components.get(), locations.get(), count);
 }
 
 static CGGradientRef cg_begin_gradient_fill(RdtVectorImpl* cg, RdtPath* path,
@@ -818,7 +815,7 @@ void rdt_clip_restore_depth(int saved_depth) {
 
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
-                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation) {
+                    uint8_t opacity, const RdtMatrix* transform, uint64_t resource_generation, bool straight_alpha) {
     (void)resource_generation;
     if (!vec || !vec->impl || !pixels) return;
     RdtVectorImpl* cg = vec->impl;
@@ -833,7 +830,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
         CGContextSetAlpha(cg->ctx, opacity / 255.0);
     }
 
-    uint32_t* premul_src = cg_copy_premul_image_data(pixels, src_w, src_h, src_stride);
+    uint32_t* premul_src = cg_copy_premul_image_data(pixels, src_w, src_h, src_stride, straight_alpha);
     if (!premul_src) {
         cg_end_draw_state(cg);
         return;
@@ -896,8 +893,8 @@ static void cg_svg_shared_release(RdtSvgShared* shared) {
     if (shared->ref_count <= 0) destroy = true;
     pthread_mutex_unlock(&g_svg_shared_mutex);
     if (destroy) {
+        lam::Temp<RdtSvgShared> owned(shared);  // the last reference releases the shared tree
         if (shared->pool) pool_destroy(shared->pool);
-        mem_free(shared);
     }
 }
 
@@ -916,15 +913,15 @@ static RdtPicture* cg_svg_picture_create(const char* data, int size, const char*
     }
     input->ui_mode = false;
 
-    char* buf = (char*)mem_alloc((size_t)size + 1, MEM_CAT_RENDER);
+    lam::Temp<char> buf = lam::temp_array<char>((size_t)size + 1, MEM_CAT_RENDER);
     if (!buf) {
         pool_destroy(pool);
         return nullptr;
     }
-    memcpy(buf, data, (size_t)size);
+    memcpy(buf.get(), data, (size_t)size);
     buf[size] = '\0';
-    Element* svg_root = html5_parse_svg_document(input, buf, nullptr);
-    mem_free(buf);
+    Element* svg_root = html5_parse_svg_document(input, buf.get(), nullptr);
+    buf.reset();
 
     if (!input->root.item || input->root.item == ITEM_ERROR || !svg_root) {
         log_error("cg_svg_picture_create: failed to parse SVG picture");
@@ -966,28 +963,25 @@ static char* cg_read_file_bytes(const char* path, int* out_size) {
         fclose(fp);
         return nullptr;
     }
-    char* buf = (char*)mem_alloc((size_t)fsz, MEM_CAT_RENDER);
+    lam::Temp<char> buf = lam::temp_array<char>((size_t)fsz, MEM_CAT_RENDER);
     if (!buf) {
         fclose(fp);
         return nullptr;
     }
-    size_t rd = fread(buf, 1, (size_t)fsz, fp);
+    size_t rd = fread(buf.get(), 1, (size_t)fsz, fp);
     fclose(fp);
     if (rd == 0) {
-        mem_free(buf);
         return nullptr;
     }
     if (out_size) *out_size = (int)rd;
-    return buf;
+    return buf.release();
 }
 
 static RdtPicture* cg_svg_picture_load_file(const char* path) {
     int size = 0;
-    char* data = cg_read_file_bytes(path, &size);
+    lam::Temp<char> data(cg_read_file_bytes(path, &size));
     if (!data) return nullptr;
-    RdtPicture* pic = cg_svg_picture_create(data, size, path);
-    mem_free(data);
-    return pic;
+    return cg_svg_picture_create(data.get(), size, path);
 }
 
 static const char* cg_picture_elem_attr(Element* element, const char* attr_name) {
@@ -1132,7 +1126,13 @@ RdtPicture* rdt_picture_dup(RdtPicture* pic) {
     dup->height = pic->height;
     dup->transform = pic->transform;
     dup->has_transform = pic->has_transform;
+    dup->animation_time = pic->animation_time;
     return dup;
+}
+
+double rdt_picture_animation_time(RdtPicture* pic) { return pic ? pic->animation_time : 0; }
+void rdt_picture_set_animation_time(RdtPicture* pic, double seconds) {
+    if (pic && isfinite(seconds) && seconds >= 0) pic->animation_time = seconds;
 }
 
 Element* rdt_picture_get_svg_root(RdtPicture* pic) {
@@ -1210,7 +1210,7 @@ void rdt_picture_draw(RdtVector* vec, RdtPicture* pic,
         render_svg_to_vec_via_display_list(vec, pic->svg->svg_root, pic->width, pic->height,
                           pic->svg->pool, 1.0f, g_picture_font_ctx, &base,
                           nullptr, nullptr, pic->source_path,
-                          (float)opacity / 255.0f);
+                          (float)opacity / 255.0f, false, nullptr, true, -1.0f, nullptr, pic->animation_time);
         return;
     }
 
@@ -1254,7 +1254,7 @@ void rdt_picture_free(RdtPicture* pic) {
     if (pic->image) CGImageRelease(pic->image);
     if (pic->paint) tvg_paint_unref(pic->paint, true);
     if (pic->svg) cg_svg_shared_release(pic->svg);
-    if (pic->source_path) mem_free(pic->source_path);
+    lam::Temp<char> source_path(pic->source_path);
     free(pic);
 }
 

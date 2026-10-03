@@ -317,6 +317,7 @@ struct FontContext {
     // destruction flag: when true, pool_free calls are skipped in font_handle_release
     // because pool_destroy will free all grouped owner memory in bulk
     bool            destroying;
+    uint64_t        resource_generation; // descriptor changes and first source resolution
 };
 
 static inline uint64_t font_context_next_handle_identity(FontContext* ctx) {
@@ -502,6 +503,8 @@ TextExtents         font_platform_measure_text(void* ct_font_ref,
 void*               font_rasterize_ct_create(const uint8_t* data, size_t len,
                                               float size_px, int face_index,
                                               FontWeight weight, FontSlant slant);
+bool                font_rasterize_ct_visit_path(void* ct_font_ref, uint32_t codepoint,
+                                               FontPathVisitFn visitor, void* context);
 bool                font_rasterize_ct_metrics(void* ct_font_ref, uint32_t codepoint,
                                                float bitmap_scale, GlyphInfo* out);
 GlyphBitmap*        font_rasterize_ct_render(void* ct_font_ref, uint32_t codepoint,

@@ -2243,6 +2243,7 @@ JitImport jit_runtime_imports[] = {
     {"lambda_type_value_is_exact", FPTR(lambda_type_value_is_exact)},
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},
     {"lambda_type_value_from_contract", FPTR(lambda_type_value_from_contract)},
+    {"lambda_fill_for_contract", FPTR(lambda_fill_for_contract)},
     {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
     {"lambda_array_empty_for_contract", FPTR(lambda_array_empty_for_contract)},
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},

@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include "../../../lib/mempool.h"
 #include "../../../lib/strbuf.h"
+#include "../../../lib/mem_node.hpp"
 #include "../../core/name_identity.h"
 
 // Color type for text color (same as in css_style.hpp)
@@ -83,9 +84,9 @@ typedef struct ViewElement ViewElement;
 struct DomNode {
     uint32_t id;             // event/state log id, monotonic per document epoch
     DomNodeType node_type;   // Node type discriminator
-    DomNode* parent;         // Parent node (nullptr at root)
-    DomNode* next_sibling;   // Next sibling node (nullptr if last)
-    DomNode* prev_sibling;   // Previous sibling (nullptr if first)
+    lam::Up<DomNode> parent;          // Parent node (nullptr at root)
+    lam::Own<DomNode> next_sibling;   // Next sibling node (nullptr if last); a child is owned through its parent's chain
+    lam::Up<DomNode> prev_sibling;    // Previous sibling (nullptr if first)
 
     // view related fields
     ViewType view_type;
@@ -224,14 +225,16 @@ enum DomTextContentType {
 // tier-1: doc-pool, survives relayout
 struct DomText : public DomNode {
     // Text-specific fields (reference to Lambda String)
-    const char* text;            // Text content or symbol name (references native_string->chars)
+    lam::Up<const char> text;    // Text content or symbol name (references native_string->chars)
     size_t length;               // Text length or symbol name length
-    // Lambda backing (required)
-    String* native_string;       // Pointer to backing Lambda String
+    // Lambda backing (required); in the Input arena, or in the document pool when owned
+    lam::Up<String> native_string;
 
     // view related fields
-    TextRect *rect;  // first text rect
-    FontProp *font;  // font for this text
+    lam::Own<TextRect> rect;  // first text rect
+    // font in force: the FontProp of the nearest font-owning ancestor, shared
+    // with that element and its other descendants; the text never owns it
+    lam::Shared<FontProp> font;
 
     // Factories rely on zeroed arena/pool storage and write only semantic non-zero fields.
     static DomText* create(String* native_string, DomElement* parent_element);
@@ -386,18 +389,24 @@ bool dom_text_remove(DomText* text_node);
 // tier-1: doc-pool, survives relayout
 struct DomComment : public DomNode {
     // Comment-specific fields
-    const char* tag_name;        // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
-    const char* content;         // Full content/text (points to native_element's String child)
+    lam::Up<const char> tag_name;   // Node name: "!--" for comments, "!DOCTYPE" for DOCTYPE
+    lam::Up<const char> content;    // Full content/text (points to native_element's String child)
     size_t length;               // Content length
-    Element* native_element;     // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
+    lam::Up<Element> native_element;  // Pointer to backing Lambda Element (tag "!--" or "!DOCTYPE")
 
     // Factories rely on zeroed arena storage and write only semantic non-zero fields.
     static DomComment* create(Element* native_element, DomElement* parent_element);
     static DomComment* create_detached(Element* native_element, DomDocument* doc);
 };
 
+// DOM nodes live in their document's storage (Input arena, node arena, document pool)
+LAM_NODE_OF(DomNode, NodeDocument);
+LAM_NODE_OF(DomText, NodeDocument);
+LAM_NODE_OF(DomComment, NodeDocument);
+
 /** Detached bridge factory retained for JS/Jube callers. */
 DomComment* dom_comment_create_detached(Element* native_element, DomDocument* doc);
+bool dom_is_comment_tag(const char* tag_name);
 
 /**
  * Destroy a DomComment node

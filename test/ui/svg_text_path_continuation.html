@@ -1,0 +1,10 @@
+<!doctype html><html><head><style>
+@font-face {font-family:Ahem;src:url('../layout/data/font/Ahem.ttf')}
+html,body {margin:0;background:white} svg {display:block} text {font-family:Ahem;font-size:20px;fill:blue}
+</style></head><body><svg width="600" height="400">
+<defs><path id="open" d="M20 60H200"/><path id="closed" d="M300 100H400V200H300Z"/></defs>
+<text x="20" y="160">A<textPath href="#missing">AAA</textPath>A</text>
+<text><textPath href="#open" side="right">A</textPath>A</text>
+<text><textPath href="#closed" startOffset="25%">A</textPath>A</text>
+<text fill="red"><textPath href="#open" path="">AAA</textPath></text>
+</svg></body></html>

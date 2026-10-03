@@ -315,6 +315,8 @@ struct MirValue {
     // nullable, constrained, and heterogeneous contracts remain here for
     // representation-preserving conversions (D2.4.1–D2.4.3).
     Type* semantic_contract;
+    // The boxed error join is retained; only its success already admits this contract.
+    Type* admitted_success_contract;
     TypeId semantic_type;
     ValueRep rep;
     JitValueClass value_class;

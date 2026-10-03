@@ -55,7 +55,7 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
 }
 
 void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
-                     void* filter, const Bound* clip) {
+                     FilterProp* filter, const Bound* clip) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_APPLY_FILTER;
     dl_set_clipped_rect_bounds(item, x, y, w, h, clip);
@@ -63,7 +63,7 @@ void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
     item->apply_filter.y = y;
     item->apply_filter.w = w;
     item->apply_filter.h = h;
-    item->apply_filter.filter = filter;
+    item->apply_filter.filter = lam::up(filter);
     item->apply_filter.clip = clip ? *clip : dl_unbounded_clip();
 }
 

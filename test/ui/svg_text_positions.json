@@ -1,0 +1,218 @@
+{
+  "name": "SVG addressable text positions",
+  "html": "test/ui/svg_text_positions.html",
+  "viewport": {
+    "width": 360,
+    "height": 260
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 20,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 40,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 20,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 20,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 80,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 105,
+      "y": 80,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 80,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 185,
+      "y": 80,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 215,
+      "y": 80,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 80,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 120,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 125,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 85,
+      "y": 120,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 155,
+      "y": 120,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 140,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 200,
+      "y": 140,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 180,
+      "y": 115,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 175,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 175,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 175,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 175,
+      "y": 175,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 243,
+      "min_r": 245,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 76,
+      "y": 243,
+      "min_r": 245,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 55,
+      "y": 40,
+      "expected_selector": "#absolute"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 135,
+      "y": 80,
+      "expected_selector": "#nested"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 200,
+      "y": 140,
+      "expected_selector": "#rotated"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 175,
+      "y": 175,
+      "expected_selector": "svg"
+    }
+  ]
+}

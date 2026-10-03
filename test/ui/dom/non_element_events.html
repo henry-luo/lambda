@@ -1,0 +1,22 @@
+<!doctype html><html><body>
+<button id="dispatch">Dispatch</button>
+<div id="host">text<!--comment--></div>
+<p id="status">waiting</p>
+<script>
+  document.getElementById('dispatch').addEventListener('click', function () {
+    const host = document.getElementById('host');
+    const fragment = document.createDocumentFragment();
+    const targets = [host.firstChild, host.lastChild, fragment];
+    let direct = 0;
+    let bubbled = 0;
+    host.addEventListener('cleanup', function () { bubbled++; });
+    targets.forEach(function (target) {
+      target.addEventListener('cleanup', function (event) {
+        if (event.target === target) direct++;
+      });
+      target.dispatchEvent(new CustomEvent('cleanup', {bubbles: true}));
+    });
+    document.getElementById('status').textContent = direct + ':' + bubbled;
+  });
+</script>
+</body></html>

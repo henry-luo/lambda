@@ -3,7 +3,7 @@
 // Compiled on Windows (until that backend is implemented) and headless builds.
 // Linux uses webview_layer_linux.cpp; macOS uses webview_layer_mac.mm.
 
-#if !defined(__APPLE__) && !defined(__linux__)
+#if defined(LAMBDA_NO_GUI) || (!defined(__APPLE__) && !defined(__linux__))
 
 #include "radiant.hpp"
 
@@ -68,4 +68,4 @@ void webview_layer_platform_inject_scroll(WebViewHandle* handle,
     (void)handle; (void)dx; (void)dy; (void)x; (void)y;
 }
 
-#endif // !defined(__APPLE__) && !defined(__linux__)
+#endif // LAMBDA_NO_GUI || (!__APPLE__ && !__linux__)

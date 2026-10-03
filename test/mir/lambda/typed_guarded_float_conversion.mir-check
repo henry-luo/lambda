@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "description": "D2.4.1\u2013D2.4.3/S7.7.2: guarded float conversion retains its boxed cold error path and a native successful tree.",
+  "checks": [
+    {
+      "in_func": "_typed_#",
+      "expect": [
+        "ddiv\t",
+        "call\tfn_float_p, fn_float"
+      ],
+      "count": {"call\tlambda_type_check_p, lambda_type_check": 1}
+    },
+    {
+      "in_func": "_mixed_decl_#",
+      "expect": ["call\tlambda_type_check_p, lambda_type_check"]
+    },
+    {
+      "in_func": "_scalar_conversion_#",
+      "expect": ["dsub\t"],
+      "forbid": ["call\tfn_float_p, fn_float"]
+    }
+  ]
+}

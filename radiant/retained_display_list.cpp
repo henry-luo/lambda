@@ -73,17 +73,17 @@ static void retained_dl_copy_clip_shape_stack(DisplayList* dst,
     }
 }
 
-static bool retained_dl_clone_path(RdtPath** out, RdtPath* in) {
-    if (!out) return false; *out = in ? rdt_path_clone(in) : nullptr; return !in || *out;
+static bool retained_dl_clone_path(lam::Own<RdtPath>* out, RdtPath* in) {
+    if (!out) return false; *out = lam::own(in ? rdt_path_clone(in) : nullptr); return !in || *out;
 }
 
-static bool retained_dl_copy_gradient_stops(DisplayList* dst, RdtGradientStop** out,
+static bool retained_dl_copy_gradient_stops(DisplayList* dst, lam::OwnArr<RdtGradientStop>* out,
                                             const RdtGradientStop* stops, int count) {
-    if (!out) return false; *out = dl_copy_stops(dst, stops, count); return !stops || count <= 0 || *out;
+    if (!out) return false; *out = lam::own_arr(dl_copy_stops(dst, stops, count)); return !stops || count <= 0 || *out;
 }
 
-static bool retained_dl_copy_dashes(DisplayList* dst, float** out, const float* dashes, int count) {
-    if (!out) return false; *out = dl_copy_dashes(dst, dashes, count); return !dashes || count <= 0 || *out;
+static bool retained_dl_copy_dashes(DisplayList* dst, lam::OwnArr<float>* out, const float* dashes, int count) {
+    if (!out) return false; *out = lam::own_arr(dl_copy_dashes(dst, dashes, count)); return !dashes || count <= 0 || *out;
 }
 
 static bool retained_dl_clone_item_payload(DisplayList* dst,
@@ -107,16 +107,24 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                     in->fill_linear_gradient.path)) return false;
             if (!retained_dl_copy_gradient_stops(dst, &out->fill_linear_gradient.stops,
                     in->fill_linear_gradient.stops, in->fill_linear_gradient.stop_count)) return false;
+            out->fill_linear_gradient.options.dash_array = lam::up(dl_copy_dashes(dst,
+                in->fill_linear_gradient.options.dash_array, in->fill_linear_gradient.options.dash_count));
+            if (in->fill_linear_gradient.options.dash_count > 0 &&
+                !out->fill_linear_gradient.options.dash_array) return false;
             break;
         case DL_FILL_RADIAL_GRADIENT:
             if (!retained_dl_clone_path(&out->fill_radial_gradient.path,
                     in->fill_radial_gradient.path)) return false;
             if (!retained_dl_copy_gradient_stops(dst, &out->fill_radial_gradient.stops,
                     in->fill_radial_gradient.stops, in->fill_radial_gradient.stop_count)) return false;
+            out->fill_radial_gradient.options.dash_array = lam::up(dl_copy_dashes(dst,
+                in->fill_radial_gradient.options.dash_array, in->fill_radial_gradient.options.dash_count));
+            if (in->fill_radial_gradient.options.dash_count > 0 &&
+                !out->fill_radial_gradient.options.dash_array) return false;
             break;
         case DL_DRAW_PICTURE:
-            out->draw_picture.picture = in->draw_picture.picture ?
-                rdt_picture_dup(in->draw_picture.picture) : nullptr;
+            out->draw_picture.picture = lam::own(in->draw_picture.picture ?
+                rdt_picture_dup(in->draw_picture.picture) : nullptr);
             if (in->draw_picture.picture && !out->draw_picture.picture) return false;
             break;
         case DL_PUSH_CLIP:
@@ -131,6 +139,9 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                                               &in->blit_surface_scaled.clip_shapes);
             break;
         case DL_BEGIN_ELEMENT:
+            if (!dl_copy_semantic_group(dst, &out->element_marker.semantics,
+                &in->element_marker.semantics)) return false;
+            [[fallthrough]];
         case DL_END_ELEMENT:
             if (in->element_marker.matching_index >= source_start) {
                 out->element_marker.matching_index =
@@ -176,24 +187,29 @@ static bool retained_dl_copy_range(DisplayList* dst, const DisplayList* src,
 RetainedDisplayListCache* retained_dl_cache_create(Pool* pool) {
     if (!pool) return nullptr;
 
-    RetainedDisplayListCache* cache =
-        (RetainedDisplayListCache*)mem_calloc(1, sizeof(RetainedDisplayListCache), MEM_CAT_RENDER);
+    lam::Temp<RetainedDisplayListCache> cache =
+        lam::temp_array_zero<RetainedDisplayListCache>(1, MEM_CAT_RENDER);
     if (!cache) return nullptr;
-
-    if (!cache->init(pool)) {
-        mem_free(cache);
-        return nullptr;
-    }
-    return cache;
+    if (!cache->init(pool)) return nullptr;
+    return cache.release();
 }
 
-static void retained_dl_fragment_free(RetainedDisplayListFragment* fragment) {
+// Fragments live in the cache's pool (the owner's node); a cache built
+// without a pool keeps them on the memtracked heap.
+static RetainedDisplayListFragment* retained_dl_fragment_alloc(Pool* pool) {
+    void* storage = pool ? pool_calloc(pool, sizeof(RetainedDisplayListFragment))
+                         : mem_calloc(1, sizeof(RetainedDisplayListFragment), MEM_CAT_RENDER);
+    return storage ? new (storage) RetainedDisplayListFragment() : nullptr;
+}
+
+static void retained_dl_fragment_free(Pool* pool, RetainedDisplayListFragment* fragment) {
     if (!fragment) return;
     if (fragment->initialized) dl_destroy(&fragment->list);
     // the list's scratch releases its arena ownership before the arena goes
     if (fragment->arena) mem_arena_destroy(fragment->arena);
     fragment->~RetainedDisplayListFragment();
-    mem_free(fragment);
+    if (pool) pool_free(pool, fragment);
+    else lam::Temp<RetainedDisplayListFragment> storage(fragment);
 }
 
 bool RetainedDisplayListCache::init(Pool* owner_pool) {
@@ -212,7 +228,7 @@ void RetainedDisplayListCache::destroy() {
         RetainedDisplayListEntry* entry = nullptr;
         while (map.next(&iter, &entry)) {
             if (entry && entry->fragment) {
-                retained_dl_fragment_free(entry->fragment);
+                retained_dl_fragment_free(pool, entry->fragment);
             }
         }
         map.destroy();
@@ -221,8 +237,8 @@ void RetainedDisplayListCache::destroy() {
 
 void retained_dl_cache_destroy(RetainedDisplayListCache* cache) {
     if (!cache) return;
+    lam::Temp<RetainedDisplayListCache> owned(cache);  // the owner hands the cache over
     cache->destroy();
-    mem_free(cache);
 }
 
 void RetainedDisplayListCache::begin_frame() {
@@ -272,17 +288,18 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     RetainedDisplayListEntry* found = cache->map.get(query);
     if (found) return found->fragment;
 
-    RetainedDisplayListFragment* fragment =
-        (RetainedDisplayListFragment*)mem_calloc(1, sizeof(RetainedDisplayListFragment), MEM_CAT_RENDER);
+    RetainedDisplayListFragment* fragment = retained_dl_fragment_alloc(cache->pool);
     if (!fragment) return nullptr;
-    new (fragment) RetainedDisplayListFragment();
 
     fragment->view_id = view_id;
     // Factory-created fragment arenas outlive frame scratch resets; they are
     // destroyed with the fragment.
-    fragment->arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "retained_dl.fragment");
+    // the fragment arena sits under the context that owns the cache's pool
+    fragment->arena = mem_arena_create(
+        cache->pool ? mem_node_owner((MemNode*)pool_get_mem_node(cache->pool)) : nullptr,
+        MEM_ROLE_RENDER, "retained_dl.fragment");
     if (!fragment->arena) {
-        retained_dl_fragment_free(fragment);
+        retained_dl_fragment_free(cache->pool, fragment);
         return nullptr;
     }
     dl_init(&fragment->list, fragment->arena);
@@ -291,7 +308,7 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     RetainedDisplayListEntry entry = { view_id, fragment };
     cache->map.set(entry);
     if (cache->map.oom()) {
-        retained_dl_fragment_free(fragment);
+        retained_dl_fragment_free(cache->pool, fragment);
         return nullptr;
     }
     return fragment;

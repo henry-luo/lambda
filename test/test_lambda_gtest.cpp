@@ -6,6 +6,7 @@
 //==============================================================================
 
 #include "test_lambda_helpers.hpp"
+#include "test_lambda_tier_helpers.hpp"
 #include "test_ast_tune_capture.hpp"
 #include "../lib/shell.h"
 #include <string.h>
@@ -265,20 +266,21 @@ TEST(LambdaTypedPathTests, ReopensBoxedTypedAdapterResultForNativeConsumer) {
 struct TierParityFixture {
     const char* script;
     const char* expected;
+    const char* interp_unsupported = nullptr;
 };
 static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/cow_var_typed_rebind.ls", "test/lambda/proc/cow_var_typed_rebind.txt"},
     {"test/lambda/proc/cow_var_nullable_record.ls", "test/lambda/proc/cow_var_nullable_record.txt"},
     {"test/lambda/proc/cow_var_nullable_record_typed_handle.ls",
-     "test/lambda/proc/cow_var_nullable_record_typed_handle.txt"},
-    {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt"},
+     "test/lambda/proc/cow_var_nullable_record_typed_handle.txt", "AST_NODE_MEMBER_ASSIGN_STAM"},
+    {"test/lambda/proc/cow_place_mutator.ls", "test/lambda/proc/cow_place_mutator.txt", "AST_NODE_SYS_FUNC"},
     {"test/lambda/proc/cow_rmw_sibling_borrow.ls", "test/lambda/proc/cow_rmw_sibling_borrow.txt"},
-    {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt"},
+    {"test/lambda/proc/cow_move_out_bind.ls", "test/lambda/proc/cow_move_out_bind.txt", "AST_NODE_MEMBER_ASSIGN_STAM"},
     // Tune28: D4.4.6 place-copy marks and CW36 branch store-backs
     {"test/lambda/proc/cow_place_copy_place_written.ls",
      "test/lambda/proc/cow_place_copy_place_written.txt"},
     {"test/lambda/proc/cow_rmw_branch_store_back.ls",
-     "test/lambda/proc/cow_rmw_branch_store_back.txt"},
+     "test/lambda/proc/cow_rmw_branch_store_back.txt", "AST_NODE_MEMBER_ASSIGN_STAM"},
     {"test/lambda/proc/tune27_nullable_lane_store.ls", "test/lambda/proc/tune27_nullable_lane_store.txt"},
     {"test/lambda/proc/tune27_fixed_path_store.ls", "test/lambda/proc/tune27_fixed_path_store.txt"},
     {"test/lambda/proc/tune27_loop_accumulator.ls", "test/lambda/proc/tune27_loop_accumulator.txt"},
@@ -425,8 +427,8 @@ static const TierParityFixture kTune27TierParity[] = {
     // S8.2.4v3 (LR07-32..36): type keys step lists and drop null matches,
     // positional selections gather; a run-time-typed key read element 0 on the
     // JIT only, and `last` there resolved against an outer container.
-    {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt"},
-    {"test/lambda/proc/subscript_last_scope.ls", "test/lambda/proc/subscript_last_scope.txt"},
+    {"test/lambda/subscript_selection.ls", "test/lambda/subscript_selection.txt", "AST_NODE_INDEX_EXPR"},
+    {"test/lambda/proc/subscript_last_scope.ls", "test/lambda/proc/subscript_last_scope.txt", "AST_NODE_INDEX_ASSIGN_STAM"},
     // S10.1.1v2 (LR07-37): `|`, `&`, `!` are the type operators only and never
     // collapse to a value; `1 | 2` and `int | null` had been `[]` on both tiers.
     {"test/lambda/type_set_operators_expr.ls", "test/lambda/type_set_operators_expr.txt"},
@@ -438,7 +440,7 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/type_literal_alias.ls", "test/lambda/type_literal_alias.txt"},
     // S16.6.7v2: a procedure arrow is an anonymous AST_NODE_PROC; each tier
     // must create, call, pass, refuse and promote it as a named nested `pn`.
-    {"test/lambda/proc/pn_arrow.ls", "test/lambda/proc/pn_arrow.txt"},
+    {"test/lambda/proc/pn_arrow.ls", "test/lambda/proc/pn_arrow.txt", "AST_NODE_PROC"},
     // S1.6 (LR03-19): an object type strides its fields by storage size; a
     // union- or range-typed field overlapped the next and read back `inf`.
     {"test/lambda/object_boxed_field_layout.ls", "test/lambda/object_boxed_field_layout.txt"},
@@ -481,13 +483,19 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/contract_return_check.ls", "test/lambda/contract_return_check.txt"},
 };
 
-TEST(LambdaTierParityTests, Tune27FixturesAgreeOnEveryTier) {
+// explicit exclusions used to pass this test by silently executing MIR
+TEST(LambdaTierParityTests, Tune27FixturesHonorTierSupport) {
     static const char* const tiers[] = {"interp", "jit", "auto"};
     for (size_t f = 0; f < sizeof(kTune27TierParity) / sizeof(kTune27TierParity[0]); f++) {
         for (size_t t = 0; t < 3; t++) {
             SCOPED_TRACE(std::string(kTune27TierParity[f].script) + " on " + tiers[t]);
-            test_lambda_script_against_file(kTune27TierParity[f].script,
-                kTune27TierParity[f].expected, true, tiers[t]);
+            if (t == 0 && kTune27TierParity[f].interp_unsupported) {
+                expect_interp_rejection(LAMBDA_EXE, kTune27TierParity[f].script,
+                    kTune27TierParity[f].interp_unsupported);
+            } else {
+                test_lambda_script_against_file(kTune27TierParity[f].script,
+                    kTune27TierParity[f].expected, true, tiers[t]);
+            }
         }
     }
 }
@@ -564,6 +572,7 @@ TEST(LambdaTune31Tests, NestedCounterAgreesOnEveryTier) {
 }
 
 TEST(LambdaTune31Tests, RecursiveArrayWitnessAgreesOnEveryTier) {
+    // derived keys use the checked setter through recursive var forwarding
     static const char* const tiers[] = {"interp", "jit", "auto"};
     for (size_t t = 0; t < 3; t++) {
         SCOPED_TRACE(tiers[t]);

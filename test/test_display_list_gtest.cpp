@@ -71,13 +71,13 @@ TEST_F(DisplayListTest, DescriptorCoversOpsAndOwnsPayloadCleanup) {
 
     DisplayItem path_item = {};
     path_item.op = DL_FILL_PATH;
-    path_item.fill_path.path = (RdtPath*)1;
+    path_item.fill_path.path = lam::own((RdtPath*)1);
     dl_item_free_owned_payload(&path_item);
     EXPECT_EQ(path_item.fill_path.path, nullptr);
 
     DisplayItem picture_item = {};
     picture_item.op = DL_DRAW_PICTURE;
-    picture_item.draw_picture.picture = (RdtPicture*)1;
+    picture_item.draw_picture.picture = lam::own((RdtPicture*)1);
     dl_item_free_owned_payload(&picture_item);
     EXPECT_EQ(picture_item.draw_picture.picture, nullptr);
 }
@@ -105,21 +105,21 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     paint_fill_linear_gradient(&clear_list, nullptr, 0.0f, 0.0f, 10.0f, 10.0f,
                                stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
     ASSERT_EQ(clear_list.size(), 1u);
-    clear_list.data()[0].fill_linear_gradient.owns_stops = true;
+    clear_list.data()[0].fill_linear_gradient.owned_stops = lam::own_arr(stops);
 
     PaintGlyphRun run = {};
     run.text = mem_strdup("owned glyph text", MEM_CAT_RENDER);
     ASSERT_NE(run.text, nullptr);
-    run.owns_text = true;
+    run.owned_text = lam::own(run.text);
     paint_glyph_run(&clear_list, &run);
     ASSERT_EQ(clear_list.size(), 2u);
 
     paint_list_clear(&clear_list);
     EXPECT_EQ(clear_list.size(), 0u);
     EXPECT_EQ(clear_list.data()[0].fill_linear_gradient.stops, nullptr);
-    EXPECT_FALSE(clear_list.data()[0].fill_linear_gradient.owns_stops);
+    EXPECT_FALSE(clear_list.data()[0].fill_linear_gradient.owned_stops);
     EXPECT_EQ(clear_list.data()[1].glyph_run.text, nullptr);
-    EXPECT_FALSE(clear_list.data()[1].glyph_run.owns_text);
+    EXPECT_FALSE(clear_list.data()[1].glyph_run.owned_text);
     paint_list_destroy(&clear_list);
 
     PaintList destroy_list = {};
@@ -127,7 +127,7 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     PaintGlyphRun destroy_run = {};
     destroy_run.text = mem_strdup("destroy owned glyph text", MEM_CAT_RENDER);
     ASSERT_NE(destroy_run.text, nullptr);
-    destroy_run.owns_text = true;
+    destroy_run.owned_text = lam::own(destroy_run.text);
     paint_glyph_run(&destroy_list, &destroy_run);
     ASSERT_EQ(destroy_list.size(), 1u);
     paint_list_destroy(&destroy_list);
@@ -429,8 +429,8 @@ TEST_F(DisplayListTest, RasterCommandsStoreClipAndCopiedClipShapes) {
     float vy[3] = {4.0f, 5.0f, 6.0f};
     ClipShape polygon = {};
     polygon.type = CLIP_SHAPE_POLYGON;
-    polygon.polygon.vx = vx;
-    polygon.polygon.vy = vy;
+    polygon.polygon.vx = lam::own_arr(vx);
+    polygon.polygon.vy = lam::own_arr(vy);
     polygon.polygon.count = 3;
     ClipShape* shapes[1] = {&polygon};
     Bound clip = {2.0f, 3.0f, 9.0f, 10.0f};
@@ -464,7 +464,7 @@ TEST_F(DisplayListTest, BlitAndExternalLayerCommandsStoreGenerations) {
 
     dl_blit_surface_scaled(&dl, &src, 0.0f, 0.0f, 50.0f, 50.0f,
                            2, &clip, nullptr, 0, 77, src.generation);
-    dl_video_placeholder(&dl, &src, 1.0f, 2.0f, 3.0f, 4.0f, 5, &clip, 18);
+    dl_video_placeholder(&dl, (RdtVideo*)&src, 1.0f, 2.0f, 3.0f, 4.0f, 5, &clip, 18);
     dl_webview_layer_placeholder(&dl, &src, 2.0f, 3.0f, 4.0f, 5.0f, &clip, 19);
 
     ASSERT_EQ(dl.size(), 3u);
@@ -487,7 +487,7 @@ TEST_F(DisplayListTest, BlitAndExternalLayerCommandsStoreGenerations) {
 
 TEST_F(DisplayListTest, EffectCommandsUseExpandedAndClippedBounds) {
     Bound clip = {3.0f, 4.0f, 15.0f, 16.0f};
-    dl_apply_filter(&dl, 0.0f, 0.0f, 20.0f, 20.0f, &dl, &clip);
+    dl_apply_filter(&dl, 0.0f, 0.0f, 20.0f, 20.0f, (FilterProp*)&dl, &clip);
     dl_box_blur_inset(&dl, 10, 20, 30, 40, 5, 6.0f, 0xff000000);
     dl_outer_shadow(&dl, 100.0f, 200.0f, 20.0f, 10.0f,
                     1.0f, 2.0f, 3.0f, 4.0f, test_color(0xaa000000), 7.0f,
@@ -975,21 +975,21 @@ TEST_F(PaintIrParityTest, ExternalLayerPlaceholdersMatchDirect) {
     Bound clip = {2.0f, 4.0f, 90.0f, 100.0f};
     char video_token = 0;
 
-    paint_video_placeholder(&pl, &video_token, 10.0f, 11.0f, 50.0f, 60.0f,
+    paint_video_placeholder(&pl, (RdtVideo*)&video_token, 10.0f, 11.0f, 50.0f, 60.0f,
                             0x105, &clip, 77);
     paint_webview_layer_placeholder(&pl, &surface,
                                     12.0f, 13.0f, 70.0f, 80.0f,
                                     &clip, surface.generation);
-    paint_video_placeholder(&pl, &video_token, 1.0f, 2.0f, 3.0f, 4.0f,
+    paint_video_placeholder(&pl, (RdtVideo*)&video_token, 1.0f, 2.0f, 3.0f, 4.0f,
                             6, nullptr, 0);
     lower();
 
-    dl_video_placeholder(&direct, &video_token, 10.0f, 11.0f, 50.0f, 60.0f,
+    dl_video_placeholder(&direct, (RdtVideo*)&video_token, 10.0f, 11.0f, 50.0f, 60.0f,
                          0x105, &clip, 77);
     dl_webview_layer_placeholder(&direct, &surface,
                                  12.0f, 13.0f, 70.0f, 80.0f,
                                  &clip, surface.generation);
-    dl_video_placeholder(&direct, &video_token, 1.0f, 2.0f, 3.0f, 4.0f,
+    dl_video_placeholder(&direct, (RdtVideo*)&video_token, 1.0f, 2.0f, 3.0f, 4.0f,
                          6, nullptr, 0);
     expect_lists_equal(lowered, direct);
 }
@@ -1015,16 +1015,16 @@ TEST_F(PaintIrParityTest, RasterEffectOpsMatchDirect) {
     paint_composite_opacity(&pl, 2, 3, 20, 30, 0.5f, true);
     paint_save_backdrop(&pl, 2, 3, 20, 30);
     paint_apply_blend_mode(&pl, 2, 3, 20, 30, 7);
-    paint_apply_filter(&pl, 4.0f, 5.0f, 40.0f, 50.0f, &filter_token, &clip);
-    paint_apply_filter(&pl, 6.0f, 7.0f, 60.0f, 70.0f, &filter_token, nullptr);
+    paint_apply_filter(&pl, 4.0f, 5.0f, 40.0f, 50.0f, (FilterProp*)&filter_token, &clip);
+    paint_apply_filter(&pl, 6.0f, 7.0f, 60.0f, 70.0f, (FilterProp*)&filter_token, nullptr);
     lower();
 
     dl_save_backdrop(&direct, 2, 3, 20, 30);
     dl_composite_opacity(&direct, 2, 3, 20, 30, 0.5f, true);
     dl_save_backdrop(&direct, 2, 3, 20, 30);
     dl_apply_blend_mode(&direct, 2, 3, 20, 30, 7);
-    dl_apply_filter(&direct, 4.0f, 5.0f, 40.0f, 50.0f, &filter_token, &clip);
-    dl_apply_filter(&direct, 6.0f, 7.0f, 60.0f, 70.0f, &filter_token, nullptr);
+    dl_apply_filter(&direct, 4.0f, 5.0f, 40.0f, 50.0f, (FilterProp*)&filter_token, &clip);
+    dl_apply_filter(&direct, 6.0f, 7.0f, 60.0f, 70.0f, (FilterProp*)&filter_token, nullptr);
     expect_lists_equal(lowered, direct);
 }
 
@@ -1096,11 +1096,11 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsBackgroundAndSolidBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = &bound;
+    view.bound = lam::own(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
-    bound.background = &bg;
-    bound.border = &border;
+    bound.background = lam::own(&bg);
+    bound.border = lam::own(&border);
     bg.color = test_color(0xff102030);
     border.width.top = 1.0f;
     border.width.right = 2.0f;
@@ -1132,11 +1132,11 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsUniformRoundedBackground) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = &bound;
+    view.bound = lam::own(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
-    bound.background = &bg;
-    bound.border = &border;
+    bound.background = lam::own(&bg);
+    bound.border = lam::own(&border);
     bg.color = test_color(0xff203040);
     border.radius.top_left = 6.0f;
     border.radius.top_right = 6.0f;
@@ -1161,11 +1161,11 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsOpaqueUniformRoundedBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = &bound;
+    view.bound = lam::own(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
-    bound.background = &bg;
-    bound.border = &border;
+    bound.background = lam::own(&bg);
+    bound.border = lam::own(&border);
     bg.color = test_color(0xff203040);
     border.width.top = 4.0f;
     border.width.right = 4.0f;
@@ -1204,11 +1204,11 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = &bound;
+    view.bound = lam::own(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
-    bound.background = &bg;
-    bound.border = &border;
+    bound.background = lam::own(&bg);
+    bound.border = lam::own(&border);
 
     bg.gradient_type = GRADIENT_LINEAR;
     EXPECT_FALSE(render_paint_boundary_emit_simple(&pl, &view, 0.0f, 0.0f));
@@ -1261,15 +1261,15 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsLinearGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryLinearGradientPaint paint = {};
 
-    view.bound = &bound;
+    view.bound = lam::own(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
-    bound.background = &bg;
+    bound.background = lam::own(&bg);
     bg.gradient_type = GRADIENT_LINEAR;
-    bg.linear_gradient = &gradient;
+    bg.linear_gradient = lam::own(&gradient);
     gradient.angle = 90.0f;
     gradient.stop_count = 2;
-    gradient.stops = css_stops;
+    gradient.stops = lam::own_arr(css_stops);
     css_stops[0].position = 0.0f;
     css_stops[0].color.r = 0x10;
     css_stops[0].color.g = 0x20;
@@ -1305,18 +1305,18 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsRadialGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryRadialGradientPaint paint = {};
 
-    view.bound = &bound;
+    view.bound = lam::own(&bound);
     view.width = 120.0f;
     view.height = 80.0f;
-    bound.background = &bg;
+    bound.background = lam::own(&bg);
     bg.gradient_type = GRADIENT_RADIAL;
-    bg.radial_gradient = &gradient;
+    bg.radial_gradient = lam::own(&gradient);
     gradient.cx_set = true;
     gradient.cy_set = true;
     gradient.cx = 0.25f;
     gradient.cy = 0.75f;
     gradient.stop_count = 2;
-    gradient.stops = css_stops;
+    gradient.stops = lam::own_arr(css_stops);
     css_stops[0].position = -1.0f;
     css_stops[0].color.r = 0x01;
     css_stops[0].color.g = 0x02;
@@ -1366,19 +1366,19 @@ TEST_F(PaintIrParityTest, MixedSequenceMatchesDirect) {
 }
 
 TEST_F(PaintIrParityTest, GatewayRequiresPaintIrAndDisplayListTargets) {
-    PaintRecordTarget missing_paint = {nullptr, &lowered, "TEST_GATEWAY"};
+    PaintRecordTarget missing_paint = {nullptr, lam::up(&lowered), lam::up("TEST_GATEWAY")};
     paint_record_fill_rect(&missing_paint, "gateway_missing_paint",
                            1.0f, 2.0f, 3.0f, 4.0f,
                            test_color(0xff010203));
     EXPECT_EQ(lowered.size(), 0u);
 
-    PaintRecordTarget missing_dl = {&pl, nullptr, "TEST_GATEWAY"};
+    PaintRecordTarget missing_dl = {lam::up(&pl), nullptr, lam::up("TEST_GATEWAY")};
     paint_record_fill_rect(&missing_dl, "gateway_missing_dl",
                            1.0f, 2.0f, 3.0f, 4.0f,
                            test_color(0xff010203));
     EXPECT_EQ(paint_list_count(&pl), 0);
 
-    PaintRecordTarget ready = {&pl, &lowered, "TEST_GATEWAY"};
+    PaintRecordTarget ready = {lam::up(&pl), lam::up(&lowered), lam::up("TEST_GATEWAY")};
     paint_record_fill_rect(&ready, "gateway_ready",
                            1.0f, 2.0f, 3.0f, 4.0f,
                            test_color(0xff010203));
@@ -1540,11 +1540,11 @@ TEST_F(PaintIrParityTest, SemanticBuildersValidateAndLowerEffectGroupRasterOps) 
     float xs[2] = {3.0f, 8.0f};
     float ys[2] = {5.0f, 5.0f};
     PaintGlyphRun glyph_run = {};
-    glyph_run.font = &group;
+    glyph_run.font = lam::up((FontBox*)&group);
     glyph_run.color = test_color(0xff102030);
-    glyph_run.glyph_ids = glyph_ids;
-    glyph_run.xs = xs;
-    glyph_run.ys = ys;
+    glyph_run.glyph_ids = lam::up(glyph_ids);
+    glyph_run.xs = lam::up(xs);
+    glyph_run.ys = lam::up(ys);
     glyph_run.count = 2;
 
     paint_begin_effect_group(&pl, &group);
@@ -1638,7 +1638,7 @@ TEST_F(PaintIrParityTest, SemanticEffectGroupLowersFilterAndBackdrop) {
     PaintEffectGroup group = {};
     group.bounds = {4.0f, 5.0f, 24.0f, 35.0f};
     group.opacity = 1.0f;
-    group.filter = &filter_token;
+    group.filter = lam::up((FilterProp*)&filter_token);
     group.backdrop = true;
     group.has_clip = true;
 
@@ -1652,7 +1652,7 @@ TEST_F(PaintIrParityTest, SemanticEffectGroupLowersFilterAndBackdrop) {
     EXPECT_EQ(lowered.data()[1].op, DL_FILL_RECT);
     EXPECT_EQ(lowered.data()[2].op, DL_APPLY_FILTER);
     EXPECT_EQ(lowered.data()[3].op, DL_COMPOSITE_OPACITY);
-    EXPECT_EQ(lowered.data()[2].apply_filter.filter, &filter_token);
+    EXPECT_EQ(lowered.data()[2].apply_filter.filter.get(), (FilterProp*)&filter_token);
     EXPECT_FLOAT_EQ(lowered.data()[2].apply_filter.x, 4.0f);
     EXPECT_FLOAT_EQ(lowered.data()[2].apply_filter.y, 5.0f);
     EXPECT_FLOAT_EQ(lowered.data()[2].apply_filter.w, 20.0f);
@@ -2087,7 +2087,7 @@ TEST_F(PaintIrParityTest, SvgLoweringEmitsNativeTextRun) {
     PaintGlyphRun run = {};
     run.text = "A < B & C";
     run.text_len = -1;
-    run.font_family = "A&B Sans";
+    run.font_family = lam::up("A&B Sans");
     run.font_size = 13.5f;
     run.x = 2.0f;
     run.baseline_y = 9.0f;
@@ -2150,7 +2150,7 @@ TEST_F(PaintIrParityTest, SvgLoweringHonorsExportTargetCaps) {
 
     PaintSvgLoweringOptions options = {};
     options.emit_unsupported_comments = true;
-    options.caps = render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
+    options.caps = lam::up(render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF));
     PaintSvgLoweringStats stats = {};
     paint_ir_lower_svg(&pl, out, &options, &stats);
 

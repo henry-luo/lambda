@@ -56,9 +56,12 @@ bool radiant_urls_match_without_fragment(const Url* first, const Url* second);
 void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const char* type);
 void radiant_reconcile_dom_mutations(UiContext* uicon, DomDocument* doc);
 void* radiant_document_element_from_point(DomDocument* doc, float x, float y);
+void* radiant_subtree_element_from_point(DomElement* root, float x, float y);
 void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
     const char* type, const char* detail_name, const char* detail_value,
     double elapsed_time);
+void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
+    const char* type, double detail, double seconds);
 extern "C" bool radiant_dispatch_event_sim_pointer(UiContext* uicon, View* target,
     const char* type, double client_x, double client_y, int button, int buttons,
     int mods, const char* pointer_type);
@@ -1662,6 +1665,11 @@ void dom_range_for_each_rect_in_text_rect(struct DomRange* range,
     struct DomText* target_text, struct TextRect* target_rect,
     struct UiContext* uicon, DomRangeRectCb cb, void* userdata);
 
+// Return selected UTF-8 byte offsets for one text node, including ranges
+// that begin or end in another node.
+bool dom_range_text_byte_span(struct DomRange* range,
+    struct DomText* target_text, int* start_byte, int* end_byte);
+
 // Canonical direction. Reads StateStore's EditingSelection/DomSelection facade
 // and refreshes the projection structs with anchor/focus/caret boundaries plus
 // resolved layout x/y/height when the selection mutation seq has advanced.
@@ -2208,8 +2216,17 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block);
 void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 void scroll_apply_pending_element_scroll(ViewBlock* block);
+void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
+                                 bool explicit_target = false);
+bool scroll_smooth_tick_document(DomDocument* document, double now);
 
-bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp);
+inline bool scroll_axis_accepts_wheel(CssEnum overflow) {
+    return overflow == CSS_VALUE_AUTO || overflow == CSS_VALUE_SCROLL;
+}
+
+bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp,
+                       float delta_x, float delta_y,
+                       float* applied_x, float* applied_y);
 inline constexpr float RDT_WHEEL_PIXEL_STEP = 50.0f;
 bool scrollpane_target(EventContext* evcon, ViewBlock* block);
 
@@ -2389,6 +2406,12 @@ typedef struct ViewState {
             float drag_start_y;
             float h_drag_start_scroll;
             float v_drag_start_scroll;
+            float smooth_start_x, smooth_start_y;
+            float smooth_target_x, smooth_target_y;
+            float smooth_last_x, smooth_last_y;
+            double smooth_start_time;
+            uint8_t smooth_active : 1;
+            uint8_t smooth_started : 1;
         } scroll;
         struct {
             uint8_t disabled : 1;
@@ -2649,6 +2672,8 @@ typedef struct DocState {
     View* text_selection_press_view;     // fallback collapse target for press-in-selection mouse-up
     int text_selection_press_offset;
     bool editing_autoscroll_active;      // selection-drag autoscroll projection
+    bool has_active_smooth_scroll;        // ViewState-owned scrolling animation
+    bool smooth_scroll_tick_writing;      // keep animation writes from canceling themselves
     View* editing_autoscroll_surface;    // surface that started autoscroll
     float editing_autoscroll_pointer_x;  // last drag pointer x in viewport coordinates
     float editing_autoscroll_pointer_y;  // last drag pointer y in viewport coordinates
@@ -3405,6 +3430,11 @@ void scroll_state_resolve_view_geometry(ViewBlock* block,
 void scroll_state_get_range_for_view(DocState* state, View* view, void* pane,
                                      float* out_h_min, float* out_h_max,
                                      float* out_v_min, float* out_v_max);
+bool scroll_state_begin_smooth_for_view(DocState* state, View* view, void* pane,
+                                        float target_x, float target_y);
+void scroll_state_cancel_smooth_for_view(DocState* state, View* view);
+bool scroll_state_tick_smooth_for_view(DocState* state, View* view, void* pane,
+                                       double now, bool is_viewport);
 
 /**
  * Store scrollbar hover and drag-session substate in ViewState.scroll.
@@ -4474,6 +4504,7 @@ typedef struct EventContext {
     bool target_text_offset_valid;
     int target_text_offset;
     float offset_x, offset_y;  // mouse offset from target view
+    float viewport_pointer_x, viewport_pointer_y; // immutable query point while CSS/SVG walkers unproject locally
 
     // style context
     BlockBlot block;

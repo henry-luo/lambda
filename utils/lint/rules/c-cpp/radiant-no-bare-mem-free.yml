@@ -1,0 +1,40 @@
+id: radiant-no-bare-mem-free
+language: cpp
+severity: error
+message: >-
+  Bare mem_free in Radiant view, HTML/CSS/SVG, layout or rendering code. A
+  function-scoped buffer belongs in a lam::Temp owner; an owning field is a
+  lam::Own/OwnArr released with lam::free_owned; a teardown function adopts
+  what it releases into a lam::Temp.
+rule:
+  kind: call_expression
+  regex: "^mem_free\\s*\\("
+files:
+  - "radiant/**/*.{c,cpp,h,hpp,mm}"
+# Interaction, editing, scripting, state and application-shell code is out of
+# this rule's scope until its own phase.
+ignores:
+  - "radiant/*event*"
+  - "radiant/*edit*"
+  - "radiant/*script*"
+  - "radiant/state_store*"
+  - "radiant/browsing*"
+  - "radiant/clipboard*"
+  - "radiant/text_control*"
+  - "radiant/ime_*"
+  - "radiant/webview*"
+  - "radiant/window*"
+  - "radiant/cmd_*"
+  - "radiant/network*"
+  - "radiant/source_pos*"
+  - "radiant/dom_range*"
+  - "radiant/*selection*"
+  - "radiant/devtool*"
+  - "radiant/*automation*"
+  - "radiant/ui_*"
+  - "radiant/*menu*"
+  - "radiant/focus*"
+  - "radiant/keyboard*"
+  - "radiant/undo*"
+  - "radiant/caret*"
+  - "radiant/drag*"

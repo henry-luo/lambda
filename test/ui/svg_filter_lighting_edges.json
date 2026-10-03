@@ -1,0 +1,99 @@
+{
+  "name": "SVG lighting linear color space, premultiplied specular color, no light, zero constants, rear lighting and default kernel",
+  "html": "test/ui/svg_filter_lighting_edges.html",
+  "viewport": {
+    "width": 840,
+    "height": 160
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 60,
+      "min_r": 180,
+      "max_r": 196,
+      "min_g": 180,
+      "max_g": 196,
+      "min_b": 180,
+      "max_b": 196
+    },
+    {
+      "type": "assert_pixel",
+      "x": 150,
+      "y": 60,
+      "min_r": 151,
+      "max_r": 167,
+      "min_g": 199,
+      "max_g": 215,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 250,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 350,
+      "y": 60,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 450,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 550,
+      "y": 60,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 650,
+      "y": 60,
+      "min_r": 119,
+      "max_r": 135,
+      "min_g": 119,
+      "max_g": 135,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 750,
+      "y": 60,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    }
+  ],
+  "oracle": "Filter Effects 1 section 9.19: specular RGB equals specularConstant times its light term; alpha is max(RGB). At zero constant all four channels are zero. Chromium 143 renders opaque black; the independent reference replaces only this case with zero-opacity feFlood. Main fixture coordinates, count and channel tolerance are unchanged."
+}

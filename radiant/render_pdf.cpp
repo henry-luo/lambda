@@ -825,6 +825,33 @@ static bool pdf_raster_fallback_radial_gradient(PdfRenderContext* ctx,
                                         pdf_radial_gradient_position, "radial");
 }
 
+static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands = nullptr);
+
+static bool pdf_export_paint_consume(PaintList* paint, void* context) {
+    PdfRenderContext* source = (PdfRenderContext*)context;
+    // accept only the native PDF operations with exact paint semantics; effects and unsupported strokes replay transparently.
+    for (int i = 0; i < paint->item_count(); i++) {
+        const PaintCmd& cmd = paint->data()[i];
+        switch (cmd.op) {
+        case PAINT_FILL_RECT: if (cmd.fill_rect.color.a != 255) return false; break;
+        case PAINT_FILL_ROUNDED_RECT: if (cmd.fill_rounded_rect.color.a != 255) return false; break;
+        case PAINT_FILL_PATH:
+            if (cmd.fill_path.color.a != 255 || cmd.fill_path.rule != RDT_FILL_WINDING) return false;
+            break;
+        case PAINT_PUSH_CLIP: case PAINT_POP_CLIP:
+        case PAINT_BEGIN_SEMANTIC_GROUP: case PAINT_END_SEMANTIC_GROUP: break;
+        default: return false;
+        }
+    }
+    PdfRenderContext local = {};
+    local.pdf_doc = source->pdf_doc; local.current_page = source->current_page;
+    local.ui_context = source->ui_context; local.page_width = source->page_width;
+    local.page_height = source->page_height;
+    pdf_lower_paint_list(&local, paint);
+    source->paint_state.emitted_count += local.paint_state.emitted_count;
+    return true;
+}
+
 static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,
                                              const PaintSvgSubscene* subscene,
                                              const RdtMatrix* transform) {
@@ -834,85 +861,38 @@ static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,
         return false;
     }
 
-    int surface_w = (int)ceilf(subscene->viewport_width); // INT_CAST_OK: PDF SVG subscene fallback surface width is integer pixels.
-    int surface_h = (int)ceilf(subscene->viewport_height); // INT_CAST_OK: PDF SVG subscene fallback surface height is integer pixels.
-    if (surface_w <= 0 || surface_h <= 0) return false;
-
-    ImageSurface* surface = image_surface_create(surface_w, surface_h);
-    if (!surface) {
-        log_error("[PDF_PAINT_IR] failed to allocate SVG subscene surface %dx%d",
-                  surface_w, surface_h);
-        return false;
-    }
-
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pixel_count = surface_w * surface_h;
-    for (int i = 0; i < pixel_count; i++) {
-        pixels[i] = 0xffffffffu;
-    }
-
-    RdtVector vec = {};
-    rdt_vector_init(&vec, pixels, surface_w, surface_h, surface_w);
-
-    Color* current_color = subscene->has_color ? (Color*)&subscene->color : nullptr;
-    Color* fill_color = subscene->has_fill ? (Color*)&subscene->fill : nullptr;
-    Color* stroke_color = subscene->has_stroke ? (Color*)&subscene->stroke : nullptr;
-    render_svg_to_vec_via_display_list(&vec,
-                                       (Element*)subscene->svg_root,
-                                       subscene->viewport_width,
-                                       subscene->viewport_height,
-                                       (Pool*)subscene->pool,
-                                       subscene->raster_scale,
-                                       (FontContext*)subscene->font_context,
-                                       nullptr,
-                                       current_color,
-                                       fill_color,
-                                       subscene->source_path,
-                                       subscene->opacity,
-                                       subscene->fill_none,
-                                       stroke_color,
-                                       subscene->stroke_none,
-                                       subscene->stroke_width,
-                                       (Element*)subscene->id_scope);
-    rdt_vector_flush_batch(&vec);
-
-    float dst_x = subscene->content_clip.left;
-    float dst_y = subscene->content_clip.top;
-    float dst_w = subscene->content_clip.right - subscene->content_clip.left;
-    float dst_h = subscene->content_clip.bottom - subscene->content_clip.top;
-    if (dst_w <= 0.0f) dst_w = subscene->viewport_width;
-    if (dst_h <= 0.0f) dst_h = subscene->viewport_height;
-
-    log_info("[PDF_PAINT_IR] raster fallback SVG subscene %.1fx%.1f to %dx%d",
-             dst_w, dst_h, surface_w, surface_h);
-    bool ok = pdf_draw_abgr_image(ctx, pixels, surface_w, surface_h, surface_w,
-                                  dst_x, dst_y, dst_w, dst_h,
-                                  255, transform);
-
-    rdt_vector_destroy(&vec);
+    Bound bounds = {};
+    ImageSurface* surface = render_svg_subscene_rasterize(subscene, &bounds);
+    if (!surface) return false;
+    RdtMatrix placement = transform ? rdt_matrix_multiply(transform, &subscene->transform) : subscene->transform;
+    bool ok = pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)surface->pixels,
+        surface->width, surface->height, surface->pitch / 4,
+        bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
+        255, &placement);
     image_surface_destroy(surface);
     return ok;
 }
 
-static void pdf_lower_paint_list(PdfRenderContext* ctx) {
+static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
     if (!ctx || ctx->effect_fallback.active) return;
+    PaintList& paint = commands ? *commands : ctx->paint_list;
     render_svg_inline_register_paint_ir_lowerers();
 
     PdfPaintLoweringState* state = &ctx->paint_state;
     bool streaming_transform =
-        paint_list_has_op_flags(&ctx->paint_list, PAINT_OP_FLAG_TRANSFORM_STACK) ||
+        paint_list_has_op_flags(&paint, PAINT_OP_FLAG_TRANSFORM_STACK) ||
         state->active_transform_depth > 0 ||
         state->skipped_transform_depth > 0;
     bool streaming_effect =
-        paint_list_has_op_flags(&ctx->paint_list, PAINT_OP_FLAG_EFFECT_STACK) ||
+        paint_list_has_op_flags(&paint, PAINT_OP_FLAG_EFFECT_STACK) ||
         state->active_effect_depth > 0 ||
         state->passthrough_effect_depth > 0;
     if (!streaming_transform && !streaming_effect &&
-        !paint_ir_validate_or_log(&ctx->paint_list, "pdf_lower_paint_list")) {
-        paint_list_clear(&ctx->paint_list);
+        !paint_ir_validate_or_log(&paint, "pdf_lower_paint_list")) {
+        paint_list_clear(&paint);
         return;
     }
-    pdf_record_page_backdrop_paint_list(ctx, &ctx->paint_list);
+    pdf_record_page_backdrop_paint_list(ctx, &paint);
     const RenderExportTargetCaps* caps =
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
     int active_clip_depth = 0;
@@ -1014,8 +994,8 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         return false;
     };
 
-    for (int i = 0; i < ctx->paint_list.item_count(); i++) {
-        PaintCmd* cmd = &ctx->paint_list.data()[i];
+    for (int i = 0; i < paint.item_count(); i++) {
+        PaintCmd* cmd = &paint.data()[i];
         state->command_count++;
         if (handle_transform_stack(cmd)) continue;
         if (handle_effect_stack(cmd)) continue;
@@ -1183,8 +1163,14 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             state->emitted_count++;
             break;
         }
+        case PAINT_BEGIN_SEMANTIC_GROUP:
+        case PAINT_END_SEMANTIC_GROUP:
+            break; // semantic wrappers have no paint or PDF graphics-state effect
         case PAINT_SVG_SUBSCENE: {
             PaintSvgSubscene* p = &cmd->svg_subscene;
+            PaintSvgSubscene vector_scene = *p;
+            if (stack_transform) vector_scene.transform = rdt_matrix_multiply(stack_transform, &p->transform);
+            if (render_svg_subscene_with_paint(&vector_scene, pdf_export_paint_consume, ctx)) break;
             pdf_paint_record_fallback(state,
                                       pdf_raster_fallback_svg_subscene(ctx, p, stack_transform),
                                       "[PDF_PAINT_IR] failed SVG subscene raster fallback");
@@ -1194,7 +1180,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             break;
         }
     }
-    paint_list_clear(&ctx->paint_list);
+    paint_list_clear(&paint);
 }
 
 static void pdf_paint_fill_rect(PdfRenderContext* ctx,
@@ -1221,7 +1207,7 @@ static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color colo
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_FILL_PATH);
     if (cmd) {
-        cmd->fill_path.owns_path = true;
+        cmd->fill_path.owned_path = lam::own(cmd->fill_path.path);
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1247,7 +1233,7 @@ static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_STROKE_PATH);
     if (cmd) {
-        cmd->stroke_path.owns_path = true;
+        cmd->stroke_path.owned_path = lam::own(cmd->stroke_path.path);
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1269,8 +1255,8 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
                                                    PAINT_FILL_LINEAR_GRADIENT);
     if (cmd) {
-        cmd->fill_linear_gradient.owns_path = gradient->path != nullptr;
-        cmd->fill_linear_gradient.owns_stops = stops != nullptr;
+        cmd->fill_linear_gradient.owned_path = lam::own(cmd->fill_linear_gradient.path);
+        if (stops) cmd->fill_linear_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_linear_gradient.stops);
         owns_payload = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1291,8 +1277,8 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
                                                    PAINT_FILL_RADIAL_GRADIENT);
     if (cmd) {
-        cmd->fill_radial_gradient.owns_path = gradient->path != nullptr;
-        cmd->fill_radial_gradient.owns_stops = stops != nullptr;
+        cmd->fill_radial_gradient.owned_path = lam::own(cmd->fill_radial_gradient.path);
+        if (stops) cmd->fill_radial_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_radial_gradient.stops);
         owns_payload = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1329,13 +1315,10 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     NEXT_RECT:
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
 
-    char* text_content = render_text_create_export_segment(
-        str, text_rect, text_transform, false);
+    lam::Temp<char> text_content(render_text_create_export_segment(
+        str, text_rect, text_transform, false));
 
-    if (strlen(text_content) == 0) {
-        mem_free(text_content);
-        return;
-    }
+    if (strlen(text_content.get()) == 0) return;
 
     // Set font if available
     float font_size = 16.0f;
@@ -1352,25 +1335,27 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     // Calculate natural width using glyph metrics (excluding trailing spaces)
     float natural_width = 0.0f;
     int space_count = 0;
-    size_t content_len = strlen(text_content);
+    size_t content_len = strlen(text_content.get());
     // Find end of non-whitespace content
-    while (content_len > 0 && text_content[content_len - 1] == ' ') {
+    while (content_len > 0 && text_content.get()[content_len - 1] == ' ') {
         content_len--;
     }
 
     if (font_box_handle(&ctx->font)) {
         for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
-            if (text_content[i] == ' ') {
+            if (text_content.get()[i] == ' ') {
                 natural_width += space_width;
                 space_count++;
             } else {
-                natural_width += font_measure_char(font_box_handle(&ctx->font), (uint32_t)text_content[i]);
+                natural_width += font_measure_char(font_box_handle(&ctx->font), (uint32_t)text_content.get()[i]);
             }
         }
     }
 
     // If text_rect width is larger than natural width and there are spaces, apply justify
-    if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width + 0.5f) {
+    if (text_justify_computed_value(text->parent) != CSS_VALUE_NONE &&
+        space_count > 0 && natural_width > 0 &&
+        text_rect->width > natural_width + 0.5f) {
         float extra_space = text_rect->width - natural_width;
         adjusted_space_width = space_width + (extra_space / space_count);
     }
@@ -1378,11 +1363,12 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     float baseline_offset = font_size * 0.8f;
     float baseline_y = y + baseline_offset;
     PaintGlyphRun run = {};
-    run.font = &ctx->font;
+    run.font = lam::up(&ctx->font);
     run.color = ctx->color;
-    run.text = text_content;
-    run.text_len = (int)strlen(text_content); // INT_CAST_OK: text run byte length is bounded by TextRect input.
-    run.owns_text = ctx && ctx->effect_fallback.active;
+    run.text = text_content.get();
+    run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: text run byte length is bounded by TextRect input.
+    // effect fallback retains commands until rasterization, so the paint list keeps the text
+    if (ctx && ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
     run.font_family = ctx->font.style ? ctx->font.style->family : nullptr;
     run.font_size = font_size;
     run.x = base_x;
@@ -1391,7 +1377,6 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
     pdf_lower_paint_list(ctx);
 
-    if (!run.owns_text) mem_free(text_content);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -1524,7 +1509,12 @@ static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
-    pdf_paint_draw_image(ctx, img, &content_rect);
+    if (render_media_paint_svg_picture(pdf_active_paint_list(ctx), ctx->ui_context, block, &content_rect)) {
+        pdf_lower_paint_list(ctx);
+    } else {
+        Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
+        pdf_paint_draw_image(ctx, img, &image_rect);
+    }
 }
 
 static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y,
@@ -1556,15 +1546,15 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                           content_rect.x + content_rect.width,
                           content_rect.y + content_rect.height};
     PaintSvgSubscene subscene = {};
-    RdtMatrix identity = rdt_matrix_identity();
+    RdtMatrix placement = rdt_matrix_translate(content_rect.x, content_rect.y);
     render_svg_build_subscene(&subscene,
                               dom_element_to_element(dom_elem),
                               content_rect.width,
                               content_rect.height,
                               pool,
-                              1.0f,
+                              ui_context_raster_scale(ctx->ui_context),
                               font_ctx,
-                              &identity,
+                              &placement,
                               &content_clip,
                               &initial_paint.current_color,
                               initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
@@ -1573,8 +1563,8 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.fill_none,
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
-                              initial_paint.stroke_width);
-    subscene.id_scope = render_svg_reference_scope(dom_elem);
+                              initial_paint.stroke_width, ctx->ui_context);
+    subscene.id_scope = lam::up(render_svg_reference_scope(dom_elem));
     paint_svg_subscene(pdf_active_paint_list(ctx), &subscene);
     pdf_lower_paint_list(ctx);
     (void)font;
@@ -1763,8 +1753,9 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
 }
 
 // Main PDF rendering function
-static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width, float height) {
-    if (!root_view || !uicon) {
+static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width, float height,
+                                       float output_scale) {
+    if (!root_view || !uicon || !isfinite(output_scale) || output_scale <= 0) {
         return NULL;
     }
 
@@ -1798,6 +1789,12 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.page_height = height;
     HPDF_Page_SetWidth(ctx.current_page, width);
     HPDF_Page_SetHeight(ctx.current_page, height);
+    // the page and capture density scale physically; the tree and top-left coordinate conversion stay logical.
+    HPDF_Page_Concat(ctx.current_page, output_scale, 0, 0, output_scale, 0, 0);
+    width /= output_scale;
+    height /= output_scale;
+    ctx.page_width = width;
+    ctx.page_height = height;
 
     // Initialize context
     ctx.ui_context = uicon;
@@ -1806,7 +1803,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.current_y = 0;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.pdf.backdrop.arena");
+    ctx.page_backdrop_arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.pdf.backdrop.arena");
     if (ctx.page_backdrop_arena) {
         dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
         ctx.page_backdrop_ready = true;
@@ -1825,13 +1822,17 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.block.y = 0;
 
     // Initialize font from default
-    ctx.font.style = &uicon->default_font;
+    ctx.font.style = lam::up(&uicon->default_font);
 
     // Set default font
     ctx.current_font = HPDF_GetFont(ctx.pdf_doc, "Helvetica", NULL);
     if (ctx.current_font) {
         HPDF_Page_SetFontAndSize(ctx.current_page, ctx.current_font, 16.0f);
     }
+
+    Color background = render_document_output_background(root_view);
+    paint_fill_rect(&ctx.paint_list, 0, 0, width, height, background);
+    pdf_lower_paint_list(&ctx);
 
     // Render the root view via shared tree walker
     RenderBackend backend = pdf_make_backend(&ctx);
@@ -1840,7 +1841,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     walk_state.y = 0;
     walk_state.font = ctx.font;
     walk_state.color = ctx.color;
-    walk_state.ui_context = uicon;
+    walk_state.ui_context = lam::up(uicon);
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
         render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
@@ -1849,9 +1850,9 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     }
 
     RenderPathTrace trace = {};
-    trace.target = "pdf";
-    trace.replay_mode = "paint_ir_pdf";
-    trace.backend_name = "pdf_export";
+    trace.target = lam::up("pdf");
+    trace.replay_mode = lam::up("paint_ir_pdf");
+    trace.backend_name = lam::up("pdf_export");
     trace.display_list_recorded = false;
     trace.paint_ir_enabled = true;
     trace.surface_width = (int)width; // INT_CAST_OK: PDF trace width is logged as whole document units.
@@ -1901,7 +1902,7 @@ static int render_export_session_to_pdf(RenderExportSession* session, const char
         float pdf_width = session->content_width * session->output_scale;
         float pdf_height = session->content_height * session->output_scale;
         HPDF_Doc pdf_doc = render_view_tree_to_pdf(ui_context, doc->view_tree->root,
-                                                   pdf_width, pdf_height);
+                                                   pdf_width, pdf_height, session->output_scale);
         if (pdf_doc) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
                 log_info("Successfully rendered HTML to PDF: %s", pdf_file);
@@ -1923,7 +1924,8 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
         int viewport_height, float scale) {
     RenderExportSession session;
     if (!render_export_session_begin(
-            &session, html_file, viewport_width, viewport_height, 800, 1200, scale)) {
+            &session, html_file, viewport_width, viewport_height, 800, 1200, scale,
+            true)) {
         return 1;
     }
     int result = render_export_session_to_pdf(&session, pdf_file);

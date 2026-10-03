@@ -481,7 +481,7 @@ void store_in_measurement_cache(DomNode* node, float width, float height,
     }
 
     int cache_count = tree->measurement_cache_count;
-    tree->measurement_cache[cache_count].node = node;
+    tree->measurement_cache[cache_count].node = lam::up(node);
     tree->measurement_cache[cache_count].measured_width = width;
     tree->measurement_cache[cache_count].measured_height = height;
     tree->measurement_cache[cache_count].content_width = content_width;
@@ -514,8 +514,7 @@ void clear_measurement_cache(ViewTree* tree) {
 
 void destroy_measurement_cache(ViewTree* tree) {
     if (!tree) return;
-    mem_free(tree->measurement_cache);
-    tree->measurement_cache = nullptr;
+    lam::free_owned(tree->measurement_cache);
     tree->measurement_cache_count = 0;
     tree->measurement_cache_capacity = 0;
     tree->measurement_cache_generation = 0;

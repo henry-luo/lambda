@@ -20,7 +20,7 @@ static inline PaintRecordTarget rc_record_target(RenderContext* rdcon) {
     PaintRecordTarget target = {
         rdcon ? rdcon->paint_list : nullptr,
         rdcon ? rdcon->dl : nullptr,
-        "PAINTER"
+        lam::up("PAINTER")
     };
     return target;
 }
@@ -108,7 +108,7 @@ void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
     paint_record_draw_picture(&target, "rc_draw_picture", picture, opacity, transform);
 }
 
-void rc_video_placeholder(RenderContext* rdcon, void* video,
+void rc_video_placeholder(RenderContext* rdcon, struct RdtVideo* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation) {
@@ -158,7 +158,7 @@ void rc_apply_blend_mode(RenderContext* rdcon, int x0, int y0, int w, int h,
 }
 
 void rc_apply_filter(RenderContext* rdcon, float x, float y, float w, float h,
-                     void* filter, const Bound* clip) {
+                     FilterProp* filter, const Bound* clip) {
     PaintRecordTarget target = rc_record_target(rdcon);
     paint_record_apply_filter(&target, "rc_apply_filter", x, y, w, h, filter, clip);
 }

@@ -8,6 +8,7 @@
 #include "mempool.h"
 #include "arena.h"
 #include "math_checked.hpp"
+#include "mem_kind.hpp"
 
 namespace lam {
 
@@ -178,6 +179,34 @@ Temp<T> temp_array_zero(size_t count, MemCategory cat) {
     static_assert(__is_trivial(T), "temp_array_zero holds trivial elements only");
     if (count == 0) return Temp<T>();
     return Temp<T>(static_cast<T*>(mem_calloc(count, sizeof(T), cat)));
+}
+
+// Owner teardown: free the memtracked storage an owning field holds and clear
+// the field. Only an Own/OwnArr field can be released this way, so the kind
+// decides which holder frees.
+template<class T>
+void free_owned(Own<T>& field) {
+    mem_free((void*)field.get());
+    field = nullptr;
+}
+
+template<class T>
+void free_owned(OwnArr<T>& field) {
+    mem_free((void*)field.get());
+    field = nullptr;
+}
+
+// The same for an owning field whose storage comes from a node's pool.
+template<class T>
+void free_owned(Pool* pool, Own<T>& field) {
+    if (field) pool_free(pool, (void*)field.get());
+    field = nullptr;
+}
+
+template<class T>
+void free_owned(Pool* pool, OwnArr<T>& field) {
+    if (field) pool_free(pool, (void*)field.get());
+    field = nullptr;
 }
 
 template<class T>

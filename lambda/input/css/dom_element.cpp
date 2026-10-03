@@ -1,10 +1,12 @@
 // #define _POSIX_C_SOURCE 200809L
 #include "dom_element.hpp"
+
 #include "dom_lifecycle.hpp"
 #include "style_epoch.hpp"
 #include "css_formatter.hpp"
 #include "css_style_node.hpp"
 #include "css_parser.hpp"
+#include "selector_matcher.hpp"
 #include "css_counter_hook.h"
 #include "../../../lib/hashmap.h"
 #include "../../../lib/mem_factory.h"
@@ -15,6 +17,7 @@
 #include "../../../lib/log.h"
 #include "../../../lib/strview.h"
 #include "../../../lib/str.h"
+#include "../../../lib/utf.h"
 #include "../../../lib/arena.h"
 #include "../../../lib/memtrack.h"
 #include "../../../lib/mem_grow.hpp"
@@ -23,6 +26,160 @@
 #include "../../core/mark_reader.hpp"  // For ElementReader
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
+
+const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
+    if (!element) return nullptr;
+    if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
+    if (prefix && strcmp(prefix, "xmlns") == 0) return "http://www.w3.org/2000/xmlns/";
+    char declaration[128] = "xmlns";
+    if (prefix && *prefix) {
+        size_t length = strlen(prefix);
+        if (length + 7 > sizeof(declaration)) return nullptr;
+        declaration[5] = ':';
+        memcpy(declaration + 6, prefix, length);
+        declaration[6 + length] = '\0';
+    }
+    // XML namespace declarations inherit independently of HTML integration points.
+    for (DomNode* node = element; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        const char* uri = node->as_element()->get_attribute(declaration);
+        if (uri) return *uri ? uri : nullptr;
+    }
+    return nullptr;
+}
+
+const char* dom_element_namespace_uri(DomElement* element) {
+    if (!element || !element->tag_name) return "";
+    const char* uri = element->get_attribute("__lambda_ns_uri");
+    if (uri) return uri;
+    const char* colon = strchr(element->tag_name, ':');
+    char prefix[128] = {};
+    if (colon) {
+        size_t length = (size_t)(colon - element->tag_name);
+        if (!length || length >= sizeof(prefix)) return "";
+        memcpy(prefix, element->tag_name, length);
+    }
+    uri = dom_element_lookup_namespace_uri(element, prefix);
+    if (uri) return uri;
+    if (colon) return "";
+    for (DomNode* node = element; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        DomElement* ancestor = node->as_element();
+        if (!ancestor->tag_name) continue;
+        // SVG HTML integration points stop inherited SVG namespace membership.
+        if (node != element &&
+            (str_icmp_cstr(ancestor->tag_name, "foreignObject") == 0 ||
+             str_icmp_cstr(ancestor->tag_name, "desc") == 0 ||
+             str_icmp_cstr(ancestor->tag_name, "title") == 0)) break;
+        if (str_icmp_cstr(ancestor->tag_name, "svg") == 0)
+            return "http://www.w3.org/2000/svg";
+        if (str_icmp_cstr(ancestor->tag_name, "math") == 0)
+            return "http://www.w3.org/1998/Math/MathML";
+    }
+    return "http://www.w3.org/1999/xhtml";
+}
+
+DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element) {
+    return element && element->ext ? element->ext->namespaced_attributes : nullptr;
+}
+
+bool dom_element_record_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* qualified_name, const char* value) {
+    if (!element || !element->doc || !namespace_uri ||
+        !qualified_name || !*qualified_name || !value) return false;
+    const char* colon = strrchr(qualified_name, ':');
+    const char* local = *namespace_uri && colon
+        ? colon + 1 : qualified_name;
+    DomElementExt* ext = element->ensure_ext();
+    if (!ext) return false;
+    Pool* pool = element->doc->document_pool;
+    for (DomNamespacedAttribute* attr = ext->namespaced_attributes;
+         attr; attr = attr->next) {
+        if (strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+            strcmp(attr->local_name, local) == 0) {
+            attr->qualified_name = lam::own(pool_strdup(pool, qualified_name));
+            attr->value = lam::own(pool_strdup(pool, value));
+            attr->active = attr->qualified_name && attr->value;
+            return attr->active;
+        }
+    }
+    DomNamespacedAttribute* attr = (DomNamespacedAttribute*)pool_calloc(
+        pool, sizeof(DomNamespacedAttribute));
+    if (!attr) return false;
+    attr->namespace_uri = lam::own(pool_strdup(pool, namespace_uri));
+    attr->local_name = lam::own(pool_strdup(pool, local));
+    attr->qualified_name = lam::own(pool_strdup(pool, qualified_name));
+    attr->value = lam::own(pool_strdup(pool, value));
+    if (!attr->namespace_uri || !attr->local_name ||
+        !attr->qualified_name || !attr->value) return false;
+    attr->active = true;
+    attr->next = ext->namespaced_attributes;
+    ext->namespaced_attributes = lam::own(attr);
+    return true;
+}
+
+void dom_element_remove_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* local_name) {
+    if (!namespace_uri || !local_name) return;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
+         attr; attr = attr->next) {
+        if (attr->active && strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+            strcmp(attr->local_name, local_name) == 0) {
+            attr->active = false;
+            return;
+        }
+    }
+}
+
+const char* dom_element_get_namespaced_attribute(DomElement* element,
+    const char* namespace_uri, const char* local_name) {
+    if (!namespace_uri || !local_name) return nullptr;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
+         attr; attr = attr->next) {
+        if (attr->active && strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+            strcmp(attr->local_name, local_name) == 0) return attr->value;
+    }
+    return nullptr;
+}
+
+const char* dom_element_attribute_namespace_uri(DomElement* element,
+    const char* qualified_name, const char** local_name) {
+    if (!element || !qualified_name || !local_name) return nullptr;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(element);
+         attr; attr = attr->next) {
+        if (attr->active && strcmp(attr->qualified_name, qualified_name) == 0) {
+            *local_name = attr->local_name;
+            return attr->namespace_uri;
+        }
+    }
+    const char* colon = strchr(qualified_name, ':');
+    if (!colon) {
+        *local_name = qualified_name;
+        return strcmp(qualified_name, "xmlns") == 0
+            ? "http://www.w3.org/2000/xmlns/" : "";
+    }
+    *local_name = colon + 1;
+    size_t prefix_len = (size_t)(colon - qualified_name);
+    if (prefix_len == 3 && strncmp(qualified_name, "xml", 3) == 0)
+        return "http://www.w3.org/XML/1998/namespace";
+    if (prefix_len == 5 && strncmp(qualified_name, "xmlns", 5) == 0)
+        return "http://www.w3.org/2000/xmlns/";
+    if (prefix_len >= 120) return nullptr;
+    char declaration[128] = "xmlns:";
+    memcpy(declaration + 6, qualified_name, prefix_len);
+    declaration[6 + prefix_len] = '\0';
+    for (DomElement* current = element; current;
+         current = current->parent_element()) {
+        const char* uri = current->get_attribute(declaration);
+        if (uri) return uri;
+    }
+    // HTML parsing maps XLink names on SVG even without an xmlns attribute.
+    if (prefix_len == 5 && strncmp(qualified_name, "xlink", 5) == 0 &&
+        strcmp(dom_element_namespace_uri(element),
+               "http://www.w3.org/2000/svg") == 0)
+        return "http://www.w3.org/1999/xlink";
+    return nullptr;
+}
 
 // DOM bridge diagnostics are emitted per node during document construction.
 #define log_debug(...) log_trace(__VA_ARGS__)
@@ -50,6 +207,53 @@ bool dom_subtree_contains_node(DomNode* root, DomNode* target) {
         if (dom_subtree_contains_node(child, target)) return true;
     }
     return false;
+}
+
+int dom_find_strong_direction(DomNode* node, bool skip_explicit_dir,
+                              bool first) {
+    if (!node) return 0;
+    if (node->is_text()) {
+        DomText* text = node->as_text();
+        if (!text->text || text->length == 0) return 0;
+        int last_strong = 0;
+        const char* cursor = text->text;
+        const char* end = cursor + text->length;
+        while (cursor < end) {
+            uint32_t codepoint = 0;
+            int consumed = utf8_decode(cursor, (size_t)(end - cursor), &codepoint);
+            if (consumed <= 0) {
+                cursor++;
+                continue;
+            }
+            cursor += consumed;
+            int strong_class = utf_bidi_strong_class(codepoint);
+            if (strong_class != 0) {
+                if (first) return strong_class;
+                last_strong = strong_class;
+            }
+        }
+        return last_strong;
+    }
+    if (!node->is_element()) return 0;
+    DomElement* element = node->as_element();
+    if (element->tag_id == MARKUP_NAME_SCRIPT ||
+        element->tag_id == MARKUP_NAME_STYLE ||
+        (element->tag_name && strcmp(element->tag_name, "::marker") == 0) ||
+        element->tag_id == MARKUP_NAME_TEXTAREA ||
+        (skip_explicit_dir && element->get_attribute("dir"))) {
+        return 0;
+    }
+    int last_strong = 0;
+    for (DomNode* child = element->first_child; child;
+         child = child->next_sibling) {
+        int strong_class = dom_find_strong_direction(
+            child, skip_explicit_dir, first);
+        if (strong_class != 0) {
+            if (first) return strong_class;
+            last_strong = strong_class;
+        }
+    }
+    return last_strong;
 }
 
 static void dom_option_collect_normalized_text(DomNode* node, StrBuf* out,
@@ -192,7 +396,7 @@ bool DomDocument::init(Input* source_input) {
     services.mem_ctx = dctx;
 
     // Keep selectively released document records separate from the node region.
-    document_pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document.pool");
+    document_pool = lam::own(mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document.pool"));
     if (!document_pool) {
         log_error("dom_document_create: failed to create pool");
         return false;
@@ -211,7 +415,7 @@ bool DomDocument::init(Input* source_input) {
     }
 
     // Create arena for all DOM node allocations
-    node_arena = mem_arena_create(dctx, MEM_ROLE_NODE, "dom.node.arena");
+    node_arena = lam::own(mem_arena_create(dctx, MEM_ROLE_NODE, "dom.node.arena"));
     if (!node_arena) {
         log_error("dom_document_create: failed to create arena");
         // Factory-created DOM roots must unregister their memory-context nodes on teardown.
@@ -247,7 +451,7 @@ void dom_document_borrow_input_resources(DomDocument* document) {
 bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool) {
     if (!document || !pool) return false;
     if (!document->owned_loader_pool) {
-        document->owned_loader_pool = pool;
+        document->owned_loader_pool = lam::own(pool);
         return true;
     }
     if (document->owned_loader_pool != pool) {
@@ -275,6 +479,7 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement) {
 
 void DomDocument::destroy() {
     dom_retire_begin_destroy(this);
+    mem_free(services.preferred_languages); services.preferred_languages = nullptr;
     float ext_rate = services.element_count
         ? 100.0f * (float)services.ext_allocations / (float)services.element_count
         : 0.0f;
@@ -361,7 +566,7 @@ bool dom_document_add_resource(DomDocument* document, void* data,
     resource->data = data;
     resource->destroy = destroy;
     resource->next = document->resources;
-    document->resources = resource;
+    document->resources = lam::own(resource);
     return true;
 }
 
@@ -374,7 +579,7 @@ bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
         return false;
     }
     dom_document_clear_embedding(embedded);
-    embedded->embedding_document = parent;
+    embedded->embedding_document = lam::up(parent);
     embedded->embedding_element_ref = ref;
     parent->embedded_evaluator_pending = true;
     return true;
@@ -491,7 +696,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
 
     static_cast<DomNode*>(element)->id = retained_id ? retained_id : dom_document_alloc_node_id(doc);
     element->node_type = DOM_NODE_ELEMENT;
-    element->doc = doc;
+    element->doc = lam::up(doc);
 
     // A null backing marks layout-only nodes; their embedded storage must never
     // be mistaken for a member of the Lambda tree.
@@ -522,7 +727,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
     element->tag_id = DomNode::tag_name_to_id(tag_name);
 
     // Create style trees (still use pool for AVL nodes)
-    element->specified_style = style_tree_create(doc->document_pool);
+    element->specified_style = lam::shared(style_tree_create(doc->document_pool));
     if (!element->specified_style) {
         return nullptr;
     }
@@ -596,20 +801,20 @@ void dom_element_clear(DomElement* element) {
 
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     } else if (element->specified_style_borrowed()) {
         // A generated pseudo box may discard its view of the source tree, but
         // it must never clear declarations owned by the originating element.
         style_tree_release_borrow(element->specified_style);
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     } else if (element->specified_style) {
         // Recascade runs inside the document pool's active lifetime; returning
         // its live style allocations here corrupts subsequent CSS allocations.
         style_tree_clear(element->specified_style);
     } else {
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     }
     // Reset version tracking
@@ -624,7 +829,7 @@ static bool dom_element_clear_custom_properties(DomElement* element,
                                                 bool remove_inline) {
     if (!element || !element->doc) return false;
     bool removed = false;
-    CssCustomProp** slot = &element->css_variables;
+    lam::Own<CssCustomProp>* slot = &element->css_variables;
     while (*slot) {
         CssCustomProp* prop = *slot;
         bool is_inline = prop->declaration &&
@@ -660,7 +865,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         // Canonical trees never contain inline declarations, so detaching is
         // sufficient and avoids materializing declarations that are discarded.
         style_epoch_unbind_element(element);
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
         changed = true;
     } else if (element->specified_style_borrowed()) {
@@ -680,12 +885,12 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
             StyleTree* replacement = style_tree_create(element->doc->document_pool);
             if (!replacement) return;
             style_tree_destroy_owned(element->specified_style);
-            element->specified_style = replacement;
+            element->specified_style = lam::shared(replacement);
             element->mark_specified_style_owned();
             changed = true;
         }
     } else {
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     }
     if (changed) {
@@ -713,7 +918,7 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style) {
     }
     // Generated pseudo elements are views over their source declarations; the
     // source element remains the sole owner across view retirement and rebuild.
-    element->specified_style = style;
+    element->specified_style = lam::shared(style);
     if (style) {
         style_tree_acquire_borrow(style);
         element->mark_specified_style_borrowed();
@@ -780,6 +985,7 @@ void dom_element_release_retired_storage(DomElement* element) {
     dom_element_clear_synthetic_attributes(element);
     dom_element_clear_custom_properties(element, true);
     dom_element_clear_custom_properties(element, false);
+    style_epoch_selection_clear_element(element);
     if (element->ext) {
         for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
             if (element->ext->pseudo_styles[kind]) {
@@ -852,7 +1058,7 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
         if (!next_value) return false;
         pool_free(element->doc->document_pool,
                   (void*)data->synthetic_attributes[index].value);
-        data->synthetic_attributes[index].value = next_value;
+        data->synthetic_attributes[index].value = lam::own((const char*)next_value);
         return true;
     }
     if (data->synthetic_attribute_count == data->synthetic_attribute_capacity) {
@@ -869,7 +1075,7 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
         return false;
     }
     data->synthetic_attributes[data->synthetic_attribute_count++] = {
-        name_copy, value_copy
+        lam::own((const char*)name_copy), lam::own((const char*)value_copy)
     };
     return true;
 }
@@ -965,9 +1171,13 @@ static const char* dom_element_attr_key(DomElement* element, const char* name,
     return stored_exact ? name : lower;
 }
 
+static bool dom_attribute_name_present(const char* name) {
+    return name && name[0] != '\0';
+}
+
 bool DomElement::set_attribute(const char* name, const char* value) {
     DomElement* element = this;
-    if (!name || !value) {
+    if (!dom_attribute_name_present(name) || !value) {
         log_debug("dom_element_set_attribute: invalid parameters");
         return false;
     }
@@ -1027,9 +1237,15 @@ bool DomElement::set_attribute(NameId name_id, const char* value) {
     return name.str ? set_attribute(name.str, value) : false;
 }
 
+const char* DomElement::local_name() const {
+    if (!tag_name) return "";
+    const char* prefix = strchr(tag_name, ':');
+    return prefix ? prefix + 1 : tag_name;
+}
+
 const char* DomElement::get_attribute(const char* name) {
     DomElement* element = this;
-    if (!name || name[0] == '\0') {
+    if (!dom_attribute_name_present(name)) {
         return nullptr;
     }
 
@@ -1064,7 +1280,7 @@ const char* DomElement::get_attribute(NameId name_id) {
 
 bool DomElement::remove_attribute(const char* name) {
     DomElement* element = this;
-    if (!name) {
+    if (!dom_attribute_name_present(name)) {
         return false;
     }
 
@@ -1109,7 +1325,7 @@ bool DomElement::remove_attribute(NameId name_id) {
 
 bool DomElement::has_attribute(const char* name) {
     DomElement* element = this;
-    if (!name) {
+    if (!dom_attribute_name_present(name)) {
         return false;
     }
 
@@ -1371,6 +1587,11 @@ const char* dom_inline_style_declaration_end(const char* text) {
     return p;
 }
 
+static bool dom_element_uses_quirks_css(const DomElement* element) {
+    return element && element->doc &&
+        is_quirks_mode((HtmlVersion)element->doc->html_version);
+}
+
 int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
     if (!element || !style_text || !element->doc) {
         return 0;
@@ -1454,7 +1675,9 @@ int dom_element_apply_inline_style(DomElement* element, const char* style_text) 
 
             if (tokens && token_count > 0) {
                 int pos = 0;
-                CssDeclaration* decl = css_parse_declaration_from_tokens(tokens, &pos, token_count, element->doc->document_pool);
+                CssDeclaration* decl = css_parse_declaration_from_tokens_mode(tokens,
+                    &pos, token_count, element->doc->document_pool,
+                    dom_element_uses_quirks_css(element));
 
                 if (decl) {
                     // Set origin to author (inline styles are author origin)
@@ -1557,13 +1780,13 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
             return false;
         }
 
-        prop->name = declaration->property_name;
-        prop->value = declaration->value;
-        prop->value_text = declaration->value_text;
+        prop->name = lam::up(declaration->property_name);
+        prop->value = lam::up(declaration->value);
+        prop->value_text = lam::up(declaration->value_text);
         prop->value_text_len = declaration->value_text_len;
-        prop->declaration = declaration;
+        prop->declaration = lam::up(declaration);
         prop->next = element->css_variables;
-        element->css_variables = prop;
+        element->css_variables = lam::own(prop);
 
         // Increment style version to invalidate caches
         element->style_version++;
@@ -1573,7 +1796,9 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
     }
 
     // Validate the property value before applying
-    if (!css_property_validate_value(declaration->property_code, declaration->value)) {
+    if (!css_property_validate_value_mode(declaration->property_code,
+                                          declaration->value,
+                                          dom_element_uses_quirks_css(element))) {
         return false;
     }
 
@@ -1602,7 +1827,9 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
     int applied_count = 0;
 
     // Apply each declaration from the rule
-    if (rule->type == CSS_RULE_STYLE && rule->data.style_rule.declarations) {
+    if ((rule->type == CSS_RULE_STYLE ||
+         rule->type == CSS_RULE_NESTED_DECLARATIONS) &&
+        rule->data.style_rule.declarations) {
         for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
             CssDeclaration* decl = rule->data.style_rule.declarations[i];
             if (decl) {
@@ -1643,11 +1870,14 @@ bool dom_element_remove_property(DomElement* element, CssPropertyCode property_c
 }
 
 bool dom_element_clear_pseudo_styles(DomElement* element) {
-    if (!element || !element->ext) return false;
-
-    bool cleared = false;
+    if (!element) return false;
+    CssSelectionStyle* selection = style_epoch_selection_style(element, false);
+    bool cleared = selection &&
+        (selection->color.source || selection->background_color.source);
+    style_epoch_selection_clear_element(element);
+    if (!element->ext) return cleared;
     for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
-        StyleTree** slot = &element->ext->pseudo_styles[kind];
+        lam::Own<StyleTree>* slot = &element->ext->pseudo_styles[kind];
         StyleTree* style = *slot;
         if (!style) continue;
         StyleTree* replacement = style_tree_create(element->doc->document_pool);
@@ -1658,7 +1888,7 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
             cleared = true;
             continue;
         }
-        *slot = replacement;
+        *slot = lam::own(replacement);
         // Retained generated boxes still borrow `style`.  Its declaration graph
         // becomes reclaimable as each box rebinds or leaves the view tree.
         style_tree_retire_borrow_source(style);
@@ -1671,6 +1901,53 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
 // Pseudo-Element Style Management (::before, ::after)
 // ============================================================================
 
+static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
+                                            CssSpecificity specificity) {
+    if (!element || !rule || rule->type != CSS_RULE_STYLE) return 0;
+    int applied_count = 0;
+    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        CssDeclaration* declaration = rule->data.style_rule.declarations[i];
+        if (!declaration || !declaration->value ||
+            !css_property_validate_value(declaration->property_code,
+                                         declaration->value)) continue;
+        CssSelectionCascadeValue* target = nullptr;
+        CssSelectionStyle* selection = nullptr;
+        if (declaration->property_code == CSS_PROPERTY_COLOR) {
+            selection = style_epoch_selection_style(element, true);
+            target = selection ? &selection->color : nullptr;
+        } else if (declaration->property_code == CSS_PROPERTY_BACKGROUND_COLOR ||
+                   declaration->property_code == CSS_PROPERTY_BACKGROUND) {
+            selection = style_epoch_selection_style(element, true);
+            target = selection ? &selection->background_color : nullptr;
+        }
+        if (!target) continue;
+        // The stylesheet owns the value; this element retains only the
+        // cascade metadata needed to select its highlight paint colors.
+        CssDeclaration candidate = *declaration;
+        candidate.specificity = specificity;
+        candidate.specificity.important = declaration->important;
+        candidate.origin = rule->origin;
+        CssDeclaration previous = {};
+        if (target->source) {
+            previous = *target->source;
+            previous.specificity = target->specificity;
+            previous.origin = target->origin;
+        }
+        if (!target->source ||
+            css_declaration_cascade_compare(&candidate, &previous) >= 0) {
+            target->source = lam::up(declaration);
+            target->specificity = candidate.specificity;
+            target->origin = candidate.origin;
+            applied_count++;
+        }
+    }
+    if (applied_count) {
+        element->style_version++;
+        element->set_needs_style_recompute(true);
+    }
+    return applied_count;
+}
+
 int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
                                           CssSpecificity specificity, int pseudo_element) {
     log_debug("[CSS-PSEUDO] Applying pseudo-element rule to <%s>, pseudo_type=%d",
@@ -1680,9 +1957,12 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
         log_debug("[CSS-PSEUDO] Early return due to null element/rule/doc");
         return 0;
     }
+    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
+        return dom_element_apply_selection_rule(element, rule, specificity);
+    }
 
     // Get the appropriate style tree for the pseudo-element
-    StyleTree** target_style = nullptr;
+    lam::Own<StyleTree>* target_style = nullptr;
     const char* pseudo_name = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
@@ -1706,6 +1986,9 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
         target_style = element->pseudo_style_slot(PSEUDO_STYLE_BACKDROP);
         pseudo_name = "::backdrop";
+    } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
+        target_style = element->pseudo_style_slot(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
+        pseudo_name = "::file-selector-button";
     } else {
         log_debug("[CSS] Unknown pseudo-element type: %d", pseudo_element);
         return 0;
@@ -1713,7 +1996,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 
     // Create style tree if needed
     if (!*target_style) {
-        *target_style = style_tree_create(element->doc->document_pool);
+        *target_style = lam::own(style_tree_create(element->doc->document_pool));
         if (!*target_style) {
             log_error("[CSS] Failed to create style tree for %s", pseudo_name);
             return 0;
@@ -1754,6 +2037,14 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
     if (!element) {
         return NULL;
     }
+    if (pseudo_element == PSEUDO_ELEMENT_SELECTION) {
+        CssSelectionStyle* selection = style_epoch_selection_style(element, false);
+        if (!selection) return nullptr;
+        return property_code == CSS_PROPERTY_COLOR
+            ? selection->color.source
+            : property_code == CSS_PROPERTY_BACKGROUND_COLOR
+                ? selection->background_color.source : nullptr;
+    }
 
     StyleTree* style = nullptr;
 
@@ -1771,6 +2062,8 @@ CssDeclaration* dom_element_get_pseudo_element_value(DomElement* element,
         style = element->pseudo_style(PSEUDO_STYLE_PLACEHOLDER);
     } else if (pseudo_element == 8) {  // PSEUDO_ELEMENT_BACKDROP
         style = element->pseudo_style(PSEUDO_STYLE_BACKDROP);
+    } else if (pseudo_element == 9) {  // PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON
+        style = element->pseudo_style(PSEUDO_STYLE_FILE_SELECTOR_BUTTON);
     }
 
     if (!style) {
@@ -2402,24 +2695,24 @@ bool DomElement::insert_before(DomElement* new_child, DomElement* reference_chil
     dom_node_cancel_detached(parent->doc, new_child);
 
     // Set parent relationship
-    new_child->parent = parent;
+    new_child->parent = lam::up(parent);
 
     // Insert before reference child
-    new_child->next_sibling = reference_child;
+    new_child->next_sibling = lam::own(reference_child);
     new_child->prev_sibling = reference_child->prev_sibling;
 
     if (reference_child->prev_sibling) {
-        reference_child->prev_sibling->next_sibling = new_child;
+        reference_child->prev_sibling->next_sibling = lam::own(new_child);
     } else {
         // Reference child was first child
-        parent->first_child = new_child;
+        parent->first_child = lam::own(new_child);
     }
 
-    reference_child->prev_sibling = new_child;
+    reference_child->prev_sibling = lam::up(new_child);
 
     // If inserting before first child, update last_child if needed
     if (!new_child->next_sibling) {
-        parent->last_child = new_child;
+        parent->last_child = lam::up(new_child);
     }
 
     // Invalidate new child's computed values
@@ -2436,20 +2729,20 @@ bool dom_node_replace_in_parent(DomElement* parent, DomNode* old_child, DomNode*
     dom_node_cancel_detached(parent->doc, new_child);
 
     // splice new_child into old_child's position in the linked list
-    new_child->parent = parent;
+    new_child->parent = lam::up(parent);
     new_child->prev_sibling = old_child->prev_sibling;
     new_child->next_sibling = old_child->next_sibling;
 
     if (old_child->prev_sibling) {
-        old_child->prev_sibling->next_sibling = new_child;
+        old_child->prev_sibling->next_sibling = lam::own(new_child);
     } else {
-        parent->first_child = new_child;
+        parent->first_child = lam::own(new_child);
     }
 
     if (old_child->next_sibling) {
-        old_child->next_sibling->prev_sibling = new_child;
+        old_child->next_sibling->prev_sibling = lam::up(new_child);
     } else {
-        parent->last_child = new_child;
+        parent->last_child = lam::up(new_child);
     }
 
     old_child->parent = nullptr;
@@ -2663,7 +2956,7 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     // The source document must outlive this clone. A true deep copy independent of
     // the source pool is not yet available.
     if (source->specified_style) {
-        clone->specified_style = style_tree_clone(source->specified_style, pool);
+        clone->specified_style = lam::shared(style_tree_clone(source->specified_style, pool));
     }
 
     // Note: Children are not cloned - caller should handle that if needed
@@ -2701,7 +2994,7 @@ DomText* DomText::create(String* native_string, DomElement* parent_element) {
 
     DomText* text_node = create_detached(native_string, parent_element->doc);
     if (!text_node) return nullptr;
-    text_node->parent = parent_element;
+    text_node->parent = lam::up(parent_element);
 
     log_debug("DomText::create: created backed text node, text='%s'", native_string->chars);
     return text_node;
@@ -2711,7 +3004,7 @@ DomText* DomText::create_copy(const char* text, size_t len,
                               DomElement* parent_element) {
     if (!parent_element || !parent_element->doc || (!text && len)) return nullptr;
     DomText* text_node = create_detached_copy(parent_element->doc, text, len);
-    if (text_node) text_node->parent = parent_element;
+    if (text_node) text_node->parent = lam::up(parent_element);
     return text_node;
 }
 
@@ -2733,8 +3026,8 @@ DomText* DomText::create_detached(String* native_string, DomDocument* doc) {
     }
 
     text_node->id = dom_document_alloc_node_id(doc);
-    text_node->native_string = native_string;
-    text_node->text = native_string->chars;
+    text_node->native_string = lam::up(native_string);
+    text_node->text = lam::up(native_string->chars);
     text_node->length = native_string->len;
 
     if (!dom_node_registry_register(doc, text_node, sizeof(DomText), true)) {
@@ -2757,8 +3050,8 @@ bool dom_text_adopt_document_string(DomText* text_node, DomDocument* doc,
         // one must reclaim it immediately instead of waiting for document exit.
         pool_free(doc->document_pool, text_node->native_string);
     }
-    text_node->native_string = string;
-    text_node->text = string->chars;
+    text_node->native_string = lam::up(string);
+    text_node->text = lam::up(string->chars);
     text_node->length = string->len;
     text_node->set_owns_native_string(true);
     return true;
@@ -2810,8 +3103,8 @@ DomText* DomText::create_symbol(const char* name, size_t len,
     }
 
     text_node->id = dom_document_alloc_node_id(parent_element->doc);
-    text_node->parent = parent_element;
-    text_node->text = name;
+    text_node->parent = lam::up(parent_element);
+    text_node->text = lam::up(name);
     text_node->length = len;
     text_node->set_symbol(true);
 
@@ -2833,8 +3126,8 @@ DomText* DomText::create_in(Arena* arena, size_t inline_string_length) {
     text_node->node_type = DOM_NODE_TEXT;
     String* string = dom_text_to_string(text_node);
     string->len = (uint32_t)inline_string_length;
-    text_node->native_string = string;
-    text_node->text = string->chars;
+    text_node->native_string = lam::up(string);
+    text_node->text = lam::up(string->chars);
     text_node->length = inline_string_length;
     return text_node;
 }
@@ -2916,18 +3209,18 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
             // a Text data mutation must retain its existing DOM node identity.
             // Replace that transient wrapper in the live chain before exposing
             // the new backing string, so later removal cannot use stale links.
-            text_node->parent = parent;
-            text_node->prev_sibling = prev;
-            text_node->next_sibling = next;
+            text_node->parent = lam::up(parent);
+            text_node->prev_sibling = lam::up(prev);
+            text_node->next_sibling = lam::own(next);
             if (prev) {
-                prev->next_sibling = text_node;
+                prev->next_sibling = lam::own(text_node);
             } else {
-                parent->first_child = text_node;
+                parent->first_child = lam::own(text_node);
             }
             if (next) {
-                next->prev_sibling = text_node;
+                next->prev_sibling = lam::up(text_node);
             } else {
-                parent->last_child = text_node;
+                parent->last_child = lam::up(text_node);
             }
             replacement->parent = nullptr;
             replacement->prev_sibling = nullptr;
@@ -2936,12 +3229,12 @@ bool dom_text_set_content(DomText* text_node, const char* new_content) {
     }
 
     // Update text_node fields to point to new String (backward compat for callers)
-    text_node->native_string = new_string_item.get_string();
+    text_node->native_string = lam::up(new_string_item.get_string());
     if (!text_node->native_string) {
         log_error("dom_text_set_content: replacement string disappeared");
         return false;
     }
-    text_node->text = text_node->native_string->chars;
+    text_node->text = lam::up(text_node->native_string->chars);
     text_node->length = text_node->native_string->len;
 
     if (result.element != dom_element_to_element(parent)) {
@@ -3148,6 +3441,11 @@ DomText* DomElement::append_text(const char* text_content) {
 // DOM Comment/DOCTYPE Node Implementation
 // ============================================================================
 
+bool dom_is_comment_tag(const char* tag_name) {
+    return tag_name && (strcmp(tag_name, "!--") == 0 ||
+        strcmp(tag_name, "#comment") == 0 || str_ieq_cstr(tag_name, "!DOCTYPE"));
+}
+
 DomComment* DomComment::create(Element* native_element, DomElement* parent_element) {
     if (!native_element || !parent_element) {
         log_error("DomComment::create: native_element and parent_element required");
@@ -3161,7 +3459,7 @@ DomComment* DomComment::create(Element* native_element, DomElement* parent_eleme
 
     DomComment* comment_node = create_detached(native_element, parent_element->doc);
     if (!comment_node) return nullptr;
-    comment_node->parent = parent_element;
+    comment_node->parent = lam::up(parent_element);
     log_debug("DomComment::create: attached comment (tag=%s, content='%s')",
               comment_node->tag_name, comment_node->content);
     return comment_node;
@@ -3187,7 +3485,7 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
     DomNodeType node_type;
     if (str_ieq_cstr(tag_name, "!DOCTYPE")) {
         node_type = DOM_NODE_DOCTYPE;
-    } else if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0) {
+    } else if (dom_is_comment_tag(tag_name)) {
         node_type = DOM_NODE_COMMENT;
     } else {
         log_error("DomComment::create_detached: not a comment or DOCTYPE: %s", tag_name);
@@ -3203,15 +3501,15 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
 
     comment_node->id = dom_document_alloc_node_id(doc);
     comment_node->node_type = node_type;
-    comment_node->native_element = native_element;
-    comment_node->tag_name = tag_name;  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
+    comment_node->native_element = lam::up(native_element);
+    comment_node->tag_name = lam::up(tag_name);  // RETAINED_FIELD_OK: interned reference type name, no allocation retained
 
     if (native_element->length > 0) {
         Item first_item = native_element->items[0];
         if (get_type_id(first_item) == LMD_TYPE_STRING) {
             String* content_str = first_item.get_string();
             if (content_str) {
-                comment_node->content = content_str->chars;
+                comment_node->content = lam::up(content_str->chars);
                 comment_node->length = content_str->len;
             }
         }
@@ -3225,13 +3523,13 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
             if (data_string) data_attr = data_string->chars;
         }
         if (data_attr) {
-            comment_node->content = data_attr;
+            comment_node->content = lam::up(data_attr);
             comment_node->length = strlen(data_attr);
         }
     }
 
     if (!comment_node->content) {
-        comment_node->content = "";
+        comment_node->content = lam::up("");
     }
 
     if (!dom_node_registry_register(doc, comment_node, sizeof(DomComment), true)) {
@@ -3335,13 +3633,13 @@ bool dom_comment_set_content(DomComment* comment_node, const char* new_content) 
     }
 
     // Update DomComment to point to new String
-    comment_node->native_element = result.element;
+    comment_node->native_element = lam::up(result.element);
     String* new_string = new_string_item.get_string();
     if (!new_string) {
         log_error("dom_comment_set_content: replacement string disappeared");
         return false;
     }
-    comment_node->content = new_string->chars;
+    comment_node->content = lam::up(new_string->chars);
     comment_node->length = new_string->len;
     log_debug("dom_comment_set_content: updated content to '%s'", new_content);
     return true;
@@ -3391,13 +3689,12 @@ DomComment* DomElement::append_comment(const char* comment_content) {
         return nullptr;
     }
 
-    // Create DomComment wrapper
-    DomComment* comment_node = DomComment::create(
-        comment_item.element,
-        parent
-    );
+    // UI relinking already created the comment wrapper; keep that identity.
+    DomComment* comment_node = parent->doc->input->ui_mode
+        ? (parent->last_child ? parent->last_child->as_comment() : nullptr)
+        : DomComment::create(comment_item.element, parent);
 
-    if (!comment_node) {
+    if (!comment_node || comment_node->native_element != comment_item.element) {
         log_error("dom_element_append_comment: failed to create DomComment");
         return nullptr;
     }
@@ -3448,28 +3745,8 @@ bool dom_comment_remove(DomComment* comment_node) {
         return false;
     }
 
-    // Remove from DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already rebuilt)
-    if (!parent->doc->input->ui_mode) {
-        if (comment_node->prev_sibling) {
-            comment_node->prev_sibling->next_sibling = comment_node->next_sibling;
-        } else if (comment_node->parent) {
-            DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
-            elem_parent->first_child = comment_node->next_sibling;
-        }
-
-        if (comment_node->next_sibling) {
-            comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
-        } else if (comment_node->parent) {
-            // Comment node was last child
-            DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
-            elem_parent->last_child = comment_node->prev_sibling;
-        }
-    }
-
-    // Clear references
-    comment_node->parent = nullptr;
-    comment_node->prev_sibling = nullptr;
-    comment_node->next_sibling = nullptr;
+    // relinking preserves DOM-only survivors; explicitly unlink the deleted wrapper.
+    if (!parent->remove_child(comment_node)) return false;
     comment_node->native_element = nullptr;
     log_debug("dom_comment_remove: removed comment at index %lld", child_idx);
     return true;
@@ -3570,7 +3847,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // Skip comments and DOCTYPE - they will be created as DomComment nodes below
     // HTML5 parser uses "#comment", CSS/older parsers use "!--"
-    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0 || str_ieq_cstr(tag_name, "!DOCTYPE")) {
+    if (dom_is_comment_tag(tag_name)) {
         return nullptr;  // Not a layout element, processed as child below
     }
 
@@ -3748,7 +4025,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
             // Check if this is a comment or DOCTYPE
             // HTML5 parser uses "#comment", CSS/older parsers use "!--"
-            if (strcmp(child_tag_name, "!--") == 0 || strcmp(child_tag_name, "#comment") == 0 || str_ieq_cstr(child_tag_name, "!DOCTYPE")) {
+            if (dom_is_comment_tag(child_tag_name)) {
                 // Create DomComment node backed by Lambda Element
                 DomComment* comment_node = DomComment::create(child_elem, dom_elem);
                 if (comment_node) {
@@ -3790,7 +4067,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                     DomText* candidate = dom_text_from_fat_string(doc, text_str);
                     if (candidate) {
                         text_node = candidate;
-                        text_node->parent = dom_elem;
+                        text_node->parent = lam::up(dom_elem);
                     } else {
                         text_node = DomText::create(text_str, dom_elem);
                     }
@@ -3839,7 +4116,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                 DomText* candidate = dom_text_from_fat_string(doc, text_str);
                                 if (candidate) {
                                     text_node = candidate;
-                                    text_node->parent = dom_elem;
+                                    text_node->parent = lam::up(dom_elem);
                                 } else {
                                     text_node = DomText::create(text_str, dom_elem);
                                 }
@@ -3875,7 +4152,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
                                             DomText* candidate = dom_text_from_fat_string(doc, s);
                                             if (candidate) {
                                                 tn = candidate;
-                                                tn->parent = dom_elem;
+                                                tn->parent = lam::up(dom_elem);
                                             } else {
                                                 tn = DomText::create(s, dom_elem);
                                             }

@@ -1599,8 +1599,8 @@ static bool editing_dom_retained_prepare_text(DomMutationNodeSnapshot* snapshot)
     // Detaching static Mark text clears its native String. Borrow the retained
     // snapshot until the Mark-aware insertion bridge replaces it with the
     // destination's canonical backing; the snapshot remains reusable.
-    text->native_string = snapshot->text_string;
-    text->text = snapshot->text_string->chars;
+    text->native_string = lam::up(snapshot->text_string);
+    text->text = lam::up(snapshot->text_string->chars);
     text->length = snapshot->text_string->len;
     text->set_owns_native_string(false);
     return true;

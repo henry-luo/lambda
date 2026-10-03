@@ -1,0 +1,120 @@
+{
+  "name": "SMIL access keys independent of focus and past/future wallclock values",
+  "html": "test/ui/svg_smil_access_wallclock.html",
+  "viewport": {
+    "width": 420,
+    "height": 230
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 70,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#focus"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "a"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#one"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#focus"
+      }
+    },
+    {
+      "type": "key_press",
+      "key": "z"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#two"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 100,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ],
+  "browser_reference": "test/svg/oracles/svg_smil_access_wallclock_reference.html"
+}

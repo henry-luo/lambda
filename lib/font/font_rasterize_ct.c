@@ -110,6 +110,61 @@ void* font_rasterize_ct_create(const uint8_t* data, size_t len, float size_px,
     return (void*)ct_font;
 }
 
+
+typedef struct FontCtPathVisit {
+    FontPathVisitFn visitor;
+    void* context;
+    float x, y, start_x, start_y;
+    bool success;
+} FontCtPathVisit;
+
+static void font_ct_path_element(void* info, const CGPathElement* element) {
+    FontCtPathVisit* walk = (FontCtPathVisit*)info;
+    if (!walk->success) return;
+    const CGPoint* p = element->points;
+    float args[6] = {0};
+    FontPathCommand command = FONT_PATH_CLOSE;
+    int count = 0;
+    switch (element->type) {
+    case kCGPathElementMoveToPoint: command = FONT_PATH_MOVE; count = 2; break;
+    case kCGPathElementAddLineToPoint: command = FONT_PATH_LINE; count = 2; break;
+    case kCGPathElementAddCurveToPoint: command = FONT_PATH_CUBIC; count = 6; break;
+    case kCGPathElementAddQuadCurveToPoint:
+        command = FONT_PATH_CUBIC; count = 6;
+        args[0] = walk->x + ((float)p[0].x - walk->x) * (2.0f / 3.0f);
+        args[1] = walk->y + (-(float)p[0].y - walk->y) * (2.0f / 3.0f);
+        args[2] = (float)p[1].x + ((float)p[0].x - (float)p[1].x) * (2.0f / 3.0f);
+        args[3] = -(float)p[1].y + (-(float)p[0].y + (float)p[1].y) * (2.0f / 3.0f);
+        args[4] = (float)p[1].x; args[5] = -(float)p[1].y;
+        break;
+    case kCGPathElementCloseSubpath: walk->x = walk->start_x; walk->y = walk->start_y; break;
+    }
+    if (element->type != kCGPathElementAddQuadCurveToPoint) {
+        for (int i = 0; i < count / 2; i++) {
+            args[2 * i] = (float)p[i].x; args[2 * i + 1] = -(float)p[i].y;
+        }
+    }
+    if (count) { walk->x = args[count - 2]; walk->y = args[count - 1]; }
+    if (command == FONT_PATH_MOVE) { walk->start_x = walk->x; walk->start_y = walk->y; }
+    walk->success = walk->visitor(walk->context, command, args, count);
+}
+
+bool font_rasterize_ct_visit_path(void* ct_font_ref, uint32_t codepoint,
+    FontPathVisitFn visitor, void* context) {
+    if (!ct_font_ref || !visitor) return false;
+    UniChar utf16[2]; CGGlyph glyphs[2] = {0};
+    CFIndex length = utf16_encode(codepoint, (uint16_t*)utf16);
+    CTFontRef font = (CTFontRef)ct_font_ref;
+    if (!length || !CTFontGetGlyphsForCharacters(font, utf16, glyphs, length) || !glyphs[0]) return false;
+    CGPathRef path = CTFontCreatePathForGlyph(font, glyphs[0], NULL);
+    if (!path) return false;
+    if (CGPathIsEmpty(path)) { CGPathRelease(path); return false; }
+    FontCtPathVisit walk = {visitor, context, 0.0f, 0.0f, 0.0f, 0.0f, true};
+    CGPathApply(path, &walk, font_ct_path_element);
+    CGPathRelease(path);
+    return walk.success;
+}
+
 // ============================================================================
 // Get glyph metrics via CoreText (no bitmap)
 // ============================================================================

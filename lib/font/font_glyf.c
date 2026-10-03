@@ -413,3 +413,43 @@ int glyf_get_outline(FontTables* tables, uint16_t glyph_id,
         return result;
     }
 }
+
+// midpoint insertion guarantees every quadratic segment has an on-curve end.
+bool glyf_visit_outline(const GlyphOutline* outline, float sx, float sy,
+    float tx, float ty, FontPathVisitFn visitor, void* context) {
+    if (!outline || !visitor) return false;
+    for (int c = 0; c < outline->num_contours; c++) {
+        const GlyfContour* contour = &outline->contours[c];
+        if (contour->num_points < 2) continue;
+        int first = -1;
+        for (int i = 0; i < contour->num_points; i++) {
+            if (contour->points[i].on_curve) { first = i; break; }
+        }
+        if (first < 0) return false;
+        float current_x = contour->points[first].x * sx + tx;
+        float current_y = contour->points[first].y * sy + ty;
+        float args[6] = {current_x, current_y};
+        if (!visitor(context, FONT_PATH_MOVE, args, 2)) return false;
+        for (int step = 1; step < contour->num_points; step++) {
+            const GlyfPoint* point = &contour->points[(first + step) % contour->num_points];
+            float x = point->x * sx + tx, y = point->y * sy + ty;
+            if (point->on_curve) {
+                args[0] = x; args[1] = y;
+                if (!visitor(context, FONT_PATH_LINE, args, 2)) return false;
+            } else {
+                const GlyfPoint* end = &contour->points[(first + step + 1) % contour->num_points];
+                float ex = end->x * sx + tx, ey = end->y * sy + ty;
+                args[0] = current_x + (x - current_x) * (2.0f / 3.0f);
+                args[1] = current_y + (y - current_y) * (2.0f / 3.0f);
+                args[2] = ex + (x - ex) * (2.0f / 3.0f);
+                args[3] = ey + (y - ey) * (2.0f / 3.0f);
+                args[4] = ex; args[5] = ey;
+                if (!visitor(context, FONT_PATH_CUBIC, args, 6)) return false;
+                x = ex; y = ey; step++;
+            }
+            current_x = x; current_y = y;
+        }
+        if (!visitor(context, FONT_PATH_CLOSE, NULL, 0)) return false;
+    }
+    return true;
+}

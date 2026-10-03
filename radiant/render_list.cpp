@@ -13,10 +13,13 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element()) return;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
-    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    MarkerProp* marker_prop = elem->marker_prop();
     if (!marker_prop) {
         return;
     }
+    FontBox marker_font_box = elem->font
+        ? FontBox{lam::up(elem->font), font_prop_used_size(elem->font)} : rdcon->font;
+    FontBox* marker_font = &marker_font_box;
 
     float x = rdcon->block.x + marker->x;
     float y = rdcon->block.y + marker->y;
@@ -25,11 +28,11 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         ? marker_prop->content_width : width;
     float bullet_size = marker_prop->bullet_size;
     CssEnum marker_type = marker_prop->marker_type;
-    Color color = rdcon->color;
-    const FontMetrics* marker_metrics = font_box_handle(&rdcon->font)
-        ? font_get_metrics(font_box_handle(&rdcon->font)) : NULL;
+    Color color = marker_prop->has_color ? marker_prop->color : rdcon->color;
+    const FontMetrics* marker_metrics = font_box_handle(marker_font)
+        ? font_get_metrics(font_box_handle(marker_font)) : NULL;
     float marker_font_size = marker_metrics
-        ? font_handle_get_physical_size_px(font_box_handle(&rdcon->font)) : 16.0f;
+        ? font_handle_get_physical_size_px(font_box_handle(marker_font)) : 16.0f;
 
 
     if (marker_prop->is_image_marker) {
@@ -167,12 +170,14 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
         case CSS_VALUE_LOWER_GREEK:
         case CSS_VALUE_ARMENIAN:
         case CSS_VALUE_GEORGIAN: {
-            if (marker_prop->text_content && *marker_prop->text_content && font_box_handle(&rdcon->font)) {
+            if (marker_prop->text_content && *marker_prop->text_content && font_box_handle(marker_font)) {
+                Color previous_color = rdcon->color;
+                rdcon->color = color;
                 float s = rdcon->raster_scale;
-                const FontMetrics* _mk = font_get_metrics(font_box_handle(&rdcon->font));
+                const FontMetrics* _mk = font_get_metrics(font_box_handle(marker_font));
                 float ascend = _mk ? (_mk->hhea_ascender * s) : 12.0f;
-                FontStyleDesc marker_style = font_style_desc_from_prop(rdcon->font.style);
-                FontHandle* marker_font = font_box_handle(&rdcon->font);
+                FontStyleDesc marker_style = font_style_desc_from_prop(marker_font->style);
+                FontHandle* marker_handle = font_box_handle(marker_font);
                 const char* marker_end = marker_prop->text_content +
                     strlen(marker_prop->text_content);
 
@@ -181,8 +186,8 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                 while (p < marker_end) {
                     uint32_t cp;
                     if (!layout_utf8_next_codepoint(&p, marker_end, &cp)) continue;
-                    LoadedGlyph* glyph = font_load_glyph(marker_font, &marker_style, cp, false);
-                    total_text_width += glyph ? glyph->advance_x + rdcon->font.style->letter_spacing * s : (rdcon->font.style->space_width * s);
+                    LoadedGlyph* glyph = font_load_glyph(marker_handle, &marker_style, cp, false);
+                    total_text_width += glyph ? glyph->advance_x + marker_font->style->letter_spacing * s : (marker_font->style->space_width * s);
                 }
 
                 float tx = x + (width * s) - total_text_width;
@@ -192,18 +197,19 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
                     if (!layout_utf8_next_codepoint(&p, marker_end, &cp)) continue;
 
                     if (cp == ' ') {
-                        tx += rdcon->font.style->space_width * s;
+                        tx += marker_font->style->space_width * s;
                         continue;
                     }
 
-                    LoadedGlyph* glyph = font_load_glyph(marker_font, &marker_style, cp, true);
+                    LoadedGlyph* glyph = font_load_glyph(marker_handle, &marker_style, cp, true);
                     if (glyph) {
                         draw_glyph(rdcon, &glyph->bitmap, lroundf(tx + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
-                        tx += glyph->advance_x + rdcon->font.style->letter_spacing * s;
+                        tx += glyph->advance_x + marker_font->style->letter_spacing * s;
                     } else {
-                        tx += rdcon->font.style->space_width * s;
+                        tx += marker_font->style->space_width * s;
                     }
                 }
+                rdcon->color = previous_color;
 
             }
             break;

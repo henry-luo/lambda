@@ -1,0 +1,101 @@
+{
+  "name": "External use isolates CSS and retains embedded image ownership through mutation",
+  "html": "test/ui/svg_external_resource.html",
+  "viewport": {
+    "width": 200,
+    "height": 110
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 65,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#move"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#instance"
+      },
+      "attribute": "x",
+      "equals": "80"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 85,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 105,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 20,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ]
+}

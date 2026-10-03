@@ -1,0 +1,337 @@
+{
+  "name": "SVG filter graph edits invalidate captured pixels while filters preserve source targeting",
+  "html": "test/ui/svg_filter_mutation.html",
+  "viewport": {
+    "width": 360,
+    "height": 280
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#source"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 70,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 190,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 190,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#source"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 70,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 190,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 190,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#source"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 70,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 190,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 190,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "3"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 30,
+      "y": 50,
+      "expected_selector": "#source"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 50,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 120,
+      "max_g": 136,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 70,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 50,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 120,
+      "max_g": 136,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 190,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 190,
+      "y": 50,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 30,
+      "y": 50
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#source"
+      },
+      "attribute": "data-clicked",
+      "equals": "yes"
+    }
+  ]
+}
