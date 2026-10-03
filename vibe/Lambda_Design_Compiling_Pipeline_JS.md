@@ -120,7 +120,7 @@ Three conclusions:
 1. **The JS front end is already linear and cheap: 0.1–0.7 ms/KB**, with
    minified bundles at the high end. It is also exactly the AST-lane cost:
    `alpine.min.js` reaches its first result in ≈30 ms under
-   `JS_EXECUTION_BACKEND=ast` and in 6–9.5 s under the default.
+   `JS_EXEC_BACKEND=ast` and in 6–9.5 s under the default.
 2. **MIR analysis+lowering is superlinear and dominated by whole-index
    scans.** Sampling `prosemirror.js` puts **87% of lowering self-time in
    `jm_literal_shape_for_object`** (`js_mir_expression_lowering.cpp`): a
@@ -341,7 +341,7 @@ path. Shared with Lambda.
 
 #### LC4.12 (implemented 2026-09-23; **D8.1.3v19**) — LambdaJS defaults to AUTO like Lambda
 
-**Decision to ratify.** The unset `JS_EXECUTION_BACKEND` selects AUTO: an
+**Decision to ratify.** The unset `JS_EXEC_BACKEND` selects AUTO: an
 interpreter-supported unit and its prebuilt static closure execute from the
 retained AST, hot definitions promote to P2 satellites, unsupported units
 fall back to whole-module MIR exactly as today. `mir` remains selectable.
@@ -451,7 +451,7 @@ parse-build, bind, validate, and index fields.
    row (today 2–200 ms/KB); no row's link exceeds 3 s once LC4.7 applies the
    interp interface above the threshold.
 3. **Identity**: `test_js_test262_gtest` baseline unchanged under the
-   default and under `JS_EXECUTION_BACKEND=auto` (rule 18: never masked);
+   default and under `JS_EXEC_BACKEND=auto` (rule 18: never masked);
    `make test` green; the 20 corpus scripts produce byte-identical stdout
    before and after under each backend.
 4. **Emission**: MT7 (D8.6.1) at 0% slack via `test_js_mir_emission_gtest`
@@ -591,7 +591,7 @@ Shared: `ast_index_visit` span-owner loop (`ast-core.cpp`).
   `JS_MIR_VOLUME` line per script after execution (`main.cpp`); a script that
   is killed by `timeout` prints nothing. `LAMBDA_COMPILER_TIMING=1` adds the
   `COMPILER_TIMING` line on the same path.
-- The AST lane is selected with `JS_EXECUTION_BACKEND=ast`; `auto` selects
+- The AST lane is selected with `JS_EXEC_BACKEND=ast`; `auto` selects
   the AST lane plus P2 promotion; unset selects AUTO under **D8.1.3v19**.
 - macOS `sample <pid>` by PID immediately after launch; the JS compile runs
   on the main thread (unlike Lambda's large-stack thread). Attribution

@@ -1166,7 +1166,7 @@ static float intrinsic_resolve_horizontal_margin_value(LayoutContext* lycon,
     zero_percent_parent.content_width = 0.0f;
     zero_percent_parent.content_height = 0.0f;
     LayoutContext zero_percent_context = *lycon;
-    zero_percent_context.block.parent = &zero_percent_parent;
+    zero_percent_context.block.parent = lam::up(&zero_percent_parent);
     float resolved = resolve_length_value(&zero_percent_context, property, value);
     return isnan(resolved) ? 0.0f : resolved;
 }
@@ -2203,8 +2203,7 @@ static bool intrinsic_has_cyclic_percentage_descendant(
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_element = child->as_element();
-        // ::marker stores MarkerProp in the shared blk slot, not BlockProp;
-        // it is generated content and cannot contribute a descendant cycle.
+        // ::marker is generated content and cannot contribute a descendant cycle.
         if (child_element->view_type == RDT_VIEW_MARKER) continue;
         ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_element);
         if (layout_block_is_display_none(child_view) ||
@@ -2478,9 +2477,8 @@ static bool intrinsic_list_item_has_table_ancestor(DomElement* element) {
 static float intrinsic_list_item_marker_width(LayoutContext* lycon,
                                               ViewBlock* view_block) {
     if (view_block && view_block->pseudo && view_block->pseudo->marker &&
-        view_block->pseudo->marker->blk) {
-        MarkerProp* marker = reinterpret_cast<MarkerProp*>(
-            view_block->pseudo->marker->blk);
+        view_block->pseudo->marker->marker_prop()) {
+        MarkerProp* marker = view_block->pseudo->marker->marker_prop();
         if (marker->width > 0.0f) {
             float width = marker->width;
             DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(view_block);
@@ -2808,21 +2806,17 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
     if (block->embed && block->embedp()->img) return block->embedp()->img;
     const char* src_value = tag == MARKUP_NAME_IMG
         ? element->get_attribute("src") : element->get_attribute(MARKUP_NAME_DATA);
-    char* selected_source = tag == MARKUP_NAME_IMG
-        ? layout_resolve_replaced_image_source(element) : nullptr;
-    if (selected_source) src_value = selected_source;
-    if (!src_value || !lycon || !lycon->ui_context) {
-        if (selected_source) mem_free(selected_source);
-        return nullptr;
-    }
+    lam::Temp<char> selected_source(tag == MARKUP_NAME_IMG
+        ? layout_resolve_replaced_image_source(element) : nullptr);
+    if (selected_source) src_value = selected_source.get();
+    if (!src_value || !lycon || !lycon->ui_context) return nullptr;
 
     if (!block->embed) block->ensure_embed(lycon);
     size_t src_len = strlen(src_value);
     StrBuf* src_buf = strbuf_new_cap(src_len);
     strbuf_append_str_n(src_buf, src_value, src_len);
-    block->embed->img = load_image(lycon->ui_context, src_buf->str);
+    block->embed->img = lam::up(load_image(lycon->ui_context, src_buf->str));
     strbuf_free(src_buf);
-    if (selected_source) mem_free(selected_source);
     return block->embedp()->img;
 }
 
@@ -3086,7 +3080,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         font_changed = true;
     } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
         FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
-        temp_font_guard.prop_a = temp_font_prop;
+        temp_font_guard.prop_a = lam::up(temp_font_prop);
         bool need_font_setup = false;
         bool spacing_font_ready = false;
         const char* css_family = NULL;
@@ -3303,7 +3297,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     if (!font_changed && !element->font && lycon->ui_context && lycon->font.style &&
         intrinsic_has_ua_font_defaults(element->tag())) {
         FontProp* ua_font = alloc_font_prop(lycon);
-        temp_font_guard.prop_b = ua_font;
+        temp_font_guard.prop_b = lam::up(ua_font);
         if (intrinsic_apply_ua_font_defaults(element, ua_font, lycon->font.style)) {
             intrinsic_complete_inherited_font(
                 ua_font, lycon->font.style,
@@ -4348,7 +4342,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 IntrinsicFontScope font_scope(lycon, lycon->font);
                 if (!font_element->styles_resolved()) {
                     LayoutViewScope view_scope(lycon);
-                    lycon->view = static_cast<View*>(font_element);
+                    lycon->view = lam::up(static_cast<View*>(font_element));
                     radiant::LayoutRunModeScope run_mode_scope(
                         lycon, radiant::RunMode::ComputeSize);
                     dom_node_resolve_style(font_element, lycon);
@@ -6299,7 +6293,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
         IntrinsicFontScope style_font_scope(lycon, lycon->font);
         LayoutViewScope style_view_scope(lycon);
         radiant::LayoutRunModeScope run_mode_scope(lycon, radiant::RunMode::ComputeSize);
-        lycon->view = static_cast<View*>(element);
+        lycon->view = lam::up(static_cast<View*>(element));
         dom_node_resolve_style(element, lycon);
     }
 
@@ -6334,7 +6328,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (resolved_size >= 0.0f && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
                 FontProp* tfp = alloc_font_prop(lycon);
                 if (tfp) {
-                    temp_height_font_guard.prop_a = tfp;
+                    temp_height_font_guard.prop_a = lam::up(tfp);
                     if (lycon->font.style) {
                         radiant_retain_font_family(tfp, lam::PoolPtr<char>(lycon->font.style->family));
                     }

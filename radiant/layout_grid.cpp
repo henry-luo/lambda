@@ -32,17 +32,17 @@ static GridTrackSize* grid_scratch_clone_track(ScratchArena* scratch,
     copy->repeat_tracks = NULL;
     copy->repeat_track_count = 0;
 
-    LayoutAxisPair<GridTrackSize**> nested = {&copy->min_size, &copy->max_size};
+    LayoutAxisPair<lam::Own<GridTrackSize>*> nested = {&copy->min_size, &copy->max_size};
     LayoutAxisPair<GridTrackSize*> source_nested = {source->min_size, source->max_size};
     for (LayoutAxis axis : layout_axes()) {
         if (source_nested[axis]) {
-            *nested[axis] = grid_scratch_clone_track(scratch, source_nested[axis]);
+            *nested[axis] = lam::own(grid_scratch_clone_track(scratch, source_nested[axis]));
             if (!*nested[axis]) return NULL;
         }
     }
     if (source->repeat_tracks && source->repeat_track_count > 0) {
-        copy->repeat_tracks = (GridTrackSize**)scratch_calloc(
-            scratch, (size_t)source->repeat_track_count * sizeof(GridTrackSize*));
+        copy->repeat_tracks = lam::own_arr((GridTrackSize**)scratch_calloc(
+            scratch, (size_t)source->repeat_track_count * sizeof(GridTrackSize*)));
         if (!copy->repeat_tracks) return NULL;
         copy->repeat_track_count = source->repeat_track_count;
         for (int i = 0; i < source->repeat_track_count; i++) {
@@ -63,10 +63,10 @@ static GridTrackList* grid_scratch_clone_track_list(ScratchArena* scratch,
     GridTrackList* copy = (GridTrackList*)scratch_calloc(scratch, sizeof(GridTrackList));
     if (!copy) return NULL;
     copy->allocated_tracks = capacity;
-    copy->tracks = (GridTrackSize**)scratch_calloc(
-        scratch, (size_t)capacity * sizeof(GridTrackSize*));
-    copy->line_names = (char**)scratch_calloc(
-        scratch, (size_t)(capacity + 1) * sizeof(char*));
+    copy->tracks = lam::own_arr((GridTrackSize**)scratch_calloc(
+        scratch, (size_t)capacity * sizeof(GridTrackSize*)));
+    copy->line_names = lam::own_arr((char**)scratch_calloc(
+        scratch, (size_t)(capacity + 1) * sizeof(char*)));
     if (!copy->tracks || !copy->line_names) return NULL;
     if (!source) {
         copy->repeat_count = 1;
@@ -119,13 +119,13 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
                   container->source_loc());
         return;
     }
-    lycon->grid_container = grid;
+    lycon->grid_container = lam::up(grid);
     grid->scratch_mark = mark;
-    grid->lycon = lycon;  // Store layout context for intrinsic sizing
+    grid->lycon = lam::up(lycon);  // Store layout context for intrinsic sizing
     if (container->embed && container->embedp()->grid) {
         memcpy(grid, container->embedp()->grid, sizeof(GridProp));
         grid->scratch_mark = mark;
-        grid->lycon = lycon;  // Restore after memcpy
+        grid->lycon = lam::up(lycon);  // Restore after memcpy
     } else {
         // Set default values using enum names that align with Lexbor constants
         grid->justify_content = CSS_VALUE_START;
@@ -145,8 +145,8 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     GridArea* source_areas = grid->grid_areas;
     int source_area_count = grid->area_count;
     grid->allocated_areas = source_area_count > 4 ? source_area_count : 4;
-    grid->grid_areas = (GridArea*)scratch_calloc(&lycon->scratch,
-        (size_t)grid->allocated_areas * sizeof(GridArea));
+    grid->grid_areas = lam::own_arr((GridArea*)scratch_calloc(&lycon->scratch,
+        (size_t)grid->allocated_areas * sizeof(GridArea)));
     if (!grid->grid_areas) {
         cleanup_grid_container(lycon);
         return;
@@ -154,15 +154,15 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     for (int i = 0; i < source_area_count; i++) {
         grid->grid_areas[i] = source_areas[i];
         if (source_areas[i].name) {
-            grid->grid_areas[i].name = grid_scratch_strdup(&lycon->scratch,
-                                                           source_areas[i].name);
+            grid->grid_areas[i].name = lam::own(grid_scratch_strdup(&lycon->scratch,
+                                                           source_areas[i].name));
             if (!grid->grid_areas[i].name) {
                 cleanup_grid_container(lycon);
                 return;
             }
         }
     }
-    GridTrackList** track_lists[4] = {
+    lam::Own<GridTrackList>* track_lists[4] = {
         &grid->grid_template_rows, &grid->grid_template_columns,
         &grid->grid_auto_rows, &grid->grid_auto_columns};
     GridTrackList* source_lists[4] = {
@@ -170,8 +170,8 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
         grid->grid_auto_rows, grid->grid_auto_columns};
     const int default_capacities[4] = {4, 4, 2, 2};
     for (int i = 0; i < 4; i++) {
-        *track_lists[i] = grid_scratch_clone_track_list(
-            &lycon->scratch, source_lists[i], default_capacities[i]);
+        *track_lists[i] = lam::own(grid_scratch_clone_track_list(
+            &lycon->scratch, source_lists[i], default_capacities[i]));
     }
     if (!grid->grid_template_rows || !grid->grid_template_columns ||
         !grid->grid_auto_rows || !grid->grid_auto_columns) {
@@ -183,8 +183,8 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     int item_capacity = layout_count_flattened_item_nodes(container, false);
     grid->allocated_items = item_capacity;
     if (item_capacity > 0) {
-        grid->grid_items = (ViewBlock**)scratch_calloc(&lycon->scratch,
-            (size_t)item_capacity * sizeof(ViewBlock*));
+        grid->grid_items = lam::own_arr((ViewBlock**)scratch_calloc(&lycon->scratch,
+            (size_t)item_capacity * sizeof(ViewBlock*)));
         if (!grid->grid_items) {
             log_error("layout_grid: unable to allocate %d grid item slots for %s",
                       item_capacity, container->source_loc());
@@ -197,8 +197,8 @@ void init_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (grid->grid_template_columns) line_capacity += grid->grid_template_columns->line_name_count;
     if (grid->grid_template_rows) line_capacity += grid->grid_template_rows->line_name_count;
     grid->allocated_line_names = line_capacity;
-    grid->line_names = (GridLineName*)scratch_calloc(&lycon->scratch,
-        (size_t)line_capacity * sizeof(GridLineName));
+    grid->line_names = lam::own_arr((GridLineName*)scratch_calloc(&lycon->scratch,
+        (size_t)line_capacity * sizeof(GridLineName)));
     if (!grid->line_names) {
         log_error("layout_grid: unable to allocate %d grid line-name slots for %s",
                   line_capacity, container->source_loc());
@@ -337,10 +337,10 @@ void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
         for (int a = 0; a < grid_layout->area_count; a++) {
             GridArea* area = &grid_layout->grid_areas[a];
             if (!area->name) continue;
-            snprintf(name_buf, sizeof(name_buf), "%s-start", area->name);
+            snprintf(name_buf, sizeof(name_buf), "%s-start", area->name.get());
             add_grid_line_name(grid_layout, name_buf, area->column_start, false);
             add_grid_line_name(grid_layout, name_buf, area->row_start, true);
-            snprintf(name_buf, sizeof(name_buf), "%s-end", area->name);
+            snprintf(name_buf, sizeof(name_buf), "%s-end", area->name.get());
             add_grid_line_name(grid_layout, name_buf, area->column_end, false);
             add_grid_line_name(grid_layout, name_buf, area->row_end, true);
         }
@@ -747,7 +747,7 @@ static GridTrackSize** expand_repeat_track_entries(ScratchArena* scratch,
 }
 
 static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_column) {
-    GridTrackList** list_slot = is_column ? &grid_layout->grid_template_columns
+    lam::Own<GridTrackList>* list_slot = is_column ? &grid_layout->grid_template_columns
                                          : &grid_layout->grid_template_rows;
     bool* auto_fit_tracks = is_column ? grid_layout->auto_fit_columns
                                       : grid_layout->auto_fit_rows;
@@ -812,16 +812,16 @@ static bool expand_auto_repeat_axis(GridContainerLayout* grid_layout, bool is_co
         }
         // Auto-repeat mutates only the pass-local clone; abandoned generations
         // remain owned by the container scratch mark and need no free chain.
-        tracks->tracks = new_tracks;
+        tracks->tracks = lam::own_arr(new_tracks);
         tracks->track_count = new_track_count;
         tracks->allocated_tracks = new_track_count;
         tracks->is_repeat = false;
-        tracks->line_names = (char**)scratch_calloc(
+        tracks->line_names = lam::own_arr((char**)scratch_calloc(
             &grid_layout->lycon->scratch,
-            (size_t)(new_track_count + 1) * sizeof(char*));
+            (size_t)(new_track_count + 1) * sizeof(char*)));
         tracks->line_name_count = 0;
         if (!tracks->line_names) return false;
-        *list_slot = tracks;
+        *list_slot = lam::own(tracks);
 
         break; // CSS permits only one auto-repeat per axis.
     }

@@ -365,18 +365,18 @@ float layout_scroll_spacing_used(LayoutContext* lycon, DomElement* owner,
         float saved_font_size = lycon->font.current_font_size;
         float saved_base = lycon->scroll_percentage_base;
         FontProp owner_font = *owner->fontp();
-        lycon->view = static_cast<View*>(owner);
-        lycon->elmt = owner;
-        lycon->font.style = &owner_font;
+        lycon->view = lam::up(static_cast<View*>(owner));
+        lycon->elmt = lam::up(owner);
+        lycon->font.style = lam::up(&owner_font);
         lycon->font.current_font_size = owner_font.font_size;
         lycon->scroll_percentage_base = scrollport_size;
         float resolved = resolve_length_value(
             lycon, CSS_PROPERTY_SCROLL_PADDING, spacing.expression);
         lycon->scroll_percentage_base = saved_base;
         lycon->font.current_font_size = saved_font_size;
-        lycon->font.style = saved_font;
-        lycon->elmt = saved_element;
-        lycon->view = saved_view;
+        lycon->font.style = lam::up(saved_font);
+        lycon->elmt = lam::up(saved_element);
+        lycon->view = lam::up(saved_view);
         return isfinite(resolved) && resolved >= 0.0f ? resolved : 0.0f;
     }
     return spacing.pixels + spacing.percent * scrollport_size;
@@ -447,19 +447,17 @@ static bool layout_scroll_request_is_smooth(DomScrollBehavior behavior,
 static bool layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
                                                     DomDocument* doc,
                                                     ViewBlock* root_block) {
-    if (!lycon || !doc || !root_block || !doc->pending_scroll_into_view_target)
+    if (!lycon || !doc || !root_block || !doc->pending_scroll_into_view_target.address)
         return false;
 
-    DomElement* target = doc->pending_scroll_into_view_target;
+    DomNodeRef target_ref = doc->pending_scroll_into_view_target;
+    DomElement* target = (DomElement*)target_ref.address;
     bool center = doc->pending_scroll_into_view_center;
     bool if_needed = doc->pending_scroll_into_view_if_needed;
     DomScrollAlign block_align = doc->pending_scroll_into_view_block;
     DomScrollAlign inline_align = doc->pending_scroll_into_view_inline;
     DomScrollBehavior behavior = doc->pending_scroll_into_view_behavior;
-    DomNodeRef target_ref = {(DomNode*)target,
-                             doc->pending_scroll_into_view_target_id};
-    doc->pending_scroll_into_view_target = nullptr;
-    doc->pending_scroll_into_view_target_id = 0;
+    doc->pending_scroll_into_view_target = {};
     doc->pending_scroll_into_view_center = false;
     doc->pending_scroll_into_view_if_needed = false;
     doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
@@ -824,7 +822,7 @@ static void reset_css_all_visual_style(LayoutContext* lycon, ViewSpan* view) {
     if (view->scroller) {
         ScrollPane* pane = view->scroller->pane;
         memcpy(view->scroller, &SCROLL_PROP_DEFAULT, sizeof(ScrollProp));
-        view->scroller->pane = pane;
+        view->scroller->pane = lam::own(pane);
     }
     if (view->position) {
         memcpy(view->position, &POSITION_PROP_DEFAULT, sizeof(PositionProp));
@@ -1125,16 +1123,16 @@ static void merge_run_in_with_next_block(LayoutContext* lycon, DomElement* run_i
     DomNode* next_block_first_child = next_block->first_child;
 
     for (DomNode* child = first_run_in_child; child; child = child->next_sibling) {
-        child->parent = next_block;
+        child->parent = lam::up(next_block);
     }
 
     if (next_block_first_child) {
-        last_run_in_child->next_sibling = next_block_first_child;
-        next_block_first_child->prev_sibling = last_run_in_child;
+        last_run_in_child->next_sibling = lam::own(next_block_first_child);
+        next_block_first_child->prev_sibling = lam::up(last_run_in_child);
     } else {
-        next_block->last_child = last_run_in_child;
+        next_block->last_child = lam::up(last_run_in_child);
     }
-    next_block->first_child = first_run_in_child;
+    next_block->first_child = lam::own(first_run_in_child);
     first_run_in_child->prev_sibling = nullptr;
 
     run_in->first_child = nullptr;
@@ -1675,14 +1673,14 @@ size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
 
 LayoutTextRun layout_prepare_text_run(const char* text, size_t length,
                                       LayoutTextRunMode mode) {
-    LayoutTextRun run = {text, length};
+    LayoutTextRun run = {lam::up(text), length};
     if (!text || mode == LAYOUT_TEXT_RUN_RAW || length == 0) return run;
 
     static thread_local char buffer[4096];  // LARGE_ARRAY_OK: reusable text scratch.
     if (mode == LAYOUT_TEXT_RUN_COLLAPSE) {
         run.length = layout_normalize_collapsible_whitespace(
             text, length, buffer, sizeof(buffer));
-        run.text = buffer;
+        run.text = lam::up(buffer);
         return run;
     }
 
@@ -1696,12 +1694,12 @@ LayoutTextRun layout_prepare_text_run(const char* text, size_t length,
         return run;
     }
     if (trimmed_length >= sizeof(buffer)) {
-        run.text = text;
+        run.text = lam::up(text);
         run.length = 0;
         return run;
     }
     str_copy(buffer, sizeof(buffer), text + start, trimmed_length);
-    run.text = buffer;
+    run.text = lam::up(buffer);
     run.length = trimmed_length;
     return run;
 }
@@ -2229,7 +2227,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
             lycon->line.parent_font_ascender = lycon->font.style->ascender;
             lycon->line.parent_font_descender = lycon->font.style->descender;
             lycon->line.parent_font_size = lycon->font.style->font_size;
-            lycon->line.parent_font_style = lycon->font.style;
+            lycon->line.parent_font_style = lam::up(lycon->font.style);
         }
         if (span->font) {
             setup_font(lycon->ui_context, &lycon->font, span->font);
@@ -2248,7 +2246,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     lycon->line.parent_font_ascender = saved_pa_asc;
     lycon->line.parent_font_descender = saved_pa_desc;
     lycon->line.parent_font_size = saved_pa_fsize;
-    lycon->line.parent_font_style = saved_pa_style;
+    lycon->line.parent_font_style = lam::up(saved_pa_style);
 }
 
 bool layout_inline_span_has_in_flow_block_child(ViewSpan* span,
@@ -2457,8 +2455,8 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
         LayoutContextScope context_scope(lycon);
         LayoutViewScope view_scope(lycon);
         marker->view_type = RDT_VIEW_INLINE;
-        lycon->view = marker;
-        lycon->elmt = elem;
+        lycon->view = lam::up(marker);
+        lycon->elmt = lam::up(elem);
         dom_node_resolve_style(elem, lycon);
         marker->view_type = saved_view_type;
     }
@@ -2478,9 +2476,9 @@ static bool layout_non_rendered_table_marker(LayoutContext* lycon, DomElement* e
         inline_parent ? lycon->line.advance_x : lycon->line.left,
         lycon->block.advance_y, 0.0f, 0.0f);
     if (!lycon->line.start_view) {
-        lycon->line.start_view = marker;
+        lycon->line.start_view = lam::up(marker);
     }
-    lycon->view = marker;
+    lycon->view = lam::up(marker);
     return true;
 }
 
@@ -3866,8 +3864,8 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
             // counter/list-item context come from the slot insertion point;
             // restore the light-DOM parent after this synchronous layout call.
             child->parent = slot->parent;
-            child->prev_sibling = layout_slot_assigned_sibling(slot, child, false);
-            child->next_sibling = layout_slot_assigned_sibling(slot, child, true);
+            child->prev_sibling = lam::up(layout_slot_assigned_sibling(slot, child, false));
+            child->next_sibling = lam::own(layout_slot_assigned_sibling(slot, child, true));
             layout_flow_node(lycon, child);
             float projection_x = 0.0f;
             float projection_y = 0.0f;
@@ -3895,9 +3893,9 @@ void layout_shadow_slot_children(LayoutContext* lycon, DomElement* slot) {
                 // point before restoring the DOM parent.
                 layout_shift_view_tree_geometry((View*)child, projection_x, projection_y);
             }
-            child->parent = dom_parent;
-            child->prev_sibling = dom_prev;
-            child->next_sibling = dom_next;
+            child->parent = lam::up(dom_parent);
+            child->prev_sibling = lam::up(dom_prev);
+            child->next_sibling = lam::own(dom_next);
         }
     }
     if (!has_assigned_nodes) {
@@ -3915,7 +3913,7 @@ void layout_init_display_contents_view(LayoutContext* lycon, DomElement* elem) {
     layout_set_view_geometry(elem, 0.0f, 0.0f, 0.0f, 0.0f);
 
     LayoutViewScope view_scope(lycon);
-    lycon->view = static_cast<View*>(elem);
+    lycon->view = lam::up(static_cast<View*>(elem));
     dom_node_resolve_style(static_cast<DomNode*>(elem), lycon);
     // CSS Display 3 box generation: the principal box disappears, but the
     // element's generated content still participates in the flattened flow.
@@ -3951,8 +3949,8 @@ static void layout_empty_mathml_tree(LayoutContext* lycon, DomNode* node,
         lam::view_require<RDT_VIEW_INLINE>(view)->display = display;
     }
     LayoutViewScope view_scope(lycon);
-    lycon->view = view;
-    lycon->elmt = node;
+    lycon->view = lam::up(view);
+    lycon->elmt = lam::up(node);
     dom_node_resolve_style(node, lycon);
     node->as_element()->display = display;
     layout_set_view_geometry(view, x, y, 0.0f, 0.0f);
@@ -4065,31 +4063,31 @@ static void layout_move_display_contents_pseudo_to_edge(
     if (!found) return;
     if ((before && parent->first_child == static_cast<DomNode*>(pseudo)) ||
         (!before && last == static_cast<DomNode*>(pseudo))) {
-        parent->last_child = last;
+        parent->last_child = lam::up(last);
         return;
     }
 
     DomNode* next = pseudo->next_sibling;
-    if (found_previous) found_previous->next_sibling = next;
-    else parent->first_child = next;
-    if (next) next->prev_sibling = found_previous;
+    if (found_previous) found_previous->next_sibling = lam::own(next);
+    else parent->first_child = lam::own(next);
+    if (next) next->prev_sibling = lam::up(found_previous);
     if (last == static_cast<DomNode*>(pseudo)) last = found_previous;
 
     if (before) {
         DomNode* old_first = parent->first_child;
         pseudo->prev_sibling = nullptr;
-        pseudo->next_sibling = old_first;
-        if (old_first) old_first->prev_sibling = pseudo;
+        pseudo->next_sibling = lam::own(old_first);
+        if (old_first) old_first->prev_sibling = lam::up(pseudo);
         else last = static_cast<DomNode*>(pseudo);
-        parent->first_child = pseudo;
+        parent->first_child = lam::own(pseudo);
     } else {
-        pseudo->prev_sibling = last;
+        pseudo->prev_sibling = lam::up(last);
         pseudo->next_sibling = nullptr;
-        if (last) last->next_sibling = pseudo;
-        else parent->first_child = pseudo;
+        if (last) last->next_sibling = lam::own(pseudo);
+        else parent->first_child = lam::own(pseudo);
         last = static_cast<DomNode*>(pseudo);
     }
-    parent->last_child = last;
+    parent->last_child = lam::up(last);
 }
 
 static bool layout_node_is_hidden_by_closed_details(DomNode* node) {
@@ -4175,7 +4173,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
 
         if (elem->view_type == RDT_VIEW_MARKER) {
-            MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+            MarkerProp* marker_prop = elem->marker_prop();
             if (marker_prop) {
                 ViewSpan* marker_span = lam::view_require_element(set_view(lycon, RDT_VIEW_MARKER, elem));
                 if (marker_span) {
@@ -4251,7 +4249,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                             : max(0.0f, marker_span->height);
                         lycon->line.max_ascender = max(
                             lycon->line.max_ascender, image_ascender);
-                        if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
+                        if (!lycon->line.start_view) lycon->line.start_view = lam::up((View*)marker_span);
                         lycon->line.is_line_start = false;
                         lycon->line.has_replaced_content = true;
                     } else if (!marker_prop->is_outside) {
@@ -4297,7 +4295,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
                         if (ascender > lycon->line.max_ascender) lycon->line.max_ascender = ascender;
                         if (descender > lycon->line.max_descender) lycon->line.max_descender = descender;
 
-                        if (!lycon->line.start_view) lycon->line.start_view = (View*)marker_span;
+                        if (!lycon->line.start_view) lycon->line.start_view = lam::up((View*)marker_span);
                         lycon->line.is_line_start = false;
 
                         if (lycon->block.line_height_is_normal && font_box_handle(&lycon->font)) {
@@ -4508,7 +4506,7 @@ static void layout_set_root_available_width(LayoutContext* lycon, ViewBlock* roo
 void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     uint64_t t_start = time_now_ns();
 
-    lycon->elmt = elmt;
+    lycon->elmt = lam::up(elmt);
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     float physical_width = lycon->width;
     float physical_height = lycon->height;
@@ -4522,11 +4520,11 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     line_init(lycon, 0, lycon->block.content_width);
 
     BlockContext saved_block = lycon->block;
-    lycon->block.parent = &saved_block;
+    lycon->block.parent = lam::up(&saved_block);
 
     ViewBlock* html = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, elmt));
     html->width = lycon->block.content_width;
-    lycon->doc->view_tree->root = (View*)html;  lycon->elmt = elmt;
+    lycon->doc->view_tree->root = lam::up((View*)html);  lycon->elmt = lam::up(elmt);
 
     lycon->block.given_width = physical_width;
     lycon->block.given_height = -1;  // -1 means auto height
@@ -5164,7 +5162,7 @@ static int layout_node_visit_budget(DomDocument* doc) {
 
 void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
-    lycon->doc = doc;  lycon->ui_context = uicon;
+    lycon->doc = lam::up(doc);  lycon->ui_context = lam::up(uicon);
     radiant::layout_debug_init(&lycon->layout_debug);
     radiant::layout_profiler_init(&lycon->profiler);
 
@@ -5206,17 +5204,23 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
     FontProp* default_font = doc->view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
     setup_font(uicon, &lycon->font, default_font);
 
-    lycon->pool = doc->view_tree->prop_pool;
+    lycon->pool = lam::up(doc->view_tree->prop_pool);
     mem_scratch_init((MemContext*)doc->services.mem_ctx, &lycon->scratch, doc->view_tree->scratch_arena, MEM_ROLE_LAYOUT, "layout.scratch");
 
-    lycon->pass_arena = doc->view_tree->layout_pass_arena;
-    lycon->counter_context = counter_context_create(lycon->pass_arena);
-    lycon->deferred_sticky_blocks = arraylist_new(8);
+    lycon->pass_arena = lam::up(doc->view_tree->layout_pass_arena);
+    lycon->counter_context = lam::up(counter_context_create(lycon->pass_arena));
+    lycon->deferred_sticky_blocks = lam::up(arraylist_new(8));
 
 }
 
 void layout_cleanup(LayoutContext* lycon) {
     Arena* scratch_arena = lycon->scratch.arena;
+#ifndef NDEBUG
+    // every scratch block belongs to a scope that ends inside the pass; the
+    // final release is a safety net, not the owner of pass memory
+    size_t live_scratch = scratch_live_count(&lycon->scratch);
+    if (live_scratch) log_error("[SCRATCH_PASS_EXIT] layout pass ended with %zu live scratch blocks", live_scratch);
+#endif
     scratch_release(&lycon->scratch);
 
     if (lycon->counter_context) {
@@ -5318,13 +5322,13 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     bool reset_script_layout = false;
     if (is_reflow) {
         if (!doc->view_tree) {
-            doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
+            doc->view_tree = view_tree_shell_create();
             init_view_pool = true;
         } else if (!doc->view_tree->prop_pool) {
             init_view_pool = true;
         }
     } else if (!doc->view_tree) {
-        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
+        doc->view_tree = view_tree_shell_create();
         init_view_pool = true;
     } else {
         // not leak a separate ViewTree ownership epoch.
@@ -5366,7 +5370,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
         layout_finalize_static_positioned_abs_descendants(root_block);
-        bool has_scroll_into_view_target = doc->pending_scroll_into_view_target != nullptr;
+        bool has_scroll_into_view_target = doc->pending_scroll_into_view_target.address != nullptr;
         // CSSOM View scrollIntoView uses the target's current bounding box;
         // viewport scroll requests must resolve first so sticky layout sees the
         // post-scroll position instead of accumulating a pre-scroll translation.

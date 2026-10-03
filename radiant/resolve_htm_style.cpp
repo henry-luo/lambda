@@ -495,27 +495,23 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     const char* preload = is_video ? element->get_attribute("preload") : nullptr;
     bool preload_none = preload && strcmp(preload, "none") == 0;
     RdtVideo* media = nullptr;
-    char* selected_file_path = nullptr;
+    lam::Temp<char> selected_file_path;
     DomNode* source_cursor = nullptr;
     const char* src = nullptr;
     while ((src = html_media_next_source(media_element, &source_cursor))) {
         Url* abs_url = parse_url(doc->url, src);
-        char* file_path = abs_url ? url_to_local_path(abs_url) : nullptr;
+        lam::Temp<char> file_path(abs_url ? url_to_local_path(abs_url) : nullptr);
         if (abs_url) url_destroy(abs_url);
         if (!file_path) continue;
 
         RdtVideo* candidate = rdt_video_create(&media_callbacks, doc->state);
-        if (!candidate) {
-            mem_free(file_path);
-            continue;
-        }
-        if (!preload_none && rdt_video_open_file(candidate, file_path) != 0) {
+        if (!candidate) continue;
+        if (!preload_none && rdt_video_open_file(candidate, file_path.get()) != 0) {
             rdt_video_destroy(candidate);
-            mem_free(file_path);
             continue;
         }
         media = candidate;
-        selected_file_path = file_path;
+        selected_file_path.reset(file_path.release());
         break;
     }
     if (!media) return;
@@ -523,23 +519,22 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     {
         if (element->has_attribute("loop")) rdt_video_set_loop(media, true);
         if (element->has_attribute("muted")) rdt_video_set_muted(media, true);
-        block->embed->video = media;
+        block->embed->video = lam::own(media);
 
         if (is_video) {
             block->embed->has_controls = element->has_attribute("controls");
             const char* poster_src = element->get_attribute("poster");
             if (poster_src && *poster_src) {
-                block->embed->poster = load_image(lycon->ui_context, poster_src);
+                block->embed->poster = lam::up(load_image(lycon->ui_context, poster_src));
             }
         }
 
         if (element->has_attribute("autoplay")) {
-            if (preload_none) rdt_video_open_file(media, selected_file_path);
+            if (preload_none) rdt_video_open_file(media, selected_file_path.get());
             rdt_video_play(media);
             if (doc->state) doc->state->has_active_video = true;
         }
     }
-    mem_free(selected_file_path);
 }
 
 static DomElement* parent_table_element(DomNode* element) {
@@ -853,9 +848,9 @@ static void apply_html_q_quote_defaults(LayoutContext* lycon, DomElement* elemen
     for (int i = 0; i < 2; i++) {
         if (dom_element_get_pseudo_element_value(
                 element, CSS_PROPERTY_CONTENT, i + 1)) continue;
-        StyleTree** style_slot = element->pseudo_style_slot(kinds[i]);
+        lam::Own<StyleTree>* style_slot = element->pseudo_style_slot(kinds[i]);
         if (!style_slot) continue;
-        if (!*style_slot) *style_slot = style_tree_create(pool);
+        if (!*style_slot) *style_slot = lam::own(style_tree_create(pool));
         if (!*style_slot) continue;
         CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
         if (!value) continue;
@@ -1436,8 +1431,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->blk->box_sizing = CSS_VALUE_BORDER_BOX;
         // HTML Rendering gives buttons a normal line-height, preventing an
         // inherited author line-height from inflating their anonymous content box.
-        block->blk->line_height = css_value_create_keyword(
-            lycon->doc->view_tree->prop_pool, "normal");
+        block->blk->line_height = lam::shared(css_value_create_keyword(
+            lycon->doc->view_tree->prop_pool, "normal"));
         // Chrome UA: font-size 13.3333px, font-family Arial for form controls
         apply_html_form_control_font(lycon, block);
         apply_html_button_box_defaults(lycon, block);
@@ -1736,8 +1731,8 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt) {
         block->display.outer = CSS_VALUE_INLINE_BLOCK;
         block->ensure_block(lycon);
         // HTML form controls use their UA normal line-height unless authored CSS overrides it.
-        block->blk->line_height = css_value_create_keyword(
-            lycon->doc->view_tree->prop_pool, "normal");
+        block->blk->line_height = lam::shared(css_value_create_keyword(
+            lycon->doc->view_tree->prop_pool, "normal"));
         apply_html_textarea_font(lycon, block);
         // html rendering defaults textarea overflow to auto; baseline synthesis
         // needs the used overflow state, not only the serialized computed value.

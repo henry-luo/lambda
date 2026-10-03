@@ -732,8 +732,8 @@ static void layout_flex_absolute_children(LayoutContext* lycon, ViewBlock* conta
     AbsStaticContext ctx = {};
     ctx.kind = ABS_STATIC_FLEX;
     ctx.containing_block = layout_containing_block_for_view(container);
-    ctx.flex = container->embed && container->embedp()->flex
-        ? container->embedp()->flex : static_cast<FlexProp*>(lycon ? lycon->flex_container : nullptr);
+    ctx.flex = lam::up(container->embed && container->embedp()->flex
+        ? container->embedp()->flex : static_cast<FlexProp*>(lycon ? lycon->flex_container : nullptr));
     ctx.resolve_percent_against_content_box = true;
     ctx.prepare_child = layout_flex_abs_prepare_child;
     ctx.after_child = layout_flex_abs_after_child;
@@ -1069,7 +1069,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     } else if (flex_item->display.inner == CSS_VALUE_TABLE) {
         log_enter();
         assert(flex_item->table_prop());
-        lycon->view = flex_item;
+        lycon->view = lam::up(flex_item);
         layout_table_content(lycon, flex_item, flex_item->display);
         log_leave();
     } else if (flex_item->display.inner == RDT_DISPLAY_REPLACED) {
@@ -1105,7 +1105,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
                         if (!flex_item->embed) {
                             flex_item->ensure_embed(lycon);
                         }
-                        flex_item->embed->doc = doc;
+                        flex_item->embed->doc = lam::own(doc);
                         dom_document_set_embedding(doc, lycon->ui_context->document,
                                                    (DomElement*)flex_item);
                         if (doc->html_root) {

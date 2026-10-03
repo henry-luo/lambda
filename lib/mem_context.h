@@ -161,6 +161,11 @@ MemContext* mem_context_root(void);
 // groups allocators (typically per-document or per-pass) for bulk teardown.
 MemContext* mem_context_create(MemContext* parent, MemRole role, const char* label);
 
+// A process-wide context per role ("process.<role>") under the root, for
+// allocators that live for the whole process (caches, worker pools, exports),
+// so the root holds only contexts. Thread-safe; never destroyed.
+MemContext* mem_context_process(MemRole role);
+
 // Cascade-destroy: destroys all child contexts first, then this context's
 // owned allocators in reverse-birth (children-before-parent) order, invoking
 // each node's MemDestroyFn. Safe on NULL. Does nothing to the root.

@@ -49,7 +49,16 @@ class ArrayList {
 
 public:
     explicit ArrayList(MemCategory category = MEM_CAT_CONTAINER, size_t initial_capacity = 16)
-        : data_(nullptr), count_(0), capacity_(0), category_(category) {
+        : data_(nullptr), count_(0), capacity_(0), category_(category), pool_(nullptr) {
+        if (initial_capacity > 0) {
+            reserve(initial_capacity);
+        }
+    }
+
+    // Element storage from an ownership-tree node's pool (D4.1.5): the list is
+    // torn down with that node, and its growth is attributed to it.
+    explicit ArrayList(Pool* pool, size_t initial_capacity = 16)
+        : data_(nullptr), count_(0), capacity_(0), category_(MEM_CAT_CONTAINER), pool_(pool) {
         if (initial_capacity > 0) {
             reserve(initial_capacity);
         }
@@ -64,7 +73,7 @@ public:
 
     ArrayList(ArrayList&& other) noexcept
         : data_(other.data_), count_(other.count_), capacity_(other.capacity_),
-          category_(other.category_) {
+          category_(other.category_), pool_(other.pool_) {
         other.data_ = nullptr;
         other.count_ = 0;
         other.capacity_ = 0;
@@ -75,11 +84,12 @@ public:
             return *this;
         }
         clear();
-        mem_free(data_);
+        free_storage(data_);
         data_ = other.data_;
         count_ = other.count_;
         capacity_ = other.capacity_;
         category_ = other.category_;
+        pool_ = other.pool_;
         other.data_ = nullptr;
         other.count_ = 0;
         other.capacity_ = 0;
@@ -209,7 +219,7 @@ public:
     // Release element storage early while leaving this list reusable.
     void release() {
         clear();
-        mem_free(data_);
+        free_storage(data_);
         data_ = nullptr;
         capacity_ = 0;
     }
@@ -238,8 +248,18 @@ protected:
     size_t count_;
     size_t capacity_;
     MemCategory category_;
+    Pool* pool_;  // node pool backing the elements; null for memtracked storage
 
 private:
+    T* alloc_storage(size_t bytes) {
+        return (T*)(pool_ ? pool_alloc(pool_, bytes) : mem_alloc(bytes, category_));
+    }
+
+    void free_storage(T* storage) {
+        if (!storage) return;
+        if (pool_) pool_free(pool_, storage);
+        else mem_free(storage);
+    }
 
     void bounds_check(size_t index) const {
         if (index < count_) {
@@ -271,7 +291,7 @@ private:
             return false;
         }
 
-        T* new_data = (T*)mem_alloc(new_capacity * sizeof(T), category_);
+        T* new_data = alloc_storage(new_capacity * sizeof(T));
         if (!new_data) {
             log_error("arraylist_alloc_failed: capacity=%zu item_size=%zu",
                       new_capacity, sizeof(T));
@@ -282,7 +302,7 @@ private:
             new (&new_data[i]) T(data_[i]);
             data_[i].~T();
         }
-        mem_free(data_);
+        free_storage(data_);
         data_ = new_data;
         capacity_ = new_capacity;
         return true;

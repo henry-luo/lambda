@@ -20,6 +20,7 @@
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "network_integration.h"
 
 void fontface_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
@@ -69,14 +70,14 @@ char *fallback_fonts[] = {
 void ui_context_init_default_fonts(UiContext* uicon) {
     if (!uicon) return;
     // isolated SVG HTML uses the same UA defaults without inheriting page font styles.
-    uicon->default_font = (FontProp){default_font_times_new_roman, 16.0f,
+    uicon->default_font = (FontProp){lam::up(default_font_times_new_roman), 16.0f,
         1.0f, 0.0f, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->default_font.font_size_from_medium = true;
     uicon->default_font.text_deco_skip_ink = CSS_VALUE_AUTO;
     uicon->default_font.text_underline_position = CSS_VALUE_AUTO;
     uicon->default_font.text_underline_side = CSS_VALUE__UNDEF;
-    uicon->default_font.platform_fallback_family = default_font_times;
-    uicon->legacy_default_font = (FontProp){default_font_times, 16.0f,
+    uicon->default_font.platform_fallback_family = lam::up(default_font_times);
+    uicon->legacy_default_font = (FontProp){lam::up(default_font_times), 16.0f,
         1.0f, 0.0f, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     uicon->legacy_default_font.font_size_from_medium = true;
     uicon->legacy_default_font.text_deco_skip_ink = CSS_VALUE_AUTO;
@@ -382,21 +383,48 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
     }
 }
 
-static void destroy_dom_owned_embed_images(DomNode* node) {
-    if (!node || !node->is_element()) return;
-    DomElement* elem = node->as_element();
-    DomNode* child = elem->first_child;
-    while (child) {
-        destroy_dom_owned_embed_images(child);
-        child = child->next_sibling;
-    }
-
-    release_dom_owned_embed_images(elem);
-}
-
 void free_document(DomDocument* doc) {
     if (!doc) return;
+    // Every check that can refuse teardown runs before the first release, so a
+    // refused document stays whole and owned instead of half torn down (its
+    // Input and loader pool used to be detached and then dropped on return).
+    Runtime* timer_runtime = doc->js.runtime;
+    EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
+    Runtime* state_runtime = dom_document_script_runtime(doc);
+    EvalContext* state_owner = state_runtime
+        ? runtime_get_eval_context(state_runtime) : nullptr;
+    if (timer_owner && state_owner && timer_owner != state_owner) {
+        // One document cannot multiplex independent evaluators on one host
+        // thread. Such documents need a shared owner or separate worker.
+        log_error("free_document: Lambda and JS runtimes have different EvalContexts; document retained");
+        return;
+    }
+    EvalContext* document_owner = state_owner ? state_owner : timer_owner;
+    // EO5v2: another document may hold the thread (each manages its own
+    // EvalContext). Teardown is a quiescent point, so take the binding rather
+    // than refusing — refusing here used to leak the whole document.
+    if (document_owner && !radiant_eval_context_switch(document_owner)) {
+        log_error("free_document: could not bind the document EvalContext; document retained");
+        return;
+    }
+    // Timer handles live in the document capsule; teardown must not inspect
+    // another document's queue through an ambient host context. StateStore owns
+    // template/render maps attached to the state runtime; bind its canonical
+    // context until thread teardown, since nested cleanup cannot save and
+    // restore a different evaluator.
+    if ((timer_owner && js_runtime_state_for(timer_owner) && !js_runtime_state_init(timer_owner)) ||
+        (state_owner && (!eval_context_matches(state_owner) ||
+            (js_runtime_state_for(state_owner) && !js_runtime_state_init(state_owner))))) {
+        log_error("free_document: document runtime state unavailable; document retained");
+        return;
+    }
+
     radiant_cancel_async_document_loads(doc);
+    // Network image release detaches surfaces from element embed props, which
+    // live in the view tree's prop pool; run it while that pool is alive rather
+    // than from the document-resource destructor after the view tree is gone
+    // (teardown audit F3). The destructor then finds no manager.
+    radiant_cleanup_network_support(doc);
 
     Input* document_input = dom_document_take_owned_input_resources(doc);
     Pool* owned_loader_pool = doc->owned_loader_pool;
@@ -406,30 +434,6 @@ void free_document(DomDocument* doc) {
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
 
-    Runtime* timer_runtime = doc->js.runtime;
-    EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
-    Runtime* state_runtime = dom_document_script_runtime(doc);
-    EvalContext* state_owner = state_runtime
-        ? runtime_get_eval_context(state_runtime) : nullptr;
-    if (timer_owner && state_owner && timer_owner != state_owner) {
-        // One document cannot multiplex independent evaluators on one host
-        // thread. Such documents need a shared owner or separate worker.
-        log_error("free_document: Lambda and JS runtimes have different EvalContexts");
-        return;
-    }
-    EvalContext* document_owner = state_owner ? state_owner : timer_owner;
-    // EO5v2: another document may hold the thread (each manages its own
-    // EvalContext). Teardown is a quiescent point, so take the binding rather
-    // than refusing — refusing here used to leak the whole document.
-    if (document_owner && !radiant_eval_context_switch(document_owner)) {
-        log_error("free_document: could not bind the document EvalContext");
-        return;
-    }
-    if (timer_owner && js_runtime_state_for(timer_owner)) {
-        // Timer handles live in the document capsule; teardown must not inspect
-        // another document's queue through an ambient host context.
-        if (!js_runtime_state_init(timer_owner)) return;
-    }
     if (timer_owner && js_runtime_state_for(timer_owner)) {
         if (script_runner_js_batch_cleanup_unsafe()) {
             js_event_loop_abandon_document_timers(doc);
@@ -438,14 +442,6 @@ void free_document(DomDocument* doc) {
         }
     }
 
-    if (state_owner) {
-        // StateStore owns template/render maps attached to this runtime. Bind
-        // its canonical context until thread teardown; nested cleanup cannot
-        // save and restore a different evaluator.
-        if (!eval_context_matches(state_owner)) return;
-        if (js_runtime_state_for(state_owner) &&
-                !js_runtime_state_init(state_owner)) return;
-    }
     dom_retire_begin_destroy(doc);
     radiant_document_destroy_state(doc);
 
@@ -461,11 +457,16 @@ void free_document(DomDocument* doc) {
         dom_lifecycle_release_all_form_props(doc);
     }
 
-    destroy_dom_owned_embed_images((DomNode*)doc->root);
-
     // State teardown releases context-owned maps, so the retained JS runtime
     // can be destroyed only after the document has detached those references.
     script_runner_cleanup_js_state(doc);
+
+    // Embedded documents belong to their iframe elements. The view-tree walk
+    // below releases them only when the tree is laid out and reaches the
+    // iframe; walk the DOM first so a parent with no view tree, or one reset
+    // since its last layout, does not leak a child whose embedding edge would
+    // then dangle.
+    if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
 
     if (doc->view_tree) {
         // Some imported DOM/view fixtures alias the pools; the view-tree destroy path owns that shared pool.
@@ -473,9 +474,7 @@ void free_document(DomDocument* doc) {
             doc->document_pool = nullptr;  // Pool will be destroyed by view_pool_destroy
         }
 
-        view_pool_destroy(doc->view_tree);
-        mem_free(doc->view_tree);
-        doc->view_tree = nullptr;
+        view_tree_shell_destroy(doc->view_tree);
     }
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
@@ -487,17 +486,16 @@ void free_document(DomDocument* doc) {
         doc->url = nullptr;
     }
 
-    // A runtime this document created for UA behavior is released here, after
-    // every consumer above has finished with its EvalContext. Runtimes that came
-    // from a loader (a `.ls` page, a script-bearing page) are owned by that
-    // loader and must not be freed twice (ESO25).
+    // A runtime this document created for UA behavior is detached here and
+    // released after dom_document_destroy: document resources (custom-paint
+    // GC roots) unregister from its heap during that destroy. Runtimes that
+    // came from a loader (a `.ls` page, a script-bearing page) are owned by
+    // that loader and must not be freed twice (ESO25).
+    lam::Temp<Runtime> owned_runtime;
     if (doc->owns_script_runtime && doc->lambda_runtime) {
-        Runtime* owned = doc->lambda_runtime;
+        owned_runtime.reset(doc->lambda_runtime);
         doc->lambda_runtime = nullptr;
         doc->owns_script_runtime = false;
-        runtime_cleanup(owned);
-        mem_free(owned);
-        log_debug("free_document: released the document-owned script runtime");
     }
 
     // The Input context owns parser arenas outside the loader pool. Release it
@@ -505,6 +503,10 @@ void free_document(DomDocument* doc) {
     // foreign document borrows its creator's Input, which remains live.
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
+    if (owned_runtime) {
+        runtime_cleanup(owned_runtime.get());
+        log_debug("free_document: released the document-owned script runtime");
+    }
     if (document_input) input_release_document_resources(document_input);
     if (owned_loader_pool) mem_pool_destroy(owned_loader_pool);
 }

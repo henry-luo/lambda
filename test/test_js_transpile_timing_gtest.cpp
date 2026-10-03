@@ -76,7 +76,7 @@ std::string run_with_timing(const char* path) {
     setenv("JS_TRANSPILE_TIMING", "1", 1);
     // D8.1.3v19 makes unset/AUTO intentionally bypass whole-module MIR.
     // This suite measures the explicit MIR pipeline, not selector policy.
-    setenv("JS_EXECUTION_BACKEND", "mir", 1);
+    setenv("JS_EXEC_BACKEND", "mir", 1);
 
     char command[1024];
 #ifdef _WIN32

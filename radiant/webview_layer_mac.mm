@@ -318,10 +318,7 @@ bool webview_layer_platform_snapshot(WebViewHandle* handle, ImageSurface* surfac
                 int target_pitch = target_w * 4;
 
                 if (surface->width != target_w || surface->height != target_h || !surface->pixels) {
-                    if (surface->pixels) {
-                        mem_free(surface->pixels);
-                    }
-                    surface->pixels = mem_calloc(target_pitch * target_h, 1, MEM_CAT_LAYOUT);
+                    image_surface_adopt_pixels(surface, mem_calloc(target_pitch * target_h, 1, MEM_CAT_LAYOUT));
                     surface->width = target_w;
                     surface->height = target_h;
                     surface->pitch = target_pitch;

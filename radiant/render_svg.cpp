@@ -82,7 +82,7 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
 
     PaintSvgLoweringOptions options = {};
     options.indent_level = ctx->indent_level;
-    options.caps = render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
+    options.caps = lam::up(render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG));
     options.resource_id_base = ctx->paint_resource_id;
     ctx->paint_svg_state.indent_level = ctx->indent_level;
     PaintSvgLoweringStats stats = {};
@@ -212,8 +212,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     NEXT_RECT:
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
-    char* text_content = render_text_create_export_segment(
-        str, text_rect, text_transform, true);
+    lam::Temp<char> text_content(render_text_create_export_segment(
+        str, text_rect, text_transform, true));
 
     // Calculate natural text width and gap count for justify rendering.
     // NOTE: includes trailing spaces. The layout's count_justify_opportunities
@@ -224,9 +224,9 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     float natural_width = 0.0f;
     int space_count = 0;
     if (font_box_handle(&ctx->font)) {
-        size_t content_len = strlen(text_content);
+        size_t content_len = strlen(text_content.get());
 
-        unsigned char* scan = (unsigned char*)text_content;
+        unsigned char* scan = (unsigned char*)text_content.get();
         unsigned char* content_end = scan + content_len;
         while (scan < content_end) {  // Only scan up to content_end
             if (is_space(*scan)) {
@@ -305,16 +305,16 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     if (!has_text_deco && !has_text_shadow) {
         PaintGlyphRun run = {};
-        run.font = &ctx->font;
+        run.font = lam::up(&ctx->font);
         run.color = ctx->color;
-        run.text = text_content;
-        run.text_len = (int)strlen(text_content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+        run.text = text_content.get();
+        run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.
-        run.owns_text = ctx->effect_fallback.active;
-        run.font_family = font_box_handle(&ctx->font)
+        if (ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
+        run.font_family = lam::up(font_box_handle(&ctx->font)
             ? font_handle_get_family_name(font_box_handle(&ctx->font))
-            : "Arial";
+            : "Arial");
         run.font_size = font_size;
         run.x = x;
         run.baseline_y = baseline_y;
@@ -325,18 +325,17 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         paint_glyph_run(svg_active_paint_list(ctx), &run);
         svg_lower_paint_list(ctx);
 
-        svg_render_text_emphasis_marks(ctx, text_content, x, y,
+        // run.text stays valid here: text_content, or the command's owned copy
+        svg_render_text_emphasis_marks(ctx, run.text, x, y,
                                        font_size, word_spacing, cjk_spacing);
-
-        if (!run.owns_text) mem_free(text_content);
         text_rect = text_rect->next;
         if (text_rect) { goto NEXT_RECT; }
         return;
     }
 
-    size_t transformed_len = strlen(text_content);
+    size_t transformed_len = strlen(text_content.get());
     StrBuf* escaped_text = strbuf_new_cap(transformed_len * 2);
-    escape_append(escaped_text, text_content, transformed_len, ESCAPE_RULES_HTML_TEXT,
+    escape_append(escaped_text, text_content.get(), transformed_len, ESCAPE_RULES_HTML_TEXT,
                   ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
 
     svg_indent(ctx);
@@ -365,8 +364,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (word_spacing > 0.01f) {
         strbuf_append_format(ctx->svg_content, " word-spacing=\"%.2f\"", word_spacing);
     }
-    paint_svg_append_cjk_dx(ctx->svg_content, text_content,
-                            (int)strlen(text_content), cjk_spacing); // INT_CAST_OK: export segment byte length is bounded by TextRect input.
+    paint_svg_append_cjk_dx(ctx->svg_content, text_content.get(),
+                            (int)strlen(text_content.get()), cjk_spacing); // INT_CAST_OK: export segment byte length is bounded by TextRect input.
 
     // Keep decoration and shadow in one style attribute so both survive SVG parsing.
     if (has_text_deco || has_text_shadow) {
@@ -429,10 +428,10 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
 
-    svg_render_text_emphasis_marks(ctx, text_content, x, y,
+    svg_render_text_emphasis_marks(ctx, text_content.get(), x, y,
                                    font_size, word_spacing, cjk_spacing);
 
-    mem_free(text_content);  strbuf_free(escaped_text);
+    text_content.reset();  strbuf_free(escaped_text);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -1057,7 +1056,7 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
                               initial_paint.stroke_width, ctx->ui_context);
-    subscene.id_scope = render_svg_reference_scope(dom_elem);
+    subscene.id_scope = lam::up(render_svg_reference_scope(dom_elem));
     paint_svg_subscene(svg_active_paint_list(ctx), &subscene);
     svg_lower_paint_list(ctx);
     if (font) ctx->font = *font;
@@ -1217,11 +1216,11 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
-    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    MarkerProp* marker_prop = elem->marker_prop();
     if (!marker_prop) return;
     if (marker_prop->has_color) color = marker_prop->color;
     FontBox marker_font_box = elem->font
-        ? FontBox{elem->font, font_prop_used_size(elem->font)} : *font;
+        ? FontBox{lam::up(elem->font), font_prop_used_size(elem->font)} : *font;
     font = &marker_font_box;
 
     float x = abs_x + marker->x;
@@ -1424,7 +1423,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     ctx.ui_context = uicon;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg.backdrop.arena");
+    ctx.page_backdrop_arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.svg.backdrop.arena");
     if (ctx.page_backdrop_arena) {
         dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
         ctx.page_backdrop_ready = true;
@@ -1438,7 +1437,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     ctx.block.x = 0; ctx.block.y = 0;
 
     // Initialize font from default
-    ctx.font.style = &uicon->default_font;
+    ctx.font.style = lam::up(&uicon->default_font);
 
     // SVG header
     strbuf_append_format(ctx.svg_content,
@@ -1450,12 +1449,9 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     ctx.indent_level++;
 
     // Add background
-    Color white = {};
-    white.r = 255;
-    white.g = 255;
-    white.b = 255;
-    white.a = 255;
-    paint_fill_rect(&ctx.paint_list, 0.0f, 0.0f, width, height, white);
+    // the document canvas includes propagated root/body paint even when its layout box is empty.
+    Color background = render_document_output_background(root_view);
+    paint_fill_rect(&ctx.paint_list, 0.0f, 0.0f, width, height, background);
     svg_lower_paint_list(&ctx);
 
     // Render the root view via shared tree walker
@@ -1465,7 +1461,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     walk_state.y = 0;
     walk_state.font = ctx.font;
     walk_state.color = ctx.color;
-    walk_state.ui_context = uicon;
+    walk_state.ui_context = lam::up(uicon);
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
         render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
@@ -1482,9 +1478,9 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     strbuf_append_str(ctx.svg_content, "</svg>\n");
 
     RenderPathTrace trace = {};
-    trace.target = "svg";
-    trace.replay_mode = "paint_ir_svg";
-    trace.backend_name = "svg_export";
+    trace.target = lam::up("svg");
+    trace.replay_mode = lam::up("paint_ir_svg");
+    trace.backend_name = lam::up("svg_export");
     trace.display_list_recorded = false;
     trace.paint_ir_enabled = true;
     trace.surface_width = width;
@@ -1537,15 +1533,12 @@ static int render_export_session_to_svg(RenderExportSession* session, const char
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
         // only the outer dimensions scale; the viewBox retains CSS coordinates for every subscene.
-        char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
-            (float)session->content_width, (float)session->content_height, doc->state, session->output_scale);
+        lam::Temp<char> svg_content(render_view_tree_to_svg(ui_context, doc->view_tree->root,
+            (float)session->content_width, (float)session->content_height, doc->state, session->output_scale));
         if (svg_content) {
-            if (save_svg_to_file(svg_content, svg_file)) {
+            if (save_svg_to_file(svg_content.get(), svg_file)) {
                 log_info("Successfully rendered HTML to SVG: %s", svg_file);
-                mem_free(svg_content);
                 return 0;
-            } else {
-                mem_free(svg_content);
             }
         } else {
         }

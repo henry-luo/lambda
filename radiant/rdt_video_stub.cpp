@@ -4,6 +4,7 @@
 // On Windows: rdt_video_mf.cpp (Media Foundation) — not yet implemented, using stubs
 
 #include "rdt_video.h"
+#include "../lib/ownership.hpp"
 #include "../lib/memtrack.h"
 
 struct RdtVideo {
@@ -20,7 +21,7 @@ RdtVideo* rdt_video_create(const RdtVideoCallbacks* cb, void* userdata) {
 }
 
 void rdt_video_destroy(RdtVideo* video) {
-    mem_free(video);
+    lam::Temp<RdtVideo> owned(video);
 }
 
 int rdt_video_open_file(RdtVideo* video, const char* file_path) {

@@ -60,9 +60,7 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon, ScratchMark* 
             snapshot->form_intrinsic_width = element->form->intrinsic_width;
             snapshot->form_intrinsic_height = element->form->intrinsic_height;
         }
-        // ::marker shares blk with MarkerProp, so it has no BlockProp state to restore.
-        snapshot->has_block_prop = element->blk != nullptr &&
-            !view_element_uses_marker_prop(element);
+        snapshot->has_block_prop = element->blk != nullptr;
         if (snapshot->has_block_prop) {
             snapshot->block_given_width = element->block()->given_width;
             snapshot->block_given_height = element->block()->given_height;
@@ -163,12 +161,12 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
     saved_run_mode = lycon->run_mode;
     saved_sizing_mode = lycon->sizing_mode;
     saved_available_space = lycon->available_space;
-    saved_views = arraylist_new(8);
+    saved_views = lam::up(arraylist_new(8));
     snapshot_scope = scratch_scope_begin(&lycon->scratch);
     layout_measure_snapshot_append(lycon, &snapshot_scope, saved_views, measure_elmt);
 
     lycon->run_mode = RunMode::ComputeSize;
-    lycon->elmt = measure_elmt;
+    lycon->elmt = lam::up(measure_elmt);
 }
 
 LayoutMeasureScope::~LayoutMeasureScope() {
@@ -177,7 +175,7 @@ LayoutMeasureScope::~LayoutMeasureScope() {
     lycon->block = saved_block;
     lycon->line = saved_line;
     lycon->font = saved_font;
-    lycon->elmt = saved_elmt;
+    lycon->elmt = lam::up(saved_elmt);
     lycon->run_mode = saved_run_mode;
     lycon->sizing_mode = saved_sizing_mode;
     lycon->available_space = saved_available_space;
@@ -275,7 +273,7 @@ LayoutCache* layout_pass_ensure_cache(::LayoutContext* lycon, ::DomElement* elem
             uint32_t generation = lycon->doc && lycon->doc->view_tree
                 ? lycon->doc->view_tree->layout_generation : 0;
             layout_cache_init(cache, generation);
-            element->layout_cache = cache;
+            element->layout_cache = lam::own(cache);
             if (element->doc) element->doc->services.layout_cache_allocations++;
         }
     }

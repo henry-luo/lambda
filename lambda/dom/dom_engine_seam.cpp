@@ -56,6 +56,9 @@ DOM_ENGINE_WEAK void* dom_engine_subtree_element_from_point(DomElement* root, fl
 DOM_ENGINE_WEAK void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail) {
     (void)target; (void)type; (void)bubbles; (void)detail;
 }
+DOM_ENGINE_WEAK void dom_engine_svg_timing_key(DomElement* target, const char* key) {
+    (void)target; (void)key;
+}
 DOM_ENGINE_WEAK bool dom_engine_layout_active(DomDocument* d) { (void)d; return false; }
 DOM_ENGINE_WEAK void dom_engine_sync_pseudo_state(void* v, uint32_t f, bool set) {
     (void)v; (void)f; (void)set;

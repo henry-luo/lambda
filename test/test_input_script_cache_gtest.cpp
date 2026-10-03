@@ -248,7 +248,7 @@ TEST(InputScriptCacheTest, PrebuildSharedImportClosureCompletesWithoutRegistryDe
     const char* lambda_exe = "./lambda.exe";
     const char* args[] = {lambda_exe, root_path, NULL};
     const ShellEnvEntry env[] = {
-        {"LAMBDA_TIER", "auto"},
+        {"LAMBDA_EXEC_BACKEND", "auto"},
         {"LAMBDA_MODULE_AST_THREADS", "2"},
         {NULL, NULL},
     };

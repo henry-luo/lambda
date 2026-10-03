@@ -1,6 +1,6 @@
 # Typed Lambda performance audit — 2026-10-03
 
-**Status:** the first tuning round (§10–§12) is complete. The follow-up P0–P5 scope (§13) is implemented; final validation is in progress (§14). Strict interpreter selection and untyped Queens support were fixed before these tuning rounds (§6/§9). Performance comparisons use **pinned MIR (`LAMBDA_TIER=jit`)**, with separate strict pure-T0 evidence. No AUTO timings enter these comparisons.
+**Status:** the first tuning round (§10–§12) is complete. The follow-up P0–P5 scope (§13) is implemented; final validation is in progress (§14). Strict interpreter selection and untyped Queens support were fixed before these tuning rounds (§6/§9). Performance comparisons use **pinned MIR (`LAMBDA_EXEC_BACKEND=jit`)**, with separate strict pure-T0 evidence. No AUTO timings enter these comparisons.
 
 **Follow-up implementation, 2026-10-03:** the P0–P5 changes proposed in §13 are implemented in source (§14). Final correctness and repeated release performance validation are in progress. §13 also corrects the earlier interpretation of MIR root counters: the old counter instrumentation introduced extra safepoints (§13.1). The uninstrumented timings remain valid.
 

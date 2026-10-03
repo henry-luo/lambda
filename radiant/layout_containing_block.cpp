@@ -121,7 +121,7 @@ int layout_count_flattened_item_nodes(ViewBlock* container, bool include_text) {
 
 LayoutContainingBlock layout_containing_block_for_view(ViewBlock* block) {
     LayoutContainingBlock cb = {};
-    cb.view = block;
+    cb.view = lam::up(block);
     if (!block) return cb;
 
     BoxMetrics box = layout_box_metrics(block);

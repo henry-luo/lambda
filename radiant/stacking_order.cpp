@@ -147,13 +147,13 @@ RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block
     }
     int total = child_count + paint->layer_count;
     if (total <= 0) return list;
-    list.entries = (RadiantStackPaintEntry*)mem_calloc(
-        (size_t)total, sizeof(RadiantStackPaintEntry), MEM_CAT_RENDER);
+    list.entries = lam::own_arr((RadiantStackPaintEntry*)mem_calloc(
+        (size_t)total, sizeof(RadiantStackPaintEntry), MEM_CAT_RENDER));
     if (!list.entries) return list;
 
     for (int i = 0; i < paint->layer_count; i++) {
         RadiantStackPaintEntry* entry = &list.entries[list.count++];
-        entry->layer = &paint->layers[i];
+        entry->layer = lam::up(&paint->layers[i]);
         entry->z = paint->layers[i].z;
         entry->order = paint->layers[i].order;
         entry->is_generated_layer = true;
@@ -165,7 +165,7 @@ RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block
             continue;
         }
         RadiantStackPaintEntry* entry = &list.entries[list.count++];
-        entry->view = child;
+        entry->view = lam::up(child);
         entry->z = radiant_stack_view_z_index(child);
         entry->order = child_order++;
         entry->is_generated_layer = false;
@@ -185,7 +185,6 @@ RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block
 
 void radiant_stack_free_custom_layout_paint(RadiantStackPaintList* list) {
     if (!list) return;
-    if (list->entries) mem_free(list->entries);
-    list->entries = nullptr;
+    lam::free_owned(list->entries);
     list->count = 0;
 }

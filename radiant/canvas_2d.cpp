@@ -69,8 +69,12 @@ struct CanvasEntry {
     CanvasEntry* next;
 };
 
+// The registry and its entries live in one pool under the document's memory
+// context; per-entry drawing stacks (saved states, clips) stay Temp-managed.
 struct CanvasRegistry {
     CanvasEntry* entries;
+    lam::Own<Pool> pool;  // holds this registry and its entries
+    lam::Up<DomDocument> document;
 };
 
 static Color canvas_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -97,7 +101,7 @@ static CanvasState canvas_initial_state(void) {
 
 static void canvas_state_destroy(CanvasState* state) {
     if (!state) return;
-    if (state->font) mem_free(state->font);
+    lam::Temp<char> font(state->font);  // the state releases its font text
     state->font = nullptr;
 }
 
@@ -106,7 +110,7 @@ static bool canvas_state_set_font(CanvasState* state, const char* font, int font
         font_len >= RADIANT_CANVAS_FONT_TEXT_MAX) return false;
     char* copy = mem_dup_n(font, (size_t)font_len, MEM_CAT_LAYOUT);
     if (!copy) return false;
-    if (state->font) mem_free(state->font);
+    lam::Temp<char> previous(state->font);  // the copy takes the slot
     state->font = copy;
     return true;
 }
@@ -123,9 +127,9 @@ static void canvas_free_saved_states(CanvasEntry* entry) {
     if (!entry) return;
     CanvasSavedState* saved = entry->saved_states;
     while (saved) {
+        lam::Temp<CanvasSavedState> owned(saved);  // the entry releases its saved states
         CanvasSavedState* next = saved->next;
         canvas_state_destroy(&saved->state);
-        mem_free(saved);
         saved = next;
     }
     entry->saved_states = nullptr;
@@ -135,9 +139,9 @@ static void canvas_free_clips(CanvasEntry* entry) {
     if (!entry) return;
     CanvasClip* clip = entry->clips;
     while (clip) {
+        lam::Temp<CanvasClip> owned(clip);  // the entry releases its clips
         CanvasClip* next = clip->next;
         if (clip->path) rdt_path_free(clip->path);
-        mem_free(clip);
         clip = next;
     }
     entry->clips = nullptr;
@@ -147,10 +151,9 @@ static void canvas_free_clips(CanvasEntry* entry) {
 static void canvas_pop_clips_to_depth(CanvasEntry* entry, int depth) {
     if (!entry) return;
     while (entry->clips && entry->clip_depth > depth) {
-        CanvasClip* clip = entry->clips;
+        lam::Temp<CanvasClip> clip(entry->clips);  // popped clips are released
         entry->clips = clip->next;
         if (clip->path) rdt_path_free(clip->path);
-        mem_free(clip);
         entry->clip_depth--;
     }
 }
@@ -167,26 +170,27 @@ static void canvas_reset_state(CanvasEntry* entry) {
     entry->state = canvas_initial_state();
 }
 
-static void canvas_entry_destroy(CanvasEntry* entry) {
+// Releases what the entry owns; its storage belongs to the registry pool.
+static void canvas_entry_release(CanvasEntry* entry) {
     if (!entry) return;
     canvas_free_saved_states(entry);
     canvas_free_clips(entry);
     if (entry->path) rdt_path_free(entry->path);
     canvas_state_destroy(&entry->state);
     if (entry->surface) image_surface_destroy(entry->surface);
-    mem_free(entry);
 }
 
 static void canvas_registry_destroy(void* data) {
+    // the document resource hands its registry over for teardown
     CanvasRegistry* registry = (CanvasRegistry*)data;
     if (!registry) return;
-    CanvasEntry* entry = registry->entries;
-    while (entry) {
-        CanvasEntry* next = entry->next;
-        canvas_entry_destroy(entry);
-        entry = next;
+    for (CanvasEntry* entry = registry->entries; entry; entry = entry->next) {
+        canvas_entry_release(entry);
     }
-    mem_free(registry);
+    // later resource destructors must not reach the freed registry (teardown audit F5)
+    registry->document->services.canvas_registry = nullptr;
+    // the registry itself lives in this pool
+    mem_pool_destroy(registry->pool);
 }
 
 static CanvasRegistry* canvas_registry_for_document(DomDocument* document,
@@ -195,10 +199,17 @@ static CanvasRegistry* canvas_registry_for_document(DomDocument* document,
     CanvasRegistry* registry = (CanvasRegistry*)document->services.canvas_registry;
     if (registry || !create) return registry;
     // the document takes ownership once its resource hook is registered
-    lam::Temp<CanvasRegistry> owned = lam::temp_array_zero<CanvasRegistry>(1, MEM_CAT_LAYOUT);
-    if (!owned) return nullptr;
-    if (!dom_document_add_resource(document, owned.get(), canvas_registry_destroy)) return nullptr;
-    registry = owned.release();
+    MemContext* context = (MemContext*)document->services.mem_ctx;
+    Pool* pool = mem_pool_create(context ? context : mem_context_process(MEM_ROLE_RENDER),
+                                 MEM_ROLE_RENDER, "canvas.registry");
+    if (!pool) return nullptr;
+    registry = (CanvasRegistry*)pool_calloc(pool, sizeof(CanvasRegistry));
+    if (!registry || !dom_document_add_resource(document, registry, canvas_registry_destroy)) {
+        mem_pool_destroy(pool);
+        return nullptr;
+    }
+    registry->pool = lam::own(pool);
+    registry->document = lam::up(document);
     document->services.canvas_registry = registry;
     return registry;
 }
@@ -254,13 +265,14 @@ static CanvasEntry* canvas_entry_for_element(DomElement* element, bool create) {
     CanvasEntry* entry = canvas_find_entry(registry, element);
     if (entry || !create || !registry) return entry;
 
-    entry = (CanvasEntry*)mem_calloc(1, sizeof(CanvasEntry), MEM_CAT_LAYOUT);
+    entry = (CanvasEntry*)pool_calloc(registry->pool, sizeof(CanvasEntry));
     if (!entry) return nullptr;
     entry->element = element;
     int width = canvas_attribute_dimension(element, "width", 300);
     int height = canvas_attribute_dimension(element, "height", 150);
     if (!canvas_replace_surface(entry, width, height)) {
-        canvas_entry_destroy(entry);
+        canvas_entry_release(entry);
+        pool_free(registry->pool, entry);
         return nullptr;
     }
     entry->next = registry->entries;
@@ -481,14 +493,13 @@ extern "C" bool radiant_canvas_save(void* canvas_element) {
 extern "C" bool radiant_canvas_restore(void* canvas_element) {
     CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
     if (!entry) return false;
-    CanvasSavedState* saved = entry->saved_states;
-    if (!saved) return true;
+    if (!entry->saved_states) return true;
+    lam::Temp<CanvasSavedState> saved(entry->saved_states);  // the popped state is released
     canvas_state_destroy(&entry->state);
     entry->state = saved->state;
     saved->state.font = nullptr;
     canvas_pop_clips_to_depth(entry, saved->clip_depth);
     entry->saved_states = saved->next;
-    mem_free(saved);
     return true;
 }
 

@@ -384,23 +384,18 @@ static void image_surface_apply_orientation_metadata(ImageSurface* surface, int 
     }
 }
 
-static void image_cache_store_unavailable(UiContext* uicon, char* file_path) {
-    if (!file_path) return;
-    if (!uicon || !uicon->image_cache) {
-        mem_free(file_path);
-        return;
-    }
+// Takes the path; the image cache keeps it as the key of an unavailable entry.
+static void image_cache_store_unavailable(UiContext* uicon, lam::Temp<char> file_path) {
+    if (!file_path || !uicon || !uicon->image_cache) return;
     // Cache the failed URL for this document so repeated intrinsic-size probes
     // do not retry a synchronous network fetch that already failed.
-    ImageEntry entry = {.path = file_path, .image = nullptr, .unavailable = true};
+    ImageEntry entry = {.path = file_path.release(), .image = nullptr, .unavailable = true};
     ImageMap::set(uicon->image_cache, entry);
 }
 
-static void load_image_cleanup_failed(UiContext* uicon, Url* abs_url, char* file_path,
-                                      unsigned char* downloaded_data) {
-    if (downloaded_data) mem_free(downloaded_data);
+static void load_image_cleanup_failed(UiContext* uicon, Url* abs_url, lam::Temp<char>& file_path) {
     if (abs_url) url_destroy(abs_url);
-    image_cache_store_unavailable(uicon, file_path);
+    image_cache_store_unavailable(uicon, lam::Temp<char>(file_path.release()));
 }
 
 ImageSurface* image_surface_decode_file(const char* path) {
@@ -465,6 +460,28 @@ uint64_t image_cache_resource_generation(UiContext* ui) {
     return hash;
 }
 
+ImageSurface* image_cache_adopt(UiContext* uicon, const char* key, ImageSurface* surface) {
+    if (!surface) return nullptr;
+    if (!uicon || !key) { image_surface_destroy(surface); return nullptr; }
+    if (!uicon->image_cache) uicon->image_cache = ImageMap::create(10);
+    ImageEntry search_key = {.path = (char*)key, .image = NULL};
+    ImageEntry* entry = uicon->image_cache ? ImageMap::get(uicon->image_cache, search_key) : nullptr;
+    if (entry && entry->image) {
+        if (entry->image != surface) image_surface_destroy(surface);
+        return entry->image;
+    }
+    if (entry) {
+        // an earlier failed probe of this file left an unavailable entry
+        entry->image = surface; entry->unavailable = false;  // RETAINED_FIELD_OK: image-cache entry, not a retained DOM field
+        return surface;
+    }
+    lam::Temp<char> path(mem_strdup(key, MEM_CAT_RENDER));
+    if (!path || !uicon->image_cache) { image_surface_destroy(surface); return nullptr; }
+    ImageEntry new_entry = {.path = path.release(), .image = surface};
+    ImageMap::set(uicon->image_cache, new_entry);
+    return surface;
+}
+
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (!uicon || !img_url || !uicon->document) return nullptr;
     bool data_uri = strncmp(img_url, "data:", 5) == 0;
@@ -509,18 +526,18 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
 
         size_t decoded_len = 0;
-        uint8_t* decoded = NULL;
+        lam::Temp<uint8_t> decoded;
         if (is_base64) {
-            decoded = base64_decode(comma + 1, 0, &decoded_len);
+            decoded.reset(base64_decode(comma + 1, 0, &decoded_len));
         } else {
             // URL-encoded (percent-encoded) data URI
             const char* data_str = comma + 1;
             size_t data_str_len = strlen(data_str);
-            decoded = (uint8_t*)url_decode_component(data_str, data_str_len, &decoded_len);
+            decoded.reset((uint8_t*)url_decode_component(data_str, data_str_len, &decoded_len));
             if (!decoded) {
                 // WPT and browser data URIs may contain literal '%' characters;
                 // keep the payload path available without weakening URL decoding.
-                decoded = parse_data_uri(img_url, nullptr, 0, &decoded_len);
+                decoded.reset(parse_data_uri(img_url, nullptr, 0, &decoded_len));
             }
         }
         if (!decoded || decoded_len == 0) {
@@ -528,37 +545,34 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             return NULL;
         }
         // Detect format from MIME type or content
-        bool is_svg = image_content_is_svg(decoded, decoded_len);
+        bool is_svg = image_content_is_svg(decoded.get(), decoded_len);
         ImageSurface* surface;
         GifFrames* inline_frames = nullptr;
         if (is_svg) {
             SvgImageIntrinsicMetadata svg_meta =
-                svg_read_intrinsic_metadata_in_memory((const char*)decoded, decoded_len);
+                svg_read_intrinsic_metadata_in_memory((const char*)decoded.get(), decoded_len);
             surface = image_surface_alloc();
             surface->format = IMAGE_FORMAT_SVG;
-            surface->pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
+            surface->pic = lam::counted(rdt_picture_load_data((const char*)decoded.get(), (int)decoded_len, "svg"));
             if (!surface->pic) {
-                mem_free(decoded);
                 image_surface_destroy(surface);
                 return NULL;
             }
             float svg_w, svg_h;
             rdt_picture_get_size(surface->pic, &svg_w, &svg_h);
             image_surface_apply_svg_metadata(surface, svg_meta, svg_w, svg_h);
-            mem_free(decoded);
         } else {
             int width, height;
-            int orientation = jpeg_exif_orientation_from_memory(decoded, decoded_len);
-            if (!image_get_dimensions_from_memory(decoded, decoded_len, &width, &height)) {
+            int orientation = jpeg_exif_orientation_from_memory(decoded.get(), decoded_len);
+            if (!image_get_dimensions_from_memory(decoded.get(), decoded_len, &width, &height)) {
                 // Invalid inline payloads are common in scraped pages; probe
                 // before full decode so placeholders do not emit backend errors.
-                mem_free(decoded);
                 log_warn("image: unsupported data URI image, using placeholder");
                 return NULL;
             }
-            surface = image_surface_decode_data(decoded, decoded_len);
-            if (surface) inline_frames = gif_detect_animated_from_memory(decoded, decoded_len);
-            mem_free(decoded);
+            surface = image_surface_decode_data(decoded.get(), decoded_len);
+            if (surface) inline_frames = gif_detect_animated_from_memory(decoded.get(), decoded_len);
+            decoded.reset();
             if (!surface) {
                 log_warn("image: unsupported data URI image, using placeholder");
                 return NULL;
@@ -583,7 +597,6 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
         // Inline image surfaces used to escape the shared cache, so shutdown
         // had no owner to release their decoded pixels.
-        surface->cache_owned = true;
         ImageEntry new_entry = {.path = (char*)cache_path, .image = surface};
         ImageMap::set(uicon->image_cache, new_entry);
         svg_image_animation_register(uicon, surface);
@@ -591,7 +604,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         return surface;
     }
     const char* resolved_img_url = img_url;
-    char* local_file_url = nullptr;
+    lam::Temp<char> local_file_url;
     if (file_exists(img_url)) {
         char abs_path[4096];
 #ifdef _WIN32
@@ -613,13 +626,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (abs_path[0]) {
             // Cached network resources are local files even when the document
             // base URL is HTTP, so resolve them as file URLs.
-            local_file_url = url_from_local_path(abs_path);
-            if (local_file_url) resolved_img_url = local_file_url;
+            local_file_url.reset(url_from_local_path(abs_path));
+            if (local_file_url) resolved_img_url = local_file_url.get();
         }
     }
 
     Url* abs_url = parse_url(uicon->document->url, resolved_img_url);
-    if (local_file_url) mem_free(local_file_url);
+    local_file_url.reset();
     if (!abs_url) {
         log_error("Failed to parse URL: %s", img_url);
         return NULL;
@@ -627,8 +640,8 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
     // Check if this is an HTTP URL
     bool is_http = (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS);
-    char* file_path = nullptr;
-    unsigned char* downloaded_data = nullptr;
+    lam::Temp<char> file_path;
+    lam::Temp<unsigned char> downloaded_data;
     size_t downloaded_size = 0;
 
     if (is_http) {
@@ -637,17 +650,15 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         // consume those bytes without admitting a new synchronous transfer.
         if (uicon->document->resource_manager) {
             const char* url_str = url_get_href(abs_url);
-            downloaded_data = (unsigned char*)resource_manager_copy_ready_resource_content(
-                uicon->document->resource_manager, url_str, &downloaded_size);
+            downloaded_data.reset((unsigned char*)resource_manager_copy_ready_resource_content(
+                uicon->document->resource_manager, url_str, &downloaded_size));
             if (!downloaded_data || downloaded_size == 0) {
                 log_debug("[image] Network image not ready without blocking: %s", url_str);
-                if (downloaded_data) mem_free(downloaded_data);
                 url_destroy(abs_url);
                 return NULL;
             }
-            file_path = mem_strdup(url_str, MEM_CAT_RENDER);
+            file_path.reset(mem_strdup(url_str, MEM_CAT_RENDER));
             if (!file_path) {
-                mem_free(downloaded_data);
                 url_destroy(abs_url);
                 return NULL;
             }
@@ -655,90 +666,81 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         } else {
             // Download the image from HTTP URL
             const char* url_str = url_get_href(abs_url);
-            file_path = mem_strdup(url_str, MEM_CAT_RENDER);
+            file_path.reset(mem_strdup(url_str, MEM_CAT_RENDER));
             if (!file_path) {
                 url_destroy(abs_url);
                 return NULL;
             }
-            ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
+            ImageEntry search_key = {.path = file_path.get(), .image = NULL};
             ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
             if (entry) {
                 log_debug(entry->unavailable ? "Image unavailable from cache: %s"
-                                             : "Image loaded from cache: %s", file_path);
-                mem_free(file_path);
+                                             : "Image loaded from cache: %s", file_path.get());
                 url_destroy(abs_url);
                 return entry->image;
             }
             log_debug("[image] Downloading image from URL: %s", url_str);
-            downloaded_data = (unsigned char*)download_http_content(url_str, &downloaded_size, nullptr);
+            downloaded_data.reset((unsigned char*)download_http_content(url_str, &downloaded_size, nullptr));
             if (!downloaded_data || downloaded_size == 0) {
                 log_error("[image] Failed to download image: %s", url_str);
-                load_image_cleanup_failed(uicon, abs_url, file_path, downloaded_data);
+                load_image_cleanup_failed(uicon, abs_url, file_path);
                 return NULL;
             }
             log_debug("[image] Downloaded image: %zu bytes", downloaded_size);
         }
     } else {
-        file_path = url_to_local_path(abs_url);
+        file_path.reset(url_to_local_path(abs_url));
         if (!file_path) {
             log_error("Invalid local URL: %s", img_url);
             url_destroy(abs_url);
             return NULL;
         }
-        if (!file_exists(file_path)) {
+        if (!file_exists(file_path.get())) {
             char shared_path[4096];
             const char* doc_href = uicon->document ? url_get_href(uicon->document->url) : nullptr;
             if (radiant_resolve_shared_data_resource_path(img_url, doc_href,
                                                           shared_path, sizeof(shared_path))) {
                 char* shared_copy = mem_strdup(shared_path, MEM_CAT_RENDER);
-                if (shared_copy) {
-                    mem_free(file_path);
-                    file_path = shared_copy;
-                }
+                if (shared_copy) file_path.reset(shared_copy);
             }
         }
-        if (img_url[0] == '/' && img_url[1] != '/' && !file_exists(file_path)) {
+        if (img_url[0] == '/' && img_url[1] != '/' && !file_exists(file_path.get())) {
             // Local WPT runs emulate an HTTP server; URL-absolute resources are
             // rooted at the WPT tree, not at the host filesystem root.
             char* wpt_path = resolve_wpt_absolute_image_path(uicon, img_url);
             if (wpt_path) {
                 log_debug("[image] Resolved WPT absolute resource %s -> %s", img_url, wpt_path);
-                mem_free(file_path);
-                file_path = wpt_path;
+                file_path.reset(wpt_path);
             }
         }
     }
 
-    ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
+    ImageEntry search_key = {.path = file_path.get(), .image = NULL};
     ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
     if (entry) {
         log_debug(entry->unavailable ? "Image unavailable from cache: %s"
-                                     : "Image loaded from cache: %s", file_path);
-        // HTTP cache lookup normally happens before download; keep this cleanup
-        // for race/fallback paths so a cached surface never drops a fresh buffer.
-        if (downloaded_data) mem_free(downloaded_data);
-        mem_free(file_path);  // always malloc-owned: strdup for HTTP, url_to_local_path for local
+                                     : "Image loaded from cache: %s", file_path.get());
         url_destroy(abs_url);
         return entry->image;
     }
     else {
-        log_debug("Image not found in cache: %s", file_path);
+        log_debug("Image not found in cache: %s", file_path.get());
     }
 
     ImageSurface *surface;
-    int slen = strlen(file_path);
+    int slen = strlen(file_path.get());
     // load image data
-    log_debug("loading image at: %s", file_path);
+    log_debug("loading image at: %s", file_path.get());
 
     // Determine if this is an SVG - check content for HTTP, extension for local files
     bool is_svg = false;
     if (is_http && downloaded_data) {
-        is_svg = image_content_is_svg(downloaded_data, downloaded_size);
+        is_svg = image_content_is_svg(downloaded_data.get(), downloaded_size);
         log_debug("[image] HTTP image format detection: is_svg=%s", is_svg ? "yes" : "no");
     } else {
-        is_svg = (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0);
-        if (!is_svg && !image_path_has_declared_non_svg_extension(file_path)) {
-            FILE* svg_probe = fopen(file_path, "rb");
+        is_svg = (slen > 4 && strcmp(file_path.get() + slen - 4, ".svg") == 0);
+        if (!is_svg && !image_path_has_declared_non_svg_extension(file_path.get())) {
+            FILE* svg_probe = fopen(file_path.get(), "rb");
             if (svg_probe) {
                 unsigned char probe_buf[512];
                 size_t probe_size = fread(probe_buf, 1, sizeof(probe_buf), svg_probe);
@@ -752,19 +754,19 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 
     if (is_svg) {
         SvgImageIntrinsicMetadata svg_meta = is_http && downloaded_data
-            ? svg_read_intrinsic_metadata_in_memory((const char*)downloaded_data, downloaded_size)
-            : svg_read_intrinsic_metadata_in_file(file_path);
+            ? svg_read_intrinsic_metadata_in_memory((const char*)downloaded_data.get(), downloaded_size)
+            : svg_read_intrinsic_metadata_in_file(file_path.get());
         surface = image_surface_alloc();
         surface->format = IMAGE_FORMAT_SVG;
         if (is_http && downloaded_data) {
-            surface->pic = rdt_picture_load_data((const char*)downloaded_data, (int)downloaded_size, "svg");
+            surface->pic = lam::counted(rdt_picture_load_data((const char*)downloaded_data.get(), (int)downloaded_size, "svg"));
         } else {
-            surface->pic = rdt_picture_load(file_path);
+            surface->pic = lam::counted(rdt_picture_load(file_path.get()));
         }
         if (!surface->pic) {
-            log_debug("failed to load SVG image: %s", file_path);
+            log_debug("failed to load SVG image: %s", file_path.get());
             image_surface_destroy(surface);
-            load_image_cleanup_failed(uicon, abs_url, file_path, downloaded_data);
+            load_image_cleanup_failed(uicon, abs_url, file_path);
             return NULL;
         }
         float svg_w, svg_h;
@@ -772,11 +774,10 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         image_surface_apply_svg_metadata(surface, svg_meta, svg_w, svg_h);
         log_debug("SVG image size: %d x %d (picture %.1f x %.1f, intrinsic=%d)",
                   surface->width, surface->height, svg_w, svg_h, surface->has_intrinsic_size);
-        if (downloaded_data) mem_free(downloaded_data);
     }
     // Detect Lottie JSON animation (by extension for local, by content for HTTP)
-    else if ((!is_http && lottie_detect_by_path(file_path)) ||
-             (is_http && downloaded_data && lottie_detect_by_content(downloaded_data, downloaded_size))) {
+    else if ((!is_http && lottie_detect_by_path(file_path.get())) ||
+             (is_http && downloaded_data && lottie_detect_by_content(downloaded_data.get(), downloaded_size))) {
         // Create a placeholder surface — pixels will be filled by the LottiePlayer
         surface = image_surface_alloc();
         // Try to get natural dimensions from the Lottie via ThorVG picture
@@ -792,12 +793,12 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 AnimationInstance* inst = NULL;
                 if (is_http && downloaded_data) {
                     inst = lottie_player_create_from_data(rs->animation_scheduler, surface,
-                                (const char*)downloaded_data, downloaded_size,
+                                (const char*)downloaded_data.get(), downloaded_size,
                                 surface->width, surface->height,
                                 rs->animation_scheduler->current_time, uicon->document->document_pool);
                 } else {
                     inst = lottie_player_create_from_file(rs->animation_scheduler, surface,
-                                file_path, surface->width, surface->height,
+                                file_path.get(), surface->width, surface->height,
                                 rs->animation_scheduler->current_time, uicon->document->document_pool);
                 }
                 if (inst) {
@@ -806,20 +807,19 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                         surface->width = lp->width;
                         surface->height = lp->height;
                     }
-                    log_info("lottie animated: registered with scheduler from %s", file_path);
+                    log_info("lottie animated: registered with scheduler from %s", file_path.get());
                 } else {
                     // Not a valid Lottie — fall through to raster path is not possible here
                     // Free and return NULL
-                    log_debug("lottie detect: failed to load as Lottie: %s", file_path);
+                    log_debug("lottie detect: failed to load as Lottie: %s", file_path.get());
                     image_surface_destroy(surface);
                     surface = NULL;
                 }
             }
         }
-        if (downloaded_data) mem_free(downloaded_data);
-        downloaded_data = nullptr;
+        downloaded_data.reset();
         if (!surface) {
-            load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
+            load_image_cleanup_failed(uicon, abs_url, file_path);
             return NULL;
         }
         image_surface_apply_orientation_metadata(surface, 1);
@@ -828,61 +828,59 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         int width, height;
         if (is_http && downloaded_data) {
             // HTTP images: read dimensions from memory header, keep data for lazy decode
-            if (image_get_dimensions_from_memory(downloaded_data, downloaded_size, &width, &height)) {
+            if (image_get_dimensions_from_memory(downloaded_data.get(), downloaded_size, &width, &height)) {
                 surface = image_surface_alloc();
                 surface->width = width;
                 surface->height = height;
                 {
-                    lam::SessionPtr<unsigned char> source_data = lam::take_ownership(downloaded_data);
+                    lam::SessionPtr<unsigned char> source_data(downloaded_data.release());
                     radiant_take_image_source_data(surface, source_data, downloaded_size);
                 }
-                downloaded_data = nullptr;
                 // pixels stays NULL — decoded on demand
                 log_debug("[image] Lazy load HTTP image: %dx%d (%zu bytes)", width, height, downloaded_size);
             } else {
                 // Unsupported HTTP assets must enter the cached placeholder path
                 // instead of sending their opaque bytes to the raster decoder.
-                log_warn("image: unsupported HTTP image, using placeholder: %s", file_path);
-                mem_free(downloaded_data);
-                downloaded_data = nullptr;
-                load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
+                log_warn("image: unsupported HTTP image, using placeholder: %s", file_path.get());
+                downloaded_data.reset();
+                load_image_cleanup_failed(uicon, abs_url, file_path);
                 return NULL;
             }
         } else {
             // Local files: read dimensions from file header only
-            if (image_get_dimensions(file_path, &width, &height)) {
+            if (image_get_dimensions(file_path.get(), &width, &height)) {
                 surface = image_surface_alloc();
                 surface->width = width;
                 surface->height = height;
                 {
-                    lam::SessionPtr<char> source_path = lam::session_strdup(file_path, MEM_CAT_IMAGE);
+                    lam::SessionPtr<char> source_path = lam::session_strdup(file_path.get(), MEM_CAT_IMAGE);
                     radiant_take_image_source_path(surface, source_path);
                 }
                 // pixels stays NULL — decoded on demand
-                log_debug("[image] Lazy load local image: %dx%d from %s", width, height, file_path);
+                log_debug("[image] Lazy load local image: %dx%d from %s", width, height, file_path.get());
             } else {
                 // Fallback: full decode if header read fails
-                surface = image_surface_decode_file(file_path);
+                surface = image_surface_decode_file(file_path.get());
                 if (!surface) {
-                    log_debug("failed to load image: %s", file_path);
-                    load_image_cleanup_failed(uicon, abs_url, file_path, nullptr);
+                    log_debug("failed to load image: %s", file_path.get());
+                    load_image_cleanup_failed(uicon, abs_url, file_path);
                     return NULL;
                 }
             }
         }
-        if (slen > 5 && strcmp(file_path + slen - 5, ".jpeg") == 0) {
+        if (slen > 5 && strcmp(file_path.get() + slen - 5, ".jpeg") == 0) {
             surface->format = IMAGE_FORMAT_JPEG;
         }
-        else if (slen > 4 && strcmp(file_path + slen - 4, ".jpg") == 0) {
+        else if (slen > 4 && strcmp(file_path.get() + slen - 4, ".jpg") == 0) {
             surface->format = IMAGE_FORMAT_JPEG;
         }
-        else if (slen > 4 && strcmp(file_path + slen - 4, ".png") == 0) {
+        else if (slen > 4 && strcmp(file_path.get() + slen - 4, ".png") == 0) {
             surface->format = IMAGE_FORMAT_PNG;
         }
-        else if (slen > 4 && strcmp(file_path + slen - 4, ".gif") == 0) {
+        else if (slen > 4 && strcmp(file_path.get() + slen - 4, ".gif") == 0) {
             surface->format = IMAGE_FORMAT_GIF;
         }
-        else if (slen > 5 && str_icmp_cstr(file_path + slen - 5, ".webp") == 0) {
+        else if (slen > 5 && str_icmp_cstr(file_path.get() + slen - 5, ".webp") == 0) {
             surface->format = IMAGE_FORMAT_WEBP;
         }
         if (surface->format == IMAGE_FORMAT_JPEG) {
@@ -890,7 +888,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             if (is_http && surface->source_data && surface->source_data_len > 0) {
                 orientation = jpeg_exif_orientation_from_memory(surface->source_data, surface->source_data_len);
             } else {
-                orientation = jpeg_exif_orientation_from_file(file_path);
+                orientation = jpeg_exif_orientation_from_file(file_path.get());
             }
             image_surface_apply_orientation_metadata(surface, orientation);
             log_debug("[image] JPEG orientation: exif=%d encoded=%dx%d natural=%dx%d",
@@ -913,8 +911,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         image_register_gif_animation(uicon, surface, gif_frames);
     }
 
-    ImageEntry new_entry = {.path = (char*)file_path, .image = surface};
-    surface->cache_owned = true;
+    ImageEntry new_entry = {.path = file_path.release(), .image = surface};
     ImageMap::set(uicon->image_cache, new_entry);
     svg_image_animation_register(uicon, surface);
     return surface;
@@ -923,7 +920,8 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
 bool image_entry_free(const void *item, void *udata) {
     UiContext* ui = (UiContext*)udata;
     ImageEntry* entry = (ImageEntry*)item;
-    mem_free((char*)entry->path);  // always mem_alloc-owned: mem_strdup for HTTP paths, url_to_local_path for local paths
+    // the cache owns its key: mem_strdup for HTTP paths, url_to_local_path for local paths
+    lam::Temp<char> path((char*)entry->path);
     if (entry->image) {
         // cached media surfaces can be released before the document's scheduler is torn down.
         if (ui && ui->document && ui->document->state)
@@ -962,7 +960,7 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     img_surface->pitch = pixel_width * 4;
     img_surface->generation = 1;
     // pitch counts bytes; the allocation counts pixels once and checks products before multiplying.
-    img_surface->pixels = mem_calloc((size_t)pixel_width * (size_t)pixel_height, sizeof(uint32_t), MEM_CAT_IMAGE);
+    image_surface_adopt_pixels(img_surface, mem_calloc((size_t)pixel_width * (size_t)pixel_height, sizeof(uint32_t), MEM_CAT_IMAGE));
     if (!img_surface->pixels) {
         log_error("[surface] Could not allocate memory for image surface");
         image_surface_destroy(img_surface);
@@ -1000,7 +998,7 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
         img_surface->orientation = 1;
         img_surface->has_intrinsic_size = true;
         img_surface->pitch = pixel_width * 4;
-        img_surface->pixels = pixels;
+        image_surface_adopt_pixels(img_surface, pixels);  // the surface takes the decoded buffer
         img_surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
         img_surface->generation = 1;
     }
@@ -1009,34 +1007,40 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
 
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                        ClipShape** clip_shapes, int clip_depth) {
-    RasterPaintContext ctx = {surface, clip, clip_shapes, clip_depth};
+    RasterPaintContext ctx = raster_paint_context(surface, clip, clip_shapes, clip_depth);
     raster_fill_rect(&ctx, rect, color);
 }
 
 // Enhanced blit function with support for different scaling modes
 void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
                          ClipShape** clip_shapes, int clip_depth) {
-    RasterPaintContext ctx = {dst, clip, clip_shapes, clip_depth};
+    RasterPaintContext ctx = raster_paint_context(dst, clip, clip_shapes, clip_depth);
     raster_blit_surface_scaled(&ctx, src, src_rect, dst_rect, scale_mode, 255);
 }
 
-bool image_surface_is_dom_owned(const ImageSurface* img_surface) {
-    return img_surface && !img_surface->url && !img_surface->cache_owned &&
-        !img_surface->network_owned;
-}
+
 
 void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
         // stale handles stop resolving before the memory goes away
+        // the destroy call hands the surface over; borrowed pixels stay with their owner
+        lam::Temp<ImageSurface> owned(img_surface);
         image_surface_release_slot(img_surface);
-        if (img_surface->pixels) mem_free(img_surface->pixels);
+        lam::free_owned(img_surface->owned_pixels);
+        img_surface->pixels = nullptr;
         if (img_surface->pic) {
             rdt_picture_free(img_surface->pic);
         }
-        if (img_surface->source_path) mem_free(img_surface->source_path);
-        if (img_surface->source_data) mem_free(img_surface->source_data);
-        mem_free(img_surface);
+        lam::free_owned(img_surface->source_path);
+        lam::free_owned(img_surface->source_data);
     }
+}
+
+void image_surface_adopt_pixels(ImageSurface* img_surface, void* pixels) {
+    if (!img_surface) return;
+    lam::free_owned(img_surface->owned_pixels);
+    img_surface->owned_pixels = lam::own_arr((uint8_t*)pixels);
+    img_surface->pixels = pixels;
 }
 
 static bool image_surface_can_promote_decode(ImageSurface* img, int target_w, int target_h) {
@@ -1064,8 +1068,7 @@ static bool image_decode_trace_enabled(void) {
 static void image_surface_install_decoded_pixels(ImageSurface* img,
                                                  unsigned char* pixels,
                                                  int width, int height) {
-    if (img->pixels) mem_free(img->pixels);
-    img->pixels = pixels;
+    image_surface_adopt_pixels(img, pixels);
     img->alpha_mode = IMAGE_ALPHA_STRAIGHT;
     img->decoded_width = width;
     img->decoded_height = height;
@@ -1125,7 +1128,6 @@ void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h)
             log_warn("image: HTTP image decode unavailable, keeping placeholder");
         }
         if (img->decoded_width >= img->width && img->decoded_height >= img->height) {
-            mem_free(img->source_data);
             radiant_clear_image_source_data(img);
         }
     }

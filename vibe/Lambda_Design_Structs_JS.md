@@ -705,7 +705,7 @@ another ABI change.
 > `sizeof(JsFunction)` **264 → 232 B** (the group's 5 pointers/Items and 3
 > flags cost 40 B inline; one pointer replaces them). Gates: test262 baseline
 > 0 regressions (40261/40261), JS gtest 370/370, JS script gtest 107/107
-> (which is the suite that exercises `JS_EXECUTION_BACKEND=ast`), rooting core
+> (which is the suite that exercises `JS_EXEC_BACKEND=ast`), rooting core
 > 107/107, MIR GC stress 107/107, GC heap 76/76, callable catalog clean, node
 > slice identical to pristine. Closures, arrow `this`, `super`, generators,
 > `arguments`, direct `eval` and a 300-iteration closure churn all produce
@@ -769,7 +769,7 @@ another ABI change.
 > spending it, since it re-touches every accessor landed in JSCU20.
 >
 > Gates: test262 40261/40261 with 0 regressions, JS gtest 370/370, JS script
-> gtest (the `JS_EXECUTION_BACKEND=ast` suite) clean, rooting core 107/107, MIR
+> gtest (the `JS_EXEC_BACKEND=ast` suite) clean, rooting core 107/107, MIR
 > GC stress clean, callable catalog clean, both Jube node gates clean, node
 > slice identical to pristine, and all 26 built-in modules still byte-identical
 > under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`.

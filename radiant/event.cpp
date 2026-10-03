@@ -4072,7 +4072,7 @@ void radiant_run_behavior_init(DomDocument* doc, BehaviorInitPhaseTiming* timing
     DocState* state = (DocState*)doc->state;
     if (!state || !doc->root) return;
     ArrayList* controls = doc->behavior_init_controls;
-    doc->behavior_init_controls = arraylist_new(8);
+    doc->behavior_init_controls = lam::own(arraylist_new(8));
     int count = 0;
     // Initial handlers commonly seed both :valid and :invalid. Apply their
     // final pseudo-state together; nothing can paint between init turns.
@@ -7435,7 +7435,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
     if (!doc->view_tree) {
-        doc->view_tree = (ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
+        doc->view_tree = view_tree_shell_create();
         view_pool_reset_retained(doc->view_tree);
     } else {
         view_pool_reset_retained(doc->view_tree);
@@ -9253,8 +9253,8 @@ static void refresh_hover_color_background_element(DocState* state,
     radiant_cascade_styles_for_element_with_matcher(element, state->hover_matcher);
 
     LayoutViewScope view_scope(lycon);
-    lycon->view = view;
-    lycon->elmt = static_cast<DomNode*>(element);
+    lycon->view = lam::up(view);
+    lycon->elmt = lam::up(static_cast<DomNode*>(element));
     layout_reset_color_background_style_cache(lycon, lam::view_require_element(view));
     static const CssPropertyCode properties[] = {
         CSS_PROPERTY_COLOR,
@@ -9303,9 +9303,9 @@ static void refresh_hover_color_background_paths(DocState* state,
         !doc->view_tree->prop_pool) return;
 
     LayoutContext lycon = {};
-    lycon.doc = doc;
-    lycon.ui_context = uicon;
-    lycon.pool = doc->view_tree->prop_pool;
+    lycon.doc = lam::up(doc);
+    lycon.ui_context = lam::up(uicon);
+    lycon.pool = lam::up(doc->view_tree->prop_pool);
     lycon.width = uicon->viewport_width;
     lycon.height = uicon->viewport_height;
     lycon.run_mode = radiant::RunMode::PerformLayout;
@@ -10733,7 +10733,7 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
         // them before iframe navigation can free and reuse those addresses.
         font_context_reset_glyph_caches(uicon->font_ctx);
     }
-    block->embed->doc = new_doc;
+    block->embed->doc = lam::own(new_doc);
     dom_document_set_embedding(new_doc, owner, iframe);
     radiant_document_ensure_state(new_doc, "navigation_iframe_target");
     new_doc->viewport.output_scale = 1.0f;
@@ -11592,7 +11592,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
     } else if (view->view_type == RDT_VIEW_MARKER) {
         // For markers: caret is at left edge (offset 0) or right edge (offset 1)
         ViewMarker* marker = lam::view_require<RDT_VIEW_MARKER>(view);
-        MarkerProp* marker_prop = marker && marker->blk ? (MarkerProp*)marker->blk : nullptr;
+        MarkerProp* marker_prop = marker ? marker->marker_prop() : nullptr;
         float marker_width = marker_prop ? marker_prop->width : view->width;
         float marker_height = marker_prop ? marker_prop->height : view->height;
         if (caret_offset == 0) {

@@ -1326,7 +1326,7 @@ extern "C" void dom_queue_textcontrol_selectionchange(DomElement* elem) {
         return;
     }
     task_state->selectionchange_event_pending = 1;
-    task_state->selectionchange_event_next = state->tc_selectionchange_head;
+    task_state->selectionchange_event_next = lam::up(state->tc_selectionchange_head);
     state->tc_selectionchange_head = elem;
     if (state->tc_selectionchange_drain_scheduled) {
         return;

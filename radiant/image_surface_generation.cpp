@@ -2,6 +2,7 @@
 #include "../lib/slot_table.hpp"
 #include "../lib/mem_factory.h"
 #include <pthread.h>
+#include "../lib/generation.h"
 
 // Process-wide slot table behind ImageSurface::self. Surfaces are created and
 // destroyed on loader and render threads, and tile workers look handles up
@@ -12,11 +13,11 @@ static Pool* g_image_slots_pool = nullptr;
 static lam::SlotTable<ImageSurface> g_image_slots;
 
 ImageSurface* image_surface_alloc(void) {
-    ImageSurface* surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+    ImageSurface* surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE); // OBJ_HEAP_OK: the one heap ImageSurface allocator; the owner releases it with image_surface_destroy
     if (!surface) return nullptr;
     pthread_mutex_lock(&g_image_slots_lock);
     if (!g_image_slots_pool) {
-        g_image_slots_pool = mem_pool_create(NULL, MEM_ROLE_MEDIA, "image_surface.slots");
+        g_image_slots_pool = mem_pool_create(mem_context_process(MEM_ROLE_MEDIA), MEM_ROLE_MEDIA, "image_surface.slots");
         g_image_slots.init(g_image_slots_pool);
     }
     // a failed insert leaves a null handle: the surface works but is never retained
@@ -43,8 +44,7 @@ void image_surface_release_slot(ImageSurface* surface) {
 
 void image_surface_bump_generation(ImageSurface* img_surface) {
     if (!img_surface) return;
-    img_surface->generation++;
-    if (img_surface->generation == 0) img_surface->generation = 1;
+    img_surface->generation = generation_next(img_surface->generation);
 }
 
 void image_surface_detach_pixels(ImageSurface* img_surface) {

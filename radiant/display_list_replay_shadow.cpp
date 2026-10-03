@@ -23,13 +23,13 @@ void dl_replay_shadow_clip_save_at_offset(DisplayReplayShadowClip* clip,
     dl_replay_shadow_clip_discard(clip);
     if (!surface || !surface->pixels || !scratch || !save) return;
 
-    clip->scratch = scratch;
+    clip->scratch = lam::up(scratch);
     clip->scope = scratch_scope_begin(scratch);
-    clip->saved = surface_region_save(surface, scratch, &clip->scope,
+    clip->saved = lam::own_arr(surface_region_save(surface, scratch, &clip->scope,
                                       save->rx - (int)origin_x,
                                       save->ry - (int)origin_y,
                                       save->rw, save->rh,
-                                      &clip->region);
+                                      &clip->region));
 }
 
 void dl_replay_shadow_clip_restore(DisplayReplayShadowClip* clip,

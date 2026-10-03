@@ -276,7 +276,7 @@ static void bidi_count_views(View* view, int line_number, int depth,
             return true;
         }
         if (current->view_type == RDT_VIEW_MARKER) {
-            MarkerProp* marker = (MarkerProp*)current->as_element()->blk;
+            MarkerProp* marker = current->as_element()->marker_prop();
             if (marker && !marker->is_outside && marker->width > 0.0f) {
                 counts->chars++;
                 counts->has_bidi_trigger = counts->has_bidi_trigger ||
@@ -497,7 +497,7 @@ static void bidi_fill_views(LayoutContext* lycon, View* view, int line_number, i
             continue;
         }
         if (current->view_type == RDT_VIEW_MARKER) {
-            MarkerProp* marker = (MarkerProp*)current->as_element()->blk;
+            MarkerProp* marker = current->as_element()->marker_prop();
             if (marker && !marker->is_outside && marker->width > 0.0f) {
                 bidi_append_atomic_fragment(
                     chars, char_cursor, current,

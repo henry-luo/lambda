@@ -7,6 +7,7 @@
 #include "mempool.h"
 #include "memtrack.h"
 #include "scratch_arena.h"
+#include "mem_kind.hpp"
 #include <limits.h>
 #include <stddef.h>
 #include <string.h>
@@ -62,6 +63,7 @@ inline bool pool_grow_array(Pool* pool, T** data, int* capacity,
     return true;
 }
 
+
 // Pool parsing structures may retain pointers into an old generation. Grow
 // these by copying to a fresh pool allocation instead of pool_realloc().
 template <typename T>
@@ -100,6 +102,7 @@ inline bool pool_copy_grow_array(Pool* pool, T** data, int* capacity,
     return true;
 }
 
+
 // `size_t` owners avoid lossy capacity narrowing; arena storage is copied into
 // a fresh extent because Arena deliberately has no realloc operation.
 template <typename T>
@@ -112,6 +115,8 @@ inline bool mem_grow_array(T** data, size_t* capacity, size_t min_capacity,
     *data = (T*)raw;
     return true;
 }
+
+
 
 template <typename T>
 inline bool pool_grow_array(Pool* pool, T** data, size_t* capacity,
@@ -169,6 +174,51 @@ inline bool scratch_grow_array(ScratchArena* scratch, T** data, int* capacity,
     *data = grown;
     *capacity = next;
     return true;
+}
+
+
+// An owned-array field grows through its raw pointer: the grow functions take
+// T** and the field is lam::OwnArr<T>.
+template <typename T, typename Grow>
+inline bool own_arr_grow(OwnArr<T>* data, Grow grow) {
+    if (!data) return false;
+    T* raw = data->get();
+    bool grown = grow(&raw);
+    *data = OwnArr<T>(raw);
+    return grown;
+}
+
+template <typename T, typename Cap, typename N, typename M>
+inline bool pool_grow_array(Pool* pool, OwnArr<T>* data, Cap* capacity,
+                            N min_capacity, M initial_capacity) {
+    return own_arr_grow(data, [&](T** raw) {
+        return pool_grow_array(pool, raw, capacity, min_capacity, initial_capacity);
+    });
+}
+
+template <typename T, typename Cap, typename N>
+inline bool pool_copy_grow_array(Pool* pool, OwnArr<T>* data, Cap* capacity, N count,
+                                 N min_capacity, N initial_capacity, bool zeroed) {
+    return own_arr_grow(data, [&](T** raw) {
+        return pool_copy_grow_array(pool, raw, capacity, count, min_capacity,
+                                    initial_capacity, zeroed);
+    });
+}
+
+template <typename T, typename Cap, typename N, typename M>
+inline bool scratch_grow_array(ScratchArena* scratch, OwnArr<T>* data, Cap* capacity,
+                               N count, M min_capacity, int initial_capacity) {
+    return own_arr_grow(data, [&](T** raw) {
+        return scratch_grow_array(scratch, raw, capacity, count, min_capacity, initial_capacity);
+    });
+}
+
+template <typename T, typename Cap, typename N, typename M>
+inline bool mem_grow_array(OwnArr<T>* data, Cap* capacity, N min_capacity,
+                           M initial_capacity, MemCategory category) {
+    return own_arr_grow(data, [&](T** raw) {
+        return mem_grow_array(raw, capacity, min_capacity, initial_capacity, category);
+    });
 }
 
 } // namespace lam

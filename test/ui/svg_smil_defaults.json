@@ -1,0 +1,557 @@
+{
+  "name": "SVG discrete-to, indefinite timing and absent XML defaults",
+  "html": "test/ui/svg_smil_defaults.html",
+  "viewport": {
+    "width": 420,
+    "height": 290
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#zero"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 100,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 140,
+      "min_r": 0,
+      "max_r": 12,
+      "min_g": 0,
+      "max_g": 12,
+      "min_b": 243,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#discrete"
+      },
+      "attribute": "x",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#half"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 100,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 140,
+      "min_r": 0,
+      "max_r": 12,
+      "min_g": 0,
+      "max_g": 12,
+      "min_b": 243,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#discrete"
+      },
+      "attribute": "x",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#one"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 100,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 140,
+      "min_r": 173,
+      "max_r": 197,
+      "min_g": 0,
+      "max_g": 12,
+      "min_b": 59,
+      "max_b": 83
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#discrete"
+      },
+      "attribute": "x",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#late"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 100,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 140,
+      "min_r": 173,
+      "max_r": 197,
+      "min_g": 0,
+      "max_g": 12,
+      "min_b": 59,
+      "max_b": 83
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#discrete"
+      },
+      "attribute": "x",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#two"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 100,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 140,
+      "min_r": 173,
+      "max_r": 197,
+      "min_g": 0,
+      "max_g": 12,
+      "min_b": 59,
+      "max_b": 83
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#discrete"
+      },
+      "attribute": "x",
+      "equals": "10"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#rewind"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 60,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 100,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 140,
+      "min_r": 0,
+      "max_r": 12,
+      "min_g": 0,
+      "max_g": 12,
+      "min_b": 243,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 210,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#discrete"
+      },
+      "attribute": "x",
+      "equals": "10"
+    }
+  ],
+  "browser_reference": "test/svg/oracles/svg_smil_defaults_reference.html"
+}

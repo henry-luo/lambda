@@ -424,7 +424,7 @@ static bool render_path_metric_visit(void* data, RdtPathCommand command, const f
 
 void render_path_metrics_destroy(RdtPathMetrics* metrics) {
     if (!metrics) return;
-    mem_free(metrics->segments); *metrics = {};
+    lam::free_owned(metrics->segments); *metrics = {};
 }
 
 bool render_path_metrics_build(RdtPathMetrics* metrics, const RdtPath* path,

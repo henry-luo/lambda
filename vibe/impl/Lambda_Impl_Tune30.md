@@ -43,7 +43,7 @@ the instructions the transpiler emits per array read, per float operation,
 per store and per call. This round is about those instructions.
 
 **Gate for the round: every one of the seven ≤ 2x C2MIR**, same-run,
-release, `LAMBDA_TIER=jit`:
+release, `LAMBDA_EXEC_BACKEND=jit`:
 
 | row | typed (ms) | C2MIR (ms) | now | target |
 |---|---:|---:|---:|---:|
@@ -314,7 +314,7 @@ are sized.
 
 ## 7. Gates
 
-- The seven rows of §1 at ≤ 2x C2MIR, same run, release, `LAMBDA_TIER=jit`,
+- The seven rows of §1 at ≤ 2x C2MIR, same run, release, `LAMBDA_EXEC_BACKEND=jit`,
   N=7 interleaved (`temp/r46/ab.py`); the §5 hot counts re-censused after
   each track.
 - No row of the suite slower than its pre-round time; typed ≤ untyped on
@@ -349,7 +349,7 @@ are sized.
 
 ## 9. Implementation log — round 1 (2026-09-18)
 
-Same-machine ratios (release, `LAMBDA_TIER=jit`, min of 7, C2MIR measured
+Same-machine ratios (release, `LAMBDA_EXEC_BACKEND=jit`, min of 7, C2MIR measured
 the same run with `temp/t30/ratio.py`):
 
 | row | before | after round 1 | gate |

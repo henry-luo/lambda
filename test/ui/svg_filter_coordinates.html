@@ -1,0 +1,26 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}</style></head><body>
+<svg width="640" height="360">
+<defs>
+ <filter id="local" filterUnits="userSpaceOnUse" x="0" y="0" width="80" height="80" color-interpolation-filters="sRGB"><feOffset dx="10" dy="5"/></filter>
+ <filter id="bbox" x="0" y="0" width="150%" height="150%" primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB"><feOffset dx=".5" dy=".25"/></filter>
+ <filter id="percent" filterUnits="userSpaceOnUse" x="50%" y="0" width="25%" height="100%"><feFlood flood-color="red"/></filter>
+ <g id="unit-piece"><rect width=".5" height="1" fill="red"/><rect x=".5" width=".5" height="1" fill="blue"/></g>
+ <filter id="unit-image" x="0" y="0" width="100%" height="100%" primitiveUnits="objectBoundingBox"><feImage href="#unit-piece" x="0" y="0" width="1" height="1"/></filter>
+ <symbol id="symbol" viewBox="10 20 40 20"><rect x="10" y="20" width="20" height="20" fill="red"/><rect x="30" y="20" width="20" height="20" fill="blue"/></symbol>
+ <filter id="symbol-image" filterUnits="userSpaceOnUse" x="420" y="140" width="120" height="60"><feImage href="#symbol" x="430" y="150" width="80" height="40"/></filter>
+ <filter id="primitive-font" filterUnits="userSpaceOnUse" x="20" y="250" width="100" height="80"><feFlood x="20" y="250" width="2em" height="2em" style="font-size:10px" flood-color="red"/></filter>
+ <filter id="filter-font" filterUnits="userSpaceOnUse" x="1em" y="250" width="2em" height="2em" style="font-size:10px"><feFlood flood-color="blue"/></filter>
+</defs>
+<g transform="translate(20 20) scale(2 1)"><rect x="10" y="10" width="20" height="20" fill="blue" filter="url(#local)"/></g>
+<rect x="230" y="30" width="40" height="40" fill="red" filter="url(#bbox)"/>
+<rect x="350" y="30" width="80" height="40" fill="blue" filter="url(#bbox)"/>
+<svg x="20" y="140" width="160" height="80" viewBox="100 200 80 40"><rect x="110" y="210" width="20" height="10" fill="blue" filter="url(#bbox)"/></svg>
+<rect x="230" y="150" width="100" height="40" filter="url(#unit-image)"/>
+<rect x="420" y="140" width="120" height="60" filter="url(#symbol-image)"/>
+<rect x="20" y="250" width="100" height="80" font-size="30" filter="url(#primitive-font)"/>
+<g transform="translate(130 0)"><rect x="10" y="250" width="100" height="80" font-size="30" filter="url(#filter-font)"/></g>
+<rect x="350" y="250" width="100" height="80" filter="url(svg_image_assets/filter-resources.svg#external)"/>
+</svg>
+<svg width="200" height="40"><rect width="200" height="40" filter="url(#percent)"/></svg>
+<svg width="400" height="40"><rect width="400" height="40" filter="url(#percent)"/></svg>
+</body></html>

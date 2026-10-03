@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "atomic.h"
+#include "ref_count.h"
 #include "memtrack.h"
 
 #ifdef __cplusplus
@@ -23,7 +24,7 @@ enum ByteStorageFlags {
 };
 
 typedef struct ByteStorage {
-    atomic_int32 refs;
+    RefCount refs;
     uint8_t* data;
     size_t capacity;
     uint32_t flags;

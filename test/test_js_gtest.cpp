@@ -128,7 +128,7 @@ static char* execute_js_script_configured(const char* script_path,
     size_t env_count = 0;
     const char* backend_value = js_backend_env_value(backend);
     if (backend_value) {
-        env[env_count].key = "JS_EXECUTION_BACKEND";
+        env[env_count].key = "JS_EXEC_BACKEND";
         env[env_count].value = backend_value;
         env_count++;
     }
@@ -339,7 +339,7 @@ char* execute_js_script_with_doc(const char* script_path, const char* html_path,
     ShellOptions options = {};
     const char* backend_value = js_backend_env_value(backend);
     if (backend_value) {
-        env[0].key = "JS_EXECUTION_BACKEND";
+        env[0].key = "JS_EXEC_BACKEND";
         env[0].value = backend_value;
         options.env = env;
     }
@@ -492,7 +492,7 @@ static void run_js_sub_batch(
     ShellEnvEntry env[2] = {};
     const char* backend_value = js_backend_env_value(backend);
     if (backend_value) {
-        env[0].key = "JS_EXECUTION_BACKEND";
+        env[0].key = "JS_EXEC_BACKEND";
         env[0].value = backend_value;
         options.env = env;
     }
@@ -1347,10 +1347,10 @@ static void parse_js_gtest_options(int* argc, char** argv) {
     if (js_mixed_mode || js_full_ast_mode) {
         // make every unlisted direct or shell-launched JS check AST by default;
         // listed parameterized cases override this in their child environment.
-        shell_setenv("JS_EXECUTION_BACKEND", "ast");
+        shell_setenv("JS_EXEC_BACKEND", "ast");
     } else if (js_full_mir_mode) {
         // non-parameterized regression tests inherit this process environment
-        shell_setenv("JS_EXECUTION_BACKEND", "mir");
+        shell_setenv("JS_EXEC_BACKEND", "mir");
     }
 }
 

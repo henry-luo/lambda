@@ -8,10 +8,12 @@
 #include "../lib/arraylist.hpp"
 #include "../lib/mem_factory.h"
 #include "../lib/str.h"
+#include "../lib/datetime.h"
 #include <math.h>
 #include <float.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 struct SvgAnimatedValue {
     const char* name;
@@ -35,6 +37,7 @@ struct SvgAnimationInstanceTime {
     double value;
     double resolved_at;
     bool end;
+    bool broadcast;
     SvgAnimationInstanceTime* next;
 };
 
@@ -59,12 +62,19 @@ typedef TypedHashMap<SvgAnimationControl,
     HashMapPointerMemberKeyOps<SvgAnimationControl, &SvgAnimationControl::address>> SvgAnimationControlMap;
 
 struct SvgAnimationRegistry;
+struct SvgAnimationUseInstance {
+    DomNodeRef host;
+    DomNodeRef source;
+    SvgAnimationRegistry* registry;
+    SvgAnimationUseInstance* next;
+};
 struct SvgTimeline {
     SvgAnimationRegistry* registry;
     DomNodeRef root;
     AnimationInstance* driver;
     double time;
     double origin;
+    double wallclock_origin;
     bool paused;
     bool ticking;
     bool layout_affects;
@@ -73,6 +83,13 @@ struct SvgTimeline {
 
 struct SvgAnimationRegistry {
     DomDocument* document;
+    DomDocument* owner_document;
+    SvgAnimationRegistry* budget_owner;
+    SvgAnimationRegistry* instance_parent;
+    SvgAnimationUseInstance* instances;
+    DomNodeRef instance_root;
+    DomNodeRef instance_host;
+    uint64_t original_generation;
     MemNode* memory_node;
     SvgTimeline* timelines;
     Pool* samples;
@@ -87,6 +104,12 @@ struct SvgAnimationRegistry {
     bool sample_failed;
     size_t frozen_bytes;
     size_t instance_count;
+    size_t total_sample_bytes;
+    size_t total_frozen_bytes;
+    size_t total_instance_count;
+    size_t total_control_count;
+    size_t total_use_count;
+    size_t total_timeline_count;
     unsigned frozen_depth;
     double event_time_offset;
 };
@@ -100,13 +123,13 @@ struct SvgAnimationWorkScope {
     size_t remaining = 1048576;
     bool reported = false;
     explicit SvgAnimationWorkScope(SvgAnimationRegistry* owner)
-        : registry(owner), previous(svg_animation_work) {
-        if (!previous || previous->registry != owner) svg_animation_work = this;
+        : registry(owner->budget_owner), previous(svg_animation_work) {
+        if (!previous || previous->registry != registry) svg_animation_work = this;
     }
     ~SvgAnimationWorkScope() { svg_animation_work = previous; }
 };
 
-static void svg_animation_notify_time(SvgTimeline* timeline, double previous);
+static void svg_animation_notify_time(SvgTimeline* timeline, double previous, unsigned depth = 0);
 
 static MemContext* svg_animation_memory(DomDocument* document) {
     return document->services.mem_ctx ? (MemContext*)document->services.mem_ctx : mem_context_root();
@@ -114,14 +137,14 @@ static MemContext* svg_animation_memory(DomDocument* document) {
 
 static void* svg_animation_alloc(SvgAnimationRegistry* registry, size_t bytes) {
     const size_t budget = 64u * 1024u * 1024u;
-    if (registry->sample_failed || bytes > budget - registry->sample_bytes) {
+    if (registry->sample_failed || bytes > budget - registry->budget_owner->total_sample_bytes) {
         if (!registry->sample_failed) log_error("SVG_ANIMATION_LIMIT: sample storage exceeds %zu bytes", budget);
         registry->sample_failed = true;
         return nullptr;
     }
     void* result = pool_calloc(registry->samples, bytes);
     if (!result) registry->sample_failed = true;
-    else registry->sample_bytes += bytes;
+    else { registry->sample_bytes += bytes; registry->budget_owner->total_sample_bytes += bytes; }
     return result;
 }
 
@@ -163,14 +186,21 @@ static bool svg_animation_filter_primitive(const char* tag);
 
 static thread_local DomDocument* svg_animation_source_document = nullptr;
 static thread_local DomElement* svg_animation_source_instance = nullptr;
+static thread_local SvgAnimationRegistry* svg_animation_instance_registry = nullptr;
+static thread_local bool svg_animation_event_broadcast = true;
+static SvgAnimationRegistry* svg_animation_use_registry(DomElement* host, DomElement* source);
 
-SvgAnimationSourceScope::SvgAnimationSourceScope(DomDocument* document, DomElement* instance)
-    : previous(svg_animation_source_document), previous_instance(svg_animation_source_instance) {
+SvgAnimationSourceScope::SvgAnimationSourceScope(DomDocument* document, DomElement* instance, DomElement* host)
+    : previous(svg_animation_source_document), previous_instance(svg_animation_source_instance),
+      previous_registry(svg_animation_instance_registry) {
     svg_animation_source_document = document;
     svg_animation_source_instance = instance ? instance : document == previous ? previous_instance : nullptr;
+    svg_animation_instance_registry = host && instance ? svg_animation_use_registry(host, instance) :
+        document == previous ? previous_registry : nullptr;
 }
 SvgAnimationSourceScope::~SvgAnimationSourceScope() {
     svg_animation_source_document = previous; svg_animation_source_instance = previous_instance;
+    svg_animation_instance_registry = previous_registry;
 }
 
 double svg_animation_clock_value(const char* value, double fallback) {
@@ -237,11 +267,97 @@ static bool svg_animation_connected(DomDocument* doc, DomNodeRef ref) {
     return false;
 }
 
+static bool svg_animation_wallclock_digits(const char** cursor, unsigned count, unsigned* value) {
+    *value = 0;
+    for (unsigned i = 0; i < count; i++) {
+        unsigned char digit = (unsigned char)**cursor;
+        if (digit < '0' || digit > '9') return false;
+        *value = *value * 10 + digit - '0'; (*cursor)++;
+    }
+    return true;
+}
+
+double svg_animation_wallclock_value(const char* value, double origin) {
+    if (!value || !isfinite(origin) || strncmp(value, "wallclock(", 10) != 0) return NAN;
+    const char* cursor = str_skip_ascii_space(value + 10);
+    time_t origin_seconds = (time_t)floor(origin);
+    struct tm local = {};
+#ifdef _WIN32
+    if (localtime_s(&local, &origin_seconds)) return NAN;
+#else
+    if (!localtime_r(&origin_seconds, &local)) return NAN;
+#endif
+    unsigned year = (unsigned)(local.tm_year + 1900), month = (unsigned)local.tm_mon + 1;
+    unsigned day = (unsigned)local.tm_mday, hour = 0, minute = 0, second = 0;
+    bool has_date = strlen(cursor) >= 5 && cursor[4] == '-';
+    if (has_date) {
+        if (!svg_animation_wallclock_digits(&cursor, 4, &year) || *cursor++ != '-' ||
+            !svg_animation_wallclock_digits(&cursor, 2, &month) || *cursor++ != '-' ||
+            !svg_animation_wallclock_digits(&cursor, 2, &day) || month < 1 || month > 12 || day < 1) return NAN;
+        int64_t days = datetime_days_from_civil(year + (month == 12), month % 12 + 1, 1) -
+            datetime_days_from_civil(year, month, 1);
+        if (day > days) return NAN;
+    }
+    double fraction = 0;
+    bool has_time = !has_date || *cursor == 'T';
+    if (has_time) {
+        if (has_date) cursor++;
+        if (!svg_animation_wallclock_digits(&cursor, 2, &hour) || *cursor++ != ':' ||
+            !svg_animation_wallclock_digits(&cursor, 2, &minute) || hour > 23 || minute > 59) return NAN;
+        if (*cursor == ':') {
+            cursor++;
+            if (!svg_animation_wallclock_digits(&cursor, 2, &second) || second > 59) return NAN;
+            if (*cursor == '.') {
+                cursor++; const char* start = cursor; double place = .1;
+                while (*cursor >= '0' && *cursor <= '9') {
+                    fraction += (*cursor++ - '0') * place; place *= .1;
+                }
+                if (cursor == start) return NAN;
+            }
+        }
+    }
+    bool zoned = has_time && (*cursor == 'Z' || *cursor == '+' || *cursor == '-');
+    double zone = 0;
+    if (zoned) {
+        char sign = *cursor++;
+        if (sign != 'Z') {
+            unsigned hours, minutes;
+            if (!svg_animation_wallclock_digits(&cursor, 2, &hours) || *cursor++ != ':' ||
+                !svg_animation_wallclock_digits(&cursor, 2, &minutes) || hours > 23 || minutes > 59) return NAN;
+            zone = (hours * 3600.0 + minutes * 60.0) * (sign == '-' ? -1 : 1);
+        }
+    }
+    cursor = str_skip_ascii_space(cursor);
+    if (*cursor++ != ')' || *str_skip_ascii_space(cursor)) return NAN;
+    double epoch;
+    if (zoned) epoch = datetime_days_from_civil(year, month, day) * 86400.0 +
+        hour * 3600.0 + minute * 60.0 + second - zone;
+    else {
+        // SMIL wallclock values without a zone use the presentation location, including DST.
+        local.tm_year = (int)year - 1900; // INT_CAST_OK: calendar field, not layout geometry.
+        local.tm_mon = (int)month - 1; // INT_CAST_OK: calendar field, not layout geometry.
+        local.tm_mday = (int)day; // INT_CAST_OK: calendar field, not layout geometry.
+        local.tm_hour = (int)hour; // INT_CAST_OK: calendar field, not layout geometry.
+        local.tm_min = (int)minute; // INT_CAST_OK: calendar field, not layout geometry.
+        local.tm_sec = (int)second; // INT_CAST_OK: calendar field, not layout geometry.
+        local.tm_isdst = -1;
+        epoch = (double)mktime(&local);
+    }
+    return epoch + fraction - origin;
+}
+
 static DomElement* svg_animation_root(DomElement* element) {
     DomElement* root = nullptr;
-    for (DomNode* node = element; node; node = node->parent)
-        if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_SVG) root = node->as_element();
+    for (DomNode* node = element; node && node->is_element(); node = node->parent) {
+        // SVG 2 §5.1.3: an HTML integration point ends the current SVG fragment.
+        if (!dom_element_is_svg(node->as_element())) break;
+        if (node->as_element()->tag() == MARKUP_NAME_SVG) root = node->as_element();
+    }
     return root;
+}
+
+static bool svg_animation_separate_fragment(DomElement* element, DomNode* root) {
+    return element != root && element->tag() == MARKUP_NAME_SVG && svg_animation_root(element) == element;
 }
 
 static void svg_animation_driver_released(AnimationInstance* instance) {
@@ -253,10 +369,10 @@ static void svg_animation_note_time(SvgTimeline* timeline, double time) {
     if (timeline->time == time) return;
     timeline->time = time;
     timeline->registry->generation++;
-    DomDocument* doc = timeline->registry->document;
+    DomDocument* doc = timeline->registry->owner_document;
     if (doc->state) {
         if (timeline->layout_affects) {
-            DomNode* root = dom_node_ref_validate(doc, timeline->root);
+            DomNode* root = dom_node_ref_validate(timeline->registry->document, timeline->root);
             if (root) dom_invalidate_layout_subtree(root);
             doc_state_request_reflow(doc->state);
         }
@@ -281,9 +397,22 @@ static void svg_animation_tick(AnimationInstance* instance, float) {
         instance->play_state = ANIM_PLAY_FINISHED;
 }
 
-static void svg_animation_start_driver(SvgTimeline* timeline) {
+static void svg_animation_start_driver(SvgTimeline* timeline, unsigned depth = 0) {
+    if (depth >= 32) return;
     if (timeline->paused || timeline->driver) return;
     DomDocument* doc = timeline->registry->document;
+    if (timeline->registry->instance_parent) {
+        SvgAnimationRegistry* parent = timeline->registry->instance_parent;
+        DomNode* host = dom_node_ref_validate(parent->document, timeline->registry->instance_host);
+        DomElement* root = host && host->is_element() ? svg_animation_root(host->as_element()) : nullptr;
+        // nested external sources start the outer host driver, while keeping their own clocks private.
+        for (SvgTimeline* clock = parent->timelines; root && clock; clock = clock->next)
+            if (clock->root.address == root && clock->root.expected_id == root->DomNode::id)
+                svg_animation_start_driver(clock, depth + 1);
+        return;
+    }
+    // pinned detached DOM can request preparation without becoming a live scheduling root.
+    if (!svg_animation_connected(doc, timeline->root)) return;
     if (!doc->state && !state_store_create(doc)) return;
     AnimationScheduler* scheduler = doc->state->animation_scheduler;
     AnimationInstance* driver = animation_instance_create(scheduler);
@@ -299,16 +428,18 @@ static void svg_animation_start_driver(SvgTimeline* timeline) {
 static void svg_animation_clear_frozen(SvgAnimationRegistry* registry, SvgAnimationControl* control) {
     if (!control || !control->frozen_text) return;
     registry->frozen_bytes -= strlen(control->frozen_text) + 1;
-    mem_free(control->frozen_text); control->frozen_text = nullptr;
+    registry->budget_owner->total_frozen_bytes -= strlen(control->frozen_text) + 1;
+    lam::Temp<char> dropped(control->frozen_text); control->frozen_text = nullptr;
 }
 
 static bool svg_animation_control_destroy(const void* data, void* context) {
     const SvgAnimationControl* control = (const SvgAnimationControl*)data;
     SvgAnimationRegistry* registry = (SvgAnimationRegistry*)context;
     registry->instance_count -= control->count;
+    registry->budget_owner->total_instance_count -= control->count;
     svg_animation_clear_frozen(registry, (SvgAnimationControl*)control);
     for (SvgAnimationInstanceTime* time = control->times; time;) {
-        SvgAnimationInstanceTime* next = time->next; mem_free(time); time = next;
+        SvgAnimationInstanceTime* next = time->next; lam::Temp<SvgAnimationInstanceTime> owned(time); time = next;
     }
     return true;
 }
@@ -327,12 +458,14 @@ static void svg_animation_prune(SvgAnimationRegistry* registry) {
     for (const SvgAnimationControl& key : retired) {
         control = SvgAnimationControlMap::get(registry->controls, key);
         if (control) svg_animation_control_destroy(control, registry);
+        registry->budget_owner->total_control_count--;
         SvgAnimationControlMap::erase(registry->controls, key);
     }
     for (SvgTimeline** link = &registry->timelines; *link;) {
         SvgTimeline* timeline = *link;
         if (!timeline->driver && !dom_node_ref_validate(registry->document, timeline->root)) {
-            *link = timeline->next; mem_free(timeline);
+            *link = timeline->next; registry->budget_owner->total_timeline_count--;
+            lam::Temp<SvgTimeline> owned(timeline);
         } else link = &timeline->next;
     }
 }
@@ -355,51 +488,71 @@ static bool svg_animation_registry_stat(void* data, MemStatSample* sample) {
     for (SvgTimeline* timeline = registry->timelines; timeline; timeline = timeline->next) {
         sample->bytes_in_use += sizeof(*timeline); sample->alloc_count++;
     }
+    for (SvgAnimationUseInstance* instance = registry->instances; instance; instance = instance->next) {
+        sample->bytes_in_use += sizeof(*instance); sample->alloc_count++;
+    }
     sample->bytes_reserved = sample->bytes_in_use;
     return true;
 }
 
 static void svg_animation_registry_destroy(void* data) {
     SvgAnimationRegistry* registry = (SvgAnimationRegistry*)data;
+    // the destroy call hands the registry over
+    lam::Temp<SvgAnimationRegistry> owned(registry);
     mem_unregister(registry->memory_node);
+    for (SvgAnimationUseInstance* instance = registry->instances; instance;) {
+        SvgAnimationUseInstance* next = instance->next;
+        registry->budget_owner->total_use_count--;
+        svg_animation_registry_destroy(instance->registry); lam::Temp<SvgAnimationUseInstance> owned(instance); instance = next;
+    }
     // D4.2.6/D4.5.1v3: cancel callbacks stop borrowing the document before sample storage is released.
     for (SvgTimeline* timeline = registry->timelines; timeline;) {
         SvgTimeline* next = timeline->next;
         if (timeline->driver && registry->document->state)
             animation_scheduler_cancel(registry->document->state->animation_scheduler, timeline->driver);
-        mem_free(timeline); timeline = next;
+        registry->budget_owner->total_timeline_count--;
+        lam::Temp<SvgTimeline> owned(timeline); timeline = next;
     }
     SvgAnimatedTargetMap::destroy(registry->targets);
     hashmap_scan(registry->controls, svg_animation_control_destroy, registry);
+    registry->budget_owner->total_control_count -= SvgAnimationControlMap::count(registry->controls);
+    registry->budget_owner->total_sample_bytes -= registry->sample_bytes;
     SvgAnimationControlMap::destroy(registry->controls);
     if (registry->samples) mem_pool_destroy(registry->samples);
-    registry->document->services.svg_animation_registry = nullptr;
-    mem_free(registry);
+    if (!registry->instance_host.address) registry->document->services.svg_animation_registry = nullptr;
+}
+
+static SvgAnimationRegistry* svg_animation_registry_new(DomDocument* doc, DomDocument* owner, bool published) {
+    SvgAnimationRegistry* registry = (SvgAnimationRegistry*)mem_calloc(1, sizeof(*registry), MEM_CAT_RENDER); // OBJ_HEAP_OK: the owner document's resource hook, or the parent registry's use instance, owns it; svg_animation_registry_destroy releases it
+    if (!registry) return nullptr;
+    registry->document = doc; registry->owner_document = owner; registry->generation = 1;
+    registry->budget_owner = registry;
+    registry->targets = SvgAnimatedTargetMap::create(32);
+    registry->controls = SvgAnimationControlMap::create(32);
+    registry->samples = mem_pool_create((MemContext*)owner->services.mem_ctx,
+        MEM_ROLE_RENDER, "svg.animation.samples");
+    if (registry->targets && registry->controls && registry->samples)
+        registry->memory_node = mem_register(svg_animation_memory(owner),
+            MEM_KIND_CACHE, MEM_ROLE_RENDER, "svg.animation.state", registry, nullptr,
+            svg_animation_registry_stat, nullptr);
+    if (!registry->targets || !registry->controls || !registry->samples ||
+        (published && !dom_document_add_resource(owner, registry, svg_animation_registry_destroy))) {
+        mem_unregister(registry->memory_node);
+        SvgAnimatedTargetMap::destroy(registry->targets);
+        SvgAnimationControlMap::destroy(registry->controls);
+        if (registry->samples) mem_pool_destroy(registry->samples);
+        lam::Temp<SvgAnimationRegistry> dropped(registry); return nullptr;
+    }
+    return registry;
 }
 
 static SvgAnimationRegistry* svg_animation_registry(DomDocument* doc, bool create) {
     if (!doc) return nullptr;
+    if (svg_animation_instance_registry && svg_animation_instance_registry->document == doc)
+        return svg_animation_instance_registry;
     SvgAnimationRegistry* registry = (SvgAnimationRegistry*)doc->services.svg_animation_registry;
     if (!registry && create) {
-        registry = (SvgAnimationRegistry*)mem_calloc(1, sizeof(*registry), MEM_CAT_RENDER);
-        if (!registry) return nullptr;
-        registry->document = doc; registry->generation = 1;
-        registry->targets = SvgAnimatedTargetMap::create(32);
-        registry->controls = SvgAnimationControlMap::create(32);
-        registry->samples = mem_pool_create((MemContext*)doc->services.mem_ctx,
-            MEM_ROLE_RENDER, "svg.animation.samples");
-        if (registry->targets && registry->controls && registry->samples)
-            registry->memory_node = mem_register(svg_animation_memory(doc),
-                MEM_KIND_CACHE, MEM_ROLE_RENDER, "svg.animation.state", registry, nullptr,
-                svg_animation_registry_stat, nullptr);
-        if (!registry->targets || !registry->controls || !registry->samples ||
-            !dom_document_add_resource(doc, registry, svg_animation_registry_destroy)) {
-            mem_unregister(registry->memory_node);
-            SvgAnimatedTargetMap::destroy(registry->targets);
-            SvgAnimationControlMap::destroy(registry->controls);
-            if (registry->samples) mem_pool_destroy(registry->samples);
-            mem_free(registry); return nullptr;
-        }
+        registry = svg_animation_registry_new(doc, doc, true);
         doc->services.svg_animation_registry = registry;
     }
     return registry;
@@ -416,13 +569,14 @@ static SvgAnimationControl* svg_animation_control(SvgAnimationRegistry* registry
         control->begin_notified = control->end_notified = false; control->notified_repeat = 0;
     }
     if (!control && create) {
-        if (SvgAnimationControlMap::count(registry->controls) >= 65536) {
+        if (registry->budget_owner->total_control_count >= 65536) {
             log_error("SVG_ANIMATION_LIMIT: document control storage exceeds 65536 elements");
             return nullptr;
         }
         key.element = dom_node_ref(element);
         SvgAnimationControlMap::set(registry->controls, key);
         control = SvgAnimationControlMap::get(registry->controls, key);
+        if (control) registry->budget_owner->total_control_count++;
     }
     return control;
 }
@@ -432,16 +586,18 @@ static SvgTimeline* svg_animation_timeline(DomElement* element, bool create) {
     if (!root) return nullptr;
     SvgAnimationRegistry* registry = svg_animation_registry(root->doc, create);
     if (!registry) return nullptr;
-    size_t count = 0;
     for (SvgTimeline* timeline = registry->timelines; timeline; timeline = timeline->next)
         if (timeline->root.address == root && timeline->root.expected_id == root->DomNode::id) return timeline;
-        else count++;
     if (!create) return nullptr;
-    if (count >= 4096) { log_error("SVG_ANIMATION_LIMIT: document exceeds 4096 timelines"); return nullptr; }
-    SvgTimeline* timeline = (SvgTimeline*)mem_calloc(1, sizeof(*timeline), MEM_CAT_RENDER);
+    if (registry->budget_owner->total_timeline_count >= 4096) { log_error("SVG_ANIMATION_LIMIT: document exceeds 4096 timelines"); return nullptr; }
+    SvgTimeline* timeline = (SvgTimeline*)mem_calloc(1, sizeof(*timeline), MEM_CAT_RENDER); // OBJ_HEAP_OK: the registry's timeline list owns it; prune and registry teardown release it
     if (!timeline) return nullptr;
     timeline->registry = registry; timeline->root = dom_node_ref(root);
+    struct timespec wallclock;
+    clock_gettime(CLOCK_REALTIME, &wallclock);
+    timeline->wallclock_origin = (double)wallclock.tv_sec + (double)wallclock.tv_nsec * 1e-9;
     timeline->next = registry->timelines; registry->timelines = timeline;
+    registry->budget_owner->total_timeline_count++;
     registry->generation++;
     return timeline;
 }
@@ -456,12 +612,15 @@ struct SvgAnimationScan {
     bool has_elements;
     bool layout_affects;
     size_t remaining;
+    bool has_uses = false;
 };
 
 static void svg_animation_scan(DomElement* element, DomElement* root,
-    SvgAnimationScan* scan, unsigned depth) {
+    SvgAnimationScan* scan, unsigned depth, bool all_fragments = false) {
     if (!element || depth >= 256 || !scan->remaining) return;
+    if (!all_fragments && svg_animation_separate_fragment(element, root)) return;
     scan->remaining--;
+    if (dom_element_is_svg(element) && strcmp(element->local_name(), "use") == 0) scan->has_uses = true;
     if (svg_animation_is_element(element)) {
         scan->has_elements = true;
         const char* name = element->get_attribute("attributeName");
@@ -475,21 +634,19 @@ static void svg_animation_scan(DomElement* element, DomElement* root,
     // embedded HTML can inherit animated SVG fonts and has viewport-dependent containing blocks.
     if (element->tag() == MARKUP_NAME_FOREIGNOBJECT) scan->layout_affects = true;
     for (DomNode* node = element->first_child; node; node = node->next_sibling)
-        if (node->is_element()) svg_animation_scan(node->as_element(), root, scan, depth + 1);
+        if (node->is_element()) svg_animation_scan(node->as_element(), root, scan, depth + 1, all_fragments);
 }
 
 static void svg_animation_prepare_tree(DomElement* element, unsigned depth, size_t* remaining) {
     if (!element || depth >= 256 || !*remaining) return;
     (*remaining)--;
-    if (element->tag() == MARKUP_NAME_SVG && dom_element_is_svg(element)) {
+    if (element->tag() == MARKUP_NAME_SVG && svg_animation_root(element) == element) {
         SvgAnimationScan scan = {false, false, 65536};
         svg_animation_scan(element, element, &scan, 0);
-        if (!scan.has_elements) return;
-        SvgTimeline* timeline = svg_animation_timeline(element, true);
+        SvgTimeline* timeline = scan.has_elements ? svg_animation_timeline(element, true) : nullptr;
         if (timeline) timeline->layout_affects = scan.layout_affects;
         if (timeline && element->doc->js.host_ui_context && !element->doc->services.svg_image_document)
             svg_animation_start_driver(timeline);
-        return;
     }
     // HTML documents can contain several independent outer SVG fragments.
     for (DomNode* child = element->first_child; child; child = child->next_sibling)
@@ -505,7 +662,8 @@ void svg_animation_prepare(DomElement* element) {
 
 bool svg_animation_has_elements(DomElement* element) {
     SvgAnimationScan scan = {false, false, 65536};
-    svg_animation_scan(element, element, &scan, 0);
+    // picture detection includes every fragment even though each evaluator owns only one clock.
+    svg_animation_scan(element, element, &scan, 0, true);
     return scan.has_elements;
 }
 
@@ -519,10 +677,67 @@ void svg_animation_prepare_instance(DomElement* host, DomElement* source_root) {
     if (!host || !source_root || !svg_animation_has_elements(source_root)) return;
     SvgTimeline* timeline = svg_animation_timeline(host, true);
     if (!timeline) return;
-    if (host->doc->js.host_ui_context && !host->doc->services.svg_image_document)
+    if (timeline->registry->owner_document->js.host_ui_context && !timeline->registry->owner_document->services.svg_image_document)
         svg_animation_start_driver(timeline);
     svg_animation_prepare(source_root);
-    svg_animation_set_time(source_root, timeline->time);
+    svg_animation_set_document_time(source_root->doc, timeline->time);
+}
+
+static SvgAnimationRegistry* svg_animation_use_registry(DomElement* host, DomElement* source) {
+    if (!host || !source) return nullptr;
+    SvgAnimationScan scan = {false, false, 65536};
+    svg_animation_scan(source, source, &scan, 0, true);
+    // an outer instance also owns the contexts of animations reached through nested use references.
+    if (!scan.has_elements && !scan.has_uses) return nullptr;
+    // instance samples own storage in the host; their source DOM is borrowed only during this scope.
+    SvgAnimationRegistry* saved = svg_animation_instance_registry;
+    SvgTimeline* host_timeline = svg_animation_timeline(host, true);
+    SvgAnimationRegistry* owner = host_timeline ? host_timeline->registry : nullptr;
+    svg_animation_instance_registry = saved;
+    if (!owner) return nullptr;
+    SvgAnimationUseInstance* found = nullptr;
+    for (SvgAnimationUseInstance** link = &owner->instances; *link;) {
+        SvgAnimationUseInstance* instance = *link;
+        if (!svg_animation_connected(owner->document, instance->host) ||
+            (instance->host.address == host && (instance->host.expected_id != host->DomNode::id ||
+             instance->source.address != source || instance->source.expected_id != source->DomNode::id))) {
+            *link = instance->next;
+            owner->budget_owner->total_use_count--;
+            svg_animation_registry_destroy(instance->registry); lam::Temp<SvgAnimationUseInstance> owned(instance);
+            continue;
+        }
+        if (instance->host.address == host && instance->host.expected_id == host->DomNode::id &&
+            instance->source.address == source && instance->source.expected_id == source->DomNode::id)
+            found = instance;
+        link = &instance->next;
+    }
+    if (!found) {
+        if (owner->budget_owner->total_use_count >= 4096) { log_error("SVG_ANIMATION_LIMIT: document exceeds 4096 use instances"); return nullptr; }
+        found = (SvgAnimationUseInstance*)mem_calloc(1, sizeof(*found), MEM_CAT_RENDER); // OBJ_HEAP_OK: the owner registry's use-instance list owns it
+        if (!found) return nullptr;
+        found->registry = svg_animation_registry_new(source->doc, owner->owner_document, false);
+        if (!found->registry) { lam::Temp<SvgAnimationUseInstance> dropped(found); return nullptr; }
+        found->host = dom_node_ref(host); found->source = dom_node_ref(source);
+        found->registry->instance_host = found->host; found->registry->instance_root = found->source;
+        found->registry->budget_owner = owner->budget_owner;
+        found->registry->instance_parent = owner;
+        owner->budget_owner->total_use_count++;
+        found->next = owner->instances; owner->instances = found;
+    }
+    svg_animation_instance_registry = found->registry;
+    SvgAnimationRegistry* original = (SvgAnimationRegistry*)source->doc->services.svg_animation_registry;
+    uint64_t generation = original ? original->generation : 0;
+    if (found->registry->original_generation != generation) {
+        found->registry->original_generation = generation; found->registry->generation++;
+    }
+    SvgTimeline* timeline = svg_animation_timeline(source, true);
+    if (timeline) {
+        timeline->wallclock_origin = host_timeline->wallclock_origin;
+        timeline->paused = host_timeline->paused;
+        svg_animation_note_time(timeline, host_timeline->time);
+    }
+    svg_animation_instance_registry = saved;
+    return found->registry;
 }
 
 struct SvgImageAnimation {
@@ -546,7 +761,8 @@ static void svg_image_animation_tick(AnimationInstance* instance, float) {
     // picture draw state is private to this surface; immutable parsed picture owners stay at time zero.
     rdt_picture_set_animation_time(player->image->pic, seconds);
     if (player->image->pixels) {
-        mem_free(player->image->pixels); player->image->pixels = nullptr;
+        // the surface owns its decoded raster; a new time re-decodes from the picture
+        lam::free_owned(player->image->owned_pixels); player->image->pixels = nullptr;
         player->image->decoded_width = player->image->decoded_height = player->image->pitch = 0;
     }
     image_surface_bump_generation(player->image);
@@ -555,7 +771,7 @@ static void svg_image_animation_tick(AnimationInstance* instance, float) {
 
 static void svg_image_animation_release(AnimationInstance* instance) {
     SvgImageAnimation* player = (SvgImageAnimation*)instance->state;
-    if (player) { mem_unregister(player->memory_node); mem_free(player); }
+    if (player) { mem_unregister(player->memory_node); lam::Temp<SvgImageAnimation> owned(player); }
     instance->state = nullptr;
 }
 
@@ -567,13 +783,13 @@ void svg_image_animation_register(UiContext* ui, ImageSurface* image) {
     AnimationScheduler* scheduler = doc->state->animation_scheduler;
     for (AnimationInstance* driver = scheduler->first; driver; driver = driver->next)
         if (driver->type == ANIM_SVG && driver->target == image) return;
-    SvgImageAnimation* player = (SvgImageAnimation*)mem_calloc(1, sizeof(*player), MEM_CAT_RENDER);
+    SvgImageAnimation* player = (SvgImageAnimation*)mem_calloc(1, sizeof(*player), MEM_CAT_RENDER); // OBJ_HEAP_OK: the scheduler's animation instance owns the player state; svg_image_animation_release frees it
     if (!player) return;
     player->document = doc; player->image = image;
     player->memory_node = mem_register(svg_animation_memory(doc),
         MEM_KIND_CACHE, MEM_ROLE_MEDIA, "svg.image.clock", player, nullptr, svg_image_animation_stat, nullptr);
     AnimationInstance* driver = animation_instance_create(scheduler);
-    if (!driver) { mem_unregister(player->memory_node); mem_free(player); return; }
+    if (!driver) { mem_unregister(player->memory_node); lam::Temp<SvgImageAnimation> dropped(player); return; }
     driver->type = ANIM_SVG; driver->target = image; driver->state = player;
     driver->duration = INFINITY; driver->start_time = scheduler->current_time;
     driver->tick = svg_image_animation_tick;
@@ -582,6 +798,8 @@ void svg_image_animation_register(UiContext* ui, ImageSurface* image) {
 }
 
 void svg_animation_pause(DomElement* element, bool paused) {
+    // SVG Animations §5.8: nested svg controls cannot change their outer fragment's clock.
+    if (!element || svg_animation_root(element) != element) return;
     SvgTimeline* timeline = svg_animation_timeline(element, true);
     if (!timeline) return;
     timeline->paused = paused;
@@ -609,7 +827,7 @@ static bool svg_animation_rewind_control(const void* data, void* context) {
 }
 
 void svg_animation_set_time(DomElement* element, double seconds) {
-    if (!isfinite(seconds)) return;
+    if (!isfinite(seconds) || !element || svg_animation_root(element) != element) return;
     SvgTimeline* timeline = svg_animation_timeline(element, true);
     if (!timeline) return;
     if (seconds < timeline->time) hashmap_scan(timeline->registry->controls, svg_animation_rewind_control, timeline);
@@ -621,6 +839,15 @@ void svg_animation_set_time(DomElement* element, double seconds) {
 double svg_animation_current_time(DomElement* element) {
     SvgTimeline* timeline = svg_animation_timeline(element, false);
     return timeline ? timeline->time : 0.0;
+}
+
+void svg_animation_set_document_time(DomDocument* document, double seconds) {
+    SvgAnimationRegistry* registry = svg_animation_registry(document, false);
+    // private picture/use source documents have no script-controlled fragment clocks.
+    for (SvgTimeline* timeline = registry ? registry->timelines : nullptr; timeline; timeline = timeline->next) {
+        DomNode* root = dom_node_ref_validate(document, timeline->root);
+        if (root && root->is_element()) svg_animation_set_time(root->as_element(), seconds);
+    }
 }
 
 uint64_t svg_animation_generation(DomDocument* document) {
@@ -669,6 +896,18 @@ static const char* svg_animation_base(SvgAnimationRegistry* registry, DomElement
             : target->get_attribute(name);
         if (authored) return authored;
         const char* tag = target->local_name();
+        if (svg_animation_name_in("href xlink:href", name)) {
+            const char* legacy = strcmp(name, "href") == 0
+                ? dom_element_attribute_ns(target, "http://www.w3.org/1999/xlink", "href") : nullptr;
+            return legacy ? legacy : "";
+        }
+        if (strcmp(tag, "feColorMatrix") == 0 && strcmp(name, "values") == 0) {
+            const char* type = svg_animation_attribute(target, "type");
+            if (svg_animation_keyword(type, "saturate")) return "1";
+            if (svg_animation_keyword(type, "hueRotate")) return "0";
+            if (!type || svg_animation_keyword(type, "matrix"))
+                return "1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0";
+        }
         if (strcmp(tag, "rect") == 0 && svg_animation_name_in("rx ry", name)) {
             const char* paired = svg_animation_attribute(target, strcmp(name, "rx") == 0 ? "ry" : "rx");
             if (paired) return paired;
@@ -687,6 +926,23 @@ static const char* svg_animation_base(SvgAnimationRegistry* registry, DomElement
         }
         struct InitialValue { const char* tags; const char* name; const char* value; };
         static const InitialValue initial_values[] = {
+            {"stop", "offset", "0"},
+            // XML enums need their initial value as the underlying discrete-to sample (SVG 1.1 §19.2.9).
+            {"linearGradient radialGradient", "gradientUnits", "objectBoundingBox"},
+            {"linearGradient radialGradient", "spreadMethod", "pad"},
+            {"pattern", "patternUnits", "objectBoundingBox"},
+            {"pattern", "patternContentUnits", "userSpaceOnUse"},
+            {"marker", "markerUnits", "strokeWidth"}, {"clipPath", "clipPathUnits", "userSpaceOnUse"},
+            {"mask", "maskUnits", "objectBoundingBox"}, {"mask", "maskContentUnits", "userSpaceOnUse"},
+            {"filter", "filterUnits", "objectBoundingBox"}, {"filter", "primitiveUnits", "userSpaceOnUse"},
+            {"svg symbol image marker pattern view feImage", "preserveAspectRatio", "xMidYMid meet"},
+            {"text tspan textPath", "lengthAdjust", "spacing"}, {"textPath", "method", "align"},
+            {"textPath", "spacing", "exact"}, {"feComposite", "operator", "over"},
+            {"feMorphology", "operator", "erode"}, {"feBlend", "mode", "normal"},
+            {"feColorMatrix", "type", "matrix"}, {"feTurbulence", "type", "turbulence"},
+            {"feTurbulence", "stitchTiles", "noStitch"},
+            {"feFuncR feFuncG feFuncB feFuncA", "type", "identity"},
+            {"feConvolveMatrix", "edgeMode", "duplicate"}, {"feConvolveMatrix", "preserveAlpha", "false"},
             {"marker", "orient", "0"}, {"marker", "markerWidth", "3"}, {"marker", "markerHeight", "3"},
             {"marker", "refX", "0"}, {"marker", "refY", "0"}, {"radialGradient", "fr", "0"},
             {"feTurbulence", "numOctaves", "1"}, {"feTurbulence", "baseFrequency", "0 0"},
@@ -726,12 +982,13 @@ static const char* svg_animation_base(SvgAnimationRegistry* registry, DomElement
     const char* base = svg_get_dom_presentation_property(target, name, inherits,
         nullptr, 0, nullptr, &owned);
     const char* result = base || initial ? svg_animation_copy(registry, base ? base : initial) : nullptr;
-    mem_free(owned);
+    lam::Temp<char> dropped(owned);
     return result;
 }
 
 struct SvgAnimationVector {
     double* components;
+    CssUnit* units;
     unsigned count;
     bool color;
     bool linear_color;
@@ -910,6 +1167,7 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
     if (kind == SVG_ANIMATION_PATH) return svg_animation_path_vector(registry, value, vector);
     if (kind == SVG_ANIMATION_NUMBER_LIST || kind == SVG_ANIMATION_LENGTH_LIST) {
         float components[2048]; const char* end = nullptr;
+        CssUnit units[2048] = {};
         size_t count = 0;
         if (kind == SVG_ANIMATION_NUMBER_LIST) count = str_parse_float_list(value, ", \t\n\r", components, 2048, &end);
         else {
@@ -918,15 +1176,14 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
             while (*end && count < 2048) {
                 const char* start = end;
                 char* number_end = nullptr;
-                strtod(start, &number_end);
+                double number = strtod(start, &number_end);
                 if (number_end == start) return false;
                 end = number_end;
                 while (str_is_alpha(*end) || *end == '%') end++;
-                size_t length = end - start;
-                if (length >= 128) return false;
-                char token[128]; memcpy(token, start, length); token[length] = 0;
-                components[count++] = svg_resolve_length(token, &lengths, dom_svg_length_axis(name), NAN);
-                if (!isfinite(components[count-1])) return false;
+                CssUnit unit = css_unit_from_string(number_end, end - number_end);
+                if (end != number_end && unit == CSS_UNIT_NONE) return false;
+                if (!isfinite(svg_resolve_length_unit(number, unit, &lengths, dom_svg_length_axis(name), NAN))) return false;
+                components[count] = number; units[count++] = unit;
                 const char* separator = end;
                 end = str_skip_chars(end, ", \t\n\r");
                 if (*end && separator == end && *end != '+' && *end != '-') return false;
@@ -946,6 +1203,11 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
             vector->components[i] = components[i];
         }
         vector->list = true;
+        if (kind == SVG_ANIMATION_LENGTH_LIST) {
+            vector->units = (CssUnit*)svg_animation_alloc(registry, count * sizeof(CssUnit));
+            if (!vector->units) return false;
+            memcpy(vector->units, units, count * sizeof(CssUnit));
+        }
         vector->integer = strcmp(name, "order") == 0;
         return true;
     }
@@ -978,6 +1240,16 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
     if (!svg_animation_vector_storage(registry, vector, 1)) return false;
     vector->integer = kind == SVG_ANIMATION_INTEGER;
     vector->components[0] = scalar;
+    if (kind == SVG_ANIMATION_LENGTH && end != value) {
+        const char* unit_text = str_skip_ascii_space(end);
+        size_t unit_length = strlen(unit_text); str_trim(&unit_text, &unit_length);
+        CssUnit unit = css_unit_from_string(unit_text, unit_length);
+        if (unit != CSS_UNIT_NONE) {
+            vector->units = (CssUnit*)svg_animation_alloc(registry, sizeof(CssUnit));
+            if (!vector->units) return false;
+            vector->units[0] = unit; vector->components[0] = number;
+        }
+    }
     return true;
 }
 
@@ -1016,12 +1288,39 @@ static const char* svg_animation_vector_text(SvgAnimationRegistry* registry,
             if (i) strbuf_append_char(text, ' ');
             strbuf_append_format(text, "%g", vector->integer ? round(vector->components[i]) : vector->components[i]);
             if (vector->percentage) strbuf_append_char(text, '%');
+            else if (vector->units) strbuf_append_str(text, css_unit_to_string(vector->units[i]));
         }
         if (transform_type) strbuf_append_char(text, ')');
     }
     const char* result = svg_animation_copy(registry, text->str);
     strbuf_free(text);
     return result;
+}
+
+static bool svg_animation_align_lengths(DomElement* target, const char* name,
+    SvgAnimationVector* a, SvgAnimationVector* b, bool absolute = false) {
+    if (a->percentage == b->percentage && !a->units && !b->units && !absolute) return true;
+    SvgLengthContext lengths = dom_svg_length_context(target);
+    if (a->percentage != b->percentage || (absolute && a->percentage)) {
+        // opacity/offset percentages are dimensionless; length percentages use the SVG viewport.
+        float basis = svg_animation_value_class(target, name) == SVG_ANIMATION_LENGTH
+            ? svg_resolve_length("100%", &lengths, dom_svg_length_axis(name), NAN) / 100 : .01f;
+        if (!isfinite(basis)) return false;
+        if (a->percentage) a->components[0] *= basis;
+        if (b->percentage) b->components[0] *= basis;
+        a->percentage = b->percentage = false;
+    }
+    for (unsigned i = 0; i < a->count; i++) {
+        CssUnit left = a->units ? a->units[i] : CSS_UNIT_NONE;
+        CssUnit right = b->units ? b->units[i] : CSS_UNIT_NONE;
+        if (left == right && (!absolute || left == CSS_UNIT_NONE)) continue;
+        a->components[i] = svg_resolve_length_unit(a->components[i], left, &lengths, dom_svg_length_axis(name), NAN);
+        b->components[i] = svg_resolve_length_unit(b->components[i], right, &lengths, dom_svg_length_axis(name), NAN);
+        if (!isfinite(a->components[i]) || !isfinite(b->components[i])) return false;
+        if (a->units) a->units[i] = CSS_UNIT_NONE;
+        if (b->units) b->units[i] = CSS_UNIT_NONE;
+    }
+    return true;
 }
 
 static const char* svg_animation_combine(SvgAnimationRegistry* registry, DomElement* target,
@@ -1031,14 +1330,8 @@ static const char* svg_animation_combine(SvgAnimationRegistry* registry, DomElem
     if (!svg_animation_vector(registry, target, name, left, transform_type, &a, linear_color) ||
         !svg_animation_vector(registry, target, name, right, transform_type, &b, linear_color) ||
         !svg_animation_vectors_compatible(&a, &b)) return nullptr;
-    if (a.percentage != b.percentage) {
-        SvgLengthContext lengths = dom_svg_length_context(target);
-        float basis = svg_resolve_length("100%", &lengths, dom_svg_length_axis(name), NAN) / 100;
-        if (!isfinite(basis)) return nullptr;
-        if (a.percentage) a.components[0] *= basis;
-        if (b.percentage) b.components[0] *= basis;
-        a.percentage = false;
-    }
+    // retain equal units so later font/viewport samples determine the target's used value.
+    if (!svg_animation_align_lengths(target, name, &a, &b)) return nullptr;
     for (unsigned i = 0; i < a.count; i++) {
         a.components[i] = a.components[i] * left_weight + b.components[i] * right_weight;
         if (!isfinite(a.components[i])) return nullptr;
@@ -1102,7 +1395,9 @@ static const char* svg_animation_underlying(SvgAnimationRegistry* registry,
 static bool svg_animation_value_valid(DomElement* target, const char* name,
     const char* value, bool numeric) {
     if (numeric) return true;
-    if (!value || !*value) return false;
+    if (!value) return false;
+    // an absent IRI has an empty underlying value; it still transitions to a discrete resource link.
+    if (!*value) return svg_animation_name_in("href xlink:href", name);
     SvgAnimationValueClass kind = svg_animation_value_class(target, name);
     if (kind == SVG_ANIMATION_UNSUPPORTED) return false;
     if (svg_animation_keyword(value, "inherit") || svg_animation_keyword(value, "initial") ||
@@ -1139,7 +1434,7 @@ static bool svg_animation_value_valid(DomElement* target, const char* name,
 }
 
 static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement* animation,
-    DomElement* target, const char* name, bool css, float progress, double iteration) {
+    DomElement* target, const char* name, bool css, float progress, double iteration, double duration) {
     SvgAnimationRegistry* registry = timeline->registry;
     const char* transform_type = strcmp(animation->local_name(), "animateTransform") == 0
         ? svg_animation_token(registry, animation->get_attribute("type")) : nullptr;
@@ -1195,6 +1490,7 @@ static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement
             return nullptr; // SVG 1.1 §8.2 requires matching path command structures.
         if (!valid || !numeric || !svg_animation_vectors_compatible(&first, &next)) numeric = false;
         if (numeric) {
+            if (paced && !svg_animation_align_lengths(target, name, &first, &next, true)) return nullptr;
             unsigned components = transform_type && first.count == 3 ? 1 : first.color ? 3 : first.count;
             double squared = 0;
             for (unsigned c = 0; c < components; c++) {
@@ -1206,11 +1502,11 @@ static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement
     }
     if (numeric && first.list && paced) paced = false;
     if (!numeric) { discrete = true; paced = spline = false; }
-    // SMIL discrete to-animations hold the to value throughout their active interval.
-    if (to_only && discrete && !transform_type) return svg_animation_copy(registry, to);
+    // SVG 1.1 §19.2.9 makes discrete to-animations use the same boundary as from-to.
     double times[256] = {};
     const char* key_times = animation->get_attribute("keyTimes");
-    if (key_times && !paced) {
+    // SMIL §3.2.3 ignores keyTimes when the simple duration is indefinite.
+    if (key_times && !paced && isfinite(duration)) {
         const char* authored[256];
         if (svg_animation_list(registry, key_times, authored, 256) != count) return nullptr;
         for (unsigned i = 0; i < count; i++) {
@@ -1275,9 +1571,11 @@ struct SvgAnimationReference {
     DomElement* element;
     char symbol[1024];
     double offset;
+    bool explicit_id;
 };
 
-static DomElement* svg_animation_target_element(DomElement* animation) {
+DomElement* svg_animation_target_element(DomElement* animation) {
+    if (!animation || !svg_animation_is_element(animation)) return nullptr;
     const char* href = animation->get_attribute("href");
     if (!href) href = dom_element_attribute_ns(animation, "http://www.w3.org/1999/xlink", "href");
     if (!href) href = animation->get_attribute("xlink:href");
@@ -1318,6 +1616,7 @@ static bool svg_animation_reference(DomElement* animation, const char* value,
         else if (*cursor == '.') dot = cursor;
     }
     if (dot) {
+        reference->explicit_id = true;
         char identifier[1024]; size_t count = 0;
         for (const char* cursor = value; cursor < dot; cursor++) {
             if (*cursor == '\\' && cursor + 1 < dot) cursor++;
@@ -1357,7 +1656,7 @@ struct SvgAnimationTimingQuery {
         remaining(initial) {}
     ~SvgAnimationTimingQuery() {
         if (svg_animation_work) svg_animation_work->remaining -= initial - remaining;
-        for (SvgAnimationTimingEntry* entry : entries) mem_free(entry);
+        for (SvgAnimationTimingEntry* entry : entries) lam::Temp<SvgAnimationTimingEntry> owned(entry);
     }
 };
 
@@ -1392,6 +1691,7 @@ static unsigned svg_animation_offset_times(SvgTimeline* timeline, DomElement* an
         // timing queries return numbers only; their tokens do not accumulate in the paint sample pool.
         char token[1024]; memcpy(token, start, length); token[length] = 0;
         double time = svg_animation_clock_value(token, NAN);
+        if (!isfinite(time)) time = svg_animation_wallclock_value(token, timeline->wallclock_origin);
         if (isfinite(time)) query->failed = !svg_animation_insert_time(times, &resolved, capacity, time);
         else {
             SvgAnimationReference reference = {};
@@ -1443,9 +1743,15 @@ static unsigned svg_animation_calculate_intervals(SvgTimeline* timeline, DomElem
         if (!svg_animation_insert_time(begins, &begin_count, 256, previous->intervals[i].begin)) query->failed = true;
     unsigned end_count = svg_animation_offset_times(timeline, animation,
         animation->get_attribute("end"), ends, 256, INFINITY, query, horizon, depth);
-    SvgAnimationControl* control = svg_animation_control(timeline->registry, animation, false);
-    for (SvgAnimationInstanceTime* time = control ? control->times : nullptr; time; time = time->next)
-        if (!time->end && !svg_animation_insert_time(begins, &begin_count, 256, time->value)) query->failed = true;
+    SvgAnimationControl* controls[2] = {svg_animation_control(timeline->registry, animation, false), nullptr};
+    if (timeline->registry->instance_host.address) {
+        SvgAnimationRegistry* original = (SvgAnimationRegistry*)animation->doc->services.svg_animation_registry;
+        if (original) controls[1] = svg_animation_control(original, animation, false);
+    }
+    for (unsigned c = 0; c < 2; c++)
+        for (SvgAnimationInstanceTime* time = controls[c] ? controls[c]->times : nullptr; time; time = time->next)
+            if (!time->end && (!c || time->broadcast) &&
+                !svg_animation_insert_time(begins, &begin_count, 256, time->value)) query->failed = true;
     const char* restart = animation->get_attribute("restart");
     bool never = svg_animation_keyword(restart, "never");
     bool inactive = svg_animation_keyword(restart, "whenNotActive");
@@ -1457,14 +1763,21 @@ static unsigned svg_animation_calculate_intervals(SvgTimeline* timeline, DomElem
         if ((resolved && never) || (resolved && inactive && begin < intervals[resolved-1].end)) continue;
         double explicit_end = INFINITY;
         for (unsigned e = 0; e < end_count; e++) if (ends[e] >= begin) { explicit_end = ends[e]; break; }
-        for (SvgAnimationInstanceTime* time = control ? control->times : nullptr; time; time = time->next)
-            if (time->end && time->resolved_at >= begin && time->value >= begin)
-                explicit_end = fmin(explicit_end, time->value);
+        for (unsigned c = 0; c < 2; c++)
+            for (SvgAnimationInstanceTime* time = controls[c] ? controls[c]->times : nullptr; time; time = time->next)
+                if (time->end && (!c || time->broadcast) && time->resolved_at >= begin && time->value >= begin)
+                    explicit_end = fmin(explicit_end, time->value);
         double active = fmin(repeating, explicit_end - begin);
         active = fmin(maximum, fmax(minimum, active));
-        if (resolved && !inactive && !never) intervals[resolved-1].end = fmin(intervals[resolved-1].end, begin);
+        double end = begin + active;
+        // SMIL first-interval filtering excludes animations already ended when the parent begins.
+        if (end <= 0 && (begin != 0 || end != 0)) continue;
+        if (resolved && !inactive && !never) {
+            intervals[resolved-1].end = fmin(intervals[resolved-1].end, begin);
+            if (intervals[resolved-1].end <= 0 && intervals[resolved-1].begin != 0) resolved--;
+        }
         SvgAnimationInterval* interval = &intervals[resolved++];
-        interval->begin = begin; interval->end = begin + active;
+        interval->begin = begin; interval->end = end;
         interval->duration = duration; interval->repeating_duration = repeating;
     }
     return resolved;
@@ -1480,10 +1793,10 @@ static SvgAnimationTimingEntry* svg_animation_timing_entry(SvgTimeline* timeline
     }
     if (!entry) {
         if (query->entries.size() >= 512) { query->failed = true; return nullptr; }
-        entry = (SvgAnimationTimingEntry*)mem_calloc(1, sizeof(*entry), MEM_CAT_RENDER);
+        entry = (SvgAnimationTimingEntry*)mem_calloc(1, sizeof(*entry), MEM_CAT_RENDER); // OBJ_HEAP_OK: the timing query's entry list owns it until the query ends
         if (!entry) { query->failed = true; return nullptr; }
         entry->element = animation; entry->horizon = horizon;
-        if (!query->entries.append(entry)) { mem_free(entry); query->failed = true; return nullptr; }
+        if (!query->entries.append(entry)) { lam::Temp<SvgAnimationTimingEntry> dropped(entry); query->failed = true; return nullptr; }
         query->changed = true;
     }
     // an anchored cycle borrows the last iteration; an unanchored cycle starts empty.
@@ -1504,12 +1817,12 @@ static SvgAnimationTimingEntry* svg_animation_timing_entry(SvgTimeline* timeline
 }
 
 static unsigned svg_animation_intervals(SvgTimeline* timeline, DomElement* animation,
-    SvgAnimationInterval* intervals, unsigned capacity) {
+    SvgAnimationInterval* intervals, unsigned capacity, double horizon = NAN) {
     SvgAnimationTimingQuery query;
     SvgAnimationTimingEntry* entry = nullptr;
     do {
         query.changed = false; query.pass++;
-        entry = svg_animation_timing_entry(timeline, animation, timeline->time, &query, 0);
+        entry = svg_animation_timing_entry(timeline, animation, isnan(horizon) ? timeline->time : horizon, &query, 0);
     } while (query.changed && !query.failed && query.remaining && query.pass < 256);
     if (query.failed || (query.changed && (!query.remaining || query.pass == 256))) {
         if (!svg_animation_work || !svg_animation_work->reported) {
@@ -1522,6 +1835,25 @@ static unsigned svg_animation_intervals(SvgTimeline* timeline, DomElement* anima
     unsigned count = entry ? (entry->count < capacity ? entry->count : capacity) : 0;
     if (count) memcpy(intervals, entry->intervals, count * sizeof(*intervals));
     return count;
+}
+
+bool svg_animation_start_time(DomElement* animation, double* seconds) {
+    if (!animation || !svg_animation_is_element(animation) || !seconds) return false;
+    SvgTimeline* timeline = svg_animation_timeline(animation, true);
+    if (!timeline) return false;
+    SvgAnimationInterval intervals[256];
+    // DOM queries include resolved future intervals; paint samples only evaluate through the current time.
+    unsigned count = svg_animation_intervals(timeline, animation, intervals, 256, DBL_MAX / 2);
+    for (unsigned i = 0; i < count; i++) {
+        if (intervals[i].end > timeline->time) { *seconds = intervals[i].begin; return true; }
+    }
+    return false;
+}
+
+double svg_animation_simple_duration(DomElement* animation) {
+    if (!animation || !svg_animation_is_element(animation)) return NAN;
+    double duration = svg_animation_clock_value(animation->get_attribute("dur"), NAN);
+    return duration > 0 && isfinite(duration) ? duration : NAN;
 }
 
 static bool svg_animation_interval(SvgTimeline* timeline, DomElement* animation,
@@ -1543,20 +1875,27 @@ bool svg_animation_begin_end(DomElement* animation, bool end, double offset) {
     SvgAnimationInterval interval = {};
     if (end && (!svg_animation_interval(timeline, animation, &interval) || timeline->time >= interval.end)) return false;
     SvgAnimationControl* control = svg_animation_control(timeline->registry, animation, true);
-    if (!control || control->count >= 256 || timeline->registry->instance_count >= 65536) return false;
-    SvgAnimationInstanceTime* time = (SvgAnimationInstanceTime*)mem_calloc(1, sizeof(*time), MEM_CAT_RENDER);
+    if (!control) return false;
+    for (SvgAnimationInstanceTime* time = control->times; time; time = time->next)
+        if (time->value == timeline->time + offset && time->resolved_at == timeline->time &&
+            time->end == end && time->broadcast == svg_animation_event_broadcast) return true;
+    if (control->count >= 256 || timeline->registry->budget_owner->total_instance_count >= 65536) return false;
+    SvgAnimationInstanceTime* time = (SvgAnimationInstanceTime*)mem_calloc(1, sizeof(*time), MEM_CAT_RENDER); // OBJ_HEAP_OK: the animation control's instance-time list owns it
     if (!time) return false;
     time->value = timeline->time + offset; time->resolved_at = timeline->time; time->end = end;
+    time->broadcast = svg_animation_event_broadcast;
     time->next = control->times; control->times = time; control->count++;
     timeline->registry->instance_count++;
+    timeline->registry->budget_owner->total_instance_count++;
     timeline->registry->generation++;
-    if (animation->doc->state) doc_state_request_repaint(animation->doc->state);
+    if (timeline->registry->owner_document->state) doc_state_request_repaint(timeline->registry->owner_document->state);
     if (!timeline->paused && animation->doc->js.host_ui_context) svg_animation_start_driver(timeline);
     return true;
 }
 
 static unsigned svg_animation_event_offsets(DomElement* animation, const char* text,
-    DomElement* source, const char* type, bool bubbles, double detail, double* offsets, unsigned capacity) {
+    DomElement* source, const char* type, bool bubbles, double detail, const char* key,
+    double* offsets, bool* broadcasts, unsigned capacity, bool explicit_only) {
     StrSplitIter split;
     if (!svg_animation_list_begin(&split, text)) return 0;
     const char* start = nullptr; size_t length = 0;
@@ -1564,8 +1903,25 @@ static unsigned svg_animation_event_offsets(DomElement* animation, const char* t
     while (svg_animation_list_next(&split, &start, &length)) {
         if (!length || length >= 1024) continue;
         char token[1024]; memcpy(token, start, length); token[length] = 0;
+        if (key) {
+            if (strncmp(token, "accessKey(", 10) != 0) continue;
+            const char* character = token + 10; uint32_t codepoint;
+            int bytes = str_utf8_decode(character, strlen(character), &codepoint);
+            if (bytes <= 0 || character[bytes] != ')' || strlen(key) != (size_t)bytes ||
+                memcmp(character, key, bytes) != 0) continue;
+            const char* suffix = str_skip_ascii_space(character + bytes + 1);
+            double offset = !*suffix ? 0 : (*suffix == '+' || *suffix == '-')
+                ? svg_animation_clock_value(suffix, NAN) : NAN;
+            if (isfinite(offset) && !svg_animation_insert_time(offsets, &count, capacity, offset)) {
+                log_error("SVG_ANIMATION_TIMING_LIMIT: access key exceeds 256 distinct offsets");
+                return 0;
+            }
+            for (unsigned i = 0; i < count; i++) broadcasts[i] = true;
+            continue;
+        }
         SvgAnimationReference reference = {};
         if (!svg_animation_reference(animation, token, &reference)) continue;
+        if (explicit_only && !reference.explicit_id) continue;
         bool matches = strcmp(reference.symbol, type) == 0;
         if (!matches && strcmp(type, "repeatEvent") == 0) {
             matches = strcmp(reference.symbol, "repeat") == 0;
@@ -1579,10 +1935,16 @@ static unsigned svg_animation_event_offsets(DomElement* animation, const char* t
         if (!matches) continue;
         for (DomNode* node = source; node; node = bubbles ? node->parent : nullptr)
             if (node == reference.element) {
+                unsigned position = 0;
+                while (position < count && offsets[position] < reference.offset) position++;
+                bool exists = position < count && offsets[position] == reference.offset;
+                if (!exists && count < capacity)
+                    for (unsigned i = count; i > position; i--) broadcasts[i] = broadcasts[i-1];
                 if (!svg_animation_insert_time(offsets, &count, capacity, reference.offset)) {
                     log_error("SVG_ANIMATION_TIMING_LIMIT: event exceeds 256 distinct offsets");
                     return 0;
                 }
+                broadcasts[position] = (exists && broadcasts[position]) || reference.explicit_id;
                 break;
             }
     }
@@ -1590,13 +1952,16 @@ static unsigned svg_animation_event_offsets(DomElement* animation, const char* t
 }
 
 static void svg_animation_event_tree(SvgTimeline* timeline, DomElement* node,
-    DomElement* source, const char* type, bool bubbles, double detail, unsigned depth, size_t* remaining) {
+    DomElement* source, const char* type, bool bubbles, double detail, const char* key,
+    unsigned depth, size_t* remaining, bool explicit_only = false) {
     if (!node || depth >= 256 || !*remaining) return;
+    if (svg_animation_separate_fragment(node, timeline->root.address)) return;
     (*remaining)--;
     if (svg_animation_is_element(node)) {
         double begin_offsets[256], end_offsets[256];
-        unsigned begin = svg_animation_event_offsets(node, node->get_attribute("begin"), source, type, bubbles, detail, begin_offsets, 256);
-        unsigned end = svg_animation_event_offsets(node, node->get_attribute("end"), source, type, bubbles, detail, end_offsets, 256);
+        bool begin_broadcasts[256] = {}, end_broadcasts[256] = {};
+        unsigned begin = svg_animation_event_offsets(node, node->get_attribute("begin"), source, type, bubbles, detail, key, begin_offsets, begin_broadcasts, 256, explicit_only);
+        unsigned end = svg_animation_event_offsets(node, node->get_attribute("end"), source, type, bubbles, detail, key, end_offsets, end_broadcasts, 256, explicit_only);
         if (begin || end) {
             SvgAnimationInterval interval = {};
             bool resolved = svg_animation_interval(timeline, node, &interval);
@@ -1605,18 +1970,26 @@ static void svg_animation_event_tree(SvgTimeline* timeline, DomElement* node,
             bool never = svg_animation_keyword(restart, "never");
             bool inactive = svg_animation_keyword(restart, "whenNotActive");
             // one event occurrence resolves either begin or end, according to SMIL event sensitivity.
+            bool saved_broadcast = svg_animation_event_broadcast;
             if (begin && !(never && resolved) && !(inactive && active)) {
-                for (unsigned i = 0; i < begin; i++) svg_animation_begin_end(node, false, begin_offsets[i]);
+                for (unsigned i = 0; i < begin; i++) {
+                    svg_animation_event_broadcast = begin_broadcasts[i];
+                    svg_animation_begin_end(node, false, begin_offsets[i]);
+                }
             } else if (end && active) {
-                for (unsigned i = 0; i < end; i++) svg_animation_begin_end(node, true, end_offsets[i]);
+                for (unsigned i = 0; i < end; i++) {
+                    svg_animation_event_broadcast = end_broadcasts[i];
+                    svg_animation_begin_end(node, true, end_offsets[i]);
+                }
             }
+            svg_animation_event_broadcast = saved_broadcast;
         }
     }
     for (DomNode* child = node->first_child; child; child = child->next_sibling)
-        if (child->is_element()) svg_animation_event_tree(timeline, child->as_element(), source, type, bubbles, detail, depth + 1, remaining);
+        if (child->is_element()) svg_animation_event_tree(timeline, child->as_element(), source, type, bubbles, detail, key, depth + 1, remaining, explicit_only);
 }
 
-extern "C" void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail) {
+static void svg_animation_dispatch_event(DomElement* target, const char* type, bool bubbles, double detail, const char* key) {
     if (!target || !target->doc || !type || target->doc->services.svg_image_document) return;
     SvgAnimationRegistry* registry = svg_animation_registry(target->doc, false);
     if (!registry) return;
@@ -1624,14 +1997,110 @@ extern "C" void dom_engine_svg_timing_event(DomElement* target, const char* type
     for (SvgTimeline* timeline = registry->timelines; timeline; timeline = timeline->next) {
         DomNode* root = dom_node_ref_validate(target->doc, timeline->root);
         if (!root || !root->is_element() || !svg_animation_connected(target->doc, timeline->root)) continue;
+        if (registry->instance_root.address)
+            root = dom_node_ref_validate(target->doc, registry->instance_root);
+        if (!root || !root->is_element()) continue;
         size_t remaining = 65536;
         double previous = timeline->time;
         if (!timeline->paused && timeline->driver)
             timeline->time = timeline->origin + target->doc->state->animation_scheduler->current_time - timeline->driver->start_time;
         if (!timeline->paused) timeline->time += registry->event_time_offset;
-        svg_animation_event_tree(timeline, root->as_element(), target, type, bubbles, detail, 0, &remaining);
+        svg_animation_event_tree(timeline, root->as_element(), target, type, bubbles, detail, key, 0, &remaining);
         timeline->time = previous;
     }
+}
+
+extern "C" void dom_engine_svg_timing_event(DomElement* target, const char* type, bool bubbles, double detail) {
+    svg_animation_dispatch_event(target, type, bubbles, detail, nullptr);
+}
+
+static void svg_animation_broadcast_use_event(SvgTimeline* host_timeline, DomElement* source,
+    const char* type, bool bubbles, double detail, const char* key) {
+    SvgAnimationRegistry* saved = svg_animation_instance_registry;
+    svg_animation_instance_registry = nullptr;
+    SvgTimeline* original = svg_animation_timeline(source, true);
+    if (original && host_timeline) {
+        double previous = original->time;
+        original->time = host_timeline->time;
+        size_t remaining = 65536;
+        DomNode* root = dom_node_ref_validate(source->doc, original->root);
+        // SVG 2 §5.6.5: ID-qualified events and access keys also initialize later instances.
+        if (root && root->is_element())
+            svg_animation_event_tree(original, root->as_element(), source, type, bubbles, detail,
+                key, 0, &remaining, true);
+        original->time = previous;
+    }
+    svg_animation_instance_registry = saved;
+}
+
+static void svg_animation_key_instances(SvgAnimationRegistry* owner, const char* key, unsigned depth) {
+    if (!owner || depth >= 32) return;
+    for (SvgAnimationUseInstance* instance = owner->instances; instance; instance = instance->next) {
+        DomNode* host = dom_node_ref_validate(owner->document, instance->host);
+        DomNode* source = dom_node_ref_validate(instance->registry->document, instance->source);
+        if (!host || !source || !host->is_element() || !source->is_element() ||
+            !svg_animation_connected(owner->document, instance->host)) continue;
+        svg_animation_broadcast_use_event(svg_animation_timeline(host->as_element(), true),
+            source->as_element(), "keydown", false, 0, key);
+        SvgAnimationSourceScope scope(source->as_element()->doc, source->as_element(), host->as_element());
+        svg_animation_dispatch_event(source->as_element(), "keydown", false, 0, key);
+        svg_animation_key_instances(instance->registry, key, depth + 1);
+    }
+}
+
+extern "C" void dom_engine_svg_timing_key(DomElement* target, const char* key) {
+    if (!target || !key || !str_utf8_valid(key, strlen(key)) || str_utf8_count(key, strlen(key)) != 1) return;
+    SvgAnimationRegistry* owner = svg_animation_registry(target->doc, false);
+    if (!owner) return;
+    SvgAnimationWorkScope work(owner);
+    svg_animation_dispatch_event(target, "keydown", false, 0, key);
+    svg_animation_key_instances(owner, key, 0);
+    owner->budget_owner->generation++;
+}
+
+void svg_animation_use_event(DomElement* host, DomElement* source, const char* type, bool bubbles, double detail) {
+    if (!host || !source || !type || host->doc->services.svg_image_document) return;
+    SvgAnimationRegistry* owner = svg_animation_registry(host->doc, false);
+    SvgAnimationUseInstance* instance = owner ? owner->instances : nullptr;
+    while (instance && (instance->host.address != host || instance->host.expected_id != host->DomNode::id))
+        instance = instance->next;
+    DomNode* root = instance ? dom_node_ref_validate(source->doc, instance->source) : nullptr;
+    if (!root || !root->is_element()) return;
+    svg_animation_broadcast_use_event(svg_animation_timeline(host, true), source, type, bubbles, detail, nullptr);
+    SvgAnimationSourceScope scope(source->doc, root->as_element(), host);
+    svg_animation_dispatch_event(source, type, bubbles, detail, nullptr);
+    owner->generation++;
+    if (owner != owner->budget_owner) owner->budget_owner->generation++;
+    if (owner->owner_document->state) doc_state_request_repaint(owner->owner_document->state);
+}
+
+static void svg_animation_forget_source_registry(SvgAnimationRegistry* owner, DomDocument* source) {
+    if (!owner) return;
+    for (SvgAnimationUseInstance** link = &owner->instances; *link;) {
+        SvgAnimationUseInstance* instance = *link;
+        if (instance->registry->document == source) {
+            *link = instance->next;
+            owner->budget_owner->total_use_count--;
+            svg_animation_registry_destroy(instance->registry); lam::Temp<SvgAnimationUseInstance> owned(instance);
+        } else {
+            svg_animation_forget_source_registry(instance->registry, source);
+            link = &instance->next;
+        }
+    }
+}
+
+void svg_animation_forget_source_document(DomDocument* host, DomDocument* source) {
+    svg_animation_forget_source_registry(host ? (SvgAnimationRegistry*)host->services.svg_animation_registry : nullptr, source);
+}
+
+DomElement* svg_animation_use_source(DomElement* host) {
+    SvgAnimationRegistry* owner = host ? svg_animation_registry(host->doc, false) : nullptr;
+    for (SvgAnimationUseInstance* instance = owner ? owner->instances : nullptr; instance; instance = instance->next)
+        if (instance->host.address == host && instance->host.expected_id == host->DomNode::id) {
+            DomNode* source = dom_node_ref_validate(instance->registry->document, instance->source);
+            return source ? source->as_element() : nullptr;
+        }
+    return nullptr;
 }
 
 struct SvgAnimationNotification {
@@ -1653,6 +2122,7 @@ static void svg_animation_queue_notification(DomElement* animation,
 static void svg_animation_collect_notifications(SvgTimeline* timeline, DomElement* node,
     double previous, SvgAnimationNotifications* events, unsigned depth, size_t* remaining) {
     if (!node || depth >= 256 || !*remaining) return;
+    if (svg_animation_separate_fragment(node, timeline->root.address)) return;
     (*remaining)--;
     if (svg_animation_is_element(node) && dom_svg_element_is_eligible(node)) {
         SvgAnimationInterval intervals[256];
@@ -1691,10 +2161,12 @@ static void svg_animation_collect_notifications(SvgTimeline* timeline, DomElemen
             previous, events, depth + 1, remaining);
 }
 
-static void svg_animation_notify_time(SvgTimeline* timeline, double previous) {
+static void svg_animation_notify_time(SvgTimeline* timeline, double previous, unsigned depth) {
+    if (depth >= 32) return;
     if (timeline->time < previous) return;
     DomDocument* doc = timeline->registry->document;
-    DomNode* root = dom_node_ref_validate(doc, timeline->root);
+    DomNode* root = dom_node_ref_validate(doc, timeline->registry->instance_root.address
+        ? timeline->registry->instance_root : timeline->root);
     if (!root || !root->is_element()) return;
     SvgAnimationWorkScope work(timeline->registry);
     SvgAnimationNotifications events(MEM_CAT_RENDER, 16);
@@ -1717,9 +2189,28 @@ static void svg_animation_notify_time(SvgTimeline* timeline, double previous) {
         double saved_offset = timeline->registry->event_time_offset;
         // Syncbase/event dependents use the defined boundary even when this frame arrives later.
         timeline->registry->event_time_offset = event->time - timeline->time;
-        radiant_dispatch_svg_time_event((UiContext*)doc->js.host_ui_context,
-            target->as_element(), names[event->kind], event->detail, event->time);
+        if (timeline->registry->instance_host.address) {
+            double current = timeline->time;
+            timeline->time = event->time;
+            timeline->registry->event_time_offset = 0;
+            // shadow animation nodes have no public DOM wrapper; their timing events still drive dependents.
+            svg_animation_broadcast_use_event(timeline, target->as_element(), names[event->kind], false, event->detail, nullptr);
+            svg_animation_dispatch_event(target->as_element(), names[event->kind], false, event->detail, nullptr);
+            timeline->time = current;
+        } else {
+            radiant_dispatch_svg_time_event((UiContext*)doc->js.host_ui_context,
+                target->as_element(), names[event->kind], event->detail, event->time);
+        }
         timeline->registry->event_time_offset = saved_offset;
+    }
+    for (SvgAnimationUseInstance* instance = timeline->registry->instances; instance; instance = instance->next) {
+        DomNode* host = dom_node_ref_validate(doc, instance->host);
+        DomNode* source = dom_node_ref_validate(instance->registry->document, instance->source);
+        if (!host || !source || !host->is_element() || !source->is_element() ||
+            !svg_animation_connected(doc, instance->host) || svg_animation_root(host->as_element()) != timeline->root.address) continue;
+        SvgAnimationSourceScope scope(source->as_element()->doc, source->as_element(), host->as_element());
+        SvgTimeline* shadow = svg_animation_timeline(source->as_element(), true);
+        if (shadow) svg_animation_notify_time(shadow, previous, depth + 1);
     }
 }
 
@@ -1766,7 +2257,8 @@ static void svg_animation_sample_node(SvgTimeline* timeline, DomElement* animati
     float progress = cycles - iteration;
     double integral = round(cycles);
     // decimal durations can leave a tiny fmod remainder at an exact repeat-count end.
-    if (terminal && elapsed > 0 && fabs(cycles - integral) <= 8 * DBL_EPSILON * fmax(1, fabs(cycles))) {
+    if (terminal && isfinite(duration) && elapsed > 0 &&
+        fabs(cycles - integral) <= 8 * DBL_EPSILON * fmax(1, fabs(cycles))) {
         progress = 1.0f; iteration = fmax(0, integral - 1);
     }
     const char* attribute_type = animation->get_attribute("attributeType");
@@ -1799,7 +2291,7 @@ static void svg_animation_sample_node(SvgTimeline* timeline, DomElement* animati
             if (result && control) {
                 svg_animation_clear_frozen(registry, control);
                 size_t bytes = strlen(result) + 1;
-                if (bytes > 8u * 1024u * 1024u - registry->frozen_bytes) {
+                if (bytes > 8u * 1024u * 1024u - registry->budget_owner->total_frozen_bytes) {
                     log_error("SVG_ANIMATION_LIMIT: frozen value storage exceeds 8 MiB");
                     registry->sample_failed = true;
                 } else {
@@ -1807,13 +2299,14 @@ static void svg_animation_sample_node(SvgTimeline* timeline, DomElement* animati
                     if (!control->frozen_text) registry->sample_failed = true;
                     else {
                         registry->frozen_bytes += bytes;
+                        registry->budget_owner->total_frozen_bytes += bytes;
                         control->frozen_signature = signature; control->frozen_target = dom_node_ref(target);
                         control->frozen_begin = interval.begin; control->frozen_end = interval.end;
                     }
                 }
             }
         }
-    } else result = svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration);
+    } else result = svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration, duration);
     if (result) svg_animation_store(registry, target, name, result, css);
 }
 
@@ -1821,20 +2314,42 @@ struct SvgAnimationCandidate {
     DomElement* animation;
     SvgAnimationInterval interval;
     size_t order;
+    DomElement* target;
+    unsigned dependency_phase;
+    unsigned target_depth;
 };
 
 typedef lam::ArrayList<SvgAnimationCandidate> SvgAnimationCandidates;
 
+static void svg_animation_candidate_dependencies(SvgAnimationCandidate* candidate) {
+    candidate->target = svg_animation_target_element(candidate->animation);
+    const char* name = svg_animation_attribute_name(candidate->animation);
+    candidate->dependency_phase = name && svg_animation_name_in("font-family font-size font-weight font-style", name) ? 0 :
+        name && candidate->target && candidate->target->tag() == MARKUP_NAME_SVG &&
+            svg_animation_name_in("viewBox width height", name) ? 1 : name && strcmp(name, "color") == 0 ? 2 :
+        name && strcmp(name, "type") == 0 ? 3 : 4;
+    if (candidate->dependency_phase < 3)
+        for (DomNode* parent = candidate->target; parent; parent = parent->parent) candidate->target_depth++;
+}
+
+static int svg_animation_priority_compare(const SvgAnimationCandidate* a, const SvgAnimationCandidate* b) {
+    if (a->interval.begin != b->interval.begin) return a->interval.begin < b->interval.begin ? -1 : 1;
+    return a->order == b->order ? 0 : a->order < b->order ? -1 : 1;
+}
+
 static int svg_animation_candidate_compare(const void* left, const void* right) {
     const SvgAnimationCandidate* a = (const SvgAnimationCandidate*)left;
     const SvgAnimationCandidate* b = (const SvgAnimationCandidate*)right;
-    if (a->interval.begin != b->interval.begin) return a->interval.begin < b->interval.begin ? -1 : 1;
-    return a->order == b->order ? 0 : a->order < b->order ? -1 : 1;
+    // font, viewport, currentColor and filter type samples are inputs to other attribute functions.
+    if (a->dependency_phase != b->dependency_phase) return a->dependency_phase < b->dependency_phase ? -1 : 1;
+    if (a->target_depth != b->target_depth) return a->target_depth < b->target_depth ? -1 : 1;
+    return svg_animation_priority_compare(a, b);
 }
 
 static void svg_animation_sample_tree(SvgTimeline* timeline, DomElement* node,
     SvgAnimationCandidates* candidates, unsigned depth, size_t* remaining) {
     if (!node || timeline->registry->sample_failed) return;
+    if (svg_animation_separate_fragment(node, timeline->root.address)) return;
     if (depth >= 256 || !*remaining) {
         log_error("SVG_ANIMATION_LIMIT: sample traversal exceeds 65536 nodes or 256 levels");
         timeline->registry->sample_failed = true; return;
@@ -1843,6 +2358,7 @@ static void svg_animation_sample_tree(SvgTimeline* timeline, DomElement* node,
     if (svg_animation_is_element(node)) {
         SvgAnimationCandidate candidate = {};
         candidate.animation = node; candidate.order = 65536 - *remaining;
+        svg_animation_candidate_dependencies(&candidate);
         if (svg_animation_interval(timeline, node, &candidate.interval) && !candidates->append(candidate))
             timeline->registry->sample_failed = true;
     }
@@ -1872,14 +2388,16 @@ static const char* svg_animation_frozen_sample(SvgTimeline* timeline, DomElement
     svg_animation_sample_tree(timeline, root->as_element(), &candidates, 0, &remaining);
     if (candidates.size() > 1) qsort(candidates.data(), candidates.size(),
         sizeof(SvgAnimationCandidate), svg_animation_candidate_compare);
-    SvgAnimationCandidate ceiling = {animation, *interval, order};
+    SvgAnimationCandidate ceiling = {animation, *interval, order, target, 0, 0};
+    svg_animation_candidate_dependencies(&ceiling);
     for (size_t i = 0; i < candidates.size() && !registry->sample_failed; i++) {
+        // dependency order includes inherited inputs while keeping frozen sandwiches acyclic.
         if (svg_animation_candidate_compare(&candidates[i], &ceiling) >= 0) break;
         svg_animation_sample_node(timeline, candidates[i].animation, &candidates[i].interval, candidates[i].order);
     }
     // SMIL freezes the complete to-function at the active end, including its underlying sandwich.
     const char* result = registry->sample_failed ? nullptr :
-        svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration);
+        svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration, interval->duration);
     timeline->time = saved_time; registry->targets = saved_targets;
     SvgAnimatedTargetMap::destroy(temporary); registry->frozen_depth--;
     return result;
@@ -1891,13 +2409,15 @@ static void svg_animation_sample(SvgAnimationRegistry* registry) {
     svg_animation_prune(registry);
     SvgAnimationWorkScope work(registry);
     registry->sampling = true;
+    registry->budget_owner->total_sample_bytes -= registry->sample_bytes;
     registry->sample_bytes = 0; registry->sample_failed = false;
     hashmap_clear(registry->targets, false);
     if (registry->samples) mem_pool_destroy(registry->samples);
-    registry->samples = mem_pool_create((MemContext*)registry->document->services.mem_ctx,
+    registry->samples = mem_pool_create((MemContext*)registry->owner_document->services.mem_ctx,
         MEM_ROLE_RENDER, "svg.animation.samples");
     if (registry->samples) for (SvgTimeline* timeline = registry->timelines; timeline; timeline = timeline->next) {
-        DomNode* root = dom_node_ref_validate(registry->document, timeline->root);
+        DomNode* root = dom_node_ref_validate(registry->document,
+            registry->instance_host.address ? registry->instance_root : timeline->root);
         if (root && root->is_element() && svg_animation_connected(registry->document, timeline->root)) {
             size_t remaining = 65536;
             SvgAnimationCandidates candidates(MEM_CAT_RENDER, 0);
@@ -1916,15 +2436,28 @@ static void svg_animation_sample(SvgAnimationRegistry* registry) {
     registry->sampling = false;
 }
 
-static bool svg_animation_target_visible(SvgAnimationRegistry* registry, const SvgAnimatedTarget* entry) {
-    if (!entry || !dom_node_ref_validate(registry->document, entry->element)) return false;
-    if (registry->reference_document) {
+static bool svg_animation_node_visible(SvgAnimationRegistry* registry, DomNode* node) {
+    if (!node) return false;
+    if (registry->reference_document || registry->instance_host.address) {
         if (svg_animation_source_document != registry->document || !svg_animation_source_instance) return false;
-        DomNode* node = entry->element.address;
         while (node && node != svg_animation_source_instance) node = node->parent;
         if (!node) return false;
     }
     return true;
+}
+
+uint64_t svg_animation_source_generation(DomDocument* document, Element* root, DomElement* node) {
+    SvgAnimationRegistry* registry = svg_animation_registry(document, false);
+    if (!registry) return 0;
+    if (registry->instance_host.address) return hashmap_hash_pointer_identity(registry, registry->generation, registry->original_generation);
+    if (!registry->reference_document) return registry->generation;
+    // shared external resources stay static outside the active use subtree (SVG 2 §5.6.5).
+    if (!node) node = dom_find_element_for_source(document->root, root);
+    return svg_animation_node_visible(registry, node) ? registry->generation : 0;
+}
+
+static bool svg_animation_target_visible(SvgAnimationRegistry* registry, const SvgAnimatedTarget* entry) {
+    return entry && svg_animation_node_visible(registry, dom_node_ref_validate(registry->document, entry->element));
 }
 
 static const char* svg_animation_target_value(SvgAnimationRegistry* registry, Element* source,
@@ -1974,7 +2507,7 @@ const char* svg_animation_source_value(Element* element, const char* name) {
             const char* computed = svg_get_dom_presentation_property(target->as_element(), name, false,
                 nullptr, 0, nullptr, &owned);
             value->resolved_text = computed ? svg_animation_copy(registry, computed) : xml;
-            value->resolved = true; mem_free(owned);
+            value->resolved = true; lam::Temp<char> dropped(owned);
         }
         return value->resolved_text;
     }

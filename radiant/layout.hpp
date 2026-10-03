@@ -291,10 +291,10 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
 // leave speculative font state in the parent layout pass.
 // tier-3: layout-transient, valid within pass
 struct IntrinsicFontScope {
-    LayoutContext* lycon;
+    lam::Up<LayoutContext> lycon;
     FontBox saved_font;
-    FontProp* prop_a;
-    FontProp* prop_b;
+    lam::Up<FontProp> prop_a;
+    lam::Up<FontProp> prop_b;
 
     IntrinsicFontScope(LayoutContext* l, FontBox saved)
         : lycon(l), saved_font(saved), prop_a(nullptr), prop_b(nullptr) {}
@@ -1003,18 +1003,18 @@ static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, 
 
 // CSS quad shorthands use the same clockwise expansion for borders, spacing, and insets.
 struct CssQuadValues {
-    const CssValue* side[4];
+    lam::Up<const CssValue> side[4];
 
     bool expand(const CssValue* value) {
         if (!value) return false;
         if (value->type != CSS_VALUE_TYPE_LIST) {
-            for (int i = 0; i < 4; i++) side[i] = value;
+            for (int i = 0; i < 4; i++) side[i] = lam::up(value);
             return true;
         }
         int count = value->data.list.count;
         if (count < 1 || count > 4 || !value->data.list.values) return false;
         for (int i = 0; i < 4; i++) {
-            side[i] = value->data.list.values[css_quad_value_index(count, i)];
+            side[i] = lam::up(value->data.list.values[css_quad_value_index(count, i)]);
             if (!side[i]) return false;
         }
         return true;
@@ -1022,8 +1022,8 @@ struct CssQuadValues {
 };
 
 typedef struct CssCascadeCandidate {
-    CssDeclaration* decl;
-    CssValue* value;
+    lam::Up<CssDeclaration> decl;
+    lam::Up<CssValue> value;
     int64_t priority;
 } CssCascadeCandidate;
 
@@ -1044,8 +1044,8 @@ static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate
     if (!candidate || !decl || !value) return;
     if (!candidate->decl ||
         css_declaration_cascade_compare(decl, candidate->decl) >= 0) {
-        candidate->decl = decl;
-        candidate->value = value;
+        candidate->decl = lam::up(decl);
+        candidate->value = lam::up(value);
         candidate->priority = get_cascade_priority(decl);
     }
 }
@@ -1181,7 +1181,7 @@ static inline void layout_resolve_in_flow_horizontal_margins(ViewBlock* block,
 }
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutContainingBlock {
-    ViewBlock* view;
+    lam::Up<ViewBlock> view;
 
     float border_x;
     float border_y;
@@ -1229,15 +1229,15 @@ typedef struct Arena Arena;
 typedef struct DomElement DomElement;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterValue {
-    const char* name;
+    lam::Up<const char> name;
     int value;
     bool propagated;
     bool created_by_reset;
 } CounterValue;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterScope {
-    HashMap* counters;
-    CounterScope* parent;
+    lam::Own<HashMap> counters;
+    lam::Up<CounterScope> parent;
     int owner_depth;
     bool pseudo_scope;
     bool reset_replaces_sibling;
@@ -1245,13 +1245,13 @@ typedef struct CounterScope {
 } CounterScope;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterFrame {
-    CounterScope* entry_scope;
-    CounterScope* element_scope;
+    lam::Up<CounterScope> entry_scope;
+    lam::Up<CounterScope> element_scope;
 } CounterFrame;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterContext {
-    Arena* arena;
-    CounterScope* current_scope;
+    lam::Up<Arena> arena;
+    lam::Up<CounterScope> current_scope;
     // owns every scope allocated during this layout pass
     lam::ArrayList<CounterScope*>* scope_stack;
     // tracks element/pseudo boundaries separately from the active counter chain
@@ -1315,7 +1315,7 @@ enum LayoutProfileBucket : uint8_t {
 };
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutProfileNode {
-    const DomNode* node;
+    lam::Up<const DomNode> node;
     LayoutProfileBucket bucket;
     double elapsed_ms;
 } LayoutProfileNode;
@@ -1367,8 +1367,8 @@ void layout_profiler_report(LayoutContext* lycon);
 double layout_profiler_now_ms();
 // tier-3: layout-transient, valid within pass
 struct LayoutProfileScope {
-    LayoutContext* lycon;
-    const DomNode* node;
+    lam::Up<LayoutContext> lycon;
+    lam::Up<const DomNode> node;
     LayoutProfileBucket bucket;
     double start_ms;
 
@@ -1546,23 +1546,23 @@ float text_unicode_space_width_em(uint32_t codepoint);
 struct TableMetadata {
     int column_count;
     int row_count;
-    bool* grid_occupied;
-    float* col_widths;
-    float* col_single_min_widths;
-    float* col_min_widths;
-    float* col_max_widths;
-    float* col_percent_widths;
-    float* row_heights;
-    float* row_base_heights;
-    float* row_reference_heights;
-    float* row_y_positions;
-    bool* row_collapsed;
-    bool* col_collapsed;
-    float* col_original_widths;
-    bool* row_has_percent_height;
-    bool* row_has_specified_height;
-    float* col_edge_max_border;
-    bool* col_has_explicit_width;
+    lam::OwnArr<bool> grid_occupied;
+    lam::OwnArr<float> col_widths;
+    lam::OwnArr<float> col_single_min_widths;
+    lam::OwnArr<float> col_min_widths;
+    lam::OwnArr<float> col_max_widths;
+    lam::OwnArr<float> col_percent_widths;
+    lam::OwnArr<float> row_heights;
+    lam::OwnArr<float> row_base_heights;
+    lam::OwnArr<float> row_reference_heights;
+    lam::OwnArr<float> row_y_positions;
+    lam::OwnArr<bool> row_collapsed;
+    lam::OwnArr<bool> col_collapsed;
+    lam::OwnArr<float> col_original_widths;
+    lam::OwnArr<bool> row_has_percent_height;
+    lam::OwnArr<bool> row_has_specified_height;
+    lam::OwnArr<float> col_edge_max_border;
+    lam::OwnArr<bool> col_has_explicit_width;
 
     float collapsed_border_top;
     float collapsed_border_right;
@@ -1642,8 +1642,8 @@ typedef BoxEdges RadiantVelmtEdges;
 
 // tier-3: layout-transient, valid within pass
 typedef struct RadiantVelmt {
-    View* view;
-    DomElement* element;
+    lam::Up<View> view;
+    lam::Up<DomElement> element;
     int index;
     RadiantVelmtBox border_box;
     RadiantVelmtEdges margin;
@@ -1653,10 +1653,10 @@ typedef struct RadiantVelmt {
 
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutContext {
-    LayoutContext* lycon;
-    ViewBlock* parent;
-    const char* layout_name;
-    RadiantVelmt* children;
+    lam::Up<LayoutContext> lycon;
+    lam::Up<ViewBlock> parent;
+    lam::Up<const char> layout_name;
+    lam::Up<RadiantVelmt> children;
     int child_count;
     float available_width;
     float available_height;
@@ -1666,10 +1666,10 @@ typedef struct CustomLayoutContext {
     float child_available_height;
     bool child_available_width_definite;
     bool child_available_height_definite;
-    const char* child_available_width_source;
-    const char* child_available_height_source;
+    lam::Up<const char> child_available_width_source;
+    lam::Up<const char> child_available_height_source;
     CssEnum direction;
-    const char* writing_mode;
+    lam::Up<const char> writing_mode;
 } CustomLayoutContext;
 
 // tier-3: layout-transient, valid within pass
@@ -1683,20 +1683,20 @@ typedef struct CustomLayoutPlacement {
 
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintLayer {
-    Element* content;
+    lam::Up<Element> content;
     int z;
     int order;
 } CustomLayoutPaintLayer;
 
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintState {
-    CustomLayoutPaintLayer* layers;
+    lam::OwnArr<CustomLayoutPaintLayer> layers;
     int layer_count;
 } CustomLayoutPaintState;
 
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutResult {
-    CustomLayoutPlacement* placements;
+    lam::OwnArr<CustomLayoutPlacement> placements;
     int placement_count;
     int placement_capacity;
     float width;
@@ -1737,7 +1737,7 @@ void apply_pseudo_counter_ops(LayoutContext* lycon, StyleTree* style);
 // two collectors drifting when a new fragmentation rule is added.
 // tier-3: layout-transient, valid within pass
 typedef struct MulticolFlowItem {
-    ViewBlock* block;
+    lam::Up<ViewBlock> block;
     float height;
     // balancing may include overflowing descendants without enlarging a
     // zero-height wrapper's own fragment box.
@@ -1784,17 +1784,17 @@ typedef struct ColumnFragment {
 // The buffers share one scratch scope, so release frees them together and the
 // nested spanner path and the ordinary container path cannot drift.
 struct MulticolGroupScratch {
-    float* heights = nullptr;
-    float* content_heights = nullptr;
-    float* margin_before = nullptr;
-    float* margin_after = nullptr;
-    float* line_advances = nullptr;
-    bool* can_fragment = nullptr;
-    bool* break_before = nullptr;
-    bool* break_after = nullptr;
-    ColumnFragment* fragments = nullptr;
+    lam::OwnArr<float> heights = nullptr;
+    lam::OwnArr<float> content_heights = nullptr;
+    lam::OwnArr<float> margin_before = nullptr;
+    lam::OwnArr<float> margin_after = nullptr;
+    lam::OwnArr<float> line_advances = nullptr;
+    lam::OwnArr<bool> can_fragment = nullptr;
+    lam::OwnArr<bool> break_before = nullptr;
+    lam::OwnArr<bool> break_after = nullptr;
+    lam::OwnArr<ColumnFragment> fragments = nullptr;
     ScratchMark scope = {};
-    ScratchArena* owner = nullptr;
+    lam::Up<ScratchArena> owner = nullptr;
 
     MulticolGroupScratch() = default;
     MulticolGroupScratch(const MulticolGroupScratch&) = delete;
@@ -1803,26 +1803,26 @@ struct MulticolGroupScratch {
     ~MulticolGroupScratch() { if (owner) release(owner); }
 
     bool init(ScratchArena* scratch) {
-        owner = scratch;
+        owner = lam::up(scratch);
         scope = scratch_scope_begin(scratch);
-        heights = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        content_heights = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        margin_before = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        margin_after = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        line_advances = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        can_fragment = (bool*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(bool));
-        break_before = (bool*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(bool));
-        break_after = (bool*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(bool));
-        fragments = (ColumnFragment*)scratch_scope_calloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
+        heights = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        content_heights = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        margin_before = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        margin_after = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        line_advances = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        can_fragment = lam::own_arr((bool*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(bool)));
+        break_before = lam::own_arr((bool*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(bool)));
+        break_after = lam::own_arr((bool*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(bool)));
+        fragments = lam::own_arr((ColumnFragment*)scratch_scope_calloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment)));
         return heights && content_heights && margin_before && margin_after && line_advances &&
             can_fragment && break_before && break_after && fragments;
     }
@@ -1844,9 +1844,9 @@ struct MulticolGroupScratch {
 // Keep the bounded flow-item buffer paired with its scratch scope; nested
 // and top-level multicol passes otherwise duplicate the same allocation path.
 struct MulticolFlowScratch {
-    MulticolFlowItem* items = nullptr;
+    lam::OwnArr<MulticolFlowItem> items = nullptr;
     ScratchMark scope = {};
-    ScratchArena* owner = nullptr;
+    lam::Up<ScratchArena> owner = nullptr;
 
     MulticolFlowScratch() = default;
     MulticolFlowScratch(const MulticolFlowScratch&) = delete;
@@ -1855,10 +1855,10 @@ struct MulticolFlowScratch {
     ~MulticolFlowScratch() { if (owner) release(owner); }
 
     bool init(ScratchArena* scratch) {
-        owner = scratch;
+        owner = lam::up(scratch);
         scope = scratch_scope_begin(scratch);
-        items = (MulticolFlowItem*)scratch_scope_calloc(
-            scratch, &scope, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem));
+        items = lam::own_arr((MulticolFlowItem*)scratch_scope_calloc(
+            scratch, &scope, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem)));
         return items != nullptr;
     }
 
@@ -1870,8 +1870,8 @@ struct MulticolFlowScratch {
 
 // tier-3: layout-transient, valid while distributing one multicol group
 typedef struct ColumnGroup {
-    ViewBlock* container;
-    ColumnFragment* fragments;
+    lam::Up<ViewBlock> container;
+    lam::Up<ColumnFragment> fragments;
     int fragment_count;
     int logical_fragment_count;
     int column_count;
@@ -1887,7 +1887,7 @@ typedef struct ColumnGroup {
 
 // tier-3: layout-transient, cursor into a ColumnGroup
 typedef struct FragmentedFlowCursor {
-    ColumnGroup* group;
+    lam::Up<ColumnGroup> group;
     int current_fragment;
     float block_offset;
     float pending_margin_after;
@@ -1929,7 +1929,7 @@ void calculate_multicol_dimensions(
 void layout_multicol_content(LayoutContext* lycon, ViewBlock* block);
 // tier-3: layout-transient, valid within pass
 typedef struct FloatBox {
-    ViewBlock* element;
+    lam::Up<ViewBlock> element;
     float margin_box_top;
     float margin_box_bottom;
     float margin_box_left;
@@ -1939,18 +1939,18 @@ typedef struct FloatBox {
 
     CssEnum float_side;         // CSS_VALUE_LEFT or CSS_VALUE_RIGHT
     bool initial_letter_clearance; // float was lowered below a sunk initial letter
-    struct FloatBox* next;      // Linked list for multiple floats
+    lam::Up<struct FloatBox> next;      // Linked list for multiple floats
 } FloatBox;
 // tier-3: layout-transient, valid within pass
 typedef struct InitialLetterBox {
-    ViewBlock* element;         // block containing the initial letter
+    lam::Up<ViewBlock> element;         // block containing the initial letter
     float margin_box_top;
     float margin_box_bottom;
     float margin_box_left;
     float margin_box_right;
     CssEnum direction;
     bool source_is_short;
-    struct InitialLetterBox* next;
+    lam::Up<struct InitialLetterBox> next;
 } InitialLetterBox;
 // tier-3: layout-transient, valid within pass
 typedef struct FloatAvailableSpace {
@@ -1974,7 +1974,7 @@ typedef struct BlockContext {
     CssEnum text_align;
     CssEnum text_align_last;
     CssEnum direction;
-    FontProp* block_container_font;
+    lam::Up<FontProp> block_container_font;
     float given_width;
     float given_height;
     float first_line_ascender;
@@ -1992,7 +1992,7 @@ typedef struct BlockContext {
     bool text_indent_each_line;
     bool is_first_line;
     bool is_line_after_forced_break;
-    FontProp* first_line_font;
+    lam::Up<FontProp> first_line_font;
     bool first_line_style_active;
     // CSS Inline 3 §7.7: an initial letter shortens following line boxes at
     // its inline-start margin edge while the letter occupies those lines.
@@ -2024,8 +2024,8 @@ typedef struct BlockContext {
     bool balance_wrap_active;   // true when wrapping against balance_wrap_width
     float balance_wrap_width;   // inline measure used for text-wrap-style: balance
 
-    struct BlockContext* parent;
-    ViewBlock* establishing_element;
+    lam::Up<struct BlockContext> parent;
+    lam::Up<ViewBlock> establishing_element;
     bool is_bfc_root;
 
     float origin_x;
@@ -2034,23 +2034,23 @@ typedef struct BlockContext {
     float bfc_offset_x;
     float bfc_offset_y;
 
-    FloatBox* left_floats;
-    FloatBox* left_floats_tail;
-    FloatBox* right_floats;
-    FloatBox* right_floats_tail;
+    lam::Up<FloatBox> left_floats;
+    lam::Up<FloatBox> left_floats_tail;
+    lam::Up<FloatBox> right_floats;
+    lam::Up<FloatBox> right_floats_tail;
     int left_float_count;
     int right_float_count;
     float lowest_float_bottom;
 
-    InitialLetterBox* initial_letters;
-    InitialLetterBox* initial_letters_tail;
+    lam::Up<InitialLetterBox> initial_letters;
+    lam::Up<InitialLetterBox> initial_letters_tail;
 
     float float_left_edge;
     float float_right_edge;
 
     float saved_clear_y;
 
-    Pool* pool;
+    lam::Up<Pool> pool;
 } BlockContext;
 // Semantic break kind classification (CSS Text 3 §4–5 + UAX #14)
 // Used to track the type of the last recorded break opportunity in a line box.
@@ -2134,21 +2134,21 @@ typedef struct Linebox {
     float initial_letter_origin_advance; // raised-cap displacement already applied to this line
     bool has_initial_letter; // line contains an initial whose origin line may need ruby metrics
     bool has_drop_initial_letter; // line contains a drop initial whose base level can be raised
-    unsigned char* last_space;      // last space character in the line
+    lam::Up<unsigned char> last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     BreakKind last_space_kind;        // semantic type of the last recorded break opportunity
-    unsigned char* last_non_shy_space; // previous non-SHY break opportunity before a soft hyphen
+    lam::Up<unsigned char> last_non_shy_space; // previous non-SHY break opportunity before a soft hyphen
     float last_non_shy_space_pos;
     BreakKind last_non_shy_space_kind;
     float last_non_shy_space_hanging_width;
     float last_non_shy_space_hanging_text_trim;
     LineMetricsSnapshot last_space_metrics;
     LineMetricsSnapshot last_non_shy_space_metrics;
-    View* start_view;
-    ViewBlock* first_static_line_alignment; // abspos inline descendants awaiting line-box extent
-    ViewBlock* last_static_line_alignment;
-    ViewBlock* first_static_inline_position; // abspos inline boxes awaiting final text alignment
-    ViewBlock* last_static_inline_position;
+    lam::Up<View> start_view;
+    lam::Up<ViewBlock> first_static_line_alignment; // abspos inline descendants awaiting line-box extent
+    lam::Up<ViewBlock> last_static_line_alignment;
+    lam::Up<ViewBlock> first_static_inline_position; // abspos inline boxes awaiting final text alignment
+    lam::Up<ViewBlock> last_static_inline_position;
     float static_inline_alignment_offset_x; // final uniform text-align shift for static inline boxes
     bool has_phantom_inline_fragment; // zero-height inline run still needing text-align
     CssEnum vertical_align;
@@ -2181,12 +2181,12 @@ typedef struct Linebox {
     float parent_font_ascender;     // parent element's font ascender (pixels)
     float parent_font_descender;    // parent element's font descender (pixels)
     float parent_font_size;         // parent element's font size (pixels)
-    FontProp* parent_font_style; // parent element's persistent font alias (for x-height)
-    TextRect* last_text_rect;       // last text rect output on this line (for trailing space trimming)
-    struct ViewText* last_text_view; // ViewText that owns last_text_rect (for bounds update after trimming)
+    lam::Up<FontProp> parent_font_style; // parent element's persistent font alias (for x-height)
+    lam::Up<TextRect> last_text_rect;       // last text rect output on this line (for trailing space trimming)
+    lam::Up<struct ViewText> last_text_view; // ViewText that owns last_text_rect (for bounds update after trimming)
     float trailing_space_width;     // width of trailing space in last text rect (CSS 2.1 §16.6.1)
-    TextRect* committed_trailing_rect;  // text rect that had trailing space when output_text was called
-    struct ViewText* committed_trailing_view;  // ViewText that owns committed_trailing_rect
+    lam::Up<TextRect> committed_trailing_rect;  // text rect that had trailing space when output_text was called
+    lam::Up<struct ViewText> committed_trailing_view;  // ViewText that owns committed_trailing_rect
     float committed_trailing_space;     // trailing space width saved at output_text time; survives
                                         // cross-node char processing so line_break can trim correctly
     float hanging_space_width;      // CSS Text 3 §4.1.3: accumulated trailing preserved space width
@@ -2213,7 +2213,7 @@ typedef struct Linebox {
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
     uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
     uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
-    FontProp* prev_kerning_font_style = nullptr;
+    lam::Up<FontProp> prev_kerning_font_style = nullptr;
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
@@ -2328,7 +2328,7 @@ inline bool layout_flex_wraps(ViewElement* element) {
 }
 // tier-3: layout-transient, valid within pass
 typedef struct FlexLineInfo {
-    View** items;
+    lam::Up<View*> items;
     int item_count;
     float main_size;
     float cross_size;
@@ -2349,11 +2349,11 @@ typedef struct FlexResolvedAxis {
 // tier-3: layout-transient, valid within pass
 typedef struct FlexContainerLayout : FlexProp {
     // Layout state (computed during layout)
-    View** flex_items;  // Array of child flex items
+    lam::OwnArr<View*> flex_items;  // Array of child flex items
     int item_count;
     int allocated_items;  // For dynamic array growth
     // Line information
-    struct FlexLineInfo* lines;
+    lam::OwnArr<struct FlexLineInfo> lines;
     int line_count;
     int allocated_lines;
     // Cached calculations
@@ -2362,7 +2362,7 @@ typedef struct FlexContainerLayout : FlexProp {
     // The final direct-text pass owns text geometry for this flex container.
     bool direct_text_geometry_handled;
     // Original container used to distinguish direct text from flattened runs.
-    ViewBlock* container;
+    lam::Up<ViewBlock> container;
     // Sizing mode flags (CSS Flexbox spec §9.2)
     // When true, the axis size is indefinite (fit-content/shrink-to-fit)
     // and flex-grow should NOT distribute additional space
@@ -2375,7 +2375,7 @@ typedef struct FlexContainerLayout : FlexProp {
     // False for auto-size containers that derive cross size from content
     bool has_definite_cross_size;
     // Layout context for intrinsic sizing (set during init_flex_container)
-    struct LayoutContext* lycon;
+    lam::Up<struct LayoutContext> lycon;
     // pass-local flex state lives above this mark and is released together.
     ScratchMark scratch_mark;
 } FlexContainerLayout;
@@ -2402,7 +2402,7 @@ typedef enum LayoutTextRunMode {
 } LayoutTextRunMode;
 
 typedef struct LayoutTextRun {
-    const char* text;
+    lam::Up<const char> text;
     size_t length;
 } LayoutTextRun;
 
@@ -2495,27 +2495,27 @@ typedef struct LayoutAxisRefs {
     } AxisInsets;
 
     typedef struct AxisMargins {
-        float* start;
-        float* end;
-        CssEnum* start_type;
-        CssEnum* end_type;
+        lam::Up<float> start;
+        lam::Up<float> end;
+        lam::Up<CssEnum> start_type;
+        lam::Up<CssEnum> end_type;
     } AxisMargins;
 
     LayoutAxis axis;
-    ViewElement* item;
-    float* size_slot;
-    float* position;
-    float* given;
-    float* minimum;
-    float* maximum;
-    float* given_percent;
-    float* minimum_percent;
-    float* maximum_percent;
-    float* given_fit_content_limit;
-    float* given_fit_content_percent;
-    CssEnum* given_type;
-    CssEnum* minimum_type;
-    CssEnum* maximum_type;
+    lam::Up<ViewElement> item;
+    lam::Up<float> size_slot;
+    lam::Up<float> position;
+    lam::Up<float> given;
+    lam::Up<float> minimum;
+    lam::Up<float> maximum;
+    lam::Up<float> given_percent;
+    lam::Up<float> minimum_percent;
+    lam::Up<float> maximum_percent;
+    lam::Up<float> given_fit_content_limit;
+    lam::Up<float> given_fit_content_percent;
+    lam::Up<CssEnum> given_type;
+    lam::Up<CssEnum> minimum_type;
+    lam::Up<CssEnum> maximum_type;
     AxisInsets insets;
     AxisMargins margins;
 
@@ -2528,34 +2528,34 @@ typedef struct LayoutAxisRefs {
           insets{}, margins{} {}
 
     void bind_geometry(ViewElement* item) {
-        this->item = item;
+        this->item = lam::up(item);
         if (!item) return;
         if (item->bound) bind_margins(&item->boundary_mut()->margin);
         if (axis == LAYOUT_AXIS_X) {
-            size_slot = &item->width;
-            position = &item->x;
+            size_slot = lam::up(&item->width);
+            position = lam::up(&item->x);
         } else {
-            size_slot = &item->height;
-            position = &item->y;
+            size_slot = lam::up(&item->height);
+            position = lam::up(&item->y);
         }
     }
 
     void bind_constraints(BlockProp* block) {
         if (!block) return;
         bool horizontal = axis == LAYOUT_AXIS_X;
-        given = horizontal ? &block->given_width : &block->given_height;
-        minimum = horizontal ? &block->given_min_width : &block->given_min_height;
-        maximum = horizontal ? &block->given_max_width : &block->given_max_height;
-        given_percent = horizontal ? &block->given_width_percent : &block->given_height_percent;
-        minimum_percent = horizontal ? &block->given_min_width_percent : &block->given_min_height_percent;
-        maximum_percent = horizontal ? &block->given_max_width_percent : &block->given_max_height_percent;
-        given_fit_content_limit = horizontal ? &block->given_width_fit_content_limit
-                                             : &block->given_height_fit_content_limit;
-        given_fit_content_percent = horizontal ? &block->given_width_fit_content_percent
-                                               : &block->given_height_fit_content_percent;
-        given_type = horizontal ? &block->given_width_type : &block->given_height_type;
-        minimum_type = horizontal ? &block->given_min_width_type : &block->given_min_height_type;
-        maximum_type = horizontal ? &block->given_max_width_type : &block->given_max_height_type;
+        given = lam::up(horizontal ? &block->given_width : &block->given_height);
+        minimum = lam::up(horizontal ? &block->given_min_width : &block->given_min_height);
+        maximum = lam::up(horizontal ? &block->given_max_width : &block->given_max_height);
+        given_percent = lam::up(horizontal ? &block->given_width_percent : &block->given_height_percent);
+        minimum_percent = lam::up(horizontal ? &block->given_min_width_percent : &block->given_min_height_percent);
+        maximum_percent = lam::up(horizontal ? &block->given_max_width_percent : &block->given_max_height_percent);
+        given_fit_content_limit = lam::up(horizontal ? &block->given_width_fit_content_limit
+                                             : &block->given_height_fit_content_limit);
+        given_fit_content_percent = lam::up(horizontal ? &block->given_width_fit_content_percent
+                                               : &block->given_height_fit_content_percent);
+        given_type = lam::up(horizontal ? &block->given_width_type : &block->given_height_type);
+        minimum_type = lam::up(horizontal ? &block->given_min_width_type : &block->given_min_height_type);
+        maximum_type = lam::up(horizontal ? &block->given_max_width_type : &block->given_max_height_type);
     }
 
     void bind_insets(PositionProp* position_prop) {
@@ -2568,10 +2568,10 @@ typedef struct LayoutAxisRefs {
         if (!margin) return;
         CssBoxSide start_side = layout_axis_side(axis, true);
         CssBoxSide end_side = layout_axis_side(axis, false);
-        margins.start = radiant_spacing_value(margin, start_side);
-        margins.end = radiant_spacing_value(margin, end_side);
-        margins.start_type = radiant_margin_type(margin, start_side);
-        margins.end_type = radiant_margin_type(margin, end_side);
+        margins.start = lam::up(radiant_spacing_value(margin, start_side));
+        margins.end = lam::up(radiant_spacing_value(margin, end_side));
+        margins.start_type = lam::up(radiant_margin_type(margin, start_side));
+        margins.end_type = lam::up(radiant_margin_type(margin, end_side));
     }
 
     LayoutAxisRefs(ViewElement* item, LayoutAxis selected)
@@ -2584,17 +2584,17 @@ typedef struct LayoutAxisRefs {
     LayoutAxisRefs(FlexItemProp* item, LayoutAxis selected)
         : LayoutAxisRefs(selected) {
         if (!item) return;
-        minimum = selected == LAYOUT_AXIS_X
-            ? &item->resolved_min_width : &item->resolved_min_height;
-        maximum = selected == LAYOUT_AXIS_X
-            ? &item->resolved_max_width : &item->resolved_max_height;
+        minimum = lam::up(selected == LAYOUT_AXIS_X
+            ? &item->resolved_min_width : &item->resolved_min_height);
+        maximum = lam::up(selected == LAYOUT_AXIS_X
+            ? &item->resolved_max_width : &item->resolved_max_height);
     }
     LayoutAxisRefs(FlexItemProp* item, bool horizontal)
         : LayoutAxisRefs(item, horizontal ? LAYOUT_AXIS_X : LAYOUT_AXIS_Y) {}
     LayoutAxisRefs(BlockContext* context, LayoutAxis selected)
         : LayoutAxisRefs(selected) {
-        if (context) given = selected == LAYOUT_AXIS_X
-            ? &context->given_width : &context->given_height;
+        if (context) given = lam::up(selected == LAYOUT_AXIS_X
+            ? &context->given_width : &context->given_height);
     }
 
     LayoutAxisRefs(BlockProp* block, LayoutAxis selected)
@@ -2664,7 +2664,7 @@ typedef struct LayoutAxisRefs {
 } LayoutAxisRefs;
 // tier-3: layout-transient, describes one child during vertical-flow sizing
 typedef struct LayoutVerticalFlowChild {
-    ViewBlock* block;
+    lam::Up<ViewBlock> block;
     bool atomic_inline;
     bool normal_block;
     bool orthogonal;
@@ -2951,8 +2951,8 @@ void cleanup_flex_container(LayoutContext* lycon);
 // unwind together, even when nested layout exits early.
 // tier-3: layout-transient, valid within pass
 struct FlexLayoutScope {
-    LayoutContext* lycon;
-    FlexContainerLayout* saved;
+    lam::Up<LayoutContext> lycon;
+    lam::Up<FlexContainerLayout> saved;
     bool active;
 
     FlexLayoutScope(LayoutContext* l, ViewBlock* container);
@@ -2990,7 +2990,7 @@ void set_cross_axis_size(ViewElement* item, float size, FlexContainerLayout* fle
 float find_max_baseline(FlexLineInfo* line, int container_align_items);
 // tier-3: layout-transient, valid within pass
 typedef struct MeasurementCacheEntry {
-    DomNode* node;
+    lam::Up<DomNode> node;
     float measured_width;
     float measured_height;
     float content_width;
@@ -3166,28 +3166,28 @@ typedef struct GridTrackSize {
     GridTrackSizeType type;
     float value;
     bool is_percentage;
-    struct GridTrackSize* min_size;
-    struct GridTrackSize* max_size;
+    lam::Own<struct GridTrackSize> min_size;
+    lam::Own<struct GridTrackSize> max_size;
     float fit_content_limit;
     int repeat_count;
-    struct GridTrackSize** repeat_tracks;
+    lam::OwnArr<struct GridTrackSize*> repeat_tracks;
     int repeat_track_count;
     bool is_auto_fill;
     bool is_auto_fit;
 } GridTrackSize;
 // tier-3: layout-transient, valid within pass
 typedef struct GridTrackList {
-    GridTrackSize** tracks;
+    lam::OwnArr<GridTrackSize*> tracks;
     int track_count;
     int allocated_tracks;
-    char** line_names;
+    lam::OwnArr<char*> line_names;
     int line_name_count;
     bool is_repeat;
     int repeat_count;
 } GridTrackList;
 // tier-3: layout-transient, valid within pass
 typedef struct GridArea {
-    char* name;
+    lam::Own<char> name;
     int row_start;
     int row_end;
     int column_start;
@@ -3195,18 +3195,18 @@ typedef struct GridArea {
 } GridArea;
 // tier-3: layout-transient, valid within pass
 typedef struct GridLineName {
-    char* name;
+    lam::Up<char> name;
     int line_number;
     bool is_row;
 } GridLineName;
 // tier-3: layout-transient, valid within pass
 typedef struct GridContainerLayout : GridProp {
-    radiant::grid::TrackArray* computed_rows;
-    radiant::grid::TrackArray* computed_columns;
-    struct ViewBlock** grid_items;
+    lam::Up<radiant::grid::TrackArray> computed_rows;
+    lam::Up<radiant::grid::TrackArray> computed_columns;
+    lam::OwnArr<struct ViewBlock*> grid_items;
     int item_count;
     int allocated_items;
-    GridLineName* line_names;
+    lam::OwnArr<GridLineName> line_names;
     int line_name_count;
     int allocated_line_names;
     int explicit_row_count;
@@ -3224,7 +3224,7 @@ typedef struct GridContainerLayout : GridProp {
     bool is_min_content_width;
     bool is_max_content_width;
     float row_intrinsic_height;
-    struct LayoutContext* lycon;
+    lam::Up<struct LayoutContext> lycon;
     bool auto_fit_columns[64];
     bool auto_fit_rows[64];
     int auto_fit_col_count;
@@ -3241,8 +3241,8 @@ float layout_grid_row_border_box_extent(struct ViewBlock* container,
 // unwind together, even when no-item or absolute-only grid paths return early.
 // tier-3: layout-transient, valid within pass
 struct GridLayoutScope {
-    LayoutContext* lycon;
-    GridContainerLayout* saved;
+    lam::Up<LayoutContext> lycon;
+    lam::Up<GridContainerLayout> saved;
     bool active;
 
     GridLayoutScope(LayoutContext* l, ViewBlock* container);
@@ -3253,13 +3253,15 @@ struct GridLayoutScope {
     GridLayoutScope& operator=(const GridLayoutScope&) = delete;
 };
 
-GridTrackList* create_grid_track_list(int initial_capacity);
-void destroy_grid_track_list(GridTrackList* track_list);
-GridTrackSize* create_grid_track_size(GridTrackSizeType type, float value);
-GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
-void destroy_grid_track_size(GridTrackSize* track_size);
+// A GridProp's track graph lives in the element props' pool (`pool`): every
+// list, track, array and line name is allocated and released through it.
+GridTrackList* create_grid_track_list(Pool* pool, int initial_capacity);
+void destroy_grid_track_list(Pool* pool, GridTrackList* track_list);
+GridTrackSize* create_grid_track_size(Pool* pool, GridTrackSizeType type, float value);
+GridTrackSize* clone_grid_track_size(Pool* pool, const GridTrackSize* track_size);
+void destroy_grid_track_size(Pool* pool, GridTrackSize* track_size);
 char* grid_scratch_strdup(ScratchArena* scratch, const char* source);
-void destroy_grid_area(GridArea* area);
+void destroy_grid_area(Pool* pool, GridArea* area);
 void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
 int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
 int collect_grid_item_nodes(LayoutContext* lycon, struct ViewBlock* container,
@@ -3272,8 +3274,8 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewB
 void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
-void clear_grid_template_areas(GridProp* grid_layout);
-void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
+void clear_grid_template_areas(Pool* pool, GridProp* grid_layout);
+void parse_grid_template_areas(Pool* pool, GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
@@ -3287,23 +3289,23 @@ void layout_final_grid_content(LayoutContext* lycon, GridContainerLayout* grid_l
 void layout_grid_absolute_children(LayoutContext* lycon, ViewBlock* container);
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutContext {
-    View* view;  // current view
-    DomNode* elmt;  // current dom element, used before the view is created
+    lam::Up<View> view;  // current view
+    lam::Up<DomNode> elmt;  // current dom element, used before the view is created
 
     BlockContext block;  // unified block context (layout state + floats + BFC)
     Linebox line;  // current linebox
     FontBox font;  // current font style
     float root_font_size;
-    FlexContainerLayout* flex_container; // integrated flex container layout
-    GridContainerLayout* grid_container; // integrated grid container layout
+    lam::Up<FlexContainerLayout> flex_container; // integrated flex container layout
+    lam::Up<GridContainerLayout> grid_container; // integrated grid container layout
 
-    DomDocument* doc;
-    UiContext* ui_context;
+    lam::Up<DomDocument> doc;
+    lam::Up<UiContext> ui_context;
     // Additional fields for test compatibility
     float width, height;  // context dimensions
     float scroll_percentage_base;  // set only while resolving deferred scroll-padding math
     float dpi;           // dots per inch
-    Pool* pool;  // memory pool for view allocation
+    lam::Up<Pool> pool;  // memory pool for view allocation
     // Available space constraints for current layout
     // This enables layout code to distinguish between:
     // - Normal layout (definite width/height)
@@ -3319,16 +3321,16 @@ typedef struct LayoutContext {
     // - ContentSize: Use content-based size (ignore CSS width/height)
     radiant::SizingMode sizing_mode;
     // Counter tracking for CSS counters (counter-reset, counter-increment, counter(), counters())
-    CounterContext* counter_context;
+    lam::Up<CounterContext> counter_context;
     // LIFO scratch allocator for scoped temporary buffers (table metadata, grid arrays, etc.)
     ScratchArena scratch;
     // A style-pass-local ordering of winning declarations, sorted by the
     // cascade comparator so side-specific props can retain an exact rank.
-    CssDeclaration** cascade_priority_decls;
+    lam::Up<CssDeclaration*> cascade_priority_decls;
     int cascade_priority_count;
     // pass-lifetime data that is not stack-shaped (counter state, generated
     // content); owned by the view tree and reset at layout_cleanup
-    Arena* pass_arena;
+    lam::Up<Arena> pass_arena;
     // Recursion depth guard against deeply nested DOM trees (fuzzer-found stack overflow)
     int depth;
     // Flex-specific nesting depth guard (flex-in-flex recursion)
@@ -3349,7 +3351,7 @@ typedef struct LayoutContext {
     // CSS Position 3 sticky constraints require final scrollport and containing-block geometry.
     bool defer_sticky_positioning;
     // Final sticky resolution touches only candidates seen during this layout pass.
-    ArrayList* deferred_sticky_blocks;
+    lam::Up<ArrayList> deferred_sticky_blocks;
     // Structured layout debug categories and optional release profiling buckets
     radiant::LayoutDebugState layout_debug;
     radiant::LayoutProfiler profiler;
@@ -3619,8 +3621,8 @@ typedef enum AbsStaticContextKind {
 struct AbsStaticContext;
 // tier-3: layout-transient, valid within pass
 typedef struct AbsChildLayoutState {
-    DomNode* child;
-    ViewBlock* child_block;
+    lam::Up<DomNode> child;
+    lam::Up<ViewBlock> child_block;
     LayoutContainingBlock containing_block;
     BlockContext parent_block;
     Linebox parent_line;
@@ -3641,8 +3643,8 @@ typedef void (*AbsAfterChildFn)(LayoutContext* lycon, ViewBlock* container,
 typedef struct AbsStaticContext {
     AbsStaticContextKind kind;
     LayoutContainingBlock containing_block;
-    FlexProp* flex;
-    GridContainerLayout* grid;
+    lam::Up<FlexProp> flex;
+    lam::Up<GridContainerLayout> grid;
     bool resolve_percent_against_content_box;
     AbsPrepareChildFn prepare_child;
     AbsAfterChildFn after_child;
@@ -3654,7 +3656,7 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
 namespace radiant {
 // tier-3: layout-transient, valid within pass
 struct LayoutRunModeScope {
-    ::LayoutContext* lycon;
+    lam::Up<::LayoutContext> lycon;
     RunMode saved_run_mode;
 
     LayoutRunModeScope(::LayoutContext* l, RunMode mode);
@@ -3665,15 +3667,15 @@ struct LayoutRunModeScope {
 };
 // tier-3: layout-transient, valid within pass
 struct LayoutMeasureScope {
-    ::LayoutContext* lycon;
+    lam::Up<::LayoutContext> lycon;
     BlockContext saved_block;
     Linebox saved_line;
     FontBox saved_font;
-    ::DomNode* saved_elmt;
+    lam::Up<::DomNode> saved_elmt;
     RunMode saved_run_mode;
     SizingMode saved_sizing_mode;
     AvailableSpace saved_available_space;
-    ArrayList* saved_views;
+    lam::Up<ArrayList> saved_views;
     ScratchMark snapshot_scope;  // owns the view snapshots for the measurement
 
     LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_elmt);
@@ -3806,6 +3808,9 @@ BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* 
 // Property Allocation
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
+// The pool element props of this pass come from: the view tree's prop pool,
+// or the pass pool where a focused test has no view tree.
+Pool* layout_prop_pool(LayoutContext* lycon);
 FontProp* alloc_font_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);
@@ -3821,7 +3826,7 @@ inline BackgroundProp* layout_ensure_background(LayoutContext* lycon, ViewSpan* 
     BoundaryProp* bound = view->ensure_boundary(lycon);
     if (!bound) return nullptr;
     if (!bound->background) {
-        bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+        bound->background = lam::own((BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp)));
     }
     return bound->background;
 }
@@ -3831,7 +3836,7 @@ inline BorderProp* layout_ensure_border(LayoutContext* lycon, ViewSpan* view) {
     BoundaryProp* bound = view->ensure_boundary(lycon);
     if (!bound) return nullptr;
     if (!bound->border) {
-        bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+        bound->border = lam::own((BorderProp*)alloc_prop(lycon, sizeof(BorderProp)));
     }
     return bound->border;
 }
@@ -3841,7 +3846,7 @@ inline OutlineProp* layout_ensure_outline(LayoutContext* lycon, ViewSpan* view) 
     BoundaryProp* bound = view->ensure_boundary(lycon);
     if (!bound) return nullptr;
     if (!bound->outline) {
-        bound->outline = (OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp));
+        bound->outline = lam::own((OutlineProp*)alloc_prop(lycon, sizeof(OutlineProp)));
     }
     return bound->outline;
 }
@@ -4045,7 +4050,7 @@ typedef bool (*LayoutFlattenedTextItemPredicate)(DomNode* text,
 typedef struct LayoutFlattenedItemPolicy {
     LayoutFlattenedTextItemPredicate include_text;
     void* context;
-    DomElement* skipped_element;
+    lam::Up<DomElement> skipped_element;
     bool initialize_contents;
     bool reset_styles_resolved;
 } LayoutFlattenedItemPolicy;
@@ -4771,7 +4776,7 @@ int count_rendered_justify_opportunities(ViewText* text, const TextRect* rect,
  */
 // tier-3: layout-transient, valid within pass
 struct BlockContextScope {
-    LayoutContext* lycon;
+    lam::Up<LayoutContext> lycon;
     BlockContext saved;
     explicit BlockContextScope(LayoutContext* l) : lycon(l), saved(l->block) {}
     ~BlockContextScope() { lycon->block = saved; }
@@ -4791,8 +4796,8 @@ struct BlockContextScope {
 // drifting in how they preserve the surrounding layout context.
 // tier-3: layout-transient, valid within pass
 struct LayoutContainingBlockScope {
-    LayoutContext* lycon;
-    BlockContext* saved_parent;
+    lam::Up<LayoutContext> lycon;
+    lam::Up<BlockContext> saved_parent;
     BlockContext containing_block;
     bool active;
 
@@ -4809,7 +4814,7 @@ struct LayoutContainingBlockScope {
             containing_block.content_height = content_size;
             containing_block.given_height = content_size >= 0.0f ? content_size : -1.0f;
         }
-        lycon->block.parent = &containing_block;
+        lycon->block.parent = lam::up(&containing_block);
     }
     LayoutContainingBlockScope(LayoutContext* l, float content_width,
                                float content_height, bool has_definite_height,
@@ -4824,7 +4829,7 @@ struct LayoutContainingBlockScope {
             containing_block.content_height = content_height;
             containing_block.given_height = content_height;
         }
-        lycon->block.parent = &containing_block;
+        lycon->block.parent = lam::up(&containing_block);
     }
     ~LayoutContainingBlockScope() {
         if (active) lycon->block.parent = saved_parent;
@@ -4839,7 +4844,7 @@ struct LayoutContainingBlockScope {
  */
 // tier-3: layout-transient, valid within pass
 struct LayoutContextScope {
-    LayoutContext* lycon;
+    lam::Up<LayoutContext> lycon;
     BlockContext saved_block;
     Linebox saved_line;
     FontBox saved_font;
@@ -4866,14 +4871,14 @@ struct LayoutContextScope {
 // one owner keeps those temporary states paired on every return path.
 // tier-3: layout-transient, valid within pass
 struct IntrinsicMeasureScope {
-    LayoutContext* lycon;
-    DomElement* element;
-    View* saved_view;
+    lam::Up<LayoutContext> lycon;
+    lam::Up<DomElement> element;
+    lam::Up<View> saved_view;
 
     IntrinsicMeasureScope(LayoutContext* l, DomElement* e)
         : lycon(l), element(e), saved_view(l ? l->view : nullptr) {
         if (element) element->set_measuring_intrinsic_width(true);
-        if (lycon && element) lycon->view = static_cast<View*>(element);
+        if (lycon && element) lycon->view = lam::up(static_cast<View*>(element));
     }
     ~IntrinsicMeasureScope() {
         if (element) element->set_measuring_intrinsic_width(false);
@@ -4886,9 +4891,9 @@ struct IntrinsicMeasureScope {
 // view leaves style resolution attached to the previous element on early exit.
 // tier-3: layout-transient, valid within pass
 struct LayoutViewScope {
-    LayoutContext* lycon;
-    DomNode* saved_elmt;
-    View* saved_view;
+    lam::Up<LayoutContext> lycon;
+    lam::Up<DomNode> saved_elmt;
+    lam::Up<View> saved_view;
     explicit LayoutViewScope(LayoutContext* l)
         : lycon(l), saved_elmt(l ? l->elmt : nullptr), saved_view(l ? l->view : nullptr) {}
     ~LayoutViewScope() {
@@ -4904,7 +4909,7 @@ struct LayoutViewScope {
 // early.
 // tier-3: layout-transient, valid within pass
 struct LayoutFontScope {
-    LayoutContext* lycon;
+    lam::Up<LayoutContext> lycon;
     FontBox saved_font;
     explicit LayoutFontScope(LayoutContext* l)
         : lycon(l), saved_font(l ? l->font : FontBox{}) {}
@@ -4924,7 +4929,7 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon);
 void layout_cleanup(LayoutContext* lycon);
 // tier-3: layout-transient, valid within pass
 struct LayoutPassScope {
-    LayoutContext* lycon;
+    lam::Up<LayoutContext> lycon;
     bool active;
     LayoutPassScope(LayoutContext* l, DomDocument* doc, UiContext* uicon)
         : lycon(l), active(false) {
@@ -4964,5 +4969,49 @@ void set_combine_text_nodes(bool combine);
 // HTML version detection functions
 int detect_html_version_lambda_css(DomDocument* doc);
 HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* input);
+
+// Pass-local layout structs live on the Stack: their fields borrow (Up) or
+// hold scope-owned arrays (OwnArr); they may point at any Heap level.
+LAM_NODE_OF(IntrinsicFontScope, NodeStack);
+LAM_NODE_OF(LayoutContainingBlock, NodeStack);
+LAM_NODE_OF(radiant::LayoutProfileScope, NodeStack);
+LAM_NODE_OF(TableMetadata, NodeStack);
+LAM_NODE_OF(RadiantVelmt, NodeStack);
+LAM_NODE_OF(CustomLayoutContext, NodeStack);
+LAM_NODE_OF(MulticolFlowItem, NodeStack);
+LAM_NODE_OF(ColumnGroup, NodeStack);
+LAM_NODE_OF(FragmentedFlowCursor, NodeStack);
+LAM_NODE_OF(FloatBox, NodeStack);
+LAM_NODE_OF(InitialLetterBox, NodeStack);
+LAM_NODE_OF(BlockContext, NodeStack);
+LAM_NODE_OF(Linebox, NodeStack);
+LAM_NODE_OF(FlexLineInfo, NodeStack);
+LAM_NODE_OF(FlexContainerLayout, NodeStack);
+LAM_NODE_OF(LayoutAxisRefs, NodeStack);
+LAM_NODE_OF(LayoutAxisRefs::AxisMargins, NodeStack);
+LAM_NODE_OF(LayoutVerticalFlowChild, NodeStack);
+LAM_NODE_OF(FlexLayoutScope, NodeStack);
+LAM_NODE_OF(GridLineName, NodeStack);
+LAM_NODE_OF(GridContainerLayout, NodeStack);
+LAM_NODE_OF(GridLayoutScope, NodeStack);
+LAM_NODE_OF(LayoutContext, NodeStack);
+LAM_NODE_OF(AbsChildLayoutState, NodeStack);
+LAM_NODE_OF(AbsStaticContext, NodeStack);
+LAM_NODE_OF(radiant::LayoutMeasureScope, NodeStack);
+LAM_NODE_OF(radiant::LayoutRunModeScope, NodeStack);
+LAM_NODE_OF(MulticolGroupScratch, NodeStack);
+LAM_NODE_OF(MulticolFlowScratch, NodeStack);
+LAM_NODE_OF(CssCascadeCandidate, NodeStack);
+LAM_NODE_OF(CssQuadValues, NodeStack);
+LAM_NODE_OF(LayoutTextRun, NodeStack);
+LAM_NODE_OF(radiant::LayoutProfileNode, NodeStack);
+LAM_NODE_OF(LayoutFlattenedItemPolicy, NodeStack);
+LAM_NODE_OF(BlockContextScope, NodeStack);
+LAM_NODE_OF(LayoutContainingBlockScope, NodeStack);
+LAM_NODE_OF(LayoutContextScope, NodeStack);
+LAM_NODE_OF(IntrinsicMeasureScope, NodeStack);
+LAM_NODE_OF(LayoutViewScope, NodeStack);
+LAM_NODE_OF(LayoutFontScope, NodeStack);
+LAM_NODE_OF(LayoutPassScope, NodeStack);
 
 #endif // LAYOUT_HPP

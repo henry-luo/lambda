@@ -1147,6 +1147,14 @@ static Item js_canonical_property_string(Item value) {
     if (get_type_id(value) != LMD_TYPE_STRING) return value;
     String* string_value = it2s(value);
     if (!string_value || property_key_requires_identity(string_value)) return value;
+    // A key whose NameId resolves back to itself in this context is already
+    // canonical; skip re-hashing its bytes (a planned static member key, or a
+    // key canonicalized by an earlier kernel on the same access).
+    NameId id = property_key_id(string_value);
+    if (id != NAME_ID_NONE && context && context->name_pool &&
+            name_pool_resolve_id(context->name_pool, id) == string_value) {
+        return value;
+    }
     // Input-owned strings may be id-less. Re-interning at the property-key
     // boundary gives them the context dynamic NameId, while a schema/static
     // spelling resolves through the NamePool parent before allocation.

@@ -4,7 +4,7 @@
 
 **Status:** IN PROGRESS. Branch `claude/string-func-tuning`, worktree `temp/replace-find-fastpath`, based on master `4bdafbd8c`.
 
-**Method:** every phase is measured against a release build of the base commit (`temp/ab/lambda-base-4bdafbd`, scratch). Median of interleaved runs, `LAMBDA_TIER=jit`, as §7 of the proposal requires. Semantics are checked by differential output comparison against the same base binary. The Lambda baseline must stay at 100%.
+**Method:** every phase is measured against a release build of the base commit (`temp/ab/lambda-base-4bdafbd`, scratch). Median of interleaved runs, `LAMBDA_EXEC_BACKEND=jit`, as §7 of the proposal requires. Semantics are checked by differential output comparison against the same base binary. The Lambda baseline must stay at 100%.
 
 ## Phase status
 

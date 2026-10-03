@@ -1282,7 +1282,7 @@ ScriptResult run_lambda_script(const char* script_path, bool procedural = false,
     const char* procedural_args[] = {LAMBDA_EXE, "run", "--no-log", script_path, NULL};
     ShellOptions options = {0};
     options.merge_stderr = true;
-    const ShellEnvEntry env[] = {{"LAMBDA_TIER", tier}, {NULL, NULL}};
+    const ShellEnvEntry env[] = {{"LAMBDA_EXEC_BACKEND", tier}, {NULL, NULL}};
     if (tier) options.env = env;
     // Negative paths are untrusted test data and must not be interpolated into a shell command.
     ShellResult shell_result = shell_exec(LAMBDA_EXE,

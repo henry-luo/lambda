@@ -23,11 +23,6 @@
 #include <math.h>
 #include <string.h>
 
-// ::marker uses the shared blk slot for MarkerProp rather than BlockProp.
-inline bool view_element_uses_marker_prop(const DomElement* element) {
-    return element && element->tag_name && strcmp(element->tag_name, "::marker") == 0;
-}
-
 // ===== computed CSS property access =====
 
 enum PropGroupKind : uint8_t {
@@ -630,17 +625,17 @@ typedef struct ImageSurface {
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
-    void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
+    void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL;
+                           // owned_pixels, or a buffer borrowed from a GIF frame, video or Lottie player
+    lam::OwnArr<uint8_t> owned_pixels;  // the buffer this surface owns; set through image_surface_adopt_pixels
     ImageAlphaMode alpha_mode; // decoded images are straight; native raster/effect surfaces are premultiplied
 #ifndef LAMBDA_HEADLESS
-    struct RdtPicture* pic;  // SVG picture (opaque, managed by rdt_vector API)
+    lam::Counted<struct RdtPicture> pic;  // SVG picture; the surface holds one reference
 #endif
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
-    bool cache_owned;      // true when UiContext image_cache owns this surface
-    bool network_owned;    // true when a NetworkResource releases this surface
-    char* source_path;     // local file path for lazy decode (NULL if already decoded or HTTP)
-    unsigned char* source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
+    lam::Own<char> source_path;  // local file path for lazy decode (NULL if already decoded or HTTP)
+    lam::OwnArr<unsigned char> source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data
     int tile_offset_y;   // tiled PNG rendering: physical-pixel Y start of this tile (0 = full-page surface)
     uint64_t generation; // incremented when borrowed pixels/picture content changes
@@ -669,11 +664,13 @@ extern ImageSurface* image_surface_decode_file(const char* path);
 extern ImageSurface* image_surface_decode_data(const unsigned char* data, size_t length);
 extern bool image_content_is_svg(const unsigned char* data, size_t length);
 extern uint64_t image_cache_resource_generation(struct UiContext* ui);
-extern bool image_surface_is_dom_owned(const ImageSurface* img_surface);
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
 extern void image_surface_bump_generation(ImageSurface* img_surface);
 extern void image_surface_detach_pixels(ImageSurface* img_surface);
+// The surface takes a memtracked pixel buffer: it replaces (and frees) the
+// buffer the surface owned and becomes the pixels it paints.
+extern void image_surface_adopt_pixels(ImageSurface* img_surface, void* pixels);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
@@ -687,7 +684,7 @@ typedef struct TextShadow TextShadow;
 
 // tier-2: view-pool, rebuilt each relayout
 struct FontProp {
-    char* family;  // font family name
+    lam::Up<char> family;  // font family name
     float font_size;  // computed font size in CSS pixels
     float used_zoom;  // effective CSS zoom applied to used font metrics
     // CSS Inline 3 initial letters retain their computed font size for em-based
@@ -714,8 +711,8 @@ struct FontProp {
     float descender;   // font descender in pixels
     float font_height; // font height in pixels
     bool has_kerning;  // whether the font has kerning
-    struct FontHandle* font_handle; // cache-owned handle pinned while this prop aliases it
-    TextShadow* text_shadow;  // CSS text-shadow (linked list for multiple shadows)
+    lam::Counted<struct FontHandle> font_handle; // cache-owned handle pinned while this prop aliases it
+    lam::Own<TextShadow> text_shadow;  // CSS text-shadow (linked list for multiple shadows)
     CssEnum text_deco_style;          // CSS text-decoration-style: solid, dashed, dotted, wavy, double
     Color text_deco_color;            // CSS text-decoration-color (default: {0} = use currentColor)
     float text_deco_thickness;        // CSS text-decoration-thickness in px (0 = auto from font metrics)
@@ -730,7 +727,7 @@ struct FontProp {
     bool text_emphasis_color_current; // currentColor follows the text color after inheritance
     uint32_t text_emphasis_mark;      // first codepoint of the computed mark, or zero
     Color text_emphasis_color;
-    const char* platform_fallback_family; // platform family used for UA glyph fallback
+    lam::Up<const char> platform_fallback_family; // platform family used for UA glyph fallback
 };
 
 size_t font_text_decoration_names(const FontProp* font, char* out, size_t capacity);
@@ -799,12 +796,12 @@ struct GridItemProp {
     int grid_row_end;            // Grid row end line
     int grid_column_start;       // Grid column start line
     int grid_column_end;         // Grid column end line
-    char* grid_area;             // Named grid area
+    lam::Own<char> grid_area;             // Named grid area
     // Named line references — resolved to integers before placement
-    const char* grid_column_start_name;
-    const char* grid_column_end_name;
-    const char* grid_row_start_name;
-    const char* grid_row_end_name;
+    lam::Own<const char> grid_column_start_name;
+    lam::Own<const char> grid_column_end_name;
+    lam::Own<const char> grid_row_start_name;
+    lam::Own<const char> grid_row_end_name;
     int justify_self;            // Item-specific justify alignment (CSS_VALUE_*)
     int align_self_grid;         // Item-specific align alignment for grid (CSS_VALUE_*)
     int order;                   // CSS order property (affects placement order)
@@ -870,11 +867,11 @@ typedef struct {
 
 // A pass-local run in an anonymous flex item's flattened text sequence.
 typedef struct FlexAnonymousTextRun {
-    DomText* text;
+    lam::Up<DomText> text;
     bool preserve_leading_space;
     bool preserve_trailing_space;
     bool is_whitespace;
-    struct FlexAnonymousTextRun* next;
+    lam::Own<struct FlexAnonymousTextRun> next;
 } FlexAnonymousTextRun;
 
 // FlexItemProp definition (needed by flex.hpp)
@@ -923,7 +920,7 @@ typedef struct FlexItemProp {
 
     // Direct text children are represented by a pass-local anonymous flex item;
     // this points back to the first text view that receives its final geometry.
-    DomText* anonymous_text;
+    lam::Up<DomText> anonymous_text;
     // CSS Flexbox flattens display:contents descendants before creating
     // anonymous items; this chain retains all text runs in one item.
     FlexAnonymousTextRun* anonymous_text_runs;
@@ -1085,8 +1082,8 @@ typedef struct {
     };
     Corner radius;
     GradientType border_image_type;
-    LinearGradient* border_image_linear_gradient;
-    char* border_image_url;
+    lam::Own<LinearGradient> border_image_linear_gradient;
+    lam::Own<char> border_image_url;
     float border_image_width[4];
     uint8_t border_image_width_type[4];
     bool has_border_image_width;
@@ -1218,24 +1215,24 @@ inline void radiant_margin_set_type_all(Margin* margin, CssEnum type) {
 }
 
 struct RadiantBorderSide {
-    float* width;
-    int64_t* width_specificity;
-    CssEnum* style;
-    int64_t* style_specificity;
-    Color* color;
-    int64_t* color_specificity;
+    lam::Up<float> width;
+    lam::Up<int64_t> width_specificity;
+    lam::Up<CssEnum> style;
+    lam::Up<int64_t> style_specificity;
+    lam::Up<Color> color;
+    lam::Up<int64_t> color_specificity;
 };
 
 inline RadiantBorderSide radiant_border_side(BorderProp* border, CssBoxSide side) {
     RadiantBorderSide result = {};
     if (!border) return result;
     int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
-    result.width = &border->width.values[index];
-    result.width_specificity = &border->width.specificities[index];
-    result.style = &border->styles[index];
-    result.style_specificity = &border->style_specificities[index];
-    result.color = &border->colors[index];
-    result.color_specificity = &border->color_specificities[index];
+    result.width = lam::up(&border->width.values[index]);
+    result.width_specificity = lam::up(&border->width.specificities[index]);
+    result.style = lam::up(&border->styles[index]);
+    result.style_specificity = lam::up(&border->style_specificities[index]);
+    result.color = lam::up(&border->colors[index]);
+    result.color_specificity = lam::up(&border->color_specificities[index]);
     return result;
 }
 
@@ -1277,7 +1274,7 @@ typedef struct {
 // tier-2: view-pool, rebuilt each relayout
 struct LinearGradient {
     float angle;           // in degrees, 0 = to top, 90 = to right
-    GradientStop* stops;   // array of color stops
+    lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
     uint8_t is_repeating : 1;  // true for repeating-linear-gradient
     uint8_t stops_in_px : 1;   // true if stop positions are in px (not fractions)
@@ -1307,7 +1304,7 @@ typedef struct {
     bool cx_set, cy_set;   // whether center was explicitly set
     bool cx_is_px, cy_is_px;
     bool is_repeating;
-    GradientStop* stops;   // array of color stops
+    lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
 } RadialGradient;
 
@@ -1319,7 +1316,7 @@ typedef struct {
     bool cx_set, cy_set;   // whether center was explicitly set
     bool cx_is_px, cy_is_px;
     bool is_repeating;
-    GradientStop* stops;   // array of color stops
+    lam::OwnArr<GradientStop> stops;   // array of color stops
     int stop_count;
 } ConicGradient;
 
@@ -1329,10 +1326,10 @@ typedef struct {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     GradientType gradient_type;
-    char* url;
-    LinearGradient* linear_gradient;
-    RadialGradient* radial_gradient;
-    ConicGradient* conic_gradient;
+    lam::Shared<char> url;
+    lam::Shared<LinearGradient> linear_gradient;
+    lam::Shared<RadialGradient> radial_gradient;
+    lam::Shared<ConicGradient> conic_gradient;
 } ListStyleImage;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -1362,13 +1359,13 @@ typedef struct {
     CssEnum bg_clip;        // CSS_VALUE_BORDER_BOX (default) | CSS_VALUE_PADDING_BOX | CSS_VALUE_CONTENT_BOX
     // Gradient support
     GradientType gradient_type;
-    LinearGradient* linear_gradient;
-    RadialGradient* radial_gradient;
-    ConicGradient* conic_gradient;
+    lam::Own<LinearGradient> linear_gradient;
+    lam::Own<RadialGradient> radial_gradient;
+    lam::Own<ConicGradient> conic_gradient;
     // Multiple gradient layers (for stacked gradients)
-    RadialGradient** radial_layers;  // array of additional radial gradients
+    lam::OwnArr<RadialGradient*> radial_layers;  // array of additional radial gradients
     int radial_layer_count;
-    LinearGradient** linear_layers;  // array of additional linear gradients
+    lam::OwnArr<LinearGradient*> linear_layers;  // array of additional linear gradients
     int linear_layer_count;
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
@@ -1394,7 +1391,7 @@ typedef struct BoxShadow {
     float spread_radius;         // Spread amount (positive = expand, negative = contract)
     Color color;                 // Shadow color (default: currentColor)
     bool inset;                  // True for inset shadow (inside the box)
-    struct BoxShadow* next;      // Next shadow in list (for multiple shadows)
+    lam::Own<struct BoxShadow> next;      // Next shadow in list (for multiple shadows)
 } BoxShadow;
 
 /**
@@ -1419,7 +1416,7 @@ typedef struct TextShadow {
     float offset_y;
     float blur_radius;
     Color color;
-    struct TextShadow* next;
+    lam::Own<struct TextShadow> next;
 } TextShadow;
 
 /**
@@ -1472,7 +1469,7 @@ typedef struct TransformFunction {
     // CSS transform translate percentages are relative to element's own width/height
     float translate_x_percent;  // NaN if not percentage, otherwise percentage value (e.g. -50 for -50%)
     float translate_y_percent;  // NaN if not percentage, otherwise percentage value
-    struct TransformFunction* next;                  // Next transform in chain
+    lam::Own<struct TransformFunction> next;                  // Next transform in chain
 } TransformFunction;
 
 typedef enum TransformFunctionOwner {
@@ -1486,7 +1483,7 @@ typedef enum TransformFunctionOwner {
  */
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TransformProp {
-    TransformFunction* functions;    // Linked list of transform functions (applied in order)
+    lam::Shared<TransformFunction> functions;    // Linked list of transform functions (applied in order)
     // Keyframe samples borrow their immutable list from the document pool;
     // resolved CSS functions are owned by the mutable view-property pool.
     TransformFunctionOwner functions_owner;
@@ -1535,9 +1532,9 @@ typedef struct FilterFunction {
             float blur_radius;
             Color color;
         } drop_shadow;
-        const char* url;             // url() - SVG filter reference
+        lam::Up<const char> url;             // url() - SVG filter reference
     } params;
-    struct FilterFunction* next;     // Next filter in chain
+    lam::Own<struct FilterFunction> next;     // Next filter in chain
 } FilterFunction;
 
 /**
@@ -1545,7 +1542,7 @@ typedef struct FilterFunction {
  */
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FilterProp {
-    FilterFunction* functions;       // Linked list of filter functions (applied in order)
+    lam::Own<FilterFunction> functions;       // Linked list of filter functions (applied in order)
 } FilterProp;
 
 /**
@@ -1606,11 +1603,11 @@ typedef struct BoundaryProp {
     Margin flow_margin;
     bool has_flow_margin;
     Spacing padding;
-    BorderProp* border;
-    BackgroundProp* background;
-    MaskProp* mask;
-    BoxShadow* box_shadow;       // Linked list of box shadows
-    OutlineProp* outline;        // CSS outline property (outside border-box)
+    lam::Own<BorderProp> border;
+    lam::Own<BackgroundProp> background;
+    lam::Own<MaskProp> mask;
+    lam::Own<BoxShadow> box_shadow;       // Linked list of box shadows
+    lam::Own<OutlineProp> outline;        // CSS outline property (outside border-box)
     float collapsed_through_mb;  // CSS 2.1 §8.3.1: margin transferred from descendants via
                                  // parent-child bottom margin collapse (the inflated portion)
     bool has_clearance;              // CSS 2.1 §9.5.2: true if clearance was applied to this block.
@@ -1638,19 +1635,19 @@ typedef struct VectorPathSegment {
     enum { VPATH_MOVETO, VPATH_LINETO, VPATH_CURVETO, VPATH_CLOSE } type;
     float x, y;                     // End point
     float x1, y1, x2, y2;           // Control points (for CURVETO)
-    struct VectorPathSegment* next;
+    lam::Own<struct VectorPathSegment> next;
 } VectorPathSegment;
 
 // Vector path property for complex path rendering
 // tier-2: view-pool, rebuilt each relayout
 typedef struct VectorPathProp {
-    VectorPathSegment* segments;    // Linked list of path segments
+    lam::Own<VectorPathSegment> segments;    // Linked list of path segments
     Color stroke_color;             // Stroke color
     Color fill_color;               // Fill color (if filled)
     float stroke_width;             // Stroke width
     bool has_stroke;                // Whether to stroke
     bool has_fill;                  // Whether to fill
-    float* dash_pattern;            // Dash pattern array (NULL for solid)
+    lam::OwnArr<float> dash_pattern;            // Dash pattern array (NULL for solid)
     int dash_pattern_length;        // Length of dash pattern
 } VectorPathProp;
 
@@ -1674,11 +1671,11 @@ typedef struct PositionProp {
     bool has_custom_layout_z_index;
     CssEnum clear;        // clear property for floats
     CssEnum float_prop;   // float property (left, right, none)
-    ViewBlock* first_abs_child;   // first child absolute/fixed positioned view
-    ViewBlock* last_abs_child;    // last child absolute/fixed positioned view
-    ViewBlock* next_abs_sibling;    // next sibling absolute/fixed positioned view
-    ViewBlock* next_static_line_alignment; // current line's deferred static self-alignment link
-    ViewBlock* next_static_inline_position; // current line's deferred inline static-position link
+    lam::Up<ViewBlock> first_abs_child;   // first child absolute/fixed positioned view
+    lam::Up<ViewBlock> last_abs_child;    // last child absolute/fixed positioned view
+    lam::Up<ViewBlock> next_abs_sibling;    // next sibling absolute/fixed positioned view
+    lam::Up<ViewBlock> next_static_line_alignment; // current line's deferred static self-alignment link
+    lam::Up<ViewBlock> next_static_inline_position; // current line's deferred inline static-position link
     float static_line_initial_extent; // provisional line-box extent used for static self-alignment
     bool static_x_needs_parent_offset;  // flex static x was computed in parent-local coords
     bool static_x_needs_inline_cb_extent; // inline CB width is finalized after abs layout
@@ -1699,15 +1696,15 @@ typedef struct PositionProp {
 // Keep the three physical inset lanes coupled so logical-position resolution
 // cannot update a value without its percentage and presence metadata.
 typedef struct RadiantInsetSide {
-    float* value;
-    float* percent;
-    bool* has;
+    lam::Up<float> value;
+    lam::Up<float> percent;
+    lam::Up<bool> has;
 } RadiantInsetSide;
 
 inline RadiantInsetSide radiant_inset_side(PositionProp* position, CssBoxSide side) {
     int index = side <= CSS_BOX_SIDE_LEFT ? side : CSS_BOX_SIDE_TOP;
-    return {&position->inset_values[index], &position->inset_percents[index],
-            &position->inset_present[index]};
+    return {lam::up(&position->inset_values[index]), lam::up(&position->inset_percents[index]),
+            lam::up(&position->inset_present[index])};
 }
 
 /**
@@ -1727,9 +1724,9 @@ typedef struct MarkerProp {
     float descender;         // Marker font normal-line descender
     float bullet_size;       // Size of the bullet shape (typically ~0.35em = 5-6px)
     float trailing_space_width; // Collapsible separator after a default text marker
-    char* text_content;      // Text content for numbered markers (decimal, roman, alpha)
+    lam::Own<char> text_content;      // Text content for numbered markers (decimal, roman, alpha)
     ListStyleImage image;     // list-style-image URL or gradient
-    ImageSurface* loaded_image; // cached loaded image for layout and render
+    lam::Up<ImageSurface> loaded_image; // borrowed from the image cache, for layout and render
     bool is_image_marker;     // true for a valid image without URL intrinsic size
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
     bool reserves_first_line; // outside marker has no parent list gutter to occupy
@@ -1750,9 +1747,9 @@ typedef struct MarkerProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct PseudoContentProp {
-    DomElement* before;    // ::before pseudo-element (NULL if none)
-    DomElement* after;     // ::after pseudo-element (NULL if none)
-    DomElement* marker;    // ::marker pseudo-element (NULL if none)
+    lam::Up<DomElement> before;    // ::before pseudo-element (NULL if none)
+    lam::Up<DomElement> after;     // ::after pseudo-element (NULL if none)
+    lam::Up<DomElement> marker;    // ::marker pseudo-element (NULL if none)
 
     bool before_generated;         // True if before element created
     bool after_generated;          // True if after element created
@@ -2013,10 +2010,10 @@ typedef struct BlockProp {
     WritingMode writing_mode;  // CSS Writing Modes: the element’s own block/inline axes
     float zoom;  // CSS Viewport 1: local zoom factor; effective zoom multiplies ancestors
     CssEnum text_transform;  // CSS_VALUE_NONE, CSS_VALUE_UPPERCASE, CSS_VALUE_LOWERCASE, CSS_VALUE_CAPITALIZE
-    const CssValue* line_height;
+    lam::Shared<const CssValue> line_height;
     float text_indent;  // can be negative
     float text_indent_percent;  // NaN if not percentage, else raw percentage value for deferred resolution
-    const CssValue* text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
+    lam::Up<const CssValue> text_indent_calc;  // non-null if text-indent is calc() with percentage, deferred to layout
     bool text_indent_hanging;  // CSS Text 3 §8.1: invert the lines selected for indentation
     bool text_indent_each_line;  // CSS Text 3 §8.1: include lines after forced breaks
     float given_min_width, given_max_width;  // non-negative
@@ -2026,7 +2023,7 @@ typedef struct BlockProp {
     CssEnum list_style_type;
     CssEnum list_style_position;  // inside, outside
     ListStyleImage list_style_image;
-    char* list_style_type_string;   // custom string marker (CSS Lists 3 §4.1)
+    lam::Own<char> list_style_type_string;   // custom string marker (CSS Lists 3 §4.1)
     char* counter_reset;            // counter names and values
     char* counter_increment;        // counter names and values
     char* counter_set;              // counter names and values (CSS Lists 3)
@@ -2038,7 +2035,7 @@ typedef struct BlockProp {
     CssEnum word_break;   // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_ALL, CSS_VALUE_KEEP_ALL
     CssEnum overflow_wrap;  // CSS_VALUE_NORMAL, CSS_VALUE_BREAK_WORD, CSS_VALUE_ANYWHERE
     CssEnum hyphens;  // CSS_VALUE_MANUAL or CSS_VALUE_AUTO
-    char* hyphenate_character;  // CSS Text 4: null means the UA default ('auto')
+    lam::Shared<char> hyphenate_character;  // CSS Text 4: null means the UA default ('auto')
     CssEnum line_break;    // CSS_VALUE_AUTO, CSS_VALUE_LOOSE, CSS_VALUE_NORMAL, CSS_VALUE_STRICT, CSS_VALUE_ANYWHERE
     CssEnum text_spacing_trim;  // CSS Text 4 text-spacing-trim
     uint8_t text_autospace;  // CSS Text 4 text-autospace feature flags
@@ -2118,7 +2115,7 @@ typedef struct BlockProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontBox {
-    FontProp *style;  // current font style
+    lam::Up<FontProp> style;  // current font style
     float current_font_size;  // font size of current element
 } FontBox;
 
@@ -2133,9 +2130,9 @@ typedef struct TextRect {
     int start_index, length;  // start and length of the text in the style node
     int line_number;  // block-local line index assigned when this rect enters inline flow
     bool has_trailing_hyphen;  // CSS Text 3 §5.2: a hyphenation break generated a trailing mark
-    const char* trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
+    lam::Up<const char> trailing_hyphenate_character;  // computed CSS Text 4 mark; null uses the UA default
     bool has_trailing_ellipsis; // -webkit-line-clamp: render '…' after text on this rect
-    TextRect* next;
+    lam::Own<TextRect> next;
 } TextRect;
 
 // tier-2: view-pool, rebuilt each relayout
@@ -2194,7 +2191,7 @@ typedef struct {
 typedef struct ScrollSpacingValue {
     float pixels;
     float percent;
-    const CssValue* expression;  // percentage math needs the final scrollport size
+    lam::Up<const CssValue> expression;  // percentage math needs the final scrollport size
 } ScrollSpacingValue;
 
 typedef enum ScrollSnapAxis {
@@ -2219,7 +2216,7 @@ typedef struct ScrollProp {
     CssEnum snap_align_block, snap_align_inline;
     bool snap_mandatory;
     bool snap_strictness_explicit;
-    ScrollPane* pane;
+    lam::Own<ScrollPane> pane;
     bool has_hz_overflow, has_vt_overflow;
     bool has_hz_scroll, has_vt_scroll;
     bool scrollbar_gutter_stable, scrollbar_gutter_both_edges;
@@ -2268,18 +2265,18 @@ typedef struct GridProp {
     bool column_gap_is_percent;
 
     // Grid template properties
-    GridTrackList* grid_template_rows;
-    GridTrackList* grid_template_columns;
+    lam::Own<GridTrackList> grid_template_rows;
+    lam::Own<GridTrackList> grid_template_columns;
     GridTrackList* grid_template_areas;
 
     // Grid auto track sizing
-    GridTrackList* grid_auto_rows;
-    GridTrackList* grid_auto_columns;
+    lam::Own<GridTrackList> grid_auto_rows;
+    lam::Own<GridTrackList> grid_auto_columns;
 
     int computed_row_count;
     int computed_column_count;
     // Grid areas
-    GridArea* grid_areas;
+    lam::OwnArr<GridArea> grid_areas;
     int area_count;
     int allocated_areas;
 
@@ -2289,17 +2286,17 @@ typedef struct GridProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct EmbedProp {
-    ImageSurface* img;  // image surface
+    lam::Up<ImageSurface> img;  // borrowed: the image cache or a network resource owns it (O2)
     float content_image_resolution; // CSS image-set() density for intrinsic sizing, 0 means 1x
-    DomDocument* doc;   // iframe document
+    lam::Own<DomDocument> doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
-    FlexProp* flex;
-    GridProp* grid;
+    lam::Own<FlexProp> flex;
+    lam::Own<GridProp> grid;
     CssEnum object_fit; // CSS_VALUE_FILL (default), CSS_VALUE_CONTAIN, CSS_VALUE_COVER, CSS_VALUE_NONE, CSS_VALUE_SCALE_DOWN
     float object_position_x; // percent when object_position_x_is_percent, otherwise CSS px
     float object_position_y; // percent when object_position_y_is_percent, otherwise CSS px
-    struct RdtVideo* video;  // video playback context (NULL for non-video elements)
-    ImageSurface* poster;    // poster image for <video> (displayed before playback starts)
+    lam::Own<struct RdtVideo> video;  // video playback context (NULL for non-video elements)
+    lam::Up<ImageSurface> poster;    // borrowed from the image cache; poster image for <video> (displayed before playback starts)
     bool object_position_set;
     bool object_position_x_is_percent;
     bool object_position_y_is_percent;
@@ -2329,8 +2326,8 @@ typedef void (*ViewGeometryScrollResolver)(ViewBlock* block,
                                            void* context);
 
 typedef struct ViewGeometryTextHit {
-    DomText* text;
-    TextRect* rect;
+    lam::Up<DomText> text;
+    lam::Up<TextRect> rect;
     float local_x;
 } ViewGeometryTextHit;
 
@@ -2769,28 +2766,28 @@ typedef struct CanonicalPropStats {
 
 // tier-2: view-pool, rebuilt each relayout
 struct ViewTree {
-    Pool* prop_pool;       // Mutable element-owned view props; survives retained reflow.
-    Arena* canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
+    lam::Own<Pool> prop_pool;       // Mutable element-owned view props; survives retained reflow.
+    lam::Own<Arena> canonical_prop_arena; // Immutable shared props; survives ordinary style/layout generations.
     // The owning document's memory context (borrowed); every allocator below is
     // registered under it, so the view tree is a subtree of its document.
-    struct MemContext* mem_ctx;
-    Arena* scratch_arena;  // Layout-pass scratch; never owns retained props.
+    lam::Up<struct MemContext> mem_ctx;
+    lam::Own<Arena> scratch_arena;  // Layout-pass scratch; never owns retained props.
     // Layout-pass data that is not stack-shaped (counter state, generated
     // content strings); reset when the pass ends.
-    Arena* layout_pass_arena;
+    lam::Own<Arena> layout_pass_arena;
     // Each scratch arena owns its backing arena's tail exclusively, so render
     // scratch and the frame display list each get their own arena.
-    Arena* render_scratch_arena;
-    Arena* display_list_arena;
-    CanonicalInlineEntry** inline_canonical_buckets; // Resizable exact-value index in prop_pool.
+    lam::Own<Arena> render_scratch_arena;
+    lam::Own<Arena> display_list_arena;
+    lam::OwnArr<CanonicalInlineEntry*> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
     size_t inline_canonical_bucket_count;
     size_t inline_canonical_count;
     size_t canonical_prop_cap_bytes;
     CanonicalPropStats canonical_stats;
-    TextRect* free_text_rects; // Reusable retained text fragments owned by prop_pool.
-    View* root;
+    lam::Own<TextRect> free_text_rects; // Reusable retained text fragments owned by prop_pool.
+    lam::Up<View> root;
     HtmlVersion html_version;
-    MeasurementCacheEntry* measurement_cache;
+    lam::OwnArr<MeasurementCacheEntry> measurement_cache;
     int measurement_cache_count;
     int measurement_cache_capacity;
     uint32_t measurement_cache_generation;
@@ -2808,12 +2805,22 @@ struct ViewTree {
 
 uint64_t inline_prop_hash(const InlineProp* value);
 bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
+LAM_NODE_OF(ViewTree, NodeViewTree);
+
+// The document's ViewTree shell. It stays on the memtracked heap: fixtures may
+// alias the document pool with the view tree's prop pool, which the tree
+// destroys before the shell is released.
+lam::Own<ViewTree> view_tree_shell_create();
+// Destroys the tree's storage and releases the shell; clears the field.
+void view_tree_shell_destroy(lam::Own<ViewTree>& tree);
+LAM_NODE_OF(RadiantBorderSide, NodeStack);
+LAM_NODE_OF(RadiantInsetSide, NodeStack);
+
 void view_tree_canonical_init(ViewTree* tree);
 void view_tree_canonical_destroy(ViewTree* tree);
 void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
                                   DomElement* parent);
 
-void release_dom_owned_embed_images(DomElement* elem);
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
 // Release iframe documents before lifecycle retirement checks their host nodes.
 // The embedded document otherwise keeps an external pin on a detached iframe.
@@ -2891,7 +2898,7 @@ typedef enum {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct {
     SymbolType type;
-    const char* utf8;           // UTF-8 string representation (static, do not free)
+    lam::Up<const char> utf8;           // UTF-8 string representation (static, do not free)
     size_t utf8_len;            // Length of UTF-8 string
     uint32_t codepoint;         // Primary Unicode codepoint (for single-codepoint symbols)
 } SymbolResolution;
@@ -2951,8 +2958,8 @@ struct UiContext;
 // Individual src entry with path and format
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontFaceSrc {
-    char* path;                  // Resolved local path
-    char* format;                // Format string: "woff", "truetype", "opentype", etc.
+    lam::Own<char> path;                  // Resolved local path
+    lam::Own<char> format;                // Format string: "woff", "truetype", "opentype", etc.
 } FontFaceSrc;
 
 // Font face descriptor for @font-face support
@@ -2961,15 +2968,15 @@ typedef struct FontFaceSrc {
 // unified module; this struct only stores the CSS @font-face metadata.
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontFaceDescriptor {
-    char* family_name;           // font-family value
-    char* src_local_path;        // local font file path (no web URLs) - first/fallback
-    char* src_local_name;        // src: local() font name value
-    FontFaceSrc* src_entries;    // Array of all src entries with formats
+    lam::Own<char> family_name;           // font-family value
+    lam::Own<char> src_local_path;        // local font file path (no web URLs) - first/fallback
+    lam::Own<char> src_local_name;        // src: local() font name value
+    lam::OwnArr<FontFaceSrc> src_entries;    // Array of all src entries with formats
     int src_count;               // Number of entries in src_entries array
     CssEnum font_style;         // normal, italic, oblique
     CssEnum font_weight;        // 100-900, normal, bold
     CssEnum font_display;       // auto, block, swap, fallback, optional
-    FontFaceUnicodeRange* unicode_ranges;
+    lam::OwnArr<FontFaceUnicodeRange> unicode_ranges;
     int unicode_range_count;
     bool is_loaded;              // loading state
 } FontFaceDescriptor;
@@ -3049,7 +3056,7 @@ enum ClipShapeType {
 struct ClipShape {
     ClipShapeType type;
     union {
-        struct { float* vx; float* vy; int count; } polygon;
+        struct { lam::OwnArr<float> vx; lam::OwnArr<float> vy; int count; } polygon;  // view-pool copies
         struct { float cx, cy, r; } circle;
         struct { float cx, cy, rx, ry; } ellipse;
         struct { float x, y, w, h, rx, ry; } inset;
@@ -3512,7 +3519,7 @@ typedef struct CssAnimatedProp {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssKeyframeStop {
     float offset;               // 0.0 (from) to 1.0 (to)
-    CssAnimatedProp* properties;
+    lam::OwnArr<CssAnimatedProp> properties;
     int property_count;
     TimingFunction* timing;     // per-keyframe easing (NULL = use animation easing)
 } CssKeyframeStop;
@@ -3520,8 +3527,8 @@ typedef struct CssKeyframeStop {
 // A parsed @keyframes rule
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssKeyframes {
-    const char* name;           // animation name (e.g., "fadeIn")
-    CssKeyframeStop* stops;     // sorted by offset ascending
+    lam::Up<const char> name;           // animation name (e.g., "fadeIn")
+    lam::OwnArr<CssKeyframeStop> stops;     // sorted by offset ascending
     int stop_count;
 } CssKeyframes;
 
@@ -3531,10 +3538,10 @@ typedef struct CssKeyframes {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct KeyframeRegistry {
-    CssKeyframes** entries;
+    lam::OwnArr<CssKeyframes*> entries;
     int count;
     int capacity;
-    Pool* pool;
+    lam::Up<Pool> pool;
 } KeyframeRegistry;
 
 // Create a keyframe registry from all @keyframes rules in the document's stylesheets
@@ -3549,7 +3556,7 @@ CssKeyframes* keyframe_registry_find(KeyframeRegistry* registry, const char* nam
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssAnimProp {
-    const char* name;           // animation-name (keyframes reference)
+    lam::Up<const char> name;           // animation-name (keyframes reference)
     float duration;             // animation-duration in seconds
     float delay;                // animation-delay in seconds
     int iteration_count;        // -1 = infinite
@@ -3565,7 +3572,7 @@ typedef struct CssAnimProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionProp {
-    CssPropertyCode* properties;  // transitioned property IDs (NULL = all)
+    lam::Up<CssPropertyCode> properties;  // transitioned property IDs (NULL = all)
     int property_count;         // -1 = "all"
     float duration;             // transition-duration in seconds
     float delay;                // transition-delay in seconds
@@ -3971,7 +3978,7 @@ typedef struct UiContext {
     char** fallback_fonts;  // fallback fonts
 
     // @font-face support
-    FontFaceDescriptor** font_faces;    // Array of @font-face declarations
+    lam::OwnArr<FontFaceDescriptor*> font_faces;    // Array of @font-face declarations
     int font_face_count;
     int font_face_capacity;
 
@@ -4083,6 +4090,10 @@ extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp*
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
+// The image cache takes a surface decoded elsewhere under `key` and returns the
+// surface it holds for that key: `surface`, or an earlier one (then `surface`
+// is destroyed). Returns null, with `surface` destroyed, when it cannot store it.
+extern ImageSurface* image_cache_adopt(UiContext* uicon, const char* key, ImageSurface* surface);
 #endif // LAMBDA_HEADLESS
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document

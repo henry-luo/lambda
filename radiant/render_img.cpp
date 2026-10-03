@@ -213,7 +213,7 @@ static int render_export_session_to_png(RenderExportSession* session, const char
         if (doc && doc->view_tree) {
             RenderOutputTarget target;
             render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
-            target.surface = ui_context->surface;
+            target.surface = lam::up(ui_context->surface);
             render_output_target_apply_session(&target, session);
             render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
         } else {
@@ -264,7 +264,7 @@ static int render_export_session_to_jpeg(RenderExportSession* session,
     if (doc && doc->view_tree) {
         RenderOutputTarget target;
         render_output_target_init(&target, RENDER_OUTPUT_JPEG, jpeg_file);
-        target.surface = ui_context->surface;
+        target.surface = lam::up(ui_context->surface);
         target.jpeg_quality = quality;
         render_output_target_apply_session(&target, session);
         render_output_render_view_tree_to_target(ui_context, doc->view_tree, &target);
@@ -322,7 +322,7 @@ int render_uicontext_to_png(UiContext* uicon, const char* png_file) {
     // Render the document (this will include caret/selection via render_ui_overlays)
     RenderOutputTarget target;
     render_output_target_init(&target, RENDER_OUTPUT_PNG, png_file);
-    target.surface = uicon->surface;
+    target.surface = lam::up(uicon->surface);
     render_output_render_view_tree_to_target(uicon, uicon->document->view_tree, &target);
 
     log_info("render_uicontext_to_png: completed successfully");
@@ -357,21 +357,19 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
     content_max_y += 50;
 
     // Render to SVG (now includes caret if present)
-    char* svg_content = render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
+    lam::Temp<char> svg_content(render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
                                                 content_max_x, content_max_y,
-                                                uicon->document->state);
+                                                uicon->document->state));
     if (!svg_content) {
         log_error("render_uicontext_to_svg: failed to render view tree");
         return 1;
     }
 
-    if (!save_svg_to_file(svg_content, svg_file)) {
+    if (!save_svg_to_file(svg_content.get(), svg_file)) {
         log_error("render_uicontext_to_svg: failed to save SVG to %s", svg_file);
-        mem_free(svg_content);
         return 1;
     }
 
-    mem_free(svg_content);
     log_info("render_uicontext_to_svg: completed successfully");
     return 0;
 }
@@ -391,11 +389,7 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
     if (doc) {
         script_runner_cleanup_js_state(doc);
-        if (doc->view_tree) {
-            view_pool_destroy(doc->view_tree);
-            mem_free(doc->view_tree);
-            doc->view_tree = nullptr;
-        }
+        view_tree_shell_destroy(doc->view_tree);
         dom_document_destroy(doc);
     }
 

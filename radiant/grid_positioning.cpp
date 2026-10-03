@@ -125,9 +125,9 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
 
     // First, calculate the total grid content size (all tracks + gaps)
     float total_row_size = grid_track_total(
-        grid_layout->computed_rows, grid_layout->computed_row_count, grid_layout->row_gap);
+        grid_layout->computed_rows.get(), grid_layout->computed_row_count, grid_layout->row_gap);
     float total_column_size = grid_track_total(
-        grid_layout->computed_columns, grid_layout->computed_column_count,
+        grid_layout->computed_columns.get(), grid_layout->computed_column_count,
         grid_layout->column_gap);
 
 
@@ -143,12 +143,12 @@ void position_grid_items(GridContainerLayout* grid_layout, ViewBlock* container,
         grid_layout->computed_row_count);
 
     grid_track_positions(
-        grid_layout->computed_rows, grid_layout->computed_row_count, grid_layout->row_gap,
+        grid_layout->computed_rows.get(), grid_layout->computed_row_count, grid_layout->row_gap,
         align_distribution.offset, align_distribution.spacing,
         radiant::alignment_is_space_distribution(grid_layout->align_content),
         row_positions, "row");
     grid_track_positions(
-        grid_layout->computed_columns, grid_layout->computed_column_count,
+        grid_layout->computed_columns.get(), grid_layout->computed_column_count,
         grid_layout->column_gap, justify_distribution.offset, justify_distribution.spacing,
         radiant::alignment_is_space_distribution(grid_layout->justify_content),
         column_positions, "column");

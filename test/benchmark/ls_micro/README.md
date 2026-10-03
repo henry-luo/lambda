@@ -6,12 +6,12 @@ Used to isolate the per-operation costs analysed in
 §2.2 and to A/B its fixes (§5).
 
 ```bash
-for f in test/benchmark/ls_micro/*.ls; do LAMBDA_TIER=jit ./lambda.exe run "$f"; done
+for f in test/benchmark/ls_micro/*.ls; do LAMBDA_EXEC_BACKEND=jit ./lambda.exe run "$f"; done
 ```
 
 Run against a **release** build (`make release`; note `make test-lambda-baseline`
 overwrites `lambda.exe` with a debug build), and A/B against an archived binary
-in `test/benchmark/exe/` rather than a rebuild. `LAMBDA_TIER=jit` is required:
+in `test/benchmark/exe/` rather than a rebuild. `LAMBDA_EXEC_BACKEND=jit` is required:
 the auto tier measures a different thing.
 
 | Script | Isolates |

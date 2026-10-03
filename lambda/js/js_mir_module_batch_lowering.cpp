@@ -3604,12 +3604,72 @@ bool transpile_js_mir_ast(JsMirTranspiler* mt) {
 // P2 emits only the selected boxed entry. The clone supplies the existing JS
 // parser/binder/lowering facts, while the admission gate guarantees the body
 // does not need module slots, captures, or another source function body.
-static bool js_mir_lower_function_satellite(JsMirTranspiler* mt,
+// A satellite runs in the retained script's module slab, but the clone numbered
+// its module vars in its own collection order. Point every module var the
+// selected body names at the retained binding's slab slot, and drop the
+// clone's initial-type guess: the interpreter stores ordinary boxed Items.
+struct JsP2ModuleVarRemap {
+    JsMirTranspiler* mt;
+    NameScope* clone_scope;
+    NameScope* retained_scope;
+    const char* failure;
+};
+
+static NameEntry* js_p2_scope_find(NameScope* scope, const String* name) {
+    for (NameEntry* entry = scope ? scope->first : NULL; entry; entry = entry->next) {
+        if (entry->name && name && entry->name->len == name->len &&
+                memcmp(entry->name->chars, name->chars, name->len) == 0) {
+            return entry;
+        }
+    }
+    return NULL;
+}
+
+static void js_p2_remap_module_vars(JsAstNode* node, void* opaque) {
+    JsP2ModuleVarRemap* remap = (JsP2ModuleVarRemap*)opaque;
+    if (!node || remap->failure) return;
+    if (node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+        if (!entry || entry->scope != remap->clone_scope) return;
+        JsModuleConstEntry* module_var = jm_find_module_const_by_binding(remap->mt, entry);
+        if (!module_var) return;   // a global object property, read by name
+        if (module_var->const_type != MCONST_MODVAR || module_var->is_iife_var ||
+                module_var->is_live_default_binding || module_var->is_preamble_external) {
+            remap->failure = "module binding form";
+            return;
+        }
+        NameEntry* retained = js_p2_scope_find(remap->retained_scope, entry->name);
+        if (!retained || retained->slot < 0) {
+            remap->failure = "module binding has no retained slot";
+            return;
+        }
+        module_var->int_val = retained->slot;
+        module_var->modvar_type = (TypeId)0;
+        return;
+    }
+    js_ast_visit_children(node, js_p2_remap_module_vars, opaque);
+}
+
+static bool js_mir_lower_function_satellite(JsMirTranspiler* mt, JsScript* script,
         AstFunctionId function_id, const char** out_name) {
-    if (!mt || !out_name || !js_mir_run_analysis_plan(mt)) return false;
+    if (!mt || !out_name || function_id >= mt->tp->ast_index.function_count) return false;
+    // set before analysis: inferred local and return types must not assume a
+    // direct callee the satellite does not define
+    mt->p2_satellite_node = (JsFunctionNode*)mt->tp->ast_index.functions[function_id].node;
+    if (!js_mir_run_analysis_plan(mt)) return false;
     JsFuncCollected* function = jm_collected_func_by_id(mt, function_id);
     if (!function || !function->node || JM_CAPTURE_COUNT(function) != 0) {
         log_error("js-p2: selected definition lacks a closed MIR plan");
+        return false;
+    }
+    JsP2ModuleVarRemap remap = {mt, mt->tp->global_scope, script->global_scope, NULL};
+    for (JsAstNode* param = (JsAstNode*)function->node->params; param;
+            param = (JsAstNode*)param->next) {
+        js_p2_remap_module_vars(param, &remap);
+    }
+    js_p2_remap_module_vars((JsAstNode*)function->node->body, &remap);
+    if (remap.failure) {
+        log_info("js-p2: satellite refused: %s", remap.failure);
         return false;
     }
     jm_define_function(mt, function);
@@ -3619,10 +3679,16 @@ static bool js_mir_lower_function_satellite(JsMirTranspiler* mt,
     return *out_name != NULL;
 }
 
-bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
-        AstFunctionId function_id, void** out_entry) {
+// Compile one function of a re-parsed clone of `source` into a private MIR
+// context. `source` is the retained script's text, or that text with a loop
+// continuation appended (D8.1.3v22); the clone keeps the retained script's
+// module slab, so its function identities and spans match the original.
+// `function_name` selects the appended top-level continuation by name.
+static bool js_mir_compile_satellite_unit(Runtime* runtime, JsScript* script,
+        const char* source, size_t source_length, AstFunctionId function_id,
+        const char* function_name_lookup, void** out_entry) {
     if (out_entry) *out_entry = NULL;
-    if (!runtime || !script || !script->source || !script->source_length ||
+    if (!runtime || !script || !source || !source_length ||
             !out_entry || !context || context->runtime != runtime) {
         return false;
     }
@@ -3639,10 +3705,23 @@ bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
     jm_track_active_js_transpile(tp, NULL, NULL);
     tp->strict_mode = script->strict_mode;
     tp->strict_js = script->strict_js;
-    if (!js_transpiler_parse_c(tp, script->source, script->source_length,
-            JS_PARSE_AUTO)) {
+    if (!js_transpiler_parse_c(tp, source, source_length, JS_PARSE_AUTO)) {
         log_error("js-p2: satellite source parse failed");
         goto cleanup;
+    }
+    if (function_name_lookup) {
+        size_t name_length = strlen(function_name_lookup);
+        for (uint32_t id = 0; id < tp->ast_index.function_count; id++) {
+            AstNode* node = tp->ast_index.functions[id].node;
+            String* name = node && node->node_type == AST_NODE_FUNC
+                ? ((JsFunctionNode*)node)->name : NULL;
+            if (name && name->len == name_length &&
+                    memcmp(name->chars, function_name_lookup, name_length) == 0 &&
+                    tp->ast_index.functions[id].parent == AST_FUNCTION_ID_INVALID) {
+                function_id = id;
+                break;
+            }
+        }
     }
     if (function_id >= tp->ast_index.function_count) {
         log_error("js-p2: selected function identity is absent from clone");
@@ -3660,7 +3739,7 @@ bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
         false, module_name_base, g_js_mir_optimize_level, true, "js-p2", false, &ctx);
     if (!mt) goto cleanup;
     g_active_mir_ctx = ctx;
-    if (!js_mir_lower_function_satellite(mt, function_id, &function_name) ||
+    if (!js_mir_lower_function_satellite(mt, script, function_id, &function_name) ||
             !jm_validate_mir_labels(ctx)) {
         goto cleanup;
     }
@@ -3697,6 +3776,19 @@ cleanup:
     jm_clear_active_js_transpile(tp, NULL, NULL);
     js_transpiler_destroy(tp);
     return retained;
+}
+
+bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
+        AstFunctionId function_id, void** out_entry) {
+    return script && js_mir_compile_satellite_unit(runtime, script, script->source,
+        script->source_length, function_id, NULL, out_entry);
+}
+
+bool js_mir_compile_loop_continuation(Runtime* runtime, JsScript* script,
+        const char* source, size_t source_length, const char* function_name,
+        void** out_entry) {
+    return function_name && js_mir_compile_satellite_unit(runtime, script, source,
+        source_length, AST_FUNCTION_ID_INVALID, function_name, out_entry);
 }
 
 bool js_mir_link_runtime_state(JsMirTranspiler* mt) {
