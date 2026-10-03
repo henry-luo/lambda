@@ -3910,6 +3910,9 @@ extern "C" bool dom_engine_exec_command(void* d, const char* c, const char* v) {
 extern "C" void* dom_engine_element_from_point(DomDocument* d, float x, float y) {
     return radiant_document_element_from_point(d, x, y);
 }
+extern "C" void* dom_engine_subtree_element_from_point(DomElement* root, float x, float y) {
+    return radiant_subtree_element_from_point(root, x, y);
+}
 
 PROVIDE(bool, history_initialize, (DomDocument* d), (d))
 PROVIDE(int, history_length, (DomDocument* d), (d))

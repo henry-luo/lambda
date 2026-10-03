@@ -773,12 +773,11 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
                     log_error("Invalid tag_name pointer in element: %p", element->tag_name);
                     return false;
                 }
-                // HTML local names are ASCII-insensitive; foreign element
-                // local names retain their case after parser correction.
+                // Prefixes identify namespaces; the type selector compares local names.
                 return strcmp(dom_element_namespace_uri(element),
                     "http://www.w3.org/1999/xhtml") == 0
-                    ? str_icmp_cstr(element->tag_name, simple_selector->value) == 0
-                    : strcmp(element->tag_name, simple_selector->value) == 0;
+                    ? str_icmp_cstr(element->local_name(), simple_selector->value) == 0
+                    : strcmp(element->local_name(), simple_selector->value) == 0;
             }
             return true; // No type specified matches any element
 

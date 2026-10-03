@@ -458,7 +458,8 @@ Radiant parses and paints SVG itself, whichever way it arrives: inline `<svg>` i
 
 **2026-10-02 update:** radius defaults, default line paint, path error recovery,
 basic CSS colors, group opacity and geometry bounds for gradient fills have
-fresh Chromium pixel checks. The implementation and validation record is in
+fresh Chromium pixel checks. Host/embedded CSS cascade, inherited group fonts,
+visibility, styled stops and mutation invalidation now have fresh paint/input checks. The implementation and validation record is in
 [SVG Support](../vibe/impl/Lambda_Impl_SVG_Support.md#74-progress-record).
 Other entries retain the 2026-09-28 evidence date.
 
@@ -466,23 +467,23 @@ Other entries retain the 2026-09-28 evidence date.
 
 | Element | Status | Notes |
 |---|---|---|
-| `<svg>`, nested `<svg>` | ✅ | `viewBox` and `preserveAspectRatio` (alignment, `meet`, `slice`, `none`). Default size 300 × 150; with only a `viewBox` it fills the container width at the viewBox ratio. Content is always clipped to the box, so `overflow="visible"` is ignored. |
+| `<svg>`, nested `<svg>` | ✅ | `viewBox` and `preserveAspectRatio` (alignment, `meet`, `slice`, `none`). Default size 300 × 150; with only a `viewBox` it fills the container width at the viewBox ratio. Root and nested overflow follow authored CSS/presentation values; visible ink can extend beyond the viewport, while hidden overflow clips in viewport space. |
 | `<g>` | ✅ | Group opacity composites overlapping shapes once, with or without a root `viewBox`, including nested groups and a nonzero viewBox origin. |
 | `<path>` | ✅ | All commands (`M L H V C S Q T A Z`, absolute and relative), arcs included. Invalid data retains complete preceding segments; incomplete parameter sets are not emitted. |
 | `<rect>` | ✅ | Either omitted radius uses the other radius; used radii are clamped to half the corresponding dimension. An explicit zero radius gives square corners. |
 | `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>` | ✅ | |
 | `<line>` | ✅ | The default stroke is `none`; explicit, inherited and inline CSS strokes use normal paint resolution. |
-| `<text>`, `<tspan>` | ◐ | Runs, `text-anchor`, font family/size/weight/style, solid fill, `textLength`/`lengthAdjust`, `xml:space`. Only the first `x`/`y`/`dx`/`dy` value is used. Not supported on text: stroke, `opacity`, `fill-opacity`, `letter-spacing`, `word-spacing`, `dominant-baseline`, `text-decoration`, `rotate`, gradient fill. |
+| `<text>`, `<tspan>` | ◐ | Addressable-character `x`/`y`/`dx`/`dy` lists, repeated `rotate`, `text-anchor`, inherited font family/size/weight/style, fill/stroke and inherited paint opacity, text/tspan compositing, spacing, baseline alignment/shift, decorations, nested `textLength`/`lengthAdjust`, `xml:space`, and character-cell targeting. Glyph outlines and bitmap coverage share paint geometry. Gradient/pattern text paint and complete clip/mask/filter boundaries remain pending; general shaping retains the font engine limitations. Specification fixtures record Chromium 143 differences in supplementary-character lists, nested length calibration and SVG 2 decoration styles/colors. |
 | `<textPath>` | ❌ | Its content is skipped. |
-| `<a>` | ◐ | Children render; the link's own `transform` and attributes are ignored. |
+| `<a>` | ✅ | Uses the shared group transform/paint/font state; transformed children retain link click bubbling. |
 | `<use>`, `<symbol>`, `<defs>` | ✅ | `href` and `xlink:href`, `x`/`y`, the symbol's `viewBox` and `preserveAspectRatio`, external `file.svg#id`, a cycle guard, nesting up to 16 levels. |
-| `<image>` | ◐ | PNG, JPEG and SVG sources; GIF and WebP do not load. A raster image's `x`/`y` are ignored, so it is drawn at the user-space origin; relative `href`s resolve against the process working directory instead of the document; `preserveAspectRatio` alignment and `none` are ignored for file sources. |
+| `<image>` | ✅ | Shared PNG/JPEG/GIF/WebP/SVG and data-URI resources; document-relative URLs, x/y, all aspect alignments, meet/slice/none, transformed clipping and opacity. GIF frames invalidate recorded paint. Referenced SVG images isolate styles and block external file references; standalone SVG has a live document DOM. |
 | `<switch>` | ❌ | Every child renders. |
 | `<foreignObject>` | ❌ | Nothing renders. |
-| `<style>` inside SVG | ◐ | Type, `.class`, `#id`, compound and `*` selectors. No selector lists, combinators or `!important`. |
+| `<style>` inside SVG | ✅ | Uses the shared CSS parser, selector matcher and cascade, including lists, combinators, specificity and `!important`; external image documents retain isolated styles. |
 | `<title>`, `<desc>` | ✅ | Not painted, as in browsers; no tooltip. |
 | `<linearGradient>`, `<radialGradient>` | ◐ | See the paint-server table below. |
-| `<pattern>` | ◐ | `patternUnits`, `x`/`y`/`width`/`height`, `patternTransform`. No `viewBox`, `patternContentUnits` or `href`. |
+| `<pattern>` | ✅ | Tile/content units, x/y/width/height, affine transforms, viewBox/PAR and local/external href templates. Tiles are clipped and sampled once for fill/stroke; tiny periods have bounded traversal. |
 | `<clipPath>` | ◐ | The union of basic shapes, or only the first `<path>`. Child transforms, `clipPathUnits="objectBoundingBox"` and `style="clip-path:…"` are ignored, and the clip ignores the clipped element's own transform. |
 | `<mask>` | ◐ | Luminance of solid-filled shapes. Gradient masks are ignored (the element paints unmasked), and black shapes cannot cut holes. |
 | `<marker>` | ◐ | `marker-end` on `<path>` only, with `orient`, `refX`/`refY` and `markerUnits`. No `marker-start` or `marker-mid`, no markers on `<line>`, `<polyline>` or `<polygon>`, and the marker's `viewBox` is ignored (all verified). |
@@ -494,28 +495,28 @@ Other entries retain the 2026-09-28 evidence date.
 
 | Feature | Status | Notes |
 |---|---|---|
-| `transform` attribute | ✅ | All transform functions. The CSS `transform` property on SVG child elements is ignored. |
+| `transform` attribute | ✅ | Attribute transforms and authored CSS transforms with CSS precedence, transform origins, and view/fill reference boxes; paint and geometric hit testing share decoding. |
 | Colours | ✅ | Hex, `rgb()`/`rgba()` including percentages, `hsl()`/`hsla()` with number/degree/radian/gradian/turn hues, and CSS named colours including `rebeccapurple`. SVG uses the shared CSS color parser. |
 | `currentColor` | ✅ | Including a CSS `color` set on the `<svg>` element. |
-| `context-fill`, `context-stroke` | ❌ | Render black. |
-| `fill="url(#gradient)"` | ◐ | Explicit linear/radial gradient fills work on paths and basic shapes, including polygons and polylines, with default `objectBoundingBox` units or `userSpaceOnUse`. Cubic paths use curve extrema for geometry bounds. A gradient fill inherited from a `<g>` still renders black. |
-| `stroke="url(#gradient)"` | ❌ | Renders solid black. |
+| `context-fill`, `context-stroke` | ◐ | Recursive use instances retain source paint, geometry bounds, coordinates and document/base. No context produces no paint. Marker context paint remains in P7. |
+| `fill="url(#gradient)"` | ✅ | Inherited typed paints apply to basic/curved shapes and text using tight geometry bounds; text glyphs share the complete text paint domain. |
+| `stroke="url(#gradient)"` | ✅ | Gradient strokes share caps, joins, dashes and paint opacity with solid strokes. |
 | `gradientUnits` | ✅ | |
-| `gradientTransform`, `spreadMethod` (other than `pad`), gradient `href` templates, `fx`/`fy`/`fr` | ❌ | A template reached through `href` renders nothing. |
-| `stop-color`, `stop-opacity` | ◐ | Work as attributes; `stop-color` given in `style=` renders black. |
+| `gradientTransform`, `spreadMethod`, gradient `href` templates, `fx`/`fy`/`fr` | ✅ | Affine transforms, pad/repeat/reflect, local/external templates with cycles, styled stops and two-circle radial cones. Lambda-side raster lowering covers ThorVG focal-circle limitations. |
+| `stop-color`, `stop-opacity` | ✅ | Presentation attributes and authored CSS, including inherited `currentColor` and percentage stop opacity. |
 | `fill-rule` | ✅ | |
 | `clip-rule` | ❌ | |
-| `opacity`, `fill-opacity`, `stroke-opacity` | ◐ | Work on shapes; ignored on text. |
+| `opacity`, `fill-opacity`, `stroke-opacity` | ◐ | Shapes and text paint through shared opacity scopes; complete clip/mask/filter compositing remains in P8/P10. |
 | `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `stroke-dashoffset` | ✅ | |
-| `stroke-dasharray` | ◐ | Zero-length entries are dropped, which breaks the `0 n` dotted-line idiom; percentages are read as user units. |
+| `stroke-dasharray` | ✅ | Preserves zero-length round-cap dots, repeats odd lists, treats all-zero/invalid negative lists as solid, and resolves percentages against the viewport diagonal. |
 | `stroke-miterlimit`, `vector-effect`, `paint-order` | ❌ | |
 | `text-anchor` | ✅ | |
-| Presentation attributes vs CSS | ✅ | `style` attribute, then `<style>` rules inside the SVG by specificity and order, then presentation attributes, as in browsers. |
-| **Page stylesheets reaching SVG content** | ❌ | Rules in the HTML page's own stylesheets do not reach elements inside an inline `<svg>`; only the root `<svg>`'s `color`, `fill`, `stroke` and `stroke-width` are taken from the page. Put SVG styling in a `<style>` inside the `<svg>` or in attributes (verified). |
-| Font properties on `<g>` | ◐ | Presentation attributes are inherited; CSS `style` values are not. |
+| Presentation attributes vs CSS | ✅ | Shared author cascade, including inline importance and selector-list specificity; presentation attributes have specificity zero. Invalid paint declarations preserve earlier valid declarations. |
+| **Page stylesheets reaching SVG content** | ✅ | Host selectors style inline SVG descendants. Host class/style changes and stylesheet text replacement invalidate retained SVG paint; external image documents remain isolated. |
+| Font properties on `<g>` | ✅ | Presentation attributes and shared CSS inherit family, size, weight and slant into descendant text. |
 | `display="none"` | ✅ | |
-| `visibility` | ❌ | Ignored. |
-| Units | ◐ | `px`, `pt`, `pc`, `mm`, `cm`, `in`. `em` and `ex` are fixed at 16 and 8 px; `%` is read as a plain number (`width="10%"` is 10 user units). |
+| `visibility` | ✅ | Inherited hidden content retains geometry; visible descendants can paint and receive pointer targets. Hidden text retains advances. |
+| Units | ◐ | `px`, `pt`, `pc`, `mm`, `cm`, `in`. Shape geometry, transforms and stroke/dash values resolve `em`/`ex` from computed font metrics and `%` from the viewport axis/diagonal. Positioned text and resource-specific unit consumers are still being extended. |
 
 ## 16. Image Formats
 
@@ -527,7 +528,7 @@ The image decoders linked into `lambda` are libpng, libjpeg-turbo and giflib (`l
 | JPEG | ✅ | EXIF orientation is ◐: for orientations 5–8 the box is swapped but the pixels are not rotated, so the image is stretched. |
 | GIF | ✅ | Animated in `lambda view`; exports show the first frame. |
 | SVG | ✅ | See [§15](#15-svg). |
-| WebP | ❌ | Shown as a placeholder. |
+| WebP | ✅ | Shared static decoder for files and data URIs, including SVG images. Animated WebP remains unsupported. |
 | AVIF, BMP, TIFF, ICO | ❌ | Render blank. |
 | Lottie (`.json`, `.lottie`) | ◐ | Played in `lambda view`; a blank 300 × 300 box in `layout` and `render`. |
 | Remote `http(s)` images | *not verified* | A network path exists (`radiant/surface.cpp`). |
@@ -594,9 +595,9 @@ The gaps most likely to change how a real page looks, with the section that has 
 **SVG and images**
 
 - Gradient fills on `<path>`, `<polygon>` and `<polyline>` paint nothing with the default `objectBoundingBox` units, and gradient strokes paint black ([§15](#15-svg)).
-- Rules in the page's stylesheets do not reach elements inside inline SVG; style SVG with attributes or a `<style>` inside the `<svg>` ([§15](#15-svg)).
+- Inline SVG shares the page cascade; external SVG images retain isolated styles ([§15](#15-svg)).
 - SVG filters are limited to `feGaussianBlur`, markers to `marker-end` on paths, and masks to solid-filled luminance masks ([§15](#15-svg)).
-- WebP, AVIF, BMP, TIFF and ICO images do not load ([§16](#16-image-formats)).
+- AVIF, BMP, TIFF and ICO images do not load ([§16](#16-image-formats)).
 
 **Output**
 

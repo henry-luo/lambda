@@ -1,0 +1,12 @@
+<!doctype html><html><head><style>body{margin:0;background:white}svg{display:block}button{margin:10px}</style></head><body>
+<svg id="scene" width="320" height="100" viewBox="0 0 320 100"><image id="dynamic" x="10" y="10" width="80" height="80" href="svg_image_assets/split.png" preserveAspectRatio="none"/></svg>
+<button id="resize">Resize resource</button><button id="replace">Replace node</button><button id="remove">Remove node</button><button id="restore">Restore node</button>
+<script>
+var scene=document.getElementById('scene');
+function bindImage(){document.getElementById('dynamic').addEventListener('click',function(){scene.setAttribute('data-image-click','yes');});}
+bindImage();
+document.getElementById('resize').addEventListener('click',function(){var image=document.getElementById('dynamic');image.setAttribute('href','svg_image_assets/split.webp');image.setAttribute('width','120');image.setAttribute('height','40');});
+document.getElementById('replace').addEventListener('click',function(){var old=document.getElementById('dynamic');var image=document.createElementNS('http://www.w3.org/2000/svg','image');image.setAttribute('id','dynamic');image.setAttribute('x','10');image.setAttribute('y','10');image.setAttribute('width','80');image.setAttribute('height','80');image.setAttribute('href','svg_image_assets/split.gif');image.setAttribute('preserveAspectRatio','none');scene.replaceChild(image,old);bindImage();});
+document.getElementById('remove').addEventListener('click',function(){document.getElementById('dynamic').remove();});
+document.getElementById('restore').addEventListener('click',function(){scene.innerHTML='<image id="dynamic" x="10" y="10" width="80" height="80" href="svg_image_assets/split.png" preserveAspectRatio="none"/>';bindImage();});
+</script></body></html>

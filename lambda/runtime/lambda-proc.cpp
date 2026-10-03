@@ -1,3 +1,4 @@
+#include "../io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
@@ -228,6 +229,17 @@ static Item pn_output_internal(Item source, Item target_item, const char* format
         log_error("pn_output_internal: cannot output error to file");
         strbuf_free(path_buf);
         return ItemError;
+    }
+
+    if (source_type == LMD_TYPE_ELEMENT && container_is_virtual_list(source.container)) {
+        // A completed file owns already encoded bytes; formatting its element
+        // would discard the payload, and text I/O could alter binary streams.
+        const char* bytes = NULL;
+        size_t size = 0;
+        bool ok = virtual_output_bytes(source, &bytes, &size) &&
+            write_raw_bytes(file_path, mode_binary, atomic, bytes, size);
+        strbuf_free(path_buf);
+        return ok ? (Item){.item = i2it((int64_t)size)} : ItemError;
     }
 
     // string source: output as raw text (ignore format)

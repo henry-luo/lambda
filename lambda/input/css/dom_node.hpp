@@ -398,6 +398,7 @@ struct DomComment : public DomNode {
 
 /** Detached bridge factory retained for JS/Jube callers. */
 DomComment* dom_comment_create_detached(Element* native_element, DomDocument* doc);
+bool dom_is_comment_tag(const char* tag_name);
 
 /**
  * Destroy a DomComment node

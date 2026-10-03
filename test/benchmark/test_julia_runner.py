@@ -13,8 +13,8 @@ import run_julia_benchmarks as julia
 class JuliaRunnerTests(unittest.TestCase):
     def test_registered_port_coverage(self):
         entries = julia.benchmark_entries(True)
-        self.assertEqual(69, len(entries))
-        self.assertEqual(63, len(julia.benchmark_entries()))
+        self.assertEqual(73, len(entries))
+        self.assertEqual(67, len(julia.benchmark_entries()))
         self.assertFalse([f"{b['suite']}/{b['name']}" for b in entries
                           if julia.port_source(b['suite'], b['name']) is None])
 

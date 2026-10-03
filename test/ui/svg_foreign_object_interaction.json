@@ -1,0 +1,393 @@
+{
+  "name": "SVG foreignObject uses transformed HTML hit targets, focus, wheel, clipping and live mutation",
+  "html": "test/ui/svg_foreign_object_interaction.html",
+  "viewport": {
+    "width": 500,
+    "height": 380
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 45,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 45,
+      "expected_selector": "#embedded-button"
+    },
+    {
+      "type": "click",
+      "x": 50,
+      "y": 45
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "embedded-button"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-client",
+      "equals": "50,45"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 335,
+      "y": 60,
+      "expected_selector": "#rotated-button"
+    },
+    {
+      "type": "click",
+      "x": 335,
+      "y": 60
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "rotated-button"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-client",
+      "equals": "335,60"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 70,
+      "y": 95,
+      "expected_selector": "#embedded-input"
+    },
+    {
+      "type": "click",
+      "x": 70,
+      "y": 95
+    },
+    {
+      "type": "assert_focus",
+      "target": {
+        "selector": "#embedded-input"
+      }
+    },
+    {
+      "type": "type",
+      "target": {
+        "selector": "#embedded-input"
+      },
+      "text": "svg"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#embedded-input"
+      },
+      "equals": "svg"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 125,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 125,
+      "expected_selector": "#blue-band"
+    },
+    {
+      "type": "scroll",
+      "x": 70,
+      "y": 135,
+      "dx": 0,
+      "dy": -1
+    },
+    {
+      "type": "advance_time",
+      "ms": 150
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 125,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 125,
+      "expected_selector": "#green-band"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 300,
+      "y": 200,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 275,
+      "y": 230,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 300,
+      "y": 200,
+      "expected_selector": "#inner-overflow"
+    },
+    {
+      "type": "click",
+      "x": 450,
+      "y": 325
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-box",
+      "equals": "35,35,120,45"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 45,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 45,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 80,
+      "y": 45,
+      "expected_selector": "#embedded-button"
+    },
+    {
+      "type": "click",
+      "x": 80,
+      "y": 45
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-client",
+      "equals": "80,45"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 200,
+      "y": 150,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "x": 450,
+      "y": 325
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 45,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 175,
+      "y": 215,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 175,
+      "y": 240,
+      "expected_selector": "#embedded-button"
+    },
+    {
+      "type": "click",
+      "x": 175,
+      "y": 240
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-client",
+      "equals": "175,240"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#embedded-input"
+      },
+      "equals": "svg"
+    },
+    {
+      "type": "click",
+      "x": 450,
+      "y": 325
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "3"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 175,
+      "y": 215,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 175,
+      "y": 240,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 450,
+      "y": 325
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "4"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 175,
+      "y": 215,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 175,
+      "y": 240,
+      "expected_selector": "#embedded-button"
+    },
+    {
+      "type": "click",
+      "x": 175,
+      "y": 240
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-client",
+      "equals": "175,240"
+    },
+    {
+      "type": "assert_value",
+      "target": {
+        "selector": "#embedded-input"
+      },
+      "equals": "svg"
+    }
+  ]
+}

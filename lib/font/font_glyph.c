@@ -936,6 +936,63 @@ LoadedGlyph* font_load_glyph(FontHandle* handle, const FontStyleDesc* style,
     return NULL;
 }
 
+FontHandle* font_resolve_for_emoji(FontContext* ctx, const FontStyleDesc* style, uint32_t codepoint) {
+    if (!ctx || !style) return NULL;
+    // Use platform emoji font lookup: passes codepoint + VS16 (U+FE0F) to
+    // CoreText so it selects Apple Color Emoji instead of a CJK text font.
+    float pixel_ratio = ctx->config.pixel_ratio;
+    float physical_size = style->size_px * pixel_ratio;
+
+    // Reuse cached emoji handle if style matches (same font for all emoji)
+    FontHandle* emoji_handle = NULL;
+    if (ctx->cached_emoji_handle
+        && ctx->cached_emoji_size_px == style->size_px
+        && ctx->cached_emoji_physical_size == physical_size
+        && ctx->cached_emoji_weight == style->weight
+        && ctx->cached_emoji_slant == style->slant
+        && font_has_codepoint(ctx->cached_emoji_handle, codepoint)) {
+        emoji_handle = ctx->cached_emoji_handle;
+        font_handle_retain(emoji_handle);
+    } else {
+        int face_index = 0;
+        char* font_path = font_platform_find_emoji_font(codepoint, &face_index);
+        if (font_path) {
+            emoji_handle = font_load_face_internal(
+                ctx, font_path, face_index,
+                style->size_px, physical_size,
+                style->weight, style->slant);
+            mem_free(font_path);
+#ifdef __APPLE__
+            // the platform descriptor carries color-glyph baseline adjustments absent from raw CGFont faces.
+            if (emoji_handle && emoji_handle->ct_font_ref)
+                font_backend_use_ct_font(emoji_handle, emoji_handle->ct_font_ref);
+#endif
+            if (emoji_handle && !font_has_codepoint(emoji_handle, codepoint)) {
+                font_handle_release(emoji_handle);
+                emoji_handle = NULL;
+            }
+        }
+        if (!emoji_handle) {
+            // Linux has no platform emoji lookup; use configured emoji families
+            // through the same database as normal font fallback.
+            emoji_handle = font_find_emoji_fallback(ctx, style, codepoint);
+        }
+        if (emoji_handle) {
+            // the cached alias keeps this face alive after the lookup ref ends
+            if (ctx->cached_emoji_handle)
+                font_handle_release(ctx->cached_emoji_handle);
+            font_handle_retain(emoji_handle);
+            ctx->cached_emoji_handle = emoji_handle;
+            ctx->cached_emoji_size_px = style->size_px;
+            ctx->cached_emoji_physical_size = physical_size;
+            ctx->cached_emoji_weight = style->weight;
+            ctx->cached_emoji_slant = style->slant;
+        }
+    }
+
+    return emoji_handle;
+}
+
 LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* style,
                                     uint32_t codepoint, bool for_rendering) {
     if (!handle || !style) return NULL;
@@ -960,53 +1017,7 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
         }
     }
 
-    // Use platform emoji font lookup: passes codepoint + VS16 (U+FE0F) to
-    // CoreText so it selects Apple Color Emoji instead of a CJK text font.
-    float pixel_ratio = ctx->config.pixel_ratio;
-    float physical_size = style->size_px * pixel_ratio;
-
-    // Reuse cached emoji handle if style matches (same font for all emoji)
-    FontHandle* emoji_handle = NULL;
-    bool handle_from_cache = false;
-    if (ctx->cached_emoji_handle
-        && ctx->cached_emoji_size_px == style->size_px
-        && ctx->cached_emoji_physical_size == physical_size
-        && ctx->cached_emoji_weight == style->weight
-        && ctx->cached_emoji_slant == style->slant
-        && font_has_codepoint(ctx->cached_emoji_handle, codepoint)) {
-        emoji_handle = ctx->cached_emoji_handle;
-        handle_from_cache = true;
-    } else {
-        int face_index = 0;
-        char* font_path = font_platform_find_emoji_font(codepoint, &face_index);
-        if (font_path) {
-            emoji_handle = font_load_face_internal(
-                ctx, font_path, face_index,
-                style->size_px, physical_size,
-                style->weight, style->slant);
-            mem_free(font_path);
-            if (emoji_handle && !font_has_codepoint(emoji_handle, codepoint)) {
-                font_handle_release(emoji_handle);
-                emoji_handle = NULL;
-            }
-        }
-        if (!emoji_handle) {
-            // Linux has no platform emoji lookup; use configured emoji families
-            // through the same database as normal font fallback.
-            emoji_handle = font_find_emoji_fallback(ctx, style, codepoint);
-        }
-        if (emoji_handle) {
-            // the cached alias keeps this face alive after the lookup ref ends
-            if (ctx->cached_emoji_handle)
-                font_handle_release(ctx->cached_emoji_handle);
-            font_handle_retain(emoji_handle);
-            ctx->cached_emoji_handle = emoji_handle;
-            ctx->cached_emoji_size_px = style->size_px;
-            ctx->cached_emoji_physical_size = physical_size;
-            ctx->cached_emoji_weight = style->weight;
-            ctx->cached_emoji_slant = style->slant;
-        }
-    }
+    FontHandle* emoji_handle = font_resolve_for_emoji(ctx, style, codepoint);
 
     if (emoji_handle) {
         LoadedGlyph* result = NULL;
@@ -1023,8 +1034,7 @@ LoadedGlyph* font_load_glyph_emoji(FontHandle* handle, const FontStyleDesc* styl
         if (result) {
             fill_loaded_glyph_font_metrics(emoji_handle);
         }
-        if (!handle_from_cache)
-            font_handle_release(emoji_handle);
+        font_handle_release(emoji_handle);
         if (result) {
             // cache with caller's handle so subsequent lookups hit
             cache_loaded_glyph(ctx, handle, codepoint, for_rendering, true);

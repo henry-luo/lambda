@@ -90,14 +90,8 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
     return true;
 }
 
-static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
-    if (!view->embed || !view->embedp()->img) return;
-
-    ImageSurface* img = view->embedp()->img;
-    Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->raster_scale);
-    Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
-    float s = rdcon->raster_scale;
-
+Rect render_media_image_rect(ViewBlock* view, ImageSurface* img, Rect rect, float s) {
+    if (!view || !view->embed || !img || img->width <= 0 || img->height <= 0) return rect;
     // Apply object-fit: compute actual image render rect
     CssEnum object_fit = view->embedp()->object_fit;
     Rect img_rect = rect;  // default: fill (stretch to container)
@@ -147,6 +141,47 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         img_rect.width = rendered_w;
         img_rect.height = rendered_h;
     }
+    return img_rect;
+}
+
+bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
+                                    const Rect* content_rect) {
+    if (!paint || !view || !view->embed || !content_rect) return false;
+    ImageSurface* image = view->embedp()->img;
+    Element* root = image && image->pic ? rdt_picture_get_svg_root(image->pic) : nullptr;
+    if (!root) return false;
+    Rect rect = render_media_image_rect(view, image, *content_rect, 1.0f);
+    if (rect.width <= 0 || rect.height <= 0) return true;
+    RdtMatrix placement = rdt_matrix_translate(rect.x, rect.y);
+    PaintSvgSubscene scene = {};
+    render_svg_build_subscene(&scene, root, rect.width, rect.height,
+        rdt_picture_get_pool(image->pic), ui_context_raster_scale(ui),
+        ui ? ui->font_ctx : nullptr, &placement, nullptr, nullptr, nullptr,
+        rdt_picture_get_source_path(image->pic), 1.0f, false, nullptr, true, -1.0f, ui);
+    scene.image_document = true;
+    scene.clip_viewport = true;
+    scene.animation_time = rdt_picture_animation_time(image->pic);
+    // replaced images clip cover/none overflow to their CSS content box in every backend.
+    RdtPath* clip = rdt_path_new();
+    if (!clip) return true;
+    rdt_path_add_rect(clip, content_rect->x, content_rect->y,
+        content_rect->width, content_rect->height, 0, 0);
+    paint_push_clip(paint, clip, nullptr);
+    paint_svg_subscene(paint, &scene);
+    paint_pop_clip(paint);
+    rdt_path_free(clip);
+    return true;
+}
+
+static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
+    if (!view->embed || !view->embedp()->img) return;
+
+    ImageSurface* img = view->embedp()->img;
+    Rect border_rect = render_geometry_block_border_rect(&rdcon->block, view, rdcon->raster_scale);
+    Rect rect = render_geometry_block_content_rect(&rdcon->block, view, rdcon->raster_scale);
+    float s = rdcon->raster_scale;
+
+    Rect img_rect = render_media_image_rect(view, img, rect, s);
     uint8_t content_opacity = render_media_content_opacity(view);
     Bound image_clip = rdcon->has_transform
         ? rdcon->block.clip

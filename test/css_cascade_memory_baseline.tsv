@@ -20,6 +20,12 @@
 # and cold-cache storage are strict ceilings. A recascade must not grow
 # canonical CSS beyond that margin.
 #
+# On 2026-10-02, strongest matching selector-list specificity separates footer
+# copyright links from other footer links in bootstrap5_kitchen_sink: one extra
+# canonical recipe and seven shared payload bindings, with zero recascade growth.
+# Only the affected structural ceilings change; byte budgets retain the prior capture.
+# D4.2.2v2-D4.2.4 and D4.5.1v3 continue to govern snapshot ownership.
+#
 # fixture phase document_live document_live_delta work_live_delta css_live canonical_live canonical_live_delta entries bound_refs payloads payload_refs bound_entries cold_entries cold_bytes
 jqueryui initial 176242 67082 415 321604 321604 317508 78 327 411 763 78 0 0
 jqueryui recascade 176242 37770 104 321604 321604 0 78 327 411 763 78 0 0

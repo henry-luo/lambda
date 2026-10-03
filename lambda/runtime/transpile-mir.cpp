@@ -3,6 +3,7 @@
 #include "lambda-number-types.hpp"
 #include "re2_wrapper.hpp"
 #include "../io/mark_builder.hpp"
+#include "../io/mark_output_builder.hpp"
 #include "safety_analyzer.hpp"
 #include "module_registry.h"
 #include "template_registry.h"
@@ -9750,6 +9751,22 @@ static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
     return leaf;
 }
 
+// CW25 / S9.2.2: a `var` argument that names a PLACE (`f(var m.rows[i])`)
+// borrows that place, not merely its root. Detach the whole spine and return
+// the rooted slot of the detached leaf, already installed in its parent, so
+// the callee's in-place writes land in the caller's container. Returns -1 when
+// the argument is a bare binding or no place of a COW-tracked root. Shared by
+// the direct and the dynamic (cross-image) call edges.
+static int mir_borrow_var_place_argument(MirTranspiler* mt, AstNode* arg) {
+    if (!arg || mir_direct_root_binding(mt, arg)) return -1;
+    AstCowPath borrow_path = {};
+    if (!ast_collect_cow_path(&borrow_path, arg) || borrow_path.count <= 0) return -1;
+    MirVarEntry* place_root = mir_direct_root_binding(mt, borrow_path.root);
+    if (!place_root || !mir_root_may_need_cow(place_root)) return -1;
+    MIR_reg_t leaf = mir_emit_cow_path_borrow(mt, place_root, &borrow_path, false);
+    return create_gc_root_slot(mt, leaf);
+}
+
 // T22-5b: a statically named nested `int` field can use the same one-shot
 // rooted spine borrow as a `var` place.  The header/lane guards prove the
 // packed slot before the final raw store; every miss resumes the established
@@ -19360,6 +19377,14 @@ static bool mir_finite_loop_plan(MirTranspiler* mt, AstWhileNode* while_node,
         return false;
     }
     NameEntry* bound = literal_bound ? NULL : ((AstIdentNode*)right)->entry;
+    // the entry guard range-checks the bound's register as an int lane; a
+    // `float` bound (`while (i < limit: float)`) would emit an integer
+    // compare on a double register
+    MirVarEntry* bound_var = bound ? mir_var_for_binding(mt, bound) : NULL;
+    if (bound_var && (bound_var->type_id != LMD_TYPE_INT ||
+            bound_var->mir_type != MIR_T_I64)) {
+        return false;
+    }
 
     // T30-4: the left side may be any sum of non-negative terms that contains
     // the counter with a positive coefficient -- `nc1 * 4 <= m`,
@@ -23904,6 +23929,31 @@ static bool mir_tail_transfers_control(AstNode* node) {
         node->node_type == AST_NODE_RAISE_EXPR);
 }
 
+// A native-return body publishes one lane. A producer the planner expected
+// to deliver that lane can instead yield an Item whose contract the lane does
+// not cover -- in a satellite image a direct call to a function outside the
+// image is reached through the dynamic edge, so `column(r)` arrives as an
+// `any` Item that may be an error. Narrowing it is the declared-return
+// admission (the explicit `return` firewall), not a representation move,
+// which em_require_rep rightly refuses. Every value the lane covers keeps the
+// plain conversion.
+static MirValue mir_require_native_return(MirTranspiler* mt, AstNode* node,
+        MirValue value, ValueRep lane) {
+    if (value.rep == VALUE_REP_ITEM && !value.maybe_pending &&
+            value.semantic_contract && mt->current_return_type &&
+            mt->native_return_tid != LMD_TYPE_ANY &&
+            lambda_canonical_rep(value.semantic_contract) != lane) {
+        Type* declared = mir_unwrap_decl_type(mt->current_return_type);
+        MIR_reg_t checked = emit_checked_value_boundary(mt, value, declared,
+            "function return");
+        emit_return_if_item_error(mt, checked);
+        MIR_reg_t native = emit_unbox_contract_lane(mt, checked,
+            mt->native_return_tid, mt->current_return_type);
+        return mir_value_from_reg(mt, node, native, lane, declared);
+    }
+    return em_require_rep(&mt->em, value, lane);
+}
+
 static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
     AstNode* tail_value = ast_unwrap_primary(node);
     // A final `if` in a pn body is the procedure's implicit return value, not
@@ -23945,8 +23995,15 @@ static MirValue transpile_content_tail_value(MirTranspiler* mt, AstNode* node) {
         // its reachable result joins in the function's native return lane.
         // Preserve that producer-selected lane through the content wrapper;
         // forcing Item here loses the physical fact before the ABI boundary.
-        MirValue result = transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP,
-            lambda_canonical_rep_for_type_id(mt->native_return_tid));
+        ValueRep lane = lambda_canonical_rep_for_type_id(mt->native_return_tid);
+        // A plain call (not folded, not a primary wrapper -- the two forms
+        // transpile_expr_value lowers differently under a required lane) is
+        // lowered first and then given the lane, so an open call result can
+        // take the declared-return admission instead of a refused move.
+        MirValue result = node->node_type == AST_NODE_CALL_EXPR &&
+                node->const_kind == AST_CONST_NONE
+            ? mir_require_native_return(mt, node, transpile_expr_value(mt, node), lane)
+            : transpile_expr_value(mt, node, MIR_VALUE_REQUIRED_REP, lane);
         mt->preserve_proc_if_result = saved_preserve_proc_if_result;
         return result;
     }
@@ -25610,6 +25667,14 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
             MIR_T_P, MIR_new_reg_op(mt->ctx, el), ai, attr_ops);
     }
 
+    bool file_destination = is_file_element_type(type);
+    MIR_reg_t finished = 0;
+    if (file_destination) {
+        // Select after attributes; a virtual file must preserve finish errors.
+        el = load_gc_root_slot(mt, el_root, "file_live");
+        emit_call_void_1(mt, "elmt_content_begin", MIR_T_P, MIR_new_reg_op(mt->ctx, el));
+    }
+
     // Fill content if present. The count comes from the literal's own content
     // node: an element type carries no per-literal count (D3.4.3v3).
     AstListNode* content_node = (AstListNode*)elmt_node->content;
@@ -25618,7 +25683,7 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
     if (literal_content_count) {
         AstNode* content_item = content_node->item;
 
-        if (literal_content_count < 10) {
+        if (literal_content_count < 10 && !file_destination) {
             // Use list_fill(el, count, val1, val2, ...) for small content
             // Count content items
             int content_count = em_linked_node_count(content_item);
@@ -25646,7 +25711,7 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
             el = load_gc_root_slot(mt, el_root, "el_live");
 
             // list_fill(el, count, items...) — returns Item
-            emit_vararg_call_2(mt, "list_fill", MIR_T_I64, 1,
+            finished = emit_vararg_call_2(mt, "list_fill", MIR_T_I64, 1,
                 MIR_T_P, MIR_new_reg_op(mt->ctx, el),
                 MIR_T_I64, MIR_new_int_op(mt->ctx, content_count),
                 ci, content_ops);
@@ -25664,19 +25729,19 @@ static MIR_reg_t emit_element_storage(MirTranspiler* mt, AstElementNode* elmt_no
                 content_item = content_item->next;
             }
             el = load_gc_root_slot(mt, el_root, "el_live");
-            emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
+            finished = emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }
     } else {
         // No content
-        if (elmt_node->item) {
+        if (elmt_node->item || file_destination) {
             // Has attributes but no content — call list_end to finalize frame
             el = load_gc_root_slot(mt, el_root, "el_live");
-            emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
+            finished = emit_call_1(mt, "list_end", MIR_T_I64, MIR_T_P, MIR_new_reg_op(mt->ctx, el));
         }
         // else: no attrs and no content — element is just a bare pointer,
     }
 
-    return load_gc_root_slot(mt, el_root, "el_rv");
+    return file_destination ? finished : load_gc_root_slot(mt, el_root, "el_rv");
 }
 
 // ============================================================================
@@ -33189,24 +33254,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // This must precede the arms because several of them (contract
                 // boundaries, native lanes) re-evaluate the argument expression
                 // themselves and would each need the same treatment.
-                if (type_param && type_param->is_var_param &&
-                        resolved_args[i] &&
-                        !mir_direct_root_binding(mt, resolved_args[i])) {
-                    AstCowPath borrow_path = {};
-                    if (ast_collect_cow_path(&borrow_path, resolved_args[i]) &&
-                            borrow_path.count > 0) {
-                        MirVarEntry* place_root =
-                            mir_direct_root_binding(mt, borrow_path.root);
-                        if (place_root && mir_root_may_need_cow(place_root)) {
-                            MIR_reg_t leaf = mir_emit_cow_path_borrow(mt, place_root,
-                                &borrow_path, false);
-                            arg_root_slots[i] = create_gc_root_slot(mt, leaf);
-                            leaf = load_gc_root_slot(mt, arg_root_slots[i], "borrow_leaf");
-                            arg_ops[i] = MIR_new_reg_op(mt->ctx, leaf);
-                            arg_vars[i] = {MIR_T_I64, "arg", 0};
-                            if (param_iter) param_iter = (AstNamedNode*)param_iter->next;
-                            continue;
-                        }
+                if (type_param && type_param->is_var_param) {
+                    int leaf_slot = mir_borrow_var_place_argument(mt, resolved_args[i]);
+                    if (leaf_slot >= 0) {
+                        arg_root_slots[i] = leaf_slot;
+                        MIR_reg_t leaf = load_gc_root_slot(mt, leaf_slot, "borrow_leaf");
+                        arg_ops[i] = MIR_new_reg_op(mt->ctx, leaf);
+                        arg_vars[i] = {MIR_T_I64, "arg", 0};
+                        if (param_iter) param_iter = (AstNamedNode*)param_iter->next;
+                        continue;
                     }
                 }
 
@@ -33488,10 +33544,14 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                             }
                             val_rep = VALUE_REP_F64;
                         }
-                        if (val_tid == param_tid) {
+                        if (val_tid == param_tid && val_rep != VALUE_REP_ITEM) {
                             // Direct native match — pass through
                             arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
-                        } else if (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL) {
+                        } else if (val_tid == param_tid || val_tid == LMD_TYPE_ANY ||
+                                val_tid == LMD_TYPE_NULL) {
+                            // A rooted `string` local reads as a boxed Item
+                            // even though its TypeId names the lane; the
+                            // native entry takes the raw pointer (D2.4.1).
                             // Boxed Item → unbox to expected native type
                             MIR_reg_t unboxed = emit_unbox_contract_lane(mt, val,
                                 param_tid, parameter_contract);
@@ -34217,6 +34277,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     TypeFunc* dyn_var_signature = mir_dynamic_call_var_signature(call_node);
     MirVarHome dyn_homes[LAMBDA_MAX_FUNCTION_ARGS] = {};
     int dyn_home_count = 0;
+    int dyn_place_leaf_slots[LAMBDA_MAX_FUNCTION_ARGS];
+    for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) dyn_place_leaf_slots[i] = -1;
     if (dyn_var_signature) {
         // the borrowed-call entry lets the dispatcher accept the `var`
         // signature; it takes the args as a list, so every arity uses the
@@ -34234,6 +34296,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     mir_root_may_need_cow(borrow_root)) {
                 (void)mir_prepare_cow_root(mt, borrow_root);
             }
+            // a place argument (`vec_add(arr.vals, x)` across satellite
+            // images) passed by value left `vals` shared: the callee's push
+            // detached a private copy and the caller's container never saw it
+            dyn_place_leaf_slots[i] = mir_borrow_var_place_argument(mt, position_arg);
         }
     }
     auto emit_dyn_var_transports = [&](MIR_reg_t const* boxed_args, int count) {
@@ -34359,8 +34425,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         int dyn_boxed_count = 0;
         arg = call_node->argument;
         while (arg) {
-            MIR_reg_t boxed_arg = mir_box_call_argument(mt, arg);
-            int boxed_arg_root = create_gc_root_slot(mt, boxed_arg);
+            int place_slot = dyn_boxed_count < LAMBDA_MAX_FUNCTION_ARGS
+                ? dyn_place_leaf_slots[dyn_boxed_count] : -1;
+            MIR_reg_t boxed_arg = place_slot >= 0
+                ? load_gc_root_slot(mt, place_slot, "borrow_leaf")
+                : mir_box_call_argument(mt, arg);
+            int boxed_arg_root = place_slot >= 0 ? place_slot
+                : create_gc_root_slot(mt, boxed_arg);
             args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
             boxed_arg = load_gc_root_slot(mt, boxed_arg_root, "dynamic_arg");
             if (dyn_boxed_count < LAMBDA_MAX_FUNCTION_ARGS) {
@@ -35251,10 +35322,13 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
             // longer left-associated chain enters only when every suffix
             // succeeds as a String, preserving left-to-right evaluation while
             // avoiding frozen intermediate joins (S9.1.1, D5.2.2v3).
-            MIR_reg_t left_item = var->root_slot >= 0
-                ? load_gc_root_slot(mt, var->root_slot, "strcat_left")
-                : var->reg;
-            MIR_reg_t left_ptr = emit_unbox(mt, left_item, LMD_TYPE_STRING);
+            // A native `string` parameter arrives in its raw pointer lane
+            // (D2.4.1); only a rooted binding holds an Item. Reading the
+            // carrier by rep keeps `s = s ++ x` from unboxing a raw String*
+            // into "<error>" on wrapper/literal-argument entries.
+            MIR_reg_t left_ptr = emit_text_pointer_lane(mt,
+                mir_string_binding_value(mt, concat_left, var, false),
+                LMD_TYPE_STRING);
             for (int i = 0; i < part_count; i++) {
                 left_ptr = mir_emit_string_concat_item(mt, var, left_ptr,
                     parts[i]);
@@ -37025,7 +37099,8 @@ static MirValue transpile_map(MirTranspiler* mt, AstMapNode* map) {
 
 static MirValue transpile_element(MirTranspiler* mt, AstElementNode* element) {
     return mir_value_from_reg(mt, (AstNode*)element,
-        emit_element_storage(mt, element), VALUE_REP_RAW_GC_POINTER,
+        emit_element_storage(mt, element),
+        is_file_element_type((TypeElmt*)element->type) ? VALUE_REP_ITEM : VALUE_REP_RAW_GC_POINTER,
         ((AstNode*)element)->type);
 }
 
@@ -40075,6 +40150,13 @@ static void mir_param_key_walk(MirParamKeyWalk* walk, AstNode* node) {
 static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, bool is_proc,
                                        TypeId* out_types, int param_count) {
     if (!fn_node->body || param_count == 0) return;
+    // D8.1.1v14: a loop continuation's parameters are a T0 activation's live
+    // locals and it has no call sites, so usage is the only evidence --
+    // `2.0 * y / sz` read an int `y` as float and the continuation compared
+    // an int lane with a double register (invalid MIR, awfy/mandelbrot,
+    // r7rs/fft). Untyped live-ins stay boxed; the `_b` wrapper admits them
+    // and locals the body declares still take their own lanes.
+    if (fn_node->is_loop_continuation) return;
 
     // Exact direct-call evidence is still valuable when the function also
     // escapes: it selects a raw fast shape, while the escaped entry keeps the
@@ -40107,7 +40189,16 @@ static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, b
         }
         // Skip optional params without defaults (may_be_null — must remain ANY)
         bool may_be_null = tp && tp->is_optional && !tp->default_value;
-        if (may_be_null) {
+        // T21-3b for parameters: one the body passes to an untyped `var`
+        // parameter is written back through its CW33 home, which needs a
+        // rooted boxed binding -- the rule `var` declarations follow. A native
+        // lane had no home, so `x = x + 10; bump(x)` lost every bump on the
+        // JIT. Deciding it here keeps callers' argument lanes in agreement.
+        // A `var` parameter already owns its caller's home, so forwarding it
+        // keeps its inferred witness (T21-2d).
+        bool borrowed_as_var = p->entry && !(tp && tp->is_var_param) &&
+            mir_binding_borrowed_as_var_argument(fn_node->body, p->entry);
+        if (may_be_null || borrowed_as_var) {
             p = (AstNamedNode*)p->next;
             tp = tp ? tp->next : nullptr;
             continue;
@@ -42978,6 +43069,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // The former fixed-size infer cache duplicated this per-formal table and
     // made the ownership of inferred types depend on compilation order.
     if (fn_node->body) {
+        // a continuation parameter passed to a `var` parameter stays boxed
+        // through the shared inference rule (D8.1.1v14)
         infer_param_types_batched(mt, fn_node, is_proc_fn, resolved_param_types, user_param_count);
     }
     mir_store_param_types(mt, fn_node, resolved_param_types, user_param_count);
@@ -43770,6 +43863,13 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     mt->var_param_home_contracts[pi] = mir_named_contract(param);
                     }
                 }
+                if (fn_node->is_loop_continuation && !native_param->is_var_param) {
+                    // D8.1.1v14: possibly shared and an owner, never a forced
+                    // snapshot (see the boxed branch below)
+                    native_param->cow_marked = true;
+                    native_param->cow_children_may_be_shared = true;
+                    native_param->cow_owned = true;
+                }
                 if (param->entry && param->entry->cow_param_mutated &&
                         !native_param->is_var_param) {
                     // A plain parameter is an activation-local snapshot even
@@ -43868,6 +43968,19 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             MirVarEntry* param_var = mir_var_for_binding(mt, param->entry);
             if (param_var) {
                 param_var->full_type = param->declared_type;
+            }
+            // D8.1.1v14: a loop continuation's parameters are a T0 activation's
+            // locals. T0 already records their real sharing on each container
+            // (the shared bit set at alias points), so they are only modelled
+            // as possibly shared -- every store tests that bit -- and as owners
+            // whose aliases mark. A written declared param still takes the
+            // entry snapshot below; marking every live-in at entry would only
+            // re-copy containers T0 already owns uniquely.
+            if (param_var && fn_node->is_loop_continuation &&
+                    (!declared_param || !declared_param->is_var_param)) {
+                param_var->cow_marked = true;
+                param_var->cow_children_may_be_shared = true;
+                param_var->cow_owned = true;
             }
             if (param_var && fn_as_node->node_type == AST_NODE_PROC &&
                     (!declared_param || !declared_param->is_var_param) &&
@@ -44154,7 +44267,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             // The body is a producer-owned descriptor. The native ABI asks
             // for one explicit lane; MirEmitter owns every Item/native
             // conversion instead of recovering it from syntax or MIR types.
-            body_result = em_require_rep(&mt->em, body_value,
+            body_result = mir_require_native_return(mt, fn_node->body, body_value,
                 lambda_canonical_rep_for_type_id(nfi_body->return_type)).reg;
         } else if (mt->block_returned) {
             // Proc already returned — emit type-correct dummy for trailing ret
@@ -47944,6 +48057,7 @@ void interp_satellite_image_destroy(InterpSatelliteImage* image) {
     if (image->compiler_type_list) arraylist_free(image->compiler_type_list);
     if (image->compiler_name_pool) name_pool_release(image->compiler_name_pool);
     if (image->compiler_pool) pool_destroy(image->compiler_pool);
+    if (image->continuation_pool) pool_destroy(image->continuation_pool);
     mem_free(image);
 }
 

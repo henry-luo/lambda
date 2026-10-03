@@ -5,7 +5,7 @@
     {
       "in_func": "_set_flags_#",
       "count": {
-        "1535": 1,
+        "and\t{{r}}, {{r}}, 1535": 1,
         "call\tcow_place_leaf_fixed": 1,
         "mov\tu8:": 3
       }
@@ -13,7 +13,7 @@
     {
       "in_func": "_move_flags_#",
       "count": {
-        "1535": 2
+        "and\t{{r}}, {{r}}, 1535": 2
       },
       "forbid": [
         "call\tcow_place_leaf_fixed"

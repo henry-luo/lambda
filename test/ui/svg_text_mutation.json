@@ -1,0 +1,96 @@
+{
+  "name": "SVG text positioning and restored tspan mutation",
+  "html": "test/ui/svg_text_mutation.html",
+  "viewport": {
+    "width": 220,
+    "height": 180
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 40,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 55,
+      "y": 40,
+      "expected_selector": "#pick"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#pick"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#moving"
+      },
+      "attribute": "rotate",
+      "equals": "90"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 40,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 85,
+      "y": 60,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 125,
+      "y": 60,
+      "expected_selector": "#pick"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#reset"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#moving"
+      },
+      "attribute": "font-size",
+      "equals": "30"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 30,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 30,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 55,
+      "y": 30,
+      "expected_selector": "#pick"
+    }
+  ]
+}

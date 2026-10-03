@@ -1,0 +1,8 @@
+<!DOCTYPE html><html><head><style>
+@font-face{font-family:SVG-Ahem;src:url('../layout/data/font/Ahem.ttf');}html,body{margin:0;background:white;}svg{position:absolute;font-family:SVG-Ahem;font-size:20px;}button{position:absolute;left:10px;top:120px;}
+</style></head><body><svg width="220" height="110"><text id="moving" x="10 50 90" y="50" fill="red"><tspan id="pick">ABC</tspan></text></svg>
+<button id="reset" onclick="resetText()">Reset</button><script>
+function moveText(){var t=document.getElementById('moving');t.setAttribute('x','80 120 160');t.setAttribute('rotate','90');t.setAttribute('fill','blue');}
+function resetText(){var t=document.getElementById('moving');t.setAttribute('x','10 50 90');t.removeAttribute('rotate');t.setAttribute('font-size','30');t.setAttribute('fill','lime');t.innerHTML='<tspan id="pick">ABC</tspan>';document.getElementById('pick').addEventListener('click',moveText);}
+document.getElementById('pick').addEventListener('click',moveText);
+</script></body></html>

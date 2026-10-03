@@ -19,7 +19,7 @@
 
 typedef enum LambdaTier {
     LAMBDA_TIER_JIT = 0,   // today's eager whole-module MIR Direct pipeline
-    LAMBDA_TIER_INTERP,    // T0 only, never promote
+    LAMBDA_TIER_INTERP,    // T0 only; unsupported scripts fail, never compile MIR
     LAMBDA_TIER_AUTO,      // T0 + per-function satellite promotion (P2)
 } LambdaTier;
 
@@ -74,6 +74,10 @@ struct InterpState;
 // callers that need whole-script facts must use this traversal instead.
 typedef void (*InterpAstChildVisitor)(AstNode* child, void* ctx);
 void interp_visit_children(AstNode* node, InterpAstChildVisitor visit, void* ctx);
+// The value item of a block run procedurally (its last value expression, or
+// NULL) plus its value/declaration/statement counts; the plan pass records it.
+AstNode* interp_proc_block_last_value(struct AstListNode* list_node,
+    int* value_count, int* decl_count, int* stam_count);
 
 // Slot window layout, matching FnFramePlan (ast-core.hpp):
 //   [ 0 .. param_count )                          parameters
@@ -120,6 +124,11 @@ struct InterpFrame {
     // procedural (S12.1.3), so its blocks yield their last value (S2.5.3)
     // exactly as MIR's `in_proc` handler functions do.
     bool                proc_handler;
+    // D8.1.1v14: the top-level handoff loop now executing in this activation
+    // (back-edges of its nested loops count toward it), and the definition's
+    // promotion cell, looked up once rather than at every back-edge.
+    const struct AstLoopControlNode* handoff_loop;
+    struct FnPromotionCell* promotion_cell;
 };
 
 // True while a break/continue/return/error-skip is unwinding this activation:

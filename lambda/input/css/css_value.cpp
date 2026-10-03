@@ -941,3 +941,7 @@ bool css_unit_is_length(CssUnit unit) {
     // CssUnit keeps every CSS <length> unit in one contiguous enum range.
     return unit >= CSS_UNIT_PX && unit <= CSS_UNIT_CQMAX;
 }
+
+bool css_unit_is_angle(CssUnit unit) {
+    return unit >= CSS_UNIT_DEG && unit <= CSS_UNIT_TURN;
+}

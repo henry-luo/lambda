@@ -1634,8 +1634,9 @@ No new decisions needed; each has an owning design doc.
 The [SVG support matrix](../doc/HTML_CSS_SVG_Support.md#15-svg) is mapped to
 reproducers and implementation phases in the
 [SVG implementation plan](impl/Lambda_Impl_SVG_Support.md#3-coverage-map).
-G3–G5, C4, G2 and A1 are repaired. Remaining work covers the shared CSS cascade,
-viewport/length/transform semantics, images/text, typed paint resources,
+G3–G5, C1–C5, A4, G2 and A1 are repaired, including shared host/isolated CSS
+and retained-paint invalidation after stylesheet/resource mutations. Remaining
+work covers viewport/length/transform semantics, images/text, typed paint resources,
 stroke/markers, clips/masks, textPath, filter graphs, conditional/HTML content,
 SMIL and SVG/PDF export. These are SVG behavior gaps, not new Lambda rulings;
 retained document resources remain subject to **D4.2.2v2–D4.2.4** and **D4.5.1v3**.

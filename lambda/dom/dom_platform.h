@@ -16,6 +16,9 @@ Item dom_match_media(Item query_item);
 void dom_match_media_notify_resize(void);
 void dom_match_media_reset(void);
 
+// caller owns the normalized comma-separated UI language list (mem_free).
+char* dom_platform_preferred_languages(void);
+
 // Host-facing entry point (F23) — see the note in dom.h.
 #ifdef __cplusplus
 struct JsRuntimeState;

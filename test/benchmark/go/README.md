@@ -3,6 +3,8 @@
 Each registered workload is a separate Go program under `cmd/`. For example,
 the R7RS Fibonacci benchmark is `cmd/r7rs/fib`, and the AWFY collision detector
 is `cmd/awfy/cd`. The seven text-library benchmarks live under `cmd/text/`.
+The four Julia-inspired scalar microbenchmarks live under `cmd/julia/`; their
+[shared workload contract](../julia/SUITE.md) fixes one warmup before timing.
 The commands call shared implementation code in
 `internal/bench`, but every benchmark is built and run as its own executable;
 there is no all-benchmarks process or generic benchmark CLI.

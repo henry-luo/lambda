@@ -7,9 +7,11 @@
 #include "../lib/mem_factory.h"
 #include "../lib/memtrack.h"
 #include "../lib/byte_builder.h"
+#ifndef LAMBDA_NO_JUBE
 #include "jube/jube_interface.h"
 #include "jube/jube_language.h"
 #include "jube/jube_registry.h"
+#endif
 #include "../lib/strbuf.h"  // For string buffer
 #include "../lib/str.h"     // For str_to_int64_default, str_to_double_default
 #include "../lib/arena.h"   // For arena allocator
@@ -50,10 +52,13 @@
 // System info for sys.* paths
 #include "runtime/sysinfo.h"
 
+#ifndef LAMBDA_HEADLESS
 #include "../radiant/radiant.hpp"
+#endif
 #include "input/css/dom_element.hpp"  // DomDocument, DomElement for JS DOM API
 #include "input/css/css_style.hpp"   // css_property_system_init
 #include "input/css/css_engine.hpp"  // CssEngine for CSS extraction
+#ifndef LAMBDA_NO_JS
 #include "js/js_event_loop.h"        // v14: event loop drain
 #include "js/js_runtime.h"           // JS result and exception-lane helpers
 #include "dom/dom.h"               // JS DOM document/session bridge
@@ -65,6 +70,7 @@
 // the profile host also links MVP so both backends can be measured with release optimization.
 #include "js/mvp/mvp.h"
 #endif
+#endif // LAMBDA_NO_JS
 #include "../lib/uv_loop.h"          // JS worker cleanup for libuv loop
 #include "../lib/time_util.h"
 #ifdef LAMBDA_BASH
@@ -90,6 +96,7 @@ char* js_load_script_source_from_cache(const char* path,
                                        size_t* out_length);
 extern unsigned int g_js_mir_optimize_level;
 
+#if !defined(LAMBDA_NO_JS) || defined(LAMBDA_RUBY) || defined(LAMBDA_BASH)
 static char* lambda_load_hosted_source_from_cache(const char* path,
         const char* language, const char* profile, const char* execution_mode,
         size_t* out_length) {
@@ -121,6 +128,7 @@ static char* lambda_load_hosted_source_from_cache(const char* path,
     }
     return source;
 }
+#endif
 
 #if !defined(NDEBUG) || defined(LAMBDA_JS_MVP)
 static char* mvp_load_script_source_from_cache(const char* path, size_t* out_length) {
@@ -171,6 +179,7 @@ static void mvp_cli_print_value(MvpValue value) {
 }
 #endif
 
+#ifndef LAMBDA_NO_JS
 static long js_batch_process_cpu_us(void) {
 #ifdef _WIN32
     FILETIME created, exited, kernel, user;
@@ -185,13 +194,17 @@ static long js_batch_process_cpu_us(void) {
         usage.ru_utime.tv_usec + usage.ru_stime.tv_usec;
 #endif
 }
+#endif // LAMBDA_NO_JS
 
+#ifndef LAMBDA_NO_JS
 static bool js_test262_global_flag_is_true(const char* name) {
     Item key = (Item){.item = s2it(heap_create_name(name))};
     Item value = js_get_global_property(key);
     return value.item == (ITEM_TRUE);
 }
+#endif // LAMBDA_NO_JS
 
+#ifndef LAMBDA_NO_JUBE
 static void lambda_cli_jube_write(void* user, const char* bytes, size_t length) {
     FILE* stream = (FILE*)user;
     if (!stream || !bytes || length == 0) return;
@@ -206,7 +219,9 @@ static bool lambda_cli_has_core_source_extension(const char* path) {
         strcmp(extension, ".mjs") == 0 || strcmp(extension, ".cjs") == 0 ||
         strcmp(extension, ".ts") == 0 || strcmp(extension, ".tsx") == 0;
 }
+#endif // LAMBDA_NO_JUBE
 
+#ifndef LAMBDA_NO_JS
 static const int JS_DOCUMENT_VIEWPORT_WIDTH = 800;
 static const int JS_DOCUMENT_VIEWPORT_HEIGHT = 600;
 
@@ -216,7 +231,9 @@ extern DomDocument* load_lambda_html_doc(Url* html_url, const char* css_filename
     int viewport_width, int viewport_height, Pool* pool, const char* html_source,
     bool track_source_lines, bool execute_scripts);
 extern "C" bool radiant_eval_context_switch(EvalContext* target);
+#endif // LAMBDA_NO_JS
 
+#ifndef LAMBDA_HEADLESS
 static bool ascii_case_ext_equals(const char* ext, const char* end, const char* expected) {
     if (!ext || !end || !expected) return false;
     return str_ieq_const(ext, (size_t)(end - ext), expected);
@@ -256,7 +273,9 @@ static bool lambda_view_http_url_is_likely_html_document(const char* url) {
     url_destroy(parsed_url);
     return is_likely_html;
 }
+#endif // LAMBDA_HEADLESS
 
+#ifndef LAMBDA_NO_JS
 struct JsDocumentSession {
     UiContext uicon;
     bool initialized;
@@ -693,6 +712,7 @@ static bool js_test262_restore_preamble_module_state(const JsPreambleState* prea
 }
 
 extern void jm_abandon_active_mir_after_signal(void);
+#endif // LAMBDA_NO_JS
 
 #ifdef _WIN32
 // Windows compatibility shim for __intrinsic_setjmpex
@@ -731,8 +751,10 @@ static inline int gettimeofday(struct timeval* tv, void* tz) {
     return 0;
 }
 
+#ifndef LAMBDA_NO_JS
 // RSS stub for Windows (returns 0 — not available in this context)
 static inline size_t get_rss_bytes() { return 0; }
+#endif // LAMBDA_NO_JS
 #endif
 
 // Forward declare additional transpiler functions
@@ -754,15 +776,19 @@ static void lambda_main_pre_memtrack_cleanup_once(void) {
     }
     g_lambda_main_pre_memtrack_cleanup_done = true;
     module_ast_prebuild_cleanup();
+#ifndef LAMBDA_NO_JS
     // JS helper globals outlive Runtime teardown, so release them before
     // emitting live-allocation telemetry or entering memtrack shutdown.
     js_array_runtime_items_cleanup_all();
     // Tagged-template cache entries are tracked allocations; freeing them from
     // a late atexit hook runs after memtrack shutdown and becomes a raw bad free.
     js_reset_template_registry();
+#endif
+#ifndef LAMBDA_NO_JUBE
     // Jube compiled interface records are registry-lifetime tracked allocations.
     jube_interface_cleanup();
     jube_registry_cleanup();
+#endif
 }
 
 static size_t lambda_main_memtrack_shutdown_once(void) {
@@ -835,9 +861,13 @@ static int lambda_main_finish(int ret_code) {
     // Capture post-execution ownership before common teardown erases the peak's
     // live categories; this is opt-in diagnostic telemetry, not policy.
     lambda_report_memory_stats("execution-complete");
+#ifndef LAMBDA_HEADLESS
     clipboard_store_shutdown();
+#endif
     css_property_system_cleanup();
+#ifndef LAMBDA_HEADLESS
     radiant_state_cleanup_interned_names();
+#endif
     // Finish the shared prebuild queue while its input-cache dependencies are
     // still alive; the registry itself owns every queued task and path copy.
     module_ast_prebuild_cleanup();
@@ -871,6 +901,7 @@ static int lambda_main_finish(int ret_code) {
     return ret_code;
 }
 
+#ifndef LAMBDA_HEADLESS
 static void lambda_view_log_completion(int exit_code) {
     // Online smoke tests retain NOTICE milestones while suppressing verbose diagnostics.
     log_notice("view command completed with result: %d", exit_code);
@@ -924,6 +955,7 @@ static bool parse_doc_window_launch_options(int argc, char** argv, bool allow_vi
     }
     return true;
 }
+#endif // LAMBDA_HEADLESS
 
 // Thread-local context from runner.cpp (for error handling)
 extern __thread EvalContext* context;
@@ -958,6 +990,7 @@ extern void lambda_repl_cleanup();
 
 // MIR interpreter mode (from mir.c)
 extern "C" int g_mir_interp_mode;
+#ifndef LAMBDA_HEADLESS
 // Legacy document policy used by Lambda Direct; LambdaJS ignores it under
 // D8.1.3v11 and always links selected MIR natively.
 extern int g_js_force_document_interp;
@@ -972,7 +1005,9 @@ static void default_render_cmd_to_interp(void) {
         log_debug("render command: enabled legacy document MIR policy for Lambda Direct");
     }
 }
+#endif // LAMBDA_HEADLESS
 
+#ifndef LAMBDA_NO_JS
 static char* read_stdin_source(size_t* out_len) {
     ByteBuilder source;
     if (!byte_builder_init(&source, 4096, MEM_CAT_SYSTEM, true)) {
@@ -992,6 +1027,7 @@ static char* read_stdin_source(size_t* out_len) {
     }
     return (char*)byte_builder_take(&source, out_len);
 }
+#endif // LAMBDA_NO_JS
 
 // External function declarations
 extern "C" {
@@ -1817,6 +1853,7 @@ int exec_convert(int argc, char* argv[]) {
 static sigjmp_buf batch_timeout_jmp;
 static volatile sig_atomic_t batch_timeout_active = 0;
 
+#ifndef LAMBDA_NO_JS
 // MIR error recovery for batch mode: longjmp instead of exit(1)
 static jmp_buf mir_error_jmp;
 static volatile sig_atomic_t mir_error_active = 0;
@@ -1849,6 +1886,7 @@ static void batch_crash_handler(int sig) {
     signal(sig, SIG_DFL);
     raise(sig);
 }
+#endif // LAMBDA_NO_JS
 
 static void batch_alarm_handler(int sig) {
     (void)sig;
@@ -1858,6 +1896,7 @@ static void batch_alarm_handler(int sig) {
     }
 }
 
+#ifndef LAMBDA_NO_JS
 // get current resident set size in bytes (for memory profiling)
 static size_t get_rss_bytes() {
 #ifdef __APPLE__
@@ -1876,8 +1915,10 @@ static size_t get_rss_bytes() {
 #endif
     return 0;
 }
+#endif // LAMBDA_NO_JS
 #endif
 
+#ifndef LAMBDA_NO_JS
 struct NodeRunnerOptions {
     bool test_mode;
     bool coverage;
@@ -2203,10 +2244,42 @@ static int node_runner_main(int argc, char** argv) {
 
     return lambda_main_finish(final_status);
 }
+#endif // LAMBDA_NO_JS
 
 // LAMBDA_TIER selects the execution tier (D8.1.1v4). Unset selects the
 // shipped `auto` policy; `jit` explicitly requests eager whole-module
 // compilation, while `interp` runs T0 without promotion.
+#if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE)
+// Commands compiled out of this build must fail clearly instead of being taken
+// for a script path by the default run handler.
+struct LambdaCliExcludedCommand {
+    const char* command;
+    const char* feature;
+};
+
+static const LambdaCliExcludedCommand LAMBDA_CLI_EXCLUDED_COMMANDS[] = {
+#ifdef LAMBDA_HEADLESS
+    {"layout", "the Radiant layout engine"}, {"render", "the Radiant layout engine"},
+    {"render-batch", "the Radiant layout engine"}, {"view", "the Radiant layout engine"},
+    {"edit", "the Radiant layout engine"}, {"replay", "the Radiant layout engine"},
+#endif
+#ifdef LAMBDA_NO_JS
+    {"js", "the JavaScript runtime"}, {"ts", "the JavaScript runtime"},
+    {"js-test-batch", "the JavaScript runtime"}, {"--emit-js-ast-dump", "the JavaScript runtime"},
+#endif
+#ifdef LAMBDA_NO_SERVE
+    {"serve", "the HTTP server"},
+#endif
+};
+
+static const char* lambda_cli_excluded_feature(const char* command) {
+    for (const LambdaCliExcludedCommand& entry : LAMBDA_CLI_EXCLUDED_COMMANDS) {
+        if (strcmp(command, entry.command) == 0) return entry.feature;
+    }
+    return NULL;
+}
+#endif
+
 static void apply_lambda_tier_env(void) {
     const char* text = getenv("LAMBDA_TIER");
     if (!text || !text[0]) return;
@@ -2264,7 +2337,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
     // Initialize lambda home path (reads LAMBDA_HOME env var if set)
     lambda_home_init();
     apply_lambda_tier_env();
+#ifndef LAMBDA_NO_JUBE
     jube_set_host_executable_path(argc > 0 ? argv[0] : NULL);
+#endif // LAMBDA_NO_JUBE
     // Strip --no-log before reading log.conf. Batch workers share the working
     // directory, so even briefly opening configured outputs races on log.txt.
     bool no_log = false;
@@ -2381,13 +2456,25 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
     // Parse command line arguments
     log_debug("Parsing command line arguments");
+#ifndef LAMBDA_NO_JS
     if (node_runner_should_handle(argc, argv)) {
         return node_runner_main(argc, argv);
     }
+#endif // LAMBDA_NO_JS
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_help();
         return lambda_main_finish(0);
     }
+#if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE)
+    if (argc >= 2) {
+        const char* excluded_feature = lambda_cli_excluded_feature(argv[1]);
+        if (excluded_feature) {
+            fprintf(stderr, "Error: '%s' requires %s, which this build excludes.\n",
+                    argv[1], excluded_feature); // PRINTF_OK: user-facing CLI diagnostic.
+            return lambda_main_finish(1);
+        }
+    }
+#endif
 
     // Initialize runtime (needed for all operations)
     log_debug("About to initialize runtime");
@@ -2459,6 +2546,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(exit_code);
     }
 
+#ifndef LAMBDA_NO_JS
     // Handle JavaScript command
     log_debug("Checking for js command");
     if (argc >= 2 && strcmp(argv[1], "js") == 0) {
@@ -2937,7 +3025,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
         js_document_session_finish(&js_document_session);
         return lambda_main_finish(final_js_exit_code);
     }
+#endif // LAMBDA_NO_JS
 
+#ifndef LAMBDA_NO_JUBE
     // Hosted-language aliases are module declarations, not command branches
     // in the host. The lookup happens once at CLI dispatch and never enters
     // Lambda or JavaScript evaluation/JIT paths.
@@ -3028,6 +3118,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
             return lambda_main_finish(1);
         }
     }
+#endif // LAMBDA_NO_JUBE
 
 #ifdef LAMBDA_RUBY
     // Handle Ruby command
@@ -3266,6 +3357,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
     }
 #endif // LAMBDA_BASH
 
+#ifndef LAMBDA_NO_JS
     // Handle TypeScript command
     log_debug("Checking for ts command");
     if (argc >= 2 && strcmp(argv[1], "ts") == 0) {
@@ -3333,6 +3425,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         runtime_cleanup(&runtime);
         return lambda_main_finish(0);
     }
+#endif // LAMBDA_NO_JS
 
     // Handle convert command
     log_debug("Checking for convert command");
@@ -3379,6 +3472,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(exit_code);
     }
 
+#ifndef LAMBDA_HEADLESS
     // Handle layout command
     log_debug("Checking for layout command");
     if (argc >= 2 && strcmp(argv[1], "layout") == 0) {
@@ -3440,6 +3534,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         log_debug("layout command completed with result: %d", exit_code);
         return lambda_main_finish(exit_code);
     }
+#endif // LAMBDA_HEADLESS
 
     // Handle math command - moved to Lambda script
     log_debug("Checking for math command");
@@ -3449,6 +3544,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(1);
     }
 
+#ifndef LAMBDA_HEADLESS
     // Handle render-batch command (shared UiContext for all renders)
     if (argc >= 2 && strcmp(argv[1], "render-batch") == 0) {
         int result = cmd_render_batch(argc - 2, argv + 2);
@@ -4100,7 +4196,9 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
         return lambda_main_finish(exit_code);
     }
+#endif // LAMBDA_HEADLESS
 
+#ifndef LAMBDA_NO_SERVE
     // Handle serve command (HTTP/HTTPS server)
     log_debug("Checking for serve command");
     if (argc >= 2 && strcmp(argv[1], "serve") == 0) {
@@ -4181,6 +4279,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         fprintf(stderr, "Server infrastructure is ready in lambda/serve/.\n");
         return lambda_main_finish(1);
     }
+#endif // LAMBDA_NO_SERVE
 
     // Handle fetch command (network resource download)
     log_debug("Checking for fetch command");
@@ -4463,6 +4562,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(0);
     }
 
+#ifndef LAMBDA_NO_JS
     // Handle js-test-batch command: run multiple JS scripts in one process for test performance
     if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0) {
         // file-backed Node batches still need normal process exit hooks;
@@ -5262,6 +5362,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         js_batch_execution_mode = 0;
         return lambda_main_finish(0);
     }
+#endif // LAMBDA_NO_JS
 
     // Handle canonical AST dump commands (Phase 1: unified AST renumber harness)
     if (argc >= 3 && strcmp(argv[1], "--emit-ast-dump") == 0) {
@@ -5273,6 +5374,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         return lambda_main_finish(result);
     }
 
+#ifndef LAMBDA_NO_JS
     if (argc >= 3 && strcmp(argv[1], "--emit-js-ast-dump") == 0) {
         const char* dump_path = argv[2];
         log_debug("Emitting canonical JS AST dump for '%s'", dump_path);
@@ -5281,6 +5383,7 @@ static int lambda_main_impl(int argc, char *argv[]) {
         runtime_cleanup(&runtime);
         return lambda_main_finish(result);
     }
+#endif // LAMBDA_NO_JS
 
     // Handle run command
     log_debug("Checking for run command");
@@ -5454,10 +5557,12 @@ static int lambda_main_impl(int argc, char *argv[]) {
 
 int main(int argc, char* argv[]) {
 #if !defined(_WIN32)
+#ifndef LAMBDA_NO_JS
     if (argc >= 2 && strcmp(argv[1], "js-test-batch") == 0 &&
             !js_batch_execution_stack_active) {
         return js_batch_run_with_execution_stack(argc, argv);
     }
+#endif // LAMBDA_NO_JS
 #endif
     return lambda_main_impl(argc, argv);
 }

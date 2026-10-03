@@ -1,0 +1,9 @@
+{
+  "name": "Custom events dispatch on text, comment and fragment nodes",
+  "html": "test/ui/dom/non_element_events.html",
+  "viewport": {"width": 360, "height": 180},
+  "events": [
+    {"type": "click", "target": {"selector": "#dispatch"}},
+    {"type": "assert_text", "target": {"selector": "#status"}, "equals": "3:2"}
+  ]
+}

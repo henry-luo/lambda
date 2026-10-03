@@ -1,0 +1,12 @@
+<!DOCTYPE html><html><head><style>
+@font-face{font-family:SVG-Ahem;src:url('../layout/data/font/Ahem.ttf');}html,body{margin:0;background:white;}svg{font-family:SVG-Ahem;font-size:20px;}
+</style></head><body><svg width="400" height="320">
+<text id="dash" x="10" y="35" fill="red" style="text-decoration:underline dashed blue;text-decoration-thickness:2px">A B</text>
+<text id="double" x="10" y="90" fill="red" style="text-decoration-line:underline;text-decoration-style:double;text-decoration-color:blue;text-decoration-thickness:2px">A B</text>
+<text id="wave" x="10" y="145" fill="red" style="text-decoration:underline wavy blue;text-decoration-thickness:2px">A B</text>
+<text id="strike" x="10" y="200" fill="red" style="text-decoration:line-through blue;text-decoration-thickness:2px">ABC</text>
+<text id="parent" x="10" y="255" fill="red" style="text-decoration:underline;text-decoration-thickness:2px">A <tspan style="text-decoration:none" fill="blue">B C</tspan>D</text>
+<text id="child" x="10" y="300" fill="red" style="text-decoration:underline;text-decoration-thickness:2px">A <tspan style="text-decoration:underline blue" fill="blue">B C</tspan>D</text>
+<text x="150" y="255" fill="lime" style="text-decoration:underline dotted blue;text-decoration-thickness:2px">A B</text>
+<text x="150" y="300" fill="red" style="text-decoration-line:underline overline line-through;text-decoration-color:blue;text-decoration-thickness:2px">A B</text>
+</svg></body></html>

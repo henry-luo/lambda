@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><style>
+@font-face{font-family:Foreign-Ahem;src:url('../layout/data/font/Ahem.ttf')}
+html,body{margin:0;background:white}svg{display:block}
+.flex{display:flex;width:100%;height:100%;gap:10px;background:lime}
+.flex>div{width:30px;height:40px;background:red}.flex>div+div{background:blue}
+.grid{display:grid;width:100%;height:100%;grid-template-columns:40px 60px;grid-template-rows:30px 40px;gap:10px;background:yellow}
+.grid>div{background:red}.grid>div+div{background:blue}.grid>div+div+div{background:lime}
+.text{font:20px/1 Foreign-Ahem;color:red;background:yellow;width:100%;height:100%}
+</style></head><body><svg width="520" height="340">
+ <g transform="translate(20 20) scale(1.5)"><foreignObject x="10" y="10" width="120" height="80"><div xmlns="http://www.w3.org/1999/xhtml" class="flex"><div></div><div></div></div></foreignObject></g>
+ <foreignObject x="250" y="20" width="140" height="100"><div xmlns="http://www.w3.org/1999/xhtml" class="grid"><div></div><div></div><div></div><div></div></div></foreignObject>
+ <foreignObject transform="translate(180 210) rotate(90)" x="10" y="10" width="80" height="60"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;background:blue"><div style="width:30px;height:30px;background:red"></div></div></foreignObject>
+ <foreignObject x="250" y="160" width="100" height="60"><div xmlns="http://www.w3.org/1999/xhtml" class="text">AAA<br>AA</div></foreignObject>
+ <foreignObject x="390" y="160" width="70" height="60" overflow="hidden"><div xmlns="http://www.w3.org/1999/xhtml" style="width:100px;height:100px;background:lime"></div></foreignObject>
+ <foreignObject x="390" y="250" width="40" height="30" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="width:80px;height:60px;background:blue"></div></foreignObject>
+</svg></body></html>

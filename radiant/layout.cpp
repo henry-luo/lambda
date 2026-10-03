@@ -20,6 +20,7 @@ extern "C" {
 #include "../lambda/input/css/css_style_node.hpp"
 #include "../lambda/lambda-data.hpp"
 #include "../lambda/dom/dom_observers.h"
+#include "../lambda/dom/dom.h"
 
 double g_style_resolve_time = 0;
 
@@ -1923,6 +1924,7 @@ void layout_setup_block_font_metrics(LayoutContext* lycon) {
     }
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
+
 }
 
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
@@ -4631,6 +4633,14 @@ void layout_html_root(LayoutContext* lycon, DomNode* elmt) {
     setup_line_height(lycon, html);
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height -
         (lycon->block.init_ascender + lycon->block.init_descender)) / 2.0f);
+
+    if (elmt->is_element() && elmt->tag() == MARKUP_NAME_SVG && dom_element_is_svg(elmt->as_element())) {
+        // SVG2 §12.2: only foreignObject descendants establish CSS formatting contexts.
+        html->width = html->content_width = physical_width;
+        html->height = html->content_height = physical_height;
+        layout_svg_foreign_objects(lycon, elmt->as_element());
+        return;
+    }
 
     DomNode* body_node = nullptr;
     // CSS 2.1 §10.3, §9.3: Root element explicit sizing and positioning.

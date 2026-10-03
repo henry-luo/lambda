@@ -1,0 +1,20 @@
+<!doctype html><html><head><style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+html,body { margin:0; background:white; }
+#scene { position:absolute; left:0; top:0; }
+#advance { position:absolute; left:0; top:260px; width:120px; height:30px; }
+text { font-family:Ahem; font-size:40px; fill:blue; }
+</style></head><body>
+<svg id="scene" width="360" height="240"><text id="moving"><textPath id="moving-path" href="#source">AA</textPath></text></svg>
+<svg width="0" height="0" style="position:absolute"><defs><path id="source" d="M20 60H220"/></defs></svg>
+<button id="advance" data-step="0">advance</button>
+<script>
+var step=0;
+document.getElementById('advance').addEventListener('click',function(){
+ step++;
+ if(step===1)document.getElementById('source').setAttribute('d','M20 200H220');
+ if(step===2)document.getElementById('source').setAttribute('transform','translate(120 0)');
+ if(step===3)document.getElementById('moving-path').setAttribute('startOffset','50%');
+ this.setAttribute('data-step',String(step));
+});
+</script></body></html>

@@ -343,3 +343,67 @@ f();                      // AST: 1 (MIR and Node: 2)
 ```
 
 The block record holding `let x` is inside the object environment, so it answers first. The interpreter instead probes the `with` stack before any static binding. The only exception is a binding that precedes the function's *captured* `with` depth (`js_interp_with_minimum_depth`). Nothing records where a `with` statement sits relative to the block records opened inside its body, so the probe cannot stop at them.
+
+---
+
+## 15. Performance (JS_15)
+
+### JS15-L1 — load time is quadratic in the number of top-level functions — **OPEN**
+
+**Found:** 2026-10-03 as a side finding of the promotion-cost table in
+`vibe/impl/Lambda_Impl_JS_Interp_Tune.md` §2 (branch
+`fix-continuation-param-inference`). **Reproduced against:** current
+`./lambda.exe js` on 2026-10-03, with `JS_TRANSPILE_TIMING=1 --no-log`.
+No `S#`/`D#` ruling covers load-time complexity.
+
+**Repro:** [`test/js/slow/top_level_4000_functions.js`](../test/js/slow/top_level_4000_functions.js)
+(354 KB). It declares 4,000 identical functions
+`pad0`…`pad3999` (`function padN(a,b){ var o={x:a,y:b}; for (...) ...; return o.x; }`),
+then one `add` function and a run of `r=add(r,1);` calls. The file only
+declares functions and calls `add`, so its load time should grow linearly.
+Under the MIR backend it takes **4.2 s**.
+
+Timings in ms, using the same function body with the count doubled each step:
+
+| Functions | backend | `index_ms` | `mir_lower_ms` | `exec_ms` | `total_ms` |
+|---:|---|---:|---:|---:|---:|
+| 2,000 | ast | 79 | — | 327 | 448 |
+| 4,000 | ast | 311 | — | 1,393 | 1,786 |
+| 2,000 | mir | 75 | 701 | 301 | 1,497 |
+| 4,000 | mir | 294 | 1,478 | 1,414 | 4,206 |
+
+Two phases grow about 4× per doubling, and that holds for both backends.
+`parse_build_ms`, `bind_ms` and `mir_lower_ms` grow about 2×.
+
+1. **`exec_ms`: global declaration instantiation.** For each top-level
+   function, `js_define_global_var_property`
+   ([`js_globals.cpp:14770`](../lambda/js/js_globals.cpp)) makes two
+   O(n) checks:
+   - `js_global_environment_find`
+     ([`js_runtime_state.cpp:216`](../lambda/js/js_runtime_state.cpp)) scans
+     every binding backwards and compares keys with `memcmp`. The upsert that
+     follows scans them again.
+   - `js_has_own_property` on the global object goes to
+     `js_map_shape_lookup` ([`js_runtime.cpp:4069`](../lambda/js/js_runtime.cpp)).
+     Its time is self time, which points to the shape-chain fallback, not the
+     hash. `typemap_hash_lookup_by_hash` takes that fallback whenever the
+     TypeMap has no `field_index` (`lambda-data.hpp:975`). *Unconfirmed:* whether
+     the global object's TypeMap is ever given a hash table.
+
+   A `sample` of a 12,000-function load puts almost all non-idle exec time in
+   these two functions.
+2. **`index_ms`: `AstIndex` pointer-hash probing.** At 12,000 functions, the
+   self time during the parse phase is concentrated in
+   `ast_index_find` ([`ast-core.cpp:1196`](../lambda/runtime/ast-core.cpp)), the
+   linear-probe loop. The load factor is kept at or below ½
+   (`ast-core.cpp:303`), so long chains point to clustering in `ast_ptr_hash`
+   (`ast-core.cpp:105`) for sequentially allocated nodes. *Unconfirmed:* the
+   probe lengths have not been measured. `ast-core.cpp` is shared with Lambda's
+   own front end, so a fix there also applies to `.ls` scripts.
+
+**Fix direction:** give the global environment a hashed key → binding index
+(`js_global_environment_find` and upsert), and make sure the global object's
+TypeMap keeps its `field_index`. For the AST index, instrument probe lengths
+first, then fix the hash or the probing. Re-measure with the doubling series
+above. The success criterion is that `index_ms` and `exec_ms` grow about 2×
+per doubling.

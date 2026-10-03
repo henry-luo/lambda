@@ -50,6 +50,7 @@ typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
 const char* dom_element_namespace_uri(struct DomElement* element);
+const char* dom_element_lookup_namespace_uri(struct DomElement* element, const char* prefix);
 const char* dom_element_attribute_namespace_uri(struct DomElement* element,
     const char* qualified_name, const char** local_name);
 
@@ -212,12 +213,16 @@ struct DomDocumentServices {
     void* style_epoch_manager; // versioned canonical specified-style pools
     void* canvas_registry;     // document-owned HTMLCanvasElement backing surfaces
     void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
+    void* svg_filter_registry; // document-owned compiled SVG filter programs
+    void* svg_animation_registry; // document-owned SMIL clocks and sampled values
+    char* preferred_languages; // document-owned UI preference snapshot, refreshed by the host setter
+    bool svg_image_document; // SVG image processing forbids external subordinate resources
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
         keyframe_registry(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), canvas_registry(nullptr),
-        svg_layer_registry(nullptr) {}
+        svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {
@@ -1025,6 +1030,7 @@ struct DomElement : DomNode {
     bool set_attribute(NameId name_id, const char* value);
     const char* get_attribute(const char* name);
     const char* get_attribute(NameId name_id);
+    const char* local_name() const;
     bool remove_attribute(const char* name);
     bool remove_attribute(NameId name_id);
     bool has_attribute(const char* name);
@@ -1282,7 +1288,7 @@ inline const Element* dom_element_render_source(const DomElement* de) {
 inline DomElement* dom_find_element_for_source(DomElement* root,
                                                const Element* source) {
     if (!root || !source) return nullptr;
-    if (dom_element_render_source(root) == source) return root;
+    if (dom_element_to_element(root) == source || dom_element_render_source(root) == source) return root;
     for (DomNode* child = root->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* found = dom_find_element_for_source(child->as_element(), source);

@@ -1,8 +1,8 @@
 # AST Interpreter — Tier-0 Execution for Lambda and LambdaJS
 
 **Date:** 2026-08-15 (rev 2 — DECIDED by user ruling; spec revision landed same day)
-**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.1.1v10, D8.1.3v12, D8.5.1v4).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. Loop-head handoff was ruled on 2026-10-02 (**AI23**, **D8.1.1v14**) and is not yet implemented; JS P2 promotion and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI23** remains the design record; the formal rulings named above win on disagreement.
-**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v10**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v3), S15.3.
+**Status:** **DECIDED 2026-08-15 (user ruling); implementation substantially landed; static-module AST prebuild landed 2026-09-19 (D8.1.1v10, D8.1.3v12, D8.5.1v4).** Ordinary Lambda compilation retains a boxed AST interpreter as T0, `AUTO` may promote eligible hot definitions to boxed MIR satellites, and explicit `jit` retains eager whole-module MIR. Loop-head handoff was ruled on 2026-10-02 (**AI23**, **D8.1.1v14**) and is partially implemented (top-level `while` loops of a `pn` body); JS P2 promotion and the remaining reference-parser fragment/span migration are still open. This reverses **U26**, which remains struck/superseded in `vibe/Lambda_Design_Unified_AST.md` §12; the restriction in `impl/Lambda_Impl_Tune_Ast (retired).md` is lifted. Ledger **AI1–AI24** remains the design record; the formal rulings named above win on disagreement.
+**Design authority:** `doc/Lambda_Formal_Design.md` — **D8.1.1v15**, **D8.1.3v12**, **D8.5.1v4**, D1.3/D1.6/D1.7, D5.1–D5.4, D6.1–D6.2, D7.2, D8.2–D8.6, DI14; `doc/Lambda_Formal_Semantics.md` — S1.6/SI3, S3.1, S5.5.1, S7.4/S7.7/S7.11.4, S9.1, S11.2.1, S11.4.11 (AI17v3), S15.3.
 **Working design:** `vibe/Lambda_Design_Unified_AST.md` (§12/U26 — amended by this doc), `vibe/Lambda_Repl.md`, `vibe/Lambda_Design_MIR_Cache.md` + `_L3`, `vibe/Lambda_Design_Stack_Rooting.md`, `vibe/Lambda_Design_Compiling_Return_Value.md`, `vibe/Lambda_Design_Stack_Frame.md`.
 **Scope:** Stage 1 = Lambda core (§3–§8, §10–§11). Stage 2 = LambdaJS (§9). C2MIR is untouched per D1.6 and CLAUDE rule 14.
 
@@ -189,6 +189,21 @@ The full walker, by node family (the complete per-kind inventory is the P1 check
 | Views / templates | modules containing `AST_NODE_VIEW` keep whole-module eager compilation in v1 — registration reaches into the compiled context (`_view_<N>` lookup) (AI12) |
 | Error-recovery nodes | T0 refuses to execute a script with `error_count > 0`, same gate as lowering |
 
+Explicit `LAMBDA_TIER=interp` is a strict T0 pin (**D8.1.1v15**, AI24,
+user ruling 2026-10-03). The support scan rejects any script or import that
+needs MIR, including a suspension-capable procedure that would otherwise
+receive a task satellite. It reports an unsupported-feature error before
+execution; the rejection is counted as `excluded`, never `fallback`.
+Whole-module fallback and task satellites in the table above apply to AUTO.
+An AST template prepared by an import worker must obey the same pin when
+the execution runtime activates it.
+
+**Support checkpoint (2026-10-03):** untyped arithmetic store keys compose the
+same checked binding path as direct keys; Queens executes entirely in T0.
+Keys remain boxed through the existing setter, preserving **S7.1.3v2** errors
+and **S9.1.2/S9.1.3** snapshot/borrow semantics. Mask, character-range and N-D
+admission remain separate. Evidence: [typed performance audit §9](impl/Lambda_Impl_Typed_Performance_Audit.md#9-untyped-queens-interpreter-support-2026-10-03).
+
 ## 5. Tier-up: per-function MIR compilation
 
 ### 5.1 Trigger
@@ -221,6 +236,10 @@ Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis
 **Why the first-entry trigger is retired.** It queued every definition whose body contains a `while` or any `for`, at its first run, however short the loop. With handoff available it has no remaining purpose and was the main source of images that are never needed.
 
 Plan, phases and evidence: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) Item 1. Satellite ownership is unchanged: one private MIR context per image, published at an evaluator safe point, retained for the Script's lifetime.
+
+**As implemented (2026-10-02).** The loop entry is not a second entry into the definition's own lowering. That lowering proves facts that hold only on its own path into the loop (counter signs, an accumulator interval with no runtime guard), emits each loop in several copies, and requires every GC register to be defined on every entry path. Instead the continuation is synthesized as its own procedure: the body's statements from the loop onward, with the live-in locals as parameters. The parameters reuse the locals' binding entries, so the shared statements need no rewriting, and entering through the `_b` wrapper gives each live-in the admission an unknown caller's argument gets. Two consequences follow. A continuation parameter is treated as an owner that may be shared, so every store tests the container's shared bit, because a live-in container may be shared with other T0 bindings (S9.1.2); only a written declared parameter also takes the ordinary entry snapshot (revised 2026-10-03). And only a `while` that is a direct statement of a `pn` body is eligible, since only there is the rest of the activation a statement suffix; back-edges of its nested loops count toward it. The record and the defects the stress run found are in the implementation plan §12.2.
+
+**Threshold evidence (2026-10-03).** The 10,000 default (D8.1.1v14) was re-checked on the post-Tune2 release. T0 is now 2–4× faster per iteration, and a continuation compiles in 1–4 ms. Those two changes roughly cancel, and the measured break-even of the §4.3 probes lies at 6,300–9,500 back-edges, just below the default. A sweep of the whole AUTO benchmark suite shows a flat optimum. *Lower* (2,500 or 5,000) is within ±1.3% on time but queues 21–39% more loop images, 42–51 of them never used. *Higher* is slower: 20,000 by about 1%, losing loops of 10,000–20,000 back-edges such as `navier_stokes` (+25%) and `matmul2` (+30%), though it leaves only 8 images unused. 50,000 is 6–8% slower, with 13–14 rows worse by over 10%. The sweep also exposed a rule gap rather than a tuning issue: a definition gets one loop image, bound to its first loop to reach the threshold. If that loop exits before the image arrives, a later, longer loop of the same definition stays in T0 (`larceny/array1`, 131 ms instead of 9.6 ms). Fixing it changes the once-per-definition rule and awaits a ruling. Data: implementation plan §12.6.
 
 ### 5.2 The satellite module
 
@@ -783,7 +802,8 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO th
 | **AI20** | REPL/shell route through T0 now; persistent top-level environment (P4) supersedes incremental-compilation caching as the REPL end state | **confirmed** |
 | **AI21** | Stage 2 extends the tier model to LambdaJS over `JsAstNode`, sharing frames/tiering/hooks; JS semantics stay in the JS helper layer; the size-based interp policy is replaced | **confirmed** |
 | **AI22** | No bytecode IR; tree-walk over the typed AST is the only sub-MIR executable form; revisit only with T0 profiles | **confirmed** |
-| **AI23** | Loop-head handoff: a running T0 activation may enter its published image at a head test of the loop that triggered it, as a one-way whole-function continuation; eligibility is limited to loops whose live state is entirely named frame slots; the loop-owner first-entry trigger is retired (§5.1.1; D8.1.1v14) | **confirmed (user, 2026-10-02); not implemented** |
+| **AI23** | Loop-head handoff: a running T0 activation may enter its published image at a head test of the loop that triggered it, as a one-way whole-function continuation; eligibility is limited to loops whose live state is entirely named frame slots; the loop-owner first-entry trigger is retired (§5.1.1; D8.1.1v14) | **confirmed (user, 2026-10-02); partially implemented 2026-10-02** |
+| **AI24** | Explicit `interp` executes only T0. Unsupported modules/imports and task-backed bodies fail before execution; whole-module fallback and MIR satellites are AUTO-only (D8.1.1v15). | **confirmed (user, 2026-10-03)** |
 
 ## 15. Spec impact
 

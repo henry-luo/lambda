@@ -18,6 +18,7 @@
 #include "../input/css/dom_node.hpp"     // DomText, dom_text_to_string, string_to_dom_text
 #include "../jube/jube_interface.h"
 #include <math.h>
+#include "../io/mark_output_builder.hpp"
 
 // data zone allocation helpers (defined in lambda-mem.cpp)
 
@@ -1526,6 +1527,10 @@ List* list() {
 
 Item list_end(List *list) {
     log_leave();
+    if (container_is_virtual_list(list)) {
+        MarkOutputBuilder* builder = virtual_output_builder(list);
+        return builder && builder->ops->finish(builder) ? (Item){.array = list} : ItemError;
+    }
     if (list->type_id == LMD_TYPE_ELEMENT) {
         log_item({.array = list}, "elmt_end");
         return {.array = list};
@@ -2950,7 +2955,10 @@ Element* elmt_with_type(TypeElmt* elmt_type) {
     }
 
     // non-UI: allocate plain Element on GC heap
-    Element *e = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
+    // File attributes may compute the format; reserve the extension before
+    // they run, and activate it only at the body boundary.
+    size_t size = is_file_element_type(elmt_type) ? sizeof(VirtualOutputElement) : sizeof(Element);
+    Element *e = (Element *)heap_calloc(size, LMD_TYPE_ELEMENT);
     e->type_id = LMD_TYPE_ELEMENT;
     e->type = elmt_type;
     return e;

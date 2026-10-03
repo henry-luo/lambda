@@ -230,6 +230,8 @@ const char* input_detect_structurizr_flavor(const char* pathname,
 const char* input_detect_graph_flavor(const char* pathname,
                                       const char* source,
                                       size_t source_len);
+// True when the file is a graph source (by extension, then by content).
+bool graph_path_is_graph(const char* graph_file);
 
 // HTML element extraction functions (from input.cpp)
 // Get the <html> element from #document tree built by HTML5 parser

@@ -65,7 +65,7 @@ fn _flip_group_list(rect, paths) {
 
 // Tokenize + interpret a page's content stream. Empty content yields
 // { texts: [], paths: [] }.
-fn _content_elements(pdf, page, page_h) {
+fn _content_elements(pdf, page, page_h, resource_prefix) {
     let raw_bytes = resolve.page_content_bytes(pdf, page)
     if (raw_bytes == null) {
         { texts: [], paths: [] }
@@ -73,7 +73,7 @@ fn _content_elements(pdf, page, page_h) {
     else {
         let fonts = interp.resolve_page_fonts(pdf, page)
         let ops = pdf_parse_content_stream(raw_bytes)
-        interp.render_page_with_fonts(pdf, page, ops, page_h, fonts)
+        interp.render_page_with_prefix(pdf, page, ops, page_h, fonts, resource_prefix)
     }
 }
 
@@ -90,7 +90,10 @@ fn _render_page_parts(pdf, page, page_index, opts) {
     let view_box = coords.view_box_attr(page)
     let bg = _resolve_bg(opts)
 
-    let r = _content_elements(pdf, page, rect.h)
+    // SVG fragment lookup is document-wide, so page-local clip/pattern counters need a namespace.
+    let document_prefix = if (opts and opts.id_prefix) string(opts.id_prefix) else "pdf"
+    let resource_prefix = document_prefix ++ "-page-" ++ (page_index) ++ "-clip"
+    let r = _content_elements(pdf, page, rect.h, resource_prefix)
     let paths = [for (p in r.paths) p]
     let texts = [for (t in r.texts) t]
     let flip_group = _flip_group_list(rect, paths)

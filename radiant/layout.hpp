@@ -4020,6 +4020,8 @@ bool layout_block_resolve_intrinsic_axis_constraints(LayoutContext* lycon,
                                                      float content_width);
 void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode* elmt);
+void layout_svg_foreign_object(LayoutContext* lycon, DomElement* element, float width, float height);
+void layout_svg_foreign_objects(LayoutContext* lycon, DomElement* element, unsigned depth = 0);
 bool is_only_whitespace(const char* str);
 
 static inline bool layout_suppress_ignorable_container_text(DomNode* node) {

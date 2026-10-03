@@ -485,7 +485,7 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     DomElement* media_element = element && element->is_element()
         ? element->as_element() : nullptr;
     DomDocument* doc = lycon->ui_context ? lycon->ui_context->document : nullptr;
-    if (!doc || !doc->url) return;
+    if (!doc || !doc->url || doc->services.svg_image_document) return;
 
     if (!block->embed) {
         block->ensure_embed(lycon);

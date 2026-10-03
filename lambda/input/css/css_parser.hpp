@@ -564,6 +564,8 @@ typedef struct CssFontShorthandParts {
 
 // Parses the structured form shared by declaration validation and layout.
 bool css_parse_font_shorthand(const CssValue* value, CssFontShorthandParts* parts);
+bool css_font_shorthand_contains_property(const char* property);
+const CssValue* css_font_shorthand_longhand(const CssValue* value, const char* property, Pool* pool);
 
 bool css_parse_unicode_range_bounds(const char* input, size_t length,
                                     uint32_t* out_start, uint32_t* out_end);

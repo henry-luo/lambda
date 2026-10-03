@@ -825,6 +825,32 @@ static bool pdf_raster_fallback_radial_gradient(PdfRenderContext* ctx,
                                         pdf_radial_gradient_position, "radial");
 }
 
+static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands = nullptr);
+
+static bool pdf_export_paint_consume(PaintList* paint, void* context) {
+    PdfRenderContext* source = (PdfRenderContext*)context;
+    // accept only the native PDF operations with exact paint semantics; effects and unsupported strokes replay transparently.
+    for (int i = 0; i < paint->item_count(); i++) {
+        const PaintCmd& cmd = paint->data()[i];
+        switch (cmd.op) {
+        case PAINT_FILL_RECT: if (cmd.fill_rect.color.a != 255) return false; break;
+        case PAINT_FILL_ROUNDED_RECT: if (cmd.fill_rounded_rect.color.a != 255) return false; break;
+        case PAINT_FILL_PATH:
+            if (cmd.fill_path.color.a != 255 || cmd.fill_path.rule != RDT_FILL_WINDING) return false;
+            break;
+        case PAINT_PUSH_CLIP: case PAINT_POP_CLIP: break;
+        default: return false;
+        }
+    }
+    PdfRenderContext local = {};
+    local.pdf_doc = source->pdf_doc; local.current_page = source->current_page;
+    local.ui_context = source->ui_context; local.page_width = source->page_width;
+    local.page_height = source->page_height;
+    pdf_lower_paint_list(&local, paint);
+    source->paint_state.emitted_count += local.paint_state.emitted_count;
+    return true;
+}
+
 static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,
                                              const PaintSvgSubscene* subscene,
                                              const RdtMatrix* transform) {
@@ -834,85 +860,38 @@ static bool pdf_raster_fallback_svg_subscene(PdfRenderContext* ctx,
         return false;
     }
 
-    int surface_w = (int)ceilf(subscene->viewport_width); // INT_CAST_OK: PDF SVG subscene fallback surface width is integer pixels.
-    int surface_h = (int)ceilf(subscene->viewport_height); // INT_CAST_OK: PDF SVG subscene fallback surface height is integer pixels.
-    if (surface_w <= 0 || surface_h <= 0) return false;
-
-    ImageSurface* surface = image_surface_create(surface_w, surface_h);
-    if (!surface) {
-        log_error("[PDF_PAINT_IR] failed to allocate SVG subscene surface %dx%d",
-                  surface_w, surface_h);
-        return false;
-    }
-
-    uint32_t* pixels = (uint32_t*)surface->pixels;
-    int pixel_count = surface_w * surface_h;
-    for (int i = 0; i < pixel_count; i++) {
-        pixels[i] = 0xffffffffu;
-    }
-
-    RdtVector vec = {};
-    rdt_vector_init(&vec, pixels, surface_w, surface_h, surface_w);
-
-    Color* current_color = subscene->has_color ? (Color*)&subscene->color : nullptr;
-    Color* fill_color = subscene->has_fill ? (Color*)&subscene->fill : nullptr;
-    Color* stroke_color = subscene->has_stroke ? (Color*)&subscene->stroke : nullptr;
-    render_svg_to_vec_via_display_list(&vec,
-                                       (Element*)subscene->svg_root,
-                                       subscene->viewport_width,
-                                       subscene->viewport_height,
-                                       (Pool*)subscene->pool,
-                                       subscene->raster_scale,
-                                       (FontContext*)subscene->font_context,
-                                       nullptr,
-                                       current_color,
-                                       fill_color,
-                                       subscene->source_path,
-                                       subscene->opacity,
-                                       subscene->fill_none,
-                                       stroke_color,
-                                       subscene->stroke_none,
-                                       subscene->stroke_width,
-                                       (Element*)subscene->id_scope);
-    rdt_vector_flush_batch(&vec);
-
-    float dst_x = subscene->content_clip.left;
-    float dst_y = subscene->content_clip.top;
-    float dst_w = subscene->content_clip.right - subscene->content_clip.left;
-    float dst_h = subscene->content_clip.bottom - subscene->content_clip.top;
-    if (dst_w <= 0.0f) dst_w = subscene->viewport_width;
-    if (dst_h <= 0.0f) dst_h = subscene->viewport_height;
-
-    log_info("[PDF_PAINT_IR] raster fallback SVG subscene %.1fx%.1f to %dx%d",
-             dst_w, dst_h, surface_w, surface_h);
-    bool ok = pdf_draw_abgr_image(ctx, pixels, surface_w, surface_h, surface_w,
-                                  dst_x, dst_y, dst_w, dst_h,
-                                  255, transform);
-
-    rdt_vector_destroy(&vec);
+    Bound bounds = {};
+    ImageSurface* surface = render_svg_subscene_rasterize(subscene, &bounds);
+    if (!surface) return false;
+    RdtMatrix placement = transform ? rdt_matrix_multiply(transform, &subscene->transform) : subscene->transform;
+    bool ok = pdf_draw_abgr_image_preserve_alpha(ctx, (const uint32_t*)surface->pixels,
+        surface->width, surface->height, surface->pitch / 4,
+        bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
+        255, &placement);
     image_surface_destroy(surface);
     return ok;
 }
 
-static void pdf_lower_paint_list(PdfRenderContext* ctx) {
+static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
     if (!ctx || ctx->effect_fallback.active) return;
+    PaintList& paint = commands ? *commands : ctx->paint_list;
     render_svg_inline_register_paint_ir_lowerers();
 
     PdfPaintLoweringState* state = &ctx->paint_state;
     bool streaming_transform =
-        paint_list_has_op_flags(&ctx->paint_list, PAINT_OP_FLAG_TRANSFORM_STACK) ||
+        paint_list_has_op_flags(&paint, PAINT_OP_FLAG_TRANSFORM_STACK) ||
         state->active_transform_depth > 0 ||
         state->skipped_transform_depth > 0;
     bool streaming_effect =
-        paint_list_has_op_flags(&ctx->paint_list, PAINT_OP_FLAG_EFFECT_STACK) ||
+        paint_list_has_op_flags(&paint, PAINT_OP_FLAG_EFFECT_STACK) ||
         state->active_effect_depth > 0 ||
         state->passthrough_effect_depth > 0;
     if (!streaming_transform && !streaming_effect &&
-        !paint_ir_validate_or_log(&ctx->paint_list, "pdf_lower_paint_list")) {
-        paint_list_clear(&ctx->paint_list);
+        !paint_ir_validate_or_log(&paint, "pdf_lower_paint_list")) {
+        paint_list_clear(&paint);
         return;
     }
-    pdf_record_page_backdrop_paint_list(ctx, &ctx->paint_list);
+    pdf_record_page_backdrop_paint_list(ctx, &paint);
     const RenderExportTargetCaps* caps =
         render_export_target_get_caps(RENDER_EXPORT_TARGET_PDF);
     int active_clip_depth = 0;
@@ -1014,8 +993,8 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         return false;
     };
 
-    for (int i = 0; i < ctx->paint_list.item_count(); i++) {
-        PaintCmd* cmd = &ctx->paint_list.data()[i];
+    for (int i = 0; i < paint.item_count(); i++) {
+        PaintCmd* cmd = &paint.data()[i];
         state->command_count++;
         if (handle_transform_stack(cmd)) continue;
         if (handle_effect_stack(cmd)) continue;
@@ -1185,6 +1164,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
         }
         case PAINT_SVG_SUBSCENE: {
             PaintSvgSubscene* p = &cmd->svg_subscene;
+            PaintSvgSubscene vector_scene = *p;
+            if (stack_transform) vector_scene.transform = rdt_matrix_multiply(stack_transform, &p->transform);
+            if (render_svg_subscene_with_paint(&vector_scene, pdf_export_paint_consume, ctx)) break;
             pdf_paint_record_fallback(state,
                                       pdf_raster_fallback_svg_subscene(ctx, p, stack_transform),
                                       "[PDF_PAINT_IR] failed SVG subscene raster fallback");
@@ -1194,7 +1176,7 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx) {
             break;
         }
     }
-    paint_list_clear(&ctx->paint_list);
+    paint_list_clear(&paint);
 }
 
 static void pdf_paint_fill_rect(PdfRenderContext* ctx,
@@ -1526,7 +1508,12 @@ static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
-    pdf_paint_draw_image(ctx, img, &content_rect);
+    if (render_media_paint_svg_picture(pdf_active_paint_list(ctx), ctx->ui_context, block, &content_rect)) {
+        pdf_lower_paint_list(ctx);
+    } else {
+        Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
+        pdf_paint_draw_image(ctx, img, &image_rect);
+    }
 }
 
 static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y,
@@ -1558,15 +1545,15 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                           content_rect.x + content_rect.width,
                           content_rect.y + content_rect.height};
     PaintSvgSubscene subscene = {};
-    RdtMatrix identity = rdt_matrix_identity();
+    RdtMatrix placement = rdt_matrix_translate(content_rect.x, content_rect.y);
     render_svg_build_subscene(&subscene,
                               dom_element_to_element(dom_elem),
                               content_rect.width,
                               content_rect.height,
                               pool,
-                              1.0f,
+                              ui_context_raster_scale(ctx->ui_context),
                               font_ctx,
-                              &identity,
+                              &placement,
                               &content_clip,
                               &initial_paint.current_color,
                               initial_paint.has_fill_color ? &initial_paint.fill_color : nullptr,
@@ -1575,7 +1562,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.fill_none,
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
-                              initial_paint.stroke_width);
+                              initial_paint.stroke_width, ctx->ui_context);
     subscene.id_scope = render_svg_reference_scope(dom_elem);
     paint_svg_subscene(pdf_active_paint_list(ctx), &subscene);
     pdf_lower_paint_list(ctx);

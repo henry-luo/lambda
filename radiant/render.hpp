@@ -140,6 +140,39 @@ typedef struct {
     uint8_t r, g, b, a;
 } RdtGradientStop;
 
+typedef enum {
+    RDT_GRADIENT_PAD,
+    RDT_GRADIENT_REFLECT,
+    RDT_GRADIENT_REPEAT,
+} RdtGradientSpread;
+
+// additional paint facts share one payload for linear/radial fill and stroke.
+typedef struct {
+    RdtGradientSpread spread;
+    bool has_focal;
+    float fx, fy, fr;
+    float stroke_width;    // zero selects fill
+    RdtStrokeCap cap;
+    RdtStrokeJoin join;
+    float miter_limit;
+    const float* dash_array;
+    int dash_count;
+    float dash_phase;
+} RdtGradientOptions;
+
+inline bool rdt_gradient_options_valid(const RdtGradientOptions* options) {
+    if (!options || options->spread < RDT_GRADIENT_PAD || options->spread > RDT_GRADIENT_REPEAT ||
+        !isfinite(options->stroke_width) || options->stroke_width < 0.0f ||
+        options->cap < RDT_CAP_BUTT || options->cap > RDT_CAP_SQUARE ||
+        options->join < RDT_JOIN_MITER || options->join > RDT_JOIN_BEVEL ||
+        !isfinite(options->miter_limit) || (options->miter_limit != 0.0f && options->miter_limit < 1.0f) ||
+        !isfinite(options->dash_phase) || options->dash_count < 0 || (options->dash_count > 0 && !options->dash_array) ||
+        (options->has_focal && (!isfinite(options->fx) || !isfinite(options->fy) || !isfinite(options->fr) || options->fr < 0.0f))) return false;
+    for (int index = 0; index < options->dash_count; index++)
+        if (!isfinite(options->dash_array[index]) || options->dash_array[index] < 0.0f) return false;
+    return true;
+}
+
 // opaque path handle — each backend defines the concrete type
 typedef struct RdtPath RdtPath;
 
@@ -249,13 +282,104 @@ bool rdt_path_get_bounds(const RdtPath* p, float* left, float* top,
 // be inspected by the active backend or when the callback aborts traversal.
 bool rdt_path_visit(const RdtPath* p, RdtPathVisitFn fn, void* context);
 
+// append affine-transformed contours, expanding compact primitives into curves.
+bool render_path_append_transformed(RdtPath* destination, const RdtPath* source,
+                                     const RdtMatrix* transform);
+void render_path_append_quadratic(RdtPath* path, float sx, float sy,
+    float qx, float qy, float x, float y);
+
+// shared adaptive contour subdivision for stroke queries and distance metrics.
+typedef bool (*RenderPathLineFn)(void* context, float x0, float y0, float x1, float y1);
+bool render_path_flatten_cubic(float x0, float y0, float x1, float y1,
+    float x2, float y2, float x3, float y3, float flatness, int max_depth,
+    RenderPathLineFn line, void* context);
+struct RdtPathMetricSegment {
+    float x0, y0, x1, y1, length, end_distance;
+    size_t subpath;
+};
+struct RdtPathMetrics {
+    RdtPathMetricSegment* segments;
+    size_t count, capacity, subpath_count;
+    float length;
+    bool closed;
+};
+bool render_path_metrics_build(RdtPathMetrics* metrics, const RdtPath* path,
+    const RdtMatrix* transform = nullptr, float flatness = .01f);
+void render_path_metrics_destroy(RdtPathMetrics* metrics);
+bool render_path_metrics_sample(const RdtPathMetrics* metrics, float distance,
+    float* x, float* y, float* tangent_x, float* tangent_y, bool extend = false);
+bool render_path_metrics_project(const RdtPathMetrics* metrics, float x, float y,
+    float from, float to, float* distance, float* normal, bool wrap = false);
+
+// append baseline-relative font outlines, or outer bitmap-coverage contours.
+// shared decoration geometry; wavy_fill closes a ribbon for SVG fill/stroke paint.
+RdtPath* render_path_create_decoration(const Rect* rect, CssEnum style, bool wavy_fill = false);
+bool render_path_append_font_glyph(RdtPath* path, FontHandle* font, uint32_t codepoint,
+    float x, float y, float scale_x, Arena* arena, bool* color_bitmap = nullptr);
+
 // Shared SVG geometry parsing for rendering and DOM geometry queries. The
 // returned path is caller-owned; transform coefficients are [a,b,c,d,e,f].
 RdtPath* svg_parse_path_d(const char* d);
+int svg_path_parameter_count(char command);
+bool svg_read_path_parameters(const char** cursor, char command, bool repeated, float args[7]);
+RdtMatrix rdt_matrix_scale(float sx, float sy);
 bool svg_parse_transform(const char* transform_str, float matrix[6]);
-// Returns the matching inline SVG style value in caller-owned storage, or null.
-const char* svg_get_inline_style_property(const char* style, const char* name,
-                                          char* buffer, size_t buffer_size);
+
+enum SvgLengthAxis { SVG_LENGTH_X, SVG_LENGTH_Y, SVG_LENGTH_DIAGONAL };
+struct SvgLengthContext {
+    float viewport_width;
+    float viewport_height;
+    float font_size;
+    float x_height;
+};
+SvgLengthContext dom_svg_length_context(DomElement* element);
+SvgLengthAxis dom_svg_length_axis(const char* name);
+const char* svg_property_initial(const char* name, bool* inherits);
+bool svg_paint_value_is_valid(const char* value);
+struct SvgBasicShapeGeometry { float x, y, width, height; };
+struct SvgViewBox { float min_x, min_y, width, height; bool has_viewbox; };
+SvgViewBox svg_parse_viewbox(const char* value);
+RdtMatrix svg_viewbox_transform(const SvgViewBox* viewbox, float width, float height,
+    const char* preserve_aspect_ratio);
+float svg_font_size_value(const char* value, float parent_size, float parent_x_height = 0.0f);
+float svg_font_x_height(FontContext* fonts, const FontStyleDesc* descriptor);
+int svg_font_weight_value(const char* value, int parent_weight);
+float svg_resolve_length(const char* value, const SvgLengthContext* context,
+    SvgLengthAxis axis, float fallback);
+float svg_resolve_angle(const char* value, float fallback);
+bool svg_append_basic_shape_path(Element* element, RdtPath* path,
+    const SvgLengthContext* lengths, SvgBasicShapeGeometry* geometry = nullptr);
+int svg_resolve_dash_array(const char* value, const SvgLengthContext* lengths,
+    float* dashes, int capacity);
+RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
+    const char* origin, const Bound* reference_box, const SvgLengthContext* lengths);
+// Shared authored cascade/presentation lookup for SVG interaction and resources.
+struct SvgDomStyleScope {
+    DomElement* root;
+    DomElement* parent;
+    const SvgDomStyleScope* previous;
+    float viewport_width;
+    float viewport_height;
+    bool has_viewport;
+};
+typedef bool (*SvgPathContainsFn)(const RdtPath*, const RdtMatrix*, RdtFillRule, void*);
+struct SvgClipHitQuery {
+    SvgPathContainsFn contains;
+    void* data;
+    bool hit;
+};
+bool svg_dom_clip_contains_point(DomElement* element, const SvgLengthContext* lengths,
+    FontContext* fonts, const RdtMatrix* frame, SvgPathContainsFn contains, void* data,
+    const SvgDomStyleScope* scope = nullptr);
+DomNode* svg_dom_style_parent(DomNode* node, const SvgDomStyleScope* scope);
+const char* svg_get_dom_presentation_property(DomElement* element, const char* name,
+    bool inherits, char* buffer, size_t buffer_size, bool* from_css = nullptr,
+    char** owned_value = nullptr, DomElement** declaring_element = nullptr,
+    const SvgDomStyleScope* scope = nullptr);
+
+// caller-owned character-cell geometry shares the painter's positioned layout.
+RdtPath* svg_text_geometry_path(DomElement* element, const SvgLengthContext* lengths,
+    FontContext* font_context);
 
 typedef struct SvgTextMetrics {
     float width;
@@ -291,7 +415,7 @@ void rdt_fill_rounded_rect(RdtVector* vec, float x, float y, float w, float h,
 void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
                      RdtStrokeCap cap, RdtStrokeJoin join,
                      const float* dash_array, int dash_count, float dash_phase,
-                     const RdtMatrix* transform);
+                     const RdtMatrix* transform, float miter_limit = 4.0f);
 
 // ---------------------------------------------------------------------------
 // Gradient fill
@@ -302,14 +426,16 @@ void rdt_fill_linear_gradient(RdtVector* vec, RdtPath* p,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
                               const RdtMatrix* transform,
-                              const RdtMatrix* gradient_transform);
+                              const RdtMatrix* gradient_transform,
+                              const RdtGradientOptions* options = nullptr);
 
 void rdt_fill_radial_gradient(RdtVector* vec, RdtPath* p,
                               float cx, float cy, float r,
                               const RdtGradientStop* stops, int stop_count,
                               RdtFillRule rule,
                               const RdtMatrix* transform,
-                              const RdtMatrix* gradient_transform);
+                              const RdtMatrix* gradient_transform,
+                              const RdtGradientOptions* options = nullptr);
 
 // ---------------------------------------------------------------------------
 // Clipping (alpha mask)
@@ -335,7 +461,7 @@ void rdt_clip_restore_depth(int saved_depth);
 void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h,
                     int src_stride, float dst_x, float dst_y, float dst_w, float dst_h,
                     uint8_t opacity, const RdtMatrix* transform,
-                    uint64_t resource_generation = 0);
+                    uint64_t resource_generation = 0, bool straight_alpha = false);
 
 // ---------------------------------------------------------------------------
 // SVG picture (load from file/data, render at given rect)
@@ -352,6 +478,9 @@ Element*    rdt_picture_get_svg_root(RdtPicture* pic);
 Element*    rdt_picture_find_svg_element_by_id(RdtPicture* pic, const char* id);
 Pool*       rdt_picture_get_pool(RdtPicture* pic);
 const char* rdt_picture_get_source_path(RdtPicture* pic);
+double      rdt_picture_animation_time(RdtPicture* pic);
+void        rdt_picture_set_animation_time(RdtPicture* pic, double seconds);
+bool        render_svg_picture_has_animation(RdtPicture* pic);
 void        rdt_picture_get_size(RdtPicture* pic, float* w, float* h);
 void        rdt_picture_set_size(RdtPicture* pic, float w, float h);
 void        rdt_picture_set_transform(RdtPicture* pic, const RdtMatrix* m);
@@ -485,6 +614,7 @@ typedef struct {
     float width;
     RdtStrokeCap cap;
     RdtStrokeJoin join;
+    float miter_limit;
     float* dash_array;   // arena-allocated copy, NULL if no dashes
     int dash_count;
     float dash_phase;
@@ -502,6 +632,7 @@ typedef struct {
     RdtMatrix transform;
     bool has_gradient_transform;
     RdtMatrix gradient_transform;
+    RdtGradientOptions options;
 } DlFillLinearGradient;
 
 typedef struct {
@@ -514,6 +645,7 @@ typedef struct {
     RdtMatrix transform;
     bool has_gradient_transform;
     RdtMatrix gradient_transform;
+    RdtGradientOptions options;
 } DlFillRadialGradient;
 
 typedef struct {
@@ -526,6 +658,7 @@ typedef struct {
     int src_w, src_h, src_stride;
     float dst_x, dst_y, dst_w, dst_h;
     uint8_t opacity;
+    bool straight_alpha;
     bool has_transform;
     RdtMatrix transform;
 } DlDrawImage;
@@ -823,26 +956,29 @@ void dl_fill_path(DisplayList* dl, RdtPath* path, Color color,
 void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
                     RdtStrokeCap cap, RdtStrokeJoin join,
                     const float* dash_array, int dash_count, float dash_phase,
-                    const RdtMatrix* transform);
+                    const RdtMatrix* transform, float miter_limit = 4.0f);
 
 void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
                              float x1, float y1, float x2, float y2,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform,
-                             const RdtMatrix* gradient_transform);
+                             const RdtMatrix* gradient_transform,
+                              const RdtGradientOptions* options = nullptr);
 
 void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
                              float cx, float cy, float r,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform,
-                             const RdtMatrix* gradient_transform);
+                             const RdtMatrix* gradient_transform,
+                              const RdtGradientOptions* options = nullptr);
 
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
                    ImageSurface* resource_owner = nullptr,
-                   uint64_t resource_generation = 0);
+                   uint64_t resource_generation = 0, bool copy_pixels = false,
+                   bool straight_alpha = false);
 
 // Record a glyph draw command.  bitmap buffer is borrowed (must outlive display list).
 void dl_draw_glyph(DisplayList* dl, GlyphBitmap* bitmap, int x, int y,
@@ -1070,12 +1206,12 @@ typedef enum {
     X(PAINT_FILL_LINEAR_GRADIENT, PAINT_OP_FLAG_OWNED_PAYLOAD) \
     X(PAINT_FILL_RADIAL_GRADIENT, PAINT_OP_FLAG_OWNED_PAYLOAD) \
     X(PAINT_DRAW_IMAGE, PAINT_OP_FLAG_NONE) \
-    X(PAINT_DRAW_IMAGE_RESOURCE, PAINT_OP_FLAG_NONE) \
+    X(PAINT_DRAW_IMAGE_RESOURCE, PAINT_OP_FLAG_OWNED_PAYLOAD) \
     X(PAINT_DRAW_GLYPH, PAINT_OP_FLAG_NONE) \
     X(PAINT_DRAW_PICTURE, PAINT_OP_FLAG_NONE) \
     X(PAINT_VIDEO_PLACEHOLDER, PAINT_OP_FLAG_NONE) \
     X(PAINT_WEBVIEW_LAYER_PLACEHOLDER, PAINT_OP_FLAG_NONE) \
-    X(PAINT_PUSH_CLIP, PAINT_OP_FLAG_CLIP_STACK | PAINT_OP_FLAG_STACK_PUSH) \
+    X(PAINT_PUSH_CLIP, PAINT_OP_FLAG_OWNED_PAYLOAD | PAINT_OP_FLAG_CLIP_STACK | PAINT_OP_FLAG_STACK_PUSH) \
     X(PAINT_POP_CLIP, PAINT_OP_FLAG_CLIP_STACK | PAINT_OP_FLAG_STACK_POP) \
     X(PAINT_PUSH_TRANSFORM, PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_RASTER_NOOP | PAINT_OP_FLAG_STACK_PUSH) \
     X(PAINT_POP_TRANSFORM, PAINT_OP_FLAG_TRANSFORM_STACK | PAINT_OP_FLAG_RASTER_NOOP | PAINT_OP_FLAG_STACK_POP) \
@@ -1133,7 +1269,8 @@ typedef struct {
     float width;
     RdtStrokeCap cap;
     RdtStrokeJoin join;
-    const float* dash_array; // borrowed
+    float miter_limit;
+    const float* dash_array; // copied; owned by the PaintList
     int dash_count;
     float dash_phase;
     bool has_transform;
@@ -1152,6 +1289,7 @@ typedef struct {
     RdtMatrix transform;
     bool has_gradient_transform;
     RdtMatrix gradient_transform;
+    RdtGradientOptions options;
 } PaintFillLinearGradient;
 
 typedef struct {
@@ -1166,6 +1304,7 @@ typedef struct {
     RdtMatrix transform;
     bool has_gradient_transform;
     RdtMatrix gradient_transform;
+    RdtGradientOptions options;
 } PaintFillRadialGradient;
 
 typedef struct {
@@ -1180,6 +1319,7 @@ typedef struct {
 
 typedef struct {
     ImageSurface* image;     // borrowed; lowerers decode or reference URL as needed
+    void (*release_image)(ImageSurface*); // optional owner release for standalone recordings
     float dst_x, dst_y, dst_w, dst_h;
     uint8_t opacity;
     bool has_transform;
@@ -1223,7 +1363,7 @@ typedef struct {
 } PaintWebviewLayerPlaceholder;
 
 typedef struct {
-    RdtPath* clip_path;     // borrowed
+    RdtPath* clip_path;     // owned clone for deferred lowering
     bool has_transform;
     RdtMatrix transform;
 } PaintPushClip;
@@ -1343,10 +1483,14 @@ typedef struct PaintSvgSubscene {
     void* id_scope;          // Element* tree for <use href="#id">; null = svg_root
     void* pool;              // Pool* used by the owning document when available
     void* font_context;      // FontContext* for SVG text resolution
+    UiContext* ui_context;   // borrowed source context while the document-owned paint list is lowered
     float viewport_width;
     float viewport_height;
     float raster_scale;
     float opacity;
+    bool image_document;
+    bool clip_viewport;
+    double animation_time;
     bool has_color;          // inherited currentColor present
     Color color;             // inherited currentColor
     bool has_fill;           // cascaded fill present
@@ -1488,17 +1632,19 @@ void paint_fill_path(PaintList* pl, RdtPath* path, Color color,
 void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
                        RdtStrokeCap cap, RdtStrokeJoin join,
                        const float* dash_array, int dash_count, float dash_phase,
-                       const RdtMatrix* transform);
+                       const RdtMatrix* transform, float miter_limit = 4.0f);
 void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
                                 float x1, float y1, float x2, float y2,
                                 const RdtGradientStop* stops, int stop_count,
                                 RdtFillRule rule, const RdtMatrix* transform,
-                                const RdtMatrix* gradient_transform);
+                                const RdtMatrix* gradient_transform,
+                              const RdtGradientOptions* options = nullptr);
 void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
                                 float cx, float cy, float r,
                                 const RdtGradientStop* stops, int stop_count,
                                 RdtFillRule rule, const RdtMatrix* transform,
-                                const RdtMatrix* gradient_transform);
+                                const RdtMatrix* gradient_transform,
+                              const RdtGradientOptions* options = nullptr);
 void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       int src_w, int src_h, int src_stride,
                       float dst_x, float dst_y, float dst_w, float dst_h,
@@ -1508,7 +1654,10 @@ void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
                                float dst_x, float dst_y,
                                float dst_w, float dst_h,
                                uint8_t opacity,
-                               const RdtMatrix* transform);
+                               const RdtMatrix* transform, void (*release_image)(ImageSurface*) = nullptr);
+bool render_image_resource_pixels(ImageSurface* image, float dst_w, float dst_h,
+                                   const uint32_t** pixels, int* src_w,
+                                   int* src_h, int* src_stride);
 void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
                       Color color, bool is_color_emoji, const Bound* clip,
                       const RdtMatrix* transform, uint64_t resource_generation);
@@ -1762,6 +1911,8 @@ bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block);
 bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block);
 bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block);
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
+// render embedded HTML through the ordinary child, scrolling and stacking phases.
+double render_block_paint_children(RenderContext* rdcon, ViewBlock* block);
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block);
 Color render_document_canvas_background(View* root_view);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
@@ -1981,6 +2132,7 @@ bool dl_item_intersects_rect(const DisplayItem* item,
 
 // ===== display_list_storage.hpp =====
 DisplayItem* dl_alloc_item(DisplayList* dl);
+Bound dl_content_bounds(const DisplayList* dl);
 RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count);
 float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count);
 void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
@@ -2360,7 +2512,7 @@ void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count);
 void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     ImageSurface* tile_surface, ScratchArena* scratch,
                     float tile_x, float tile_y, float tile_w, float tile_h,
-                    float scale);
+                    float scale, int first_item = 0);
 
 #ifdef __cplusplus
 }
@@ -2751,13 +2903,14 @@ static inline void paint_record_stroke_path(PaintRecordTarget* target, const cha
                                             RdtPath* path, Color color, float width,
                                             RdtStrokeCap cap, RdtStrokeJoin join,
                                             const float* dash_array, int dash_count,
-                                            float dash_phase, const RdtMatrix* transform) {
+                                            float dash_phase, const RdtMatrix* transform,
+                                            float miter_limit = 4.0f) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
     paint_stroke_path(target->paint_list, path, color, width, cap, join,
-                      dash_array, dash_count, dash_phase, transform);
+                      dash_array, dash_count, dash_phase, transform, miter_limit);
     paint_record_lower_pending(target);
 }
 
@@ -2767,14 +2920,15 @@ static inline void paint_record_fill_linear_gradient(PaintRecordTarget* target, 
                                                      const RdtGradientStop* stops, int stop_count,
                                                      RdtFillRule rule,
                                                      const RdtMatrix* transform,
-                                                     const RdtMatrix* gradient_transform) {
+                                                     const RdtMatrix* gradient_transform,
+                                                     const RdtGradientOptions* options = nullptr) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
     paint_fill_linear_gradient(target->paint_list, path, x1, y1, x2, y2,
                                stops, stop_count, rule, transform,
-                               gradient_transform);
+                               gradient_transform, options);
     paint_record_lower_pending(target);
 }
 
@@ -2783,14 +2937,15 @@ static inline void paint_record_fill_radial_gradient(PaintRecordTarget* target, 
                                                      const RdtGradientStop* stops, int stop_count,
                                                      RdtFillRule rule,
                                                      const RdtMatrix* transform,
-                                                     const RdtMatrix* gradient_transform) {
+                                                     const RdtMatrix* gradient_transform,
+                                                     const RdtGradientOptions* options = nullptr) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
     }
     paint_fill_radial_gradient(target->paint_list, path, cx, cy, r,
                                stops, stop_count, rule, transform,
-                               gradient_transform);
+                               gradient_transform, options);
     paint_record_lower_pending(target);
 }
 
@@ -2881,6 +3036,19 @@ static inline void paint_record_pop_clip(PaintRecordTarget* target, const char* 
         return;
     }
     paint_pop_clip(target->paint_list);
+    paint_record_lower_pending(target);
+}
+
+static inline void paint_record_draw_image_resource(PaintRecordTarget* target, const char* op,
+    ImageSurface* image, float x, float y, float width, float height, uint8_t opacity,
+    const RdtMatrix* transform, void (*release_image)(ImageSurface*) = nullptr) {
+    if (!paint_record_ready(target)) {
+        paint_record_missing(target, op);
+        if (image && release_image) release_image(image);
+        return;
+    }
+    paint_draw_image_resource(target->paint_list, image, x, y, width, height,
+        opacity, transform, release_image);
     paint_record_lower_pending(target);
 }
 
@@ -3326,6 +3494,7 @@ typedef enum RenderCompositeRegionMode {
     RENDER_COMPOSITE_REGION_OPACITY
 } RenderCompositeRegionMode;
 uint32_t render_composite_blend_pixel(uint32_t backdrop, uint32_t source, CssEnum blend_mode);
+void render_composite_blend_rgb(uint32_t backdrop, uint32_t source, CssEnum mode, float result[3]);
 void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdrop,
                                    int x0, int y0, int width, int height,
                                    RenderCompositeRegionMode mode,
@@ -3340,10 +3509,16 @@ uint32_t render_pixel_pack_abgr(uint32_t red, uint32_t green,
                                 uint32_t blue, uint32_t alpha);
 uint8_t render_pixel_premultiply_channel(uint8_t channel, uint8_t alpha);
 uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha);
+uint32_t render_pixel_premultiply_abgr(uint32_t pixel);
+uint32_t render_pixel_unpremultiply_abgr(uint32_t pixel);
+uint32_t render_pixel_scale_premultiplied(uint32_t pixel, uint8_t opacity);
+float render_color_srgb_to_linear(float channel);
+float render_color_linear_to_srgb(float channel);
 uint32_t render_pixel_source_over_straight(uint32_t destination, uint32_t source,
                                            uint8_t opacity);
+// straight destination/output with premultiplied source, or two premultiplied pixels/output.
 uint32_t render_pixel_source_over_premultiplied(uint32_t destination, uint32_t source);
-uint32_t render_pixel_source_over_premultiplied_opaque(uint32_t destination, uint32_t source);
+uint32_t render_pixel_source_over_premultiplied_pair(uint32_t destination, uint32_t source);
 uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint32_t source);
 ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating);
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
@@ -3358,7 +3533,7 @@ void render_pixel_source_over_opaque_bytes(uint8_t* destination, uint32_t source
                                            uint8_t opacity);
 
 void render_composite_source_over_premul(ImageSurface* surface, const uint32_t* backdrop,
-                                         int x0, int y0, int width, int height);
+                                         int x0, int y0, int width, int height, uint8_t opacity = 255);
 void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
                               int x0, int y0, int width, int height,
                               float opacity);
@@ -3382,12 +3557,92 @@ void render_composite_opacity(ImageSurface* surface, const uint32_t* backdrop,
  * @param clip The clipping bounds
  */
 void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filter, Rect* rect, Bound* clip);
+void render_filter_hue_matrix(float angle, float matrix[3][3]);
+void render_filter_saturate_matrix(float amount, float matrix[3][3]);
 bool render_filter_apply_with_backend(const RenderBackendCaps* caps,
                                       ScratchArena* sa,
                                       ImageSurface* surface,
                                       FilterProp* filter,
                                       Rect* rect,
                                       Bound* clip);
+
+// SVG programs own resolved graph facts; execution images remain per-render scratch.
+enum RdtSvgFilterKind {
+    RDT_SVG_FILTER_BLUR, RDT_SVG_FILTER_OFFSET, RDT_SVG_FILTER_FLOOD,
+    RDT_SVG_FILTER_MERGE, RDT_SVG_FILTER_MATRIX, RDT_SVG_FILTER_SHADOW,
+    RDT_SVG_FILTER_BLEND, RDT_SVG_FILTER_COMPOSITE, RDT_SVG_FILTER_MORPHOLOGY,
+    RDT_SVG_FILTER_IMAGE, RDT_SVG_FILTER_TILE, RDT_SVG_FILTER_TURBULENCE,
+    RDT_SVG_FILTER_DISPLACEMENT, RDT_SVG_FILTER_DIFFUSE, RDT_SVG_FILTER_SPECULAR
+};
+enum RdtSvgFilterInput {
+    RDT_SVG_FILTER_SOURCE = -1, RDT_SVG_FILTER_ALPHA = -2, RDT_SVG_FILTER_EMPTY = -3,
+    RDT_SVG_FILTER_FILL = -4, RDT_SVG_FILTER_STROKE = -5,
+    RDT_SVG_FILTER_BACKGROUND = -6, RDT_SVG_FILTER_BACKGROUND_ALPHA = -7
+};
+struct RdtSvgFilterNoise;
+struct RdtSvgFilterLight {
+    float surface_scale, constant, exponent, kernel[2];
+    float position[3], target[3], spot_exponent, cone_cosine;
+    unsigned kind;
+    bool limiting_cone;
+};
+struct RdtSvgFilterNode {
+    RdtSvgFilterKind kind;
+    Element* element;
+    RdtSvgFilterNoise* noise;
+    RdtSvgFilterLight light;
+    int input, input2;
+    int* merge_inputs;
+    size_t merge_count;
+    const char* result;
+    const char* region[4];
+    float values[20];
+    Color color;
+    CssEnum blend_mode;
+    unsigned variant;
+    bool linear, valid;
+};
+struct RdtSvgFilterProgram {
+    Arena* arena;
+    Element* element;
+    uint64_t epoch;
+    RdtSvgFilterProgram* next;
+    RdtSvgFilterNode* nodes;
+    size_t count, active_users;
+    const char* region[4];
+    bool filter_bbox, primitive_bbox, compiled, valid, allocation_failed;
+};
+constexpr size_t RDT_SVG_FILTER_MAX_NODES = 4096;
+struct RdtSvgFilterRun {
+    ScratchArena* scratch;
+    MemContext* memory;
+    const ImageSurface* source;
+    Bound source_bounds, geometry;
+    SvgLengthContext lengths;
+    RdtMatrix frame;
+    float density;
+    size_t work_limit;
+    size_t* work_used; // shared by nested captures and kernels during one synchronous evaluation
+    bool (*draw_source)(void* context, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
+    void* source_context;
+    bool (*draw_image)(void* context, const RdtSvgFilterNode* node, const RdtSvgFilterRun* run,
+        Bound region, Bound grid, ImageSurface* output);
+    void* image_context;
+    bool (*draw_input)(void* context, int input, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
+    void* input_context;
+};
+RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, Element* element);
+void render_svg_filter_program_release(RdtSvgFilterProgram* program);
+int render_svg_filter_input(const RdtSvgFilterProgram* program, size_t before, const char* name);
+RdtSvgFilterNoise* render_svg_filter_noise_create(Arena* arena, MemContext* memory, float seed);
+bool render_svg_filter_region(const RdtSvgFilterProgram* program, const RdtSvgFilterRun* run, Bound* region);
+bool render_svg_filter_execute(const RdtSvgFilterProgram* program, const RdtSvgFilterRun* run,
+    ImageSurface** result, Bound* bounds, RdtMatrix* placement);
+void render_svg_filter_resample_source(const RdtSvgFilterRun* run, const ImageSurface* source,
+    Bound source_bounds, Bound grid, ImageSurface* output);
+bool render_svg_filter_spend_work(const RdtSvgFilterRun* run, size_t work);
+bool render_memory_allow_allocation(MemContext* memory, size_t bytes);
+ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height);
 
 // ===== render_background.hpp =====
 // Background rendering functions
@@ -3514,6 +3769,7 @@ void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 // ===== render_img.hpp =====
 // Function declarations for image rendering
 StrBuf* render_encode_surface_png(ImageSurface* surface);
+StrBuf* render_encode_surface_data_uri(ImageSurface* surface);
 void save_surface_to_png(ImageSurface* surface, const char* filename);
 void save_surface_to_jpeg(ImageSurface* surface, const char* filename, int quality);
 int render_html_to_png(const char* html_file, const char* png_file,
@@ -3550,6 +3806,9 @@ void render_list_view(struct RenderContext* rdcon, ViewBlock* view);
 // ===== media render declarations =====
 struct RenderContext;
 
+Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
+bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
+                                    const Rect* content_rect);
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height);
 void render_image_view(struct RenderContext* rdcon, ViewBlock* view);
@@ -3630,9 +3889,6 @@ int render_document_transform_to_output_target(const char* document_file,
     const char* output_file, int viewport_width, int viewport_height,
     float output_scale, float device_scale, int jpeg_quality);
 
-// Detect graph syntax inputs before routing through the native transform configuration.
-bool graph_path_is_graph(const char* graph_file);
-
 // ===== render_overlay.hpp =====
 struct RenderContext;
 
@@ -3682,7 +3938,7 @@ int render_document_transform_to_svg(const char* document_file,
 
 // Function to render a view tree to SVG string
 char* render_view_tree_to_svg(UiContext* uicon, View* root_view,
-                              int width, int height, DocState* state = nullptr);
+                              float width, float height, DocState* state = nullptr, float output_scale = 1.0f);
 
 // Function to save SVG content to file
 bool save_svg_to_file(const char* svg_content, const char* filename);
@@ -3723,6 +3979,48 @@ struct SvgIntrinsicSize {
 
 #define SVG_USE_DEPTH_MAX 16     // nested <use> instantiations per render
 
+typedef enum {
+    SVG_PAINT_COLOR,
+    SVG_PAINT_NONE,
+    SVG_PAINT_CURRENT_COLOR,
+    SVG_PAINT_RESOURCE,
+    SVG_PAINT_CONTEXT_FILL,
+    SVG_PAINT_CONTEXT_STROKE,
+} SvgPaintKind;
+
+typedef struct {
+    SvgPaintKind kind;
+    Color color;
+    const char* reference;      // walk-owned URL and optional fallback
+    const char* fallback;
+    Element* source;
+    RdtMatrix source_transform;
+    void* source_style;         // borrowed walk-owned declaration document for relative paint URLs
+    const char* source_path;
+} SvgPaint;
+
+typedef struct {
+    SvgPaint fill, stroke;
+    Color current_color;
+    Bound geometry_box;
+    RdtMatrix transform;
+    const struct SvgInlineRenderContext* source_context; // borrowed producer scope, including its parent context paint
+} SvgContextPaint;
+
+enum SvgInheritedPropertyId {
+    SVG_STYLE_FILL_RULE, SVG_STYLE_STROKE_WIDTH, SVG_STYLE_STROKE_CAP,
+    SVG_STYLE_STROKE_JOIN, SVG_STYLE_MITER_LIMIT, SVG_STYLE_DASH_ARRAY,
+    SVG_STYLE_DASH_OFFSET, SVG_STYLE_PAINT_ORDER, SVG_STYLE_MARKER_START,
+    SVG_STYLE_MARKER_MID, SVG_STYLE_MARKER_END, SVG_STYLE_PROPERTY_COUNT,
+};
+
+struct SvgInheritedProperty {
+    const char* value;           // walk-owned computed tokens; percentages retain their used viewport basis
+    SvgLengthContext lengths;   // font metrics at the declaring element
+    void* source_style;
+    const char* source_path;
+};
+
 struct SvgInlineRenderContext {
     Element* svg_root;           // root <svg> element
     Pool* pool;                  // memory pool
@@ -3730,7 +4028,9 @@ struct SvgInlineRenderContext {
     DisplayList* dl;             // required display list target for deferred rendering
     PaintList* paint_list;       // required PaintIR gateway used before lowering to dl
     ScratchArena* resource_scratch; // per-render defs/style tables
+    int backdrop_start;           // display-list index at the current SVG isolation boundary
     const char* source_path;      // source SVG path for resolving nested resources
+    bool image_document;         // secure static image documents allow embedded resources only
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
     void* image_resolver_context;
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
@@ -3753,8 +4053,13 @@ struct SvgInlineRenderContext {
     Color current_color;         // CSS 'color' property for currentColor keyword
     float stroke_width;
     float opacity;
+    float fill_opacity, stroke_opacity;
     bool fill_none;
     bool stroke_none;
+    SvgPaint fill_paint, stroke_paint;
+    SvgInheritedProperty inherited_properties[SVG_STYLE_PROPERTY_COUNT];
+    const SvgContextPaint* context_paint;
+    void* paint_resource_scope;  // borrowed linked scopes prevent recursive paint servers
 
     // inherited text properties (used by <text>/<tspan> when not on element itself)
     const char* inherited_font_family;   // pointer into Element attribute string memory (lifetime of SVG element tree)
@@ -3770,14 +4075,15 @@ struct SvgInlineRenderContext {
     // gradient/pattern definitions from <defs>
     HashMap* defs;               // id → SvgDefTable*
 
-    // lightweight SVG-document stylesheet cache from embedded <style> nodes
-    void* style_rules;           // SvgStyleRule* (private to render_svg_inline.cpp)
-    int style_rule_count;
-    int style_rule_capacity;
+    // authored CSS adapter; borrowed only during this paint walk.
+    void* style_context;          // SvgStyleContext* (private to render_svg_inline.cpp)
+    bool visibility_hidden;
+    const char* inherited_font_style;
 
-    // Internal guard used while repainting a source element through a resolved
-    // SVG mask. Prevents recursive mask application on the same element.
-    bool suppress_masks;
+    Element* effect_source;      // source capture omits this element's own effects exactly once
+    const RdtSvgFilterRun* filter_work; // borrowed capture/kernel budget, including nested filter inputs
+    bool clip_geometry;         // clip children contribute fill geometry regardless of authored paint
+    SvgClipHitQuery* clip_hit_query; // borrowed analytic point query through the same clip traversal
 
     // Tree searched for same-document references (<use href="#id">): the DOM
     // tree root for inline SVG, otherwise the SVG root.
@@ -3838,7 +4144,13 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       bool initial_fill_none,
                       const Color* initial_stroke_color,
                       bool initial_stroke_none,
-                      float initial_stroke_width);
+                      float initial_stroke_width,
+                      UiContext* ui_context = nullptr);
+
+typedef bool (*SvgExportPaintConsumer)(PaintList* paint, void* context);
+bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
+    SvgExportPaintConsumer consumer, void* context);
+ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bound* logical_bounds);
 
 void render_svg_inline_register_paint_ir_lowerers(void);
 
@@ -3860,7 +4172,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
                       const Color* initial_stroke_color = nullptr,
                       bool initial_stroke_none = true,
                       float initial_stroke_width = -1.0f,
-                      Element* id_scope = nullptr);
+                      Element* id_scope = nullptr, double image_time = 0);
 
 // Tree an inline <svg>'s same-document references (<use href="#id">) resolve
 // in: its DOM tree root, which spans the whole HTML document when connected.

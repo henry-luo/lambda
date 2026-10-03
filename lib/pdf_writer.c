@@ -11,6 +11,7 @@
 #include "pdf_writer.h"
 #include "memtrack.h"
 #include "strbuf.h"
+#include "escape.h"
 #include "arraylist.h"
 #include "mempool.h"
 #include "arena.h"
@@ -201,28 +202,7 @@ static void record_obj_offset(HPDF_Doc doc, int obj_id, long offset, PdfObjType 
 
 // escape text for pdf string
 static void pdf_escape_text(StrBuf* buf, const char* text) {
-    strbuf_append_char(buf, '(');
-    for (const char* p = text; *p; p++) {
-        switch (*p) {
-            case '(':
-            case ')':
-            case '\\':
-                strbuf_append_char(buf, '\\');
-                strbuf_append_char(buf, *p);
-                break;
-            default:
-                if ((unsigned char)*p < 32 || (unsigned char)*p > 126) {
-                    // escape as octal
-                    char octal[8];
-                    snprintf(octal, sizeof(octal), "\\%03o", (unsigned char)*p);
-                    strbuf_append_str(buf, octal);
-                } else {
-                    strbuf_append_char(buf, *p);
-                }
-                break;
-        }
-    }
-    strbuf_append_char(buf, ')');
+    escape_append_pdf_literal(buf, text, strlen(text));
 }
 
 // format float for pdf (avoid unnecessary precision)

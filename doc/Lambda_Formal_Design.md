@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 17.0.0 (2026-10-02)
+**Spec version:** 19.0.0 (2026-10-03)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -442,6 +442,19 @@ language-visible counterparts are the semantics spec's SI ledger.
   JS-properties slot (D2.6.6v2), which frees exactly one such bit. The
   header is public ABI for MIR and the GC; the asserts are the enforcement.
   [OB22]
+
+- **D2.6.12v2*** **Virtual output lists carry their builder.** A PDF file's
+  content destination extends the existing List prefix (through Element)
+  with a builder pointer. Its `is_virtual` representation flag dispatches
+  content append to that builder instead of an Item array; it is independent
+  of the `is_spreadable` kind bit. Normal lists keep their existing storage.
+  A common builder interface admits future destinations. No output context
+  or allocator context is installed or changed. Finish and ownership follow
+  the extended destination. The PDFBuilder's MVP object encoder reads borrowed
+  map/array storage and writes bytes directly, retaining no source Item edges;
+  document construction stays in Lambda. Producer forwarding and the remaining
+  lifecycle and observation contracts are tracked in DO32/SO48.
+  [PDF_Output §5.4–§5.6]
 
 ### D2.7 The scalar-GC invariant
 
@@ -1312,6 +1325,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   `MarkEditor` are io (they take `Input*`) — ownership resolves the
   layering, not callback abstractions; forwarding shims are deleted once
   call sites migrate. [SM §9.4]
+- **D7.1.6** **`lambda-cli` is the runtime-only host**: it carries only
+  the Lambda runtime — core, io, the Lambda engine and validator, and the
+  third-party libraries they need — and excludes **Radiant, the JS/TS
+  runtime and DOM, Jube host modules, and the HTTP server (`serve`)**. It is
+  a reduced build profile beside the one `lambda.exe` (D1.1), not a bundle
+  of it. An excluded command fails with an explicit "excluded from this
+  build" diagnostic; importing a `.js`/`.ts` or Jube module is an ordinary
+  import error. Nothing degrades silently. [SM15]
 
 ### D7.2 Script packages
 
@@ -1493,7 +1514,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v14*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v15*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1502,6 +1523,11 @@ loosely across the corpus — context disambiguates, and we live with it.
   baseline execution mode and the retained AST is the runtime source of truth;
   the shipped Lambda script policy is **AUTO**: each definition starts in T0,
   and an eligible hot definition may promote to its P2 boxed MIR satellite.
+  *(v15, 2026-10-03, USER)* Explicit `LAMBDA_TIER=interp` is strictly T0:
+  unsupported scripts or imports fail with an unsupported-feature diagnostic
+  before execution; neither whole-module MIR fallback nor task-backed MIR
+  satellites are permitted. These fallback paths belong to AUTO only;
+  explicit `jit` selects the eager MIR path. [Ast_Interpreter AI24]
   Ordinary interpreted entries promote at `LAMBDA_JIT_THRESHOLD` (**5** by
   default). A direct, validated self-tail edge also increments the
   definition-site call and tail-edge counters; at the same threshold it may
@@ -2314,7 +2340,8 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.1v11 | Revised 2026-09-22 (v11): static file-backed import prebuild uses one bounded closure-wide task pool. Parse-accurate discovery immediately canonicalizes, deduplicates, and queues each static-import request; a completed child notifies and releases all direct parents, so a shared child is built once without dependency-depth batch barriers. Worker tasks publish only AST templates and never wait on child work; the cache retains its ordinary single-flight handling for separate closures. Initialization, execution, and MIR stay on the receiving runtime. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.1.1v12 | Revised 2026-09-22: AUTO P2 promotion queues one deduplicated, snapshot-safe target definition to the bounded process-wide compiler service and continues the triggering call in T0. A worker produces only a private, immutable MIR image from frozen facts; it never mutates a live Script context, AST analysis fact, module image, or Function entry. A later ordinary safe point generation-checks and publishes the target boxed entry. Stale/failed/unsupported work pins that execution-local definition to T0. This adds no OSR or active-frame replacement; private direct-callee cluster images remain later work. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. **Conformance fix 2026-09-22 (LR01-16):** the worker placed its image's property-key suffix from the owner slab's key count. That thread-local read saw an empty slab, and publication kept any suffix whose count differed, so every image after the first resolved member names through the first image's keys. The suffix is now placed when the safe point binds the image, linked by key-ID content and recorded in `LambdaModuleLayout::property_key_base`, which the generated code reads; `LAMBDA_SATELLITE_SYNC=1` pins publication for tests. |
 | D8.1.1v13 | Revised 2026-09-22: static import prebuild moves from a per-root closure graph to a process-global canonical profile/path task-future registry and one bounded pool. Root discovery is fire-and-forget; tasks immediately request all children, deduplicate a shared child, and release only direct parents by continuation. AST build workers never wait on child work. Ordinary Lambda/JS import consumers wait only for their direct dependency future; prebuild-worker loaders bypass that wait. The cache separately validates exact source identity before an artifact is consumed, and cycle/prebuild failure falls back to ordinary-loader diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
-| D8.1.1v14 | Ruled 2026-10-02 (USER), **not implemented**: loop-head handoff, the per-loop-site back-edge trigger at 10000, and retirement of the loop-owner first-entry trigger. Shipped behavior is unchanged: a definition whose body owns a loop is still queued at its first entry, back-edges are counted per definition against 1024, and a published image is reached only by a later function entry, so a once-called loop owner (`mandelbrot2`, `matmul2`) runs wholly in T0 under AUTO (about 250x its JIT time; `LAMBDA_SATELLITE_SYNC=1` removes the gap). Plan and evidence: `vibe/impl/Lambda_Impl_Interp_Tune2.md` Item 1. Working record: `vibe/Lambda_Design_Ast_Interpreter.md` §5.1.1. |
+| D8.1.1v14 | Ruled 2026-10-02 (USER); **partially implemented** 2026-10-02 (branch `worktree-interp-tune2`). Implemented: the per-loop back-edge trigger at 10000, retirement of the loop-owner first-entry trigger, and handoff at the loop head. The loop entry is a synthesized procedure over the live-in locals (the body's statements from the loop onward), entered through its boxed wrapper, so every live-in is admitted like an unknown caller's argument. Residue: eligible loops are only `while` statements directly in a `pn` body, and back-edges of their nested loops count toward them; the loop-triggered image does not carry the definition's own boxed entry. Under AUTO, `mandelbrot2` 12.0 s → 0.10 s and `matmul2` 6.3 s → 0.11 s (eager JIT 0.06 s / 0.05 s, debug build). AUTO corpus differential 1092/1092 identical; with `LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1` every eligible loop hands off and the corpus matches `interp` except one pre-existing sync-mode satellite abort. Plan and evidence: `vibe/impl/Lambda_Impl_Interp_Tune2.md` §12.2. Working record: `vibe/Lambda_Design_Ast_Interpreter.md` §5.1.1. |
+| D8.1.1v15 | **Implemented 2026-10-03.** Explicit interp rejects unsupported scripts/imports before execution, including task-backed MIR satellites and cached AST activation. AUTO retains fallback; explicit jit retains eager MIR. Lambda baseline: 6,180/6,180; strict-pin regression cases: 6/6. Evidence and existing differential failures: `vibe/impl/Lambda_Impl_Typed_Performance_Audit.md` §6–§7. |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
 | D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXECUTION_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
 | D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
@@ -2335,6 +2362,13 @@ slice; no formal semantic ruling or document semver changes.
 | D8.5.1v7 | Revised 2026-09-22: static-module prebuild is a process-global future registry, not a closure-owned graph and `wait_all()` barrier. Canonical profile/path requests share one in-flight or completed future across all roots; direct dependency continuations schedule parent AST builds without worker-side waits. Ordinary Lambda/JS import consumption waits only for its direct module future. The `InputScriptCache` remains the exact-source/profile artifact authority, so task readiness never bypasses source invalidation or normal diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 | D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
+
+**D2.6.12v2 — MVP with dictionaries, 2026-10-02.** Interpreter/MIR file
+construction selects `VirtualOutputElement`/`PDFBuilder`; raw byte appends,
+dictionary encoding, and `output` are implemented.
+The builder owns no Item edges and is released by the existing GC external
+payload hook. Producer-return lists and retained-content contracts remain DO32.
+[Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
 
 ## Appendix B — Open Design Issues (DO#)
 
@@ -2545,6 +2579,13 @@ Numbered `DO#` (design-open); each links to its record.
   eager tier's time by right.
 - **DO31** Whether an object declaration may name an element tag — `type <B> { x: int; string* }`, B being both the type name and the tag — and how a hierarchy's tags would relate. Deferred 2026-09-25: a nominal name is the type's name only and is never matched against a tag (D2.6.6v3); a tag is enforced by a structural element pattern, `type e = <tag …>`. [Type_Object OB23]
 
+- **DO32** Virtual PDF output follow-up: producer destination forwarding,
+  retained-file representation (SO48), structured encoder placement, byte
+  accounting, expression rollback, and phase-2 native helpers. The MVP uses
+  builder-owned bytes with precise wrapper lifetime, and does not promise
+  elimination of producer-return lists or migration of Radiant export.
+  [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
+
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |
@@ -2553,6 +2594,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.1 | Item_Boxing §0–§8 (R7–R10, W1–W3) | `Lambda_Design_Item_Boxing.md` |
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
+| D2.6.12v2 | PDF virtual-list and dictionary MVP | `Lambda_Design_PDF_Output.md` §5.4–§5.6 |
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
 | D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
@@ -2574,7 +2616,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
-| D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
+| D7.1 | SM1–SM15 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |

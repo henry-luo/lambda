@@ -27,24 +27,54 @@
 #include "../../io/mark_editor.hpp"  // For MarkEditor
 #include "../../io/mark_builder.hpp" // For MarkBuilder
 
+const char* dom_element_lookup_namespace_uri(DomElement* element, const char* prefix) {
+    if (!element) return nullptr;
+    if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
+    if (prefix && strcmp(prefix, "xmlns") == 0) return "http://www.w3.org/2000/xmlns/";
+    char declaration[128] = "xmlns";
+    if (prefix && *prefix) {
+        size_t length = strlen(prefix);
+        if (length + 7 > sizeof(declaration)) return nullptr;
+        declaration[5] = ':';
+        memcpy(declaration + 6, prefix, length);
+        declaration[6 + length] = '\0';
+    }
+    // XML namespace declarations inherit independently of HTML integration points.
+    for (DomNode* node = element; node; node = node->parent) {
+        if (!node->is_element()) continue;
+        const char* uri = node->as_element()->get_attribute(declaration);
+        if (uri) return *uri ? uri : nullptr;
+    }
+    return nullptr;
+}
+
 const char* dom_element_namespace_uri(DomElement* element) {
-    if (!element) return "";
-    const char* explicit_uri = element->get_attribute("__lambda_ns_uri");
-    if (explicit_uri) return explicit_uri;
+    if (!element || !element->tag_name) return "";
+    const char* uri = element->get_attribute("__lambda_ns_uri");
+    if (uri) return uri;
+    const char* colon = strchr(element->tag_name, ':');
+    char prefix[128] = {};
+    if (colon) {
+        size_t length = (size_t)(colon - element->tag_name);
+        if (!length || length >= sizeof(prefix)) return "";
+        memcpy(prefix, element->tag_name, length);
+    }
+    uri = dom_element_lookup_namespace_uri(element, prefix);
+    if (uri) return uri;
+    if (colon) return "";
     for (DomNode* node = element; node; node = node->parent) {
         if (!node->is_element()) continue;
         DomElement* ancestor = node->as_element();
         if (!ancestor->tag_name) continue;
+        // SVG HTML integration points stop inherited SVG namespace membership.
         if (node != element &&
-            str_icmp_cstr(ancestor->tag_name, "foreignObject") == 0) {
-            return "http://www.w3.org/1999/xhtml";
-        }
-        if (str_icmp_cstr(ancestor->tag_name, "svg") == 0) {
+            (str_icmp_cstr(ancestor->tag_name, "foreignObject") == 0 ||
+             str_icmp_cstr(ancestor->tag_name, "desc") == 0 ||
+             str_icmp_cstr(ancestor->tag_name, "title") == 0)) break;
+        if (str_icmp_cstr(ancestor->tag_name, "svg") == 0)
             return "http://www.w3.org/2000/svg";
-        }
-        if (str_icmp_cstr(ancestor->tag_name, "math") == 0) {
+        if (str_icmp_cstr(ancestor->tag_name, "math") == 0)
             return "http://www.w3.org/1998/Math/MathML";
-        }
     }
     return "http://www.w3.org/1999/xhtml";
 }
@@ -449,6 +479,7 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement) {
 
 void DomDocument::destroy() {
     dom_retire_begin_destroy(this);
+    mem_free(services.preferred_languages); services.preferred_languages = nullptr;
     float ext_rate = services.element_count
         ? 100.0f * (float)services.ext_allocations / (float)services.element_count
         : 0.0f;
@@ -1204,6 +1235,12 @@ bool DomElement::set_attribute(NameId name_id, const char* value) {
     // DOM storage still accepts bytes, but generated callers must preserve the
     // NameId until this single backing-map boundary.
     return name.str ? set_attribute(name.str, value) : false;
+}
+
+const char* DomElement::local_name() const {
+    if (!tag_name) return "";
+    const char* prefix = strchr(tag_name, ':');
+    return prefix ? prefix + 1 : tag_name;
 }
 
 const char* DomElement::get_attribute(const char* name) {
@@ -3404,6 +3441,11 @@ DomText* DomElement::append_text(const char* text_content) {
 // DOM Comment/DOCTYPE Node Implementation
 // ============================================================================
 
+bool dom_is_comment_tag(const char* tag_name) {
+    return tag_name && (strcmp(tag_name, "!--") == 0 ||
+        strcmp(tag_name, "#comment") == 0 || str_ieq_cstr(tag_name, "!DOCTYPE"));
+}
+
 DomComment* DomComment::create(Element* native_element, DomElement* parent_element) {
     if (!native_element || !parent_element) {
         log_error("DomComment::create: native_element and parent_element required");
@@ -3443,7 +3485,7 @@ DomComment* DomComment::create_detached(Element* native_element, DomDocument* do
     DomNodeType node_type;
     if (str_ieq_cstr(tag_name, "!DOCTYPE")) {
         node_type = DOM_NODE_DOCTYPE;
-    } else if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0) {
+    } else if (dom_is_comment_tag(tag_name)) {
         node_type = DOM_NODE_COMMENT;
     } else {
         log_error("DomComment::create_detached: not a comment or DOCTYPE: %s", tag_name);
@@ -3647,13 +3689,12 @@ DomComment* DomElement::append_comment(const char* comment_content) {
         return nullptr;
     }
 
-    // Create DomComment wrapper
-    DomComment* comment_node = DomComment::create(
-        comment_item.element,
-        parent
-    );
+    // UI relinking already created the comment wrapper; keep that identity.
+    DomComment* comment_node = parent->doc->input->ui_mode
+        ? (parent->last_child ? parent->last_child->as_comment() : nullptr)
+        : DomComment::create(comment_item.element, parent);
 
-    if (!comment_node) {
+    if (!comment_node || comment_node->native_element != comment_item.element) {
         log_error("dom_element_append_comment: failed to create DomComment");
         return nullptr;
     }
@@ -3704,28 +3745,8 @@ bool dom_comment_remove(DomComment* comment_node) {
         return false;
     }
 
-    // Remove from DOM sibling chain (skip in ui_mode: MarkEditor's dom_relink_children already rebuilt)
-    if (!parent->doc->input->ui_mode) {
-        if (comment_node->prev_sibling) {
-            comment_node->prev_sibling->next_sibling = comment_node->next_sibling;
-        } else if (comment_node->parent) {
-            DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
-            elem_parent->first_child = comment_node->next_sibling;
-        }
-
-        if (comment_node->next_sibling) {
-            comment_node->next_sibling->prev_sibling = comment_node->prev_sibling;
-        } else if (comment_node->parent) {
-            // Comment node was last child
-            DomElement* elem_parent = static_cast<DomElement*>(comment_node->parent);
-            elem_parent->last_child = comment_node->prev_sibling;
-        }
-    }
-
-    // Clear references
-    comment_node->parent = nullptr;
-    comment_node->prev_sibling = nullptr;
-    comment_node->next_sibling = nullptr;
+    // relinking preserves DOM-only survivors; explicitly unlink the deleted wrapper.
+    if (!parent->remove_child(comment_node)) return false;
     comment_node->native_element = nullptr;
     log_debug("dom_comment_remove: removed comment at index %lld", child_idx);
     return true;
@@ -3826,7 +3847,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
     // Skip comments and DOCTYPE - they will be created as DomComment nodes below
     // HTML5 parser uses "#comment", CSS/older parsers use "!--"
-    if (strcmp(tag_name, "!--") == 0 || strcmp(tag_name, "#comment") == 0 || str_ieq_cstr(tag_name, "!DOCTYPE")) {
+    if (dom_is_comment_tag(tag_name)) {
         return nullptr;  // Not a layout element, processed as child below
     }
 
@@ -4004,7 +4025,7 @@ DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElem
 
             // Check if this is a comment or DOCTYPE
             // HTML5 parser uses "#comment", CSS/older parsers use "!--"
-            if (strcmp(child_tag_name, "!--") == 0 || strcmp(child_tag_name, "#comment") == 0 || str_ieq_cstr(child_tag_name, "!DOCTYPE")) {
+            if (dom_is_comment_tag(child_tag_name)) {
                 // Create DomComment node backed by Lambda Element
                 DomComment* comment_node = DomComment::create(child_elem, dom_elem);
                 if (comment_node) {

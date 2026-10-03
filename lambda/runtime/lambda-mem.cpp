@@ -1,3 +1,4 @@
+#include "../io/mark_output_builder.hpp"
 #include "transpiler.hpp"
 #include <limits.h>
 #include "../../lib/log.h"
@@ -154,6 +155,12 @@ extern "C" void js_function_gc_destroy(void* data);
 
 void heap_gc_destroy_external_payload(void* obj, uint16_t type_tag) {
     if (!obj) return;
+    if (type_tag == LMD_TYPE_ELEMENT && container_is_virtual_list((Container*)obj)) {
+        VirtualOutputElement* element = (VirtualOutputElement*)obj;
+        if (element->builder) element->builder->ops->destroy(element->builder);
+        element->builder = NULL;
+        return;
+    }
     if (type_tag == LMD_TYPE_FUNC) {
         // A function value may own optional native payloads (JSCU20); the JS
         // side knows which layout it is and what it owns.
