@@ -192,13 +192,13 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     DomElement* root = DomElement::create(&doc, "div", backing);
     DomElement* control = DomElement::create(&doc, "input", backing);
     ASSERT_NE(root, nullptr); ASSERT_NE(control, nullptr);
-    doc.root = root;
+    doc.root = lam::up(root);
     ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(control));
     ASSERT_NE(state_store_create(&doc), nullptr);
     control->view_type = RDT_VIEW_BLOCK;
     FormControlProp original{}, rebuilt{};
     original.control_type = rebuilt.control_type = FORM_CONTROL_TEXT;
-    control->form = &original;
+    control->form = lam::own(&original);  // test-owned prop
     ASSERT_TRUE(form_control_store_text_value(doc.state, static_cast<View*>(control), "svg", 3, 3));
     ASSERT_TRUE(root->remove_child(control));
     // D4.5.1v3: layout properties are temporary; the registered DOM control owns its value.
@@ -208,7 +208,7 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), &length), "svg");
     EXPECT_EQ(length, 3u);
     ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(control));
-    control->view_type = RDT_VIEW_BLOCK; control->form = &rebuilt;
+    control->view_type = RDT_VIEW_BLOCK; control->form = lam::own(&rebuilt);
     state_store_prune_after_reflow(doc.state);
     EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), nullptr), "svg");
     control->form = nullptr;
