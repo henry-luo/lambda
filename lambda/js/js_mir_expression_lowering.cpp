@@ -2027,7 +2027,10 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     return jm_apply_with_identifier_fallback(mt, id, live_val);
                 }
                 MIR_reg_t mv = jm_load_module_var(mt, (uint32_t)mc->int_val);
-                JsFuncCollected* direct_func =
+                // a P2 satellite runs after the interpreter instantiated every
+                // hoisted declaration, and it does not define other functions'
+                // MIR items, so it reads the binding as stored
+                JsFuncCollected* direct_func = mt->p2_satellite_node ? NULL :
                     jm_find_direct_function_decl_for_identifier(mt, id);
                 if (direct_func && direct_func->func_item &&
                         !JM_JS_FACT(direct_func, is_reassigned)) {

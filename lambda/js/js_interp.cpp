@@ -6469,8 +6469,10 @@ static bool js_interp_p2_is_data_object_property(JsPropertyNode* property) {
             property->key->node_type == AST_NODE_LITERAL);
 }
 
-// P2 has no shared closure or module-value ABI. Static member names are sealed
-// into the definition's module slab, while their receivers remain local values.
+// P2 has no shared closure ABI. Script top-level bindings are read from the
+// definition's module slab, globals by name, and calls go through the invoke
+// kernel. Static member names are sealed into the definition's module slab,
+// while their receivers remain local values.
 static void js_interp_p2_scan_node(JsAstNode* node,
         JsP2AdmissionScan* scan) {
     if (!node || !scan || scan->reject_reason) return;
@@ -6479,12 +6481,9 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         if (js_interp_p2_is_this_identifier(node)) break;
         JsIdentifierNode* identifier = (JsIdentifierNode*)node;
         NameEntry* entry = identifier->entry;
-        if (!entry) {
-            if (!js_ast_identifier_named(node, "undefined", 9)) {
-                js_interp_p2_reject(scan, "unresolved global name");
-            }
-            break;
-        }
+        // An unresolved name is a global-object read the satellite performs
+        // by name, exactly as T0 does (E1, Lambda_Impl_JS_Interp_Tune.md).
+        if (!entry) break;
         AstNodeId binding_id = entry->node
             ? ast_index_find(&scan->script->ast_index, entry->node)
             : AST_NODE_ID_INVALID;
@@ -6492,13 +6491,21 @@ static void js_interp_p2_scan_node(JsAstNode* node,
                 binding_id >= scan->script->ast_index.count ||
                 scan->script->ast_index.owner_functions[binding_id] !=
                     scan->function_id) {
-            js_interp_p2_reject(scan, "captured or module binding");
+            // A script top-level binding lives in the retained module slab;
+            // the satellite is pointed at its slot. Anything else is a capture.
+            if (entry->scope != scan->script->global_scope) {
+                js_interp_p2_reject(scan, "captured binding");
+            }
         }
         break;
     }
-    case AST_NODE_CALL_EXPR:
     case AST_NODE_NEW_EXPR:
-        js_interp_p2_reject(scan, "call boundary");
+        js_interp_p2_reject(scan, "construct boundary");
+        break;
+    case AST_NODE_CALL_EXPR:
+        // Calls go through the ordinary invoke kernel; the callee may be
+        // interpreted or native (JSI9). A satellite never calls another
+        // definition's MIR item directly.
         break;
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {

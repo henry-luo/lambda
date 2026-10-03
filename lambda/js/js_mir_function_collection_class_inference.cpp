@@ -29,6 +29,7 @@ JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
             fn = (JsFunctionNode*)decl->init;
         }
     }
+    if (fn && mt->p2_satellite_node && fn != mt->p2_satellite_node) return NULL;
     if (stable && ntype == AST_NODE_FUNC &&
             !jm_function_decl_is_direct_binding((JsFunctionNode*)definition, false)) return NULL;
     if (stable && ntype == AST_NODE_VARIABLE_DECLARATOR &&
