@@ -405,9 +405,10 @@ kernel of A1/A2 takes its policy values from the profile, so each language
 reads its own knobs; the stress differential for JS is
 `JS_FUNC_JIT_THRESHOLD=1 JS_LOOP_JIT_THRESHOLD=1` with synchronous publication.
 
-**R3 — Hotness-only promotion; call threshold 1000, then 100.** A JS definition is
-compiled only on a hot hit: 1000 calls (five before; **100** since
-**D8.1.3v23**, §11.5) or a loop reaching the
+**R3 — Hotness-only promotion; call threshold 1000, then 100, then 5.** A JS
+definition is compiled only on a hot hit: 1000 calls (five before; 100 since
+D8.1.3v23, §11.5; **5**, the same as Lambda, since **D8.1.3v24**, §11.6) or a
+loop reaching the
 back-edge threshold. Nothing is compiled at first entry or because a
 definition owns a loop. Both thresholds are provisional and are to be revised
 from release profiling (E4). The default is changed in
@@ -584,6 +585,37 @@ call threshold / back-edge threshold.
   round, so its regression is not a threshold effect. Probable cause: E1 now
   promotes its recursive function, whose calls go through the generic call
   kernel. Not yet investigated.
+
+### 11.6 Function-threshold sweep for both languages (D8.1.3v24)
+
+Release `a51bab468`, AUTO, loop threshold 10000, values interleaved per
+script, min of three, load 3–6 (2026-10-03 18:16–19:45). Script:
+`temp/bench_auto/func_sweep.py`; data `func_sweep_{lambda,js}.json` (main
+checkout). Geomean end-to-end wall time, lower is better:
+
+| Threshold | 1 | 2 | 5 | 10 | 25 | 100 | 500 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Lambda, 126 scripts, vs 5 | 1.040 | 1.005 | **1.000** | 1.014 | 1.033 | 1.069 | 1.113 |
+| JS, 73 rows, vs 100 | 0.875 | 0.983 | **0.978** | 0.984 | 0.990 | 1.000 | 1.008 |
+
+- **Lambda:** 5 is best (2 ties within noise; exec time 0.987 vs 1.000). 1
+  costs 4% by compiling once-called functions; above 10 cost grows steadily
+  (diviter 458 ms at 5 → 11.3 s at 500).
+- **JS:** among real thresholds 5 is best, on wall and on exec time (0.955 vs
+  100). The default is set to 5 (**D8.1.3v24**).
+- **JS at 1** compiles every function at its first call, which hotness-only
+  promotion excludes. Its gain is concentrated in rows whose hot function is
+  called once and so reaches MIR only through loop handoff: larceny/primes
+  75 vs 1,798 ms, kostya/primes 76 vs 1,740, matmul 222 vs 636, fft2 48 vs
+  121, array1 34 vs 63, ray 40 vs 61, triangl 5.5 vs 6.9 s. The continuation
+  runs up to 24× slower than the whole-function satellite there — a
+  continuation-quality defect (likely: locals built before the loop lose
+  their native types as parameters), not a threshold question. Next item.
+- **Threshold 2** shows isolated pathologies in both languages (JS triangl
+  12.8 s vs 6.9 s; Lambda paraffins 47 vs 25 ms), not investigated.
+- Not usable: octane rows, `run_octane.js`, `prettier_ast_preprocess.js` and
+  `havlak2.js` error or time out at every value; two text rows were not
+  reached before the run's time limit.
 
 ### 11.4 Not done
 

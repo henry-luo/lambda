@@ -6636,7 +6636,7 @@ static void js_interp_p2_scan_node(JsAstNode* node,
 
 // D8.1.3v22: a definition is compiled only on a hot hit; the defaults are
 // provisional until release profiling.
-#define JS_FUNC_JIT_THRESHOLD 100
+#define JS_FUNC_JIT_THRESHOLD 5
 #define JS_LOOP_JIT_THRESHOLD 10000
 
 static uint32_t js_interp_policy_threshold(const char* name, uint32_t fallback) {
