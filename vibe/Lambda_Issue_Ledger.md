@@ -876,6 +876,23 @@ Take `fn f(a, b = 2) => [a, b]`. `f(1, zz: 5)` is `[1, 2]`, and so is `f(5, a: 1
 <a id="lr07-41"></a>**LR07-41 · JIT: a self-referencing union's value crashes (S1.6) · OPEN (found 2026-09-26, while fixing LR03-29)**
 `type U = U | int` then `[U]` segfaults on the JIT; T0 prints it, and `5 is U` is `true` on both tiers. The binary from before the type-value fix pass crashes the same way, so type equality is not involved: emitting the alias's value recurses through its own arm.
 
+<a id="lr07-42"></a>**LR07-42 · An async procedure's state machine grows quadratically with its calls: ~300 ms to compile `beng/knucleotide` (D8.1.1v2) · OPEN (found 2026-10-03, by the AUTO benchmark sweep)**
+`test/benchmark/beng/knucleotide.ls` (rewritten in `c839925ca`) runs a 2–3 ms workload, but AUTO takes ~318 ms end to end and eager JIT ~236 ms (quiet machine, release). The v50 binary shows the same cost on the new script, so this is a codegen cost, not a recent regression. `main` reads its input with `io.read(INPUT_PATH)^`. That makes it an async procedure (the concurrency planner logs "pn main suspends because it calls io_read"), and an async procedure must run as a resumable MIR state machine. T0 therefore compiles it synchronously at first entry, together with its 8 direct callees (`interp_make_closure` → `compile_ast_function_satellite`). Under `LAMBDA_SATELLITE_CLUSTER_SKIP`, the image costs 315 ms with every member and 23 ms with `main` alone. Most of the cost follows `print_count`, a one-line callee: skipping it leaves 82 ms. The size is in `main` itself: **54,254 MIR lines**, of 59,238 for the whole module.
+
+Two causes multiply:
+
+1. **A resume state at every call that can raise.** `mir_call_may_suspend` is correct here: every local callee has `may_await = 0`. But each call to a raising `pn` has an error exit, and in an async procedure every error exit unwinds the task scope through `transpile_task_scope_unwind_to`. `lambda_task_scope_unwind` may suspend, so each such exit allocates its own park/resume state. `main` gets 12 states: 2 for `io.read` and 10 for scope unwinds after `extract_three`, `count_small_kmers`, two `print_frequency_table` calls and five `print_count` calls. `main` starts no task, so under S13.3.1 (a handle is owned by the nearest lexical block) its scope can hold no handle to join at any of those exits.
+2. **Each state saves every register created so far, live or not.** `new_reg` calls `async_track_reg`, which adds every register an async procedure creates to `mt->async_spills`, and the list never shrinks. Each state's `async_save_spills` / `async_restore_spills` covers the whole prefix, as one `lambda_async_frame_set_word`/`get_word` call per register, each with its own root-slot reloads around it. The words saved per state grow 14, 28, 41, 58, 71, 109, 124, 139, 154, 169, 187, and the MIR between consecutive states grows from ~240 to ~12,000 lines, so size is quadratic in the number of states. `main` has 1,104 `set_word` and 1,104 `get_word` calls.
+
+Confirmation: replacing `io.read(INPUT_PATH)^` with the synchronous `input(INPUT_PATH, "text")^` leaves `main` non-async. The module drops from 59,238 to 5,502 MIR lines with no async states, and eager JIT wall falls from 891 to 121 ms (minimum of 3 at load ~59; read the ratio, not the absolute times). The effect is not specific to this benchmark: any `pn` that awaits once and then makes many calls pays it.
+
+Possible fixes, independent and combinable:
+
+- **(A) Save only what is live across each state.** Restrict `async_save_spills` / `async_restore_spills` to registers live at the suspension point, from a liveness pass over the async function or from the tracked set pruned at scope exits. Cost becomes linear in the number of states, with no semantic change. This is the larger codegen change.
+- **(B) Emit no suspendable unwind where the scope can own no handle.** Under S13.3.1 a block owns only the handles started in it, so a procedure (or block) with no `start` in its body can skip the park/resume state at its error exits and unwind synchronously. This removes 10 of `main`'s 12 states here. It depends on the task-scope rules: confirm that nothing else, such as `io.read`'s own task, can be registered in the caller's scope after its await completes. It needs a ruling (D8.1.1v2 / S13.3).
+
+Repro: `LAMBDA_TIER=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
+
 ## 8. Memory management & GC (LR_08)
 
 

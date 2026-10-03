@@ -1079,7 +1079,9 @@ are slower, none because of the handoff:
 
 - `knucleotide` (untyped) 32 → 318 ms: the script was rewritten after v50
   (`c839925ca`), and the new version spends ~300 ms compiling a 9-member
-  `main` image. The v50 binary shows the same on it.
+  `main` image. The v50 binary shows the same on it. Cause: `main` is async
+  (`io.read`) and its state machine grows quadratically with its calls;
+  filed as [LR07-42](../Lambda_Issue_Ledger.md#lr07-42).
 - `base64`, `json_gen`: ~12 ms slower. Unchanged with handoff disabled and
   present on `2b2339b88`, so the cause is a master change since v50; not
   bisected.
