@@ -323,7 +323,9 @@ Reading:
 - 1,024 is below every measured crossover.
 - The crossover moves when T0 gets faster. Items 2–5 target a 1.3–2× lower
   per-iteration cost for typed bodies, which raises the crossover by the same
-  factor. Re-run this measurement after they land.
+  factor. Re-run this measurement after they land. *(Re-run 2026-10-03,
+  §12.6: crossovers 6,300–9,500 on the post-Tune2 release, and a whole-suite
+  sweep of 2,500–50,000 finds 10,000 on the flat optimum. The default stands.)*
 
 The probes are small definitions. A long definition costs more to compile for
 the same loop, so its crossover is higher; the Phase 1.1 census covers that
@@ -795,7 +797,7 @@ capture are in `temp/interp_perf/` (`cpu.sh`, `prof.sh`, `agg.py`,
 
 | Item | Status |
 |---|---|
-| 1 Loop-head handoff | Implemented 2026-10-02 (§12.2), narrower than the §6 plan; census done (§12.5) |
+| 1 Loop-head handoff | Implemented 2026-10-02 (§12.2), narrower than the §6 plan; census done (§12.5); benchmark round and threshold evidence (§12.6) |
 | 2 Lazy boundary diagnostics | Implemented 2026-10-02 (§12.1) |
 | 3 Contract plan | Implemented 2026-10-02 as a tag fast path, not a stored plan (§12.1) |
 | 4 Planned call sites, direct entry | Declined on the reprofile (§12.4): the layer it removes is 3–5% |
@@ -1028,3 +1030,127 @@ interleaved runs, load average 37–57):
 
 Eager JIT is unchanged, as it should be: the shared-helper and lowering
 changes alter only paths it reaches through boxed calls.
+
+### 12.6 Benchmark round and threshold evidence (2026-10-03)
+
+Branch `fix-continuation-param-inference` (based on `2b2339b88`, commit
+`551d9cd3e`). Release binaries from `make build-release-compile`. Timings were
+taken only when the 1-minute load average was below 4 and no other
+`lambda.exe` ran. An earlier attempt at load 26–47 read 1.55× slower on every
+row, eager JIT included, and was discarded. The eager-JIT column serves as the
+control: typed JIT against v50 is 0.985× geomean, so the machine matches the
+v50 capture.
+
+**Elevation census** (126 benchmark scripts, default AUTO,
+`LAMBDA_LOOP_CENSUS=1`): 70 scripts have a loop reaching 10,000 back-edges;
+73 continuations published, 64 handoffs, 34 still queued at exit (18 because
+the function itself had compiled by call count first, 16 because the loop
+ended before its image arrived), 6 pinned (fasta, revcomp, hyphen,
+three_way_merge2).
+
+**Defects found and fixed.** Each was caught by a differential against
+`interp` in stress mode (`LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1`) or
+under forced call promotion (`LAMBDA_JIT_THRESHOLD=2 LAMBDA_SATELLITE_SYNC=1`).
+Regression cases (g)–(i) are in `test/lambda/proc/interp_loop_handoff.ls`.
+
+1. A continuation skips batched parameter-type inference. It has no call
+   sites, so the body alone inferred an int live-in as float; the result was
+   invalid MIR in `awfy/mandelbrot` and `r7rs/fft`.
+2. A local's simple `TypeType` annotation is unwrapped before it becomes the
+   live-in's contract (`pidigits2`'s `string` read as a type value).
+3. Pre-existing. The native `string` parameter lane is the raw pointer
+   (D2.4.1). The owned-concat path `s = s ++ x` unboxed it blindly and direct
+   calls passed a boxed local through, so wrapper, literal-argument and
+   function-value entries printed `<error>`.
+4. Pre-existing. The finite-loop plan accepted a `float` bound and range-checked
+   it as an int lane: invalid MIR in eager JIT.
+5. Pre-existing. A dynamic cross-image call passed a `var` place argument
+   (`vec_add(arr.vals, x)`) by value, so the callee's push detached a private
+   copy. It now borrows the place like the direct edge (CW25, S9.2.2). This,
+   not the entry snapshot, was the cause of `awfy/json`'s lost pushes.
+
+**AUTO end to end against v50** (wall clock including startup and compile;
+geomean of new/v50 over 63 rows): untyped **0.74×**, typed **0.64×**. By suite,
+untyped/typed: AWFY 0.64/0.58, BENG 1.06/0.71, KOSTYA 0.51/0.29, LARCENY
+0.75/0.69, R7RS 0.79/0.77, JetStream 0.80/0.77, Text 0.80/0.89. The largest
+moves are loops that now hand off: `mandelbrot2` 7,455 → 61 ms, `matmul2`
+3,965 → 51 ms, `primes2` 943 → 104 ms, `levenshtein2` 276 → 63 ms. Three rows
+are slower, none because of the handoff:
+
+- `knucleotide` (untyped) 32 → 318 ms: the script was rewritten after v50
+  (`c839925ca`), and the new version spends ~300 ms compiling a 9-member
+  `main` image. The v50 binary shows the same on it.
+- `base64`, `json_gen`: ~12 ms slower. Unchanged with handoff disabled and
+  present on `2b2339b88`, so the cause is a master change since v50; not
+  bisected.
+
+**AST (`LAMBDA_TIER=interp`) against the v50 binary** (one run per row, same
+quiet machine): untyped **0.61×**, typed **0.55×**. R7RS gained most
+(0.39–0.45; `tak` 45 → 12 ms, `divrec` 492 → 127 ms), from §12.1–12.4.
+
+**Break-even, re-measured** (the §4.3 probes on this release). The "buy" side
+is now `LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1`, so it pays for exactly
+what the threshold decides, one continuation image:
+
+| Probe | T0 per iteration, v50 → now | Continuation compile | Crossover N |
+|---|---|---:|---:|
+| A: typed `float[]` inner product | 0.74 → 0.23 µs | 1.9 ms | 8,100 |
+| B: typed float recurrence | 1.41 → 0.33 µs | 2.1 ms | 6,300 |
+| C: untyped integer counter | 0.28 → 0.14 µs | 1.0 ms | 9,500 |
+| D: map member updates and a call | 1.51 → 0.61 µs | 3.7 ms | 7,500 |
+
+T0 got 2–4× faster, which raises the crossover. A continuation compiles in a
+third to a quarter of a whole definition's time, which lowers it. The two
+roughly cancel. All four crossovers lie at 6,300–9,500, and at N = 10,000 the
+two strategies are within 0.6 ms of each other on every probe. Triggering at
+break-even is the rent-or-buy rule: total cost at most twice the optimum
+whatever the loop's eventual length.
+
+**Threshold sweep** (whole AUTO suite, `LAMBDA_JIT_BACKEDGE` at each value,
+3 runs each, quiet machine). Geomean is against 10,000 over 58 rows. Excluded
+are `larceny/array1` (see below) and four Text rows whose 50,000 runs hit a
+load spike. Image counts are over the 126 benchmark scripts.
+
+| Threshold | Untyped geo | Typed geo | Loop images queued | Handoffs | Unused images |
+|---:|---:|---:|---:|---:|---:|
+| 2,500 | 0.998 | 0.987 | 139 | 88 | 51 |
+| 5,000 | 1.012 | 1.002 | 121 | 79 | 42 |
+| **10,000** | **1.000** | **1.000** | **100** | **71** | **29** |
+| 20,000 | 1.012 | 1.011 | 77 | 69 | 8 |
+| 50,000 | 1.063 | 1.079 | 54 | 44 | 10 |
+
+- **Why not lower.** 2,500 and 5,000 buy nothing measurable (within ±1.3%)
+  and queue 21–39% more images, of which 42–51 are never used: worker CPU and
+  one private MIR context each (§5). Below the measured crossovers, compiling
+  costs more than the interpreting it saves. Individual rows split both ways
+  (`fft`, `fannkuch2`, `base642` faster; `collatz` +18%, `nqueens2`,
+  `cube3d2` slower), so the rows do not show a systematic gain either.
+- **Why not higher.** 20,000 is 1.1–1.2% slower. It loses on loops of
+  10,000–20,000 back-edges that now finish in T0: `navier_stokes` +25%/+28%,
+  `matmul2` +30%, `fannkuch2`, `havlak2`, `base642`. Its advantage is image
+  economy: 77 images and only 8 unused, against 100 and 29. 50,000 is 6–8%
+  slower, with 13–14 rows above +10%: the long-loop rows (`mandelbrot`,
+  `spectralnorm`, `fannkuch`) start compiling 40,000 back-edges later.
+- **Reading.** The suite optimum is flat from 2,500 to 20,000, and 10,000
+  sits on it, just above every measured crossover. It is the lowest value
+  that wastes no time on loops below break-even. 20,000 would trade ~1% of
+  time for ~70% fewer unused images. That is a trade the D8.1.1v14 ruling did
+  not make, and this data does not force it. The default stays 10,000.
+
+**Found by the sweep: a definition's single loop image goes to its first hot
+loop.** `larceny/array1`'s `benchmark` runs a 10,000-iteration fill loop and
+then a 1,000,100-iteration loop. At 10,000 the first loop queues the
+definition's continuation, bound to itself, and exits before the image is
+published. The second loop then runs entirely in T0, because the definition
+is already queued once (D8.1.1v14 ruling 1). At 20,000 the first loop never
+qualifies, and the run takes 9.6 ms instead of 131 ms. This is independent of
+the threshold value: any value equal to an early loop's trip count reproduces
+it. Remedies (re-queue when the bound loop has exited, or one image per loop
+site) change the "once per definition" rule and need a ruling.
+
+**Open.** The one-image-per-definition case above; `test/lambda/interp_variadic.ls`
+SIGSEGV under forced call promotion (master too); the post-v50
+`base64`/`json_gen` regression; `knucleotide`'s compile cost. Scratch tooling
+in the main checkout's `temp/bench_auto/` (`diffrun.py`, `ast_time.py`,
+`th_compare.py`, `imgcount.py`) and `temp/interp_perf/be/` (`sweep2.py`,
+`fit2.py`), not tracked.
