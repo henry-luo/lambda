@@ -487,7 +487,7 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
 
     CustomLayoutResult result;
     memset(&result, 0, sizeof(result));
-    result.placements = placements;
+    result.placements = lam::own_arr(placements);
     result.placement_capacity = child_count;
 
     bool ok = fn(&context, &result);

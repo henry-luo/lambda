@@ -372,7 +372,7 @@ TEST_F(CustomLayoutTest, GeneratedPaintAndChildrenShareSignedStackingOrder) {
     layers[1].order = 1;
     layers[2].z = -1;
     layers[2].order = 2;
-    CustomLayoutPaintState paint = {layers, 3};
+    CustomLayoutPaintState paint = {lam::own_arr(layers), 3};
     parent.set_custom_layout_paint_prop(&paint);
 
     RadiantStackPaintList list = radiant_stack_collect_custom_layout_paint(&parent);

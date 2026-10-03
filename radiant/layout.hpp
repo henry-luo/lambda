@@ -967,18 +967,18 @@ static inline void layout_apply_positive_min_max_contribution(ViewBlock* block, 
 
 // CSS quad shorthands use the same clockwise expansion for borders, spacing, and insets.
 struct CssQuadValues {
-    const CssValue* side[4];
+    lam::Up<const CssValue> side[4];
 
     bool expand(const CssValue* value) {
         if (!value) return false;
         if (value->type != CSS_VALUE_TYPE_LIST) {
-            for (int i = 0; i < 4; i++) side[i] = value;
+            for (int i = 0; i < 4; i++) side[i] = lam::up(value);
             return true;
         }
         int count = value->data.list.count;
         if (count < 1 || count > 4 || !value->data.list.values) return false;
         for (int i = 0; i < 4; i++) {
-            side[i] = value->data.list.values[css_quad_value_index(count, i)];
+            side[i] = lam::up(value->data.list.values[css_quad_value_index(count, i)]);
             if (!side[i]) return false;
         }
         return true;
@@ -986,8 +986,8 @@ struct CssQuadValues {
 };
 
 typedef struct CssCascadeCandidate {
-    CssDeclaration* decl;
-    CssValue* value;
+    lam::Up<CssDeclaration> decl;
+    lam::Up<CssValue> value;
     int64_t priority;
 } CssCascadeCandidate;
 
@@ -1008,8 +1008,8 @@ static inline void css_consider_cascade_candidate(CssCascadeCandidate* candidate
     if (!candidate || !decl || !value) return;
     int64_t priority = get_cascade_priority(decl);
     if (!candidate->decl || priority >= candidate->priority) {
-        candidate->decl = decl;
-        candidate->value = value;
+        candidate->decl = lam::up(decl);
+        candidate->value = lam::up(value);
         candidate->priority = priority;
     }
 }
@@ -1193,15 +1193,15 @@ typedef struct Arena Arena;
 typedef struct DomElement DomElement;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterValue {
-    const char* name;
+    lam::Up<const char> name;
     int value;
     bool propagated;
     bool created_by_reset;
 } CounterValue;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterScope {
-    HashMap* counters;
-    CounterScope* parent;
+    lam::Own<HashMap> counters;
+    lam::Up<CounterScope> parent;
     int owner_depth;
     bool pseudo_scope;
     bool reset_replaces_sibling;
@@ -1209,13 +1209,13 @@ typedef struct CounterScope {
 } CounterScope;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterFrame {
-    CounterScope* entry_scope;
-    CounterScope* element_scope;
+    lam::Up<CounterScope> entry_scope;
+    lam::Up<CounterScope> element_scope;
 } CounterFrame;
 // tier-3: layout-transient, valid within pass
 typedef struct CounterContext {
-    Arena* arena;
-    CounterScope* current_scope;
+    lam::Up<Arena> arena;
+    lam::Up<CounterScope> current_scope;
     // owns every scope allocated during this layout pass
     lam::ArrayList<CounterScope*>* scope_stack;
     // tracks element/pseudo boundaries separately from the active counter chain
@@ -1279,7 +1279,7 @@ enum LayoutProfileBucket : uint8_t {
 };
 // tier-3: layout-transient, valid within pass
 typedef struct LayoutProfileNode {
-    const DomNode* node;
+    lam::Up<const DomNode> node;
     LayoutProfileBucket bucket;
     double elapsed_ms;
 } LayoutProfileNode;
@@ -1653,13 +1653,13 @@ typedef struct CustomLayoutPaintLayer {
 
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutPaintState {
-    CustomLayoutPaintLayer* layers;
+    lam::OwnArr<CustomLayoutPaintLayer> layers;
     int layer_count;
 } CustomLayoutPaintState;
 
 // tier-3: layout-transient, valid within pass
 typedef struct CustomLayoutResult {
-    CustomLayoutPlacement* placements;
+    lam::OwnArr<CustomLayoutPlacement> placements;
     int placement_count;
     int placement_capacity;
     float width;
@@ -1747,17 +1747,17 @@ typedef struct ColumnFragment {
 // The buffers share one scratch scope, so release frees them together and the
 // nested spanner path and the ordinary container path cannot drift.
 struct MulticolGroupScratch {
-    float* heights = nullptr;
-    float* content_heights = nullptr;
-    float* margin_before = nullptr;
-    float* margin_after = nullptr;
-    float* line_advances = nullptr;
-    bool* can_fragment = nullptr;
-    bool* break_before = nullptr;
-    bool* break_after = nullptr;
-    ColumnFragment* fragments = nullptr;
+    lam::OwnArr<float> heights = nullptr;
+    lam::OwnArr<float> content_heights = nullptr;
+    lam::OwnArr<float> margin_before = nullptr;
+    lam::OwnArr<float> margin_after = nullptr;
+    lam::OwnArr<float> line_advances = nullptr;
+    lam::OwnArr<bool> can_fragment = nullptr;
+    lam::OwnArr<bool> break_before = nullptr;
+    lam::OwnArr<bool> break_after = nullptr;
+    lam::OwnArr<ColumnFragment> fragments = nullptr;
     ScratchMark scope = {};
-    ScratchArena* owner = nullptr;
+    lam::Up<ScratchArena> owner = nullptr;
 
     MulticolGroupScratch() = default;
     MulticolGroupScratch(const MulticolGroupScratch&) = delete;
@@ -1766,26 +1766,26 @@ struct MulticolGroupScratch {
     ~MulticolGroupScratch() { if (owner) release(owner); }
 
     bool init(ScratchArena* scratch) {
-        owner = scratch;
+        owner = lam::up(scratch);
         scope = scratch_scope_begin(scratch);
-        heights = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        content_heights = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        margin_before = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        margin_after = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        line_advances = (float*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(float));
-        can_fragment = (bool*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(bool));
-        break_before = (bool*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(bool));
-        break_after = (bool*)scratch_scope_alloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(bool));
-        fragments = (ColumnFragment*)scratch_scope_calloc(scratch, &scope,
-            MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment));
+        heights = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        content_heights = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        margin_before = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        margin_after = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        line_advances = lam::own_arr((float*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(float)));
+        can_fragment = lam::own_arr((bool*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(bool)));
+        break_before = lam::own_arr((bool*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(bool)));
+        break_after = lam::own_arr((bool*)scratch_scope_alloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(bool)));
+        fragments = lam::own_arr((ColumnFragment*)scratch_scope_calloc(scratch, &scope,
+            MAX_MULTICOL_BLOCKS * sizeof(ColumnFragment)));
         return heights && content_heights && margin_before && margin_after && line_advances &&
             can_fragment && break_before && break_after && fragments;
     }
@@ -1807,9 +1807,9 @@ struct MulticolGroupScratch {
 // Keep the bounded flow-item buffer paired with its scratch scope; nested
 // and top-level multicol passes otherwise duplicate the same allocation path.
 struct MulticolFlowScratch {
-    MulticolFlowItem* items = nullptr;
+    lam::OwnArr<MulticolFlowItem> items = nullptr;
     ScratchMark scope = {};
-    ScratchArena* owner = nullptr;
+    lam::Up<ScratchArena> owner = nullptr;
 
     MulticolFlowScratch() = default;
     MulticolFlowScratch(const MulticolFlowScratch&) = delete;
@@ -1818,10 +1818,10 @@ struct MulticolFlowScratch {
     ~MulticolFlowScratch() { if (owner) release(owner); }
 
     bool init(ScratchArena* scratch) {
-        owner = scratch;
+        owner = lam::up(scratch);
         scope = scratch_scope_begin(scratch);
-        items = (MulticolFlowItem*)scratch_scope_calloc(
-            scratch, &scope, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem));
+        items = lam::own_arr((MulticolFlowItem*)scratch_scope_calloc(
+            scratch, &scope, MAX_MULTICOL_BLOCKS * sizeof(MulticolFlowItem)));
         return items != nullptr;
     }
 
@@ -2097,10 +2097,10 @@ typedef struct Linebox {
     float initial_letter_origin_advance; // raised-cap displacement already applied to this line
     bool has_initial_letter; // line contains an initial whose origin line may need ruby metrics
     bool has_drop_initial_letter; // line contains a drop initial whose base level can be raised
-    unsigned char* last_space;      // last space character in the line
+    lam::Up<unsigned char> last_space;      // last space character in the line
     float last_space_pos;             // position of the last space in the line
     BreakKind last_space_kind;        // semantic type of the last recorded break opportunity
-    unsigned char* last_non_shy_space; // previous non-SHY break opportunity before a soft hyphen
+    lam::Up<unsigned char> last_non_shy_space; // previous non-SHY break opportunity before a soft hyphen
     float last_non_shy_space_pos;
     BreakKind last_non_shy_space_kind;
     float last_non_shy_space_hanging_width;
@@ -2176,7 +2176,7 @@ typedef struct Linebox {
     uint32_t prev_codepoint = 0;     // for CoreText GPOS kerning (codepoint-based)
     uint32_t prev_text_spacing_codepoint = 0; // previous character for CSS text-spacing pairs
     uint32_t prev_text_autospace_codepoint = 0; // previous typographic unit for CSS text-autospace
-    FontProp* prev_kerning_font_style = nullptr;
+    lam::Up<FontProp> prev_kerning_font_style = nullptr;
     bool has_cjk_text = false;       // true if line contains CJK characters (for line-height blending)
     float max_top_bottom_height = 0; // CSS 2.1 §10.8.1: max height of vertical-align:top/bottom elements
                                      // (used in second pass to expand line box if needed)
@@ -2365,7 +2365,7 @@ typedef enum LayoutTextRunMode {
 } LayoutTextRunMode;
 
 typedef struct LayoutTextRun {
-    const char* text;
+    lam::Up<const char> text;
     size_t length;
 } LayoutTextRun;
 
@@ -3612,7 +3612,7 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
 namespace radiant {
 // tier-3: layout-transient, valid within pass
 struct LayoutRunModeScope {
-    ::LayoutContext* lycon;
+    lam::Up<::LayoutContext> lycon;
     RunMode saved_run_mode;
 
     LayoutRunModeScope(::LayoutContext* l, RunMode mode);
@@ -3623,11 +3623,11 @@ struct LayoutRunModeScope {
 };
 // tier-3: layout-transient, valid within pass
 struct LayoutMeasureScope {
-    ::LayoutContext* lycon;
+    lam::Up<::LayoutContext> lycon;
     BlockContext saved_block;
     Linebox saved_line;
     FontBox saved_font;
-    ::DomNode* saved_elmt;
+    lam::Up<::DomNode> saved_elmt;
     RunMode saved_run_mode;
     SizingMode saved_sizing_mode;
     AvailableSpace saved_available_space;
@@ -3999,7 +3999,7 @@ typedef bool (*LayoutFlattenedTextItemPredicate)(DomNode* text,
 typedef struct LayoutFlattenedItemPolicy {
     LayoutFlattenedTextItemPredicate include_text;
     void* context;
-    DomElement* skipped_element;
+    lam::Up<DomElement> skipped_element;
     bool initialize_contents;
     bool reset_styles_resolved;
 } LayoutFlattenedItemPolicy;
@@ -4833,6 +4833,14 @@ LAM_NODE_OF(LayoutContext, NodeStack);
 LAM_NODE_OF(AbsChildLayoutState, NodeStack);
 LAM_NODE_OF(AbsStaticContext, NodeStack);
 LAM_NODE_OF(radiant::LayoutMeasureScope, NodeStack);
+LAM_NODE_OF(radiant::LayoutRunModeScope, NodeStack);
+LAM_NODE_OF(MulticolGroupScratch, NodeStack);
+LAM_NODE_OF(MulticolFlowScratch, NodeStack);
+LAM_NODE_OF(CssCascadeCandidate, NodeStack);
+LAM_NODE_OF(CssQuadValues, NodeStack);
+LAM_NODE_OF(LayoutTextRun, NodeStack);
+LAM_NODE_OF(radiant::LayoutProfileNode, NodeStack);
+LAM_NODE_OF(LayoutFlattenedItemPolicy, NodeStack);
 LAM_NODE_OF(BlockContextScope, NodeStack);
 LAM_NODE_OF(LayoutContainingBlockScope, NodeStack);
 LAM_NODE_OF(LayoutContextScope, NodeStack);

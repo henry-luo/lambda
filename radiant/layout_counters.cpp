@@ -34,7 +34,7 @@ CounterContext* counter_context_create(Arena* arena) {
 bool CounterContext::init(Arena* backing_arena) {
     if (!backing_arena) return false;
 
-    arena = backing_arena;
+    arena = lam::up(backing_arena);
     current_scope = nullptr;
     scope_stack = nullptr;
     frame_stack = nullptr;
@@ -96,7 +96,7 @@ void CounterContext::push_scope(bool pseudo_scope) {
     CounterScope* scope = (CounterScope*)arena_alloc(arena, sizeof(CounterScope));
     if (!scope) return;
     // Create hash map for counters in this scope
-    scope->counters = CounterMap::create(16);
+    scope->counters = lam::own(CounterMap::create(16));
     scope->parent = current_scope;
     scope->owner_depth = current_scope && frame_stack ? (int)frame_stack->size() : -1;
     scope->pseudo_scope = pseudo_scope;
@@ -108,15 +108,15 @@ void CounterContext::push_scope(bool pseudo_scope) {
     }
 
     if (!current_scope) {
-        current_scope = scope;
+        current_scope = lam::up(scope);
         return;
     }
 
     if (frame_stack) {
-        CounterFrame frame = {current_scope, scope};
+        CounterFrame frame = {lam::up(current_scope), lam::up(scope)};
         frame_stack->append(frame);
     }
-    current_scope = scope;
+    current_scope = lam::up(scope);
 }
 
 void CounterContext::pop_scope() {
@@ -158,13 +158,13 @@ void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_re
             iter = 0;
             while (CounterMap::next(scope->counters, &iter, &cv)) {
                 if (cv->created_by_reset) continue;
-                CounterValue search_key = {cv->name, 0, false, false};
+                CounterValue search_key = {lam::up((const char*)cv->name), 0, false, false};
                 CounterValue* entry_cv = CounterMap::get(entry->counters, search_key);
                 if (entry_cv) {
                     entry_cv->value = cv->value;
                     entry_cv->propagated = true;
                 } else {
-                    CounterValue propagated = {cv->name, cv->value, true, false};
+                    CounterValue propagated = {lam::up((const char*)cv->name), cv->value, true, false};
                     CounterMap::set(entry->counters, propagated);
                 }
             }
@@ -176,7 +176,7 @@ void CounterContext::pop_scope_propagate(bool propagate_resets, bool preserve_re
     bool preserve_scope = preserve_reset_scope ||
         (scope && (scope->reset_replaces_sibling ||
                    scope->pseudo_reset_for_descendants));
-    current_scope = (propagate_resets && has_reset && preserve_scope) ? scope : entry;
+    current_scope = lam::up((propagate_resets && has_reset && preserve_scope) ? scope : entry);
     frame_stack->remove(index);
 }
 // Counter Parsing Helpers
@@ -289,7 +289,7 @@ static CounterScope* counter_find_scope(CounterScope* scope,
 
 static void counter_create(CounterScope* scope, char* name, int value,
                            bool created_by_reset) {
-    CounterValue counter = {name, value, false, created_by_reset};
+    CounterValue counter = {lam::up((const char*)name), value, false, created_by_reset};
     CounterMap::set(scope->counters, counter);
 }
 
@@ -314,7 +314,7 @@ void counter_reset(CounterContext* ctx, const char* counter_spec) {
 
     for (int i = 0; i < parsed.count; i++) {
         // Create or update counter in current scope
-        CounterValue search_key = {parsed.names[i], 0, false, false};
+        CounterValue search_key = {lam::up((const char*)parsed.names[i]), 0, false, false};
         CounterValue* existing = CounterMap::get(ctx->current_scope->counters, search_key);
 
         if (!existing) {
@@ -365,7 +365,7 @@ void counter_increment(CounterContext* ctx, const char* counter_spec) {
         int increment = parsed.values[i];
         // CSS Lists 3 §4.2/§4.4.1: use the inherited counter instance when the
         // element has not created a nearer reset scope.
-        CounterValue search_key = {parsed.names[i], 0, false, false};
+        CounterValue search_key = {lam::up((const char*)parsed.names[i]), 0, false, false};
         CounterValue* cv = counter_find(ctx->current_scope, &search_key);
 
         if (!cv) {
@@ -382,7 +382,7 @@ static void counter_set_parsed(CounterContext* ctx, ParsedCounterSpec parsed) {
         // of the given name. If no counter of the given name exists on the element,
         // a new counter is created with the specified value.
         // Unlike counter-reset, this does NOT create a new scope.
-        CounterValue search_key = {parsed.names[i], 0, false, false};
+        CounterValue search_key = {lam::up((const char*)parsed.names[i]), 0, false, false};
         CounterValue* cv = counter_find(ctx->current_scope, &search_key);
 
         if (cv) {
@@ -402,7 +402,7 @@ void counter_set(CounterContext* ctx, const char* counter_spec) {
 
 int counter_get_value(CounterContext* ctx, const char* name) {
     if (!ctx || !ctx->current_scope || !name) return 0;
-    CounterValue search_key = {name, 0, false, false};
+    CounterValue search_key = {lam::up((const char*)name), 0, false, false};
     CounterValue* cv = counter_find(ctx->current_scope, &search_key);
     return cv ? cv->value : 0;
 }
@@ -413,7 +413,7 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     *values = nullptr;
     *count = 0;
 
-    CounterValue search_key = {name, 0, false, false};
+    CounterValue search_key = {lam::up((const char*)name), 0, false, false};
     // Count how many counters with this name exist in the scope chain
     int counter_count = 0;
     CounterScope* scope = ctx->current_scope;

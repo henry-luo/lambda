@@ -105,21 +105,21 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     paint_fill_linear_gradient(&clear_list, nullptr, 0.0f, 0.0f, 10.0f, 10.0f,
                                stops, 2, RDT_FILL_WINDING, nullptr, nullptr);
     ASSERT_EQ(clear_list.size(), 1u);
-    clear_list.data()[0].fill_linear_gradient.owns_stops = true;
+    clear_list.data()[0].fill_linear_gradient.owned_stops = lam::own_arr(stops);
 
     PaintGlyphRun run = {};
     run.text = mem_strdup("owned glyph text", MEM_CAT_RENDER);
     ASSERT_NE(run.text, nullptr);
-    run.owns_text = true;
+    run.owned_text = lam::own(run.text);
     paint_glyph_run(&clear_list, &run);
     ASSERT_EQ(clear_list.size(), 2u);
 
     paint_list_clear(&clear_list);
     EXPECT_EQ(clear_list.size(), 0u);
     EXPECT_EQ(clear_list.data()[0].fill_linear_gradient.stops, nullptr);
-    EXPECT_FALSE(clear_list.data()[0].fill_linear_gradient.owns_stops);
+    EXPECT_FALSE(clear_list.data()[0].fill_linear_gradient.owned_stops);
     EXPECT_EQ(clear_list.data()[1].glyph_run.text, nullptr);
-    EXPECT_FALSE(clear_list.data()[1].glyph_run.owns_text);
+    EXPECT_FALSE(clear_list.data()[1].glyph_run.owned_text);
     paint_list_destroy(&clear_list);
 
     PaintList destroy_list = {};
@@ -127,7 +127,7 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     PaintGlyphRun destroy_run = {};
     destroy_run.text = mem_strdup("destroy owned glyph text", MEM_CAT_RENDER);
     ASSERT_NE(destroy_run.text, nullptr);
-    destroy_run.owns_text = true;
+    destroy_run.owned_text = lam::own(destroy_run.text);
     paint_glyph_run(&destroy_list, &destroy_run);
     ASSERT_EQ(destroy_list.size(), 1u);
     paint_list_destroy(&destroy_list);
@@ -429,8 +429,8 @@ TEST_F(DisplayListTest, RasterCommandsStoreClipAndCopiedClipShapes) {
     float vy[3] = {4.0f, 5.0f, 6.0f};
     ClipShape polygon = {};
     polygon.type = CLIP_SHAPE_POLYGON;
-    polygon.polygon.vx = vx;
-    polygon.polygon.vy = vy;
+    polygon.polygon.vx = lam::own_arr(vx);
+    polygon.polygon.vy = lam::own_arr(vy);
     polygon.polygon.count = 3;
     ClipShape* shapes[1] = {&polygon};
     Bound clip = {2.0f, 3.0f, 9.0f, 10.0f};

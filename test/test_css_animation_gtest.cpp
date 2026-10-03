@@ -387,7 +387,7 @@ protected:
     CssAnimProp defaultAnimProp(const char* name, float duration) {
         CssAnimProp ap;
         memset(&ap, 0, sizeof(ap));
-        ap.name = name;
+        ap.name = lam::up(name);
         ap.duration = duration;
         ap.iteration_count = 1;
         ap.direction = ANIM_DIR_NORMAL;
@@ -413,10 +413,10 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
     prop_to.value.f = 1.0f;
 
     CssKeyframeStop stops[2];
-    stops[0] = {0.0f, &prop_from, 1, NULL};
-    stops[1] = {1.0f, &prop_to, 1, NULL};
+    stops[0] = {0.0f, lam::own_arr(&prop_from), 1, NULL};
+    stops[1] = {1.0f, lam::own_arr(&prop_to), 1, NULL};
 
-    CssKeyframes kf = {"testFade", stops, 2};
+    CssKeyframes kf = {lam::up("testFade"), lam::own_arr(stops), 2};
 
     CssAnimProp ap = defaultAnimProp("testFade", 1.0f);
     AnimationInstance* inst = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
@@ -450,10 +450,10 @@ TEST_F(AnimationTickTest, ColorAnimation) {
     prop_to.value.color.b = 255; prop_to.value.color.a = 255;
 
     CssKeyframeStop stops[2];
-    stops[0] = {0.0f, &prop_from, 1, NULL};
-    stops[1] = {1.0f, &prop_to, 1, NULL};
+    stops[0] = {0.0f, lam::own_arr(&prop_from), 1, NULL};
+    stops[1] = {1.0f, lam::own_arr(&prop_to), 1, NULL};
 
-    CssKeyframes kf = {"colorAnim", stops, 2};
+    CssKeyframes kf = {lam::up("colorAnim"), lam::own_arr(stops), 2};
 
     CssAnimProp ap = defaultAnimProp("colorAnim", 1.0f);
     AnimationInstance* inst = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
@@ -479,8 +479,8 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     property.property_code = CSS_PROPERTY_TRANSFORM;
     property.value_type = ANIM_VAL_TRANSFORM;
     property.value.transform = &keyframe_function;
-    CssKeyframeStop stop = {0.0f, &property, 1, NULL};
-    CssKeyframes keyframes = {"slide", &stop, 1};
+    CssKeyframeStop stop = {0.0f, lam::own_arr(&property), 1, NULL};
+    CssKeyframes keyframes = {lam::up("slide"), lam::own_arr(&stop), 1};
 
     CssAnimProp animation = defaultAnimProp("slide", 1.0f);
     AnimationInstance* instance = css_animation_create(
@@ -507,11 +507,11 @@ TEST_F(AnimationTickTest, ThreeStopInterpolation) {
     props[2].value.f = 1.0f;
 
     CssKeyframeStop stops[3];
-    stops[0] = {0.0f, &props[0], 1, NULL};
-    stops[1] = {0.5f, &props[1], 1, NULL};
-    stops[2] = {1.0f, &props[2], 1, NULL};
+    stops[0] = {0.0f, lam::own_arr(&props[0]), 1, NULL};
+    stops[1] = {0.5f, lam::own_arr(&props[1]), 1, NULL};
+    stops[2] = {1.0f, lam::own_arr(&props[2]), 1, NULL};
 
-    CssKeyframes kf = {"pulse", stops, 3};
+    CssKeyframes kf = {lam::up("pulse"), lam::own_arr(stops), 3};
 
     CssAnimProp ap = defaultAnimProp("pulse", 2.0f);
     AnimationInstance* inst = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);

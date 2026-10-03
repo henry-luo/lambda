@@ -1221,7 +1221,7 @@ static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color colo
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_FILL_PATH);
     if (cmd) {
-        cmd->fill_path.owns_path = true;
+        cmd->fill_path.owned_path = lam::own(cmd->fill_path.path);
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1247,7 +1247,7 @@ static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_STROKE_PATH);
     if (cmd) {
-        cmd->stroke_path.owns_path = true;
+        cmd->stroke_path.owned_path = lam::own(cmd->stroke_path.path);
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1269,8 +1269,8 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
                                                    PAINT_FILL_LINEAR_GRADIENT);
     if (cmd) {
-        cmd->fill_linear_gradient.owns_path = gradient->path != nullptr;
-        cmd->fill_linear_gradient.owns_stops = stops != nullptr;
+        cmd->fill_linear_gradient.owned_path = lam::own(cmd->fill_linear_gradient.path);
+        if (stops) cmd->fill_linear_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_linear_gradient.stops);
         owns_payload = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1291,8 +1291,8 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
                                                    PAINT_FILL_RADIAL_GRADIENT);
     if (cmd) {
-        cmd->fill_radial_gradient.owns_path = gradient->path != nullptr;
-        cmd->fill_radial_gradient.owns_stops = stops != nullptr;
+        cmd->fill_radial_gradient.owned_path = lam::own(cmd->fill_radial_gradient.path);
+        if (stops) cmd->fill_radial_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_radial_gradient.stops);
         owns_payload = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1379,7 +1379,8 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     run.color = ctx->color;
     run.text = text_content.get();
     run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: text run byte length is bounded by TextRect input.
-    run.owns_text = ctx && ctx->effect_fallback.active;
+    // effect fallback retains commands until rasterization, so the paint list keeps the text
+    if (ctx && ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
     run.font_family = ctx->font.style ? ctx->font.style->family : nullptr;
     run.font_size = font_size;
     run.x = base_x;
@@ -1388,7 +1389,6 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
     pdf_lower_paint_list(ctx);
 
-    if (run.owns_text) text_content.release();  // the paint list keeps the text
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -1822,7 +1822,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.block.y = 0;
 
     // Initialize font from default
-    ctx.font.style = &uicon->default_font;
+    ctx.font.style = lam::up(&uicon->default_font);
 
     // Set default font
     ctx.current_font = HPDF_GetFont(ctx.pdf_doc, "Helvetica", NULL);

@@ -144,7 +144,7 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                 }
             }
             shapes[out_depth].type = CLIP_SHAPE_POLYGON;
-            shapes[out_depth].polygon = {vx, vy, count};
+            shapes[out_depth].polygon = {lam::own_arr(vx), lam::own_arr(vy), count};
         } else {
             shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
             dl_offset_clip_shape(&shapes[out_depth], offset_x, offset_y);

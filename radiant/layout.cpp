@@ -1561,14 +1561,14 @@ size_t layout_normalize_collapsible_whitespace(const char* text, size_t length,
 
 LayoutTextRun layout_prepare_text_run(const char* text, size_t length,
                                       LayoutTextRunMode mode) {
-    LayoutTextRun run = {text, length};
+    LayoutTextRun run = {lam::up(text), length};
     if (!text || mode == LAYOUT_TEXT_RUN_RAW || length == 0) return run;
 
     static thread_local char buffer[4096];  // LARGE_ARRAY_OK: reusable text scratch.
     if (mode == LAYOUT_TEXT_RUN_COLLAPSE) {
         run.length = layout_normalize_collapsible_whitespace(
             text, length, buffer, sizeof(buffer));
-        run.text = buffer;
+        run.text = lam::up(buffer);
         return run;
     }
 
@@ -1582,12 +1582,12 @@ LayoutTextRun layout_prepare_text_run(const char* text, size_t length,
         return run;
     }
     if (trimmed_length >= sizeof(buffer)) {
-        run.text = text;
+        run.text = lam::up(text);
         run.length = 0;
         return run;
     }
     str_copy(buffer, sizeof(buffer), text + start, trimmed_length);
-    run.text = buffer;
+    run.text = lam::up(buffer);
     run.length = trimmed_length;
     return run;
 }

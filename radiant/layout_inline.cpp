@@ -2177,7 +2177,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (elmt->tag() == MARKUP_NAME_WBR) {
         ViewSpan* wbr_span = lam::view_require<RDT_VIEW_INLINE>(set_view(lycon, RDT_VIEW_INLINE, elmt));
         layout_set_view_geometry(wbr_span, 0.0f, 0.0f, 0.0f, 0.0f);
-        lycon->line.last_space = (unsigned char*)elmt;
+        lycon->line.last_space = lam::up((unsigned char*)elmt);
         lycon->line.last_space_pos = lycon->line.advance_x;
         lycon->line.last_space_kind = BRK_ZERO_WIDTH_BREAK;
         lycon->line.trailing_space_width = 0;

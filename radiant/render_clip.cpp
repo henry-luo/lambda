@@ -368,7 +368,7 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, ScratchMark
         ClipShape* cs = render_clip_alloc_shape(scratch, mem);
         if (!cs) return nullptr;
         cs->type = CLIP_SHAPE_POLYGON;
-        cs->polygon = {vx, vy, count};
+        cs->polygon = {lam::own_arr(vx), lam::own_arr(vy), count};
         return cs;
     }
 

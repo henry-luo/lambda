@@ -545,8 +545,10 @@ static CssEnum get_inherited_text_enum(
     return fallback;
 }
 
+// Field is the BlockProp string field's type: a raw char* or a kind
+template <typename Field>
 static const char* get_inherited_text_string(
-        LayoutContext* lycon, char* BlockProp::*member) {
+        LayoutContext* lycon, Field BlockProp::*member) {
     DomNode* node = lycon->elmt ? lycon->elmt : lycon->view;
     while (node) {
         if (node->is_element()) {
@@ -3617,7 +3619,7 @@ static void record_line_break_opportunity(LayoutContext* lycon,
                                           unsigned char* position,
                                           float width, BreakKind kind) {
     if (!lycon) return;
-    lycon->line.last_space = position;
+    lycon->line.last_space = lam::up(position);
     lycon->line.last_space_pos = width;
     lycon->line.last_space_kind = kind;
     capture_line_metrics(&lycon->line.last_space_metrics, &lycon->line);
@@ -3734,7 +3736,7 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
     }
     if (generated_hyphen) {
         rect->has_trailing_hyphen = true;
-        rect->trailing_hyphenate_character = hyphenate_character;
+        rect->trailing_hyphenate_character = lam::up(hyphenate_character);
     }
     if (restore_collapsible_trailing_space && lycon->line.last_space_kind == BRK_SPACE) {
         lycon->line.trailing_space_width =
@@ -4048,7 +4050,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     if (!text_view) {
         text_view = lam::view_require<RDT_VIEW_TEXT>(set_view(lycon, RDT_VIEW_TEXT, text_node));
-        text_view->font = lam::shared(lycon->font.style);
+        text_view->font = lam::shared(lycon->font.style.get());
     }
 
     TextRect* rect = lycon->doc->view_tree->alloc_text_rect();

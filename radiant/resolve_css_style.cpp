@@ -939,23 +939,19 @@ static char* duplicate_view_pool_layout_string(LayoutContext* lycon, const char*
     return pool_strdup(lycon->doc->view_tree->prop_pool, value);
 }
 
-static void replace_view_pool_layout_string(LayoutContext* lycon, char** target, const char* value) {
+// Field is the item prop's owned string field (lam::Own<char> or lam::Own<const char>)
+template <typename Field>
+static void replace_view_pool_layout_string(LayoutContext* lycon, Field* target, const char* value) {
     if (!target) return;
     // item-prop union, so attached names must share the pool lifetime.
-    *target = duplicate_view_pool_layout_string(lycon, value);
-}
-
-static void replace_view_pool_layout_const_string(LayoutContext* lycon, const char** target, const char* value) {
-    if (!target) return;
-    // item-prop union, so attached names must share the pool lifetime.
-    *target = duplicate_view_pool_layout_string(lycon, value);
+    *target = lam::own(duplicate_view_pool_layout_string(lycon, value));
 }
 
 struct CssGridAxisSlots {
     int* start;
     int* end;
-    const char** start_name;
-    const char** end_name;
+    lam::Own<const char>* start_name;
+    lam::Own<const char>* end_name;
     bool* has_start;
     bool* has_end;
     bool* start_is_span;
@@ -1125,9 +1121,9 @@ static void resolve_grid_axis_shorthand(LayoutContext* lycon, ViewSpan* span,
             }
             const char* line_name = css_grid_named_line(part);
             if (line_name) {
-                const char** name_slot = value_index == 0 ? axis.start_name : axis.end_name;
+                lam::Own<const char>* name_slot = value_index == 0 ? axis.start_name : axis.end_name;
                 bool* has_line = value_index == 0 ? axis.has_start : axis.has_end;
-                replace_view_pool_layout_const_string(lycon, name_slot, line_name);
+                replace_view_pool_layout_string(lycon, name_slot, line_name);
                 *has_line = true;
             }
         }
@@ -1142,7 +1138,7 @@ static void resolve_grid_line_longhand(LayoutContext* lycon, ViewSpan* span,
     if (!item) return;
     CssGridAxisSlots axis = css_grid_axis_slots(item, is_row);
     int* line = is_end ? axis.end : axis.start;
-    const char** line_name = is_end ? axis.end_name : axis.start_name;
+    lam::Own<const char>* line_name = is_end ? axis.end_name : axis.start_name;
     bool* has_line = is_end ? axis.has_end : axis.has_start;
     bool* line_is_span = is_end ? axis.end_is_span : axis.start_is_span;
     if (css_grid_line_value(value, line, has_line, line_is_span)) {
@@ -1151,7 +1147,7 @@ static void resolve_grid_line_longhand(LayoutContext* lycon, ViewSpan* span,
     } else {
         const char* name = css_grid_named_line(value);
         if (name) {
-            replace_view_pool_layout_const_string(lycon, line_name, name);
+            replace_view_pool_layout_string(lycon, line_name, name);
             *has_line = true;
         }
     }
@@ -4742,7 +4738,7 @@ static bool apply_chromium_monospace_font_size_quirk(StyleTree* style_tree,
     span->font->font_size = original_size * 13.0f / 16.0f;
     span->font->font_size_from_medium = false;
     if (lycon) {
-        lycon->font.style = span->font;
+        lycon->font.style = lam::up(span->font);
         lycon->font.current_font_size = span->fontp()->font_size;
     }
     return true;
@@ -4878,7 +4874,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         // relative units and non-inherited declarations are resolved.
         ViewSpan* span = lam::view_require_element(lycon->view);
         if (span && span->font) {
-            lycon->font.style = span->font;
+            lycon->font.style = lam::up(span->font);
             lycon->font.current_font_size = span->fontp()->font_size;
         }
     }
@@ -4890,13 +4886,13 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
         apply_chromium_monospace_font_size_quirk(
             style_tree, parent_font_style, span, lycon, dom_elem);
         if (span && span->font && span->fontp()->font_size > 0) {
-            lycon->font.style = span->font;
+            lycon->font.style = lam::up(span->font);
             lycon->font.current_font_size = span->fontp()->font_size;
         }
     } else if (dom_elem->tag() == MARKUP_NAME_TEXTAREA) {
         ViewSpan* span = lam::view_require_element(lycon->view);
         if (span && span->font && span->fontp()->font_size > 0) {
-            lycon->font.style = span->font;
+            lycon->font.style = lam::up(span->font);
             lycon->font.current_font_size = span->fontp()->font_size;
             if (span->fontp()->family && lycon->ui_context) {
                 setup_font(lycon->ui_context, &lycon->font, span->font);
@@ -4915,7 +4911,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     {
         ViewSpan* span = lam::view_require_element(lycon->view);
         if (span && span->font && span->fontp()->font_size > 0.0f) {
-            lycon->font.style = span->font;
+            lycon->font.style = lam::up(span->font);
             lycon->font.current_font_size = span->fontp()->font_size;
         }
     }
@@ -5104,7 +5100,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 // against the declaring ancestor's font-size, not the child's.
                 CssValue* computed = resolve_inherited_line_height_value(
                     lycon, ancestor, alh, true);
-                inheritance_span->blk->line_height = computed ? computed : ancestor->blk->line_height;
+                inheritance_span->blk->line_height = lam::shared(computed ? computed : ancestor->blk->line_height);
                 continue;
             }
             // CSS 2.1 §6.1.1/§6.2.1: inherited properties inherit the
@@ -5171,7 +5167,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                         lycon, ancestor, v, false);
                     if (computed) {
                         inheritance_span->ensure_block(lycon);
-                        inheritance_span->blk->line_height = computed;
+                        inheritance_span->blk->line_height = lam::shared(computed);
                         continue;
                     }
                 }
@@ -5548,7 +5544,7 @@ static void css_apply_list_style_keyword(LayoutContext* lycon, ViewSpan* span,
     }
     if (!list_member || type_already_set) {
         span->blk->list_style_image = {};
-        span->blk->list_style_image.url = (char*)alloc_prop(lycon, 5);
+        span->blk->list_style_image.url = lam::shared((char*)alloc_prop(lycon, 5));
         str_copy(span->block()->list_style_image.url, 5, "none", 4);
     }
 }
@@ -5565,7 +5561,7 @@ static void css_store_list_style_type_string(LayoutContext* lycon, ViewSpan* spa
                                              const char* marker) {
     if (!marker) return;
     size_t length = strlen(marker);
-    span->blk->list_style_type_string = (char*)alloc_prop(lycon, length + 1);
+    span->blk->list_style_type_string = lam::own((char*)alloc_prop(lycon, length + 1));
     str_copy(span->block()->list_style_type_string, length + 1, marker, length);
     span->blk->list_style_type = CSS_VALUE_NONE;
 }
@@ -5574,7 +5570,7 @@ static void css_store_hyphenate_character(LayoutContext* lycon, ViewSpan* span,
                                           const char* character) {
     if (!lycon || !span || !character) return;
     size_t length = strlen(character);
-    span->blk->hyphenate_character = (char*)alloc_prop(lycon, length + 1);
+    span->blk->hyphenate_character = lam::shared((char*)alloc_prop(lycon, length + 1));
     str_copy(span->blk->hyphenate_character, length + 1, character, length);
 }
 
@@ -5595,7 +5591,7 @@ static bool css_store_list_style_image(LayoutContext* lycon, ViewSpan* span,
     if (url) {
         size_t length = strlen(url);
         span->blk->list_style_image = {};
-        span->blk->list_style_image.url = (char*)alloc_prop(lycon, length + 1);
+        span->blk->list_style_image.url = lam::shared((char*)alloc_prop(lycon, length + 1));
         str_copy(span->block()->list_style_image.url, length + 1, url, length);
         return true;
     }
@@ -5603,14 +5599,20 @@ static bool css_store_list_style_image(LayoutContext* lycon, ViewSpan* span,
     GradientType gradient_type = css_background_gradient_type(value);
     if (gradient_type == GRADIENT_NONE) return false;
 
+    LinearGradient* linear = nullptr;
+    RadialGradient* radial = nullptr;
+    ConicGradient* conic = nullptr;
+    bool resolved = gradient_type == GRADIENT_LINEAR
+        ? resolve_linear_gradient_value(lycon, value, &linear)
+        : gradient_type == GRADIENT_RADIAL
+            ? resolve_radial_gradient_value(lycon, value, &radial)
+            : resolve_conic_gradient_value(lycon, value, &conic);
+    if (!resolved) return false;
     ListStyleImage image = {};
     image.gradient_type = gradient_type;
-    bool resolved = gradient_type == GRADIENT_LINEAR
-        ? resolve_linear_gradient_value(lycon, value, &image.linear_gradient)
-        : gradient_type == GRADIENT_RADIAL
-            ? resolve_radial_gradient_value(lycon, value, &image.radial_gradient)
-            : resolve_conic_gradient_value(lycon, value, &image.conic_gradient);
-    if (!resolved) return false;
+    image.linear_gradient = lam::shared(linear);
+    image.radial_gradient = lam::shared(radial);
+    image.conic_gradient = lam::shared(conic);
     // CSS Images gradients have no intrinsic dimensions; retain the resolved
     // image so list markers can apply the image-marker default object size.
     span->blk->list_style_image = image;
@@ -6366,7 +6368,7 @@ static void resolve_list_style_longhand(LayoutContext* lycon, ViewSpan* span,
                value->type == CSS_VALUE_TYPE_KEYWORD &&
                value->data.keyword == CSS_VALUE_NONE) {
         span->blk->list_style_image = {};
-        span->blk->list_style_image.url = (char*)alloc_prop(lycon, 5);
+        span->blk->list_style_image.url = lam::shared((char*)alloc_prop(lycon, 5));
         str_copy(span->block()->list_style_image.url, 5, "none", 4);
     }
 }
@@ -7146,9 +7148,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 }
                 if (parts.size && font_family_name) {
                     span->ensure_block(lycon);
-                    span->blk->line_height = parts.line_height
+                    span->blk->line_height = lam::shared(parts.line_height
                         ? parts.line_height
-                        : css_value_create_keyword(lycon->doc->view_tree->prop_pool, "normal");
+                        : css_value_create_keyword(lycon->doc->view_tree->prop_pool, "normal"));
                 }
                 if (font_family_name) {
                     radiant_retain_font_family(span->font,
@@ -7223,7 +7225,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (shorthand_overrides_longhand(
                     lycon, CSS_PROPERTY_FONT, decl)) break;
             span->ensure_block(lycon);
-            span->blk->line_height = value;
+            span->blk->line_height = lam::shared(value);
             break;
         }
         case CSS_PROPERTY_TEXT_ALIGN: {
@@ -7364,7 +7366,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             else if (indent_value && indent_value->type == CSS_VALUE_TYPE_FUNCTION) {
                 block->blk->text_indent = 0;
                 block->blk->text_indent_percent = NAN;
-                block->blk->text_indent_calc = indent_value;
+                block->blk->text_indent_calc = lam::up(indent_value);
             }
             if (indent_value && indent_value->type != CSS_VALUE_TYPE_KEYWORD) {
                 block->blk->text_indent_hanging = hanging;
@@ -7577,11 +7579,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 break;
             }
             span->ensure_transform(lycon);
-            span->transform->functions = resolve_css_function_list<TransformFunction>(
+            span->transform->functions = lam::shared(resolve_css_function_list<TransformFunction>(
                 value,
                 [&](const CssValue* item) {
                     return resolve_transform_function(lycon, prop_id, item);
-                }, append_transform_function);
+                }, append_transform_function));
             span->transform->functions_owner = TRANSFORM_FUNCTIONS_VIEW_POOL;
             break;
         }

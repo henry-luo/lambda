@@ -17578,9 +17578,9 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
     CssKeyframes* keyframes = (CssKeyframes*)pool_calloc(
         pool, sizeof(CssKeyframes));
     if (!keyframes) return nullptr;
-    keyframes->name = "web-animation";
-    keyframes->stops = (CssKeyframeStop*)pool_calloc(
-        pool, sizeof(CssKeyframeStop) * count);
+    keyframes->name = lam::up("web-animation");
+    keyframes->stops = lam::own_arr((CssKeyframeStop*)pool_calloc(
+        pool, sizeof(CssKeyframeStop) * count));
     if (!keyframes->stops) return nullptr;
     keyframes->stop_count = count;
 
@@ -17619,8 +17619,8 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
             if (!css_animation_parse_property_value(property, value, &parsed,
                                                     pool)) continue;
             parsed.composite = js_web_animation_composite(dom_realm_get_cstr(frame, "composite"));
-            stop->properties = (CssAnimatedProp*)pool_calloc(
-                pool, sizeof(CssAnimatedProp));
+            stop->properties = lam::own_arr((CssAnimatedProp*)pool_calloc(
+                pool, sizeof(CssAnimatedProp)));
             if (!stop->properties) return nullptr;
             stop->properties[0] = parsed;
             stop->property_count = 1;

@@ -1653,7 +1653,7 @@ static int collect_flex_item_nodes(LayoutContext* lycon, ViewBlock* container,
                                    int capacity, DomElement* rendered_legend) {
     LayoutFlattenedItemPolicy policy = {};
     policy.include_text = flex_collect_flattened_text_item;
-    policy.skipped_element = rendered_legend;
+    policy.skipped_element = lam::up(rendered_legend);
     policy.initialize_contents = true;
     // Flattening does not change a DOM child's cascade parent. Preserve its
     // current style so equivalent flex measurements can reuse its contribution.

@@ -334,7 +334,7 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         0.0f, // normal fonts must not inherit initial-letter computed-size state
         CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
     default_font.font_size_from_medium = true;
-    default_font.platform_fallback_family = default_font_times;
+    default_font.platform_fallback_family = lam::up(default_font_times);
     legacy_default_font = (FontProp){lam::up(default_font_times), 16.0f, // 16px (CSS logical pixels)
         1.0f, // default CSS zoom
         0.0f, // normal fonts must not inherit initial-letter computed-size state
@@ -466,6 +466,13 @@ void free_document(DomDocument* doc) {
     // can be destroyed only after the document has detached those references.
     script_runner_cleanup_js_state(doc);
 
+    // Embedded documents belong to their iframe elements. The view-tree walk
+    // below releases them only when the tree is laid out and reaches the
+    // iframe; walk the DOM first so a parent with no view tree, or one reset
+    // since its last layout, does not leak a child whose embedding edge would
+    // then dangle.
+    if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
+
     if (doc->view_tree) {
         // Some imported DOM/view fixtures alias the pools; the view-tree destroy path owns that shared pool.
         if (doc->document_pool == doc->view_tree->prop_pool) {
@@ -473,8 +480,7 @@ void free_document(DomDocument* doc) {
         }
 
         view_pool_destroy(doc->view_tree);
-        mem_free(doc->view_tree);
-        doc->view_tree = nullptr;
+        lam::free_owned(doc->view_tree);
     }
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
@@ -486,17 +492,16 @@ void free_document(DomDocument* doc) {
         doc->url = nullptr;
     }
 
-    // A runtime this document created for UA behavior is released here, after
-    // every consumer above has finished with its EvalContext. Runtimes that came
-    // from a loader (a `.ls` page, a script-bearing page) are owned by that
-    // loader and must not be freed twice (ESO25).
+    // A runtime this document created for UA behavior is detached here and
+    // released after dom_document_destroy: document resources (custom-paint
+    // GC roots) unregister from its heap during that destroy. Runtimes that
+    // came from a loader (a `.ls` page, a script-bearing page) are owned by
+    // that loader and must not be freed twice (ESO25).
+    lam::Temp<Runtime> owned_runtime;
     if (doc->owns_script_runtime && doc->lambda_runtime) {
-        Runtime* owned = doc->lambda_runtime;
+        owned_runtime.reset(doc->lambda_runtime);
         doc->lambda_runtime = nullptr;
         doc->owns_script_runtime = false;
-        runtime_cleanup(owned);
-        mem_free(owned);
-        log_debug("free_document: released the document-owned script runtime");
     }
 
     // The Input context owns parser arenas outside the loader pool. Release it
@@ -504,6 +509,10 @@ void free_document(DomDocument* doc) {
     // foreign document borrows its creator's Input, which remains live.
     // Free DomDocument via dom_document_destroy (handles arena and pool)
     dom_document_destroy(doc);
+    if (owned_runtime) {
+        runtime_cleanup(owned_runtime.get());
+        log_debug("free_document: released the document-owned script runtime");
+    }
     if (document_input) input_release_document_resources(document_input);
     if (owned_loader_pool) mem_pool_destroy(owned_loader_pool);
 }

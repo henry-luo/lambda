@@ -765,15 +765,15 @@ void dl_init(DisplayList* dl, Arena* backing_arena);
 // separate arenas for the list payloads and the replay scratch, since each
 // scratch arena owns its backing arena exclusively.
 struct OffscreenRenderArenas {
-    Pool* pool = nullptr;
-    Arena* list_arena = nullptr;
-    Arena* scratch_arena = nullptr;
+    lam::Own<Pool> pool = nullptr;
+    lam::Own<Arena> list_arena = nullptr;
+    lam::Own<Arena> scratch_arena = nullptr;
 
     bool init(const char* pool_label, const char* list_label, const char* scratch_label) {
         MemContext* context = mem_context_process(MEM_ROLE_RENDER);
-        pool = mem_pool_create(context, MEM_ROLE_RENDER, pool_label);
-        list_arena = pool ? mem_arena_create(context, MEM_ROLE_RENDER, list_label) : nullptr;
-        scratch_arena = list_arena ? mem_arena_create(context, MEM_ROLE_RENDER, scratch_label) : nullptr;
+        pool = lam::own(mem_pool_create(context, MEM_ROLE_RENDER, pool_label));
+        list_arena = lam::own(pool ? mem_arena_create(context, MEM_ROLE_RENDER, list_label) : nullptr);
+        scratch_arena = lam::own(list_arena ? mem_arena_create(context, MEM_ROLE_RENDER, scratch_label) : nullptr);
         if (scratch_arena) return true;
         destroy();
         return false;
@@ -1107,8 +1107,8 @@ typedef struct {
 } PaintFillRoundedRect;
 
 typedef struct {
-    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
-    bool owns_path;         // path must be freed by the owning PaintList cleanup
+    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     Color color;
     RdtFillRule rule;
     bool has_transform;
@@ -1116,8 +1116,8 @@ typedef struct {
 } PaintFillPath;
 
 typedef struct {
-    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
-    bool owns_path;         // path must be freed by the owning PaintList cleanup
+    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     Color color;
     float width;
     RdtStrokeCap cap;
@@ -1130,11 +1130,11 @@ typedef struct {
 } PaintStrokePath;
 
 typedef struct {
-    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
-    bool owns_path;         // path must be freed by the owning PaintList cleanup
+    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float x1, y1, x2, y2;
-    const RdtGradientStop* stops;  // borrowed unless owns_stops is set
-    bool owns_stops;        // stops must be freed by the owning PaintList cleanup
+    const RdtGradientStop* stops;  // the stops drawn: borrowed, or owned_stops
+    lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
     RdtFillRule rule;
     bool has_transform;
@@ -1144,11 +1144,11 @@ typedef struct {
 } PaintFillLinearGradient;
 
 typedef struct {
-    RdtPath* path;          // borrowed unless owns_path is set by deferred lowerer
-    bool owns_path;         // path must be freed by the owning PaintList cleanup
+    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float cx, cy, r;
-    const RdtGradientStop* stops;  // borrowed unless owns_stops is set
-    bool owns_stops;        // stops must be freed by the owning PaintList cleanup
+    const RdtGradientStop* stops;  // the stops drawn: borrowed, or owned_stops
+    lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
     RdtFillRule rule;
     bool has_transform;
@@ -1363,9 +1363,9 @@ void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raste
 typedef struct {
     lam::Up<FontBox> font;
     Color color;
-    const char* text;               // optional native text payload; UTF-8, borrowed unless owns_text
+    const char* text;               // optional native text payload; UTF-8, borrowed, or owned_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
-    bool owns_text;          // text must be freed by the owning PaintList cleanup
+    lam::Own<const char> owned_text;  // set when the paint list keeps the text
     lam::Up<const char> font_family; // borrowed; optional for vector text lowering
     float font_size;
     float x, baseline_y;
@@ -2446,8 +2446,7 @@ inline void radiant_clear_background_image(BackgroundProp* background) {
 }
 
 inline void radiant_retain_marker_text_content(MarkerProp* marker, lam::PoolPtr<char> text_content) {
-    lam::PersistentFieldRef<char, lam::PoolDomain> field(marker->text_content);
-    field.set(text_content);
+    marker->text_content = lam::own(text_content.get());
 }
 
 inline void radiant_take_image_source_path(ImageSurface* surface, lam::SessionPtr<char>& source_path) {

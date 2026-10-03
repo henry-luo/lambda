@@ -350,7 +350,7 @@ static bool radiant_custom_layout_parse_paint_layers(const CustomLayoutContext* 
     }
     resource->roots = roots;
     resource->root_count = layer_count;
-    resource->paint.layers = layers;
+    resource->paint.layers = lam::own_arr(layers);
     resource->paint.layer_count = layer_count;
     return true;
 }

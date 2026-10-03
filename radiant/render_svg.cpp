@@ -271,7 +271,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.
-        run.owns_text = ctx->effect_fallback.active;
+        if (ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());
         run.font_family = lam::up(font_box_handle(&ctx->font)
             ? font_handle_get_family_name(font_box_handle(&ctx->font))
             : "Arial");
@@ -284,7 +284,6 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         paint_glyph_run(svg_active_paint_list(ctx), &run);
         svg_lower_paint_list(ctx);
 
-        if (run.owns_text) text_content.release();  // the paint list keeps the text
         text_rect = text_rect->next;
         if (text_rect) { goto NEXT_RECT; }
         return;
@@ -1350,7 +1349,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.block.x = 0; ctx.block.y = 0;
 
     // Initialize font from default
-    ctx.font.style = &uicon->default_font;
+    ctx.font.style = lam::up(&uicon->default_font);
 
     // SVG header
     strbuf_append_format(ctx.svg_content,

@@ -111,6 +111,7 @@ template<class T> constexpr Up<T> up(T* p) { return Up<T>(p); }
 // borrowing an owned or outliving field keeps the outlives claim
 template<class T> constexpr Up<T> up(const Own<T>& o) { return Up<T>(o.p_); }
 template<class T> constexpr Up<T> up(const Up<T>& u) { return u; }
+template<class T> constexpr Up<T> up(const OwnArr<T>& a) { return Up<T>(a.p_); }
 template<class T> constexpr Own<T> own(T* p) { return Own<T>(p); }
 template<class T> constexpr OwnArr<T> own_arr(T* p) { return OwnArr<T>(p); }
 template<class T> constexpr Counted<T> counted(T* p) { return Counted<T>(p); }

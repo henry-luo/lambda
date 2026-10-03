@@ -40,33 +40,31 @@ void PaintList::init(Arena* backing_arena) {
     (void)backing_arena;
 }
 
-static void paint_free_owned_path(RdtPath** path, bool* owns_path) {
-    if (!path || !owns_path || !*owns_path || !*path) return;
-    rdt_path_free(*path);
+static void paint_free_owned_path(RdtPath** path, lam::Own<RdtPath>* owned) {
+    if (!path || !owned || !*owned) return;
+    rdt_path_free(*owned);
+    *owned = nullptr;
     *path = nullptr;
-    *owns_path = false;
 }
 
 static void paint_free_owned_gradient_stops(const RdtGradientStop** stops,
-                                            bool* owns_stops) {
-    if (!stops || !owns_stops || !*owns_stops || !*stops) return;
-    lam::Temp<RdtGradientStop> owned((RdtGradientStop*)*stops);  // owns_stops: this command's copy
+                                            lam::OwnArr<RdtGradientStop>* owned) {
+    if (!stops || !owned || !*owned) return;
+    lam::free_owned(*owned);
     *stops = nullptr;
-    *owns_stops = false;
 }
 
-static void paint_free_owned_gradient_payload(RdtPath** path, bool* owns_path,
+static void paint_free_owned_gradient_payload(RdtPath** path, lam::Own<RdtPath>* owned_path,
                                               const RdtGradientStop** stops,
-                                              bool* owns_stops) {
-    paint_free_owned_path(path, owns_path);
-    paint_free_owned_gradient_stops(stops, owns_stops);
+                                              lam::OwnArr<RdtGradientStop>* owned_stops) {
+    paint_free_owned_path(path, owned_path);
+    paint_free_owned_gradient_stops(stops, owned_stops);
 }
 
 static void paint_free_owned_glyph_run_text(PaintGlyphRun* run) {
-    if (!run || !run->owns_text || !run->text) return;
-    lam::Temp<char> owned((char*)run->text);  // owns_text: this command's copy
+    if (!run || !run->owned_text) return;
+    lam::free_owned(run->owned_text);
     run->text = nullptr;
-    run->owns_text = false;
 }
 
 static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
@@ -74,22 +72,22 @@ static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
     // deferred lowerers can transfer heap payloads into PaintList commands; central cleanup prevents backend-specific ownership switches from drifting.
     switch (cmd->op) {
     case PAINT_FILL_PATH:
-        paint_free_owned_path(&cmd->fill_path.path, &cmd->fill_path.owns_path);
+        paint_free_owned_path(&cmd->fill_path.path, &cmd->fill_path.owned_path);
         break;
     case PAINT_STROKE_PATH:
-        paint_free_owned_path(&cmd->stroke_path.path, &cmd->stroke_path.owns_path);
+        paint_free_owned_path(&cmd->stroke_path.path, &cmd->stroke_path.owned_path);
         break;
     case PAINT_FILL_LINEAR_GRADIENT:
         paint_free_owned_gradient_payload(&cmd->fill_linear_gradient.path,
-                                          &cmd->fill_linear_gradient.owns_path,
+                                          &cmd->fill_linear_gradient.owned_path,
                                           &cmd->fill_linear_gradient.stops,
-                                          &cmd->fill_linear_gradient.owns_stops);
+                                          &cmd->fill_linear_gradient.owned_stops);
         break;
     case PAINT_FILL_RADIAL_GRADIENT:
         paint_free_owned_gradient_payload(&cmd->fill_radial_gradient.path,
-                                          &cmd->fill_radial_gradient.owns_path,
+                                          &cmd->fill_radial_gradient.owned_path,
                                           &cmd->fill_radial_gradient.stops,
-                                          &cmd->fill_radial_gradient.owns_stops);
+                                          &cmd->fill_radial_gradient.owned_stops);
         break;
     case PAINT_GLYPH_RUN:
         paint_free_owned_glyph_run_text(&cmd->glyph_run);
