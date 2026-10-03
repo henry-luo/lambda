@@ -298,7 +298,7 @@ Script top-level loops are a separate, later case: their `var`s are global
 properties, so there are no live-ins, but the continuation must return the
 script's completion value and the rest of the script must not run twice.
 
-**E4 — Threshold.** Start with `JS_JIT_BACKEDGE` at 10,000 and
+**E4 — Threshold.** Start with `JS_LOOP_JIT_THRESHOLD` at 10,000 and
 `JS_JIT_THRESHOLD` at 1000 (§8) and re-derive both for JS after E2. Today's
 break-even is `promotion cost ÷ (T0 − T1 cost per iteration)`, about
 6,000 iterations for a tiny file and about 90,000 at 87 KB, because the cost
@@ -399,10 +399,10 @@ sentence that no active AST frame transfers to MIR, and JSI18's entry-only
 rule. E3 is unblocked; it still depends on E1 to be useful.
 
 **R2 — JS keeps its own names.** `JS_EXECUTION_BACKEND` and
-`JS_JIT_THRESHOLD` stay. The loop threshold is `JS_JIT_BACKEDGE`. The shared
+`JS_JIT_THRESHOLD` stay. The loop threshold is `JS_LOOP_JIT_THRESHOLD`. The shared
 kernel of A1/A2 takes its policy values from the profile, so each language
 reads its own knobs; the stress differential for JS is
-`JS_JIT_THRESHOLD=1 JS_JIT_BACKEDGE=1` with synchronous publication.
+`JS_JIT_THRESHOLD=1 JS_LOOP_JIT_THRESHOLD=1` with synchronous publication.
 
 **R3 — Hotness-only promotion; call threshold 1000, then 100.** A JS definition is
 compiled only on a hot hit: 1000 calls (five before; **100** since
@@ -508,7 +508,7 @@ As designed in §5, with these specifics:
   live-in, a continuation that fails to compile. A live-in still in its TDZ
   declines the handoff and stays T0.
 
-Stress differential (`JS_JIT_THRESHOLD=2 JS_JIT_BACKEDGE=1`): no divergence;
+Stress differential (`JS_JIT_THRESHOLD=2 JS_LOOP_JIT_THRESHOLD=1`): no divergence;
 31 handoffs in 19 of 471 files. Refusals are dominated by nested definitions
 (272 "closure capture"), the shared-environment work of JS design §9.5.
 

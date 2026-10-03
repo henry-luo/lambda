@@ -127,7 +127,7 @@ struct Runtime {
     // mixing AST and MIR closures in a single realm has no shared ABI.
     bool js_ast_backend;
     // D8.1.3v22 promotion policy, read from JS_EXECUTION_BACKEND /
-    // JS_JIT_THRESHOLD / JS_JIT_BACKEDGE once per runtime at first use rather
+    // JS_JIT_THRESHOLD / JS_LOOP_JIT_THRESHOLD once per runtime at first use rather
     // than from the environment on every interpreted call.
     bool js_promotion_policy_resolved;
     bool js_promotion_auto;

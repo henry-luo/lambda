@@ -6636,8 +6636,8 @@ static void js_interp_p2_scan_node(JsAstNode* node,
 
 // D8.1.3v22: a definition is compiled only on a hot hit; the defaults are
 // provisional until release profiling.
-#define JS_JIT_THRESHOLD_DEFAULT 100
-#define JS_JIT_BACKEDGE_DEFAULT 10000
+#define JS_FUNC_JIT_THRESHOLD 100
+#define JS_LOOP_JIT_THRESHOLD 10000
 
 static uint32_t js_interp_policy_threshold(const char* name, uint32_t fallback) {
     const char* text = getenv(name);
@@ -6656,9 +6656,9 @@ static Runtime* js_interp_promotion_policy(void) {
     if (!runtime || runtime->js_promotion_policy_resolved) return runtime;
     runtime->js_promotion_auto = js_execution_auto_requested();
     runtime->js_promotion_call_threshold = js_interp_policy_threshold(
-        "JS_JIT_THRESHOLD", JS_JIT_THRESHOLD_DEFAULT);
+        "JS_JIT_THRESHOLD", JS_FUNC_JIT_THRESHOLD);
     runtime->js_promotion_backedge_threshold = js_interp_policy_threshold(
-        "JS_JIT_BACKEDGE", JS_JIT_BACKEDGE_DEFAULT);
+        "JS_LOOP_JIT_THRESHOLD", JS_LOOP_JIT_THRESHOLD);
     runtime->js_promotion_policy_resolved = true;
     return runtime;
 }
