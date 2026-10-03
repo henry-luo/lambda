@@ -2,6 +2,7 @@
 #include "render.hpp"
 #include "radiant.hpp"
 #include "event.hpp"
+#include "svg_animation.hpp"
 
 #include "../lib/image.h"
 #include "../lib/log.h"
@@ -17,6 +18,7 @@
 #include "../lambda/network/network_resource_manager.h"
 
 #include <stdlib.h>
+#include <limits.h>
 #include <unistd.h>
 
 typedef struct ImageEntry {
@@ -36,7 +38,7 @@ static char* resolve_wpt_absolute_image_path(UiContext* uicon, const char* img_u
 }
 
 // Detect if memory content is SVG by checking for XML/SVG signature
-static bool is_svg_content(const unsigned char* data, size_t size) {
+bool image_content_is_svg(const unsigned char* data, size_t size) {
     if (!data || size < 10) return false;
 
     // Skip UTF-8 BOM if present
@@ -401,10 +403,19 @@ static void load_image_cleanup_failed(UiContext* uicon, Url* abs_url, char* file
     image_cache_store_unavailable(uicon, file_path);
 }
 
-static ImageSurface* image_surface_decode_file(const char* path) {
+ImageSurface* image_surface_decode_file(const char* path) {
     if (!path || !*path) return nullptr;
     int width = 0, height = 0, channels = 0;
     unsigned char* pixels = image_load(path, &width, &height, &channels, 4);
+    if (!pixels) return nullptr;
+    ImageSurface* surface = image_surface_create_from(width, height, pixels);
+    if (!surface) image_free(pixels);
+    return surface;
+}
+
+ImageSurface* image_surface_decode_data(const unsigned char* data, size_t length) {
+    int width = 0, height = 0, channels = 0;
+    unsigned char* pixels = image_load_from_memory(data, length, &width, &height, &channels);
     if (!pixels) return nullptr;
     ImageSurface* surface = image_surface_create_from(width, height, pixels);
     if (!surface) image_free(pixels);
@@ -421,8 +432,45 @@ static bool image_path_has_declared_non_svg_extension(const char* file_path) {
     return true;
 }
 
+static void image_register_gif_animation(UiContext* ui, ImageSurface* image, GifFrames* frames) {
+    if (!frames) return;
+    DocState* state = ui && ui->document ? (DocState*)ui->document->state : nullptr;
+    if (!state || !state->animation_scheduler ||
+        !gif_animation_create(state->animation_scheduler, image, frames,
+            state->animation_scheduler->current_time, ui->document->document_pool)) {
+        image_gif_free(frames);
+    }
+}
+
+static bool image_cache_hash_resource(const void* item, void* context) {
+    const ImageEntry* entry = (const ImageEntry*)item;
+    uint64_t* hash = (uint64_t*)context;
+    uint64_t pointer = (uint64_t)(uintptr_t)entry->image;
+    uint64_t generation = entry->image ? entry->image->generation : 0;
+    *hash ^= (pointer * UINT64_C(0x9e3779b97f4a7c15)) ^
+        (generation * UINT64_C(0xbf58476d1ce4e5b9));
+    return true;
+}
+
+uint64_t image_cache_resource_generation(UiContext* ui) {
+    uint64_t hash = 0;
+    if (!ui) return hash;
+    if (ui->image_cache) hashmap_scan(ui->image_cache, image_cache_hash_resource, &hash);
+    if (ui->document && ui->document->resource_manager) {
+        int total = 0, completed = 0, failed = 0;
+        resource_manager_get_stats(ui->document->resource_manager, &total, &completed, &failed);
+        hash ^= (uint64_t)total * UINT64_C(0x94d049bb133111eb) ^
+            (uint64_t)completed * UINT64_C(0x2545f4914f6cdd1d) ^ (uint64_t)failed;
+    }
+    return hash;
+}
+
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
-    if (uicon->document == NULL || uicon->document->url == NULL) {
+    if (!uicon || !img_url || !uicon->document) return nullptr;
+    bool data_uri = strncmp(img_url, "data:", 5) == 0;
+    // SVG2 §2.2: image documents can embed data resources but cannot fetch external content.
+    if (uicon->document->services.svg_image_document && !data_uri) return nullptr;
+    if (!data_uri && uicon->document->url == NULL) {
         log_error("Missing URL context for image: %s", img_url);
         return NULL;
     }
@@ -434,7 +482,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     }
 
     // Handle data: URIs
-    if (strncmp(img_url, "data:", 5) == 0) {
+    if (data_uri) {
         ImageEntry search_key = {.path = (char*)img_url, .image = NULL};
         ImageEntry* entry = ImageMap::get(uicon->image_cache, search_key);
         if (entry) {
@@ -480,8 +528,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             return NULL;
         }
         // Detect format from MIME type or content
-        bool is_svg = is_svg_content(decoded, decoded_len);
+        bool is_svg = image_content_is_svg(decoded, decoded_len);
         ImageSurface* surface;
+        GifFrames* inline_frames = nullptr;
         if (is_svg) {
             SvgImageIntrinsicMetadata svg_meta =
                 svg_read_intrinsic_metadata_in_memory((const char*)decoded, decoded_len);
@@ -498,7 +547,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
             image_surface_apply_svg_metadata(surface, svg_meta, svg_w, svg_h);
             mem_free(decoded);
         } else {
-            int width, height, channels;
+            int width, height;
             int orientation = jpeg_exif_orientation_from_memory(decoded, decoded_len);
             if (!image_get_dimensions_from_memory(decoded, decoded_len, &width, &height)) {
                 // Invalid inline payloads are common in scraped pages; probe
@@ -507,18 +556,18 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 log_warn("image: unsupported data URI image, using placeholder");
                 return NULL;
             }
-            unsigned char* data = image_load_from_memory(decoded, decoded_len, &width, &height, &channels);
+            surface = image_surface_decode_data(decoded, decoded_len);
+            if (surface) inline_frames = gif_detect_animated_from_memory(decoded, decoded_len);
             mem_free(decoded);
-            if (!data) {
+            if (!surface) {
                 log_warn("image: unsupported data URI image, using placeholder");
                 return NULL;
             }
-            surface = image_surface_create_from(width, height, data);
-            if (!surface) { image_free(data); return NULL; }
             // Detect format from MIME
             if (strstr(img_url, "image/png")) surface->format = IMAGE_FORMAT_PNG;
             else if (strstr(img_url, "image/jpeg") || strstr(img_url, "image/jpg")) surface->format = IMAGE_FORMAT_JPEG;
             else if (strstr(img_url, "image/gif")) surface->format = IMAGE_FORMAT_GIF;
+            else if (strstr(img_url, "image/webp")) surface->format = IMAGE_FORMAT_WEBP;
             else if (strstr(img_url, "image/svg")) surface->format = IMAGE_FORMAT_SVG;
             if (surface->format == IMAGE_FORMAT_JPEG) {
                 image_surface_apply_orientation_metadata(surface, orientation);
@@ -526,6 +575,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 image_surface_apply_orientation_metadata(surface, 1);
             }
         }
+        image_register_gif_animation(uicon, surface, inline_frames);
         char* cache_path = mem_strdup(img_url, MEM_CAT_RENDER);
         if (!cache_path) {
             image_surface_destroy(surface);
@@ -536,6 +586,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         surface->cache_owned = true;
         ImageEntry new_entry = {.path = (char*)cache_path, .image = surface};
         ImageMap::set(uicon->image_cache, new_entry);
+        svg_image_animation_register(uicon, surface);
         log_debug("[BG-IMAGE] Loaded data URI image: %dx%d", surface->width, surface->height);
         return surface;
     }
@@ -682,7 +733,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     // Determine if this is an SVG - check content for HTTP, extension for local files
     bool is_svg = false;
     if (is_http && downloaded_data) {
-        is_svg = is_svg_content(downloaded_data, downloaded_size);
+        is_svg = image_content_is_svg(downloaded_data, downloaded_size);
         log_debug("[image] HTTP image format detection: is_svg=%s", is_svg ? "yes" : "no");
     } else {
         is_svg = (slen > 4 && strcmp(file_path + slen - 4, ".svg") == 0);
@@ -694,7 +745,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 fclose(svg_probe);
                 // Network cache files do not preserve extensions; declared
                 // raster resources keep their URL-selected decoder.
-                is_svg = is_svg_content(probe_buf, probe_size);
+                is_svg = image_content_is_svg(probe_buf, probe_size);
             }
         }
     }
@@ -831,6 +882,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         else if (slen > 4 && strcmp(file_path + slen - 4, ".gif") == 0) {
             surface->format = IMAGE_FORMAT_GIF;
         }
+        else if (slen > 5 && str_icmp_cstr(file_path + slen - 5, ".webp") == 0) {
+            surface->format = IMAGE_FORMAT_WEBP;
+        }
         if (surface->format == IMAGE_FORMAT_JPEG) {
             int orientation = 1;
             if (is_http && surface->source_data && surface->source_data_len > 0) {
@@ -856,29 +910,24 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         } else if (surface->source_data && surface->source_data_len > 0) {
             gif_frames = gif_detect_animated_from_memory(surface->source_data, surface->source_data_len);
         }
-        if (gif_frames) {
-            DocState* rs = (DocState*)uicon->document->state;
-            if (rs && rs->animation_scheduler) {
-                gif_animation_create(rs->animation_scheduler, surface, gif_frames,
-                                      rs->animation_scheduler->current_time, uicon->document->document_pool);
-                log_info("gif animated: registered %d-frame GIF with scheduler", gif_frames->frame_count);
-            } else {
-                image_gif_free(gif_frames);
-            }
-        }
+        image_register_gif_animation(uicon, surface, gif_frames);
     }
 
     ImageEntry new_entry = {.path = (char*)file_path, .image = surface};
     surface->cache_owned = true;
     ImageMap::set(uicon->image_cache, new_entry);
+    svg_image_animation_register(uicon, surface);
     return surface;
 }
 
 bool image_entry_free(const void *item, void *udata) {
-    (void)udata;
+    UiContext* ui = (UiContext*)udata;
     ImageEntry* entry = (ImageEntry*)item;
     mem_free((char*)entry->path);  // always mem_alloc-owned: mem_strdup for HTTP paths, url_to_local_path for local paths
     if (entry->image) {
+        // cached media surfaces can be released before the document's scheduler is torn down.
+        if (ui && ui->document && ui->document->state)
+            animation_scheduler_remove_by_target(ui->document->state->animation_scheduler, entry->image);
         if (entry->image->url) url_destroy(entry->image->url);
         image_surface_destroy(entry->image);
     }
@@ -889,14 +938,15 @@ void image_cache_cleanup(UiContext* uicon) {
     // loop through the hashmap and free the images
     if (uicon->image_cache) {
         log_debug("Cleaning up cached images");
-        hashmap_scan(uicon->image_cache, image_entry_free, NULL);
+        hashmap_scan(uicon->image_cache, image_entry_free, uicon);
         ImageMap::destroy(uicon->image_cache);
         uicon->image_cache = NULL;
     }
 }
 
 ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
-    if (pixel_width <= 0 || pixel_height <= 0) {
+    if (pixel_width <= 0 || pixel_height <= 0 || pixel_width > INT_MAX / 4 ||
+        (size_t)pixel_height > SIZE_MAX / sizeof(uint32_t) / (size_t)pixel_width) {
         log_error("[surface] Invalid image surface dimensions");
         return NULL;
     }
@@ -911,7 +961,8 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     img_surface->has_intrinsic_size = true;
     img_surface->pitch = pixel_width * 4;
     img_surface->generation = 1;
-    img_surface->pixels = mem_calloc(pixel_width * pixel_height * 4, sizeof(uint32_t), MEM_CAT_IMAGE);
+    // pitch counts bytes; the allocation counts pixels once and checks products before multiplying.
+    img_surface->pixels = mem_calloc((size_t)pixel_width * (size_t)pixel_height, sizeof(uint32_t), MEM_CAT_IMAGE);
     if (!img_surface->pixels) {
         log_error("[surface] Could not allocate memory for image surface");
         image_surface_destroy(img_surface);
@@ -920,8 +971,35 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     return img_surface;
 }
 
+bool render_memory_allow_allocation(MemContext* memory, size_t bytes) {
+    size_t limit = 0; memtrack_get_limits(nullptr, nullptr, &limit);
+    if (!limit) return true;
+    size_t usage = memtrack_get_current_usage();
+    if (usage < limit && bytes <= limit - usage) return true;
+    mem_context_request_reclaim(memory, MEM_PRESSURE_HIGH, bytes);
+    usage = memtrack_get_current_usage();
+    return usage < limit && bytes <= limit - usage;
+}
+
+ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height) {
+    width = ceilf(width); height = ceilf(height);
+    if (!isfinite(width) || !isfinite(height) || width <= 0.0f || height <= 0.0f ||
+        width >= (float)(INT_MAX / 4) || height >= (float)INT_MAX ||
+        (double)width * (double)height > (double)((SIZE_MAX - sizeof(ImageSurface)) / 4)) return nullptr;
+    size_t bytes = (size_t)width * (size_t)height * 4 + sizeof(ImageSurface);
+    if (!render_memory_allow_allocation(memory, bytes)) return nullptr;
+    ImageSurface* surface = image_surface_create((int)width, (int)height); // INT_CAST_OK: checked physical raster extent
+    if (!surface) {
+        // reclaim outside allocator callbacks; active filter programs stay pinned while retrying their surfaces.
+        mem_context_request_reclaim(memory, MEM_PRESSURE_CRITICAL, bytes);
+        if (render_memory_allow_allocation(memory, bytes)) surface = image_surface_create((int)width, (int)height); // INT_CAST_OK: checked physical raster extent
+    }
+    return surface;
+}
+
 ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels) {
-    if (pixel_width <= 0 || pixel_height <= 0 || !pixels) {
+    if (pixel_width <= 0 || pixel_height <= 0 || pixel_width > INT_MAX / 4 || !pixels ||
+        (size_t)pixel_height > SIZE_MAX / sizeof(uint32_t) / (size_t)pixel_width) {
         log_error("[surface] Invalid image surface dimensions or pixels");
         return NULL;
     }
@@ -933,6 +1011,7 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
         img_surface->has_intrinsic_size = true;
         img_surface->pitch = pixel_width * 4;
         img_surface->pixels = pixels;
+        img_surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
         img_surface->generation = 1;
     }
     return img_surface;
@@ -978,6 +1057,12 @@ static bool image_surface_can_promote_decode(ImageSurface* img, int target_w, in
     int decoded_h = img->decoded_height > 0 ? img->decoded_height : img->height;
     if (target_w <= 0) target_w = decoded_w;
     if (target_h <= 0) target_h = decoded_h;
+    // decoding cannot exceed the encoded image; larger CSS boxes must not
+    // repeatedly replace full-resolution buffers already borrowed by paint.
+    int intrinsic_w = img->encoded_width > 0 ? img->encoded_width : img->width;
+    int intrinsic_h = img->encoded_height > 0 ? img->encoded_height : img->height;
+    if (intrinsic_w > 0 && target_w > intrinsic_w) target_w = intrinsic_w;
+    if (intrinsic_h > 0 && target_h > intrinsic_h) target_h = intrinsic_h;
     return target_w > decoded_w || target_h > decoded_h;
 }
 
@@ -991,6 +1076,7 @@ static void image_surface_install_decoded_pixels(ImageSurface* img,
                                                  int width, int height) {
     if (img->pixels) mem_free(img->pixels);
     img->pixels = pixels;
+    img->alpha_mode = IMAGE_ALPHA_STRAIGHT;
     img->decoded_width = width;
     img->decoded_height = height;
     img->pitch = width * 4;

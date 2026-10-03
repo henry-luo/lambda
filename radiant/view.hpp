@@ -135,6 +135,7 @@ typedef enum AnimationType {
     ANIM_CSS_TRANSITION,
     ANIM_GIF,
     ANIM_LOTTIE,
+    ANIM_SVG,
 } AnimationType;
 
 typedef enum AnimationDirection {
@@ -319,6 +320,7 @@ static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
 
 // Per-view CSS transform matrix, for painted bounds and for hit-testing.
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
+bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform = true);
 
 static inline RdtMatrix rdt_matrix_identity(void) {
     RdtMatrix m = { 1, 0, 0,  0, 1, 0,  0, 0, 1 };
@@ -410,6 +412,17 @@ static inline bool rdt_matrix_unproject_affine_point(
     float dy = y - matrix->e23;
     *out_x = (matrix->e22 * dx - matrix->e12 * dy) / determinant;
     *out_y = (-matrix->e21 * dx + matrix->e11 * dy) / determinant;
+    return true;
+}
+
+static inline bool rdt_matrix_invert_affine(const RdtMatrix* matrix, RdtMatrix* inverse) {
+    if (!matrix || !inverse || matrix->e31 != 0.0f || matrix->e32 != 0.0f || matrix->e33 != 1.0f) return false;
+    float determinant = matrix->e11 * matrix->e22 - matrix->e21 * matrix->e12;
+    if (determinant == 0.0f || !isfinite(determinant)) return false;
+    float a = matrix->e22 / determinant, b = -matrix->e12 / determinant;
+    float c = -matrix->e21 / determinant, d = matrix->e11 / determinant;
+    *inverse = {a, b, -a * matrix->e13 - b * matrix->e23,
+        c, d, -c * matrix->e13 - d * matrix->e23, 0.0f, 0.0f, 1.0f};
     return true;
 }
 
@@ -589,6 +602,7 @@ typedef enum {
     IMAGE_FORMAT_PNG,
     IMAGE_FORMAT_JPEG,
     IMAGE_FORMAT_GIF,
+    IMAGE_FORMAT_WEBP,
 } ImageFormat;
 
 typedef enum {
@@ -596,6 +610,11 @@ typedef enum {
     SCALE_MODE_LINEAR,       // Bilinear interpolation (smooth)
     SCALE_MODE_LINEAR_WRAP,  // Bilinear with wrap-around for tiled backgrounds
 } ScaleMode;
+
+typedef enum {
+    IMAGE_ALPHA_PREMULTIPLIED = 0,
+    IMAGE_ALPHA_STRAIGHT,
+} ImageAlphaMode;
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct ImageSurface {
@@ -611,6 +630,7 @@ typedef struct ImageSurface {
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
+    ImageAlphaMode alpha_mode; // decoded images are straight; native raster/effect surfaces are premultiplied
 #ifndef LAMBDA_HEADLESS
     struct RdtPicture* pic;  // SVG picture (opaque, managed by rdt_vector API)
 #endif
@@ -644,6 +664,10 @@ extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
 extern void image_surface_release_slot(ImageSurface* surface);
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
+extern ImageSurface* image_surface_decode_file(const char* path);
+extern ImageSurface* image_surface_decode_data(const unsigned char* data, size_t length);
+extern bool image_content_is_svg(const unsigned char* data, size_t length);
+extern uint64_t image_cache_resource_generation(struct UiContext* ui);
 extern bool image_surface_is_dom_owned(const ImageSurface* img_surface);
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
@@ -2927,7 +2951,7 @@ bool radiant_is_supported_web_font_source(const char* url, const char* format);
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
 
 // Process all @font-face rules from a stylesheet
-void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet, const char* base_path);
+void process_font_face_rules_from_stylesheet(UiContext* uicon, struct CssStylesheet* stylesheet, const char* base_path, bool data_only = false);
 
 // Process all @font-face rules from all stylesheets in a document
 void process_document_font_faces(UiContext* uicon, struct DomDocument* doc);
@@ -3688,9 +3712,12 @@ Color resolve_color_value(LayoutContext* lycon, const CssValue* value);
 Color color_name_to_rgb(CssEnum color_name);
 int64_t get_cascade_priority(const CssDeclaration* decl);
 float resolve_length_value(LayoutContext* lycon, uintptr_t property, const CssValue* value);
+float resolve_css_angle_value(const CssValue* value);
 float layout_effective_zoom(View* view);
 char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
                                const char* url);
+typedef const CssValue* (*CssVariableLookupFn)(void* context, const char* name);
+const CssValue* css_resolve_var_value(const CssValue* value, CssVariableLookupFn lookup, void* context);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
@@ -3832,6 +3859,15 @@ extern void transform_point(float& x, float& y, const RdtMatrix& m);
 
 } // namespace radiant
 
+// typed CSS transform decoding shared by box and SVG coordinate resolution.
+typedef float (*TransformLengthResolver)(void* context, const CssValue* value);
+int css_value_count(const CssValue* value, int limit);
+const CssValue* css_value_at(const CssValue* value, int index);
+bool resolve_transform_function_value(const CssValue* value, TransformFunction* function,
+    TransformLengthResolver resolve_length, void* context);
+void resolve_transform_origin_value(const CssValue* value, TransformProp* transform,
+    TransformLengthResolver resolve_length, void* context);
+
 
 #ifndef LAMBDA_HEADLESS
 // tier-2: view-pool, rebuilt each relayout
@@ -3915,6 +3951,8 @@ typedef struct UiContext {
     void destroy_document();
     void destroy();
 } UiContext;
+
+void ui_context_init_default_fonts(UiContext* uicon);
 
 inline float ui_context_raster_scale(const UiContext* uicon) {
     if (!uicon) return 1.0f;

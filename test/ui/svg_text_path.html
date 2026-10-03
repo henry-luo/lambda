@@ -1,0 +1,30 @@
+<!doctype html><html><head><style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+html,body { margin:0; background:white; }
+svg { display:block; }
+text { font-family:Ahem; font-size:40px; fill:blue; }
+</style></head><body><svg id="scene" data-last="none" width="640" height="680">
+<defs>
+ <path id="line" d="M20 60H220"/>
+ <path id="center" d="M280 60H480"/>
+ <path id="reverse" d="M220 140H20"/>
+ <g transform="translate(90 70)"><path id="mapped" d="M0 0H100" transform="translate(280 140) scale(2)"/></g>
+ <path id="curve" d="M20 270Q120 170 220 270"/>
+ <path id="diagonal" d="M300 220L500 420"/>
+ <path id="nested" d="M20 360H220"/>
+ <path id="calibrated" d="M20 520H220" pathLength="100"/>
+ <path id="spacing" d="M20 600H220"/>
+ <path id="stretch" d="M280 600H480"/>
+</defs>
+<text id="straight"><textPath id="straight-path" href="#line">AAA</textPath></text>
+<text id="anchored" text-anchor="middle"><textPath id="anchored-path" href="#center" startOffset="50%">AA</textPath></text>
+<text id="reversed"><textPath id="reversed-path" href="#reverse">AAA</textPath></text>
+<text id="transformed"><textPath id="transformed-path" href="#mapped">AAA</textPath></text>
+<text id="curved" text-anchor="middle"><textPath id="curved-path" href="#curve" startOffset="50%">A</textPath></text>
+<text id="angled"><textPath id="angled-path" href="#diagonal">AA</textPath></text>
+<text id="children"><textPath id="children-path" href="#nested">A<tspan id="nested-span" dx="10" dy="20">A</tspan>A</textPath></text>
+<text id="calibration"><textPath id="calibration-path" href="#calibrated" startOffset="50">AA</textPath></text>
+<text id="spaced"><textPath id="spaced-path" href="#spacing" textLength="120">AA</textPath></text>
+<text id="scaled"><textPath id="scaled-path" href="#stretch" textLength="120" lengthAdjust="spacingAndGlyphs">AA</textPath></text>
+<text id="missing" x="20" y="460"><textPath id="missing-path" href="#absent">AAA</textPath></text>
+</svg><script>document.getElementById("scene").addEventListener("click",function(event){this.setAttribute("data-last",event.target.id);});</script></body></html>

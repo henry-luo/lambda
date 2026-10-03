@@ -1,0 +1,280 @@
+{
+  "name": "SMIL inherited resource percentages, filter vectors, dash/text lists and angles",
+  "html": "test/ui/svg_smil_classes.html",
+  "viewport": {
+    "width": 560,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "click",
+      "x": 30,
+      "y": 205
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-bounds",
+      "equals": "10"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 25,
+      "min_r": 183,
+      "max_r": 199,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 56,
+      "max_b": 72
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 25,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 23,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 43,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 217,
+      "y": 85,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 65,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 365,
+      "y": 100,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "x": 110,
+      "y": 205
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-bounds",
+      "equals": "30"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 25,
+      "min_r": 162,
+      "max_r": 178,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 77,
+      "max_b": 93
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 25,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 120,
+      "max_b": 136
+    },
+    {
+      "type": "assert_pixel",
+      "x": 23,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 43,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 217,
+      "y": 85,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 65,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 360,
+      "y": 110,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "x": 190,
+      "y": 205
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-bounds",
+      "equals": "50"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 25,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 120,
+      "max_b": 136
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 25,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 23,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 43,
+      "y": 80,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 217,
+      "y": 85,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 240,
+      "y": 65,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 350,
+      "y": 115,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ]
+}

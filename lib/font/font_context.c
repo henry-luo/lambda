@@ -140,6 +140,7 @@ FontContext* font_context_create(FontContextConfig* config) {
     ctx->owns_pool = owns_pool;
     ctx->owns_arena = owns_arena;
     ctx->glyph_cache_generation = 1;
+    ctx->resource_generation = 1;
     ctx->next_handle_identity = 1;
 
     // create glyph arena (separate for bitmap data, resettable)

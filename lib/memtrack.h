@@ -397,6 +397,7 @@ void memtrack_unregister_pressure_callback(uint32_t handle);
  * @param critical_limit Bytes at which CRITICAL pressure starts
  */
 void memtrack_set_limits(size_t soft_limit, size_t hard_limit, size_t critical_limit);
+void memtrack_get_limits(size_t* soft_limit, size_t* hard_limit, size_t* critical_limit);
 
 /**
  * Get current memory pressure level

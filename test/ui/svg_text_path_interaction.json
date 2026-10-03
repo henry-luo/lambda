@@ -1,0 +1,390 @@
+{
+  "name": "SVG textPath positioned character cells receive actual pointer clicks",
+  "html": "test/ui/svg_text_path.html",
+  "viewport": {
+    "width": 640,
+    "height": 680
+  },
+  "events": [
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 40,
+      "expected_selector": "#straight-path"
+    },
+    {
+      "type": "click",
+      "x": 40,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "straight-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 160,
+      "y": 40,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 160,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 350,
+      "y": 40,
+      "expected_selector": "#anchored-path"
+    },
+    {
+      "type": "click",
+      "x": 350,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "anchored-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 430,
+      "y": 40,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 430,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 200,
+      "y": 150,
+      "expected_selector": "#reversed-path"
+    },
+    {
+      "type": "click",
+      "x": 200,
+      "y": 150
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "reversed-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 200,
+      "y": 110,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 200,
+      "y": 110
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 300,
+      "y": 120,
+      "expected_selector": "#transformed-path"
+    },
+    {
+      "type": "click",
+      "x": 300,
+      "y": 120
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "transformed-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 410,
+      "y": 120,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 410,
+      "y": 120
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 120,
+      "y": 200,
+      "expected_selector": "#curved-path"
+    },
+    {
+      "type": "click",
+      "x": 120,
+      "y": 200
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "curved-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 120,
+      "y": 250,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 120,
+      "y": 250
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 323,
+      "y": 226,
+      "expected_selector": "#angled-path"
+    },
+    {
+      "type": "click",
+      "x": 323,
+      "y": 226
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "angled-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 350,
+      "y": 330,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 350,
+      "y": 330
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 360,
+      "expected_selector": "#nested-span"
+    },
+    {
+      "type": "click",
+      "x": 90,
+      "y": 360
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "nested-span"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 90,
+      "y": 330,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 90,
+      "y": 330
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 150,
+      "y": 500,
+      "expected_selector": "#calibration-path"
+    },
+    {
+      "type": "click",
+      "x": 150,
+      "y": 500
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "calibration-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 580,
+      "expected_selector": "#spaced-path"
+    },
+    {
+      "type": "click",
+      "x": 40,
+      "y": 580
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "spaced-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 80,
+      "y": 580,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 80,
+      "y": 580
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 120,
+      "y": 580,
+      "expected_selector": "#spaced-path"
+    },
+    {
+      "type": "click",
+      "x": 120,
+      "y": 580
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "spaced-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 380,
+      "y": 580,
+      "expected_selector": "#scaled-path"
+    },
+    {
+      "type": "click",
+      "x": 380,
+      "y": 580
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scaled-path"
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 440,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "x": 40,
+      "y": 440
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "scene"
+    }
+  ]
+}

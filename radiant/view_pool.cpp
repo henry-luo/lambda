@@ -756,7 +756,9 @@ static bool release_should_walk_dom_children(DomElement* elem) {
     if (elem->display.inner == RDT_DISPLAY_REPLACED) {
         // Select, textarea, and button keep real DOM children/state that can own
         // layout handles; skipping them leaks fallback font handles on removal.
-        return tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA || tag == MARKUP_NAME_BUTTON;
+        // SVG's foreignObject descendants own ordinary CSS layout resources too.
+        return tag == MARKUP_NAME_SELECT || tag == MARKUP_NAME_TEXTAREA ||
+            tag == MARKUP_NAME_BUTTON || tag == MARKUP_NAME_SVG;
     }
 
     return true;
@@ -1188,7 +1190,9 @@ static void subtract_block_scroll(ViewBlock* block, float* x, float* y) {
  * @param out_dy Output: vertical translation offset
  * @return true if a transform offset was calculated, false otherwise
  */
-static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y) {
+static void calculate_absolute_position(View* view, TextRect* rect, float* out_x, float* out_y,
+                                        View* boundary = nullptr) {
+    if (view == boundary) { *out_x = *out_y = 0.0f; return; }
     float abs_x = rect ? rect->x : view->x;
     float abs_y = rect ? rect->y : view->y;
     ViewBlock* block = view->is_block() ? lam::view_require_block(view) : nullptr;
@@ -1218,7 +1222,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
             float cb_abs_x = 0.0f;
             float cb_abs_y = 0.0f;
             calculate_absolute_position(
-                static_cast<View*>(cb), nullptr, &cb_abs_x, &cb_abs_y);
+                static_cast<View*>(cb), nullptr, &cb_abs_x, &cb_abs_y, boundary);
             float cb_x = cb->x;
             float cb_y = cb->y;
             if (cb->view_type == RDT_VIEW_INLINE) {
@@ -1256,7 +1260,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
         // but then we need to continue walking up to find the absolute parent's
         // containing block and add those positions too.
         ViewElement* parent = view->parent_view();
-        while (parent) {
+        while (parent && parent != boundary) {
             if (parent->is_block()) {
                 ViewBlock* parent_block = lam::view_require_block(parent);
                 if (view_block_has_position(parent_block, CSS_VALUE_ABSOLUTE) ||
@@ -1267,7 +1271,7 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
                     // containing-block coordinate, not that ancestor's local y.
                     calculate_absolute_position(
                         static_cast<View*>(parent_block), nullptr,
-                        &parent_abs_x, &parent_abs_y);
+                        &parent_abs_x, &parent_abs_y, boundary);
                     abs_x += parent_abs_x;
                     abs_y += parent_abs_y;
                     if (parent_block != root) {
@@ -1293,14 +1297,14 @@ static void calculate_absolute_position(View* view, TextRect* rect, float* out_x
     *out_y = abs_y;
 }
 
-static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix) {
+static bool get_transform_matrix_for_view(View* view, RdtMatrix* out_matrix, View* boundary = nullptr) {
     if (!view || !view->is_block()) return false;
 
     ViewBlock* block = lam::view_require_block(view);
     if (!block->transform || !block->transformp()->functions) return false;
 
     float abs_x = 0.0f, abs_y = 0.0f;
-    calculate_absolute_position(view, nullptr, &abs_x, &abs_y);
+    calculate_absolute_position(view, nullptr, &abs_x, &abs_y, boundary);
     RdtLogicalPoint origin = radiant::transform_origin(
         block->transformp(), abs_x, abs_y, block->width, block->height);
 
@@ -1480,6 +1484,41 @@ bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix) {
     return get_transform_matrix_for_view(view, out_matrix);
 }
 
+// SVG2 §12.2: foreignObject is the boundary between CSS layout and SVG user space.
+bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform) {
+    if (!view || !out_matrix) return false;
+    View* chain[256]; unsigned count = 0;
+    ViewElement* foreign = nullptr;
+    for (ViewElement* parent = view->parent_view(); parent && count < 256; parent = parent->parent_view()) {
+        if (parent->tag() == MARKUP_NAME_FOREIGNOBJECT) { foreign = parent; break; }
+        chain[count++] = static_cast<View*>(parent);
+    }
+    float values[6];
+    if (!foreign || !dom_svg_foreign_object_client_transform(foreign, values)) return false;
+    float x, y;
+    calculate_absolute_position(view, nullptr, &x, &y, static_cast<View*>(foreign));
+    RdtMatrix frame = {values[0], values[1], values[2], values[3], values[4], values[5], 0, 0, 1};
+    while (count) {
+        RdtMatrix local;
+        if (get_transform_matrix_for_view(chain[--count], &local, static_cast<View*>(foreign)))
+            frame = rdt_matrix_multiply(&frame, &local);
+    }
+    RdtMatrix local;
+    if (include_self_transform && get_transform_matrix_for_view(view, &local, static_cast<View*>(foreign)))
+        frame = rdt_matrix_multiply(&frame, &local);
+    RdtMatrix position = rdt_matrix_translate(x, y);
+    *out_matrix = rdt_matrix_multiply(&frame, &position);
+    return true;
+}
+
+static bool view_foreign_object_bounds(View* view, float* x, float* y, float* width, float* height) {
+    RdtMatrix frame;
+    if (!view_get_foreign_object_matrix(view, &frame)) return false;
+    *x = *y = 0.0f; *width = view->width; *height = view->height;
+    apply_matrix_to_bounds(&frame, x, y, width, height);
+    return true;
+}
+
 void view_get_visual_bounds(View* view, float* out_x, float* out_y,
                             float* out_width, float* out_height) {
     if (!view) {
@@ -1499,6 +1538,13 @@ void view_get_visual_bounds(View* view, float* out_x, float* out_y,
     // is painted with, as getBoundingClientRect() and hit testing see it.
     if (view->is_element() &&
             dom_svg_element_client_bounds(view, &x, &y, &width, &height)) {
+        if (out_x) *out_x = x;
+        if (out_y) *out_y = y;
+        if (out_width) *out_width = width;
+        if (out_height) *out_height = height;
+        return;
+    }
+    if (view_foreign_object_bounds(view, &x, &y, &width, &height)) {
         if (out_x) *out_x = x;
         if (out_y) *out_y = y;
         if (out_width) *out_width = width;

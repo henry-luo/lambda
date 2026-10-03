@@ -275,6 +275,7 @@ bool dom_document_replace_url(DomDocument* document, Url* replacement) {
 
 void DomDocument::destroy() {
     dom_retire_begin_destroy(this);
+    mem_free(services.preferred_languages); services.preferred_languages = nullptr;
     float ext_rate = services.element_count
         ? 100.0f * (float)services.ext_allocations / (float)services.element_count
         : 0.0f;
@@ -1025,6 +1026,12 @@ bool DomElement::set_attribute(NameId name_id, const char* value) {
     // DOM storage still accepts bytes, but generated callers must preserve the
     // NameId until this single backing-map boundary.
     return name.str ? set_attribute(name.str, value) : false;
+}
+
+const char* DomElement::local_name() const {
+    if (!tag_name) return "";
+    const char* prefix = strchr(tag_name, ':');
+    return prefix ? prefix + 1 : tag_name;
 }
 
 const char* DomElement::get_attribute(const char* name) {

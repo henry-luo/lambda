@@ -1,0 +1,11 @@
+<!DOCTYPE html><html><head><style>
+@font-face {font-family:SVG-Ahem; src:url('../layout/data/font/Ahem.ttf');}
+html,body {margin:0;background:white;} svg {position:absolute;left:0;top:0;font-family:SVG-Ahem;font-size:20px;}
+</style></head><body><svg width="360" height="260">
+<text id="absolute" x="10,50,90" y="30 50 30" fill="red">ABC</text>
+<text id="nested" x="10 40 70 100 130" y="90" fill="blue">A<tspan x="180 210">BC</tspan>DE</text>
+<text id="relative" x="10" y="130" dx="0 10 20" dy="0 5 -5" fill="lime">ABC</text>
+<text id="rotated" x="150" y="130" rotate="0 90" fill="blue">ABC</text>
+<text id="unicode" x="10 50 90 130" y="185" fill="red">AéΩB</text>
+<text id="percent" x="10% 20%" y="95%" font-size="10" fill="magenta">AB</text>
+</svg></body></html>

@@ -1,0 +1,24 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white}svg{position:absolute;left:0;top:0}</style></head><body>
+<svg id="scene" width="500" height="360" data-last="none">
+ <rect id="back" width="500" height="360" fill="white"/>
+ <defs stroke="green" stroke-width="2">
+  <path id="source" d="M20 0H100" fill="none"/>
+  <use id="nested" href="#source" x="10"/>
+  <path id="explicit" d="M20 0H100" fill="none" stroke="red" stroke-width="4"/>
+  <symbol id="symbol" viewBox="0 0 100 40"><rect x="10" y="10" width="80" height="20" fill="none" vector-effect="non-scaling-stroke"/></symbol>
+  <use id="cycle-a" href="#cycle-b"/><use id="cycle-b" href="#cycle-a"/>
+ </defs>
+ <path id="bevel" d="M40 70H80V30" fill="none" stroke="blue" stroke-width="20" stroke-linejoin="bevel"/>
+ <path id="miter" d="M140 70H180V30" fill="none" stroke="blue" stroke-width="20" stroke-linejoin="miter" stroke-miterlimit="1"/>
+ <path id="round" d="M240 70H280V30" fill="none" stroke="blue" stroke-width="20" stroke-linejoin="round"/>
+ <g fill="none" stroke="blue" font-size="20" stroke-width=".5em">
+  <use id="instance" href="#source" y="150" font-size="40"/>
+  <use id="caps" href="#source" y="200" stroke-width="10" stroke-dasharray="20 20" stroke-linecap="round"/>
+  <use id="instance-nested" href="#nested" y="250"/>
+  <use id="override" href="#explicit" y="300"/>
+  <use id="instance-symbol" href="#symbol" x="280" y="130" width="200" height="80" stroke-width="6"/>
+  <use id="cycle" href="#cycle-a" x="300" y="280"/>
+ </g>
+</svg><script>
+document.getElementById('scene').addEventListener('click',function(event){this.setAttribute('data-last',event.target.id);});
+</script></body></html>

@@ -1,0 +1,29 @@
+<!doctype html><html><head><style>
+html,body{margin:0;background:white}svg{display:block}
+button,input{box-sizing:border-box;display:block;border:0;padding:0;margin:0;font:12px Arial}
+.embedded{width:100%;height:100%;background:yellow}
+.embedded button{width:80px;height:30px;background:red;color:black}
+.embedded input{width:80px;height:20px;background:yellow}
+.scroll{width:80px;height:40px;overflow:auto;scrollbar-width:none}
+.scroll div{height:40px;background:blue}.scroll div+div{height:100px;background:lime}
+#rotated-button{width:60px;height:30px;background:blue}
+#advance{position:absolute;left:410px;top:310px;width:80px;height:30px;background:silver}
+</style></head><body>
+<svg id="scene" width="500" height="380">
+ <g id="group" transform="translate(20 20) scale(1.5)"><foreignObject id="foreign" x="10" y="10" width="120" height="120"><div xmlns="http://www.w3.org/1999/xhtml" class="embedded"><button id="embedded-button">button</button><input id="embedded-input"><div id="scroll" class="scroll"><div id="blue-band"></div><div id="green-band"></div></div></div></foreignObject></g>
+ <foreignObject transform="translate(350 30) rotate(90)" width="100" height="80"><div xmlns="http://www.w3.org/1999/xhtml"><button id="rotated-button">rotate</button></div></foreignObject>
+ <foreignObject transform="translate(330 170) rotate(90)" width="80" height="80"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:100%;height:100%;background:yellow"><div style="position:absolute;left:20px;top:10px;width:30px;height:40px;overflow:hidden"><div id="inner-overflow" style="width:70px;height:70px;background:blue"></div></div></div></foreignObject>
+</svg><button id="advance" data-step="0">advance</button>
+<script>
+var scene=document.getElementById('scene'),group=document.getElementById('group'),foreign=document.getElementById('foreign'),step=0;
+function record(e){scene.setAttribute('data-last',this.id);scene.setAttribute('data-client',String(Math.round(e.clientX))+','+String(Math.round(e.clientY)));}
+document.getElementById('embedded-button').addEventListener('click',record);
+document.getElementById('rotated-button').addEventListener('click',record);
+document.getElementById('advance').addEventListener('click',function(){
+ step++;this.setAttribute('data-step',String(step));
+ if(step===1){var r=document.getElementById('embedded-button').getBoundingClientRect();this.setAttribute('data-box',[r.x,r.y,r.width,r.height].join(','));foreign.setAttribute('x','30');foreign.setAttribute('width','80');}
+ if(step===2)group.setAttribute('transform','translate(200 180) rotate(90)');
+ if(step===3)group.removeChild(foreign);
+ if(step===4)group.appendChild(foreign);
+});
+</script></body></html>

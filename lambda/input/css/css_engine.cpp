@@ -2,6 +2,7 @@
 #include "css_value_parser.hpp"
 #include "css_parser.hpp"
 #include "css_style_node.hpp"
+#include "selector_matcher.hpp"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -17,6 +18,109 @@ static uint64_t css_condition_hash_bytes(const char* text, size_t length) {
         hash *= UINT64_C(1099511628211);
     }
     return hash;
+}
+
+struct CssElementDeclarationQuery {
+    CssEngine* engine;
+    SelectorMatcher* matcher;
+    DomElement* element;
+    const char* property;
+    CssDeclaration best;
+    uint32_t order;
+    bool found;
+};
+
+static void css_query_consider_declaration(CssElementDeclarationQuery* query,
+    const CssDeclaration* declaration, CssSpecificity specificity, CssOrigin origin) {
+    if (!declaration || !declaration->valid || !declaration->property_name) return;
+    // SVG declaration queries need shorthand priority before projecting their resolved longhand value.
+    bool marker_shorthand = str_icmp_cstr(declaration->property_name, "marker") == 0 &&
+        (strcmp(query->property, "marker-start") == 0 || strcmp(query->property, "marker-mid") == 0 ||
+         strcmp(query->property, "marker-end") == 0);
+    bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
+        css_font_shorthand_contains_property(query->property);
+    if (!marker_shorthand && !font_shorthand && str_icmp_cstr(declaration->property_name, query->property) != 0) return;
+    CssDeclaration candidate = *declaration;
+    candidate.specificity = specificity;
+    candidate.specificity.important = declaration->important;
+    candidate.origin = origin;
+    candidate.source_order = query->order++;
+    if (!query->found || css_declaration_cascade_compare(&candidate, &query->best) >= 0) {
+        query->best = candidate;
+        query->found = true;
+    }
+}
+
+static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* rule,
+                                    size_t depth) {
+    if (!rule || depth > 512) return;
+    if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+        rule->type == CSS_RULE_LAYER) {
+        bool active = rule->type == CSS_RULE_LAYER || (query->engine &&
+            (rule->type == CSS_RULE_MEDIA
+                ? css_evaluate_media_query(query->engine, rule->data.conditional_rule.condition)
+                : css_evaluate_supports_condition(query->engine, rule->data.conditional_rule.condition)));
+        if (active) for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            css_query_element_rule(query, rule->data.conditional_rule.rules[i], depth + 1);
+        }
+        return;
+    }
+    if (rule->type != CSS_RULE_STYLE) return;
+    CssSpecificity specificity = {};
+    bool matched = false;
+    CssSelectorGroup* group = rule->data.style_rule.selector_group;
+    size_t count = group ? group->selector_count : 1;
+    for (size_t i = 0; i < count; i++) {
+        CssSelector* selector = group ? group->selectors[i] : rule->data.style_rule.selector;
+        MatchResult match = {};
+        if (selector && !selector->specificity.inline_style && !selector->specificity.ids &&
+            !selector->specificity.classes && !selector->specificity.elements) {
+            selector->specificity = selector_matcher_calculate_specificity(query->matcher, selector);
+        }
+        if (selector && selector_matcher_matches(query->matcher, selector, query->element, &match) &&
+            match.pseudo_element == PSEUDO_ELEMENT_NONE &&
+            (!matched || css_specificity_compare(match.specificity, specificity) > 0)) {
+            specificity = match.specificity;
+            matched = true;
+        }
+    }
+    if (matched) for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+        css_query_consider_declaration(query, rule->data.style_rule.declarations[i],
+                                       specificity, rule->origin);
+    }
+}
+
+static void css_query_element_sheet(CssElementDeclarationQuery* query, CssStylesheet* sheet,
+                                     size_t depth) {
+    if (!sheet || sheet->disabled || depth > 512) return;
+    for (size_t i = 0; i < sheet->imported_count; i++) {
+        css_query_element_sheet(query, sheet->imported_stylesheets[i], depth + 1);
+    }
+    for (size_t i = 0; i < sheet->rule_count; i++) {
+        css_query_element_rule(query, sheet->rules[i], 0);
+    }
+}
+
+bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
+    DomElement* element, CssStylesheet** sheets, size_t sheet_count,
+    CssDeclaration** inline_declarations, size_t inline_count,
+    const char* property_name, CssDeclaration* result) {
+    if (!matcher || !element || !property_name || !result) return false;
+    CssElementDeclarationQuery query = {};
+    query.engine = engine;
+    query.matcher = matcher;
+    query.element = element;
+    query.property = property_name;
+    for (size_t i = 0; sheets && i < sheet_count; i++) {
+        css_query_element_sheet(&query, sheets[i], 0);
+    }
+    CssSpecificity inline_specificity = {1, 0, 0, 0, false};
+    for (size_t i = 0; inline_declarations && i < inline_count; i++) {
+        css_query_consider_declaration(&query, inline_declarations[i],
+                                       inline_specificity, CSS_ORIGIN_AUTHOR);
+    }
+    if (query.found) *result = query.best;
+    return query.found;
 }
 
 static uint64_t css_condition_environment_key(const CssEngine* engine,

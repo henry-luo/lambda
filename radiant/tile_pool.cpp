@@ -333,7 +333,7 @@ void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count) {
 void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     ImageSurface* tile_surface, ScratchArena* scratch,
                     float tile_x, float tile_y, float tile_w, float tile_h,
-                    float scale) {
+                    float scale, int first_item) {
     DisplayReplayBackdropStack backdrop_stack;
     dl_replay_backdrop_init(&backdrop_stack);
 
@@ -352,7 +352,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
     rdt_vector_begin_batch(vec);
 
-    for (int i = 0; i < dl->item_count(); i++) {
+    // SVG backdrop capture replays the already recorded prefix from its isolation boundary.
+    for (int i = LMB_MAX(first_item, 0); i < dl->item_count(); i++) {
         DisplayItem* item = &dl->data()[i];
 
         // Cull draw work that doesn't intersect this tile; the skip path below

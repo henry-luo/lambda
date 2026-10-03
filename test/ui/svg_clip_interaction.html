@@ -1,0 +1,21 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white}svg{position:absolute;left:0;top:0}.clipped{clip-path:url(#two)}</style></head><body>
+<svg id="scene" width="560" height="260" data-last="none">
+ <rect id="back" width="560" height="260" fill="white"/>
+ <defs>
+  <clipPath id="two"><path d="M10 10H45V90H10Z"/><path d="M75 10H110V90H75Z"/></clipPath>
+  <clipPath id="hole"><path d="M10 10H110V90H10Z M35 30H85V70H35Z" clip-rule="evenodd"/></clipPath>
+  <clipPath id="bbox" clipPathUnits="objectBoundingBox"><rect x=".25" y=".25" width=".5" height=".5"/></clipPath>
+  <clipPath id="intersection"><rect width="70" height="100"/></clipPath>
+  <mask id="mask" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="100"><rect width="120" height="100" fill="white"/><circle cx="60" cy="50" r="25" fill="black"/></mask>
+  <rect id="source" width="120" height="100" fill="blue" clip-path="url(#two)"/>
+ </defs>
+ <rect id="union" width="120" height="100" fill="blue" class="clipped"/>
+ <rect id="evenodd" width="120" height="100" fill="blue" transform="translate(140 0)" clip-path="url(#hole)"/>
+ <rect id="bounding" x="10" y="10" width="100" height="80" fill="blue" transform="translate(280 0)" clip-path="url(#bbox)"/>
+ <g transform="translate(420 0)" clip-path="url(#two)"><rect id="child" width="120" height="100" fill="blue"/></g>
+ <rect id="masked" width="120" height="100" fill="blue" transform="translate(0 130)" mask="url(#mask)"/>
+ <g transform="translate(140 130)" clip-path="url(#two)"><rect id="intersected" width="120" height="100" fill="blue" clip-path="url(#intersection)"/></g>
+ <use id="instance" href="#source" x="280" y="130"/>
+</svg><script>
+document.getElementById('scene').addEventListener('click',function(event){this.setAttribute('data-last',event.target.id);});
+</script></body></html>

@@ -1,6 +1,7 @@
 #include "render.hpp"
 #include "../lib/math_utils.h"
 #include <math.h>
+#include <string.h>
 
 static void dl_record_set_unbounded(DisplayItem* item) {
     if (!item) return;
@@ -126,16 +127,17 @@ void dl_fill_path(DisplayList* dl, RdtPath* path, Color color,
 void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
                     RdtStrokeCap cap, RdtStrokeJoin join,
                     const float* dash_array, int dash_count, float dash_phase,
-                    const RdtMatrix* transform) {
+                    const RdtMatrix* transform, float miter_limit) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_STROKE_PATH;
-    float stroke_pad = width > 0.0f ? width * 4.0f + 2.0f : 2.0f;
+    float stroke_pad = width > 0.0f ? width * fmaxf(4.0f, miter_limit) + 2.0f : 2.0f;
     dl_record_set_path_bounds(item, path, transform, stroke_pad);
     item->stroke_path.path = rdt_path_clone(path);
     item->stroke_path.color = color;
     item->stroke_path.width = width;
     item->stroke_path.cap = cap;
     item->stroke_path.join = join;
+    item->stroke_path.miter_limit = miter_limit;
     item->stroke_path.dash_array = dl_copy_dashes(dl, dash_array, dash_count);
     item->stroke_path.dash_count = dash_count;
     item->stroke_path.dash_phase = dash_phase;
@@ -147,10 +149,13 @@ void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
                              float x1, float y1, float x2, float y2,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform,
-                             const RdtMatrix* gradient_transform) {
+                             const RdtMatrix* gradient_transform,
+                             const RdtGradientOptions* options) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_LINEAR_GRADIENT;
-    dl_record_set_path_bounds(item, path, transform, 1.0f);
+    float pad = options && options->stroke_width > 0.0f
+        ? options->stroke_width * fmaxf(4.0f, options->miter_limit) + 2.0f : 1.0f;
+    dl_record_set_path_bounds(item, path, transform, pad);
     item->fill_linear_gradient.path = rdt_path_clone(path);
     item->fill_linear_gradient.x1 = x1;
     item->fill_linear_gradient.y1 = y1;
@@ -163,16 +168,22 @@ void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
     if (transform) item->fill_linear_gradient.transform = *transform;
     item->fill_linear_gradient.has_gradient_transform = (gradient_transform != nullptr);
     if (gradient_transform) item->fill_linear_gradient.gradient_transform = *gradient_transform;
+    item->fill_linear_gradient.options = options ? *options : RdtGradientOptions{};
+    item->fill_linear_gradient.options.dash_array = options
+        ? dl_copy_dashes(dl, options->dash_array, options->dash_count) : nullptr;
 }
 
 void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
                              float cx, float cy, float r,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform,
-                             const RdtMatrix* gradient_transform) {
+                             const RdtMatrix* gradient_transform,
+                             const RdtGradientOptions* options) {
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_RADIAL_GRADIENT;
-    dl_record_set_path_bounds(item, path, transform, 1.0f);
+    float pad = options && options->stroke_width > 0.0f
+        ? options->stroke_width * fmaxf(4.0f, options->miter_limit) + 2.0f : 1.0f;
+    dl_record_set_path_bounds(item, path, transform, pad);
     item->fill_radial_gradient.path = rdt_path_clone(path);
     item->fill_radial_gradient.cx = cx;
     item->fill_radial_gradient.cy = cy;
@@ -184,13 +195,24 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
     if (transform) item->fill_radial_gradient.transform = *transform;
     item->fill_radial_gradient.has_gradient_transform = (gradient_transform != nullptr);
     if (gradient_transform) item->fill_radial_gradient.gradient_transform = *gradient_transform;
+    item->fill_radial_gradient.options = options ? *options : RdtGradientOptions{};
+    item->fill_radial_gradient.options.dash_array = options
+        ? dl_copy_dashes(dl, options->dash_array, options->dash_count) : nullptr;
 }
 
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
-                   ImageSurface* resource_owner, uint64_t resource_generation) {
+                   ImageSurface* resource_owner, uint64_t resource_generation, bool copy_pixels, bool straight_alpha) {
+    if (copy_pixels) {
+        // standalone decoders can expire before replay; the recording owns this copy.
+        size_t size = (size_t)src_stride * (size_t)src_h * sizeof(uint32_t);
+        uint32_t* copy = (uint32_t*)scratch_alloc(&dl->arena, size);
+        if (!copy) return;
+        memcpy(copy, pixels, size);
+        pixels = copy;
+    }
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_DRAW_IMAGE;
     dl_record_set_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, transform, 1.0f);
@@ -205,6 +227,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
     item->draw_image.dst_w = dst_w;
     item->draw_image.dst_h = dst_h;
     item->draw_image.opacity = opacity;
+    item->draw_image.straight_alpha = straight_alpha;
     item->draw_image.has_transform = (transform != nullptr);
     if (transform) item->draw_image.transform = *transform;
 }

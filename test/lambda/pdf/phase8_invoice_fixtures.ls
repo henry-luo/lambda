@@ -16,7 +16,7 @@ pn summarize(path: string) {
         has_text: has(html, "Invoice"),
         has_clip: has(html, "clip-path"),
         has_gradient: has(html, "linearGradient"),
-        has_pattern_fill: has(html, "url(#clippat"),
+        has_pattern_fill: has(html, "url(#pdf-page-0-clippat"),
         has_stroke_style: has(html, "stroke-linecap")
     }
 }

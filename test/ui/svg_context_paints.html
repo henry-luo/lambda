@@ -1,0 +1,19 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white;}svg{position:absolute;left:0;top:0;}</style></head><body><svg width="500" height="240">
+<defs>
+ <g id="pair"><rect width="30" height="30" fill="context-fill"/><rect x="50" width="30" height="30" fill="context-fill"/></g>
+ <g id="stroke-pair"><rect width="30" height="30" fill="context-stroke"/><rect x="50" width="30" height="30" fill="context-stroke"/></g>
+ <g id="nested"><use href="#pair" fill="context-fill"/></g>
+ <linearGradient id="split"><stop offset=".5" stop-color="red"/><stop offset=".5" stop-color="blue"/></linearGradient>
+ <linearGradient id="user" href="#split" gradientUnits="userSpaceOnUse" x1="10" x2="90"/>
+ <pattern id="tiles" width=".5" height="1" patternContentUnits="objectBoundingBox"><rect width=".25" height="1" fill="red"/><rect x=".25" width=".25" height="1" fill="blue"/></pattern>
+</defs>
+<use href="#pair" x="10" y="10" fill="lime"/>
+<use href="#stroke-pair" x="110" y="10" stroke="red" fill="none"/>
+<use href="#pair" x="210" y="10" fill="url(#split)"/>
+<use href="#nested" x="310" y="10" fill="url(#split)"/>
+<use href="#pair" x="410" y="10" color="blue" fill="currentColor"/>
+<use href="#pair" x="10" y="70" fill="url(#user)"/>
+<g transform="translate(110 70) scale(1.5 1)"><use href="#pair" fill="url(#split)"/></g>
+<use href="#pair" x="260" y="70" fill="url(#tiles)"/>
+<rect x="410" y="70" width="80" height="30" fill="context-fill"/>
+</svg></body></html>

@@ -3097,6 +3097,8 @@ static bool assert_target(EventSimContext* ctx, UiContext* uicon, SimEvent* ev) 
 static void force_render_surface(UiContext* uicon) {
     if (uicon->document && uicon->document->view_tree) {
         DocState* state = (DocState*)uicon->document->state;
+        // clock and intrinsic-size changes need layout before paint consumes their dirty flags.
+        sim_reflow_if_pending(uicon->document, state);
         if (state) doc_state_mark_dirty(state);
         render_html_doc(uicon, uicon->document->view_tree, nullptr);
         if (state) doc_state_clear_render_flags(state);

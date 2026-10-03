@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 60 60"><rect id="paint" x="10" y="10" width="40" height="40" fill="red"><set attributeName="fill" to="blue" begin="2s" dur="0.5s" fill="freeze"/></rect><script>document.getElementById('paint').setAttribute('fill','green');</script></svg>

@@ -191,6 +191,7 @@ typedef struct Html5Parser {
     Element* html_element;      // <html> element
     Element* head_element;      // <head> element
     Element* form_element;      // Current form element (if any)
+    Element* fragment_root;     // synthetic fragment context whose children are returned
 
     // Stacks
     List* open_elements;        // Stack of open elements
@@ -257,13 +258,10 @@ int html5_determine_quirks_mode(const char* name, const char* public_id,
 // Extended parsing function with options
 Element* html5_parse_ex(Input* input, const char* html, Html5ParseOptions* opts);
 
-// Parse an external SVG document through the HTML5/SVG parser path.
-// Returns the first <svg> element and stores the full parsed document in input->root.
-Element* html5_parse_svg_document(Input* input, const char* svg_source, Html5ParseOptions* opts);
-
 // Fragment parsing (for markdown HTML blocks/inline)
 // Creates a parser in body mode for parsing HTML fragments
-Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input);
+Html5Parser* html5_fragment_parser_create(Pool* pool, Arena* arena, Input* input,
+    const char* context_tag = nullptr, bool svg_namespace = false);
 // Parse an HTML fragment into an existing fragment parser context
 bool html5_fragment_parse(Html5Parser* parser, const char* html);
 // Get the body element containing parsed fragment content

@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "../lib/base64.h"
 #include "layout.hpp"
 #include "event.hpp"
 
@@ -226,6 +227,32 @@ StrBuf* render_encode_surface_png(ImageSurface* surface) {
     mem_free(rows);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     return png_bytes;
+}
+
+StrBuf* render_encode_surface_data_uri(ImageSurface* surface) {
+    if (!surface || !surface->pixels) return nullptr;
+    ImageSurface* straight = nullptr;
+    if (surface->alpha_mode != IMAGE_ALPHA_STRAIGHT) {
+        straight = render_surface_create_budgeted(nullptr, (float)surface->width, (float)surface->height);
+        if (!straight) return nullptr;
+        // image encoders require straight channels; private replay surfaces contain premultiplied paint.
+        for (int y = 0; y < surface->height; y++) {
+            const uint32_t* src = (const uint32_t*)((uint8_t*)surface->pixels + (size_t)y * surface->pitch);
+            uint32_t* dst = (uint32_t*)((uint8_t*)straight->pixels + (size_t)y * straight->pitch);
+            for (int x = 0; x < surface->width; x++) dst[x] = render_pixel_unpremultiply_abgr(src[x]);
+        }
+        straight->alpha_mode = IMAGE_ALPHA_STRAIGHT;
+    }
+    StrBuf* png = render_encode_surface_png(straight ? straight : surface);
+    if (straight) image_surface_destroy(straight);
+    if (!png) return nullptr;
+    char* encoded = base64_encode_alloc(png->str, png->length, BASE64_STD);
+    strbuf_free(png);
+    if (!encoded) return nullptr;
+    StrBuf* uri = strbuf_create("data:image/png;base64,");
+    if (uri) strbuf_append_str(uri, encoded);
+    mem_free(encoded);
+    return uri;
 }
 
 static bool render_export_session_begin_internal(

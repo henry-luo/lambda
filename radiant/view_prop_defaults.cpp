@@ -69,7 +69,8 @@ static InlineProp make_inline_prop_default() {
     value.vertical_align = CSS_VALUE_BASELINE;
     value.ruby_position = CSS_VALUE_ALTERNATE;
     value.opacity = 1.0f;
-    value.visibility = CSS_VALUE_VISIBLE;
+    // inline consumers use Visibility, not the CSS keyword enumeration.
+    value.visibility = VIS_VISIBLE;
     value.mix_blend_mode = CSS_VALUE_NORMAL;
     return value;
 }

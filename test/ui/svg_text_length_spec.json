@@ -1,0 +1,169 @@
+{
+  "name": "SVG2 exclusive nested textLength calibration",
+  "oracle": "SVG 2 11.2.1; Chromium 143 changes nested inner spacing and shifts following text twice. This fixture checks the specification directly.",
+  "html": "test/ui/svg_text_length_spec.html",
+  "viewport": {
+    "width": 360,
+    "height": 160
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 25,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 55,
+      "y": 25,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 75,
+      "y": 25,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 115,
+      "y": 25,
+      "min_r": 245,
+      "max_g": 10,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 135,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 195,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 205,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 225,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 245,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 285,
+      "y": 25,
+      "max_r": 10,
+      "max_g": 10,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 305,
+      "y": 25,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 15,
+      "y": 90,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 35,
+      "y": 90,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 85,
+      "y": 90,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 105,
+      "y": 90,
+      "max_r": 10,
+      "min_g": 245,
+      "max_b": 10
+    },
+    {
+      "type": "assert_pixel",
+      "x": 65,
+      "y": 90,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_pixel",
+      "x": 125,
+      "y": 90,
+      "min_r": 245,
+      "min_g": 245,
+      "min_b": 245
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 105,
+      "y": 90,
+      "expected_selector": "#after-fixed"
+    }
+  ]
+}

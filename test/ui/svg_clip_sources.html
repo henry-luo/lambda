@@ -1,0 +1,22 @@
+<!doctype html><html><head><style>
+@font-face { font-family:Ahem; src:url('../layout/data/font/Ahem.ttf'); }
+html,body { margin:0; background:white; }
+svg { display:block; font-family:Ahem; font-size:40px; }
+</style></head><body><svg width="640" height="260">
+<defs>
+ <clipPath id="letters"><text x="20" y="60" fill="none" stroke="red" stroke-width="30">A</text></clipPath>
+ <rect id="basic" x="20" y="20" width="40" height="40"/>
+ <clipPath id="direct"><use href="#basic" x="30" y="10"/></clipPath>
+ <g id="indirect"><rect x="20" y="20" width="40" height="40"/></g>
+ <clipPath id="invalid"><use href="#indirect"/></clipPath>
+ <clipPath id="empty"/>
+ <clipPath id="circular" clip-path="url(#circular)"><rect x="20" y="20" width="40" height="40"/></clipPath>
+ <clipPath id="hidden"><rect x="20" y="20" width="40" height="40" visibility="hidden"/><rect x="80" y="20" width="20" height="40"/></clipPath>
+</defs>
+<rect width="120" height="80" fill="blue" clip-path="url(#letters)"/>
+<g transform="translate(140 0)"><rect width="120" height="80" fill="blue" clip-path="url(#direct)"/></g>
+<g transform="translate(280 0)"><rect width="120" height="80" fill="blue" clip-path="url(#invalid)"/></g>
+<g transform="translate(420 0)"><rect width="120" height="80" fill="blue" clip-path="url(#empty)"/></g>
+<g transform="translate(0 120)"><rect width="120" height="80" fill="blue" clip-path="url(#circular)"/></g>
+<g transform="translate(140 120)"><rect width="120" height="80" fill="blue" clip-path="url(#hidden)"/></g>
+</svg></body></html>

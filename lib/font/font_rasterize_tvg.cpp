@@ -106,75 +106,29 @@ static bool ensure_buffer(TvgRasterCtx* ctx, int w, int h) {
 // Internal: build ThorVG shape from glyph outline
 // ============================================================================
 
+static bool font_tvg_outline_command(void* context, FontPathCommand command,
+    const float* args, int count) {
+    Tvg_Paint shape = (Tvg_Paint)context;
+    switch (command) {
+    case FONT_PATH_MOVE: return tvg_shape_move_to(shape, args[0], args[1]) == TVG_RESULT_SUCCESS;
+    case FONT_PATH_LINE: return tvg_shape_line_to(shape, args[0], args[1]) == TVG_RESULT_SUCCESS;
+    case FONT_PATH_CUBIC: return tvg_shape_cubic_to(shape, args[0], args[1], args[2], args[3],
+        args[4], args[5]) == TVG_RESULT_SUCCESS;
+    case FONT_PATH_CLOSE: return tvg_shape_close(shape) == TVG_RESULT_SUCCESS;
+    }
+    return false;
+}
+
 static Tvg_Paint build_shape_from_outline(GlyphOutline* outline, float scale,
                                            float offset_x, float offset_y,
                                            float bmp_h, float synth_bold_stroke) {
     Tvg_Paint shape = tvg_shape_new();
     if (!shape) return NULL;
 
-    for (int c = 0; c < outline->num_contours; c++) {
-        GlyfContour* contour = &outline->contours[c];
-        if (contour->num_points < 2) continue;
-
-        // find first on-curve point to start the path
-        int first_on = -1;
-        for (int i = 0; i < contour->num_points; i++) {
-            if (contour->points[i].on_curve) {
-                first_on = i;
-                break;
-            }
-        }
-        if (first_on < 0) continue; // all off-curve — shouldn't happen after midpoint insertion
-
-        float fx = contour->points[first_on].x * scale + offset_x;
-        // flip Y: font coordinates are Y-up, bitmap is Y-down
-        float fy = bmp_h - (contour->points[first_on].y * scale + offset_y);
-        tvg_shape_move_to(shape, fx, fy);
-
-        int n = contour->num_points;
-        for (int raw_i = 1; raw_i < n; raw_i++) {
-            int i = (first_on + raw_i) % n;
-            GlyfPoint* pt = &contour->points[i];
-
-            float px = pt->x * scale + offset_x;
-            float py = bmp_h - (pt->y * scale + offset_y);
-
-            if (pt->on_curve) {
-                tvg_shape_line_to(shape, px, py);
-            } else {
-                // quadratic Bézier: need the next on-curve point as endpoint
-                int next_i = (first_on + raw_i + 1) % n;
-                GlyfPoint* next_pt = &contour->points[next_i];
-                float ex = next_pt->x * scale + offset_x;
-                float ey = bmp_h - (next_pt->y * scale + offset_y);
-
-                // get current position for the conversion
-                // previous on-curve point is where we are now
-                // we need P0 (current pos) — retrieve from the shape state
-                // but ThorVG doesn't expose current position, so track it
-                // Actually, we compute from the previous point:
-                int prev_i = (first_on + raw_i - 1) % n;
-                if (prev_i < 0) prev_i += n;
-                GlyfPoint* prev_pt = &contour->points[prev_i];
-                float p0x = prev_pt->x * scale + offset_x;
-                float p0y = bmp_h - (prev_pt->y * scale + offset_y);
-
-                // quadratic → cubic conversion:
-                // CP1 = P0 + 2/3 * (P1 - P0)
-                // CP2 = P2 + 2/3 * (P1 - P2)
-                float cp1x = p0x + (2.0f / 3.0f) * (px - p0x);
-                float cp1y = p0y + (2.0f / 3.0f) * (py - p0y);
-                float cp2x = ex + (2.0f / 3.0f) * (px - ex);
-                float cp2y = ey + (2.0f / 3.0f) * (py - ey);
-
-                tvg_shape_cubic_to(shape, cp1x, cp1y, cp2x, cp2y, ex, ey);
-
-                // skip the next point since we consumed it as the endpoint
-                raw_i++;
-            }
-        }
-
-        tvg_shape_close(shape);
+    if (!glyf_visit_outline(outline, scale, -scale, offset_x, bmp_h - offset_y,
+        font_tvg_outline_command, (void*)shape)) {
+        tvg_paint_del(shape);
+        return NULL;
     }
 
     // white fill with non-zero winding rule (standard for TrueType)

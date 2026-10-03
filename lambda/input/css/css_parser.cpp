@@ -30,6 +30,17 @@
 // reports a parse failure instead of recursing until the stack overflows.
 #define MAX_CSS_FUNC_DEPTH 256
 
+static CssRule* css_parser_allocate_rule(Pool* pool) {
+    CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+    if (rule) {
+        rule->pool = pool;
+        // parsed stylesheets are authored; zero initialization would assign
+        // user-agent origin and incorrectly elevate their important rules.
+        rule->origin = CSS_ORIGIN_AUTHOR;
+    }
+    return rule;
+}
+
 static char* css_parser_unescape_url_component(const char* str, size_t len, Pool* pool) {
     return escape_css_unescape_pool(pool, str, len, true,
         ESCAPE_CSS_EOF_REPLACEMENT, true, true);
@@ -882,6 +893,49 @@ bool css_parse_font_shorthand(const CssValue* value, CssFontShorthandParts* part
         }
     }
     return true;
+}
+
+static int css_font_shorthand_property_index(const char* property) {
+    static const char* const names[] = {"font-size", "font-weight", "font-style", "font-variant", "line-height", "font-family"};
+    for (unsigned index = 0; property && index < sizeof(names) / sizeof(names[0]); index++)
+        if (strcmp(property, names[index]) == 0) return (int)index;
+    return -1;
+}
+
+bool css_font_shorthand_contains_property(const char* property) {
+    return css_font_shorthand_property_index(property) >= 0;
+}
+
+const CssValue* css_font_shorthand_longhand(const CssValue* value, const char* property, Pool* pool) {
+    int index = css_font_shorthand_property_index(property);
+    if (index < 0 || !value || !pool) return nullptr;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        if (info && info->group == CSS_VALUE_GROUP_GLOBAL) return value;
+    }
+    CssFontShorthandParts parts;
+    if (!css_parse_font_shorthand(value, &parts)) return nullptr;
+    const CssValue* selected[] = {parts.size, parts.weight, parts.style, nullptr, parts.line_height};
+    if (index < 5 && selected[index]) return selected[index];
+    CssValue* output = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!output) return nullptr;
+    if (index < 5) {
+        output->type = CSS_VALUE_TYPE_KEYWORD;
+        output->data.keyword = index == 3 && parts.small_caps ? CSS_VALUE_SMALL_CAPS : CSS_VALUE_NORMAL;
+        return output;
+    }
+    // family projection borrows the parsed tokens and retains comma-separated fallback groups.
+    *output = *parts.group;
+    output->data.list.values += parts.family_start;
+    output->data.list.count -= parts.family_start;
+    if (value == parts.group) return output;
+    CssValue* families = (CssValue*)pool_alloc(pool, sizeof(CssValue));
+    CssValue** groups = (CssValue**)pool_alloc(pool, (size_t)value->data.list.count * sizeof(CssValue*));
+    if (!families || !groups) return nullptr;
+    *families = *value;
+    memcpy(groups, value->data.list.values, (size_t)value->data.list.count * sizeof(CssValue*));
+    groups[0] = output; families->data.list.values = groups;
+    return families;
 }
 
 // Helper: Parse a CSS function with its arguments from tokens
@@ -2498,6 +2552,16 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     // Validate the parsed value before returning
     if (decl->value) {
+        if ((decl->property_code == CSS_PROPERTY_FILL || decl->property_code == CSS_PROPERTY_STROKE) &&
+            decl->value->type == CSS_VALUE_TYPE_CUSTOM) {
+            const char* name = decl->value->data.custom_property.name;
+            CssColor color = {};
+            // unknown identifiers are invalid paint, so a later typo cannot
+            // replace a preceding valid declaration in the shared cascade.
+            if (!name || (!css_parse_color(name, &color) &&
+                str_icmp_cstr(name, "context-fill") != 0 &&
+                str_icmp_cstr(name, "context-stroke") != 0)) return NULL;
+        }
         // Check if this property disallows negative values
         bool disallow_negative = false;
         switch (decl->property_code) {
@@ -2618,6 +2682,11 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     if (decl->value && decl->property_code == CSS_PROPERTY_FONT) {
         bool allow_special_value = decl->value->type == CSS_VALUE_TYPE_VAR ||
             decl->value->type == CSS_VALUE_TYPE_ENV;
+        // this parser represents var()/env() as functions; their shorthand grammar is deferred until substitution.
+        if (decl->value->type == CSS_VALUE_TYPE_FUNCTION && decl->value->data.function) {
+            const char* name = decl->value->data.function->name;
+            allow_special_value = name && (strcmp(name, "var") == 0 || strcmp(name, "env") == 0);
+        }
         if (decl->value->type == CSS_VALUE_TYPE_KEYWORD) {
             const CssEnumInfo* info = css_enum_info(decl->value->data.keyword);
             allow_special_value = info &&
@@ -2665,7 +2734,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         }
 
         // Create rule structure
-        CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+        CssRule* rule = css_parser_allocate_rule(pool);
         if (!rule) {
             log_debug(" ERROR: Failed to allocate rule");
             return 0;
@@ -3177,7 +3246,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
                 int after_sel = css_skip_whitespace_tokens(tokens, sel_pos, block_start);
                 if (nested_sg && nested_sg->selector_count > 0 && after_sel >= block_start) {
                     // Valid nested rule — create it
-                    CssRule* nested = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+                    CssRule* nested = css_parser_allocate_rule(pool);
                     nested->type = CSS_RULE_STYLE;
                     nested->pool = pool;
                     nested->data.style_rule.selector_group = nested_sg;
@@ -3280,7 +3349,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
     // If there are post-nested declarations, create a CSSNestedDeclarations rule
     if (post_nested_count > 0) {
-        CssRule* nd_rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+        CssRule* nd_rule = css_parser_allocate_rule(pool);
         nd_rule->type = CSS_RULE_NESTED_DECLARATIONS;
         nd_rule->pool = pool;
         nd_rule->data.style_rule.declarations = post_nested_decls;
@@ -3305,7 +3374,7 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
     }
 
     // Create the CSS rule
-    CssRule* rule = (CssRule*)pool_calloc(pool, sizeof(CssRule));
+    CssRule* rule = css_parser_allocate_rule(pool);
     if (!rule) return 0;
 
     rule->type = CSS_RULE_STYLE;

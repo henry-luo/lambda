@@ -2935,10 +2935,26 @@ static DomDocument* load_dom_backed_image_document(Url* image_url, int viewport_
     return doc;
 }
 
-// load SVG through the DOM-backed image path.
+// standalone SVG owns a document DOM; referenced images retain isolated image mode.
 DomDocument* load_svg_doc(Url* svg_url, int viewport_width, int viewport_height, Pool* pool, float device_scale) {
     (void)device_scale;
-    return load_dom_backed_image_document(svg_url, viewport_width, viewport_height, pool, "load_svg_doc");
+    if (!svg_url || !pool) return nullptr;
+    bool http = svg_url->scheme == URL_SCHEME_HTTP || svg_url->scheme == URL_SCHEME_HTTPS;
+    char* path = http ? nullptr : url_to_local_path(svg_url);
+    CssSourceBuffer source = {};
+    bool loaded = css_load_source(http ? url_get_href(svg_url) : path, http, false, &source);
+    if (path) mem_free(path);
+    if (!loaded) return nullptr;
+    StrBuf* html = strbuf_new_cap(source.length + 256);
+    if (!html) { mem_free(source.data); return nullptr; }
+    strbuf_append_str(html, "<!doctype html><html><head><style>html,body{margin:0;padding:0;background:white}body>svg{display:block}</style></head><body>");
+    strbuf_append_str_n(html, source.data, source.length);
+    strbuf_append_str(html, "</body></html>");
+    DomDocument* doc = load_lambda_html_doc(svg_url, nullptr, viewport_width,
+        viewport_height, pool, html->str);
+    strbuf_free(html);
+    mem_free(source.data);
+    return doc;
 }
 
 // load a raster image through the DOM-backed image path.

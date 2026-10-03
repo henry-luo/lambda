@@ -1,0 +1,28 @@
+<!doctype html>
+<html><head><style>
+@font-face{font-family:Switch-Ahem;src:url('../layout/data/font/Ahem.ttf')}
+html,body{margin:0;background:white}svg{display:block}button{margin:10px}
+</style></head><body>
+<svg id="scene" width="360" height="160" data-last="none">
+ <rect id="back" width="360" height="160" fill="white"/>
+ <g id="frame" transform="translate(20 20) scale(1.5)">
+  <switch id="choice"><rect id="first" systemLanguage="en" width="80" height="40" fill="red"/>
+   <rect id="fallback" x="10" width="50" height="40" fill="blue"/></switch>
+ </g>
+ <text x="220" y="60" font-family="Switch-Ahem" font-size="40" fill="red"><tspan id="conditional-text" systemLanguage="zz">A</tspan><tspan fill="blue">B</tspan></text>
+</svg>
+<button id="advance" data-step="0">advance</button>
+<script>
+var step=0,scene=document.getElementById('scene');
+scene.addEventListener('click',function(event){this.setAttribute('data-last',event.target.id);});
+document.getElementById('advance').addEventListener('click',function(){
+ step++;
+ var first=document.getElementById('first'),text=document.getElementById('conditional-text');
+ if(step===1){first.setAttribute('systemLanguage','zz');text.setAttribute('systemLanguage','en');
+  var box=document.getElementById('choice').getBBox();this.setAttribute('data-box',String(box.x)+','+String(box.width));}
+ if(step===2){first.setAttribute('systemLanguage','en');first.setAttribute('display','none');}
+ if(step===3){first.removeAttribute('display');first.setAttribute('requiredExtensions','https://example.invalid/extension');}
+ if(step===4){first.removeAttribute('requiredExtensions');document.getElementById('frame').setAttribute('transform','translate(180 20) rotate(90)');text.removeAttribute('systemLanguage');}
+ this.setAttribute('data-step',String(step));
+});
+</script></body></html>

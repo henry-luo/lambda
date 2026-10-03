@@ -66,6 +66,20 @@ char *fallback_fonts[] = {
     NULL
 };
 
+void ui_context_init_default_fonts(UiContext* uicon) {
+    if (!uicon) return;
+    // isolated SVG HTML uses the same UA defaults without inheriting page font styles.
+    uicon->default_font = (FontProp){default_font_times_new_roman, 16.0f,
+        1.0f, 0.0f, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
+    uicon->default_font.font_size_from_medium = true;
+    uicon->default_font.platform_fallback_family = default_font_times;
+    uicon->legacy_default_font = (FontProp){default_font_times, 16.0f,
+        1.0f, 0.0f, CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
+    uicon->legacy_default_font.font_size_from_medium = true;
+    uicon->minimum_logical_font_size = 6.0f;
+    uicon->fallback_fonts = ::fallback_fonts;
+}
+
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
     if (!uicon) return;
     uicon->create_surface(pixel_width, pixel_height);
@@ -323,26 +337,7 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
         return EXIT_FAILURE;
     }
 
-    // set default fonts
-    // Browsers use serif (Times/Times New Roman) as the default font when no font-family is specified
-    // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
-    // default font size in HTML is 16 CSS pixels - layout operates in CSS logical pixels
-    // fontprop::used_zoom precedes the initial-letter field; keep the default
-    // font's computed weight aligned with the aggregate layout.
-    default_font = (FontProp){default_font_times_new_roman, 16.0f, // 16px (CSS logical pixels)
-        1.0f, // default CSS zoom
-        0.0f, // normal fonts must not inherit initial-letter computed-size state
-        CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
-    default_font.font_size_from_medium = true;
-    default_font.platform_fallback_family = default_font_times;
-    legacy_default_font = (FontProp){default_font_times, 16.0f, // 16px (CSS logical pixels)
-        1.0f, // default CSS zoom
-        0.0f, // normal fonts must not inherit initial-letter computed-size state
-        CSS_VALUE_NORMAL, CSS_VALUE_NORMAL, CSS_VALUE_NONE};
-    legacy_default_font.font_size_from_medium = true;
-    // Chromium's desktop UA preference keeps relative text at or above 6 CSS px.
-    minimum_logical_font_size = 6.0f;
-    fallback_fonts = ::fallback_fonts;
+    ui_context_init_default_fonts(this);
 
     // init vector rendering engine
     rdt_engine_init(1);

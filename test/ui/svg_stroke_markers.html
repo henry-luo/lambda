@@ -1,0 +1,21 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white;}svg{position:absolute;left:0;top:0;}</style></head><body><svg width="620" height="420">
+<defs>
+ <marker id="dot" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" viewBox="0 0 14 14" refX="7" refY="7" orient="auto"><circle cx="7" cy="7" r="6" fill="red"/></marker>
+ <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" viewBox="0 0 10 10" refX="5" refY="5" orient="auto-start-reverse"><path d="M2 2L8 5L2 8Z" fill="context-stroke"/></marker>
+ <marker id="context" markerUnits="userSpaceOnUse" markerWidth="20" markerHeight="20" viewBox="0 0 20 20" refX="10" refY="10"><rect width="20" height="20" fill="context-fill"/></marker>
+ <linearGradient id="split"><stop offset=".5" stop-color="red"/><stop offset=".5" stop-color="blue"/></linearGradient>
+</defs>
+<g fill="none" stroke="blue" stroke-width="3" marker-start="url(#dot)" marker-mid="url(#dot)" marker-end="url(#dot)">
+ <line x1="20" y1="30" x2="100" y2="30"/>
+ <polyline points="140,30 180,60 220,30"/>
+ <polygon points="270,30 310,60 350,30"/>
+ <path d="M400 30Q430 90 460 30 M500 30L540 30L580 60"/>
+</g>
+<g fill="none" stroke="blue" stroke-width="3" marker-start="url(#arrow)" marker-end="url(#arrow)"><line x1="30" y1="120" x2="110" y2="120"/><path d="M170 120 C170 120 220 120 220 120"/></g>
+<path d="M280 120H360" fill="url(#split)" stroke="blue" stroke-width="3" marker-start="url(#context)" marker-end="url(#context)"/>
+<g stroke="blue" stroke-width="10" fill="none"><path d="M20 190H180" stroke-dasharray="0 20" stroke-linecap="round"/><path d="M220 190H380" stroke-dasharray="0 0"/><path d="M420 190H580" stroke-dasharray="-1 20"/></g>
+<path d="M20 300L50 220L80 300" fill="none" stroke="blue" stroke-width="12" stroke-miterlimit="1"/>
+<path d="M120 300L150 220L180 300" fill="none" stroke="blue" stroke-width="12" stroke-miterlimit="10"/>
+<g transform="translate(220 250) scale(3 1)"><rect width="40" height="40" fill="none" stroke="red" stroke-width="10" vector-effect="non-scaling-stroke"/></g>
+<g transform="translate(410 250) skewX(45)"><rect width="60" height="40" fill="none" stroke="blue" stroke-width="10" vector-effect="non-scaling-stroke"/></g>
+</svg></body></html>
