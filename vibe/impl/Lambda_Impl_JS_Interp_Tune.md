@@ -404,8 +404,9 @@ kernel of A1/A2 takes its policy values from the profile, so each language
 reads its own knobs; the stress differential for JS is
 `JS_JIT_THRESHOLD=1 JS_JIT_BACKEDGE=1` with synchronous publication.
 
-**R3 — Hotness-only promotion; call threshold 1000.** A JS definition is
-compiled only on a hot hit: 1000 calls (five before) or a loop reaching the
+**R3 — Hotness-only promotion; call threshold 1000, then 100.** A JS definition is
+compiled only on a hot hit: 1000 calls (five before; **100** since
+**D8.1.3v23**, §11.5) or a loop reaching the
 back-edge threshold. Nothing is compiled at first entry or because a
 definition owns a loop. Both thresholds are provisional and are to be revised
 from release profiling (E4). The default is changed in
@@ -513,7 +514,7 @@ Stress differential (`JS_JIT_THRESHOLD=2 JS_JIT_BACKEDGE=1`): no divergence;
 
 AUTO exec ms on a quiet machine (load 3.7–8, 2026-10-03 16:16–16:25, min of
 three): pre-round binary (`551d9cd3e`, call threshold 5, no handoff) vs this
-round (`286c909d2`: threshold 1000, handoff), with whole-module MIR from the
+round (`286c909d2`: threshold 1000 — 100 since §11.5 — and handoff), with whole-module MIR from the
 same binary. Geomean AUTO after/before over the 29 rows: **0.218**.
 
 | Row | AUTO before | AUTO after | MIR |
@@ -553,6 +554,35 @@ before promoting. They are the expected cost of the provisional thresholds and
 the input for E4. `larceny/primes`, `kostya/primes` and `levenshtein` stay
 far from MIR: their hot code is not a direct-statement loop of an admitted
 function. Raw data: `temp/bench_auto/js_e3_time.json` (main checkout).
+
+### 11.5 Threshold sweep and the 100-call default (D8.1.3v23)
+
+Release AUTO exec ms, min of three, load 2–4, binary `286c909d2`; columns are
+call threshold / back-edge threshold.
+
+| Row | 5/10k | 100/10k | 1000/10k | 1000/1k | 100/1k | 1000/100k |
+|---|---:|---:|---:|---:|---:|---:|
+| r7rs/mbrot2 | 8.0 | 12.6 | 22.8 | 18.9 | 16.1 | 55.5 |
+| larceny/paraffins | 49.5 | 62.1 | 82.4 | 71.4 | 84.2 | 57.4 |
+| r7rs/fft2 | 97.1 | 97.8 | 97.7 | 58.4 | 57.8 | 75.3 |
+| r7rs/nqueens2 | 43.7 | 44.2 | 50.3 | 50.3 | 44.4 | 50.4 |
+| larceny/puzzle | 41.4 | 42.1 | 50.6 | 57.5 | 42.1 | 50.7 |
+| larceny/ray | 43.7 | 43.4 | 45.4 | 36.6 | 34.9 | 62.8 |
+| kostya/base64 | 582 | 631 | 570 | 527 | 526 | 913 |
+| larceny/quicksort | 142 | 152 | 153 | 149 | 145 | 214 |
+| fib2, array1, deriv, gcbench, matmul | flat | flat | flat | flat | flat | ≥ others |
+
+- **Calls.** No row is slower at 100 than at 1000; 100 recovers most of the
+  gap to 5. Five is not chosen yet because each promotion still re-parses the
+  whole source (§2.5), a cost these small files do not show. The user set the
+  default to 100 (**D8.1.3v23**).
+- **Back-edges.** 100,000 is worse almost everywhere. 1,000 helps fft2, ray
+  and base64 but hurts puzzle; 10,000 is kept until E2 removes the
+  size-dependent compile cost, then re-derived by break-even as Lambda's was.
+- **quicksort** is 142–214 ms under every setting against 91 ms before this
+  round, so its regression is not a threshold effect. Probable cause: E1 now
+  promotes its recursive function, whose calls go through the generic call
+  kernel. Not yet investigated.
 
 ### 11.4 Not done
 

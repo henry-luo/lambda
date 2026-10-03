@@ -23,7 +23,7 @@ source, and the MIR dynamic-code compilation service is deleted. See §5.6,
 
 **Direct-eval linking revision (USER, 2026-09-24):** **D8.1.3v21 / JSI36** links a direct eval from interpreted code to its caller frame's live environment chain. Eval code and the closures it creates resolve free names by name through that chain, and a sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment. The `EvalContext` bridge now serves MIR callers only, until P4 shared environment cells. See §5.6, §16 item 13, and Appendix S3.
 
-**Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_JIT_THRESHOLD` defaults to 1000 calls (five before), and a loop that reaches `JS_JIT_BACKEDGE` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
+**Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_JIT_THRESHOLD` defaults to 100 calls (D8.1.3v23; 1000 in v22, five before), and a loop that reaches `JS_JIT_BACKEDGE` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
 
 **Static-module prebuild revision (2026-09-19):** `JS_EXECUTION_BACKEND=auto`
 is now an explicit AST-first module policy. The shared prebuild scheduler
@@ -33,7 +33,7 @@ runtime import lookup before reuse. Interpreter-supported modules execute from
 those templates; unsupported units retain whole-module MIR. Unset remains MIR
 and forced `ast` remains fail-closed. AUTO now promotes an admitted closed,
 synchronous classic top-level function at `JS_JIT_THRESHOLD` calls (default
-five; 1000 since D8.1.3v22) to a boxed MIR satellite; its local-data slice admits non-spread arrays,
+five; 100 since D8.1.3v23) to a boxed MIR satellite; its local-data slice admits non-spread arrays,
 data objects with static or local computed keys, and static or local-key
 computed member chains. Whole-module MIR fallback is not a promotion. This is
 governed by **D8.1.3v18** and **D8.5.1v4**.
@@ -1097,7 +1097,7 @@ differential tests select each backend explicitly (**D8.1.3v18**).
 
 ### 9.3 Promotion point
 
-*(Revised 2026-10-03, D8.1.3v22 / JSI18v2.)* Promotion has two triggers, both hot hits. The call count belongs to the static AST definition (`JsCallableCode`); `JS_JIT_THRESHOLD` defaults to 1000. The threshold-crossing call has not started its body, so it may enter the published native satellite.
+*(Revised 2026-10-03, D8.1.3v22 / JSI18v2.)* Promotion has two triggers, both hot hits. The call count belongs to the static AST definition (`JsCallableCode`); `JS_JIT_THRESHOLD` defaults to 100 (D8.1.3v23). The threshold-crossing call has not started its body, so it may enter the published native satellite.
 
 A loop that is a direct statement of a function body counts its back-edges in the same definition's promotion cell. At `JS_JIT_BACKEDGE` (default 10000) the statements from that loop to the end of the body are compiled as a continuation over the live-in bindings, and the running activation enters it at the loop's next head test. The interpreter then returns the continuation's result as the activation's result; nothing is written back. Eligibility conditions and sequencing are in the [tuning plan](impl/Lambda_Impl_JS_Interp_Tune.md) §5 E3. No other interpreter PC is transferable. Both thresholds are provisional until release profiling. Direct validated self-tail handoff may be considered only after the ordinary entry satellite is correct and separately gated.
 
@@ -1684,7 +1684,7 @@ These questions do not reopen the decisions above:
 3. **Fact layout.** Which `JsFuncCollected` fields become `FnAnalysis`, which require a JS function-plan extension, and which remain MIR-only? The rule is “shared semantic answer once; backend mechanics local.”
 4. **Property-name synthetic inventory.** Which names are semantic products of source forms and which are backend-private? The former belong in `JsScript` planning; the latter must still be sealed before dynamic NamePool activation.
 5. **Restricted-slice admission.** The exact first supported fixture manifest is established by the P2 differential survey, not by weakening semantics for an inconvenient node.
-6. **Promotion threshold.** *Ruled 2026-10-03 (D8.1.3v22):* 1000 calls and 10000 loop back-edges, both provisional until release profiling.
+6. **Promotion threshold.** *Ruled 2026-10-03 (D8.1.3v22; call default 100 per D8.1.3v23):* 100 calls and 10000 loop back-edges, both provisional until release profiling.
 7. **Direct self-tail handoff.** KIV until ordinary entry promotion and JS call/construct/error semantics are green. *Wrong turn recorded (removed 2026-09-15):* an AST self-tail activation reuse (`JS_INTERP_TAIL_CALL`) had shipped ahead of this gate and violated JSI7. Its completion crossed an enclosing `try`, so `catch` missed the callee's throw and `finally` ran before the callee. Unbounded self-recursion also never raised `RangeError`. Any future handoff must be unobservable, including termination: Node performs no TCO, so unbounded recursion must still reach the stack limit. See `vibe/jube/JS_Runtime_Call_Flatten.md` §3.5 v2 note.
 8. **Continuation representation.** Reuse/extend current generator and async state owners after the synchronous frame/rooting model is stable.
 9. **JS root-range inventory.** Which current fixed ranges are truly realm-persistent, page-wrapper-owned, async-lane-owned, or activation-shaped? The target owners are fixed by §6.3; the audit determines each field's row and destruction callback.
@@ -1716,7 +1716,7 @@ These questions do not reopen the decisions above:
 | **JSI15** | `jit_init()` and MIR lowering occur only inside the selected T1 path | proposed |
 | **JSI16v2** | Selected LambdaJS MIR executes native code; AST is the interpreter | ratified USER 2026-09-16 / D8.1.3v18; implementation pending JS Tune13 |
 | **JSI17** | T0 support is semantic-fact-aware and decided before declaration instantiation | proposed |
-| **JSI18v2** | Promotion is hotness-only (1000 calls or 10000 loop back-edges); a loop may hand off the running activation at its head test | ratified USER 2026-10-03 / D8.1.3v22; entry promotion implemented for the closed P2 slice, loop handoff not implemented |
+| **JSI18v2** | Promotion is hotness-only (100 calls or 10000 loop back-edges; D8.1.3v23); a loop may hand off the running activation at its head test | ratified USER 2026-10-03 / D8.1.3v22; entry promotion implemented for the closed P2 slice, loop handoff not implemented |
 | **JSI19** | Static property names are discovered and sealed from `JsScript` plans before realm work | proposed |
 | **JSI20** | Runtime-catalog/module ownership retains old `JsScript` generations while callbacks can execute them | proposed |
 | **JSI21** | Differential, tier/language-crossing, page-coexistence, forced-GC, Test262, and release-performance gates are mandatory | proposed |
