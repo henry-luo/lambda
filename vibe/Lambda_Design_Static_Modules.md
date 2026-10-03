@@ -83,6 +83,7 @@ Tier 1 therefore enforces both dependency direction and capability ownership: di
 | SM12 | Shared resource/document acquisition and caching live in lambda-io; raw context-free mechanisms stay lib; event-loop/Item-coupled language IO stays rt under an explicit runtime-native classification. `lambda/network/**` reclassifies by concern (§2.1–§2.2, §6, §8.2) | **DECIDED** |
 | SM13 | **Provider ownership**: every function declared by a module's public header is defined by that module or a lower module. Generated aggregate headers inherit the ownership of their highest layer (§7.1) | **DECIDED** |
 | SM14 | C2MIR is retired and frozen. The module split does not edit, redesign, regenerate for, or add validation gates for the C2MIR implementation/artifacts (§9.1) | **DECIDED** |
+| SM15 | `lambda-cli` is the runtime-only host: no Radiant, JS/TS runtime and DOM, Jube host modules, or HTTP server; excluded commands and imports fail explicitly (§13.2; D7.1.6) | **DECIDED** (USER 2026-10-03) |
 
 ---
 
@@ -448,7 +449,7 @@ Exit criteria for active MIR-Direct: the boundary baseline reports zero upward e
 
 | Profile | Link shape | What "headless" means |
 |---|---|---|
-| **A — `lambda-cli`** | `lib + lambda-data + lambda-rt`, **no `radiant.a`** | No layout/render capability at all: convert/validate/run/REPL. This is the profile that `headless_stubs.cpp` + the `LAMBDA_HEADLESS` define serve today; after SM9 the stubs are replaced by the hooks' null-safe defaults, and both the file and the define disappear. No freetype/GLFW/ThorVG in the binary. |
+| **A — `lambda-cli`** | `lib + lambda-data + lambda-rt` minus JS/TS, Jube and `serve` (SM15, §13.2), **no `radiant.a`** | No layout/render capability at all: convert/validate/run/REPL. This is the profile that `headless_stubs.cpp` + the `LAMBDA_HEADLESS` define serve today; after SM9 the stubs are replaced by the hooks' null-safe defaults, and both the file and the define disappear. No freetype/GLFW/ThorVG in the binary. |
 | **B — `lambda` (full) in headless mode** | everything incl. `radiant.a` | Headless-browser mode: full layout/render/JS with no visible window. Already a **runtime** mode, not a build variant — `ui_context_init(uicon, headless)` runs windowless by default (optionally a hidden GLFW window via `LAMBDA_HEADLESS_GLFW_WINDOW` for GL-dependent paths); GLFW initialization is confined to `ui_context.cpp`; `window.cpp` provides the headless layout-test entry and headless animation-frame ticking for JS. This is the substrate for `make layout`, event_sim/WebDriver-style automation, and CI rendering. |
 
 Consequences for the split:
@@ -456,6 +457,23 @@ Consequences for the split:
 - The two must not be conflated. Profile A is a **link-time** choice (omit `radiant.a`); profile B is a **runtime** flag inside radiant. No `#ifdef`-stripping of display code — the *same* `radiant.a` serves windowed and headless runs.
 - SM9's stub-deletion exit criterion applies to profile A only; profile B never needed stubs.
 - Profile B imposes an invariant on radiant internals as SM8 moves files around: display/window initialization stays confined behind `ui_context`, and no layout/render/font path may hard-require a live display (audit — §16.1).
+
+### 13.2 SM15 — `lambda-cli` is the runtime-only host (USER, 2026-10-03)
+
+**Ruling (D7.1.6).** `lambda-cli.exe` contains only the Lambda runtime: core, io, the Lambda engine and validator, and the third-party libraries they need. It excludes Radiant, the JS/TS runtime and DOM, Jube host modules, and the HTTP server. It is a reduced build profile beside the one `lambda.exe` (D1.1), not a bundle of it.
+
+**What changed.** §13.1 originally gave profile A the link shape `lib + lambda-data + lambda-rt`, and the §6 charter puts `lambda/js/**` and `lambda/module/**` inside `lambda-rt`, so profile A implicitly carried JS and Jube. SM15 narrows it: profile A drops Radiant *and* the rt-resident JS/TS, DOM and Jube code, plus `lambda/serve`. The variant had in fact been unbuildable since before rev 29 (see the rev-29 caveat in §15). With SM15 the variant is active again, so `headless_stubs.cpp` stops being the frozen SM14 enclave described in §4 item 5 and §13: it is an active profile-A file, trimmed to the three stubs the runtime still reaches.
+
+**Kept, because the Lambda runtime itself needs them.** libuv (the task scheduler and async `io.read`), libpng/turbojpeg/giflib with `lib/image.c` (Lambda image load/save), curl/mbedtls/nghttp2 (`lambda/network` input fetching), SQLite (cookie store). `graph_path_is_graph` moved from `radiant/graph_format.cpp` to `lambda/input/input.cpp` because `convert` needs it.
+
+**Mechanism (2026-10-03).** The cli variant defines `LAMBDA_HEADLESS`, `LAMBDA_NO_JS`, `LAMBDA_NO_JUBE`, `LAMBDA_NO_SERVE` in `build_lambda_config.json` (never in a public header, D7.1.4).
+- *Runtime boundary — link time.* rt→JS/Jube calls resolve to `lambda/runtime/no_js_stubs.cpp`, and the remaining rt→Radiant ones to `headless_stubs.cpp`. Contract: each stub behaves exactly as the real module does with no realm or module attached (lifecycle hooks no-op, ownership queries answer "not mine", JS entry points log and fail). No runtime logic is `#ifdef`-stripped.
+- *Compile-gated, a known deviation.* The JS rows of the JIT import table and its NO_GC audit list (`sys_func_registry.c`), and the shell's JS/Radiant/Jube/serve commands (`main.cpp`), sit behind the defines. The shell may compose anything (§8), but the import-table guard is an `#ifdef` in rt. The D7.1.1-clean end state is for JS to register its own JIT imports and rt→JS calls through lower-owned hooks with null-safe defaults (DO21, Class F); then `no_js_stubs.cpp` and the registry guards both disappear, as SM9 planned for `headless_stubs.cpp`.
+- *Explicit failure.* Excluded commands report `'<cmd>' requires <feature>, which this build excludes` and exit 1; `.js`/`.ts` and Jube-module imports fail as ordinary import errors (E216/E217).
+
+**Verification (2026-10-03).** `make build-cli` is clean, including a strict (no `-w`) compile of the touched files; 688/722 `test/lambda` scripts pass, and the other 34 import Radiant/DOM Jube modules or `.js` files and pass on the full `lambda.exe`; full `make build` and `make test-lambda-baseline` pass.
+
+**Pitfall.** Every new rt→JS/Jube call site needs a matching `no_js_stubs.cpp` entry, or `build-cli` stops linking. The cli variant's `exclude_source_files` *replaces* the main list rather than extending it.
 
 ---
 

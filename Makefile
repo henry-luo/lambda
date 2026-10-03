@@ -600,7 +600,7 @@ help:
 	@echo "  build-release - Build optimized release version using Premake"
 	@echo "  build-release-profile - Build optimized release with JS execution profiling enabled"
 	@echo "  release       - Build release version and prepare release artifacts"
-	@echo "  lambda-cli    - Build headless CLI-only version (release, no Radiant/GUI, outputs lambda-cli.exe)"
+	@echo "  lambda-cli    - Build runtime-only CLI (release; no Radiant, JS, Jube or serve; outputs lambda-cli.exe)"
 	@echo "  lambda-cst    - Build the Tree-sitter Lambda/JS/TS CST differential verifier"
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
@@ -889,13 +889,13 @@ build-debug-asan: $(RE2_LIB) $(MIR_LIB)
 	@ls -lh lambda-debug-asan.exe 2>/dev/null || true
 	$(call windows_dll_check,lambda-debug-asan.exe)
 
-# Headless CLI build (no Radiant layout engine or GUI support)
+# Runtime-only CLI build (no Radiant, JavaScript/DOM, Jube or HTTP server)
 # Produces lambda-cli.exe with only Lambda scripting capabilities (release build)
 lambda-cli: build-cli
 
 build-cli:
 	@echo "Building Lambda CLI (headless, release) using Premake build system..."
-	@echo "Excluded: Radiant layout engine, GUI windowing, font rendering, image codecs"
+	@echo "Excluded: Radiant layout engine and GUI, JavaScript runtime and DOM, Jube host modules, HTTP server"
 	$(PYTHON) utils/generate_premake.py --variant cli --output $(PREMAKE_CLI_FILE)
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake --file=$(PREMAKE_CLI_FILE)

@@ -529,7 +529,7 @@ class PremakeGenerator:
         """Apply a build variant overlay (e.g., 'cli') onto the main config.
 
         The variant is read from platforms.<variant> and overrides top-level config
-        keys like output, source_dirs, exclude_source_files, includes, and defines.
+        keys like output, source_dirs, source_files, exclude_source_files, includes, and defines.
         This is applied before library parsing so exclude_libraries takes effect.
         """
         platforms_config = self.config.get('platforms', {})
@@ -541,7 +541,7 @@ class PremakeGenerator:
         vlog(f"DEBUG: Applying variant overlay '{variant}'")
 
         # Override top-level keys if the variant specifies them
-        overlay_keys = ['output', 'source_dirs', 'exclude_source_files', 'includes']
+        overlay_keys = ['output', 'source_dirs', 'source_files', 'exclude_source_files', 'includes']
         for key in overlay_keys:
             if key in variant_config:
                 vlog(f"DEBUG: Variant override: {key} = {variant_config[key]}")

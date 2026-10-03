@@ -3604,9 +3604,6 @@ int render_document_transform_to_output_target(const char* document_file,
     const char* output_file, int viewport_width, int viewport_height,
     float output_scale, float device_scale, int jpeg_quality);
 
-// Detect graph syntax inputs before routing through the native transform configuration.
-bool graph_path_is_graph(const char* graph_file);
-
 // ===== render_overlay.hpp =====
 struct RenderContext;
 
