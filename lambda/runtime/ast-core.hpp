@@ -10,6 +10,8 @@ typedef struct Script Script;
 typedef struct AstNode AstNode;
 typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
+typedef struct InterpBoundaryPlan InterpBoundaryPlan;
+typedef struct InterpPlacePlan InterpPlacePlan;
 typedef struct NameScope NameScope;
 typedef struct TypeBinder TypeBinder;
 typedef struct LangProfile LangProfile;
@@ -368,6 +370,7 @@ struct NameEntry {
     // effective compiler type and historically lost this distinction during
     // declaration construction, which let later boundaries guess from TypeId.
     Type* declared_type;
+    InterpBoundaryPlan* interp_boundary;  // immutable full-contract classification
     bool type_widened;
     bool is_lexical;
     // loop-head bindings need a distinct capture-analysis fact; this used to
@@ -469,6 +472,7 @@ typedef struct FnFramePlan {
     uint16_t scratch_depth;   // max Items live across a child eval / MAY_GC call
     uint16_t total_slots;     // params + locals + vargs? + 1 (signal) + scratch
     bool planned;
+    InterpBoundaryPlan* return_boundary;
 } FnFramePlan;
 
 // name_scope
@@ -1065,6 +1069,7 @@ typedef struct AstMapNode : AstNode {
     // Computed keys and spreads force run-time shape construction; static
     // literals retain their precomputed ShapeEntry chain.
     bool has_computed_key;
+    TypeMap* interp_destination;  // fresh literal layout; fields admitted before publish
 } AstMapNode;
 
 typedef struct AstPropertyNode : AstNode {
@@ -1100,6 +1105,7 @@ typedef struct AstAssignNode : AstNode {
     // before this store runs; detach a shared root before writing
     // (lambda_ast_note_var_root_sharing)
     bool var_root_unshare;
+    InterpPlacePlan* interp_place;
 } AstAssignNode;
 
 // One Tier-3 edit (PTH60v3). A `put`/`del` statement is a list of these, in
@@ -1901,3 +1907,18 @@ static inline LangProfile* lang_profile_for_name(const char* name) {
     // shared profile table must not grow a dormant branch per guest language.
     return &lambda_profile;
 }
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+bool ast_map_literal_keys_follow_contract(AstMapNode* literal, TypeMap* expected);
+bool ast_map_contract_storage_valid(TypeMap* expected);
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef __cplusplus
+extern "C"
+#endif
+Type* ast_map_path_leaf_contract(Type* root_contract, const AstCowPath* path,
+    AstNode* terminal, bool terminal_is_member, int64_t* index_mask);

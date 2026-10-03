@@ -1,6 +1,6 @@
 # Typed Lambda performance audit — 2026-10-03
 
-**Status:** measured on a fresh release build; tuning below is proposed, not implemented. Strict interpreter selection is fixed in this change. The performance comparison uses **pinned MIR (`LAMBDA_TIER=jit`)**, with a separate pure-T0 diagnostic. No AUTO timings enter these comparisons.
+**Status:** all six tuning proposals are implemented (§10), and final release measurements and validation are complete (§11). Typed/untyped performance parity remains unmet (§12). Strict interpreter selection and untyped Queens support were fixed before this tuning change (§6/§9). The performance comparison uses **pinned MIR (`LAMBDA_TIER=jit`)**, with a separate pure-T0 diagnostic. No AUTO timings enter these comparisons.
 
 **Authority:** D8.1.1v15 (execution selection), D2.4.1–D2.4.3 (contract and representation), D3.2.4v4/D3.3.4 (record admission and full inferred contracts), D5.3.3 (precise roots), S7.7.2–S7.7.4 (boundary failures), S9.1.2–S9.1.3 (snapshots and borrows).
 
@@ -154,3 +154,345 @@ Validation on tree `6a5170563` plus this support fix:
 - `make test-lambda-baseline`: **6,170/6,182 pass**. The remaining 12 rendering failures reproduce with the scanner restored to the pre-change source and rebuilt against the same tree. Evidence: `temp/queens_interp_fix/before_render_tests.log`. The old recursive-array test's rejection expectation is replaced by golden checks on interp, jit and AUTO, all passing.
 - Full release interpreter/MIR sweep: **944 matches, 39 exclusions, one mismatch, zero timeouts** across 984 scripts; no explicit interp fallback. The mismatch remains the MIR `pipe_filter.ls` crash; the same-tree pre-change executable also exits on signal 11. Every previously excluded corpus row keeps its exclusion verdict. Full list regeneration refuses the mismatch, so the committed partition is retained.
 - Raw results are under `temp/queens_interp_fix/`; `git diff --check` passes. Release SHA-256: `bbea26454ee908d48d86fbe86fd11b8dc47b48139889b117de2ecf065f185ded`.
+
+## 10. Implemented tuning (2026-10-03)
+
+The untouched control is a release from `4753e70d3d3f84d4e52b06e97ceeb3a0d5b4f9f9`,
+retained as `temp/typed_tuning/lambda-before.exe`, SHA-256
+`eb308e1df1272b522f5cf349fdd758fda7a9e6d83e24d9f80532efce892cc559`.
+All six proposals in §5 are implemented; no formal semantics or design ruling
+changes. The final measurements below supersede the earlier performance
+checkpoints, which remain historical evidence.
+
+### 10.1 MIR native numeric and boolean proofs — proposals 1–3
+
+Ordered nullable numeric comparisons now retain the native 0/1/2 boolean lane.
+Their descriptors include the operands' absence, and the comparison emitter
+publishes the same representation consumed by condition lowering. Missing
+numeric-array reads still yield null, including mixed int/float comparisons;
+no declaration is treated as a bounds proof (S6.1.2, S7.1.1v3,
+D2.4.1–D2.4.3). Integer `abs` uses the shared type-preserving native builtin
+path, retaining the int53 boundary and null/infinity/NaN behavior (S4.1.2).
+
+The existing local float-tree guard also recognizes pure `float()` conversions
+of numeric typed-array reads. The guarded present arm uses native arithmetic;
+the original boxed conversion/error arm remains. `MirValue` records the complete
+successful-admission contract across that join. Unconverted nullable reads
+prevent publication of a non-null success proof. Fasta therefore avoids the
+conversion/division helpers and repeated successful scalar admission, without
+removing the negative-index or conversion failure arms (D8.2.4v2/D8.2.5v3,
+S7.7.2–S7.7.4).
+
+The full corpus caught a boxed/native mismatch in Navier-Stokes. A pure
+`float(i)` over a present numeric scalar does not introduce an error arm, so
+it retains the native join. Fallible conversions keep their boxed join;
+declarations now require the actual emitted carrier to match before selecting
+a native sentinel boundary, as assignments already do (D2.4.1–D2.4.3).
+Coverage includes scalar conversion with a nullable read, mixed converted and
+unconverted reads at a declaration, and reassignment. Both Navier-Stokes ports
+pass after this correction; the failed checkpoint is retained under
+`temp/typed_tuning/before_float_fix/` and its timings are superseded below.
+
+The follow-up Towers check exposed the other half of that descriptor rule:
+an integer arithmetic initializer explicitly lowered as an `IntLane` must
+publish that carrier even when its default AST prediction describes a boxed
+result. The declaration now uses the requested emitted lane, retaining its
+cold null rejection (D2.4.1–D2.4.3, S7.7.2). A minimal nullable integer
+arithmetic declaration covers both success and out-of-bounds failure; Towers
+passes on both pinned tiers. The failed checkpoint is retained under
+`temp/typed_tuning/before_int_carrier_fix/`.
+
+Array call boundaries reuse maintained full contracts across compatible,
+non-invalidating edges. Mutable locals qualify only while their full proof
+survives; widened, environment, state, borrowed-parameter and guarded-element
+bindings retain their existing admission. Non-identical counted contracts still
+check lengths (D3.3.4).
+
+A fresh primitive `fill` can now construct its admitted destination through
+`lambda_fill_for_contract`, installing the exact array certificate before
+return. Declaration/return consumers own their failure; call consumers use the
+existing parameter-error join. The shared call descriptor predicts that join,
+so a boxed error cannot be mistaken for a native scalar return (S7.7.3,
+D2.4.1). Counted call-argument contracts keep ordinary admission to retain its
+failure order. Zero, floating zero, negative, fractional and null counts retain
+`fill`'s exact-count behavior.
+
+The fill helper interns its certificate before allocating the result. Immediate
+scalar arguments have no GC owner; non-immediate arguments use a precise rooted
+span, and allocating admission roots the filled result. Successful carrier
+checking/certificate installation cannot allocate. This removes the native
+root-frame overhead found in the first recursive nqueens pilot (D5.3.3).
+A bare float literal proves its numeric lane but does not install a durable
+certificate, so its declaration still performs admission.
+
+The existing CFG liveness pass runs after helper elimination and recomputes root
+stores/reloads from the resulting MIR. There is no second liveness planner,
+conservative native-stack scan or benchmark-specific root deletion. Pointer
+carriers retain their boxed owner roots (D5.3.3).
+
+### 10.2 T0 destination construction and admission — proposals 4–5
+
+Frame planning carries a written record destination through fresh declaration,
+assignment, return and single-value branch/block result positions. `eval_map`
+evaluates and roots every original field first, then either fills that exact
+layout from existing field proofs or transactionally admits the staged values.
+Failure returns to the ordinary inferred-map boundary with its original
+diagnostic. The shared MIR/T0 adoption gates exclude reordered, computed,
+spread, binder-dependent and unsupported storage layouts (D3.2.4v4,
+S7.7.1–S7.7.2). Named identity and recursive/null fields remain intact.
+
+Containment coverage also exposed an existing MIR issue: field admission could
+return before later initializer expressions ran. MIR now stages all fields
+before fallible destination admission, preserving S7.7.1–S7.7.2. The reviewed
+DeltaBlue construction change adds nine MIR instructions, confined to
+`create_variable` (+4) and `create_planner` (+5); its default budget records that
+measured cost. The Windows budget awaits a native measurement and is unchanged.
+
+Binding, parameter and return plans classify the complete written contract once.
+They reuse the existing trusted shape/array certificate relation, include an
+exact-bool fast path, and avoid a second generic check after completed array
+admission. Binder-dependent contracts still use the invocation environment.
+The existing runtime representation-proof helper and binder walk are shared,
+not copied. No observed-value inline cache is introduced (D3.3.4, D8.4.1v2).
+Unsupported field layouts still reify; their existing count tests retain that
+requirement.
+
+### 10.3 T0 checked store plans — proposal 6
+
+Assignments retain a precollected AST path, declared leaf contract, exact-index
+mask and resolved numeric element/lane. Rooted key spans use the same checked
+COW spine writer as MIR, preserving RHS/key/owner evaluation order. Dynamic
+keys, incompatible carriers and N-D roots keep the original transactional
+checked fallback. Flat stores share the existing mask/exact-integer gate and
+setter (S7.1.3v2, S9.1.2–S9.1.3).
+
+After COW preparation, a bounded scalar write into the same certified rank-one
+numeric carrier preserves its certificate directly: the admitted value cannot
+change its rank, count or lane. Views, static storage, list splices, bad indices
+and uncertified owners retain the full checked path (D3.3.3v3). Writes through
+`var` borrows and plain-binding snapshots retain their distinct ownership rules.
+
+### 10.4 Correctness checkpoints
+
+Five new MIR fixtures have golden outputs and emission ratchets: nullable
+comparisons, integer abs, guarded float conversion, staged record construction,
+and typed fill counts/call errors. Existing ratchets are tightened around the
+eliminated helpers. T0 admission tests assert eliminated crossings while
+retaining incompatible-layout reification; the nested-store test covers 100
+writes without repeated graph admission or deep cloning.
+
+The final full baseline is **6,182/6,194**. All **290 forced-GC**, **240 MIR
+emission**, **53 optimization** and **20 MIR size-ratchet** tests pass. The
+remaining 12 rendering failures are the same failures established before this
+tuning (§9); no golden or fallback policy is changed to hide them. Log:
+`temp/typed_tuning/complete_baseline_final.log`.
+
+The final debug-tier corpus sweep is **944 matches, 39 explicit exclusions,
+one known MIR pipe-filter crash, zero timeouts**, with no explicit-interpreter
+fallback. Evidence: `temp/typed_tuning/complete_sweep_final.{tsv,log}`. The earlier
+release checkpoint has the same partition. Final release-specific checks and
+measurements are recorded below.
+
+## 11. Final release evidence
+
+`make release` succeeds. The final candidate is archived as
+`temp/typed_tuning/lambda-after.exe`, SHA-256
+`588cb2af85181a9cca3e9b0e1dcff701de936c18a06d923e80e01f5dcad86da5`.
+Both executables are optimized releases from the same tree, with only this
+working diff separating the candidate from the untouched control. The host is
+Darwin arm64/macOS 26.3, on AC power. All timings use a pinned tier; no AUTO
+measurement enters this report (D8.1.1v15).
+
+### 11.1 Fifteen-pair targeted timing
+
+One warmup per side, 15 alternating process pairs, execution time from the
+script marker, equal normalized output on every pair. Counter profiling,
+builds and correctness tests run separately. Same-source rows compare each
+**typed script against itself** on the old and new release. The final column
+is a separate paired measurement of the current untyped/typed ports; it must
+not be computed by dividing across the two campaigns.
+
+Pinned MIR:
+
+| Benchmark | Old typed ms | New typed ms | New/old | New typed/untyped ports |
+|---|---:|---:|---:|---:|
+| r7rs/nqueens | 1.187 | 1.087 | 0.916× | 1.173× |
+| awfy/towers | 0.232 | 0.221 | 0.953× | 0.472× |
+| awfy/bounce | 0.089 | 0.058 | 0.652× | 1.052× |
+| beng/fannkuch | 0.293 | 0.287 | 0.980× | 1.037× |
+| beng/fasta | 0.838 | 0.711 | 0.848× | 1.176× |
+| beng/pidigits | 0.311 | 0.313 | 1.006× | 0.993× |
+| larceny/puzzle | 12.988 | 13.635 | 1.050× | 1.020× |
+| text/microdiff | 33.087 | 33.383 | 1.009× | 1.039× |
+| jetstream/navier_stokes | 64.169 | 62.427 | 0.973× | 0.796× |
+
+Pure interpreter:
+
+| Benchmark | Old typed ms | New typed ms | New/old | New typed/untyped ports |
+|---|---:|---:|---:|---:|
+| r7rs/nqueens | 18.352 | 16.121 | 0.878× | 1.165× |
+| awfy/sieve | 2.568 | 1.971 | 0.768× | 1.121× |
+| awfy/queens | 7.123 | 5.576 | 0.783× | 1.357× |
+| awfy/towers | 16.701 | 13.487 | 0.808× | 1.183× |
+| awfy/bounce | 4.587 | 3.871 | 0.844× | 1.122× |
+| awfy/richards | 1968.690 | 1703.990 | 0.866× | 1.043× |
+| beng/binarytrees | 146.344 | 57.354 | 0.392× | 1.037× |
+| kostya/primes | 433.851 | 336.074 | 0.775× | 1.052× |
+| larceny/deriv | 278.349 | 113.580 | 0.408× | 1.211× |
+| larceny/gcbench | 4263.790 | 1404.770 | 0.329× | 1.115× |
+| larceny/quicksort | 105.284 | 83.870 | 0.797× | 1.155× |
+
+Every interpreter diagnostic reports `executed=1 fallback=0 excluded=0`, and
+its separately instrumented process has no MIR frame entry. This includes
+**both Queens ports**; they now execute the same pinned interpreter tier.
+
+Annotation-only controls repeat identical work: 1,000 times under MIR and 20
+under T0. The erased source changes only integer/array/return annotations; both
+variants satisfy their golden outputs.
+
+| Control | MIR typed/erased | T0 typed/erased |
+|---|---:|---:|
+| annotation/bounce | 0.811× | 1.089× |
+| annotation/fannkuch | 1.032× | 1.047× |
+
+Raw samples, output hashes, source hashes, binary identity and paired-bootstrap
+upper bounds: `temp/typed_tuning/complete_{jit,interp}_{ports,change}.json`.
+A one-sided bootstrap upper bound is retained by the shared runner; it is not
+an equivalence test. Bounce and fasta improve in all 15 same-source pairs;
+their upper bounds are 0.724× and 0.895×. Nqueens has an 8.4% lower median,
+but only 10/15 wins and an upper bound of 1.036×, so this campaign does not
+establish its speedup. The first checkpoint likewise did not establish it:
+counters alone are insufficient timing evidence.
+Fannkuch, pidigits and Navier-Stokes deltas remain sample-specific. Puzzle has
+a 5.0% slower same-source median (4/15 wins, upper bound 1.078×), and microdiff
+0.9% (2/15 wins, upper bound 1.098×). These remain visible watchlist results;
+no claim of universal non-regression or performance parity follows.
+
+All 11 same-source T0 targets improve, with one-sided bootstrap upper bounds
+below 1.0. That measures the tuning's effect on the typed programs; it does
+not establish parity with their untyped ports or annotation-erased controls.
+
+### 11.2 Executed counters
+
+These counts come from separate profile runs of the archived binaries.
+
+| MIR hot function | Old root stores → new | Old root reloads → new |
+|---|---:|---:|
+| bounce benchmark | 15,606 → 1,320 | 192,627 → 8,465 |
+| fannkuch main | 108,936 → 91,612 | 346,690 → 312,042 |
+| nqueens solve | 228,981 → 198,725 | 998,885 → 789,885 |
+| fasta random_fasta | 202,802 → 172,230 | 1,198,838 → 958,838 |
+
+Bounce's `is_truthy` calls fall 20,000→0 and integer `fn_abs` 1,426→0;
+fannkuch's `is_truthy` calls fall 8,659→0. Nqueens has no remaining executed
+`lambda_type_check` (2,056→0) or separate numeric-array admission
+(13,075→0); 15,131 fills publish their certificate at construction. Fasta's
+`fn_float` and `fn_div` calls each fall 8,000→0, with `lambda_type_check`
+8,007→7. The producer still performs any required live carrier/count gate;
+zero helper calls does not mean validation was removed.
+
+| T0 typed workload | Old map admissions | Old reifications | Old field visits | Old admitted bytes |
+|---|---:|---:|---:|---:|
+| deriv | 880,000 | 220,000 | 880,000 | 14,160,000 |
+| gcbench | 12,866,918 | 3,222,190 | 6,444,380 | 157,865,468 |
+| binarytrees | 406,200 | 135,854 | 271,708 | 6,655,484 |
+| Richards | 2,182,750 | 450 | 2,450 | 34,000 |
+
+**All four columns are zero in the final candidate for these workloads.**
+Primes retains its 2,122,050 checked direct stores, and bounce retains 13,652;
+they are real writes whose key/value/ownership rules remain enforced.
+Profiles: `temp/typed_tuning/{profiles.json,*.exec.tsv,*.cow.tsv}`.
+
+### 11.3 Release correctness and visible failures
+
+The final release passes **290/290 GC stress**, **240/240 MIR emission**,
+**19/19 admission**, **7/7 strict-pin regression** tests and **20/20** new
+fixture checks (five scripts × two pinned tiers × normal/forced collection
+with freed-memory poisoning). Their logs use the
+`temp/typed_tuning/complete_release_*` prefix. Baseline and corpus results are
+recorded in §10.4.
+
+Release configuration size ratchets pass **17/20**. Three failures reproduce
+with the untouched control, with the same counts: hoisted JS module-write main
+76→87, nested COW module 166→169, and exact JS collection main 12,573→12,627.
+Evidence: `control_release_ratchet.log` and
+`complete_release_ratchet.log`. Their budgets are unchanged. The ordinary
+baseline configuration passes all 20; the reviewed nine-instruction DeltaBlue
+construction delta is the only budget increase in this tuning.
+
+### 11.4 Full paired corpus
+
+The final release scan uses one warmup and five alternating pairs per port,
+with a 15-second process limit. All 63 MIR pairs launch; 61 have equal output.
+Pure T0 has 54 comparable pairs. Every accepted T0 diagnostic reports
+`executed=1 fallback=0 excluded=0` and no executed MIR frame entry. Both binary
+hashes remain stable in every campaign (D8.1.1v15).
+
+| Tier | Equal-output pairs | Typed slower | More than 5% slower | More than 10% slower | Geometric mean typed/untyped |
+|---|---:|---:|---:|---:|---:|
+| Pinned MIR | 61 | 11 | 5 | 1 | 0.610× |
+| Pure T0 | 54 | 40 | 30 | 15 | 1.008× |
+
+These are scan medians, not demonstrated regressions or equivalence bounds.
+Small rows vary between campaigns; the 15-pair targeted comparisons and
+annotation-only controls in §11.1 are the stronger evidence for those rows.
+The geometric mean also compares ports, which may differ beyond annotations.
+
+Spectralnorm and matmul still produce unequal outputs in both tiers, as they
+do in the untouched control, so neither enters the comparison. T0 additionally
+excludes seven rows through its execution gate: knucleotide, triangl and
+text_search are explicitly rejected in both ports; typed splay is explicitly
+rejected while its untyped port runs. Untyped collatz and diviter exceed the
+15-second limit, as do both log_pipeline ports. No timeout is counted as a
+strict-interpreter rejection or a timing result.
+
+Raw samples and diagnostics:
+`temp/typed_tuning/complete_{jit,interp}_corpus.json`; aggregate counts and
+excluded-row details: `temp/typed_tuning/complete_corpus_summary.json`.
+
+### 11.5 Reproduction
+
+The permanent driver is `test/benchmark/run_typed_audit.py`. It reuses the
+existing paired runner, release gate, output normalization and uncertainty
+calculation. `--control` selects a same-typed-source comparison;
+`--annotation-controls` creates identical repeated sources with golden files.
+Interpreter eligibility is checked in an independent process, outside timing.
+Each campaign checks that its binary hashes remain unchanged through completion.
+
+```bash
+python3 test/benchmark/run_typed_audit.py --tier jit --pairs 15 \
+  --only r7rs/nqueens,awfy/bounce,beng/fannkuch,beng/fasta \
+  --annotation-controls --output temp/typed_tuning/reproduce_jit.json
+python3 test/benchmark/run_typed_audit.py --tier interp --pairs 15 \
+  --only larceny/gcbench,larceny/deriv,beng/binarytrees,awfy/richards,kostya/primes \
+  --output temp/typed_tuning/reproduce_interp.json
+python3 test/benchmark/run_typed_audit.py --tier interp --pairs 15 \
+  --control temp/typed_tuning/lambda-before.exe \
+  --only larceny/gcbench,larceny/deriv,beng/binarytrees,awfy/richards,kostya/primes \
+  --output temp/typed_tuning/reproduce_change.json
+```
+
+## 12. What remains slower
+
+The six proposals are implemented, and the broad 3× T0 record-construction
+penalties are removed. **They do not establish that every typed program is
+faster than its untyped port.** Targeted pure-T0 ports retain overhead,
+and annotation-only T0 controls retain approximately 9% for bounce and 5% for
+fannkuch. MIR nqueens and fasta also retain a port penalty in the 15-pair run.
+
+The counter evidence narrows the residual work: it is no longer fresh-record
+reification in the four record targets, or nqueens's repeated array admission.
+T0 still checks live carriers/certificates at boundaries and keys/values/COW
+ownership at checked stores; preplanning removes classification and path
+construction, not those semantics. MIR fannkuch still has 312,042 hot-body root
+reloads versus the untyped port's 40,349, and fasta 958,838 versus 812,848.
+Those remaining roots surround the helpers that still exist. These are useful
+profiling targets, not sufficient evidence to assign timing percentages or to
+remove checks/roots (D3.3.4, D5.3.3).
+
+Further tuning should isolate those remaining checked kernels and boxed joins
+with annotation-only repeated workloads and native samples. Every new reduction
+must keep nullable/OOB behavior, error joins, exact index validation and
+snapshot/borrow semantics (S7.1.1v3, S7.1.3v2, S7.7.2–S7.7.4,
+S9.1.2–S9.1.3). The current implementation reports its residual penalties
+instead of redefining unequal work or permitting fallback as a speed result.

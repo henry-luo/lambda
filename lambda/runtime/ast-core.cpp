@@ -1454,3 +1454,64 @@ AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id) {
     if (!index || id >= index->binding_count) return NULL;
     return ast_index_find(index, index->bindings[id]->node) == AST_NODE_ID_INVALID ? NULL : index->bindings[id]->node;
 }
+
+
+// adopted values and fields must walk in the same order (D3.2.4v4)
+extern "C" bool ast_map_literal_keys_follow_contract(AstMapNode* map_node,
+        TypeMap* expected) {
+    ShapeEntry* expected_field = expected->shape;
+    AstNode* item = map_node->item;
+    while (expected_field && item) {
+        if (item->node_type != AST_NODE_KEY_EXPR || !expected_field->name) return false;
+        AstNamedNode* key = (AstNamedNode*)item;
+        if (!key->name || key->name->len != expected_field->name->length ||
+                memcmp(key->name->chars, expected_field->name->str,
+                    key->name->len) != 0) {
+            return false;
+        }
+        expected_field = typemap_next_field(expected, expected_field);
+        item = item->next;
+    }
+    return !expected_field && !item;
+}
+
+// a destination must fit every concrete field before construction adopts it
+extern "C" bool ast_map_contract_storage_valid(TypeMap* expected) {
+    if (!expected || !expected->shape) return false;
+    FOR_EACH_MAP_FIELD(expected, field) {
+        if (!field->name || !field->type) return false;
+        TypeId storage = shape_entry_storage_type_id(field);
+        if (storage == LMD_TYPE_ANY) return false;
+        if (!shape_entry_storage_fits_data(field, expected->byte_size)) return false;
+    }
+    return true;
+}
+
+// bracket placeholders resolve contracts; the setter rechecks their exact keys
+extern "C" Type* ast_map_path_leaf_contract(Type* root_contract,
+        const AstCowPath* path, AstNode* terminal, bool terminal_is_member,
+        int64_t* index_mask) {
+    *index_mask = 0;
+    Type* current = root_contract;
+    for (int i = 0; i <= path->count && current; i++) {
+        AstNode* segment = i == path->count ? terminal : path->segment[i];
+        bool is_member = i == path->count ? terminal_is_member : path->is_member[i];
+        AstNode* key_node = ast_unwrap_primary(segment);
+        Item key = ItemNull;
+        if (is_member && key_node && key_node->node_type == AST_NODE_IDENT) {
+            key.item = ((uint64_t)LMD_TYPE_STRING << 56) |
+                (uint64_t)(uintptr_t)((AstIdentNode*)key_node)->name;
+        } else if (!is_member) {
+            // any bracket key may be an exact int at runtime; the mask bit
+            // makes the runtime confirm it before trusting this resolution
+            key.item = (uint64_t)LMD_TYPE_INT << 56;
+            *index_mask |= (int64_t)1 << i;
+        } else {
+            return NULL;
+        }
+        bool open_leaf = false;
+        current = lambda_map_path_contract_step(current, key, &open_leaf);
+        if (open_leaf) return current;
+    }
+    return current;
+}

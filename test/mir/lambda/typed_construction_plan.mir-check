@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "description": "D3.2.4v4/S7.7.1: fresh recursive records use the declared layout, with staged dynamic field admission preserving later initializer effects.",
+  "checks": [{"in_func": "*", "expect": ["call\tmap_with_type_tl_p, map_with_type_tl", "call\tlambda_type_check_p, lambda_type_check"]}]
+}
