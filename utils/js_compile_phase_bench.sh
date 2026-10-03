@@ -50,8 +50,8 @@ EOF
 }
 
 case "$BACKEND" in
-    mir) BACKEND_ENV="JS_EXECUTION_BACKEND=mir" ;;
-    ast|auto) BACKEND_ENV="JS_EXECUTION_BACKEND=$BACKEND" ;;
+    mir) BACKEND_ENV="JS_EXEC_BACKEND=mir" ;;
+    ast|auto) BACKEND_ENV="JS_EXEC_BACKEND=$BACKEND" ;;
     *) echo "unknown backend: $BACKEND" >&2; exit 2 ;;
 esac
 

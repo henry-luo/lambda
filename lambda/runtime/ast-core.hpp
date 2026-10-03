@@ -950,6 +950,11 @@ typedef struct AstIdentNode : AstNode {
     // binder, type or pattern name). Sits in tail padding: identifiers are
     // also created by morphing other nodes in place, so the size must not grow.
     bool interp_frame_slot_read;
+    // LambdaJS: 1-based slot of a static member name in the script's realm
+    // literal cache, which holds its canonical property key (0 = none). The
+    // parser assigns it like a string literal's slot; the AST stores no
+    // runtime String (D4.6.2v2). Also in tail padding.
+    uint32_t js_property_key_slot;
 } AstIdentNode;
 // name, entry, capture owner, then slot + flag inside one padded word
 static_assert(sizeof(AstIdentNode) == sizeof(AstNode) + 4 * sizeof(void*),
@@ -1749,7 +1754,7 @@ typedef struct FnPromotionCell {
     void* boxed_entry;
     // D8.1.1v14: back-edges of each handoff loop, counted over the loop's
     // whole subtree and accumulated across activations. The first loop to
-    // reach LAMBDA_JIT_BACKEDGE owns the one continuation of this definition.
+    // reach LAMBDA_LOOP_JIT_THRESHOLD owns the one continuation of this definition.
     uint32_t loop_backedges[INTERP_HANDOFF_LOOP_MAX];
     FnLoopHandoffState loop_state;
     uint8_t loop_ordinal;               // handoff loop of the continuation

@@ -517,6 +517,9 @@ struct JsMirCursor {
 
 struct JsMirTranspiler {
     JsTranspiler* tp;        // access to AST, name_pool, scopes
+    // A P2 satellite defines only this function. Calls to any other function
+    // take the generic call kernel, whose callee may be interpreted or native.
+    JsFunctionNode* p2_satellite_node;
     // §9.2: per-function lowering state; see JsMirFunctionEmitter. Named
     // func_em rather than fn because the call macros already bind fn.
     JsMirFunctionEmitter* func_em;

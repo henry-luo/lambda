@@ -112,7 +112,7 @@
 Standing gates for every phase: `make test-lambda-baseline` at its current
 pass set (nothing new may fail; the 11 pre-existing conc/proc E221 failures
 are the known baseline), `make test-radiant-baseline` untouched, every new
-`.ls` fixture byte-identical under `LAMBDA_TIER=interp`, `jit` and the
+`.ls` fixture byte-identical under `LAMBDA_EXEC_BACKEND=interp`, `jit` and the
 default `AUTO` selector, and `--emit-ast-dump` assertions for every static
 claim. Reminder from the memory ledger: `make test-lambda-baseline`
 overwrites `lambda.exe` with the debug build and `make release` deletes

@@ -2027,7 +2027,10 @@ static MIR_reg_t jm_emit_identifier_read(JsMirTranspiler* mt,
                     return jm_apply_with_identifier_fallback(mt, id, live_val);
                 }
                 MIR_reg_t mv = jm_load_module_var(mt, (uint32_t)mc->int_val);
-                JsFuncCollected* direct_func =
+                // a P2 satellite runs after the interpreter instantiated every
+                // hoisted declaration, and it does not define other functions'
+                // MIR items, so it reads the binding as stored
+                JsFuncCollected* direct_func = mt->p2_satellite_node ? NULL :
                     jm_find_direct_function_decl_for_identifier(mt, id);
                 if (direct_func && direct_func->func_item &&
                         !JM_JS_FACT(direct_func, is_reassigned)) {
@@ -2688,7 +2691,9 @@ static int jm_typed_array_parameter_kind_impl(JsMirTranspiler* mt,
         JsAstNode* node = (JsAstNode*)index->nodes[call_ids[call_index]];
         if (!node || node->node_type != AST_NODE_CALL_EXPR) continue;
         JsCallNode* call = (JsCallNode*)node;
-        if (jm_resolve_direct_call_function(mt, call, true) != function->node) continue;
+        // a caller's argument kind is a parameter fact the runtime kind guard
+        // rechecks, so it holds in a satellite whose callers are not defined
+        if (jm_resolve_direct_call_target(mt, call, true) != function->node) continue;
         int candidate = jm_typed_array_argument_kind(mt, call,
             jm_call_argument_at(call, parameter_index), next_active, active_count);
         if (candidate == JM_TYPED_ARRAY_KIND_CYCLE) continue;

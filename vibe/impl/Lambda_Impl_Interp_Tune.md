@@ -93,7 +93,7 @@ fixtures passed, while JS passed 426/428. The other JS failure was
 `regex_bt_legacy_octal_assertion.js`. Standalone GTests were not independently
 ranked. All Lambda top-ten samples reported zero MIR fallbacks; all JS top-ten
 phase probes emitted zero MIR instructions. Nine other Lambda fixtures did
-fall back despite `LAMBDA_TIER=interp`; preserve their identities in the
+fall back despite `LAMBDA_EXEC_BACKEND=interp`; preserve their identities in the
 coverage/fallback report, not the strict-AST performance population.
 
 Release executable SHA256:
@@ -135,8 +135,8 @@ The [current raw samples](../../temp/interp_tune/2026-09-18_current_vs_12b507e51
 [current report](../../temp/interp_tune/2026-09-18_current_vs_12b507e51/report.md),
 and [interleaved JS confirmation](../../temp/interp_tune/2026-09-18_current_vs_12b507e51/js_pair_confirmation.json)
 compare the current release executable with the preserved `12b507e51` release
-binary. Every child explicitly used `LAMBDA_TIER=interp`,
-`JS_EXECUTION_BACKEND=ast`, `LAMBDA_NO_LOG=1`, and `--no-log`; this excludes
+binary. Every child explicitly used `LAMBDA_EXEC_BACKEND=interp`,
+`JS_EXEC_BACKEND=ast`, `LAMBDA_NO_LOG=1`, and `--no-log`; this excludes
 auto-tier promotion as required by **D8.1.1v9, D8.1.3v11**. Results are
 whole-process wall-time medians, so they include parsing and setup as well as
 interpreter execution.
@@ -237,7 +237,7 @@ work complete and cannot substitute for its acceptance gates.
    document files, module paths, permission options, platform goldens and
    fixture hashes. Audit differences from the 892/428 baseline rather than
    silently using a changed population.
-4. Set `LAMBDA_TIER=interp` and `JS_EXECUTION_BACKEND=ast` explicitly for every
+4. Set `LAMBDA_EXEC_BACKEND=interp` and `JS_EXEC_BACKEND=ast` explicitly for every
    measured child. Sanitize inherited tier, GC-stress and diagnostic controls;
    hold logging fixed without editing `log.conf`. A missing selector is not
    equivalent to pinned AST.
@@ -847,7 +847,7 @@ sanitizers for correctness as appropriate, never for the reported timing run.
 After building the corresponding test runners in release configuration:
 
 ```sh
-env LAMBDA_TIER=interp ./test/test_lambda_gtest.exe --gtest_brief=1
+env LAMBDA_EXEC_BACKEND=interp ./test/test_lambda_gtest.exe --gtest_brief=1
 ./test/test_js_gtest.exe --full-ast --gtest_brief=1
 ./test/test_interp_gtest.exe
 ./test/test_name_pool_gtest.exe
@@ -855,7 +855,7 @@ make test-lambda-baseline
 ```
 
 `--full-ast` (or `JS_GTEST_MODE=ast`) overrides the harness's mixed AST/MIR
-fixture list and runs every fixture with `JS_EXECUTION_BACKEND=ast`;
+fixture list and runs every fixture with `JS_EXEC_BACKEND=ast`;
 `--full-mir` (or `JS_GTEST_MODE=mir`) pins every fixture to whole-module MIR.
 `make test-js-parity` runs both modes for `test_js_gtest` and the Test262
 baseline (`--ast-only` / `--mir-only`) and reports cross-tier divergence. Some standalone GTests deliberately select other tiers: these are

@@ -546,7 +546,7 @@ Focused evidence:
 
 ```text
 Lambda JIT:    ./lambda.exe run test/lambda/proc/proc_for_window.ls --no-log
-Lambda T0:     LAMBDA_TIER=interp ./lambda.exe run test/lambda/proc/proc_for_window.ls --no-log
+Lambda T0:     LAMBDA_EXEC_BACKEND=interp ./lambda.exe run test/lambda/proc/proc_for_window.ls --no-log
 AST dump:      AST_NODE_FOR_EXPR (and no AST_NODE_FOR_STAM) for proc_for_window.ls
 JS C-style:    ./lambda.exe js -e 'let sum = 0; for (let i = 0; i < 4; i++) sum += i; console.log(sum);'
 Focused GTest: proc_for_range, proc_for_window, proc_for_expr_content_proc, interp_for_window — 4/4 passed
@@ -582,7 +582,7 @@ git diff --check                                    # clean
 
 **D8.2.2** requires one physical layout per shared tag, and **D8.2.4** requires child ownership to be published once. Lambda procedural assignment nodes previously extended `AstAssignNode` with a separate `AstAssignStamNode` or `AstCompoundAssignNode` layout: the former carried `target`/`target_node`/`target_entry`/`value`, while the latter carried `object`/`key`/`value`. P1c folds those optional fields into one `AstAssignNode`; `right` and Lambda's `value` spelling share one union slot, and the old type names are aliases rather than layouts. The builder allocates the shared size for identifier and compound assignments. `ast_visit_core_children()` now walks all four assignment tags through `left/right`, so a compound target's existing field node owns its object/key edges exactly once.
 
-The focused migration also repaired the stale P1b consumer found by the differential gate: both MIR `for`-`let` emitters were still blind-casting `AST_NODE_VARIABLE_DECLARATOR` to `AstNamedNode`, which read the initializer through the wrong field contract and produced `inf`/`9` for grouped queries under explicit `LAMBDA_TIER=jit`. They now consume `AstDeclaratorNode::init`; no compatibility cast remains on that path. This is a root-cause correction, not a test relaxation (**D8.2.2**, **D8.2.4**).
+The focused migration also repaired the stale P1b consumer found by the differential gate: both MIR `for`-`let` emitters were still blind-casting `AST_NODE_VARIABLE_DECLARATOR` to `AstNamedNode`, which read the initializer through the wrong field contract and produced `inf`/`9` for grouped queries under explicit `LAMBDA_EXEC_BACKEND=jit`. They now consume `AstDeclaratorNode::init`; no compatibility cast remains on that path. This is a root-cause correction, not a test relaxation (**D8.2.2**, **D8.2.4**).
 
 The same rule now covers declaration wrappers. `AstVarDeclNode` is the sole wrapper layout; its `declarations` and Lambda's `declare` spellings share one union slot, and `AstLetNode` is an alias. `let`, `var`, `pub`, and `type` child ownership therefore runs through one `AstVarDeclNode` row in the common visitor, while JavaScript's `kind`/`using` flags remain available on the same record.
 
@@ -593,8 +593,8 @@ Focused evidence:
 ```text
 make build-release-compile                          # Errors: 0
 InterpWalker assignment/for differential controls   # 14/14 passed
-LAMBDA_TIER=jit grouped_for                         # key 1/0, total 3/6
-LAMBDA_TIER=interp grouped_for                      # identical key 1/0, total 3/6
+LAMBDA_EXEC_BACKEND=jit grouped_for                         # key 1/0, total 3/6
+LAMBDA_EXEC_BACKEND=interp grouped_for                      # identical key 1/0, total 3/6
 make test-lambda-baseline                            # 3978/3978 passed
 ./utils/check_ast_tune_loc.sh ... --cap 310690      # C/C++ -26; all source -29
 git diff --check                                    # clean

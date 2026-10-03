@@ -29,7 +29,7 @@ These options apply when running a script directly (i.e., `lambda <script.ls>`).
 | | `--max-errors N` | Max type errors before stopping (0 = unlimited) | `10` |
 | | `--optimize=N` / `--opt-level=N` | MIR optimization level; large modules may automatically use the interpreter | `2` |
 | `-O0` … `-O3` | | Optimization level shorthand: 0 = debug with stack traces, 1 = basic, 2 = full, 3 = aggressive | |
-| | `--tier=auto\|jit\|interp` | Execution tier: `auto` interprets and compiles hot functions, `jit` compiles everything, `interp` never compiles. `LAMBDA_TIER` is the environment equivalent | `auto` |
+| | `--tier=auto\|jit\|interp` | Execution tier: `auto` interprets and compiles hot functions, `jit` compiles everything, `interp` never compiles. `LAMBDA_EXEC_BACKEND` is the environment equivalent | `auto` |
 | | `--mir-interp` | Run the JIT's output on the MIR interpreter instead of native code | |
 | | `--dry-run` | Skip real I/O; return fabricated results for network/filesystem operations | `false` |
 | | `--static-warning` | Relaxed mode: report static type errors as warnings and keep running (syntax errors still fail; the result may contain error values) | |
@@ -529,7 +529,7 @@ When Lambda is started with no arguments, it enters the interactive REPL.
 | Variable | Values | Description |
 |----------|--------|-------------|
 | `LAMBDA_HOME` | path | Runtime asset directory: packages, schemas, fonts. Default: `./lmd` (source checkout and release bundle alike), **relative to the current working directory** — set it to an absolute path to run `lambda` from anywhere |
-| `LAMBDA_TIER` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL keeps a persistent interpreter session unless `jit` |
+| `LAMBDA_EXEC_BACKEND` | `auto`, `jit`, `interp` | Execution tier, as `--tier=`. The REPL keeps a persistent interpreter session unless `jit` |
 | `JUBE_MODULE_PATH` | path | Where Node modules are discovered (default: `./modules` beside the executable) |
 | `LAMBDA_LOG_LEVEL` | level name | Minimum log level written to `log.txt` |
 | `LAMBDA_LOG_FILE` | path | Log file location (default: `./log.txt`) |

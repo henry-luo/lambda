@@ -75,6 +75,8 @@ def run_once(binary, script, timeout_s, language="lambda", tier="jit",
         command.insert(2, "--runtime=" + js_runtime)
     environment = os.environ.copy()
     if language == "lambda":
+        environment["LAMBDA_EXEC_BACKEND"] = tier
+        # pre-2026-10-03 name, still read by the archived binaries this compares
         environment["LAMBDA_TIER"] = tier
     started = time.perf_counter_ns()
     process = None
@@ -537,7 +539,7 @@ def main():
         "language": args.language,
         "control_js_runtime": args.control_js_runtime if args.language == "js" else None,
         "candidate_js_runtime": args.candidate_js_runtime if args.language == "js" else None,
-        "js_execution_backend": os.environ.get("JS_EXECUTION_BACKEND")
+        "js_execution_backend": os.environ.get("JS_EXEC_BACKEND")
         if args.language == "js" else None,
         "tier": args.tier,
         "pairs": args.pairs,

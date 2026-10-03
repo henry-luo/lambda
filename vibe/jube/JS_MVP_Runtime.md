@@ -30,7 +30,7 @@ make build-release-profile
 As of 2026-09-28, debug and `release_profile` hosts link the experimental MVP;
 the ordinary release host excludes it. `release_profile` uses `NDEBUG`, O3 and
 LTO, with optional execution counters. Set `JS_OPT_TRACE=0` for timing and
-`JS_EXECUTION_BACKEND=mir` for a comparison with full LambdaJS's compiled lane.
+`JS_EXEC_BACKEND=mir` for a comparison with full LambdaJS's compiled lane.
 The current paired comparison uses identical source/wrapper bytes and Node
 output checks; it is separate from the historical QuickJS acceptance above.
 It validates 62/63 current workloads; MVP fails the stronger Navier frame-15

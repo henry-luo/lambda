@@ -1,6 +1,6 @@
 # Typed Lambda performance audit — 2026-10-03
 
-**Status:** all six tuning proposals are implemented (§10), and final release measurements and validation are complete (§11). Typed/untyped performance parity remains unmet (§12). Strict interpreter selection and untyped Queens support were fixed before this tuning change (§6/§9). The performance comparison uses **pinned MIR (`LAMBDA_TIER=jit`)**, with a separate pure-T0 diagnostic. No AUTO timings enter these comparisons.
+**Status:** all six tuning proposals are implemented (§10), and final release measurements and validation are complete (§11). Typed/untyped performance parity remains unmet (§12). Strict interpreter selection and untyped Queens support were fixed before this tuning change (§6/§9). The performance comparison uses **pinned MIR (`LAMBDA_EXEC_BACKEND=jit`)**, with a separate pure-T0 diagnostic. No AUTO timings enter these comparisons.
 
 **Authority:** D8.1.1v15 (execution selection), D2.4.1–D2.4.3 (contract and representation), D3.2.4v4/D3.3.4 (record admission and full inferred contracts), D5.3.3 (precise roots), S7.7.2–S7.7.4 (boundary failures), S9.1.2–S9.1.3 (snapshots and borrows).
 

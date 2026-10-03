@@ -2737,16 +2737,16 @@ static int run_t262_sub_batch(
     bool process_created = false;
     {
         std::lock_guard<std::mutex> lock(g_backend_spawn_mutex);
-        const char* previous_backend = getenv("JS_EXECUTION_BACKEND");
+        const char* previous_backend = getenv("JS_EXEC_BACKEND");
         bool had_previous_backend = previous_backend != NULL;
         char* saved_backend = previous_backend ? _strdup(previous_backend) : NULL;
-        _putenv_s("JS_EXECUTION_BACKEND", ast_backend ? "ast" : "mir");
+        _putenv_s("JS_EXEC_BACKEND", ast_backend ? "ast" : "mir");
         process_created = CreateProcessA(NULL, &cmd_copy[0], NULL, NULL, TRUE, 0,
                                          NULL, NULL, &si, &pi) != 0;
         if (had_previous_backend) {
-            _putenv_s("JS_EXECUTION_BACKEND", saved_backend ? saved_backend : "");
+            _putenv_s("JS_EXEC_BACKEND", saved_backend ? saved_backend : "");
         } else {
-            _putenv_s("JS_EXECUTION_BACKEND", "");
+            _putenv_s("JS_EXEC_BACKEND", "");
         }
         free(saved_backend);
     }
@@ -2911,15 +2911,15 @@ static int run_t262_sub_batch(
     int ret;
     {
         std::lock_guard<std::mutex> lock(g_backend_spawn_mutex);
-        const char* previous_backend = getenv("JS_EXECUTION_BACKEND");
+        const char* previous_backend = getenv("JS_EXEC_BACKEND");
         bool had_previous_backend = previous_backend != NULL;
         char* saved_backend = previous_backend ? strdup(previous_backend) : NULL;
-        setenv("JS_EXECUTION_BACKEND", ast_backend ? "ast" : "mir", 1);
+        setenv("JS_EXEC_BACKEND", ast_backend ? "ast" : "mir", 1);
         ret = posix_spawn(&pid, "./lambda.exe", &file_actions, NULL, argv, environ);
         if (had_previous_backend) {
-            setenv("JS_EXECUTION_BACKEND", saved_backend ? saved_backend : "", 1);
+            setenv("JS_EXEC_BACKEND", saved_backend ? saved_backend : "", 1);
         } else {
-            unsetenv("JS_EXECUTION_BACKEND");
+            unsetenv("JS_EXEC_BACKEND");
         }
         free(saved_backend);
     }
@@ -3298,7 +3298,7 @@ static std::unordered_map<std::string, BatchResult> execute_t262_batch(
     if (indices.empty()) return results;
 
     if (g_hybrid_backend_routing && g_persistent_workers) {
-        // A persistent lambda.exe cannot switch JS_EXECUTION_BACKEND between
+        // A persistent lambda.exe cannot switch JS_EXEC_BACKEND between
         // AST and MIR manifests, so hybrid runs use isolated child processes.
         fprintf(stderr, "[test262] Hybrid AST/MIR routing disables persistent workers\n");
         g_persistent_workers = false;
@@ -4805,7 +4805,7 @@ int main(int argc, char** argv) {
             g_ast_only = true;
         }
         if (strcmp(argv[i], "--mir-only") == 0) {
-            // Pinned whole-module MIR (JS_EXECUTION_BACKEND=mir) for every
+            // Pinned whole-module MIR (JS_EXEC_BACKEND=mir) for every
             // selected job, including the sync tests hybrid routes to AST.
             g_mir_only = true;
         }

@@ -8,7 +8,7 @@ native float load -- is excluded by construction, which a call-count or an
 "arm is short" heuristic cannot do correctly.
 
 Usage:
-    LAMBDA_TIER=jit LAMBDA_MIR_DUMP_PATH=temp/x.mir ./lambda.exe run bench.ls
+    LAMBDA_EXEC_BACKEND=jit LAMBDA_MIR_DUMP_PATH=temp/x.mir ./lambda.exe run bench.ls
     python3 test/benchmark/mir_mandatory_census.py temp/x.mir [...]
 
 Caveat: the dump holds the whole MIR context and is rewritten per module, so a

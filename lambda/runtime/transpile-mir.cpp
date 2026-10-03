@@ -43655,6 +43655,17 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Set vargs for variadic functions (save previous for nesting)
     if (is_variadic) {
         MIR_reg_t vargs_reg = MIR_reg(mt->ctx, "_vargs", func);
+        // The dynamic-call adapter passes ITEM_NULL as its no-rest sentinel
+        // (lambda_dynamic_call); installing those bits as the List* made
+        // varg(0) read address 0x0100...28 in a satellite entered with no
+        // extra arguments. NULL is the runtime's "no rest" (fn_varg0/1 answer
+        // an empty list), matching T0's interp_set_frame_vargs.
+        MIR_label_t vargs_ok = new_label(mt);
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BNE, MIR_new_label_op(mt->ctx, vargs_ok),
+            MIR_new_reg_op(mt->ctx, vargs_reg), MIR_new_int_op(mt->ctx, (int64_t)ITEM_NULL)));
+        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, vargs_reg),
+            MIR_new_int_op(mt->ctx, 0)));
+        emit_label(mt, vargs_ok);
         MIR_reg_t saved_reg = emit_call_1(mt, "set_vargs", MIR_T_P, MIR_T_P,
             MIR_new_reg_op(mt->ctx, vargs_reg));
         // Store in a named register so we can reference it at function exit

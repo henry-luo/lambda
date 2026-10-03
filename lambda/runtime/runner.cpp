@@ -1478,7 +1478,7 @@ static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
         path ? path : "<unknown>", kind);
     char message[256];
     snprintf(message, sizeof(message),
-        "LAMBDA_TIER=interp cannot execute %s; MIR fallback is disabled", kind);
+        "LAMBDA_EXEC_BACKEND=interp cannot execute %s; MIR fallback is disabled", kind);
     LambdaError* error = err_create(ERR_NOT_IMPLEMENTED, message, NULL);
     if (error) {
         if (tp->errors) arraylist_append(tp->errors, error);

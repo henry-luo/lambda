@@ -6031,7 +6031,7 @@ static InterpState* interp_current_state(void);
 // ---------------------------------------------------------------------------
 // A `while` that is a direct statement of a `pn` body (numbered by the frame
 // plan) counts the back-edges of its whole subtree. When it reaches
-// LAMBDA_JIT_BACKEDGE, the statements from that loop to the end of the body
+// LAMBDA_LOOP_JIT_THRESHOLD, the statements from that loop to the end of the body
 // are compiled as a synthesized procedure -- the continuation -- whose
 // parameters are the activation's live-in locals. Once published, the running
 // activation enters it at the loop's next head test, where T0's whole live
@@ -6771,9 +6771,38 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                     // until this scope closes, but it must not be an active
                     // caller while the native entry can call back into T0.
                     List tail_args = {.length = params, .items = (Item*)(void*)frame->slots};
+                    // A variadic activation's rest list is not a fixed slot:
+                    // passing only `params` words made the satellite's adapter
+                    // see no extras and install its no-rest sentinel, so
+                    // `varg()` read empty after the handoff. Re-spread the
+                    // activation's current rest list (kept rooted by its frame
+                    // slot) after the fixed arguments.
+                    Item* spread = NULL;
+                    if (is_variadic && frame->vargs_index < frame->slot_count) {
+                        List* rest_list = (List*)(uintptr_t)frame->slots[frame->vargs_index];
+                        int64_t rest_len = rest_list ? rest_list->length : 0;
+                        if (rest_len > 0) {
+                            spread = (Item*)mem_calloc((size_t)(params + rest_len),
+                                sizeof(Item), MEM_CAT_EVAL);
+                            if (!spread) {
+                                result = ItemError;
+                                break;
+                            }
+                            for (int p = 0; p < (int)params; p++) {
+                                spread[p] = (Item){.item = frame->slots[p]};
+                            }
+                            for (int64_t r = 0; r < rest_len; r++) {
+                                spread[params + r] = rest_list->items[r];
+                            }
+                            tail_args.length = params + rest_len;
+                            tail_args.items = spread;
+                        }
+                    }
                     frame->st->top = frame->caller;
                     st->depth++;
-                    return fn_call(callable, &tail_args);
+                    Item tail_result = fn_call(callable, &tail_args);
+                    if (spread) mem_free(spread);
+                    return tail_result;
                 }
                 if (frame->signal != EvalSignal::TAIL_CALL) break;
                 frame->signal = EvalSignal::NORMAL;
@@ -7384,7 +7413,7 @@ bool interp_const_fold_script(Transpiler* tp) {
     // that evaluation to allocate -- a folded String, Decimal or container is
     // born on the GC heap and dies with the frame unless it is rehomed. So the
     // pass needs a context that can allocate, not merely a context: the eager
-    // pipeline (LAMBDA_TIER=jit) compiles the whole module before the runner
+    // pipeline (LAMBDA_EXEC_BACKEND=jit) compiles the whole module before the runner
     // reaches runner_setup_context()/heap_init(), leaving `context->heap` NULL
     // while `context` itself is live. Folding `type(42)` there reached
     // heap_calloc and faulted on `context->heap->gc`. Declining the pass keeps
@@ -7514,13 +7543,13 @@ static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallba
 }
 
 static uint32_t interp_jit_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_JIT_THRESHOLD", 5);
+    return interp_promotion_threshold("LAMBDA_FUNC_JIT_THRESHOLD", 5);
 }
 
 // back-edges of one handoff loop's subtree before its continuation compiles;
 // the user set 10000 on 2026-10-02 (D8.1.1v14, Interp Tune2 §4.3)
 static uint32_t interp_jit_backedge_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_JIT_BACKEDGE", 10000);
+    return interp_promotion_threshold("LAMBDA_LOOP_JIT_THRESHOLD", 10000);
 }
 
 // `LAMBDA_SATELLITE_SYNC=1` publishes each satellite at the promotion that

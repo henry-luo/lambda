@@ -394,7 +394,7 @@ design record with the call-site census after T29-1/T29-3, not code.
   Build the control from the **same HEAD** as the change (Tune28 §9.5).
   Never time a debug build; `make test-lambda-baseline` overwrites
   `lambda.exe` and `make release` deletes `test/*.exe`.
-- One benchmark process at a time; `LAMBDA_TIER=jit`; interleaved min of 7
+- One benchmark process at a time; `LAMBDA_EXEC_BACKEND=jit`; interleaved min of 7
   (`temp/r46/ab.py`, `N=9` for any sub-3% call). Check the C2MIR column moves
   < 5% between runs before reading any row (§2.1).
 - Static census per track: `LAMBDA_MIR_DUMP_PATH`, then
@@ -590,7 +590,7 @@ of T29-1, not T29-2.
 This is the per-access part of the record gap only; the navigation and COW
 tests per access are T29-1's.
 
-**Timing** (release, `LAMBDA_TIER=jit`, interleaved, 7 runs, ms; "old" is the
+**Timing** (release, `LAMBDA_EXEC_BACKEND=jit`, interleaved, 7 runs, ms; "old" is the
 HEAD script, "new" the P0-typed one):
 
 | row | v46 | T29-2 same script | T29-2 new script |

@@ -1,4 +1,4 @@
-# T0 interpreter — exclusion list (LAMBDA_TIER=interp)
+# T0 interpreter — exclusion list (LAMBDA_EXEC_BACKEND=interp)
 #
 # Scripts whose pre-scan finds a construct the walker does not execute fail
 # before execution under explicit interp, counted as excluded with fallback=0

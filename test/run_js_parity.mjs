@@ -2,7 +2,7 @@
 // JS execution-tier parity runner.
 //
 // Runs test_js_gtest and the Test262 baseline under each pinned execution tier
-// (JS_EXECUTION_BACKEND=mir via --full-mir / --mir-only, and the full AST
+// (JS_EXEC_BACKEND=mir via --full-mir / --mir-only, and the full AST
 // interpreter via --full-ast / --ast-only), then reports per-leg results and
 // the cross-tier divergence: cases that fail under one tier but not the other.
 //

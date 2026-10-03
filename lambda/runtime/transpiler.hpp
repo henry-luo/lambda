@@ -126,6 +126,13 @@ struct Runtime {
     // A document chooses one JS execution tier before its preamble runs;
     // mixing AST and MIR closures in a single realm has no shared ABI.
     bool js_ast_backend;
+    // D8.1.3v22 promotion policy, read from JS_EXEC_BACKEND /
+    // JS_FUNC_JIT_THRESHOLD / JS_LOOP_JIT_THRESHOLD once per runtime at first use rather
+    // than from the environment on every interpreted call.
+    bool js_promotion_policy_resolved;
+    bool js_promotion_auto;
+    uint32_t js_promotion_call_threshold;
+    uint32_t js_promotion_backedge_threshold;
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
     bool use_mir_direct; // all executable Lambda paths use MIR Direct
     // Worker-local module prebuilds may create immutable AST cache templates,

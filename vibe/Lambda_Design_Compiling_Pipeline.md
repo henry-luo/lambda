@@ -554,7 +554,7 @@ utils/compile_phase_bench.sh jit 3 > temp/compile_phase_after_jit.tsv
 
 # scaling witnesses
 for N in 1000 2000 4000 8000; do
-  LAMBDA_COMPILER_TIMING=1 LAMBDA_TIER=interp ./lambda.exe temp/astscale/lets_$N.ls --no-log
+  LAMBDA_COMPILER_TIMING=1 LAMBDA_EXEC_BACKEND=interp ./lambda.exe temp/astscale/lets_$N.ls --no-log
 done
 ```
 
@@ -572,8 +572,8 @@ rows separately in `temp/phase_profile.txt`.
    own time after LC3.5; `oracle_poc` build+bind+validate+index ≤ 25 ms.
 2. **Scaling**: `lets_8000` ≤ 4 × `lets_2000` and `fns_2000` ≤ 4 ×
    `fns_500` (linear, not quadratic).
-3. **Identity**: `make test-lambda-baseline` 100% under `LAMBDA_TIER=interp`
-   and `LAMBDA_TIER=jit` (SI3v2: tiers evaluate identically);
+3. **Identity**: `make test-lambda-baseline` 100% under `LAMBDA_EXEC_BACKEND=interp`
+   and `LAMBDA_EXEC_BACKEND=jit` (SI3v2: tiers evaluate identically);
    `make test-radiant-baseline` 100%; the 20 corpus scripts produce
    byte-identical output before and after.
 4. **Emission**: for LC3.7's analysis reorder, MT7 (D8.6.1) at 0% slack —

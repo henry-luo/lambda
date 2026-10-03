@@ -10,7 +10,7 @@
 // Tree-walking execution tier. It intentionally shares the JS object/value
 // helpers and the Runtime/EvalContext ownership model with MIR lowering.
 static inline bool js_ast_interpreter_forced(void) {
-    const char* backend = getenv("JS_EXECUTION_BACKEND");
+    const char* backend = getenv("JS_EXEC_BACKEND");
     return backend && (strcmp(backend, "ast") == 0 ||
         strcmp(backend, "interpreter") == 0);
 }
@@ -28,7 +28,7 @@ static inline bool js_ast_interpreter_requested(void) {
 // outside that executor's coverage, the caller keeps the established MIR
 // fallback rather than publishing a mixed-tier realm.
 static inline bool js_execution_auto_requested(void) {
-    const char* backend = getenv("JS_EXECUTION_BACKEND");
+    const char* backend = getenv("JS_EXEC_BACKEND");
     // D8.1.3v19: a supported unit starts in the retained AST tier. `mir`
     // remains the explicit opt-in, while unsupported AST surface falls back
     // to the whole-module MIR lane at the ordinary admission gate.

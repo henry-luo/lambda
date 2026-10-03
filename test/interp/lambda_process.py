@@ -79,9 +79,9 @@ def run_lambda_process(executable: str, script: str, tier: Optional[str],
     """
     env: dict[str, Optional[str]] = dict(extra_env or {})
     if tier is None:
-        env["LAMBDA_TIER"] = None
+        env["LAMBDA_EXEC_BACKEND"] = None
     else:
-        env["LAMBDA_TIER"] = tier
+        env["LAMBDA_EXEC_BACKEND"] = tier
     argv = [executable]
     if procedural:
         argv.append("run")

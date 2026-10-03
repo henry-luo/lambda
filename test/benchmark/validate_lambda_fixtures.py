@@ -10,14 +10,14 @@ binary, output = sys.argv[1:3]
 scripts = sys.argv[3:]
 assert scripts, 'supply fixture paths after binary and output JSON'
 modes = [
-    ('jit', {'LAMBDA_TIER': 'jit'}, []),
-    ('interp', {'LAMBDA_TIER': 'interp'}, []),
-    ('auto', {'LAMBDA_TIER': 'auto'}, []),
-    ('gc_every', {'LAMBDA_TIER': 'jit', 'LAMBDA_GC_FORCE_EVERY': '1',
+    ('jit', {'LAMBDA_EXEC_BACKEND': 'jit'}, []),
+    ('interp', {'LAMBDA_EXEC_BACKEND': 'interp'}, []),
+    ('auto', {'LAMBDA_EXEC_BACKEND': 'auto'}, []),
+    ('gc_every', {'LAMBDA_EXEC_BACKEND': 'jit', 'LAMBDA_GC_FORCE_EVERY': '1',
                   'LAMBDA_GC_POISON_FREED': '1'}, []),
-    ('gc_random', {'LAMBDA_TIER': 'jit', 'LAMBDA_GC_FORCE_SEED': '1592594996',
+    ('gc_random', {'LAMBDA_EXEC_BACKEND': 'jit', 'LAMBDA_GC_FORCE_SEED': '1592594996',
                    'LAMBDA_GC_FORCE_ONE_IN': '3', 'LAMBDA_GC_POISON_FREED': '1'}, []),
-    ('mir_interp_gc', {'LAMBDA_TIER': 'jit', 'LAMBDA_GC_FORCE_EVERY': '1',
+    ('mir_interp_gc', {'LAMBDA_EXEC_BACKEND': 'jit', 'LAMBDA_GC_FORCE_EVERY': '1',
                        'LAMBDA_GC_POISON_FREED': '1'}, ['--mir-interp']),
 ]
 rows = []

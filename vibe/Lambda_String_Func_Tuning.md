@@ -549,7 +549,7 @@ Already fast (survey):
   - **Test suites:** `make test-lambda-baseline` must pass 100%. For changes visible to LambdaJS, also run the test262 baseline (CLAUDE.md rule 18).
   - **Structural pins:** add one wherever a regression would be silent, like `LambdaOptStrings.LiteralSplitKernelAvoidsBytewiseComparisons`.
 - **Speed:**
-  - Compare release builds of the same HEAD with and without the change (CLAUDE.md rule 10), under `LAMBDA_TIER=jit`.
+  - Compare release builds of the same HEAD with and without the change (CLAUDE.md rule 10), under `LAMBDA_EXEC_BACKEND=jit`.
   - Take the median of at least 7 runs, interleaved when the difference is under about 5%.
   - Report peak RSS for any change that affects memory.
 - **Inputs:**
