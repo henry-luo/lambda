@@ -27,18 +27,18 @@ struct JsExecutionBackendScope {
     bool had_saved = false;
 
     explicit JsExecutionBackendScope(const char* selected) {
-        const char* current = getenv("JS_EXECUTION_BACKEND");
+        const char* current = getenv("JS_EXEC_BACKEND");
         if (current) {
             str_copy(saved, sizeof(saved), current, strlen(current));
             had_saved = true;
         }
-        if (selected) setenv("JS_EXECUTION_BACKEND", selected, 1);
-        else unsetenv("JS_EXECUTION_BACKEND");
+        if (selected) setenv("JS_EXEC_BACKEND", selected, 1);
+        else unsetenv("JS_EXEC_BACKEND");
     }
 
     ~JsExecutionBackendScope() {
-        if (had_saved) setenv("JS_EXECUTION_BACKEND", saved, 1);
-        else unsetenv("JS_EXECUTION_BACKEND");
+        if (had_saved) setenv("JS_EXEC_BACKEND", saved, 1);
+        else unsetenv("JS_EXEC_BACKEND");
     }
 };
 
@@ -700,12 +700,12 @@ TEST(JsInterpreter, RetainsIntrinsicPrototypeCacheAcrossCollectionAndMutation) {
 TEST(JsInterpreter, ExplicitAstSelectorUsesTheSharedScriptPath) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
 
     const char source[] = "var answer = 6 * 7; answer;";
     Item result = transpile_js_to_mir(&runtime, source, "selector.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, flt2it(42.0).item);
     ASSERT_EQ(runtime.scripts->length, 1);
@@ -766,16 +766,16 @@ TEST(JsScriptOwnership, PreservesClassFieldInitializerCaptureOverlay) {
 TEST(JsInterpreter, UnsetBackendSelectsAutoAstForSupportedScript) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    const char* previous = getenv("JS_EXECUTION_BACKEND");
+    const char* previous = getenv("JS_EXEC_BACKEND");
     char saved_backend[32] = {};
     if (previous) str_copy(saved_backend, sizeof(saved_backend), previous,
         strlen(previous));
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     const char source[] = "var answer = 6 * 7; answer;";
     Item result = transpile_js_to_mir(&runtime, source, "unset-auto.js", NULL);
 
-    if (saved_backend[0]) ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", saved_backend, 1), 0);
+    if (saved_backend[0]) ASSERT_EQ(setenv("JS_EXEC_BACKEND", saved_backend, 1), 0);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_TRUE(runtime.js_ast_backend);
     EXPECT_EQ(result.item, flt2it(42.0).item);
@@ -785,8 +785,8 @@ TEST(JsInterpreter, UnsetBackendSelectsAutoAstForSupportedScript) {
 TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function squareSum(limit) { "
@@ -800,8 +800,8 @@ TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-satellite.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
     ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
@@ -819,8 +819,8 @@ TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
 TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function advance(delta) { \"use strict\"; "
@@ -830,8 +830,8 @@ TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-this-property.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
     ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
@@ -854,8 +854,8 @@ TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
 TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "var multiply = function(value) { "
@@ -864,8 +864,8 @@ TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-function-expression.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
     ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
@@ -882,8 +882,8 @@ TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
 TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function grow(seed, delta) { "
@@ -894,8 +894,8 @@ TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-local-object-property-chain.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
     ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
@@ -912,8 +912,8 @@ TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
 TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function pair(left, right) { return [left, right]; } "
@@ -921,8 +921,8 @@ TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-array-literal.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
     ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
@@ -940,8 +940,8 @@ TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
 TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function read(object, key) { return object[key]; } "
@@ -950,8 +950,8 @@ TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-computed-property-pinned.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
     ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
@@ -970,8 +970,8 @@ TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
 TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function materialize(key, value) { "
@@ -980,8 +980,8 @@ TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) 
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-computed-object-literal.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
     ASSERT_EQ(js_fn_body_kind(function), JS_FUNCTION_BODY_CODE);
@@ -1001,7 +1001,7 @@ TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     ASSERT_NE(cache, nullptr);
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
 
     const char source[] = "var answer = 21 * 2; answer;";
     Runtime first_runtime = {};
@@ -1020,7 +1020,7 @@ TEST(JsInterpreter, ReusesCommonAstCacheAcrossFreshRuntimes) {
     runtime_init(&second_runtime);
     Item second = transpile_js_to_mir(&second_runtime, source,
         "<common-ast-cache>", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(second));
     EXPECT_EQ(second.item, flt2it(42.0).item);
     ASSERT_NE(second_runtime.scripts, nullptr);
@@ -1069,7 +1069,7 @@ TEST(JsInterpreter, AutoPrebuildsStaticImportClosureAsAst) {
     ASSERT_NE(cache, nullptr);
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "auto", 1), 0);
     ASSERT_EQ(setenv("LAMBDA_MODULE_AST_THREADS", "2", 1), 0);
 
     Runtime runtime = {};
@@ -1077,7 +1077,7 @@ TEST(JsInterpreter, AutoPrebuildsStaticImportClosureAsAst) {
     Item namespace_obj = load_js_module(&runtime, root_path);
 
     ASSERT_EQ(unsetenv("LAMBDA_MODULE_AST_THREADS"), 0);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(namespace_obj));
     EXPECT_EQ(js_get_key_default(namespace_obj, js_make_string("answer")).item,
         flt2it(42.0).item);
@@ -1493,7 +1493,7 @@ TEST(JsInterpreter, ReusesAstTemplatesForClassModuleEvalAndTypeScript) {
     ASSERT_NE(cache, nullptr);
     InputScriptCacheStats before = {};
     input_script_cache_get_stats(cache, &before);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
 
     const char class_source[] =
         "class Box { constructor(value) { this.value = value; } "
@@ -1566,7 +1566,7 @@ TEST(JsInterpreter, ReusesAstTemplatesForClassModuleEvalAndTypeScript) {
     Item typescript_second_result = transpile_js_typescript_to_mir_len(
         &typescript_second, typescript_source, sizeof(typescript_source) - 1,
         "<ast-overlay.ts>", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(typescript_second_result));
     EXPECT_EQ(typescript_second_result.item, flt2it(42.0).item);
     runtime_cleanup(&typescript_second);
@@ -1581,7 +1581,7 @@ TEST(JsInterpreter, ReusesAstTemplatesForClassModuleEvalAndTypeScript) {
 TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "function invoke(callback) { return callback(); } "
@@ -1591,7 +1591,7 @@ TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
         "globalThis.__lambdaForOfClosureResult = sum;";
     Item result = transpile_js_to_mir(&runtime, source, "for-of-closure.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(result));
     Item sum = js_get_key_default(js_get_global_this(),
         js_make_string("__lambdaForOfClosureResult"));
@@ -1603,7 +1603,7 @@ TEST(JsMir, CapturesTopLevelForOfBindingsAfterSiblingFunctionDeclaration) {
 TEST(JsMir, KeepsShadowedTailCallAsOrdinaryCall) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "function descend(n) { if (n === 0) return 0; "
@@ -1611,7 +1611,7 @@ TEST(JsMir, KeepsShadowedTailCallAsOrdinaryCall) {
         "globalThis.__lambdaShadowedTailCall = descend(2);";
     Item result = transpile_js_to_mir(&runtime, source, "shadowed-tail-call.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(result));
     Item value = js_get_key_default(js_get_global_this(),
         js_make_string("__lambdaShadowedTailCall"));
@@ -1769,7 +1769,7 @@ TEST(JsInterpreter, RetainsAstStringAndBigIntLiteralsInRealmCache) {
 }
 
 TEST(JsInterpreter, KeepsSynthesizedTypeScriptEnumLiteralsOutOfAstLiteralCache) {
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Runtime runtime = {};
     runtime_init(&runtime);
     const char source[] = "enum Hue { Red = 7 } Hue[7];";
@@ -1782,7 +1782,7 @@ TEST(JsInterpreter, KeepsSynthesizedTypeScriptEnumLiteralsOutOfAstLiteralCache) 
         EXPECT_EQ(js_strict_equal(result.get(), expected.get()).item, b2it(true));
     }
     runtime_cleanup(&runtime);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 }
 
 TEST(JsInterpreter, LazyGlobalsPreserveOwnDescriptorsAndReplacements) {
@@ -2024,7 +2024,7 @@ TEST(JsScriptOwnership, ReleasesBatchScriptGenerationAfterHeapReset) {
 TEST(JsInterpreter, UsesSharedCommonJsResolverAndModuleRegistry) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
 
     const char source[] =
         "var first = require('./main.cjs'); "
@@ -2034,7 +2034,7 @@ TEST(JsInterpreter, UsesSharedCommonJsResolverAndModuleRegistry) {
     Item result = transpile_js_to_mir(&runtime, source,
         "test/js/interp_cjs/entry.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_elements_get_int(result, 0).item, flt2it(42.0).item);
     EXPECT_EQ(js_elements_get_int(result, 1).item, flt2it(42.0).item);
@@ -2073,10 +2073,10 @@ TEST(JsInterpreter, LinksEsModulesWithLiveRegistryBindings) {
     const char source[] =
         "import { bump, counter } from './dep.mjs'; "
         "bump(); export const answer = counter + 1;";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     Item answer = js_get_key_default(namespace_obj, js_make_string("answer"));
@@ -2103,10 +2103,10 @@ TEST(JsInterpreter, PreservesShadowedFactoryParametersOverNamespaceImports) {
 
     const char source[] =
         "import { result } from './rspack-entry.mjs'; export { result };";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/rspack-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     Item result = js_get_key_default(namespace_obj, js_make_string("result"));
@@ -2125,10 +2125,10 @@ TEST(JsInterpreter, KeepsAliasedExportsSeparateFromLoopShadowBindings) {
         "import { helper } from './alias-export-helper.mjs'; "
         "helper({}, [['render', 0]]); "
         "export const result = helper({}, [['render', 42]]).render;";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/alias-export-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     Item result = js_get_key_default(namespace_obj, js_make_string("result"));
@@ -2154,10 +2154,10 @@ TEST(JsInterpreter, SupportsModuleMetadataAndInlineDynamicImports) {
         "import('./dep.mjs').then(function(ns) { "
         "globalThis.__interp_dynamic_counter = ns.counter; });";
     runtime.js_document_base_url = "test/js/interp_esm/document.html";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item result = transpile_js_to_mir(&runtime, source,
         "<inline-script-0>", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(result));
     Item dynamic_value = js_get_key_default(js_get_global_this(),
@@ -2183,10 +2183,10 @@ TEST(JsInterpreter, OrdersDynamicImportsThroughTopLevelAwaitDependencies) {
         "globalThis.__interp_tla_order += 'B').catch(() => {})]); "
         "Promise.all([aStarted.promise, bStarted.promise]).then(gate.resolve); "
         "imports.then(() => globalThis.__interp_tla_order += '!');";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item result = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/tla-order-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(result));
     Item order = js_get_key_default(js_get_global_this(),
@@ -2211,10 +2211,10 @@ TEST(JsInterpreter, OrdersDynamicImportRejectionsThroughTopLevelAwaitDependencie
         "Promise.all([aStarted.promise, bStarted.promise]).then(() => "
         "gate.reject('expected rejection')); "
         "imports.then(() => globalThis.__interp_tla_rejection_order += '!');";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item result = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/tla-rejection-order-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(result));
     Item order = js_get_key_default(js_get_global_this(),
@@ -2313,10 +2313,10 @@ TEST(JsInterpreter, AwaitsDynamicImportOfSuspendedModule) {
     const char source[] =
         "const dependency = await import('./dynamic-tla-dependency.mjs'); "
         "export default [dependency.first, dependency.default, dependency.third];";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = js_interp_execute_es_module_source(&runtime, source,
         sizeof(source) - 1, "test/js/interp_esm/dynamic-tla-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     Item values = js_get_key_default(namespace_obj, js_make_string("default"));
@@ -2341,10 +2341,10 @@ TEST(JsInterpreter, RetainedAstModuleAwaitsDynamicImportOfSuspendedModule) {
     const char source[] =
         "const dependency = await import('./dynamic-tla-dependency.mjs'); "
         "export default [dependency.first, dependency.default, dependency.third];";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/dynamic-tla-retained-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     Item values = js_get_key_default(namespace_obj, js_make_string("default"));
@@ -2437,10 +2437,10 @@ TEST(JsInterpreter, StaticModuleHonorsRequestedAstBackend) {
     const char source[] = "export const answer = 42;";
     ASSERT_FALSE(item_is_error(js_interp_execute_source(&runtime, "0;", 2,
         "ast-module-backend-setup.js", NULL)));
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_module_to_mir(&runtime, source,
         "ast-module-backend.mjs");
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
@@ -2459,10 +2459,10 @@ TEST(JsInterpreter, PreservesLiveBindingsThroughNamedReexports) {
     const char source[] =
         "import { bump, liveCounter } from './reexport.mjs'; "
         "bump(); export default liveCounter;";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/reexport-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
@@ -2480,10 +2480,10 @@ TEST(JsInterpreter, PreservesLiveBindingsThroughStarReexports) {
     const char source[] =
         "import { bump, counter } from './star.mjs'; "
         "bump(); export default counter;";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/star-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
@@ -2501,10 +2501,10 @@ TEST(JsInterpreter, ExportsNamespaceObjectsAndAnonymousDefaultFunctions) {
     const char namespace_source[] =
         "import { dependency } from './namespace.mjs'; "
         "dependency.bump(); export default dependency.counter;";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, namespace_source,
         "test/js/interp_esm/namespace-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
@@ -2528,10 +2528,10 @@ TEST(JsInterpreter, InstantiatesHoistedExportsBeforeCircularDependencies) {
     runtime_init(&runtime);
 
     const char source[] = "import answer from './circular-a.mjs'; export default answer;";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/circular-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
@@ -2569,10 +2569,10 @@ TEST(JsInterpreter, ImportsLambdaModulesThroughTheSharedRegistry) {
     const char source[] =
         "import { increment } from './lambda_dep.ls'; "
         "export default increment(41);";
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "ast", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "ast", 1), 0);
     Item namespace_obj = transpile_js_to_mir(&runtime, source,
         "test/js/interp_esm/lambda-main.mjs", NULL);
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
 
     ASSERT_FALSE(item_is_error(namespace_obj));
     EXPECT_EQ(js_strict_equal(js_get_key_default(namespace_obj,
@@ -4605,7 +4605,7 @@ TEST(JsInterpreter, PreservesForAwaitCloseCompletionPrecedence) {
 TEST(JsMir, AwaitsForAwaitIteratorCloseBeforeReturning) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "async function run() { let closed = false; let iterator = { "
@@ -4615,7 +4615,7 @@ TEST(JsMir, AwaitsForAwaitIteratorCloseBeforeReturning) {
         "for await (let value of iterator) { break; } return closed; } run();";
     Item promise = transpile_js_to_mir(&runtime, source, "for-await-mir-close.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
     Item result = js_await_sync_incremental(promise);
     ASSERT_FALSE(item_is_error(result));
@@ -4627,7 +4627,7 @@ TEST(JsMir, AwaitsForAwaitIteratorCloseBeforeReturning) {
 TEST(JsMir, AwaitsAsyncGeneratorCloseBeforeReturning) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "async function* values() { try { yield 1; } finally { "
@@ -4637,7 +4637,7 @@ TEST(JsMir, AwaitsAsyncGeneratorCloseBeforeReturning) {
     Item promise = transpile_js_to_mir(&runtime, source,
         "for-await-mir-async-generator-close.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
     Item result = js_await_sync_incremental(promise);
     ASSERT_FALSE(item_is_error(result));
@@ -4649,7 +4649,7 @@ TEST(JsMir, AwaitsAsyncGeneratorCloseBeforeReturning) {
 TEST(JsMir, ClosesForAwaitIteratorAfterValueAwaitRejection) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "async function run() { let closed = false; let iterator = { "
@@ -4660,7 +4660,7 @@ TEST(JsMir, ClosesForAwaitIteratorAfterValueAwaitRejection) {
     Item promise = transpile_js_to_mir(&runtime, source,
         "for-await-mir-value-rejection.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
     Item result = js_await_sync_incremental(promise);
     ASSERT_FALSE(item_is_error(result));
@@ -4672,7 +4672,7 @@ TEST(JsMir, ClosesForAwaitIteratorAfterValueAwaitRejection) {
 TEST(JsMir, AwaitsNestedForAwaitCloseBeforeReturning) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "function iterator(mark) { let sent = false; let value = { "
@@ -4686,7 +4686,7 @@ TEST(JsMir, AwaitsNestedForAwaitCloseBeforeReturning) {
     Item promise = transpile_js_to_mir(&runtime, source,
         "for-await-mir-nested-close.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
     Item result = js_await_sync_incremental(promise);
     ASSERT_FALSE(item_is_error(result));
@@ -4698,7 +4698,7 @@ TEST(JsMir, AwaitsNestedForAwaitCloseBeforeReturning) {
 TEST(JsMir, AwaitsForAwaitCloseOnLabeledAbruptJumps) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "function iterator(mark) { let sent = false; let value = { "
@@ -4717,7 +4717,7 @@ TEST(JsMir, AwaitsForAwaitCloseOnLabeledAbruptJumps) {
     Item promise = transpile_js_to_mir(&runtime, source,
         "for-await-mir-labeled-close.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
     Item result = js_await_sync_incremental(promise);
     ASSERT_FALSE(item_is_error(result));
@@ -4729,7 +4729,7 @@ TEST(JsMir, AwaitsForAwaitCloseOnLabeledAbruptJumps) {
 TEST(JsMir, PreservesForAwaitCloseCompletionPrecedence) {
     Runtime runtime = {};
     runtime_init(&runtime);
-    ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "mir", 1), 0);
+    ASSERT_EQ(setenv("JS_EXEC_BACKEND", "mir", 1), 0);
 
     const char source[] =
         "function iterator(close) { let value = { next: function() { return Promise.resolve({ value: 1, done: false }); }, "
@@ -4750,7 +4750,7 @@ TEST(JsMir, PreservesForAwaitCloseCompletionPrecedence) {
     Item promise = transpile_js_to_mir(&runtime, source,
         "for-await-mir-close-precedence.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
+    ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
     Item result = js_await_sync_incremental(promise);
     ASSERT_FALSE(item_is_error(result));

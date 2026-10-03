@@ -32,7 +32,7 @@ static void blit_video_frame(ImageSurface* surface, const RdtVideoFrame* frame,
 
     Rect dst_rect = {dst_x, dst_y, dst_w, dst_h};
     Bound local_clip = clip ? *clip : (Bound){0, 0, (float)surface->width, (float)surface->height};
-    RasterPaintContext raster = {surface, &local_clip, nullptr, 0};
+    RasterPaintContext raster = raster_paint_context(surface, &local_clip, nullptr, 0);
     raster_blit_pixels_scaled(&raster, (const uint32_t*)frame->pixels,
                               frame->width, frame->height, frame->stride / 4,
                               &dst_rect, SCALE_MODE_LINEAR);

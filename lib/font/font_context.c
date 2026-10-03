@@ -46,7 +46,7 @@ static void face_cache_free(void* item) {
         if (entry->handle->ctx && entry->handle->ctx->destroying) {
             // FontContext teardown runs after document/view pools are bulk-freed;
             // drain stale pool-owned FontProp refs so file handles/path copies close.
-            while (entry->handle->ref_count > 0) {
+            while (ref_count_get(&entry->handle->ref_count) > 0) {
                 font_handle_release(entry->handle);
             }
         } else {
@@ -464,8 +464,9 @@ float font_handle_get_physical_size_px(FontHandle* handle) {
 // ============================================================================
 
 FontHandle* font_handle_retain(FontHandle* handle) {
-    if (handle) {
-        handle->ref_count++;
+    // retaining a released handle is a caller bug; it is reported, not revived
+    if (handle && !ref_count_retain(&handle->ref_count)) {
+        log_error("font_handle_retain: handle already released");
     }
     return handle;
 }
@@ -482,11 +483,11 @@ bool font_handle_get_style(FontHandle* handle, const char** out_family,
 
 void font_handle_release(FontHandle* handle) {
     if (!handle) return;
-    handle->ref_count--;
+    RefCountRelease released = ref_count_release(&handle->ref_count);
     // When the owning FontContext is being destroyed, skip all pool_free calls;
     // the grouped owner will release remaining blocks in bulk.
     bool bulk_destroy = (handle->ctx && handle->ctx->destroying);
-    if (handle->ref_count <= 0 || bulk_destroy) {
+    if (released != REF_COUNT_LIVE || bulk_destroy) {
         if (handle->resources_destroyed) {
             font_context_untrack_handle(handle->ctx, handle);
             return;
@@ -518,8 +519,7 @@ void font_handle_release(FontHandle* handle) {
                 FontFileDataEntry* cached = (FontFileDataEntry*)hashmap_get(
                     handle->ctx->file_data_cache, &search);
                 if (cached) {
-                    cached->ref_count--;
-                    if (cached->ref_count <= 0) {
+                    if (ref_count_release(&cached->ref_count) != REF_COUNT_LIVE) {
                         // remove from cache — hashmap_delete returns copy in spare,
                         // does NOT call free callback. We must free manually.
                         const FontFileDataEntry* removed = (const FontFileDataEntry*)hashmap_delete(

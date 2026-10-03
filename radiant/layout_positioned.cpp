@@ -1466,22 +1466,22 @@ static void positioned_register_static_line_self_alignment(
     block->position->static_line_initial_extent = static_block_context
         ? static_block_context->line_height : 0.0f;
     if (line->last_static_line_alignment) {
-        line->last_static_line_alignment->position->next_static_line_alignment = block;
+        line->last_static_line_alignment->position->next_static_line_alignment = lam::up(block);
     } else {
-        line->first_static_line_alignment = block;
+        line->first_static_line_alignment = lam::up(block);
     }
-    line->last_static_line_alignment = block;
+    line->last_static_line_alignment = lam::up(block);
 }
 
 static void positioned_register_static_inline_position(ViewBlock* block, Linebox* line) {
     if (!block || !block->position || !line) return;
     block->position->next_static_inline_position = nullptr;
     if (line->last_static_inline_position) {
-        line->last_static_inline_position->position->next_static_inline_position = block;
+        line->last_static_inline_position->position->next_static_inline_position = lam::up(block);
     } else {
-        line->first_static_inline_position = block;
+        line->first_static_inline_position = lam::up(block);
     }
-    line->last_static_inline_position = block;
+    line->last_static_inline_position = lam::up(block);
 }
 
 void layout_finalize_static_inline_positions(LayoutContext* lycon) {
@@ -1925,9 +1925,9 @@ static void layout_reflow_abs_child_content_after_height_change(
     // css 2.1 §10.5: normal-flow descendants used the provisional height;
     // reflow their contents without recomputing the established abspos origin.
     LayoutContextScope child_scope(lycon);
-    lycon->block.parent = &parent_block;
-    lycon->elmt = static_cast<DomNode*>(child);
-    lycon->view = static_cast<View*>(child);
+    lycon->block.parent = lam::up(&parent_block);
+    lycon->elmt = lam::up(static_cast<DomNode*>(child));
+    lycon->view = lam::up(static_cast<View*>(child));
     lycon->block.content_width = 0.0f;
     lycon->block.content_height = 0.0f;
     lycon->block.given_width = -1.0f;
@@ -1950,7 +1950,7 @@ static void layout_reflow_abs_child_content_after_height_change(
     lycon->block.content_height = layout_content_size_from_border_box(
         child, used_border_height, false);
     lycon->block.is_bfc_root = true;
-    lycon->block.establishing_element = child;
+    lycon->block.establishing_element = lam::up(child);
     block_context_reset_floats(&lycon->block);
     setup_inline(lycon, child);
     layout_block_inner_content(lycon, child);
@@ -2129,10 +2129,11 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     if (!cb) { log_error("Missing containing block");  lycon->depth--;  log_leave();  return; }
     if (register_with_containing_block && cb->position) {
         if (!cb->positionp()->first_abs_child) {
-            cb->position->last_abs_child = cb->position->first_abs_child = block;
+            cb->position->first_abs_child = lam::up(block);
+            cb->position->last_abs_child = lam::up(block);
         } else {
-            cb->position->last_abs_child->position->next_abs_sibling = block;
-            cb->position->last_abs_child = block;
+            cb->position->last_abs_child->position->next_abs_sibling = lam::up(block);
+            cb->position->last_abs_child = lam::up(block);
         }
         block->position->next_abs_sibling = nullptr;
     }
@@ -2350,7 +2351,7 @@ static void layout_abs_block_internal(LayoutContext* lycon, DomNode *elmt,
     }
     // CSS 2.2 Section 9.4.1: "Absolutely positioned elements ... establish new BFCs"
     lycon->block.is_bfc_root = true;
-    lycon->block.establishing_element = block;
+    lycon->block.establishing_element = lam::up(block);
     block_context_reset_floats(&lycon->block);
 
     bool is_intrinsic_width = layout_axis_uses_intrinsic_size(

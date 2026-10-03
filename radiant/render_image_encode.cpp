@@ -42,8 +42,9 @@ StrBuf* render_encode_surface_png(ImageSurface* surface) {
                  8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png_ptr, info_ptr);
-    png_bytep* rows = (png_bytep*)mem_alloc(
-        sizeof(png_bytep) * surface->height, MEM_CAT_RENDER);
+    // libpng owns the row table: png_malloc/png_free, since a longjmp out of
+    // png_write_image must not cross a destructor
+    png_bytep* rows = (png_bytep*)png_malloc(png_ptr, sizeof(png_bytep) * surface->height);
     if (!rows) {
         png_destroy_write_struct(&png_ptr, &info_ptr);
         strbuf_free(png_bytes);
@@ -54,7 +55,7 @@ StrBuf* render_encode_surface_png(ImageSurface* surface) {
     }
     png_write_image(png_ptr, rows);
     png_write_end(png_ptr, NULL);
-    mem_free(rows);
+    png_free(png_ptr, rows);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     return png_bytes;
 }
@@ -90,11 +91,10 @@ StrBuf* render_encode_surface_data_uri(ImageSurface* surface) {
     }
     StrBuf* png = render_encode_surface_png(&straight);
     if (!png) return nullptr;
-    char* encoded = base64_encode_alloc(png->str, png->length, BASE64_STD);
+    lam::Temp<char> encoded(base64_encode_alloc(png->str, png->length, BASE64_STD));
     strbuf_free(png);
     if (!encoded) return nullptr;
     StrBuf* uri = strbuf_create("data:image/png;base64,");
-    if (uri) strbuf_append_str(uri, encoded);
-    mem_free(encoded);
+    if (uri) strbuf_append_str(uri, encoded.get());
     return uri;
 }

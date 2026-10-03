@@ -18,6 +18,7 @@
 #define LIB_HASHMAP_HELPERS_H
 
 #include "hashmap.h"
+#include "hash.h"
 #include "str.h"
 
 #include <stddef.h>
@@ -123,6 +124,15 @@ static inline uint64_t hashmap_hash_pointer_identity(const void* key,
     return hashmap_hash_bytes(&pointer_bits, sizeof(pointer_bits), seed0, seed1);
 }
 
+// Trusted internal addresses need distribution, not content-key collision defense.
+static inline uint64_t hashmap_hash_pointer_fast_identity(const void* key,
+                                                          uint64_t seed0,
+                                                          uint64_t seed1) {
+    (void)seed0;
+    (void)seed1;
+    return hash_ptr(key);
+}
+
 static inline bool hashmap_pointer_identity_equal(const void* first,
                                                   const void* second) {
     return first == second;
@@ -181,9 +191,9 @@ static inline bool hashmap_identity3_equal(bool first_equal, bool second_equal,
     HASHMAP_DEFINE_CSTRKEY(name, struct_type, key_field, hashmap_hash_icstr, hashmap_compare_icstr)
 
 // emit cmp/hash/new for a struct keyed by pointer identity at field.
-#define HASHMAP_DEFINE_PTRKEY(name, struct_type, key_field) \
+#define HASHMAP_DEFINE_PTRKEY_HASH(name, struct_type, key_field, hash_function) \
     static uint64_t name##_hash(const void* item, uint64_t s0, uint64_t s1) { \
-        return hashmap_hash_pointer_identity( \
+        return hash_function( \
             ((const struct_type*)item)->key_field, s0, s1); \
     } \
     static int name##_cmp(const void* a, const void* b, void* udata) { \
@@ -196,6 +206,9 @@ static inline bool hashmap_identity3_equal(bool first_equal, bool second_equal,
         return hashmap_new(sizeof(struct_type), cap, 0, 0, \
                            name##_hash, name##_cmp, NULL, NULL); \
     }
+
+#define HASHMAP_DEFINE_PTRKEY(name, struct_type, key_field) \
+    HASHMAP_DEFINE_PTRKEY_HASH(name, struct_type, key_field, hashmap_hash_pointer_identity)
 
 // emit cmp/hash/new for a struct keyed by an integer field. Works for any
 // integer type the C compiler can compare with `<` (int32_t, int64_t,

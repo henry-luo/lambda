@@ -460,9 +460,10 @@ static DomNode* dom_retire_resolve_edge(DomNodeRegistry* registry, DomNode* node
     }
     // Compress shared stale chains before any node storage is reclaimed.
     while (node != live) {
-        DomNode*& edge = forward ? node->next_sibling : node->prev_sibling;
-        DomNode* next = edge;
-        edge = live;
+        // the two edges have different kinds (next owns, prev is a back link)
+        DomNode* next = forward ? node->next_sibling : node->prev_sibling;
+        if (forward) node->next_sibling = lam::own(live);
+        else node->prev_sibling = lam::up(live);
         node = next;
     }
     return live;
@@ -474,12 +475,12 @@ static void dom_retire_unlink_inbound_edges(DomNodeRegistry* registry) {
         registry->stats.retirement_edge_visits++;
         if (record->state == DOM_NODE_RETIRED) continue;
         DomNode* other = record->address;
-        other->next_sibling = dom_retire_resolve_edge(registry, other->next_sibling, true);
-        other->prev_sibling = dom_retire_resolve_edge(registry, other->prev_sibling, false);
+        other->next_sibling = lam::own(dom_retire_resolve_edge(registry, other->next_sibling, true));
+        other->prev_sibling = lam::up(dom_retire_resolve_edge(registry, other->prev_sibling, false));
         if (other->is_element()) {
             DomElement* element = other->as_element();
-            element->first_child = dom_retire_resolve_edge(registry, element->first_child, true);
-            element->last_child = dom_retire_resolve_edge(registry, element->last_child, false);
+            element->first_child = lam::own(dom_retire_resolve_edge(registry, element->first_child, true));
+            element->last_child = lam::up(dom_retire_resolve_edge(registry, element->last_child, false));
         }
     }
 }
@@ -498,7 +499,7 @@ static size_t dom_retire_subtree(DomDocument* doc, DomNode* node,
         result.element = record->backing_source;
     } else if (node->is_text() && node->as_text()->native_string ==
                (String*)(node->as_text() + 1)) {
-        result.item = s2it(node->as_text()->native_string);
+        result.item = s2it(node->as_text()->native_string.get());
     }
     if (result.item != ItemNull.item) dom_retire_release_render_result(doc, result);
     size_t retired = 0;

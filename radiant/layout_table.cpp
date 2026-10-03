@@ -3457,7 +3457,7 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
         }
     }
     for (int i = 0; i < rowspan_cells->length; i++) {
-        mem_free(rowspan_cells->data[i]);
+        lam::Temp<RowspanCell> cell((RowspanCell*)rowspan_cells->data[i]);
     }
     arraylist_free(rowspan_cells);
 }
@@ -3879,7 +3879,7 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
     anon->set_table_fixup(true);
     dom_element_retain_tag_name(anon, lam::borrow_const(lam::promote_to_pool(pool, tag_name)));
     anon->doc = parent->doc;
-    anon->parent = parent;
+    anon->parent = lam::up(parent);
     switch (display_type) {
         case CSS_VALUE_TABLE_ROW_GROUP:
         case CSS_VALUE_TABLE_HEADER_GROUP:
@@ -3910,15 +3910,15 @@ static DomElement* create_anonymous_table_element(LayoutContext* lycon, DomEleme
 
 static void append_detached_table_node(DomElement* parent, DomNode* child) {
     if (!parent || !child) return;
-    child->parent = parent;
+    child->parent = lam::up(parent);
     child->next_sibling = nullptr;
     child->prev_sibling = parent->last_child;
     if (parent->last_child) {
-        parent->last_child->next_sibling = child;
+        parent->last_child->next_sibling = lam::own(child);
     } else {
-        parent->first_child = child;
+        parent->first_child = lam::own(child);
     }
-    parent->last_child = child;
+    parent->last_child = lam::up(child);
 }
 
 static void append_child_to_element(DomElement* parent, DomElement* child) {
@@ -3973,15 +3973,15 @@ static void insert_node_before(DomElement* parent, DomNode* new_node, DomNode* r
         append_detached_table_node(parent, new_node);
         return;
     }
-    new_node->parent = parent;
-    new_node->next_sibling = ref_node;
+    new_node->parent = lam::up(parent);
+    new_node->next_sibling = lam::own(ref_node);
     new_node->prev_sibling = ref_node->prev_sibling;
     if (ref_node->prev_sibling) {
-        ref_node->prev_sibling->next_sibling = new_node;
+        ref_node->prev_sibling->next_sibling = lam::own(new_node);
     } else {
-        parent->first_child = new_node;
+        parent->first_child = lam::own(new_node);
     }
-    ref_node->prev_sibling = new_node;
+    ref_node->prev_sibling = lam::up(new_node);
 }
 
 static bool table_text_node_has_preserved_whitespace_content(DomNode* node) {
@@ -4573,7 +4573,7 @@ static ViewElement* mark_table_box(LayoutContext* lycon, DomNode* node,
     ViewElement* element = lam::view_require_element(view);
     if (!element) return nullptr;
     element->display = display;
-    lycon->view = view;
+    lycon->view = lam::up(view);
     dom_node_resolve_style(node, lycon);
     if (element->font) setup_font(lycon->ui_context, &lycon->font, element->font);
     return element;
@@ -4642,12 +4642,12 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     }
     LayoutViewScope view_scope(lycon);
     LayoutFontScope font_scope(lycon);
-    lycon->elmt = node;
+    lycon->elmt = lam::up(node);
     if (tag == MARKUP_NAME_CAPTION || display.inner == CSS_VALUE_TABLE_CAPTION) {
         ViewBlock* caption = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, node));
         if (caption) {
             caption->display.inner = CSS_VALUE_TABLE_CAPTION;
-            lycon->view = static_cast<View*>(caption);
+            lycon->view = lam::up(static_cast<View*>(caption));
             dom_node_resolve_style(node, lycon);
             DomElement* dom_elem = lam::dom_require_element(node);
             if (dom_elem->specified_style && parent && parent->view_type == RDT_VIEW_TABLE) {
@@ -4692,7 +4692,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             lycon, node, RDT_VIEW_TABLE_ROW, display));
         if (row) {
             if (node->is_element()) {
-                row->pseudo = alloc_pseudo_content_prop(lycon, lam::view_require_block(row));
+                row->pseudo = lam::own(alloc_pseudo_content_prop(lycon, lam::view_require_block(row)));
                 if (row->pseudo) {
                     DomElement* row_elem = node->as_element();
                     auto insert_pseudo_for_row = [&](DomElement* pseudo, bool is_before) {
@@ -4705,9 +4705,9 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
                             DomElement* anon_td = create_anonymous_table_element(lycon, row_elem,
                                 CSS_VALUE_TABLE_CELL, "::anon-td");
                             if (anon_td) {
-                                pseudo->parent = anon_td;
-                                anon_td->first_child = pseudo;
-                                anon_td->last_child = pseudo;
+                                pseudo->parent = lam::up(anon_td);
+                                anon_td->first_child = lam::own(pseudo);
+                                anon_td->last_child = lam::up(pseudo);
                                 insert_pseudo_into_dom(row_elem, anon_td, is_before);
                             }
                         }
@@ -6077,8 +6077,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
         ? 0.0f : content_height;
     cell->content_width = content_width;
     cell->content_height = content_height;
-    lycon->block.parent = &context_scope.saved_block;
-    lycon->block.establishing_element = cell;
+    lycon->block.parent = lam::up(&context_scope.saved_block);
+    lycon->block.establishing_element = lam::up(cell);
     lycon->block.is_bfc_root = true;
     lycon->block.origin_x = cell->x + content_start_x;
     lycon->block.origin_y = cell->y + content_start_y;
@@ -6129,7 +6129,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     lycon->line.advance_x = content_start_x;   // Start advancing from padding offset
     lycon->line.is_line_start = true;
     lycon->line.start_view = NULL;  // Reset start_view so new text nodes become start of line
-    lycon->elmt = tcell;
+    lycon->elmt = lam::up(tcell);
     if (tcell->blk && tcell->block_mut()->text_align) {
         lycon->block.text_align = tcell->block()->text_align;
     }
@@ -6420,9 +6420,9 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 radiant::LayoutRunModeScope run_mode_scope(
                     lycon, radiant::RunMode::ComputeSize);
                 View* saved_view = lycon->view;
-                lycon->view = static_cast<View*>(child_elem);
+                lycon->view = lam::up(static_cast<View*>(child_elem));
                 dom_node_resolve_style(child_elem, lycon);
-                lycon->view = saved_view;
+                lycon->view = lam::up(saved_view);
             }
             IntrinsicSizes child_sizes = layout_measure_intrinsic_widths(lycon, child_elem);
             float child_max = child_sizes.max_content;
@@ -7020,7 +7020,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             } else {
                 ColspanWidthContribution* contribution =
-                    (ColspanWidthContribution*)mem_calloc(1, sizeof(ColspanWidthContribution), MEM_CAT_LAYOUT);
+                    (ColspanWidthContribution*)mem_calloc(1, sizeof(ColspanWidthContribution), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: colspan contribution; released after the colspan pass in this function
                 contribution->cell = tcell;
                 contribution->col = col;
                 contribution->span = tcell->td->col_span;
@@ -7035,8 +7035,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (int i = 0; i < colspan_widths->length; i++) {
         ColspanWidthContribution* contribution =
             (ColspanWidthContribution*)colspan_widths->data[i];
+        lam::Temp<ColspanWidthContribution> owned(contribution);  // applied once, then released
         apply_colspan_width_contribution(table, meta, contribution);
-        mem_free(contribution);
     }
     arraylist_free(colspan_widths);
     for (int c = 0; c < columns; c++) {
@@ -7789,10 +7789,10 @@ bool wrap_orphaned_table_children(LayoutContext* lycon, DomElement* parent) {
             // Detach the source range once; appending each node then cannot
             DomNode* prev = run_start->prev_sibling;
             DomNode* next_after_run = run_end->next_sibling;
-            if (prev) prev->next_sibling = next_after_run;
-            else parent->first_child = next_after_run;
-            if (next_after_run) next_after_run->prev_sibling = prev;
-            else parent->last_child = prev;
+            if (prev) prev->next_sibling = lam::own(next_after_run);
+            else parent->first_child = lam::own(next_after_run);
+            if (next_after_run) next_after_run->prev_sibling = lam::up(prev);
+            else parent->last_child = lam::up(prev);
             run_start->prev_sibling = nullptr;
             run_end->next_sibling = nullptr;
             DomNode* move_node = run_start;
@@ -7856,7 +7856,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
             vtable->tb->is_annoy_colgroup = 0;
             vtable->view_type = RDT_VIEW_TABLE;
         }
-        lycon->view = static_cast<View*>(vtable);
+        lycon->view = lam::up(static_cast<View*>(vtable));
     }
     ViewTable* table = build_table_tree(lycon, tableNode);
     if (!table) {

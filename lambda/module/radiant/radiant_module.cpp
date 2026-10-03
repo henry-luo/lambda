@@ -330,7 +330,7 @@ static bool radiant_custom_layout_parse_paint_layers(const CustomLayoutContext* 
         int z = 0;
         radiant_item_to_int(radiant_obj_get(layer_item, "z"), &z);
         roots[i] = content;
-        layers[i].content = content.element;
+        layers[i].content = lam::up(content.element);
         layers[i].z = z;
         layers[i].order = i;
     }
@@ -350,7 +350,7 @@ static bool radiant_custom_layout_parse_paint_layers(const CustomLayoutContext* 
     }
     resource->roots = roots;
     resource->root_count = layer_count;
-    resource->paint.layers = layers;
+    resource->paint.layers = lam::own_arr(layers);
     resource->paint.layer_count = layer_count;
     return true;
 }
@@ -900,7 +900,7 @@ static Item radiant_layout_parent_item(const CustomLayoutContext* context) {
     if (!radiant_host_api || !radiant_host_api->value || !context || !context->parent) return ItemNull;
     RadiantVelmt parent;
     memset(&parent, 0, sizeof(parent));
-    parent.view = (View*)context->parent;
+    parent.view = lam::up((View*)context->parent);
     parent.element = context->parent;
     parent.index = -1;
     parent.border_box.x = 0.0f;

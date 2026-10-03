@@ -915,6 +915,14 @@ JsAstNode* build_js_member_from_children(JsTranspiler* tp, SourceSpan span,
     member->property = property;
     member->computed = computed;
     member->optional = optional;
+    // a static non-private name gets a realm literal-cache slot so the walker
+    // converts it to a canonical property key once per realm, not per access
+    if (!computed && property->node_type == AST_NODE_IDENT) {
+        JsIdentifierNode* name = (JsIdentifierNode*)property;
+        if (name->name && name->name->len > 0 && name->name->chars[0] != '#') {
+            name->js_property_key_slot = ++tp->runtime_literal_count;
+        }
+    }
     Type* resolved = resolve_js_member_type(member);
     member->type = resolved ? resolved : js_set_type_any(tp, ANY_JS_MEMBER);
     return (JsAstNode*)member;

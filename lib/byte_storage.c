@@ -32,7 +32,7 @@ ByteStorage* byte_storage_alloc(size_t capacity, MemCategory category) {
             return NULL;
         }
     }
-    atomic_store32(&storage->refs, 1);
+    ref_count_init(&storage->refs);
     storage->capacity = capacity;
     storage->release_data = byte_storage_release_owned;
     atomic_inc64(&byte_storage_allocations);
@@ -45,7 +45,7 @@ ByteStorage* byte_storage_wrap(void* data, size_t capacity, uint32_t flags,
     ByteStorage* storage = (ByteStorage*)mem_calloc(
         1, sizeof(ByteStorage), MEM_CAT_CONTAINER);
     if (!storage) return NULL;
-    atomic_store32(&storage->refs, 1);
+    ref_count_init(&storage->refs);
     storage->data = (uint8_t*)data;
     storage->capacity = capacity;
     storage->flags = flags | BYTE_STORAGE_FLAG_EXTERNAL;
@@ -57,49 +57,32 @@ ByteStorage* byte_storage_wrap(void* data, size_t capacity, uint32_t flags,
 
 ByteStorage* byte_storage_retain(ByteStorage* storage) {
     if (!storage) return NULL;
-    int32_t refs = atomic_load32(&storage->refs);
-    for (;;) {
-        // A zero count is already released; INT32_MAX cannot be retained safely.
-        assert(refs > 0 && refs < INT32_MAX);
-        if (refs <= 0 || refs == INT32_MAX) return NULL;
-        int32_t desired = refs + 1;
-        if (__atomic_compare_exchange_n(&storage->refs.v, &refs, desired, false,
-                __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
-            return storage;
-        }
-    }
+    // A zero count is already released; a saturated count cannot be retained safely.
+    bool retained = ref_count_retain(&storage->refs);
+    assert(retained);
+    return retained ? storage : NULL;
 }
 
 void byte_storage_release(ByteStorage* storage) {
     if (!storage) return;
-    int32_t refs = atomic_load32(&storage->refs);
-    for (;;) {
-        assert(refs > 0);
-        if (refs <= 0) return;
-        int32_t desired = refs - 1;
-        if (!__atomic_compare_exchange_n(&storage->refs.v, &refs, desired, false,
-                __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
-            continue;
-        }
-        if (desired == 0) {
-            uint8_t* data = storage->data;
-            size_t capacity = storage->capacity;
-            ByteStorageReleaseFn release_data = storage->release_data;
-            void* context = storage->release_context;
-            storage->data = NULL;
-            storage->capacity = 0;
-            storage->release_data = NULL;
-            storage->release_context = NULL;
-            if (release_data) release_data(data, capacity, context);
-            atomic_inc64(&byte_storage_releases);
-            mem_free(storage);
-        }
-        return;
-    }
+    RefCountRelease released = ref_count_release(&storage->refs);
+    assert(released != REF_COUNT_UNDERFLOW);
+    if (released != REF_COUNT_LAST) return;
+    uint8_t* data = storage->data;
+    size_t capacity = storage->capacity;
+    ByteStorageReleaseFn release_data = storage->release_data;
+    void* context = storage->release_context;
+    storage->data = NULL;
+    storage->capacity = 0;
+    storage->release_data = NULL;
+    storage->release_context = NULL;
+    if (release_data) release_data(data, capacity, context);
+    atomic_inc64(&byte_storage_releases);
+    mem_free(storage);
 }
 
 int32_t byte_storage_ref_count(const ByteStorage* storage) {
-    return storage ? atomic_load32(&storage->refs) : 0;
+    return storage ? ref_count_get(&storage->refs) : 0;
 }
 
 int64_t byte_storage_allocation_count(void) {

@@ -671,7 +671,7 @@ TEST(LambdaOptProfile, ExecutedCallsAreCountedOnlyWhenEnabled) {
             EXPECT_NE(strstr(profile, "helper\tpn_print\t26"), nullptr);
             EXPECT_NE(strstr(profile, "frame_entry\t_accept_u32_"), nullptr);
             EXPECT_NE(strstr(profile, "root_store\t_main_"), nullptr);
-            EXPECT_NE(strstr(profile, "root_reload\t_main_"), nullptr);
+            // NO_GC diagnostic markers do not create production root reloads.
             EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
             free(profile);
         } else {
@@ -757,7 +757,7 @@ static char* run_profiled_lambda_fixture(const char* script,
         {"LAMBDA_EXEC_PROFILE_CALLERS", callers ? "1" : "0"},
         {"LAMBDA_EXEC_PROFILE_OUT", profile_path},
         {"LAMBDA_DISABLE_MIR_CACHE", "1"},
-        {"LAMBDA_TIER", "jit"},
+        {"LAMBDA_EXEC_BACKEND", "jit"},
         {NULL, NULL}
     };
     ShellOptions options = {};
@@ -897,9 +897,9 @@ TEST(LambdaOptProfile, ReadOnlyLengthAvoidsGcRootTraffic) {
     ASSERT_NE(profile, nullptr);
     EXPECT_NE(strstr(profile, "helper\tfn_len_l\t2"), nullptr);
     EXPECT_NE(strstr(profile, "helper\tfn_len_s\t1"), nullptr);
-    EXPECT_LE(exec_profile_count_prefix(profile,
+    EXPECT_LE(exec_profile_sum_prefix(profile,
         "root_store\t_lens__raw0_"), 2u);
-    EXPECT_LE(exec_profile_count_prefix(profile,
+    EXPECT_LE(exec_profile_sum_prefix(profile,
         "root_reload\t_lens__raw0_"), 3u);
     EXPECT_NE(strstr(profile, "overflow\t-\t0"), nullptr);
     free(profile);
@@ -1097,6 +1097,26 @@ TEST(LambdaOptAdmission, RecursiveShapeIdentityInterpExactHits) {
     // certificate at all ten crossings; neither admission nor reification runs.
     EXPECT_EQ(run.profile.get("map_admit_calls"), 0u);
     EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
+}
+
+// D3.2.4v4/S7.7.2: fresh call arguments adopt a known layout before entry.
+TEST(LambdaOptAdmission, FreshRecordCallArgumentsInterpAvoidReification) {
+    const char* source =
+        "type Context = {column: int, indent: int}\n"
+        "fn dynamic(value) any => value\n"
+        "fn walk(ctx: Context, remaining: int) int {\n"
+        "    if (remaining == 0) ctx.column\n"
+        "    else walk({column: ctx.column + 1, indent: ctx.indent}, remaining - 1)\n"
+        "}\n"
+        "pn main() {\n"
+        "    print(walk(remaining: 100, ctx: {column: dynamic(0), indent: 0}))\n"
+        "}\n";
+    FixtureRun run = run_fixture("call_argument_layout", "interp", source, true);
+    ASSERT_TRUE(run.ok);
+    EXPECT_EQ(run.std_out, "100\n");
+    EXPECT_EQ(run.profile.get("map_admit_reifications"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_fields_visited"), 0u);
+    EXPECT_EQ(run.profile.get("map_admit_bytes_copied"), 0u);
 }
 
 // A nullable record-array path must not re-admit its owning graph after each

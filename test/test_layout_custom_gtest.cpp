@@ -58,9 +58,9 @@ protected:
         ASSERT_NE(pool, nullptr);
         arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
-        doc.document_pool = pool;
-        doc.node_arena = arena;
-        lycon.pool = pool;
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena);
+        lycon.pool = lam::up(pool);
         scratch_init(&lycon.scratch, arena);
         lycon.block.direction = CSS_VALUE_LTR;
         lycon.available_space = AvailableSpace::make_indefinite();
@@ -90,7 +90,7 @@ protected:
         ASSERT_NE(block, nullptr);
         block->node_type = DOM_NODE_ELEMENT;
         block->set_synthetic(true);
-        block->tag_name = tag;
+        block->tag_name = lam::up(tag);
         block->tag_id = DomNode::tag_name_to_id(tag);
         block->view_type = RDT_VIEW_BLOCK;
         block->width = width;
@@ -102,7 +102,7 @@ protected:
     void init_parent(ViewBlock* parent, float width, float height) {
         init_block(parent, "div", width, height);
         // Cold element extensions require the document pool used in production.
-        parent->doc = &doc;
+        parent->doc = lam::up(&doc);
         parent->blk = &parent_blk;
     }
 };
@@ -249,8 +249,8 @@ TEST_F(CustomLayoutTest, FlexEmbedImageDoesNotBecomeLinkIntrinsicSize) {
 
     init_block(&link, "a", 0.0f, 0.0f);
     link.display = {CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false};
-    link.embed = &embed;
-    link.embed->img = &image;
+    link.embed = lam::own(&embed);
+    link.embed->img = lam::up(&image);
 
     EXPECT_FALSE(layout_replaced_image_surface_contributes(&link));
 
@@ -372,7 +372,7 @@ TEST_F(CustomLayoutTest, GeneratedPaintAndChildrenShareSignedStackingOrder) {
     layers[1].order = 1;
     layers[2].z = -1;
     layers[2].order = 2;
-    CustomLayoutPaintState paint = {layers, 3};
+    CustomLayoutPaintState paint = {lam::own_arr(layers), 3};
     parent.set_custom_layout_paint_prop(&paint);
 
     RadiantStackPaintList list = radiant_stack_collect_custom_layout_paint(&parent);

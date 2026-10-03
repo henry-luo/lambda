@@ -1839,6 +1839,36 @@ Item fn_argmax(Item item) {
 }
 
 // fill(n, value) - create vector of n copies of value
+Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane) {
+    // capture scalar bits before allocation can move a pointer-backed argument
+    uint64_t bits = 0;
+    switch (lane) {
+    case ELEM_INT:
+        bits = get_type_id(value) == LMD_TYPE_INT
+            ? (uint64_t)lambda_int_item_to_lane(value.item) : (uint64_t)value.get_int64();
+        break;
+    case ELEM_UINT64: bits = value.get_uint64(); break;
+    case ELEM_FLOAT64: {
+        double scalar = value.get_double();
+        memcpy(&bits, &scalar, sizeof(bits));
+        break;
+    }
+    case ELEM_BOOL: bits = it2b(value) ? 1 : 0; break;
+    default: return ItemError;
+    }
+    ArrayNum* result = array_num_new_uninit(lane, count);
+    if (!result || result->length != count) return ItemError;
+    if (lane == ELEM_BOOL) {
+        if (count > 0) memset(result->data, (int)bits, (size_t)count);
+    }
+    else {
+        char* slots = (char*)result->data;
+        for (int64_t i = 0; i < count; i++)
+            memcpy(slots + i * sizeof(bits), &bits, sizeof(bits));
+    }
+    return {.array_num = result};
+}
+
 Item fn_fill(Item n_item, Item value) {
     GUARD_ERROR2(n_item, value);
     int64_t n = 0;
@@ -1870,46 +1900,11 @@ Item fn_fill(Item n_item, Item value) {
 
     TypeId val_type = get_type_id(value);
 
-    if (is_integer_type_id(val_type)) {
-        // v5: the int lane is i64, so fill writes the LANE value (poison rides
-        // as its lane sentinel).
-        int64_t val = (val_type == LMD_TYPE_INT) ? lambda_int_item_to_lane(value.item)
-                                                 : value.get_int64();
-        ArrayNum* result = array_num_new_uninit(ELEM_INT, n);  // every lane written below
-        for (int64_t i = 0; i < n; i++) {
-            result->items[i] = val;
-        }
-        return { .array_num = result };
-    }
-    else if (val_type == LMD_TYPE_UINT64) {
-        ArrayNum* result = array_num_new_uninit(ELEM_UINT64, n);
-        uint64_t val = value.get_uint64();
-        for (int64_t i = 0; i < n; i++) {
-            ((uint64_t*)result->data)[i] = val;
-        }
-        return { .array_num = result };
-    }
-    else if (val_type == LMD_TYPE_FLOAT) {
-        double val = value.get_double();
-        ArrayNum* result = array_num_new_uninit(ELEM_FLOAT64, n);
-        for (int64_t i = 0; i < n; i++) {
-            result->float_items[i] = val;
-        }
-        return { .array_num = result };
-    }
-    else if (val_type == LMD_TYPE_BOOL) {
-        // bool needs its own packed lane: falling through to the boxed Array
-        // branch below made `fill(n, true)` produce n boxed Items, which costs
-        // 8x the memory and — because the value then reaches a declared
-        // `bool[]` boundary as a generic array — turns admission into an
-        // O(n) element walk instead of the O(1) representation check.
-        ArrayNum* result = array_num_new_uninit(ELEM_BOOL, n);
-        if (!result) return ItemError;
-        uint8_t val = it2b(value) ? 1 : 0;
-        memset(result->data, val, (size_t)n);
-        return { .array_num = result };
-    }
-    else {
+    if (is_integer_type_id(val_type)) return lambda_fill_primitive(n, value, ELEM_INT);
+    if (val_type == LMD_TYPE_UINT64) return lambda_fill_primitive(n, value, ELEM_UINT64);
+    if (val_type == LMD_TYPE_FLOAT) return lambda_fill_primitive(n, value, ELEM_FLOAT64);
+    if (val_type == LMD_TYPE_BOOL) return lambda_fill_primitive(n, value, ELEM_BOOL);
+    {
         // spreadable array for non-numeric values (avoids list merge behavior for strings)
         Array *result = (Array *)heap_calloc(sizeof(Array) + sizeof(Item)*n, LMD_TYPE_ARRAY);
         result->type_id = LMD_TYPE_ARRAY;

@@ -154,7 +154,7 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
 
     // read CSS content from local file
     size_t css_size = 0;
-    char* css_content = read_file_to_string(res->local_path, &css_size);
+    lam::Temp<char> css_content(read_file_to_string(res->local_path, &css_size));
     if (!css_content) {
         log_error("network: failed to read CSS file: %s", res->local_path);
         return;
@@ -162,7 +162,6 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     if (css_size == 0) {
         // Empty stylesheets are valid CSS; treat them as no-op resources so
         // zero-byte downloads do not surface as parser/read failures.
-        mem_free(css_content);
         log_debug("network: skipping empty CSS resource: %s", res->url);
         return;
     }
@@ -176,20 +175,18 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
         engine = css_engine_create(doc->document_pool);
         if (!engine) {
             log_error("network: failed to create CSS engine");
-            mem_free(css_content);
             return;
         }
     } else {
         log_error("network: no CSS engine or pool available");
-        mem_free(css_content);
         return;
     }
 
     // parse the stylesheet
     engine->context.quirks_mode =
         is_quirks_mode((HtmlVersion)doc->html_version);
-    CssStylesheet* sheet = css_parse_stylesheet(engine, css_content, res->url);
-    mem_free(css_content);  // content was copied by parser
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css_content.get(), res->url);
+    css_content.reset();  // content was copied by parser
 
     if (!sheet) {
         log_error("network: failed to parse CSS: %s", res->url);
@@ -253,7 +250,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         if (img_surface) {
             img_surface->width = img_width;
             img_surface->height = img_height;
-            img_surface->source_path = mem_strdup(res->local_path, MEM_CAT_IMAGE);
+            img_surface->source_path = lam::own(mem_strdup(res->local_path, MEM_CAT_IMAGE));
             log_debug("network: image metadata loaded lazily: %dx%d from %s",
                       img_width, img_height, res->local_path);
         }
@@ -317,6 +314,17 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         }
     }
 
+    // O2: the UI image cache owns decoded images; this resource and the
+    // element borrow them. A second decode of the same file (another element
+    // sharing the resource) resolves to the cached surface. Without a UI
+    // context there is no cache, and this resource owns the surface.
+    UiContext* cache_ui = res->manager ? (UiContext*)res->manager->ui_context : nullptr;
+    if (cache_ui && !res->image_surface_borrowed) {
+        img_surface = image_cache_adopt(cache_ui, res->local_path, img_surface);
+        if (!img_surface) return;
+        res->image_surface_borrowed = true;
+    }
+
     // ensure element has embed property allocated
     if (!img_element->embed) {
         if (img_element->doc && img_element->doc->view_tree) {
@@ -324,15 +332,15 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         } else if (img_element->doc && img_element->doc->document_pool) {
             // An async decode can finish before the first ViewTree exists; use
             // the document pool only at that lifetime seam and seed CSS initials.
-            img_element->embed = (EmbedProp*)pool_calloc(img_element->doc->document_pool, sizeof(EmbedProp));
-            if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
-        } else {
-            img_element->embed = (EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_NETWORK);
+            img_element->embed = lam::own((EmbedProp*)pool_calloc(img_element->doc->document_pool, sizeof(EmbedProp)));
             if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
         }
+        // with neither a view tree nor a document pool there is no owner for
+        // the prop; a heap copy here was never released (teardown audit F4)
         if (!img_element->embed) {
             log_error("network: failed to allocate embed property");
-            image_surface_destroy(img_surface);
+            // a cached surface stays with the cache
+            if (!res->image_surface_borrowed && img_surface != res->image_surface) image_surface_destroy(img_surface);
             return;
         }
     }
@@ -341,15 +349,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         image_surface_destroy(res->image_surface);
     }
     res->image_surface = img_surface;
-
-    // Async-loaded images are owned by the NetworkResource so teardown does not
-    // depend on which DOM/view embed survives reflow.
-    img_surface->network_owned = !res->image_surface_borrowed;
-    if (img_element->embed->img && img_element->embed->img != img_surface &&
-            image_surface_is_dom_owned(img_element->embed->img)) {
-        image_surface_destroy(img_element->embed->img);
-    }
-    img_element->embed->img = img_surface;
+    img_element->embed->img = lam::up(img_surface);
 
     // schedule reflow since image has intrinsic dimensions that affect layout
     if (res->manager) {
@@ -376,21 +376,16 @@ static void detach_image_surface_from_tree(DomNode* node, ImageSurface* surface)
 static void release_network_image(NetworkResource* res) {
     if (!res) return;
     ImageSurface* surface = res->image_surface;
-    if (surface && res->manager && res->manager->document) {
+    // a cached surface outlives the document; only a resource-owned one goes here
+    if (!surface || res->image_surface_borrowed) return;
+    if (res->manager && res->manager->document) {
         DomDocument* doc = res->manager->document;
         detach_image_surface_from_tree((DomNode*)doc->root, surface);
         if (doc->view_tree && doc->view_tree->root && doc->view_tree->root != (View*)doc->root) {
             detach_image_surface_from_tree((DomNode*)doc->view_tree->root, surface);
         }
     }
-    if (surface && !res->image_surface_borrowed) image_surface_destroy(surface);
-    if (!surface && res->owner_element && res->owner_element->embed) {
-        EmbedProp* embed = res->owner_element->embed;
-        if (image_surface_is_dom_owned(embed->img)) {
-            image_surface_destroy(embed->img);
-            embed->img = nullptr;
-        }
-    }
+    image_surface_destroy(surface);
 }
 
 static void request_network_layout_update(NetworkResourceManager* mgr,
@@ -434,10 +429,10 @@ void process_font_resource(NetworkResource* res, const struct CssFontFaceDescrip
     source.path = res->local_path;
     source.format = NULL;
 
-    FontFaceUnicodeRange* unicode_ranges = nullptr;
+    lam::Temp<FontFaceUnicodeRange> unicode_ranges;
     if (font_face->unicode_range_count > 0 && font_face->unicode_ranges) {
-        unicode_ranges = (FontFaceUnicodeRange*)mem_calloc(
-            (size_t)font_face->unicode_range_count, sizeof(FontFaceUnicodeRange), MEM_CAT_NETWORK);
+        unicode_ranges = lam::temp_array_zero<FontFaceUnicodeRange>(
+            (size_t)font_face->unicode_range_count, MEM_CAT_NETWORK);
         if (unicode_ranges) {
             for (int i = 0; i < font_face->unicode_range_count; i++) {
                 unicode_ranges[i].start_codepoint = font_face->unicode_ranges[i].start_codepoint;
@@ -452,14 +447,13 @@ void process_font_resource(NetworkResource* res, const struct CssFontFaceDescrip
     face_desc.slant = fs;
     face_desc.sources = &source;
     face_desc.source_count = 1;
-    face_desc.unicode_ranges = unicode_ranges;
+    face_desc.unicode_ranges = unicode_ranges.get();
     face_desc.unicode_range_count = unicode_ranges ? font_face->unicode_range_count : 0;
 
     if (font_face_register(uicon->font_ctx, &face_desc)) {
         log_debug("network: registered font local path for '%s': %s",
                   face_desc.family, res->local_path);
     }
-    if (unicode_ranges) mem_free(unicode_ranges);
 
     // schedule reflow for document to apply new font
     if (res->manager && res->manager->document) {
@@ -481,11 +475,10 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element) 
 
     // read SVG file content
     size_t svg_size = 0;
-    char* svg_content = read_file_to_string(res->local_path, &svg_size);
+    lam::Temp<char> svg_content(read_file_to_string(res->local_path, &svg_size));
     if (!svg_content || svg_size == 0) {
-        // Empty downloads still allocate a NUL buffer; free it before
-        // treating the external SVG reference as unavailable.
-        if (svg_content) mem_free(svg_content);
+        // Empty downloads still allocate a NUL buffer; the Temp frees it before
+        // the external SVG reference is treated as unavailable.
         log_error("network: failed to read SVG file: %s", res->local_path);
         return;
     }
@@ -511,8 +504,7 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element) 
 
     log_debug("network: SVG resource loaded, target_id=%s, size=%zu bytes",
               target_id ? target_id : "(none)", svg_size);
-
-    mem_free(svg_content);
+    svg_content.reset();
 
     // schedule reflow so the <use> element can incorporate the SVG
     if (res->manager) {
@@ -555,10 +547,9 @@ void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
         return;
     }
     size_t content_size = 0;
-    char* content = read_file_to_string(res->local_path, &content_size);
+    lam::Temp<char> content(read_file_to_string(res->local_path, &content_size));
     if (!content || content_size == 0) {
         log_warn("network: failed to read cached script: %s", res->local_path);
-        if (content) mem_free(content);
         return;
     }
 
@@ -567,7 +558,7 @@ void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
     // The script content is available in the cache file for later execution
     // via flush_layout_updates() or a future incremental script runner pass.
     log_info("network: script cached for deferred execution: %s (%zu bytes)", res->url, content_size);
-    mem_free(content);
+    content.reset();
 
     // Schedule reflow so the main thread can pick up and execute this script
     if (res->manager && doc->root) {

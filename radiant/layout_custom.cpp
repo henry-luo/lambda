@@ -67,8 +67,8 @@ void custom_layout_fill_radiant_velmt_from_view(
     if (!velmt) return;
     memset(velmt, 0, sizeof(*velmt));
     if (!child) return;
-    velmt->view = child;
-    velmt->element = child->is_element() ? child->as_element() : nullptr;
+    velmt->view = lam::up(child);
+    velmt->element = lam::up(child->is_element() ? child->as_element() : nullptr);
     velmt->index = index;
     // top-level custom layout children are normalized; nested RadiantVelmt snapshots
     // preserve local child offsets so callbacks can inspect rich content.
@@ -193,32 +193,32 @@ static void custom_layout_set_axis_constraint(float css_size,
                                               float fallback_size,
                                               float* out_size,
                                               bool* out_definite,
-                                              const char** out_source) {
+                                              lam::Up<const char>* out_source) {
     if (!out_size || !out_definite || !out_source) return;
 
     if (css_size >= 0.0f) {
         *out_size = css_used_size;
         *out_definite = true;
-        *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_CSS;
+        *out_source = lam::up(CUSTOM_LAYOUT_CONSTRAINT_SOURCE_CSS);
         return;
     }
     if (available && available->is_definite()) {
         *out_size = available->value;
         *out_definite = true;
-        *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_AVAILABLE;
+        *out_source = lam::up(CUSTOM_LAYOUT_CONSTRAINT_SOURCE_AVAILABLE);
         return;
     }
     if (available && available->is_intrinsic()) {
         *out_size = fallback_size;
         *out_definite = false;
-        *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_INTRINSIC;
+        *out_source = lam::up(CUSTOM_LAYOUT_CONSTRAINT_SOURCE_INTRINSIC);
         return;
     }
     // Auto custom parents may derive final size after placement, so callbacks
     // get the visible fallback without treating it as a definite CSS constraint.
     *out_size = fallback_size;
     *out_definite = false;
-    *out_source = CUSTOM_LAYOUT_CONSTRAINT_SOURCE_FALLBACK;
+    *out_source = lam::up(CUSTOM_LAYOUT_CONSTRAINT_SOURCE_FALLBACK);
 }
 
 static void custom_layout_set_child_constraints(CustomLayoutContext* context) {
@@ -469,10 +469,10 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     }
     CustomLayoutContext context;
     memset(&context, 0, sizeof(context));
-    context.lycon = lycon;
-    context.parent = block;
-    context.layout_name = layout_name;
-    context.children = children;
+    context.lycon = lam::up(lycon);
+    context.parent = lam::up(block);
+    context.layout_name = lam::up(layout_name);
+    context.children = lam::up(children);
     context.child_count = child_count;
     context.available_width = block->content_width;
     context.available_height = block->content_height;
@@ -480,14 +480,14 @@ bool layout_custom_apply(LayoutContext* lycon, ViewBlock* block, const char* lay
     context.css_height = block->blk ? block->block()->given_height : -1.0f;
     context.direction = (block->blk && block->block_mut()->direction) ?
         block->block()->direction : lycon->block.direction;
-    context.writing_mode = "horizontal-tb";
+    context.writing_mode = lam::up("horizontal-tb");
     custom_layout_set_child_constraints(&context);
     custom_layout_warn_auto_axis_percent_children(&context, true);
     custom_layout_warn_auto_axis_percent_children(&context, false);
 
     CustomLayoutResult result;
     memset(&result, 0, sizeof(result));
-    result.placements = placements;
+    result.placements = lam::own_arr(placements);
     result.placement_capacity = child_count;
 
     bool ok = fn(&context, &result);

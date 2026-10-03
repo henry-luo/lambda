@@ -927,7 +927,7 @@ extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     UiContext* uicon = _js_current_ui_context;
     DomDocument* doc = uicon && uicon->document
         ? uicon->document : _js_current_document;
-    bool scroll_into_view_pending = doc && doc->pending_scroll_into_view_target;
+    bool scroll_into_view_pending = doc && doc->pending_scroll_into_view_target.address;
     if (!uicon || !uicon->headless || dom_is_host_driven_loop() ||
         !doc || !doc->view_tree || !doc->view_tree->root ||
         (doc->js.mutation_count == 0 && !scroll_into_view_pending)) {
@@ -2110,7 +2110,7 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
     if (dt) {
         head_node = (DomNode*)dt;
         tail_node = (DomNode*)dt;
-        ((DomNode*)dt)->parent = (DomNode*)stub;
+        ((DomNode*)dt)->parent = lam::up((DomNode*)stub);
     }
     if (doc->root) {
         if (tail_node) {
@@ -2119,7 +2119,7 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
             // could be affected. Only forward traversals (used by
             // dom_node_boundary_length and compareDocumentPosition for the
             // stub) need the link.
-            tail_node->next_sibling = (DomNode*)doc->root;
+            tail_node->next_sibling = lam::own((DomNode*)doc->root);
         } else {
             head_node = (DomNode*)doc->root;
         }
@@ -2127,14 +2127,14 @@ extern "C" void* dom_get_or_create_doc_node(void* doc_v) {
         // document IS the parent of the documentElement). Only set when
         // currently null so we don't override real tree relationships.
         if (!((DomNode*)doc->root)->parent) {
-            ((DomNode*)doc->root)->parent = (DomNode*)stub;
+            ((DomNode*)doc->root)->parent = lam::up((DomNode*)stub);
         }
         DomNode* c = (DomNode*)doc->root;
         while (c->next_sibling) c = c->next_sibling;
         tail_node = c;
     }
-    ((DomElement*)stub)->first_child = head_node;
-    ((DomElement*)stub)->last_child  = tail_node;
+    ((DomElement*)stub)->first_child = lam::own(head_node);
+    ((DomElement*)stub)->last_child  = lam::up(tail_node);
     doc->js.doc_node = stub;
     return stub;
 }
@@ -3139,7 +3139,7 @@ static Item dom_document_set_domain(DomDocument* document, Item value) {
     }
 
     const char* normalized = requested[0] == '.' ? requested + 1 : requested;
-    document->document_domain = pool_strdup(document->document_pool, normalized);
+    document->document_domain = lam::own(pool_strdup(document->document_pool, normalized));
     if (!document->document_domain) {
         return js_throw_named_error_text("InvalidStateError",
             "document.domain allocation failed");
@@ -3463,7 +3463,7 @@ static bool dom_rebind_subtree_document(DomNode* node,
     if (!node->is_element()) return true;
 
     DomElement* elem = node->as_element();
-    elem->doc = destination;
+    elem->doc = lam::up(destination);
     for (DomNode* child = elem->first_child; child; child = child->next_sibling) {
         if (!dom_rebind_subtree_document(child, source, destination)) return false;
     }
@@ -3666,7 +3666,7 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     }
     if (html_dom && head_dom) html_dom->append_child(head_dom);
     if (html_dom && body_dom) html_dom->append_child(body_dom);
-    fd->root = html_dom;
+    fd->root = lam::up(html_dom);
     return fd;
 }
 
@@ -3702,15 +3702,15 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
             if (!s) continue;
             DomText* tn = dom_text_create(s, body);
             if (tn) {
-                tn->parent = body;
+                tn->parent = lam::up(body);
                 if (!body->first_child) {
-                    body->first_child = tn;
-                    body->last_child = tn;
+                    body->first_child = lam::own(tn);
+                    body->last_child = lam::up(tn);
                 } else {
                     DomNode* last = body->last_child;
-                    last->next_sibling = tn;
-                    tn->prev_sibling = last;
-                    body->last_child = tn;
+                    last->next_sibling = lam::own(tn);
+                    tn->prev_sibling = lam::up(last);
+                    body->last_child = lam::up(tn);
                 }
             }
         }
@@ -3793,7 +3793,7 @@ static Item dom_parser_parse_xml(const char* source) {
         free_document(xml_document);
         return dom_parser_error_document();
     }
-    xml_document->root = dom_root;
+    xml_document->root = lam::up(dom_root);
     return wrap_foreign_doc(xml_document);
 }
 
@@ -4250,7 +4250,7 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
         Item item = builder.element(qualified_name).final();
         Element* e = item.element;
         DomElement* root = dom_element_create(fd, qualified_name, e);
-        fd->root = root;
+        fd->root = lam::up(root);
     }
     return wrap_foreign_doc(fd);
 }
@@ -6699,6 +6699,7 @@ extern "C" Item dom_document_create_event_bridge(Item interface_name) {
     if (strcmp(interface_text, "TextEvent") == 0) {
         return js_create_text_event_init("", false, false, false, ItemNull, "");
     }
+    if (strcmp(interface_text, "TimeEvent") == 0) return js_create_time_event_init("", 0, ItemNull);
     return js_create_event_init("", false, false, false);
 }
 
@@ -7644,14 +7645,10 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
                                        DomScrollBehavior behavior = DOM_SCROLL_BEHAVIOR_AUTO) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
     if (!doc) return;
-    if (doc->pending_scroll_into_view_target) {
-        dom_node_unpin(doc,
-            {(DomNode*)doc->pending_scroll_into_view_target,
-             doc->pending_scroll_into_view_target_id},
-            DOM_NODE_PIN_RECONCILE);
+    if (doc->pending_scroll_into_view_target.address) {
+        dom_node_unpin(doc, doc->pending_scroll_into_view_target, DOM_NODE_PIN_RECONCILE);
     }
-    doc->pending_scroll_into_view_target = nullptr;
-    doc->pending_scroll_into_view_target_id = 0;
+    doc->pending_scroll_into_view_target = {};
     doc->pending_scroll_into_view_center = false;
     doc->pending_scroll_into_view_if_needed = false;
     doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
@@ -7662,8 +7659,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
         !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
         return;
     }
-    doc->pending_scroll_into_view_target = elem;
-    doc->pending_scroll_into_view_target_id = ref.expected_id;
+    doc->pending_scroll_into_view_target = ref;
     doc->pending_scroll_into_view_center = center;
     doc->pending_scroll_into_view_if_needed = if_needed;
     doc->pending_scroll_into_view_block = block_align;
@@ -8280,9 +8276,9 @@ extern "C" Item dom_text_control_set_default_value_bridge(void* dom_elem, Item v
         if (*s) {
             DomText* tn = DomText::create_copy(s, strlen(s), elem);
             if (tn) {
-                tn->parent = elem;
-                elem->first_child = tn;
-                elem->last_child = tn;
+                tn->parent = lam::up(elem);
+                elem->first_child = lam::own(tn);
+                elem->last_child = lam::up(tn);
                 dom_post_insert((DomNode*)elem, (DomNode*)tn);
             }
         }
@@ -8767,15 +8763,15 @@ extern "C" void dom_select_set_length_bridge(void* dom_elem, Item value) {
             Element* nat = nat_item.element;
             DomElement* opt = dom_element_create(doc, "option", nat);
             if (!opt) break;
-            opt->parent = elem;
+            opt->parent = lam::up(elem);
             if (!elem->first_child) {
-                elem->first_child = opt;
-                elem->last_child = opt;
+                elem->first_child = lam::own(opt);
+                elem->last_child = lam::up(opt);
             } else {
                 DomNode* last = elem->last_child;
-                last->next_sibling = opt;
-                opt->prev_sibling = last;
-                elem->last_child = opt;
+                last->next_sibling = lam::own(opt);
+                opt->prev_sibling = lam::up(last);
+                elem->last_child = lam::up(opt);
             }
         }
     } else if (new_len < cur) {
@@ -8834,9 +8830,9 @@ extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
     elem->last_child = nullptr;
     DomText* tn = DomText::create_copy(sv, strlen(sv), elem);
     if (tn) {
-        tn->parent = elem;
-        elem->first_child = tn;
-        elem->last_child = tn;
+        tn->parent = lam::up(elem);
+        elem->first_child = lam::own(tn);
+        elem->last_child = lam::up(tn);
     }
     // option.text replaces children, so publish a structural mutation instead of an attribute record.
     dom_mutation_notify();
@@ -11767,7 +11763,7 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         if (elem->doc && elem->doc->document_pool) {
             size_t len = strlen(id_str);
             char* id_copy = pool_dup_n(elem->doc->document_pool, id_str, len);
-            elem->id = id_copy;
+            elem->id = lam::up(id_copy);
             elem->set_attribute("id", id_str);
             dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent);
             log_debug("dom_set_property: set id='%s' on <%s>",
@@ -12963,6 +12959,7 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem, int depth = 0
         }
     } else if (str_icmp_cstr(tag, "use") == 0) {
         DomElement* reference = dom_svg_use_reference(elem);
+        SvgAnimationSourceScope animation_scope(elem->doc, reference, elem);
         bounds = dom_svg_bounds_for_element(reference, depth + 1);
         RdtMatrix reference_transform = reference ? dom_svg_transform_from_element(reference) : rdt_matrix_identity();
         dom_svg_bounds_apply_transform(&bounds, &reference_transform);
@@ -13613,6 +13610,9 @@ typedef struct JsDomSvgShapeHit {
     bool bounding_box;
     bool fill_painted;
     bool stroke_painted;
+    DomElement* instance_source;
+    DomElement* instance_hosts[16];
+    unsigned instance_depth;
 } JsDomSvgShapeHit;
 
 static void dom_svg_configure_stroke_hit(DomElement* elem, JsDomSvgPathHitContext* context) {
@@ -13809,7 +13809,9 @@ static DomElement* dom_svg_use_reference(DomElement* elem) {
     if (!elem || !elem->doc || !dom_svg_tag_is(elem, "use")) return nullptr;
     const char* href = elem->get_attribute("href");
     if (!href) href = elem->get_attribute("xlink:href");
-    if (!href || href[0] != '#' || !href[1]) return nullptr;
+    if (!href || !*href) return nullptr;
+    if (href[0] != '#') return svg_animation_use_source(elem);
+    if (!href[1]) return nullptr;
     return dom_find_element_by_id(elem->doc->root, href + 1);
 }
 
@@ -13857,6 +13859,7 @@ static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* referen
         result = dom_svg_basic_shape_hit_local_point(reference, local_x, local_y, min_scale, reference_ctm);
         result.fill_painted = result.fill && dom_svg_paint_is_present(reference, "fill", true);
         result.stroke_painted = result.stroke && dom_svg_paint_is_present(reference, "stroke", false);
+        if (result.fill_painted || result.stroke_painted) result.instance_source = reference;
         return result;
     }
     if (dom_svg_tag_is(reference, "use"))
@@ -13872,6 +13875,11 @@ static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* referen
         JsDomSvgShapeHit hit = dom_svg_reference_hit_viewport_point(child_elem, &child_ctm, viewport_x, viewport_y);
         result.fill |= hit.fill; result.stroke |= hit.stroke; result.bounding_box |= hit.bounding_box;
         result.fill_painted |= hit.fill_painted; result.stroke_painted |= hit.stroke_painted;
+        if (!result.instance_source && hit.instance_source) {
+            result.instance_source = hit.instance_source;
+            result.instance_depth = hit.instance_depth;
+            memcpy(result.instance_hosts, hit.instance_hosts, hit.instance_depth * sizeof(*hit.instance_hosts));
+        }
     }
     return result;
 }
@@ -13890,7 +13898,8 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
     RdtMatrix offset = rdt_matrix_translate(dom_svg_attribute_number(elem, "x", 0.0f),
         dom_svg_attribute_number(elem, "y", 0.0f));
     RdtMatrix frame = rdt_matrix_multiply(instance_ctm, &offset);
-    SvgDomStyleScope scope = {reference, elem, g_dom_svg_style_scope, 0.0f, 0.0f, false};
+    SvgDomStyleScope scope = {lam::up(reference), lam::up(elem), lam::up(g_dom_svg_style_scope), 0.0f, 0.0f, false};
+    SvgAnimationSourceScope animation_scope(reference->doc, reference, elem);
     const SvgDomStyleScope* saved_scope = g_dom_svg_style_scope;
     g_dom_svg_style_scope = &scope;
     RdtMatrix local = dom_svg_transform_from_element(reference);
@@ -13906,6 +13915,8 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
         }
     }
     result = dom_svg_reference_hit_viewport_point(reference, &frame, viewport_x, viewport_y);
+    if (result.instance_source && result.instance_depth < 16)
+        result.instance_hosts[result.instance_depth++] = elem;
     JsDomSvgBounds bounds = dom_svg_bounds_for_element(reference);
     float local_x = 0.0f, local_y = 0.0f;
     if (bounds.valid && rdt_matrix_unproject_affine_point(&frame, viewport_x, viewport_y, &local_x, &local_y))
@@ -13918,6 +13929,28 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
 static JsDomSvgShapeHit dom_svg_use_hit_viewport_point(DomElement* elem, float viewport_x, float viewport_y) {
     RdtMatrix frame = dom_svg_ctm(elem, true);
     return dom_svg_use_instance_hit(elem, &frame, viewport_x, viewport_y);
+}
+
+static void dom_svg_dispatch_use_timing_hit(const JsDomSvgShapeHit* hit, unsigned depth,
+    const char* type, bool bubbles, double detail) {
+    if (!depth) return;
+    DomElement* host = hit->instance_hosts[depth - 1];
+    if (depth == 1) {
+        svg_animation_use_event(host, hit->instance_source, type, bubbles, detail);
+        return;
+    }
+    DomElement* reference = dom_svg_use_reference(host);
+    if (!reference) return;
+    // replay the hit's instance chain so identical nested source nodes retain distinct timing owners.
+    SvgAnimationSourceScope scope(reference->doc, reference, host);
+    dom_svg_dispatch_use_timing_hit(hit, depth - 1, type, bubbles, detail);
+}
+
+void dom_svg_dispatch_use_timing_event(void* element, float x, float y, const char* type, bool bubbles, double detail) {
+    DomElement* use = (DomElement*)element;
+    if (!use || !dom_svg_tag_is(use, "use")) return;
+    JsDomSvgShapeHit hit = dom_svg_use_hit_viewport_point(use, x, y);
+    if (hit.instance_source) dom_svg_dispatch_use_timing_hit(&hit, hit.instance_depth, type, bubbles, detail);
 }
 
 typedef enum JsDomSvgPointerEventsMode {
@@ -14871,7 +14904,7 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         }
         // static Mark text is invalidated when unlinked, but appendChild must
         // carry the original backing item through a move before relinking it.
-        if (!text->native_string) text->native_string = native_string;
+        if (!text->native_string) text->native_string = lam::up(native_string);
     }
 
     int64_t insert_index = dom_element_to_element(parent)->length;
@@ -14925,8 +14958,8 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         if (text->owns_native_string()) {
             pool_free(parent->doc->document_pool, text->native_string);
         }
-        text->native_string = inserted_string;
-        text->text = inserted_string->chars;
+        text->native_string = lam::up(inserted_string);
+        text->text = lam::up(inserted_string->chars);
         text->length = inserted_string->len;
         text->set_owns_native_string(false);
     }
@@ -15198,28 +15231,28 @@ static bool dom_replace_document_element(DomElement* old_root,
             link_prev = current;
         }
         if (link_prev) {
-            link_prev->next_sibling = (DomNode*)replacement;
+            link_prev->next_sibling = lam::own((DomNode*)replacement);
         } else {
-            parent->first_child = (DomNode*)replacement;
+            parent->first_child = lam::own((DomNode*)replacement);
         }
         if (old_next) {
-            old_next->prev_sibling = (DomNode*)replacement;
+            old_next->prev_sibling = lam::up((DomNode*)replacement);
         } else {
-            parent->last_child = (DomNode*)replacement;
+            parent->last_child = lam::up((DomNode*)replacement);
         }
     }
     dom_node_cancel_detached(doc, (DomNode*)replacement);
-    replacement->parent = old_parent;
+    replacement->parent = lam::up(old_parent);
     // Document proxies intentionally keep the documentElement's prev link
     // null even when a synthetic doctype precedes it.
     replacement->prev_sibling = old_root->prev_sibling;
-    replacement->next_sibling = old_next;
+    replacement->next_sibling = lam::own(old_next);
     old_root->parent = nullptr;
     old_root->prev_sibling = nullptr;
     old_root->next_sibling = nullptr;
 
-    doc->root = replacement;
-    doc->html_root = replacement_backing;
+    doc->root = lam::up(replacement);
+    doc->html_root = lam::up(replacement_backing);
     dom_node_schedule_detached(doc, (DomNode*)old_root);
     dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
                            (DomNode*)replacement, old_parent);
@@ -15245,7 +15278,7 @@ static void dom_document_refresh_root(DomElement* parent) {
     parent->doc->root = nullptr;
     for (DomNode* node = parent->first_child; node; node = node->next_sibling) {
         if (dom_is_document_element_child(node)) {
-            parent->doc->root = node->as_element();
+            parent->doc->root = lam::up(node->as_element());
             return;
         }
     }
@@ -15628,7 +15661,7 @@ extern "C" Item dom_clone_document_bridge(Item document_item, Item deep_arg) {
     // A shallow Document clone has no children, including the implicit doctype.
     clone->js.implicit_doctype = deep && source->js.implicit_doctype;
     if (deep && source->root) {
-        clone->root = dom_clone_element_into_document(source->root, clone, true);
+        clone->root = lam::up(dom_clone_element_into_document(source->root, clone, true));
         if (!clone->root) {
             free_document(clone);
             return ItemNull;
@@ -15724,7 +15757,7 @@ extern "C" Item dom_replace_child_bridge(void* parent_ptr, Item new_child_arg,
                     return ItemNull;
                 }
             }
-            if (!new_text->native_string) new_text->native_string = replacement_string;
+            if (!new_text->native_string) new_text->native_string = lam::up(replacement_string);
             dom_pre_remove(old_child);
             if (!dom_node_replace_in_parent(elem, old_child, new_child)) return ItemNull;
             MarkEditor editor(elem->doc->input, EDIT_MODE_INLINE);
@@ -17253,25 +17286,52 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     if (elem->tag() == MARKUP_NAME_SVG) {
         if (operation == JUBE_DOM_PAUSE_ANIMATIONS || operation == JUBE_DOM_UNPAUSE_ANIMATIONS) {
             svg_animation_pause(elem, operation == JUBE_DOM_PAUSE_ANIMATIONS);
-            return ItemNull;
+            return make_js_undefined();
         }
         if (operation == JUBE_DOM_ANIMATIONS_PAUSED) return Item{.item = svg_animation_paused(elem) ? ITEM_TRUE : ITEM_FALSE};
         if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(svg_animation_current_time(elem));
         if (operation == JUBE_DOM_SET_CURRENT_TIME) {
             double seconds = 0.0;
-            if (argc && item_try_to_double(args[0], &seconds)) svg_animation_set_time(elem, seconds);
-            return ItemNull;
+            if (!argc) return dom_raise_type_error("setCurrentTime requires one argument");
+            JS_ASSIGN_OR_RETURN(numeric, js_to_number(args[0]));
+            if (!item_try_to_double(numeric, &seconds) || !isfinite(seconds) || fabs(seconds) > FLT_MAX)
+                return dom_raise_type_error("setCurrentTime requires a finite time");
+            svg_animation_set_time(elem, (float)seconds);
+            return make_js_undefined();
         }
+    }
+    if (dom_element_is_svg(elem)) {
+        if (operation == JUBE_DOM_GET_TARGET_ELEMENT) {
+            DomElement* target = svg_animation_target_element(elem);
+            return target ? dom_wrap_element(target) : ItemNull;
+        }
+        if (operation == JUBE_DOM_GET_START_TIME) {
+            double seconds;
+            return svg_animation_start_time(elem, &seconds) ? push_d(seconds) :
+                dom_raise_exception("InvalidStateError", "The animation has no current interval");
+        }
+        if (operation == JUBE_DOM_GET_SIMPLE_DURATION) {
+            double seconds = svg_animation_simple_duration(elem);
+            return isfinite(seconds) ? push_d(seconds) :
+                dom_raise_exception("NotSupportedError", "The animation has no finite simple duration");
+        }
+        if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(svg_animation_current_time(elem));
     }
     if (dom_element_is_svg(elem) && (operation == JUBE_DOM_BEGIN_ELEMENT ||
         operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT ||
         operation == JUBE_DOM_END_ELEMENT_AT)) {
         double offset = 0.0;
-        if ((operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT_AT) &&
-            (!argc || !item_try_to_double(args[0], &offset))) return ItemNull;
+        if (operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT_AT) {
+            if (!argc) return dom_raise_type_error("Animation timing requires one argument");
+            JS_ASSIGN_OR_RETURN(numeric, js_to_number(args[0]));
+            if (!item_try_to_double(numeric, &offset) || !isfinite(offset) || fabs(offset) > FLT_MAX)
+                return dom_raise_type_error("Animation timing requires a finite offset");
+            offset = (float)offset;
+        }
         svg_animation_begin_end(elem, operation == JUBE_DOM_END_ELEMENT ||
             operation == JUBE_DOM_END_ELEMENT_AT, offset);
-        return ItemNull;
+        // the shared DOM publication boundary maps JS void to Lambda null.
+        return make_js_undefined();
     }
 
     // getBoundingClientRect() — returns {top, left, right, bottom, width, height}
@@ -18127,9 +18187,9 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
     CssKeyframes* keyframes = (CssKeyframes*)pool_calloc(
         pool, sizeof(CssKeyframes));
     if (!keyframes) return nullptr;
-    keyframes->name = "web-animation";
-    keyframes->stops = (CssKeyframeStop*)pool_calloc(
-        pool, sizeof(CssKeyframeStop) * count);
+    keyframes->name = lam::up("web-animation");
+    keyframes->stops = lam::own_arr((CssKeyframeStop*)pool_calloc(
+        pool, sizeof(CssKeyframeStop) * count));
     if (!keyframes->stops) return nullptr;
     keyframes->stop_count = count;
 
@@ -18168,8 +18228,8 @@ static CssKeyframes* js_web_animation_parse_keyframes(DomElement* element,
             if (!css_animation_parse_property_value(property, value, &parsed,
                                                     pool)) continue;
             parsed.composite = js_web_animation_composite(dom_realm_get_cstr(frame, "composite"));
-            stop->properties = (CssAnimatedProp*)pool_calloc(
-                pool, sizeof(CssAnimatedProp));
+            stop->properties = lam::own_arr((CssAnimatedProp*)pool_calloc(
+                pool, sizeof(CssAnimatedProp)));
             if (!stop->properties) return nullptr;
             stop->properties[0] = parsed;
             stop->property_count = 1;
@@ -18344,9 +18404,9 @@ extern "C" Item dom_option_ctor(Item text_arg, Item value_arg, Item def_sel_arg,
         if (t && *t) {
             DomText* tn = DomText::create_copy(t, strlen(t), opt);
             if (tn) {
-                tn->parent = opt;
-                opt->first_child = tn;
-                opt->last_child = tn;
+                tn->parent = lam::up(opt);
+                opt->first_child = lam::own(tn);
+                opt->last_child = lam::up(tn);
             }
         }
     }

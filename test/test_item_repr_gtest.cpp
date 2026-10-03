@@ -14,6 +14,9 @@
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/side_stack.h"
 #include "../lambda/runtime/sys_func_registry.h"
+#include "../lambda/runtime/type_contract.hpp"
+#include "../lambda/runtime/transpiler.hpp"
+#include "../lib/hashmap.h"
 #include "../lib/memtrack.h"
 
 extern "C" {
@@ -283,6 +286,42 @@ protected:
         EXPECT_EQ(lambda_int_item_value(shape_transition_read_field(map, after_flag)), 123456);
     }
 };
+
+TEST_F(RuntimeShapeTransition, ArrayContractsKeepIdentityBeyondThirtyTwoSpellings) {
+    TypeUnary* contracts = (TypeUnary*)pool_calloc(pool, 80 * sizeof(TypeUnary));
+    ASSERT_NE(contracts, nullptr);
+    ArrayRepCert* first = nullptr;
+    for (int i = 0; i < 80; i++) {
+        contracts[i].type_id = LMD_TYPE_TYPE;
+        contracts[i].kind = TYPE_KIND_UNARY;
+        contracts[i].op = OPERATOR_ARRAY;
+        contracts[i].operand = &TYPE_INT;
+        ArrayRepCert* cert = lambda_array_rep_cert_resolve((Type*)&contracts[i]);
+        ASSERT_NE(cert, nullptr);
+        if (!first) first = cert;
+        EXPECT_EQ(cert, first);
+    }
+    EXPECT_EQ(hashmap_count(eval.heap->array_rep_cert_by_contract), 80u);
+    for (int i = 79; i >= 0; i--)
+        EXPECT_EQ(lambda_array_rep_cert_resolve((Type*)&contracts[i]), first);
+
+    // an independent context keeps the same spelling in a different heap
+    ASSERT_TRUE(eval_context_shutdown(&eval));
+    EvalContext other = {};
+    ASSERT_TRUE(eval_context_init(&other));
+    heap_init();
+    EXPECT_NE(other.heap, nullptr);
+    if (other.heap) {
+        ArrayRepCert* separate = lambda_array_rep_cert_resolve((Type*)&contracts[0]);
+        EXPECT_NE(separate, nullptr);
+        EXPECT_NE(separate, first);
+        heap_destroy();
+        other.heap = nullptr;
+    }
+    EXPECT_TRUE(eval_context_shutdown(&other));
+    EXPECT_TRUE(eval_context_init(&eval));
+    EXPECT_EQ(lambda_array_rep_cert_resolve((Type*)&contracts[0]), first);
+}
 
 } // namespace
 

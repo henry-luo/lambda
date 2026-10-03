@@ -222,6 +222,9 @@ static inline bool ast_value_may_carry_defect(AstNode* node,
     }
 }
 
+// shared conservative producer proof used before eliding any typed boundary
+bool ast_expr_may_defect(AstNode* node, int depth);
+
 // S11.4.3 (LR12-25, LR12-36): may an error reach a system function's
 // reject-error parameter, making it the call's value? Through an operand whose
 // type admits error -- an explicit `any` included -- or that may carry a

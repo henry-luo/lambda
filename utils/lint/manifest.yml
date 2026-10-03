@@ -57,15 +57,27 @@ rules:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/radiant-alloc-allowlist.yml
     category: memory-safety
-    tags: [radiant, allocator, allowlist, warn]
+    tags: [radiant, allocator, allowlist, mandatory]
+
+  no-retired-free-api:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/no-retired-free-api.yml
+    category: memory-safety
+    tags: [arena, scratch, mandatory]
+
+  radiant-no-bare-mem-free:
+    backend: ast-grep
+    file: utils/lint/rules/c-cpp/radiant-no-bare-mem-free.yml
+    category: memory-safety
+    tags: [radiant, ownership, temp, mandatory]
     note: "Warn-mode R7 gate while the sanctioned allocation API allowlist stabilizes."
 
   obj-heap-ok:
     backend: ast-grep
     file: utils/lint/rules/c-cpp/obj-heap-ok.yml
     category: memory-safety
-    tags: [radiant, heap-root, warn]
-    note: "Warn-mode R2 review marker for typed struct heap roots."
+    tags: [radiant, heap-root, mandatory]
+    note: "R2 review marker for typed struct heap roots; an error since memory phase M4."
 
   alloca-static-size:
     backend: ast-grep
@@ -410,3 +422,10 @@ rules:
     category: architecture
     tags: [radiant, headers, structure]
     note: "DD4 ratchet for Radiant header consolidation. Fails on new/non-allow-listed per-file headers and on header count growth past the global-header cap."
+
+  mem-kind-nodes:
+    backend: python
+    file: utils/check_mem_kind_nodes.py
+    category: memory-safety
+    tags: [radiant, ownership, kinds, mandatory]
+    note: "Reads lam::Up<T> and lam::Shared<T> fields and LAM_NODE_OF levels from the Clang AST; fails when an Up target's declared level is not the holder's level or an ancestor (lib/mem_node.hpp). Holders or targets without a declared level are counted as unchecked."

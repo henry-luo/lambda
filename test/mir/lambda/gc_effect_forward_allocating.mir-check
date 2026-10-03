@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "description": "D5.3.1-D5.3.2: an allocating direct callee retains one live-string root even though the following length call is NO_GC.",
+  "description": "D5.3.1-D5.3.2/S7.7.2: an allocating direct callee retains the live string and its boxed success/error join; fill's invalid-count and allocation errors prevent a scalar-only return proof. The following length call remains NO_GC.",
   "checks": [
     {
       "in_func": "_gc_order_alloc_caller_#",
       "expect": [
         "call\t_gc_order_alloc_leaf_",
         "call\tlambda_stack_is_exhausted",
-        "call\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, {{r}}, runtime, 1, 0"
+        "call\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, {{r}}, runtime, 5, 0"
       ],
       "forbid": [
         "call\tlambda_side_stack_ensure_for_p, lambda_side_stack_ensure_for, {{r}}, runtime, 2, 0"

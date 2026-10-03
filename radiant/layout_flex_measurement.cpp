@@ -11,6 +11,7 @@
 #include "../lib/tagged.hpp"
 #include <float.h>
 #include <limits.h>
+#include "../lib/generation.h"
 
 LayoutTextRun flex_measure_prepare_text_run(DomNode* text_node, const char* text, size_t length) {
     CssEnum ws = get_white_space_value(text_node);
@@ -469,7 +470,7 @@ static bool ensure_measurement_cache_capacity(ViewTree* tree, int required) {
 
 void advance_measurement_cache_generation(ViewTree* tree) {
     if (!tree) return;
-    tree->measurement_cache_generation++;
+    tree->measurement_cache_generation = generation_next32(tree->measurement_cache_generation);
 }
 
 void store_in_measurement_cache(DomNode* node, float width, float height,
@@ -481,7 +482,7 @@ void store_in_measurement_cache(DomNode* node, float width, float height,
     }
 
     int cache_count = tree->measurement_cache_count;
-    tree->measurement_cache[cache_count].node = node;
+    tree->measurement_cache[cache_count].node = lam::up(node);
     tree->measurement_cache[cache_count].measured_width = width;
     tree->measurement_cache[cache_count].measured_height = height;
     tree->measurement_cache[cache_count].content_width = content_width;
@@ -514,8 +515,7 @@ void clear_measurement_cache(ViewTree* tree) {
 
 void destroy_measurement_cache(ViewTree* tree) {
     if (!tree) return;
-    mem_free(tree->measurement_cache);
-    tree->measurement_cache = nullptr;
+    lam::free_owned(tree->measurement_cache);
     tree->measurement_cache_count = 0;
     tree->measurement_cache_capacity = 0;
     tree->measurement_cache_generation = 0;

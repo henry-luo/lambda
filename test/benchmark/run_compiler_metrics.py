@@ -37,7 +37,7 @@ def parse_record(line, marker):
 
 def run_once(binary, script, expected_hash, timeout):
     env = os.environ.copy()
-    env["LAMBDA_TIER"] = "jit"
+    env["LAMBDA_EXEC_BACKEND"] = "jit"
     env["LAMBDA_COMPILER_TIMING"] = "1"
     env["LAMBDA_DISABLE_MIR_CACHE"] = "1"
     result = subprocess.run(
@@ -75,7 +75,7 @@ def run_exact_code_size(binary, script, expected_hash, timeout):
     debug_path = ROOT / "temp/mir_gen_debug.txt"
     debug_path.unlink(missing_ok=True)
     env = os.environ.copy()
-    env.update(LAMBDA_TIER="jit", LAMBDA_COMPILER_TIMING="0",
+    env.update(LAMBDA_EXEC_BACKEND="jit", LAMBDA_COMPILER_TIMING="0",
                LAMBDA_DISABLE_MIR_CACHE="1", LAMBDA_MIR_GEN_DEBUG="0",
                LAMBDA_MIR_GEN_DEBUG_APPEND="1")
     result = subprocess.run(
@@ -161,7 +161,7 @@ def main():
         "control_sha256": sha256_file(args.control),
         "candidate_sha256": sha256_file(args.candidate),
         "repeat": args.repeat,
-        "environment": {"LAMBDA_TIER": "jit", "LAMBDA_COMPILER_TIMING": "1",
+        "environment": {"LAMBDA_EXEC_BACKEND": "jit", "LAMBDA_COMPILER_TIMING": "1",
                         "LAMBDA_DISABLE_MIR_CACHE": "1"},
         "metric_scope": "fresh-process entry-module timing; generated_code_bytes "
                         "sums all MIR contexts' per-function code lengths in a separate diagnostic run; "

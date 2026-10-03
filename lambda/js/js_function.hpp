@@ -277,6 +277,8 @@ static inline uint8_t js_fn_body_kind(const JsFunction* fn) {
 // Publish a native satellite without changing the function object's identity.
 // The caller must retain the satellite context before making this visible.
 bool js_function_promote_ast_body(JsFunction* fn, void* entry);
+// Republish a function's call capabilities after its flags change.
+void js_function_finalize_capabilities(JsFunction* fn);
 
 static inline const JsNativeCode* js_fn_native(const JsFunction* fn) {
     return JS_FN_PAYLOAD_READ(fn, native);

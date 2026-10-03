@@ -49,7 +49,7 @@
 > **Evidence:** every Lambda claim was measured with the debug `lambda.exe` of
 > 2026-09-27 (tree at 3fb512d91; the pattern sources are unchanged since
 > 2026-09-26). The probe scripts are in `temp/pattern_probe/` (scratch, not
-> committed). The interpreter and the MIR JIT (`LAMBDA_TIER=jit`) agree on
+> committed). The interpreter and the MIR JIT (`LAMBDA_EXEC_BACKEND=jit`) agree on
 > every probe. JS results come from Node 22.13.0, Python results from CPython
 > 3.14. Reference-grammar results come from `tree-sitter parse` on
 > `grammar.js`.

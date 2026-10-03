@@ -758,7 +758,7 @@ SysFuncInfo sys_func_defs[] = {
 
     {SYSFUNC_FILL, "fill", 2, &TYPE_ANY, false, false, false, LMD_TYPE_ANY, false,
      C_RET_ITEM, NULL, "fn_fill", FPTR(fn_fill), NULL, NULL, false, 0,
-     /* is_async */ false, /* success */ NULL, /* may_error */ false,
+     /* is_async */ false, /* success */ NULL, /* may_error */ true,
      /* result */ SYS_RESULT_ARRAY_OF_ARGUMENT,
      /* result_arg_index */ 1},
 
@@ -2243,7 +2243,22 @@ JitImport jit_runtime_imports[] = {
     {"lambda_type_value_is_exact", FPTR(lambda_type_value_is_exact)},
     {"lambda_value_type_is_exact", FPTR(lambda_value_type_is_exact)},
     {"lambda_type_value_from_contract", FPTR(lambda_type_value_from_contract)},
-    {"lambda_fill_for_contract", FPTR(lambda_fill_for_contract)},
+    // admission returns only a container or defect; contract/site pointers are
+    // immutable metadata, while the fallback remains allocating and conservative
+    {"lambda_fill_for_contract", FPTR(lambda_fill_for_contract),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    {"lambda_fill_for_contract_int_lane", FPTR(lambda_fill_for_contract_int_lane),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
     {"lambda_array_empty_for_contract", FPTR(lambda_array_empty_for_contract)},
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},

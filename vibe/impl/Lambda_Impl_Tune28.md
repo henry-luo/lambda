@@ -435,7 +435,7 @@ rebind ends the region for that path. Runtime unchanged.
   (its typed rows equal Result44's within noise; matmul is the post-fix
   value). Never time a debug build; `make test-lambda-baseline` overwrites
   `lambda.exe` and `make release` deletes `test/*.exe`.
-- One benchmark process at a time; JIT-pinned `LAMBDA_TIER=jit` for part-1
+- One benchmark process at a time; JIT-pinned `LAMBDA_EXEC_BACKEND=jit` for part-1
   numbers, min of 5 interleaved runs (`temp/t27/sweep.py`), 9 runs for any
   sub-3% call.
 - Static census per track: `LAMBDA_MIR_DUMP_PATH`, then the §3.1 counts
@@ -486,7 +486,7 @@ a missing optimization but a fold that could not fire:
    lesson: read a literal from the raw operand, never the unwrapped one).
 2. **The whole pass declined without a GC heap.** RC7 expects an *evaluation*
    to allocate, so the guard required `context->heap`. The eager pipeline
-   (`LAMBDA_TIER=jit`, which every Part-1 benchmark number pins) compiles the
+   (`LAMBDA_EXEC_BACKEND=jit`, which every Part-1 benchmark number pins) compiles the
    module before `runner_setup_context()` reaches `heap_init()`, so the pass
    never ran there at all. Split the guard: the binding-copy arm (RC3.3) runs
    with or without a heap because it evaluates nothing, and only the expression
@@ -988,7 +988,7 @@ representation and needs its own round.
 
 **Correctness.** A 4,000-case differential fuzz of `replace`/`find`/`split` — a dense six-letter alphabet that includes a two-byte UTF-8 letter, one- to three-letter needles, every option kind, and the keep-delimiter split — is byte-identical to the control. `test/lambda/find_replace_options.ls` gains overlapping, near-miss, translate, symbol, window and UTF-8 cases. The regression pin now names `literal_find` and also asserts that `fn_replace_impl` and `fn_find_impl` call it.
 
-**Measured** against the same HEAD built without the change: release, `LAMBDA_TIER=jit`, median of 7 runs (5 for the last two rows):
+**Measured** against the same HEAD built without the change: release, `LAMBDA_EXEC_BACKEND=jit`, median of 7 runs (5 for the last two rows):
 
 | Row | before (ms) | after (ms) | speedup |
 |---|---:|---:|---:|

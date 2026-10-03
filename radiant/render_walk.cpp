@@ -72,9 +72,9 @@ static bool render_walk_block_effect_group(ViewBlock* block, float abs_x, float 
     group->bounds.bottom = abs_y + block->height + visual_overflow;
     group->opacity = opacity;
     group->blend_mode = (int)blend; // INT_CAST_OK: CssEnum is serialized through PaintIR as an integer enum value.
-    group->filter = has_filter ? block->filter_prop() : NULL;
+    group->filter = lam::up(has_filter ? block->filter_prop() : NULL);
     group->backdrop = has_backdrop_filter;
-    group->backdrop_filter = has_backdrop_filter ? block->backdrop_filter_prop() : NULL;
+    group->backdrop_filter = lam::up(has_backdrop_filter ? block->backdrop_filter_prop() : NULL);
     group->shadow = has_shadow;
     return true;
 }
@@ -94,9 +94,9 @@ static bool render_walk_inline_effect_group(ViewSpan* span, PaintEffectGroup* gr
 
     group->opacity = opacity;
     group->blend_mode = (int)blend; // INT_CAST_OK: CssEnum is serialized through PaintIR as an integer enum value.
-    group->filter = has_filter ? span->filter_prop() : NULL;
+    group->filter = lam::up(has_filter ? span->filter_prop() : NULL);
     group->backdrop = has_backdrop_filter;
-    group->backdrop_filter = has_backdrop_filter ? span->backdrop_filter_prop() : NULL;
+    group->backdrop_filter = lam::up(has_backdrop_filter ? span->backdrop_filter_prop() : NULL);
     return true;
 }
 

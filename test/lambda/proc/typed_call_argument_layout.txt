@@ -1,0 +1,6 @@
+[true, 1, "first", 2]
+[true, 3, "named", 4]
+[true, "nested", 2]
+[1, 2, 3, 4]
+[true, true]
+[9, true]

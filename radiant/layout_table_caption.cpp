@@ -78,7 +78,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
     content_width -= cap_box.pad_border_h;
     content_width = max(content_width, 0.0f);
 
-    lycon->view = static_cast<View*>(cap);
+    lycon->view = lam::up(static_cast<View*>(cap));
     dom_node_resolve_style(static_cast<DomNode*>(cap), lycon);
 
     layout_table_caption_content_setup(lycon, cap, content_width);
@@ -91,7 +91,7 @@ float relayout_table_caption(LayoutContext* lycon, ViewBlock* cap, float table_w
 
     log_debug("Caption re-layout complete: width=%.1f, height=%.1f", cap->width, cap->height);
 
-    lycon->view = saved_view;
+    lycon->view = lam::up(saved_view);
 
     float margin_v = 0;
     if (cap->bound) {

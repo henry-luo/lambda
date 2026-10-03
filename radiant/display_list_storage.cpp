@@ -9,6 +9,7 @@
 #include "../lib/math_checked.hpp"
 #include <string.h>
 #include <limits.h>
+#include "../lib/generation.h"
 
 #define DL_INITIAL_CAPACITY 2048
 #define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
@@ -54,6 +55,35 @@ float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count) {
     float* copy = (float*)scratch_alloc(&dl->arena, sz);
     memcpy(copy, dashes, sz);
     return copy;
+}
+
+bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
+                            const RenderSemanticGroup* source) {
+    if (!dl || !out || !source || source->attribute_count < 0 ||
+        (source->attribute_count && !source->attributes)) return false;
+    RenderSemanticGroup copy = {};
+    auto copy_string = [&](const char* value) -> const char* {
+        if (!value) return nullptr;
+        size_t bytes = strlen(value) + 1;
+        char* result = (char*)scratch_alloc(&dl->arena, bytes);
+        if (result) memcpy(result, value, bytes);
+        return result;
+    };
+    if (source->attribute_count) {
+        RenderSemanticAttribute* attrs = (RenderSemanticAttribute*)scratch_calloc(
+            &dl->arena, (size_t)source->attribute_count * sizeof(RenderSemanticAttribute));
+        if (!attrs) return false;
+        for (int i = 0; i < source->attribute_count; i++) {
+            attrs[i] = {lam::up(copy_string(source->attributes[i].name)), lam::up(copy_string(source->attributes[i].value))};
+            if (!attrs[i].name || !attrs[i].value) return false;
+        }
+        copy.attributes = lam::up(attrs);
+        copy.attribute_count = source->attribute_count;
+    }
+    copy.title = lam::up(copy_string(source->title));
+    if (source->title && !copy.title) return false;
+    *out = copy;
+    return true;
 }
 
 void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
@@ -144,7 +174,7 @@ int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
                 }
             }
             shapes[out_depth].type = CLIP_SHAPE_POLYGON;
-            shapes[out_depth].polygon = {vx, vy, count};
+            shapes[out_depth].polygon = {lam::own_arr(vx), lam::own_arr(vy), count};
         } else {
             shapes[out_depth] = clip_shape_from_params(src->type[i], src->params[i]);
             dl_offset_clip_shape(&shapes[out_depth], offset_x, offset_y);
@@ -244,7 +274,7 @@ static void dl_validation_set(DisplayListValidationResult* result, bool valid,
     if (!result) return;
     result->valid = valid;
     result->first_error_index = index;
-    result->message = message;
+    result->message = lam::up(message);
     result->clip_depth = clip_depth;
     result->backdrop_depth = backdrop_depth;
     result->shadow_clip_depth = shadow_clip_depth;
@@ -282,14 +312,14 @@ static bool dl_validate_resource_size(const void* resource, float w, float h) {
 }
 
 static bool dl_retainable_generation_resource(const void* resource, uint64_t generation) {
-    return !resource || generation != 0;
+    return !resource || generation_stamped(generation);
 }
 
 // Retained items reference surfaces by handle; an unregistered surface (null
 // handle) cannot be checked for liveness later, so it is never retained.
 static bool dl_retainable_surface(const void* borrowed, lam::Handle<ImageSurface> owner,
                                   uint64_t generation) {
-    return !borrowed || (!owner.is_null() && generation != 0);
+    return !borrowed || (!owner.is_null() && generation_stamped(generation));
 }
 
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {

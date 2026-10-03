@@ -268,7 +268,7 @@ static TransformFunction* parse_transform_value(const char* val, Pool* pool) {
         TransformFunction* tf = parse_transform_func(&p, pool);
         if (tf) {
             tf->next = NULL;
-            if (tail) { tail->next = tf; tail = tf; }
+            if (tail) { tail->next = lam::own(tf); tail = tf; }
             else { head = tail = tf; }
         } else {
             // skip unknown token
@@ -498,7 +498,7 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
             stop->offset = offset;
             stop->timing = NULL;
             stop->property_count = prop_count;
-            stop->properties = (CssAnimatedProp*)pool_alloc(pool, sizeof(CssAnimatedProp) * prop_count);
+            stop->properties = lam::own_arr((CssAnimatedProp*)pool_alloc(pool, sizeof(CssAnimatedProp) * prop_count));
             memcpy(stop->properties, temp_props, sizeof(CssAnimatedProp) * prop_count);
             stop_count++;
         }
@@ -521,9 +521,9 @@ static CssKeyframes* parse_keyframes_content(const char* content, Pool* pool) {
     }
 
     CssKeyframes* kf = (CssKeyframes*)pool_calloc(pool, sizeof(CssKeyframes));
-    kf->name = name;
+    kf->name = lam::up(name);
     kf->stop_count = stop_count;
-    kf->stops = (CssKeyframeStop*)pool_alloc(pool, sizeof(CssKeyframeStop) * stop_count);
+    kf->stops = lam::own_arr((CssKeyframeStop*)pool_alloc(pool, sizeof(CssKeyframeStop) * stop_count));
     memcpy(kf->stops, temp_stops, sizeof(CssKeyframeStop) * stop_count);
 
     log_debug("css-anim: parsed @keyframes '%s' with %d stops", name, stop_count);
@@ -561,7 +561,7 @@ KeyframeRegistry* keyframe_registry_create(DomDocument* doc, Pool* pool) {
     if (!css_property_system_init(pool)) return NULL;
 
     KeyframeRegistry* registry = (KeyframeRegistry*)pool_calloc(pool, sizeof(KeyframeRegistry));
-    registry->pool = pool;
+    registry->pool = lam::up(pool);
     registry->capacity = 0;
     registry->entries = nullptr;
     registry->count = 0;
@@ -787,7 +787,7 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
         TransformFunction* interp = interpolate_transform_func(a, b, t, pool);
         if (interp) {
             interp->next = NULL;
-            if (tail) { tail->next = interp; tail = interp; }
+            if (tail) { tail->next = lam::own(interp); tail = interp; }
             else { head = tail = interp; }
         }
         if (a) a = a->next;
@@ -816,7 +816,7 @@ static BackgroundProp* ensure_background_prop(ViewSpan* span) {
     if (!pool) return NULL;
     if (!span->bound) span->ensure_boundary(el->doc->view_tree);
     if (span->bound && !span->boundary()->background) {
-        span->bound->background = (BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp));
+        span->bound->background = lam::own((BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp)));
     }
     return span->bound ? span->boundary()->background : NULL;
 }
@@ -849,7 +849,7 @@ static void apply_animated_value(DomElement* element, CssAnimatedProp* prop) {
                     span->ensure_transform(element->doc->view_tree);
             }
             if (span->transform) {
-                span->transform->functions = prop->value.transform;
+                span->transform->functions = lam::shared(prop->value.transform);
                 // Keyframe lists are document-owned and may be sampled again
                 // after a retained view-pool reset.
                 span->transform->functions_owner = TRANSFORM_FUNCTIONS_DOCUMENT_POOL;
@@ -1567,7 +1567,7 @@ void css_animation_resolve(DomElement* element, LayoutContext* lycon) {
     // build CssAnimProp from resolved animation properties
     CssAnimProp anim_prop;
     memset(&anim_prop, 0, sizeof(anim_prop));
-    anim_prop.name = anim_name;
+    anim_prop.name = lam::up(anim_name);
     anim_prop.duration = 0.0f;
     anim_prop.delay = 0.0f;
     anim_prop.iteration_count = 1;
@@ -2073,7 +2073,7 @@ bool css_transition_resolve_values(const CssValue* shorthand_value,
                                    CssTransitionProp* tp,
                                    CssPropertyCode* prop_buf, int prop_cap) {
     memset(tp, 0, sizeof(*tp));
-    tp->properties = prop_buf;
+    tp->properties = lam::up(prop_buf);
     tp->property_count = 0;
     tp->duration = 0.0f;
     tp->delay = 0.0f;

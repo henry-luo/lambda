@@ -13,12 +13,12 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element()) return;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
-    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    MarkerProp* marker_prop = elem->marker_prop();
     if (!marker_prop) {
         return;
     }
     FontBox marker_font_box = elem->font
-        ? FontBox{elem->font, font_prop_used_size(elem->font)} : rdcon->font;
+        ? FontBox{lam::up(elem->font), font_prop_used_size(elem->font)} : rdcon->font;
     FontBox* marker_font = &marker_font_box;
 
     float x = rdcon->block.x + marker->x;
@@ -60,7 +60,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
     if (marker_prop->image.url && strcmp(marker_prop->image.url, "none") != 0) {
         if (!marker_prop->loaded_image) {
-            marker_prop->loaded_image = load_image(rdcon->ui_context, marker_prop->image.url);
+            marker_prop->loaded_image = lam::up(load_image(rdcon->ui_context, marker_prop->image.url));
         }
         if (marker_prop->loaded_image && marker_prop->loaded_image->pic) {
             float iw, ih;

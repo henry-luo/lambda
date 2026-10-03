@@ -28,7 +28,7 @@ SymbolResolution resolve_symbol(const char* name, size_t len) {
     const char* emoji_utf8 = emoji_shortcode_lookup(name, len);
     if (emoji_utf8) {
         result.type = SYMBOL_EMOJI;
-        result.utf8 = emoji_utf8;
+        result.utf8 = lam::up(emoji_utf8);
         result.utf8_len = strlen(emoji_utf8);
         // Note: codepoint is 0 for emoji since many are multi-codepoint
         return result;
@@ -38,7 +38,7 @@ SymbolResolution resolve_symbol(const char* name, size_t len) {
     const char* replacement = html_entity_lookup(name, len);
     if (replacement) {
         result.type = SYMBOL_HTML_ENTITY;
-        result.utf8 = replacement;
+        result.utf8 = lam::up(replacement);
         result.utf8_len = strlen(replacement);
         result.codepoint = utf8_first_codepoint(replacement);
         return result;

@@ -1,0 +1,20 @@
+[
+  "svg_export_snapshot",
+  "svg_external_paints",
+  "svg_images",
+  "svg_gradient_paints",
+  "svg_context_paints",
+  "svg_pattern_paints",
+  "svg_clip_masks",
+  "svg_mask_content",
+  "svg_filter_operators",
+  "svg_filter_lighting",
+  "svg_foreign_object_resources",
+  "svg_foreign_object_prefixes",
+  "svg_overflow_dashes",
+  "svg_text_paint",
+  "svg_font_shorthands",
+  "svg_text_resources",
+  "svg_filter_coordinates",
+  "svg_smil_export_initial"
+]

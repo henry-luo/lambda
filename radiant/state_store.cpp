@@ -923,7 +923,7 @@ StateStore* state_store_create(DomDocument* document) {
     }
     if (document->state_store) {
         if (document->state_store->doc_state && !document->state) {
-            document->state = document->state_store->doc_state;
+            document->state = lam::up(document->state_store->doc_state);
         }
         return document->state_store;
     }
@@ -963,8 +963,8 @@ bool StateStore::init(DomDocument* owner_document) {
         return false;
     }
 
-    owner_document->state_store = this;
-    owner_document->state = doc_state;
+    owner_document->state_store = lam::own(this);
+    owner_document->state = lam::up(doc_state);
     doc_state->owner_store = this;
     Runtime* semantic_runtime = dom_document_script_runtime(owner_document);
     semantic_context = semantic_runtime
@@ -3598,7 +3598,7 @@ static int behavior_init_control_equals(ArrayListValue left, ArrayListValue righ
 void radiant_queue_behavior_init_control(DomDocument* doc, View* view) {
     if (!doc || !view || !view->is_element()) return;
     if (!doc->behavior_init_controls) {
-        doc->behavior_init_controls = arraylist_new(8);
+        doc->behavior_init_controls = lam::own(arraylist_new(8));
     }
     if (doc->behavior_init_controls &&
         arraylist_index_of(doc->behavior_init_controls,

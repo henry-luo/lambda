@@ -79,10 +79,7 @@ bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
     rdt_clip_restore_depth(saved_clip_depth);
     rdt_vector_destroy(&tmp_vec);
 
-    if (surface->pixels) {
-        mem_free(surface->pixels);
-    }
-    surface->pixels = pixels;
+    image_surface_adopt_pixels(surface, pixels);
     surface->decoded_width = target_width;
     surface->decoded_height = target_height;
     surface->pitch = target_width * 4;

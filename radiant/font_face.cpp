@@ -51,7 +51,7 @@ static void resolve_missing_font_source_path(char** source, const char* base_pat
     // declared font family but point the source at the canonical local asset.
     char* replacement = mem_strdup(resolved, MEM_CAT_FONT);
     if (!replacement) return;
-    mem_free(*source);
+    lam::Temp<char> previous(*source);  // the replacement takes the slot
     *source = replacement;
 }
 
@@ -74,24 +74,20 @@ void init_text_flow_logging(void) {
 }
 
 static FontFaceDescriptor* font_face_descriptor_from_css(CssFontFaceDescriptor* css_desc) {
-    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)mem_calloc(1, sizeof(FontFaceDescriptor), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: UiContext owns @font-face descriptors across layout passes.
+    // staged in Temp owners until complete; UiContext owns the result across layout passes
+    lam::Temp<FontFaceDescriptor> descriptor = lam::temp_array_zero<FontFaceDescriptor>(1, MEM_CAT_LAYOUT);
     if (!descriptor) return nullptr;
-    descriptor->family_name = css_desc->family_name
-        ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr;
-    descriptor->src_local_path = css_desc->src_url
-        ? mem_strdup(css_desc->src_url, MEM_CAT_LAYOUT) : nullptr;
+    lam::Temp<char> family_name(css_desc->family_name
+        ? mem_strdup(css_desc->family_name, MEM_CAT_LAYOUT) : nullptr);
+    lam::Temp<char> src_local_path(css_desc->src_url
+        ? mem_strdup(css_desc->src_url, MEM_CAT_LAYOUT) : nullptr);
     descriptor->font_style = css_desc->font_style;
     descriptor->font_weight = css_desc->font_weight;
     descriptor->font_display = css_desc->font_display;
     if (css_desc->unicode_range_count > 0 && css_desc->unicode_ranges) {
-        descriptor->unicode_ranges = (FontFaceUnicodeRange*)mem_calloc(
-            (size_t)css_desc->unicode_range_count, sizeof(FontFaceUnicodeRange), MEM_CAT_LAYOUT);
-        if (!descriptor->unicode_ranges) {
-            if (descriptor->family_name) mem_free(descriptor->family_name);
-            if (descriptor->src_local_path) mem_free(descriptor->src_local_path);
-            mem_free(descriptor);
-            return nullptr;
-        }
+        descriptor->unicode_ranges = lam::own_arr((FontFaceUnicodeRange*)mem_calloc(
+            (size_t)css_desc->unicode_range_count, sizeof(FontFaceUnicodeRange), MEM_CAT_LAYOUT));
+        if (!descriptor->unicode_ranges) return nullptr;
         for (int i = 0; i < css_desc->unicode_range_count; i++) {
             descriptor->unicode_ranges[i].start_codepoint =
                 css_desc->unicode_ranges[i].start_codepoint;
@@ -100,7 +96,9 @@ static FontFaceDescriptor* font_face_descriptor_from_css(CssFontFaceDescriptor* 
         }
         descriptor->unicode_range_count = css_desc->unicode_range_count;
     }
-    return descriptor;
+    descriptor->family_name = lam::own(family_name.release());
+    descriptor->src_local_path = lam::own(src_local_path.release());
+    return descriptor.release();
 }
 
 // CSS @font-face parsing integration - uses css_font_face.hpp module
@@ -123,22 +121,19 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     }
 
     // Resource ownership stays explicit: this helper always returns a font-owned copy.
-    char* owned_base_path = radiant_document_resource_base(
-        lycon->doc, MEM_CAT_FONT);
-    const char* base_path = owned_base_path;
+    lam::Temp<char> owned_base_path(radiant_document_resource_base(
+        lycon->doc, MEM_CAT_FONT));
+    const char* base_path = owned_base_path.get();
 
     // Parse using CSS module
     CssFontFaceDescriptor* css_desc = css_parse_font_face_content(content, nullptr);
-    if (!css_desc) {
-        if (owned_base_path) mem_free(owned_base_path);
-        return;
-    }
+    if (!css_desc) return;
 
     // Resolve URL
     if (css_desc->src_url && base_path) {
         char* resolved = css_resolve_font_url(css_desc->src_url, base_path, nullptr);
         if (resolved) {
-            mem_free(css_desc->src_url);
+            lam::Temp<char> previous(css_desc->src_url);  // the resolved URL takes the slot
             css_desc->src_url = resolved;
         }
     }
@@ -152,7 +147,6 @@ void parse_font_face_rule(LayoutContext* lycon, void* rule) {
     }
 
     css_font_face_descriptor_free(css_desc);
-    if (owned_base_path) mem_free(owned_base_path);
 }
 
 // Process all @font-face rules from a stylesheet - uses css_font_face.hpp module
@@ -195,24 +189,25 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
                                    css_desc->src_urls[j].url,
                                    css_desc->src_urls[j].format ? css_desc->src_urls[j].format : "?");
                     }
-                    mem_free(css_desc->src_urls[j].url);
+                    lam::Temp<char> dropped(css_desc->src_urls[j].url);
                     css_desc->src_urls[j].url = nullptr;
                 }
             }
         }
         if (radiant_url_is_http(css_desc->src_url)) {
-            mem_free(css_desc->src_url);
+            lam::Temp<char> dropped(css_desc->src_url);
             css_desc->src_url = nullptr;
         }
 
         // SVG image documents can use embedded font bytes without fetching external resources.
         if (data_only) {
             if (css_desc->src_url && strncmp(css_desc->src_url, "data:", 5) != 0) {
-                mem_free(css_desc->src_url); css_desc->src_url = nullptr;
+                lam::Temp<char> dropped(css_desc->src_url);
+                css_desc->src_url = nullptr;
             }
             for (int j = 0; css_desc->src_urls && j < css_desc->src_count; j++) {
                 char*& source = css_desc->src_urls[j].url;
-                if (source && strncmp(source, "data:", 5) != 0) { mem_free(source); source = nullptr; }
+                if (source && strncmp(source, "data:", 5) != 0) { lam::Temp<char> dropped(source); source = nullptr; }
             }
         }
 
@@ -245,16 +240,16 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
                 for (int j = 0; j < css_desc->src_count; j++) {
                     if (css_desc->src_urls[j].url) loadable_src_count++;
                 }
-                descriptor->src_entries = loadable_src_count > 0
+                descriptor->src_entries = lam::own_arr(loadable_src_count > 0
                     ? (FontFaceSrc*)mem_calloc(loadable_src_count, sizeof(FontFaceSrc), MEM_CAT_LAYOUT)
-                    : nullptr;
+                    : nullptr);
                 if (descriptor->src_entries) {
                     descriptor->src_count = loadable_src_count;
                     int dst = 0;
                     for (int j = 0; j < css_desc->src_count; j++) {
                         if (!css_desc->src_urls[j].url) continue;
-                        descriptor->src_entries[dst].path = mem_strdup(css_desc->src_urls[j].url, MEM_CAT_LAYOUT);
-                        descriptor->src_entries[dst].format = css_desc->src_urls[j].format ? mem_strdup(css_desc->src_urls[j].format, MEM_CAT_LAYOUT) : nullptr;
+                        descriptor->src_entries[dst].path = lam::own(mem_strdup(css_desc->src_urls[j].url, MEM_CAT_LAYOUT));
+                        descriptor->src_entries[dst].format = lam::own(css_desc->src_urls[j].format ? mem_strdup(css_desc->src_urls[j].format, MEM_CAT_LAYOUT) : nullptr);
                         dst++;
                     }
                     clog_debug(font_log, "Copied %d src entries for @font-face '%s'",
@@ -268,7 +263,7 @@ void process_font_face_rules_from_stylesheet(UiContext* uicon, CssStylesheet* st
         css_font_face_descriptor_free(css_desc);
     }
 
-    mem_free(css_descs);
+    lam::Temp<CssFontFaceDescriptor*> descriptor_array(css_descs);
     clog_info(font_log, "Registered %d @font-face descriptors", count);
 }
 
@@ -284,9 +279,9 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
     }
 
     // Resource ownership stays explicit: this helper always returns a font-owned copy.
-    char* owned_doc_base_path = radiant_document_resource_base(
-        doc, MEM_CAT_FONT);
-    const char* doc_base_path = owned_doc_base_path;
+    lam::Temp<char> owned_doc_base_path(radiant_document_resource_base(
+        doc, MEM_CAT_FONT));
+    const char* doc_base_path = owned_doc_base_path.get();
 
     for (int i = 0; i < doc->stylesheet_count; i++) {
         CssStylesheet* stylesheet = doc->stylesheets[i];
@@ -294,20 +289,12 @@ void process_document_font_faces(UiContext* uicon, DomDocument* doc) {
 
         // An external stylesheet owns the base for its relative font URLs.
         const char* base_path = doc_base_path;
-        char* stylesheet_path = stylesheet->origin_url
+        lam::Temp<char> stylesheet_path(stylesheet->origin_url
             ? radiant_resolve_resource_path(stylesheet->origin_url,
-                doc_base_path, false, MEM_CAT_FONT) : nullptr;
-        if (stylesheet_path) base_path = stylesheet_path;
+                doc_base_path, false, MEM_CAT_FONT) : nullptr);
+        if (stylesheet_path) base_path = stylesheet_path.get();
 
         process_font_face_rules_from_stylesheet(uicon, stylesheet, base_path);
-
-        if (stylesheet_path) {
-            mem_free(stylesheet_path);  // from url_to_local_path() or strdup() which use stdlib
-        }
-    }
-
-    if (owned_doc_base_path) {
-        mem_free(owned_doc_base_path);  // from url_to_local_path()
     }
     doc->font_faces_processed = true;
 }
@@ -325,7 +312,7 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
     // Initialize @font-face storage if needed
     if (!uicon->font_faces) {
         uicon->font_face_capacity = 10;
-        uicon->font_faces = (FontFaceDescriptor**)mem_calloc(uicon->font_face_capacity, sizeof(FontFaceDescriptor*), MEM_CAT_LAYOUT);
+        uicon->font_faces = lam::own_arr((FontFaceDescriptor**)mem_calloc(uicon->font_face_capacity, sizeof(FontFaceDescriptor*), MEM_CAT_LAYOUT));
         uicon->font_face_count = 0;
 
         if (!uicon->font_faces) {

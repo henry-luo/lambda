@@ -232,7 +232,7 @@ P1–P3 flattened the call path from a call site into the kernel and out through
 the body entry. An AST-interpreted callee takes that shared middle
 (`js_call` → kernel → `fn->body`), but the interpreter's own layers on either
 side were never flattened. Measured on the P3 debug build for a non-tail
-dynamic recursion under `JS_EXECUTION_BACKEND=ast`, one AST call costs
+dynamic recursion under `JS_EXEC_BACKEND=ast`, one AST call costs
 **4,128 B**:
 
 | Frame per call level | Stack | Role |
@@ -276,7 +276,7 @@ the same two machine frames: the direct instance and `js_interp_call_function`.
 Both frames shrink, the kernel instance by its folded branches and the AST
 activation by four root slots. The interpreter recursion
 (`exec_list` → `exec` → `eval`, ~45% of the level) is tree-walking structure,
-not call protocol, and is out of scope. Gates: the `JS_EXECUTION_BACKEND=ast`
+not call protocol, and is out of scope. Gates: the `JS_EXEC_BACKEND=ast`
 runs of `test_js_gtest` and the test262 baseline must show no new failures
 against the pre-change tree on that backend, plus a forced-GC run on it. The
 MIR backend gates are unchanged.
@@ -694,7 +694,7 @@ regression and the span smoke script. After the dead-helper deletion,
   place of `js_call_function_prerooted_args_into` for plain-argument,
   non-construct calls.
 
-**Measured** (debug `-O3`, lldb, `JS_EXECUTION_BACKEND=ast`, non-tail dynamic
+**Measured** (debug `-O3`, lldb, `JS_EXEC_BACKEND=ast`, non-tail dynamic
 recursion `temp/jscall/dyn_nontail.js`):
 - Breakpoint counts: all 7 recursive calls take `js_call_ast_direct`. Only the
   native `console.log` takes `js_call` and the generic kernel.
@@ -709,14 +709,14 @@ recursion `temp/jscall/dyn_nontail.js`):
 **Gate facts established while planning.**
 - The standard test262 baseline is predominantly an AST run: hybrid routing
   sends 34,334 of 40,261 tests to AST batches, and the runner sets
-  `JS_EXECUTION_BACKEND` per batch.
+  `JS_EXEC_BACKEND` per batch.
 - `test_js_gtest` defaults to mixed mode: every test not in the MIR list runs
   on AST.
 - Both suites were therefore already gating the AST path in P1–P3.
 - The pre-change AST baselines are test262 40,261/40,261 and `test_js_gtest`
   489/489.
 
-**Release A/B** (interleaved ×3, `JS_EXECUTION_BACKEND=ast`,
+**Release A/B** (interleaved ×3, `JS_EXEC_BACKEND=ast`,
 `temp/aap/callloop_big.js`, 4 million dynamic AST calls): pre-change 1.69–1.71 s,
 after 1.62–1.68 s, about 3% faster. Interpreter tree walking dominates an AST
 call, so call-protocol flattening moves the total only a little.
@@ -780,7 +780,7 @@ trampoline; `js_call` no longer appears on the hit path.
 **Measured.**
 - Stack per dynamic level is unchanged at 672 B (lldb, debug `-O3`), because
   `js_call` was already a zero-byte tail jump.
-- Release A/B (interleaved ×3, `JS_EXECUTION_BACKEND=mir`,
+- Release A/B (interleaved ×3, `JS_EXEC_BACKEND=mir`,
   `temp/aap/callloop_big.js`) against the pre-P4 release binary: 0.35–0.39 s
   before vs 0.35 s after. No measurable change on this loop; the removed hop
   was a single predictable tail branch.
@@ -988,7 +988,7 @@ JC22v2: the reuse is removed (§3.5 v2 note, Appendix I).*
 | Node `test-stack-size-limit` (`--stack-size=2000 -e explode`) | hangs | `RangeError`, exit 1 |
 | `rec(n){ try { return rec(n+1) } catch { return n } }` | never terminates | returns |
 
-**Cost** (release, `JS_EXECUTION_BACKEND=ast`, paired ×11). Control: the same
+**Cost** (release, `JS_EXEC_BACKEND=ast`, paired ×11). Control: the same
 tree before this change.
 
 | Row | Ratio | Wins |

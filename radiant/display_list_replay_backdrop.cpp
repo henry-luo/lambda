@@ -63,7 +63,7 @@ void dl_replay_backdrop_save_at_offset(DisplayReplayBackdropStack* stack,
     }
 
     surface_region_clear(surface, &region);
-    stack->stack[stack->sp] = buf;
+    stack->stack[stack->sp] = lam::own_arr(buf);
     stack->region[stack->sp] = region;
     stack->scope[stack->sp] = scope;
     stack->sp++;

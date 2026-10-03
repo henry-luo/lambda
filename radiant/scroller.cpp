@@ -441,12 +441,12 @@ void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
     search.port_height = layout_content_size_from_border_box(block, block->height, false);
     LayoutContext length_context = {};
     length_context.doc = block->doc;
-    length_context.view = static_cast<View*>(block);
-    length_context.elmt = block;
-    length_context.ui_context = block->doc
-        ? static_cast<UiContext*>(block->doc->js.host_ui_context) : nullptr;
-    length_context.pool = block->doc && block->doc->view_tree
-        ? block->doc->view_tree->prop_pool : nullptr;
+    length_context.view = lam::up(static_cast<View*>(block));
+    length_context.elmt = lam::up(block);
+    length_context.ui_context = lam::up(block->doc
+        ? static_cast<UiContext*>(block->doc->js.host_ui_context) : nullptr);
+    length_context.pool = lam::up(block->doc && block->doc->view_tree
+        ? block->doc->view_tree->prop_pool : nullptr);
     length_context.width = length_context.ui_context
         ? length_context.ui_context->viewport_width : block->width;
     length_context.height = length_context.ui_context

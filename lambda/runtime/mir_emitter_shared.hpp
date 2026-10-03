@@ -4555,6 +4555,13 @@ static inline void em_profile_before_call(MirEmitter* em, MIR_insn_t call,
     MIR_reg_t ignored = em_new_reg(em, "profile_call", MIR_T_I64);
     MIR_insn_t mark = mir_new_call_with_args(em->ctx, note->proto,
         note->import, ignored, 1, &arg);
+    // diagnostic calls must retain their NO_GC effect before root finalization
+    if (!em_root_note_call_site(&em->frame.gc_call_sites,
+            &em->frame.gc_call_site_count, &em->frame.gc_call_site_capacity,
+            mark, note->call.effects.gc, note->call.effects.exception)) {
+        log_error("lambda-exec-profile: cannot record diagnostic call effects");
+        abort();
+    }
     MIR_insert_insn_before(em->ctx, em->func_item, call, mark);
 }
 

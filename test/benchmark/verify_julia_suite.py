@@ -86,7 +86,7 @@ def port_command(engine, name):
     if engine in ("mir", "mir_typed", "interp", "interp_typed"):
         typed = engine.endswith("_typed")
         path = SUITE / f"{name}{'2' if typed else ''}.ls"
-        env = {"LAMBDA_TIER": "interp" if engine.startswith("interp") else "jit"}
+        env = {"LAMBDA_EXEC_BACKEND": "interp" if engine.startswith("interp") else "jit"}
         return [registry.LAMBDA_EXE, "run", str(path)], env
     if engine in ("nodejs", "lambdajs", "quickjs", "mvpjs"):
         path = str(SUITE / f"{name}.js")
@@ -98,7 +98,7 @@ def port_command(engine, name):
         path = registry.expand_benchmark_js(path)
         if engine == "mvpjs":
             return [registry.LAMBDA_EXE, "js", "--runtime=mvp", path], {}
-        return [registry.LAMBDA_EXE, "js", path], {"JS_EXECUTION_BACKEND": "mir"}
+        return [registry.LAMBDA_EXE, "js", path], {"JS_EXEC_BACKEND": "mir"}
     if engine == "python":
         return [sys.executable, str(SUITE / "python" / f"{name}.py")], {}
     if engine == "julia":

@@ -1,0 +1,20 @@
+<!doctype html><html><head><style>html,body{margin:0;background:white}svg{display:block}</style></head><body>
+<!-- Filter Effects 1 sections 8, 9.4 and 9.15: explicit results in the referencing viewport.
+     No filters or referenced elements are used, so the reference does not share those code paths. -->
+<svg width="640" height="460">
+ <rect x="60" y="35" width="40" height="20" fill="blue"/>
+ <rect x="250" y="40" width="40" height="40" fill="red"/>
+ <rect x="390" y="40" width="80" height="40" fill="blue"/>
+ <rect x="60" y="165" width="40" height="20" fill="blue"/>
+ <rect x="230" y="150" width="50" height="40" fill="red"/>
+ <rect x="280" y="150" width="50" height="40" fill="blue"/>
+ <rect x="430" y="150" width="40" height="40" fill="red"/>
+ <rect x="470" y="150" width="40" height="40" fill="blue"/>
+ <!-- A 2em region declared at 10px spans 20 user units, even on a 30px target. -->
+ <rect x="20" y="250" width="20" height="20" fill="red"/>
+ <rect x="140" y="250" width="20" height="20" fill="blue"/>
+ <image x="350" y="250" width="100" height="80" href="../../ui/svg_image_assets/split.png" preserveAspectRatio="none"/>
+ <!-- 50%/25% of the two referencing viewports gives 100/50 and 200/100. -->
+ <rect x="100" y="360" width="50" height="40" fill="red"/>
+ <rect x="200" y="400" width="100" height="40" fill="red"/>
+</svg></body></html>

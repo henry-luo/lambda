@@ -1,0 +1,4 @@
+[0.25, 0.75, true]
+[true, true]
+changed
+[0.5, true, true]

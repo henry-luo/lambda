@@ -1202,6 +1202,8 @@ enum ArrayRepCertFlags {
     // some axis has a fixed length (`T[n]`): lengths are not a carrier fact,
     // so every reuse re-checks them against the live value
     ARRAY_REP_CERT_COUNTED = 1u << 3,
+    // the resolved numeric leaf carrier proves every admitted value (D3.3.3v3)
+    ARRAY_REP_CERT_PRIMITIVE_VALUES = 1u << 4,
 };
 
 struct ArrayRepCert {
@@ -2956,6 +2958,12 @@ extern "C" {
     // Other carriers retain the complete checked-boundary path.
     Item lambda_fill_for_contract(Item count, Item value, Type* expected,
         const char* boundary);
+    // compile-proved plain primitive destination; preserve the count's native int lane
+    Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
+        const char* boundary);
+    // shared construction kernel; count and scalar lane are admitted by the caller
+    Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane);
+    bool lambda_try_fill_for_contract(Item count, Item value, Type* expected, Item* result);
     Item lambda_array_admit_numeric_contract(Item value, Type* expected,
         const char* boundary);
     // `[]` admitted under `expected`: a certified empty ArrayNum for a

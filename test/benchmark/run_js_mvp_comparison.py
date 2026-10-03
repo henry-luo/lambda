@@ -33,7 +33,7 @@ def main():
     bench.require_pinned_node_version(["nodejs"], "time")
     # Profile instrumentation stays dormant during timing; the full engine's
     # default is AUTO, so explicitly select the compiled benchmark lane.
-    os.environ["JS_EXECUTION_BACKEND"] = "mir"
+    os.environ["JS_EXEC_BACKEND"] = "mir"
     os.environ["JS_OPT_TRACE"] = "0"
     os.environ["JS_MIR_DUMP"] = "0"
     output = Path(args.output)

@@ -31,7 +31,6 @@ typedef struct LambdaMapContractCacheEntry {
 // interning table beside the map-relation cache gives every equivalent T[]
 // boundary in one EvalContext the same proof without retaining Type objects
 // after that context's pool is released (D3.3.3).
-#define LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY 32
 typedef struct LambdaArrayRepCertCacheEntry {
     Type* contract;
     ArrayRepCert* cert;
@@ -51,8 +50,7 @@ typedef struct Heap {
     LambdaRegionBlock* region_free_blocks;
     LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
     uint32_t map_contract_cache_next;
-    LambdaArrayRepCertCacheEntry array_rep_cert_cache[LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY];
-    uint32_t array_rep_cert_cache_next;
+    struct hashmap* array_rep_cert_by_contract;
     // Identity of this heap incarnation, assigned once at heap_init from a
     // process-wide counter and never reused. Root registrations die with the
     // heap; a RootVector compares this to know its blocks must re-register
@@ -126,6 +124,13 @@ struct Runtime {
     // A document chooses one JS execution tier before its preamble runs;
     // mixing AST and MIR closures in a single realm has no shared ABI.
     bool js_ast_backend;
+    // D8.1.3v22 promotion policy, read from JS_EXEC_BACKEND /
+    // JS_FUNC_JIT_THRESHOLD / JS_LOOP_JIT_THRESHOLD once per runtime at first use rather
+    // than from the environment on every interpreted call.
+    bool js_promotion_policy_resolved;
+    bool js_promotion_auto;
+    uint32_t js_promotion_call_threshold;
+    uint32_t js_promotion_backedge_threshold;
     const char* import_base_dir; // override import base directory for main script (NULL = use script's directory)
     bool use_mir_direct; // all executable Lambda paths use MIR Direct
     // Worker-local module prebuilds may create immutable AST cache templates,

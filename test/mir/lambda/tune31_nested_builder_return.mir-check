@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Tune31 T31-2 / D3.2.1-D3.3.1, S7.1.3v2: an indexed item from a certified outer builder is admitted at the direct consumer boundary; the raw consumer has no generic index helper.",
+  "description": "D3.2.1-D3.3.1/S11.4.3: an indexed item from a certified outer builder retains the untyped consumer's error guard without repeating its identity admission; the raw consumer has no generic index helper.",
   "checks": [
     {
       "in_func": "_sum_codes_#",
@@ -10,8 +10,14 @@
     },
     {
       "in_func": "_main_#",
-      "expect": [
-        "call\tfn_index_p, fn_index",
+      "expect_seq": [
+        "call\tfn_index_p, fn_index, {{r:raw}},",
+        "mov\t{{r:item}}, {{r:raw}}",
+        "ursh\t{{r:tag}}, {{r:item}}, 56",
+        "eq\t{{r}}, {{r:tag}}, 27",
+        "call\t_sum_codes_"
+      ],
+      "forbid": [
         "call\tlambda_type_check_p, lambda_type_check"
       ]
     }

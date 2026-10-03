@@ -76,7 +76,7 @@ JavaScript / TypeScript source
   first-party C parser (lexer + recursive-descent/Pratt)  →  unified AST
         │
         ├── AST interpreter (default tier)
-        └── MIR lowering (hot functions, or JS_EXECUTION_BACKEND=mir) → native code
+        └── MIR lowering (hot functions, or JS_EXEC_BACKEND=mir) → native code
         │
         ▼
   JS runtime (lambda/js: objects, prototypes, builtins, RegExp, event loop, modules)

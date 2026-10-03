@@ -1082,12 +1082,34 @@ InterpBoundaryPlan* interp_boundary_plan_create(Pool* pool, Type* contract) {
     plan->map_contract = lambda_type_nonnull_map_contract(contract);
     plan->optional_open_array = interp_declared_optional_array(contract);
     plan->numeric_kind = lambda_numeric_kind_from_type(plan->plain);
+    plan->accepts_null = lambda_type_accepts_null(contract);
     if (lambda_array_contract_info(contract, &plan->array)) {
         plan->store_element = type_field_unwrap_simple_decl(plan->array.immediate_element);
         plan->has_store_lane = lambda_type_array_lane_storage_desc(
             plan->store_element, &plan->store_lane);
+        plan->uncounted_primitive_array = lambda_array_contract_is_plain(contract) &&
+            plan->array.rank == 1 && !plan->array.counted_axes &&
+            (plan->store_element == &TYPE_INT || plan->store_element == &TYPE_BOOL ||
+             plan->store_element == &TYPE_FLOAT || plan->store_element == &TYPE_STRING);
     }
     return plan;
+}
+
+static bool interp_boundary_value_proven(Item value, const InterpBoundaryPlan* plan) {
+    if (!plan || plan->uses_binder) return false;
+    TypeId actual = get_type_id(value);
+    if (actual == LMD_TYPE_NULL) return plan->accepts_null;
+    if (plan->plain == &TYPE_INT || plan->plain == &TYPE_BOOL ||
+            plan->plain == &TYPE_FLOAT || plan->plain == &TYPE_STRING)
+        return actual == plan->plain->type_id;
+    if (plan->map_contract)
+        return lambda_map_rep_proves_contract(value, (TypeMap*)plan->map_contract);
+    if (plan->array.array_contract) {
+        if (plan->uncounted_primitive_array &&
+                lambda_array_rep_proves_uncounted_primitive(value, plan->store_element)) return true;
+        return lambda_array_rep_proves(value, plan->contract, true);
+    }
+    return lambda_value_rep_proves_contract(value, plan->contract);
 }
 
 static bool interp_type_uses_binder(Type* type) {
@@ -1122,11 +1144,7 @@ static Item interp_coerce_declared_binding(InterpFrame* f, Item value,
     }
     if (plan) {
         // the plan resolved the destination; only its live representation can change
-        if (!plan->uses_binder &&
-                ((plan->map_contract && lambda_map_rep_proves_contract(value,
-                    (TypeMap*)plan->map_contract)) ||
-                 (plan->array.array_contract && lambda_array_rep_proves(value,
-                    plan->array.array_contract, true)))) return value;
+        if (interp_boundary_value_proven(value, plan)) return value;
         if (plan->optional_open_array && (value_type == LMD_TYPE_NULL ||
                 value_type == LMD_TYPE_RANGE || value_type == LMD_TYPE_ARRAY ||
                 value_type == LMD_TYPE_ARRAY_NUM)) return value;
@@ -1185,6 +1203,9 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
         {"type parameter binding", NULL, NULL, NULL, 0};
     static const LambdaBoundary declared_parameter_label =
         {"declared parameter binding", NULL, NULL, NULL, 0};
+    const InterpBoundaryPlan* plan = parameter->entry ? parameter->entry->interp_boundary : NULL;
+    // a resolved identity action needs neither parameter nor contract classification
+    if (interp_boundary_value_proven(value, plan)) return value;
     TypeParam* parameter_type = lambda_type_param(parameter->type);
     if (parameter_type && parameter_type->binder) {
         Scratch source_root(f);
@@ -1195,7 +1216,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     }
     Type* contract = parameter_type && parameter_type->contract_type
         ? parameter_type->contract_type : parameter ? parameter->declared_type : NULL;
-    if (f && f->binder_count && interp_type_uses_binder(contract)) {
+    if (f && f->binder_count && (plan ? plan->uses_binder : interp_type_uses_binder(contract))) {
         Scratch source_root(f);
         source_root.set(value);
         return lambda_type_check_lazy(source_root.get(), contract, f->binder_env,
@@ -1226,7 +1247,7 @@ static Item interp_coerce_parameter_binding(InterpFrame* f, Item value,
     }
     return interp_coerce_declared_binding(f, value, parameter->declared_type,
         boundary ? boundary : &declared_parameter_label,
-        parameter->entry ? parameter->entry->interp_boundary : NULL);
+        plan);
 }
 
 static bool interp_parameter_is_binder_site(const AstNamedNode* parameter) {
@@ -1250,8 +1271,9 @@ static bool interp_bind_declared_value(InterpFrame* f, AstDeclaratorNode* named,
     if (!named) return false;
     LambdaBoundary boundary = {NULL, interp_format_named_boundary, named->name,
         "declaration", 0};
-    Item bound = interp_coerce_declared_binding(f, value, named->declared_type,
-        &boundary, named->entry ? named->entry->interp_boundary : NULL);
+    Item bound = named->interp_boundary_proven ? value :
+        interp_coerce_declared_binding(f, value, named->declared_type,
+            &boundary, named->entry ? named->entry->interp_boundary : NULL);
     // CW24v2 phase 2: a place-copy binding (`var row = m.rows[i]`) marks the
     // read value so the first write DETACHES -- a real S9.1.2 snapshot --
     // instead of aliasing a child a fresh literal never captured. All T0
@@ -1483,6 +1505,9 @@ static Item eval_unary(InterpFrame* f, AstUnaryNode* node) {
     }
 }
 
+static bool interp_fast_int_apply(Operator op, int64_t left, int64_t right,
+        int64_t* result);
+
 static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     // `and`/`or` short-circuit before the right operand is evaluated (S10.2.3);
     // truthiness is by tag through the shipped helper (S3.1/S3.2).
@@ -1534,6 +1559,13 @@ static Item eval_binary(InterpFrame* f, AstBinaryNode* node) {
     rhs.set(right_value);
     Item left = lhs.get();
     Item right = rhs.get();
+    if (node->interp_int_arithmetic && get_type_id(left) == LMD_TYPE_INT &&
+            get_type_id(right) == LMD_TYPE_INT) {
+        // the shared kernel rejects results outside int53; generic arithmetic owns poison
+        int64_t result = 0;
+        if (interp_fast_int_apply(node->op, lambda_int_item_to_i64(left),
+                lambda_int_item_to_i64(right), &result)) return {.item = i2it(result)};
+    }
     // Keyword comparisons are the only vectorized comparison syntax; symbolic
     // < <= > >= stay scalar so masks are never implicit truth values.
     if (node->op >= OPERATOR_ELEM_EQ && node->op <= OPERATOR_ELEM_GE) {
@@ -1679,7 +1711,7 @@ static Item eval_native_sys_item_call(const SysFuncInfo* info, const Item* args,
 // Direct C call through the registry entry, using the same result boxing MIR
 // lowering selects from sysfunc_c_ret_type_id. Same registry, both tiers.
 static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
-        int argc, Type* result_type) {
+        int argc, Type* result_type, Type* array_destination = NULL) {
     if (!info || !info->func_ptr) {
         log_error("interp: system function '%s' has no entry point",
             info && info->name ? info->name : "<null>");
@@ -1694,6 +1726,10 @@ static Item eval_sys_call(InterpFrame* f, SysFuncInfo* info, const Item* args,
             // error; it never returns from this activation (S7.7.3)
             if (item_is_error(args[i])) return args[i];
         }
+    }
+    if (info->fn == SYSFUNC_FILL && argc == 2 && array_destination) {
+        Item exact = ItemNull;
+        if (lambda_try_fill_for_contract(args[0], args[1], array_destination, &exact)) return exact;
     }
 
     if (interp_native_sys_item_supported(info)) {
@@ -2194,7 +2230,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
             return argc == 0 ? vmap_new() : vmap_from_array((Item){.item = words[0]});
         }
         Item sresult = eval_sys_call(f, sinfo, (const Item*)(void*)words, argc,
-            node->type);
+            node->type, node->interp_array_destination);
         if (sinfo && (sinfo->fn == SYSFUNC_ERROR || sinfo->fn == SYSFUNC_ERROR2)) {
             AstSysFuncNode* site = (AstSysFuncNode*)callee;
             sresult = lambda_error_stamp_site(sresult,
@@ -2828,7 +2864,10 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         bool proven = true;
         ShapeEntry* field = destination->shape;
         for (int i = 0; proven && i < vi; i++, field = typemap_next_field(destination, field))
-            proven = lambda_value_rep_proves_contract(values.items()[i], field->type);
+            proven = node->interp_fields
+                ? node->interp_fields[i].statically_proven ||
+                    interp_boundary_value_proven(values.items()[i], node->interp_fields[i].boundary)
+                : lambda_value_rep_proves_contract(values.items()[i], field->type);
         if (proven) {
             // Exact field proofs need no second staging span or admission.
             return interp_fill_map(f, destination, values.items(), vi);
@@ -2838,7 +2877,10 @@ static Item eval_map(InterpFrame* f, AstMapNode* node) {
         field = destination->shape;
         for (int i = 0; valid && i < vi; i++, field = typemap_next_field(destination, field)) {
             Item converted = values.items()[i];
-            valid = lambda_value_rep_proves_contract(converted, field->type) ||
+            valid = (node->interp_fields
+                ? node->interp_fields[i].statically_proven ||
+                    interp_boundary_value_proven(converted, node->interp_fields[i].boundary)
+                : lambda_value_rep_proves_contract(converted, field->type)) ||
                 lambda_type_try_admit(converted, field->type, NULL, &converted);
             if (valid) admitted.items()[i] = converted;
         }
@@ -5333,7 +5375,8 @@ static __attribute__((noinline)) Item exec_place_assign(InterpFrame* f, AstNode*
         replacement = lambda_array_set_checked_preplanned(owner.get(), key_slot.get(),
             value_slot.get(), root->declared_type, array_element,
             boundary_plan && boundary_plan->has_store_lane ? &boundary_plan->store_lane : NULL,
-            boundary, root->is_var_param);
+            boundary, root->is_var_param,
+            boundary_plan && boundary_plan->uncounted_primitive_array);
     } else if (ast_declared_type_is_map(root->declared_type)) {
         // a typed map write validates a detached candidate before it is
         // visible. Explicit `var` parameters were detached at the caller
@@ -5550,6 +5593,11 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Item object_value = eval_expr(f, field->object);
         Scratch obj(f);
         obj.set(object_value);
+        if (field->interp_field && get_type_id(obj.get()) == LMD_TYPE_MAP &&
+                obj.get().map->type == field->interp_field->shape) {
+            // the immutable shape predicts this field; misses keep shared lookup semantics
+            return map_shape_field_to_item(obj.get().map->data, field->interp_field->field);
+        }
         Item key = interp_eval_member_key(f, field->field);
         Scratch key_slot(f);
         key_slot.set(key);
@@ -5579,9 +5627,19 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         Scratch index_slot(f);
         index_slot.set(index_value);
         int64_t plain_index = 0;
-        if (lambda_item_to_int64_exact(index_slot.get(), &plain_index) &&
-                get_type_id(obj.get()) == LMD_TYPE_ARRAY) {
-            return interp_item_at(obj.get(), plain_index);
+        if (lambda_item_to_int64_exact(index_slot.get(), &plain_index)) {
+            TypeId object_type = get_type_id(obj.get());
+            if (field->interp_field && field->interp_field->numeric_index &&
+                    object_type == LMD_TYPE_ARRAY_NUM) {
+                ArrayNum* array = obj.get().array_num;
+                if (!array->is_ndim && !array->is_view && array->get_elem_type() ==
+                        field->interp_field->numeric_element) {
+                    // the shared decoder requires a bounded offset; OOB remains absent
+                    return plain_index >= 0 && plain_index < array->length
+                        ? array_num_read_item(array, plain_index) : ItemNull;
+                }
+            }
+            if (object_type == LMD_TYPE_ARRAY) return interp_item_at(obj.get(), plain_index);
         }
         return fn_index(obj.get(), index_slot.get());
     }
@@ -5846,8 +5904,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
             boundary = (LambdaBoundary){NULL, interp_format_named_boundary,
                 assign->target, "assignment to", 0};
         }
-        value = interp_coerce_declared_binding(f, value, target->declared_type,
-            &boundary, target->interp_boundary);
+        if (!assign->interp_boundary_proven)
+            value = interp_coerce_declared_binding(f, value, target->declared_type,
+                &boundary, target->interp_boundary);
         if (!fresh_rhs_error && item_is_error(value) && target->declared_type &&
                 !lambda_type_accepts_error(target->declared_type)) {
             // A fresh checked-assignment failure returns before publishing the
@@ -6031,7 +6090,7 @@ static InterpState* interp_current_state(void);
 // ---------------------------------------------------------------------------
 // A `while` that is a direct statement of a `pn` body (numbered by the frame
 // plan) counts the back-edges of its whole subtree. When it reaches
-// LAMBDA_JIT_BACKEDGE, the statements from that loop to the end of the body
+// LAMBDA_LOOP_JIT_THRESHOLD, the statements from that loop to the end of the body
 // are compiled as a synthesized procedure -- the continuation -- whose
 // parameters are the activation's live-in locals. Once published, the running
 // activation enters it at the loop's next head test, where T0's whole live
@@ -6475,8 +6534,9 @@ static Item interp_rejected_parameter_error(const TypeFunc* signature,
     if (!signature || !args) return ItemNull;
     const TypeParam* param = signature->param;
     for (int index = 0; param && index < argc; param = param->next, index++) {
-        if (param->contract_type && !lambda_type_accepts_error(param->contract_type) &&
-                item_is_error(args[index])) {
+        // ordinary arguments need no error-contract classification at call entry
+        if (item_is_error(args[index]) && param->contract_type &&
+                !lambda_type_accepts_error(param->contract_type)) {
             // Reject before frame entry: MIR preserves this ItemError at the
             // caller boundary, so the callee cannot turn it into a value.
             return args[index];
@@ -6771,9 +6831,38 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                     // until this scope closes, but it must not be an active
                     // caller while the native entry can call back into T0.
                     List tail_args = {.length = params, .items = (Item*)(void*)frame->slots};
+                    // A variadic activation's rest list is not a fixed slot:
+                    // passing only `params` words made the satellite's adapter
+                    // see no extras and install its no-rest sentinel, so
+                    // `varg()` read empty after the handoff. Re-spread the
+                    // activation's current rest list (kept rooted by its frame
+                    // slot) after the fixed arguments.
+                    Item* spread = NULL;
+                    if (is_variadic && frame->vargs_index < frame->slot_count) {
+                        List* rest_list = (List*)(uintptr_t)frame->slots[frame->vargs_index];
+                        int64_t rest_len = rest_list ? rest_list->length : 0;
+                        if (rest_len > 0) {
+                            spread = (Item*)mem_calloc((size_t)(params + rest_len),
+                                sizeof(Item), MEM_CAT_EVAL);
+                            if (!spread) {
+                                result = ItemError;
+                                break;
+                            }
+                            for (int p = 0; p < (int)params; p++) {
+                                spread[p] = (Item){.item = frame->slots[p]};
+                            }
+                            for (int64_t r = 0; r < rest_len; r++) {
+                                spread[params + r] = rest_list->items[r];
+                            }
+                            tail_args.length = params + rest_len;
+                            tail_args.items = spread;
+                        }
+                    }
                     frame->st->top = frame->caller;
                     st->depth++;
-                    return fn_call(callable, &tail_args);
+                    Item tail_result = fn_call(callable, &tail_args);
+                    if (spread) mem_free(spread);
+                    return tail_result;
                 }
                 if (frame->signal != EvalSignal::TAIL_CALL) break;
                 frame->signal = EvalSignal::NORMAL;
@@ -7384,7 +7473,7 @@ bool interp_const_fold_script(Transpiler* tp) {
     // that evaluation to allocate -- a folded String, Decimal or container is
     // born on the GC heap and dies with the frame unless it is rehomed. So the
     // pass needs a context that can allocate, not merely a context: the eager
-    // pipeline (LAMBDA_TIER=jit) compiles the whole module before the runner
+    // pipeline (LAMBDA_EXEC_BACKEND=jit) compiles the whole module before the runner
     // reaches runner_setup_context()/heap_init(), leaving `context->heap` NULL
     // while `context` itself is live. Folding `type(42)` there reached
     // heap_calloc and faulted on `context->heap->gc`. Declining the pass keeps
@@ -7514,13 +7603,13 @@ static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallba
 }
 
 static uint32_t interp_jit_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_JIT_THRESHOLD", 5);
+    return interp_promotion_threshold("LAMBDA_FUNC_JIT_THRESHOLD", 5);
 }
 
 // back-edges of one handoff loop's subtree before its continuation compiles;
 // the user set 10000 on 2026-10-02 (D8.1.1v14, Interp Tune2 §4.3)
 static uint32_t interp_jit_backedge_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_JIT_BACKEDGE", 10000);
+    return interp_promotion_threshold("LAMBDA_LOOP_JIT_THRESHOLD", 10000);
 }
 
 // `LAMBDA_SATELLITE_SYNC=1` publishes each satellite at the promotion that

@@ -13,7 +13,7 @@ design is `vibe/Lambda_Design_JS_Interpreter.md` P2.
 
 ## Delivered boundary
 
-`JS_EXECUTION_BACKEND=ast` parses, binds, indexes, and retains a `JsScript`
+`JS_EXEC_BACKEND=ast` parses, binds, indexes, and retains a `JsScript`
 before executing its shared AST. `JsScript : Script` is catalogued by the
 same `Runtime` that owns Lambda scripts. The interpreter obtains the
 runtime's canonical `EvalContext`, allocates in its heap, and prepares the

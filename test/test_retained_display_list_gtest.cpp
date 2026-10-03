@@ -740,7 +740,7 @@ TEST_F(RetainedDisplayListTest, RejectsBorrowedFilterAtCapture) {
     filter->op = DL_APPLY_FILTER;
     filter->bounds[2] = 10.0f;
     filter->bounds[3] = 10.0f;
-    filter->apply_filter.filter = &fake_filter;
+    filter->apply_filter.filter = lam::up((FilterProp*)&fake_filter);
     dl_end_element(&source, begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -769,7 +769,7 @@ TEST_F(RetainedDisplayListTest, UnsafeRecaptureClearsPreviousFragment) {
     filter->op = DL_APPLY_FILTER;
     filter->bounds[2] = 10.0f;
     filter->bounds[3] = 10.0f;
-    filter->apply_filter.filter = &fake_filter;
+    filter->apply_filter.filter = lam::up((FilterProp*)&fake_filter);
     dl_end_element(&unsafe_source, unsafe_begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -905,7 +905,7 @@ TEST_F(RetainedDisplayListTest, RejectsStaleVideoGeneration) {
     video->op = DL_VIDEO_PLACEHOLDER;
     video->bounds[2] = 12.0f;
     video->bounds[3] = 8.0f;
-    video->video_placeholder.video = &source;
+    video->video_placeholder.video = (RdtVideo*)&source;
     video->video_placeholder.video_generation = 4;
     dl_end_element(&source, begin);
 

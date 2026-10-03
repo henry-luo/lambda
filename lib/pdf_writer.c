@@ -222,6 +222,24 @@ static void pdf_format_float(StrBuf* buf, float value) {
     }
 }
 
+static void pdf_append_matrix(StrBuf* buf, float a, float b, float c,
+                               float d, float e, float f) {
+    const float values[] = {a, b, c, d, e, f};
+    for (int i = 0; i < 6; i++) {
+        if (i) strbuf_append_char(buf, ' ');
+        pdf_format_float(buf, values[i]);
+    }
+}
+
+HPDF_STATUS HPDF_Page_Concat(HPDF_Page page, float a, float b, float c,
+                            float d, float e, float f) {
+    if (!page || !isfinite(a) || !isfinite(b) || !isfinite(c) ||
+        !isfinite(d) || !isfinite(e) || !isfinite(f)) return HPDF_ERROR_INVALID_PARAM;
+    pdf_append_matrix(page->content, a, b, c, d, e, f);
+    strbuf_append_str(page->content, " cm\n");
+    return HPDF_OK;
+}
+
 static void pdf_append_hex_byte(StrBuf* buf, uint8_t value) {
     static const char* hex = "0123456789ABCDEF";
     strbuf_append_char(buf, hex[(value >> 4) & 0x0f]);
@@ -741,18 +759,7 @@ HPDF_STATUS HPDF_Page_DrawABGRImage(HPDF_Page page, const uint32_t* pixels,
     }
 
     strbuf_append_str(page->content, "q\n");
-    pdf_format_float(page->content, a);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, b);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, c);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, d);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, e);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, f);
-    strbuf_append_str(page->content, " cm\n");
+    HPDF_Page_Concat(page, a, b, c, d, e, f);
     strbuf_append_str(page->content, "BI\n/W ");
     strbuf_append_int(page->content, width);
     strbuf_append_str(page->content, "\n/H ");
@@ -838,18 +845,8 @@ HPDF_STATUS HPDF_Page_DrawABGRImageWithAlpha(HPDF_Page page, const uint32_t* pix
     }
 
     strbuf_append_str(page->content, "q\n");
-    pdf_format_float(page->content, a);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, b);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, c);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, d);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, e);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, f);
-    strbuf_append_str(page->content, " cm\n/");
+    HPDF_Page_Concat(page, a, b, c, d, e, f);
+    strbuf_append_char(page->content, '/');
     strbuf_append_str(page->content, image->resource_name);
     strbuf_append_str(page->content, " Do\nQ\n");
 
@@ -933,17 +930,7 @@ HPDF_STATUS HPDF_Page_SetTextMatrix(HPDF_Page page,
     if (!page) return HPDF_ERROR_INVALID_PARAM;
     if (!page->in_text_object) return HPDF_ERROR_INVALID_STATE;
 
-    pdf_format_float(page->content, a);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, b);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, c);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, d);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, e);
-    strbuf_append_char(page->content, ' ');
-    pdf_format_float(page->content, f);
+    pdf_append_matrix(page->content, a, b, c, d, e, f);
     strbuf_append_str(page->content, " Tm\n");
 
     return HPDF_OK;

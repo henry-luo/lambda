@@ -90,9 +90,9 @@ TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
     DomElement element = {};
     element.node_type = DOM_NODE_ELEMENT;
     element.set_synthetic(true);
-    element.doc = &doc;
+    element.doc = lam::up(&doc);
     element.set_styles_resolved(true);
-    doc.root = &element;
+    doc.root = lam::up(&element);
     for (size_t i = 0; i < count; i++) {
         EXPECT_EQ(css_prop_accessor(rows[i].id), &rows[i]);
         EXPECT_GT(rows[i].id, CSS_PROPERTY_UNKNOWN);
@@ -113,10 +113,10 @@ TEST(CssPropTable, DirtyMutationDoesNotConsumePendingLayout) {
     element.set_synthetic(true);
     InlineProp in_line = INLINE_PROP_DEFAULT;
     in_line.opacity = 1.0f;
-    element.doc = &doc;
-    element.in_line = &in_line;
+    element.doc = lam::up(&doc);
+    element.in_line = lam::shared(&in_line);
     element.set_styles_resolved(true);
-    doc.root = &element;
+    doc.root = lam::up(&element);
     doc.js.mutation_count = 1;
     char value[64];
     // A dirty computed-style read cannot consume the pending layout merely to
@@ -133,10 +133,10 @@ TEST(CssPropTable, VisibilityUsesRenderEnumNames) {
     element.node_type = DOM_NODE_ELEMENT;
     element.set_synthetic(true);
     InlineProp in_line = INLINE_PROP_DEFAULT;
-    element.doc = &doc;
-    element.in_line = &in_line;
+    element.doc = lam::up(&doc);
+    element.in_line = lam::shared(&in_line);
     element.set_styles_resolved(true);
-    doc.root = &element;
+    doc.root = lam::up(&element);
 
     struct VisibilityCase {
         Visibility value;
@@ -175,7 +175,7 @@ static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,
     sheet->rule_count = 1;
 
     *sheet_ptr = sheet;
-    doc->stylesheets = sheet_ptr;
+    doc->stylesheets = lam::own_arr(sheet_ptr);
     doc->stylesheet_count = 1;
 }
 
@@ -269,8 +269,8 @@ protected:
     void SetUp() override {
         pool = pool_create();
         memset(&doc, 0, sizeof(doc));
-        doc.document_pool = pool;
-        doc.node_arena = arena_create_default();
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena_create_default());
     }
     void TearDown() override {
         if (doc.node_arena) arena_destroy(doc.node_arena);
@@ -415,8 +415,8 @@ protected:
         pool = pool_create();
         scheduler = animation_scheduler_create(pool);
         memset(&doc, 0, sizeof(doc));
-        doc.document_pool = pool;
-        doc.node_arena = arena_create_default();
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena_create_default());
     }
     void TearDown() override {
         animation_scheduler_destroy(scheduler);
@@ -433,15 +433,15 @@ protected:
         memset(mock, 0, sizeof(*mock));
         DomElement* element = (DomElement*)mock->buf;
         element->node_type = DOM_NODE_ELEMENT;
-        element->doc = &doc;
-        ((ViewSpan*)element)->in_line = &mock->in_line;
+        element->doc = lam::up(&doc);
+        ((ViewSpan*)element)->in_line = lam::shared(&mock->in_line);
         return element;
     }
 
     CssAnimProp defaultAnimProp(const char* name, float duration) {
         CssAnimProp ap;
         memset(&ap, 0, sizeof(ap));
-        ap.name = name;
+        ap.name = lam::up(name);
         ap.duration = duration;
         ap.iteration_count = 1;
         ap.direction = ANIM_DIR_NORMAL;
@@ -467,10 +467,10 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
     prop_to.value.f = 1.0f;
 
     CssKeyframeStop stops[2];
-    stops[0] = {0.0f, &prop_from, 1, NULL};
-    stops[1] = {1.0f, &prop_to, 1, NULL};
+    stops[0] = {0.0f, lam::own_arr(&prop_from), 1, NULL};
+    stops[1] = {1.0f, lam::own_arr(&prop_to), 1, NULL};
 
-    CssKeyframes kf = {"testFade", stops, 2};
+    CssKeyframes kf = {lam::up("testFade"), lam::own_arr(stops), 2};
 
     CssAnimProp ap = defaultAnimProp("testFade", 1.0f);
     AnimationInstance* inst = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
@@ -504,10 +504,10 @@ TEST_F(AnimationTickTest, ColorAnimation) {
     prop_to.value.color.b = 255; prop_to.value.color.a = 255;
 
     CssKeyframeStop stops[2];
-    stops[0] = {0.0f, &prop_from, 1, NULL};
-    stops[1] = {1.0f, &prop_to, 1, NULL};
+    stops[0] = {0.0f, lam::own_arr(&prop_from), 1, NULL};
+    stops[1] = {1.0f, lam::own_arr(&prop_to), 1, NULL};
 
-    CssKeyframes kf = {"colorAnim", stops, 2};
+    CssKeyframes kf = {lam::up("colorAnim"), lam::own_arr(stops), 2};
 
     CssAnimProp ap = defaultAnimProp("colorAnim", 1.0f);
     AnimationInstance* inst = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
@@ -524,7 +524,7 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
-    element->transform = &transform;
+    element->transform = lam::own(&transform);
 
     TransformFunction keyframe_function = {};
     keyframe_function.type = TRANSFORM_TRANSLATEX;
@@ -533,8 +533,8 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     property.property_code = CSS_PROPERTY_TRANSFORM;
     property.value_type = ANIM_VAL_TRANSFORM;
     property.value.transform = &keyframe_function;
-    CssKeyframeStop stop = {0.0f, &property, 1, NULL};
-    CssKeyframes keyframes = {"slide", &stop, 1};
+    CssKeyframeStop stop = {0.0f, lam::own_arr(&property), 1, NULL};
+    CssKeyframes keyframes = {lam::up("slide"), lam::own_arr(&stop), 1};
 
     CssAnimProp animation = defaultAnimProp("slide", 1.0f);
     AnimationInstance* instance = css_animation_create(
@@ -561,11 +561,11 @@ TEST_F(AnimationTickTest, ThreeStopInterpolation) {
     props[2].value.f = 1.0f;
 
     CssKeyframeStop stops[3];
-    stops[0] = {0.0f, &props[0], 1, NULL};
-    stops[1] = {0.5f, &props[1], 1, NULL};
-    stops[2] = {1.0f, &props[2], 1, NULL};
+    stops[0] = {0.0f, lam::own_arr(&props[0]), 1, NULL};
+    stops[1] = {0.5f, lam::own_arr(&props[1]), 1, NULL};
+    stops[2] = {1.0f, lam::own_arr(&props[2]), 1, NULL};
 
-    CssKeyframes kf = {"pulse", stops, 3};
+    CssKeyframes kf = {lam::up("pulse"), lam::own_arr(stops), 3};
 
     CssAnimProp ap = defaultAnimProp("pulse", 2.0f);
     AnimationInstance* inst = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);

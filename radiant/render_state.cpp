@@ -5,7 +5,7 @@
 RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock* block,
                                                  const BlockBlot* parent_block) {
     RenderTransformScope scope = {
-        rdcon,
+        lam::up(rdcon),
         rdcon->transform,
         rdcon->has_transform,
         rdcon->perspective_distance,

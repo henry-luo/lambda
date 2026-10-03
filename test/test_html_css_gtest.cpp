@@ -651,7 +651,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_SimpleDiv) {
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
-    printf("DOM element created: tag=%s\n", dom_root->tag_name);
+    printf("DOM element created: tag=%s\n", dom_root->tag_name.get());
 
     // Step 3: Apply CSS rule manually
     // Create a simple rule: .box { color: blue; }
@@ -729,14 +729,14 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_NestedElements) {
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "DOM conversion failed";
 
-    printf("Parent element: tag=%s\n", dom_root->tag_name);
+    printf("Parent element: tag=%s\n", dom_root->tag_name.get());
 
     // Step 3: Check parent-child relationship
     EXPECT_NE(dom_root->first_child, nullptr) << "Should have child element";
 
     if (dom_root->first_child) {
         DomElement* child = (DomElement*)dom_root->first_child;
-        printf("Child element: tag=%s\n", child->tag_name);
+        printf("Child element: tag=%s\n", child->tag_name.get());
         EXPECT_STREQ(child->tag_name, "p") << "Child should be <p> element";
         EXPECT_EQ(child->parent, dom_root) << "Child should have parent pointer";
     }
@@ -786,7 +786,7 @@ TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
     EXPECT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
     if (dom_root) {
-        printf("Successfully parsed and converted: tag=%s\n", dom_root->tag_name);
+        printf("Successfully parsed and converted: tag=%s\n", dom_root->tag_name.get());
     }
 }
 
@@ -808,7 +808,7 @@ TEST_F(HtmlCssIntegrationTest, LoadAndParseSampleHTML) {
     DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
     ASSERT_NE(dom_root, nullptr) << "Failed to convert to DomElement";
 
-    printf("Successfully parsed sample1.html: tag=%s\n", dom_root->tag_name);
+    printf("Successfully parsed sample1.html: tag=%s\n", dom_root->tag_name.get());
 
     // Try to extract CSS (will be empty if no <style> tags found)
     std::string css = extract_css_from_html(root_elem);
@@ -877,7 +877,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
         DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
-            printf("  ✓ Converted to DomElement: tag=%s\n", dom_root->tag_name);
+            printf("  ✓ Converted to DomElement: tag=%s\n", dom_root->tag_name.get());
             converted++;
 
             // Count children
@@ -917,7 +917,7 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
         DomElement* dom_root = lambda_element_to_dom_element(root_elem, (doc = dom_document_create(input)));
 
         if (dom_root) {
-            printf("  ✓ Converted to DomElement: tag=%s\n", dom_root->tag_name);
+            printf("  ✓ Converted to DomElement: tag=%s\n", dom_root->tag_name.get());
             converted++;
         } else {
             printf("  ✗ Failed to convert to DomElement\n");

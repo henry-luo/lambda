@@ -3,6 +3,7 @@
 
 #include "../../lib/ownership.hpp"
 #include "../../lib/mem_kind.hpp"
+#include "../../lib/arraylist.hpp"
 #include "../../lib/tagged.hpp"
 #include "../../radiant/radiant.hpp"
 
@@ -281,6 +282,55 @@ TEST(MemoryKinds, ZeroFilledStructIsNullAndCopiesBitwise) {
     EXPECT_EQ(copy.prop.get(), &prop);
     EXPECT_TRUE(copy.image == node.image);
     EXPECT_FALSE(copy.image.is_null());
+}
+
+struct KindDerivedProp : KindProp { float height; };
+
+// same-kind upcast is implicit; downcast and cross-kind stay rejected
+static_assert(CanAssign<lam::Up<KindProp>, lam::Up<KindDerivedProp>>::value, "Up<Derived> -> Up<Base>");
+static_assert(CanAssign<lam::Own<KindProp>, lam::Own<KindDerivedProp>>::value, "Own<Derived> -> Own<Base>");
+static_assert(!CanAssign<lam::Up<KindDerivedProp>, lam::Up<KindProp>>::value, "no implicit downcast");
+static_assert(!CanAssign<lam::Own<KindProp>, lam::Up<KindDerivedProp>>::value, "upcast keeps the kind");
+static_assert(!CanAssign<lam::OwnArr<KindProp>, lam::OwnArr<KindDerivedProp>>::value, "OwnArr stride is fixed");
+static_assert(!CanAssign<lam::Shared<KindProp>, KindProp*>::value, "raw -> Shared must be explicit");
+static_assert(!CanAssign<lam::Shared<KindProp>, lam::Own<KindProp>>::value, "Own must not become Shared");
+static_assert(!CanAssign<lam::Own<KindProp>, lam::Shared<KindProp>>::value, "Shared must not become Own");
+static_assert(CanAssign<lam::Shared<KindProp>, lam::Shared<KindDerivedProp>>::value, "Shared upcasts");
+
+TEST(MemoryKinds, DeducingFactoriesAndExplicitCasts) {
+    KindDerivedProp derived = {};
+    derived.width = 2.0f;
+    KindNode node = {};
+    node.prop = lam::own(&derived);           // Own<KindDerivedProp> -> Own<KindProp>
+    lam::Up<const KindProp> view = lam::up(&derived);
+    EXPECT_EQ(node.prop.get(), static_cast<KindProp*>(&derived));
+    EXPECT_FLOAT_EQ(view->width, 2.0f);
+    // an explicit cast reads like a cast of the raw pointer
+    KindDerivedProp* back = (KindDerivedProp*)node.prop;
+    EXPECT_EQ(back, &derived);
+}
+
+TEST(MemoryKinds, OwnSpanBoundsItsOwnedArray) {
+    float values[3] = {1.0f, 2.0f, 3.0f};
+    lam::OwnSpan<float> span = {lam::own_arr(values), 3};
+    float sum = 0.0f;
+    for (float v : span) sum += v;
+    EXPECT_FLOAT_EQ(sum, 6.0f);
+    EXPECT_FLOAT_EQ(span[1], 2.0f);
+    EXPECT_FALSE(span.empty());
+}
+
+TEST(MemoryKinds, ArrayListTakesStorageFromANodePool) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    {
+        lam::ArrayList<int> list(pool, 2);
+        for (int i = 0; i < 100; i++) ASSERT_TRUE(list.append(i));
+        EXPECT_EQ(list.size(), 100u);
+        EXPECT_TRUE(pool_owns(pool, list.data()));
+        EXPECT_EQ(list[99], 99);
+    }
+    pool_destroy(pool);
 }
 
 // ---------------------------------------------------------------------------

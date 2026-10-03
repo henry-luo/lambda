@@ -128,7 +128,7 @@ FormControlProp* tc_get_or_create_form(DomElement* elem) {
         mem_free(f);
         return nullptr;
     }
-    elem->form = f;
+    elem->form = lam::own(f);
     if (f->control_type != FORM_CONTROL_NONE &&
         elem->role_kind() == DomElement::ROLE_NONE) {
         elem->set_role_kind(DomElement::ROLE_FORM);

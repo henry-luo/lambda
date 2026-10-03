@@ -1,0 +1,86 @@
+{
+  "name": "SVG animation DOM queries, interval errors and TimeEvent initialization",
+  "html": "test/ui/svg_smil_dom_queries.html",
+  "viewport": {
+    "width": 420,
+    "height": 240
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#initial"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-initial",
+      "equals": "true,true,2,2,0,InvalidStateError/11/true,NotSupportedError/9/true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-idl",
+      "equals": "undefined,TypeError,TypeError,TypeError"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#middle"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-middle",
+      "equals": "2,3,2,undefined,undefined"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#event"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-event",
+      "equals": "repeatEvent,3,true,false,false,false,repeatEvent,3,TypeError,repeatEvent,3"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#finish"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-finish",
+      "equals": "InvalidStateError"
+    }
+  ],
+  "browser_reference": "test/svg/oracles/svg_smil_dom_queries_reference.html"
+}

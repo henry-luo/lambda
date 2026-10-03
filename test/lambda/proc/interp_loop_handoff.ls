@@ -1,9 +1,9 @@
 // D8.1.1v14 loop-head handoff. Every procedure below owns a top-level
-// `while` that runs past LAMBDA_JIT_BACKEDGE (10000), so under AUTO the
+// `while` that runs past LAMBDA_LOOP_JIT_THRESHOLD (10000), so under AUTO the
 // running activation may move to its compiled continuation at a later head
 // test. Whether and where it moves depends on worker timing; the output must
 // not. Each case is shaped so a wrong handoff changes what it prints. Under
-// `LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1` every case hands off at
+// `LAMBDA_LOOP_JIT_THRESHOLD=1 LAMBDA_SATELLITE_SYNC=1` every case hands off at
 // its second head test, deterministically.
 
 // (a) a container aliased before the loop and written inside it: the alias

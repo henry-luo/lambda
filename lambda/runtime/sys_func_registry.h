@@ -438,6 +438,19 @@ static inline bool sysfunc_returns_optional_int(const SysFuncInfo* info) {
     }
 }
 
+// intrinsic failures are independent of an operand's carried error (D6.1.3)
+static inline bool sysfunc_originates_defect(const SysFuncInfo* info) {
+    if (!info) return false;
+    if (sysfunc_returns_optional_int(info)) return true;
+    switch (info->fn) {
+    case SYSFUNC_FILL: // invalid counts and allocation sizes return ItemError
+    case SYSFUNC_SHL: case SYSFUNC_SHR: case SYSFUNC_USHR:
+    case SYSFUNC_VMAP_NEW: case SYSPROC_PUSH: case SYSPROC_SPLICE:
+        return true;
+    default: return false;
+    }
+}
+
 // Math entries whose result is float regardless of argument type. The rest of
 // the native-math family (floor/ceil/round/trunc/abs …) preserve their
 // argument's type instead, so their result lane depends on type inference —

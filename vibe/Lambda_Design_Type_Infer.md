@@ -354,7 +354,7 @@ Both are T0 walker defects (JIT agrees with goldens); they violate the
 invariant's letter and block using the harness as a clean gate until fixed.
 
 **Coverage hole.** 324/657 scripts (49%) fall back to JIT under
-LAMBDA_TIER=interp and are therefore *not* differentially checked at all.
+LAMBDA_EXEC_BACKEND=interp and are therefore *not* differentially checked at all.
 The invariant is currently only ~half-audited by the harness; interp
 coverage growth is the cheapest way to widen the guarantee.
 

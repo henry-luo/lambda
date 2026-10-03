@@ -164,6 +164,7 @@ RADIANT_C_API bool radiant_dom_event_default_prevented(Item item);
 RADIANT_C_API bool radiant_dom_event_propagation_stopped(Item item);
 RADIANT_C_API bool radiant_dom_event_prevent_default(Item item);
 RADIANT_C_API void radiant_dom_event_set_trusted(Item item, bool trusted);
+RADIANT_C_API void radiant_dom_event_set_time_values(Item event, Item view, Item detail);
 RADIANT_C_API void radiant_dom_event_set_prototype_override(Item item,
                                                              Item prototype);
 RADIANT_C_API void radiant_dom_event_destroy(void* native);

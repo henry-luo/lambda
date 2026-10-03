@@ -7,7 +7,7 @@
 
 static RenderEffectBackdrop render_effect_empty_backdrop(RenderContext* rdcon) {
     RenderEffectBackdrop backdrop = {};
-    backdrop.context = rdcon;
+    backdrop.context = lam::up(rdcon);
     return backdrop;
 }
 
@@ -136,7 +136,7 @@ RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
                                             ViewBlock* block,
                                             const BlockBlot* parent_block) {
     RenderEffectGroup group = {};
-    group.context = rdcon;
+    group.context = lam::up(rdcon);
     if (!rdcon || !block || !parent_block) {
         return group;
     }

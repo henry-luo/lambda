@@ -100,7 +100,7 @@ static void populate_font_prop_metrics(UiContext* uicon, FontProp* fprop,
 }
 
 void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
-    fbox->style = fprop;
+    fbox->style = lam::up(fprop);
     fbox->current_font_size = font_prop_used_size(fprop);
 
     if (!uicon || !uicon->font_ctx) {
@@ -132,7 +132,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     // database lookup, platform fallback, and fallback font chain — all with caching.
     FontHandle* handle = family ? font_resolve(uicon->font_ctx, &style) : NULL;
     if (handle) {
-        fprop->font_handle = handle;
+        fprop->font_handle = lam::counted(handle);
         // Transfer font_resolve's caller ref into the cache-managed alias.
         font_cache_adopt_handle_alias(handle);
 
@@ -152,22 +152,21 @@ void fontface_cleanup(UiContext* uicon) {
         FontFaceDescriptor* descriptor = uicon->font_faces ? uicon->font_faces[i] : NULL;
         if (!descriptor) continue;
 
-        if (descriptor->family_name) mem_free(descriptor->family_name);
-        if (descriptor->src_local_path) mem_free(descriptor->src_local_path);
-        if (descriptor->src_local_name) mem_free(descriptor->src_local_name);
+        lam::Temp<FontFaceDescriptor> owned(descriptor);  // the registry releases each descriptor
+        lam::free_owned(descriptor->family_name);
+        lam::free_owned(descriptor->src_local_path);
+        lam::free_owned(descriptor->src_local_name);
         if (descriptor->src_entries) {
             for (int j = 0; j < descriptor->src_count; j++) {
-                if (descriptor->src_entries[j].path) mem_free(descriptor->src_entries[j].path);
-                if (descriptor->src_entries[j].format) mem_free(descriptor->src_entries[j].format);
+                lam::free_owned(descriptor->src_entries[j].path);
+                lam::free_owned(descriptor->src_entries[j].format);
             }
-            mem_free(descriptor->src_entries);
+            lam::free_owned(descriptor->src_entries);
         }
-        if (descriptor->unicode_ranges) mem_free(descriptor->unicode_ranges);
-        mem_free(descriptor);
+        lam::free_owned(descriptor->unicode_ranges);
     }
 
-    if (uicon->font_faces) mem_free(uicon->font_faces);
-    uicon->font_faces = NULL;
+    lam::free_owned(uicon->font_faces);
     uicon->font_face_count = 0;
     uicon->font_face_capacity = 0;
 }

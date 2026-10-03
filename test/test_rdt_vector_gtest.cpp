@@ -10,6 +10,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_engine.h"
 #include "../lambda/io/mark_builder.hpp"
 
 #include "../lib/image.h"
@@ -40,7 +41,7 @@ protected:
 
     void SetUp() override {
         ASSERT_TRUE(doc.init(&input));
-        root = element("div"); ASSERT_NE(root, nullptr); doc.root = root;
+        root = element("div"); ASSERT_NE(root, nullptr); doc.root = lam::up(root);
         svg = element("svg", root); ASSERT_NE(svg, nullptr);
         ASSERT_TRUE(svg->set_attribute("width", "200"));
         ASSERT_TRUE(svg->set_attribute("height", "200"));
@@ -74,6 +75,155 @@ protected:
     }
 };
 
+TEST_F(SvgAnimationLifetimeTest, WallclockGrammarCalendarZonesAndFractionalSeconds) {
+    const double origin = 946684800.25; // 2000-01-01T00:00:00.25Z
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock(2000-01-01T00:00Z)", origin), -.25);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock( 2000-01-01T01:00:01.125+01:00 )", origin), .875);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock(1999-12-31T23:00:00-01:00)", origin), -.25);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock(2000-02-29T00:00Z)", origin), 59 * 86400.0 - .25);
+    EXPECT_TRUE(isfinite(svg_animation_wallclock_value("wallclock(9999-12-31T23:59:59Z)", origin)));
+    time_t epoch = (time_t)floor(origin);
+    struct tm local = {};
+#ifdef _WIN32
+    ASSERT_EQ(localtime_s(&local, &epoch), 0);
+#else
+    ASSERT_NE(localtime_r(&epoch, &local), nullptr);
+#endif
+    char clock[64], value[96];
+    ASSERT_GT(strftime(clock, sizeof(clock), "%H:%M:%S", &local), 0u);
+    snprintf(value, sizeof(value), "wallclock(%s)", clock);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value(value, origin), -.25);
+    ASSERT_GT(strftime(clock, sizeof(clock), "%Y-%m-%d", &local), 0u);
+    snprintf(value, sizeof(value), "wallclock(%s)", clock);
+    local.tm_hour = local.tm_min = local.tm_sec = 0; local.tm_isdst = -1;
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value(value, origin), (double)mktime(&local) - origin);
+    const char* invalid[] = {"wallclock(2001-02-29T00:00Z)", "wallclock(2000-04-31)",
+        "wallclock(2000-01-01t00:00Z)", "wallclock(2000-01-01T24:00Z)", "wallclock(00:00:60)",
+        "wallclock(00:00:01.)", "wallclock(00:00 +01:00)", "wallclock(00:00+01)",
+        "wallclock(2000-01-01Z)", "wallclock(2000-01-01T00:00Z)+1s", "wallclock()"};
+    for (const char* value : invalid) EXPECT_TRUE(isnan(svg_animation_wallclock_value(value, origin))) << value;
+}
+
+TEST_F(SvgAnimationLifetimeTest, AccessKeysResolveOffsetsRestartAndEndAcrossFocusedFragments) {
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    ASSERT_TRUE(rect->set_attribute("x", "10"));
+    DomElement* animation = animate(rect, "x", "10", "110"); ASSERT_NE(animation, nullptr);
+    ASSERT_TRUE(animation->set_attribute("begin", "accessKey(\xc3\xa9)+0.5s;accessKey(a)"));
+    ASSERT_TRUE(animation->set_attribute("end", "accessKey(z)"));
+    svg_animation_pause(svg, true);
+    dom_engine_svg_timing_key(root, "\xc3\xa9");
+    svg_animation_set_time(svg, 1);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "35");
+    dom_engine_svg_timing_key(root, "z");
+    svg_animation_set_time(svg, 2);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "35");
+    dom_engine_svg_timing_key(root, "a");
+    svg_animation_set_time(svg, 3);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+    ASSERT_TRUE(animation->set_attribute("restart", "whenNotActive"));
+    dom_engine_svg_timing_key(root, "a");
+    svg_animation_set_time(svg, 3.5);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "85");
+}
+
+TEST_F(SvgAnimationLifetimeTest, AnimationQueriesUseResolvedIntervalsAndLiveTarget) {
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    DomElement* animation = animate(rect, "x", "10", "110"); ASSERT_NE(animation, nullptr);
+    ASSERT_TRUE(animation->set_attribute("begin", "2s;6s"));
+    svg_animation_pause(svg, true);
+    double start = -1;
+    EXPECT_TRUE(svg_animation_start_time(animation, &start)); EXPECT_DOUBLE_EQ(start, 2);
+    EXPECT_DOUBLE_EQ(svg_animation_simple_duration(animation), 2);
+    EXPECT_EQ(svg_animation_target_element(animation), rect);
+    svg_animation_set_time(svg, 4);
+    EXPECT_TRUE(svg_animation_start_time(animation, &start)); EXPECT_DOUBLE_EQ(start, 6);
+    svg_animation_set_time(svg, 8);
+    EXPECT_FALSE(svg_animation_start_time(animation, &start));
+    ASSERT_TRUE(animation->set_attribute("href", "#absent"));
+    EXPECT_EQ(svg_animation_target_element(animation), nullptr);
+    ASSERT_TRUE(animation->set_attribute("dur", "indefinite"));
+    EXPECT_TRUE(isnan(svg_animation_simple_duration(animation)));
+}
+
+TEST_F(SvgAnimationLifetimeTest, ExpiredNegativeIntervalsDoNotFreezeOrFeedSyncbases) {
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    DomElement* expired = animate(rect, "x", "10", "110"); ASSERT_NE(expired, nullptr);
+    ASSERT_TRUE(expired->set_attribute("id", "expired"));
+    ASSERT_TRUE(expired->set_attribute("begin", "-3s"));
+    DomElement* dependent = animate(rect, "y", "10", "110"); ASSERT_NE(dependent, nullptr);
+    ASSERT_TRUE(dependent->set_attribute("begin", "expired.end+2s"));
+    svg_animation_pause(svg, true);
+    svg_animation_set_time(svg, 1.5);
+    EXPECT_EQ(svg_animation_value(rect, "x"), nullptr);
+    EXPECT_EQ(svg_animation_value(rect, "y"), nullptr);
+    double start = 0;
+    EXPECT_FALSE(svg_animation_start_time(expired, &start));
+    ASSERT_TRUE(expired->set_attribute("begin", "-1s"));
+    svg_animation_set_time(svg, 0);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+    ASSERT_TRUE(expired->set_attribute("begin", "-3s;1s"));
+    svg_animation_set_time(svg, 2);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+    EXPECT_TRUE(svg_animation_start_time(expired, &start)); EXPECT_DOUBLE_EQ(start, 1);
+}
+
+TEST_F(SvgAnimationLifetimeTest, UseControlsIsolateImplicitEventsShareQualifiedIdsAndReleaseTheirOwners) {
+    DomElement* defs = element("defs", svg); ASSERT_NE(defs, nullptr);
+    DomElement* prototype = element("g", defs); ASSERT_NE(prototype, nullptr);
+    ASSERT_TRUE(prototype->set_attribute("id", "prototype"));
+    DomElement* rect = element("rect", prototype); ASSERT_NE(rect, nullptr);
+    ASSERT_TRUE(rect->set_attribute("id", "source"));
+    DomElement* implicit = animate(rect, "x", "10", "110"); ASSERT_NE(implicit, nullptr);
+    ASSERT_TRUE(implicit->set_attribute("begin", "click"));
+    DomElement* qualified = animate(rect, "y", "10", "110"); ASSERT_NE(qualified, nullptr);
+    ASSERT_TRUE(qualified->set_attribute("begin", "source.click"));
+    DomElement* first = element("use", svg); ASSERT_NE(first, nullptr);
+    DomElement* second = element("use", svg); ASSERT_NE(second, nullptr);
+    svg_animation_pause(svg, true);
+    { SvgAnimationSourceScope scope(&doc, prototype, first); EXPECT_EQ(svg_animation_value(rect, "x"), nullptr); }
+    { SvgAnimationSourceScope scope(&doc, prototype, second); EXPECT_EQ(svg_animation_value(rect, "x"), nullptr); }
+    svg_animation_use_event(first, rect, "click", true, 0);
+    svg_animation_set_time(svg, 1);
+    {
+        SvgAnimationSourceScope scope(&doc, prototype, first);
+        EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+        EXPECT_STREQ(svg_animation_value(rect, "y"), "60");
+    }
+    {
+        SvgAnimationSourceScope scope(&doc, prototype, second);
+        EXPECT_EQ(svg_animation_value(rect, "x"), nullptr);
+        EXPECT_STREQ(svg_animation_value(rect, "y"), "60");
+    }
+    EXPECT_EQ(svg_animation_value(rect, "x"), nullptr);
+    uint64_t retained = animation_allocations();
+    svg_animation_forget_source_document(&doc, &doc);
+    EXPECT_LT(animation_allocations(), retained);
+    EXPECT_EQ(svg_animation_use_source(first), nullptr);
+    EXPECT_EQ(svg_animation_use_source(second), nullptr);
+}
+
+TEST_F(SvgAnimationLifetimeTest, UseRepeatEventsDriveQualifiedDependentsOnTheHostClock) {
+    DomElement* defs = element("defs", svg); ASSERT_NE(defs, nullptr);
+    DomElement* prototype = element("g", defs); ASSERT_NE(prototype, nullptr);
+    DomElement* rect = element("rect", prototype); ASSERT_NE(rect, nullptr);
+    DomElement* pulse = animate(rect, "x", "10", "110"); ASSERT_NE(pulse, nullptr);
+    ASSERT_TRUE(pulse->set_attribute("id", "pulse"));
+    ASSERT_TRUE(pulse->set_attribute("begin", "click"));
+    ASSERT_TRUE(pulse->set_attribute("dur", "1s"));
+    ASSERT_TRUE(pulse->set_attribute("repeatCount", "2"));
+    DomElement* dependent = animate(rect, "y", "10", "110"); ASSERT_NE(dependent, nullptr);
+    ASSERT_TRUE(dependent->set_attribute("begin", "pulse.repeat(1)"));
+    DomElement* first = element("use", svg); ASSERT_NE(first, nullptr);
+    DomElement* second = element("use", svg); ASSERT_NE(second, nullptr);
+    svg_animation_prepare(svg);
+    { SvgAnimationSourceScope scope(&doc, prototype, first); EXPECT_EQ(svg_animation_value(rect, "y"), nullptr); }
+    { SvgAnimationSourceScope scope(&doc, prototype, second); EXPECT_EQ(svg_animation_value(rect, "y"), nullptr); }
+    svg_animation_use_event(first, rect, "click", true, 0);
+    ASSERT_TRUE(animation_scheduler_tick(doc.state->animation_scheduler, 1.25, nullptr));
+    { SvgAnimationSourceScope scope(&doc, prototype, first); EXPECT_STREQ(svg_animation_value(rect, "y"), "22.5"); }
+    { SvgAnimationSourceScope scope(&doc, prototype, second); EXPECT_STREQ(svg_animation_value(rect, "y"), "22.5"); }
+}
+
 TEST_F(SvgAnimationLifetimeTest, ClockSurvivesLayoutReleaseAndStopsOnPauseDetachAndDocumentTeardown) {
     DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
     ASSERT_TRUE(rect->set_attribute("x", "10"));
@@ -98,6 +248,8 @@ TEST_F(SvgAnimationLifetimeTest, ClockSurvivesLayoutReleaseAndStopsOnPauseDetach
     EXPECT_FALSE(animation_scheduler_tick(scheduler, 1.5, nullptr));
     EXPECT_EQ(scheduler->count, 0);
     EXPECT_EQ(svg_animation_value(rect, "x"), nullptr);
+    svg_animation_prepare(svg);
+    EXPECT_EQ(scheduler->count, 0); // a detached pinned tree must not restart its driver.
     ASSERT_TRUE(root->append_child(svg));
     svg_animation_prepare(svg);
     ASSERT_EQ(scheduler->count, 1);
@@ -106,6 +258,85 @@ TEST_F(SvgAnimationLifetimeTest, ClockSurvivesLayoutReleaseAndStopsOnPauseDetach
     doc.destroy();
     EXPECT_EQ(doc.services.svg_animation_registry, nullptr);
     EXPECT_EQ(doc.state, nullptr);
+}
+
+TEST_F(SvgAnimationLifetimeTest, HtmlBoundariesOwnIndependentFragmentClocksAndPrivateDocumentsAdvanceAllFragments) {
+    DomElement* foreign = element("foreignObject", svg); ASSERT_NE(foreign, nullptr);
+    DomElement* html = element("div", foreign); ASSERT_NE(html, nullptr); ASSERT_FALSE(dom_element_is_svg(html));
+    DomElement* inner = element("svg", html); ASSERT_NE(inner, nullptr);
+    DomElement* nested = element("svg", svg); ASSERT_NE(nested, nullptr);
+    DomElement* outer_shape = element("rect", svg); ASSERT_NE(outer_shape, nullptr);
+    DomElement* inner_shape = element("rect", inner); ASSERT_NE(inner_shape, nullptr);
+    DomElement* nested_shape = element("rect", nested); ASSERT_NE(nested_shape, nullptr);
+    DomElement* shapes[] = {outer_shape, inner_shape, nested_shape};
+    for (DomElement* target : shapes)
+        ASSERT_NE(animate(target, "x", "10", "110"), nullptr);
+    EXPECT_TRUE(svg_animation_has_elements(foreign));
+    svg_animation_prepare(svg); svg_animation_pause(svg, true); svg_animation_pause(inner, true);
+    svg_animation_set_time(inner, 2);
+    EXPECT_DOUBLE_EQ(svg_animation_current_time(svg), 0);
+    EXPECT_STREQ(svg_animation_value(outer_shape, "x"), "10");
+    EXPECT_STREQ(svg_animation_value(inner_shape, "x"), "110");
+    svg_animation_set_time(svg, 1);
+    EXPECT_DOUBLE_EQ(svg_animation_current_time(nested), 1);
+    svg_animation_set_time(nested, 2);
+    svg_animation_pause(nested, false);
+    EXPECT_DOUBLE_EQ(svg_animation_current_time(svg), 1);
+    EXPECT_TRUE(svg_animation_paused(svg));
+    EXPECT_STREQ(svg_animation_value(nested_shape, "x"), "60");
+    EXPECT_STREQ(svg_animation_value(inner_shape, "x"), "110");
+    svg_animation_set_document_time(&doc, .5);
+    EXPECT_DOUBLE_EQ(svg_animation_current_time(svg), .5);
+    EXPECT_DOUBLE_EQ(svg_animation_current_time(inner), .5);
+    EXPECT_STREQ(svg_animation_value(inner_shape, "x"), "35");
+}
+
+TEST_F(SvgAnimationLifetimeTest, FilterProgramsTrackClockChangesWithoutDomMutation) {
+    DomElement* offset = element("feOffset", svg); ASSERT_NE(offset, nullptr);
+    ASSERT_NE(animate(offset, "dx", "0", "100"), nullptr);
+    svg_animation_prepare(svg); svg_animation_pause(svg, true);
+    Element filter = {};
+    uint64_t epoch = doc.mutation_epoch;
+    RdtSvgFilterProgram* before = render_svg_filter_program_acquire(&doc, &filter);
+    ASSERT_NE(before, nullptr); before->compiled = true;
+    EXPECT_EQ(render_svg_filter_program_acquire(&doc, &filter), before);
+    render_svg_filter_program_release(before);
+    svg_animation_set_time(svg, 1);
+    EXPECT_EQ(doc.mutation_epoch, epoch);
+    RdtSvgFilterProgram* after = render_svg_filter_program_acquire(&doc, &filter);
+    ASSERT_NE(after, nullptr); EXPECT_NE(after, before); EXPECT_FALSE(after->compiled);
+    EXPECT_TRUE(before->compiled); // pinned callers keep their earlier immutable facts.
+    EXPECT_NE(after->animation_generation, before->animation_generation);
+    render_svg_filter_program_release(before); render_svg_filter_program_release(after);
+}
+
+TEST_F(SvgAnimationLifetimeTest, FilterProgramsSeparateAnimatedInstancesFromStaticReferences) {
+    Input* owner = authored_input(); ASSERT_NE(owner, nullptr);
+    MarkBuilder builder(owner);
+    Item source = builder.element("g").final();
+    DomElement* group = element("g", svg, source.element); ASSERT_NE(group, nullptr);
+    source = builder.element("filter").final();
+    Element* filter_source = source.element;
+    DomElement* filter = element("filter", group, filter_source); ASSERT_NE(filter, nullptr);
+    DomElement* flood = element("feFlood", filter); ASSERT_NE(flood, nullptr);
+    ASSERT_NE(animate(flood, "flood-color", "red", "blue"), nullptr);
+    DomElement* outside = element("g", svg); ASSERT_NE(outside, nullptr);
+    svg_animation_mark_reference(svg); svg_animation_pause(svg, true); svg_animation_set_time(svg, 1);
+    RdtSvgFilterProgram* base = render_svg_filter_program_acquire(&doc, filter_source); ASSERT_NE(base, nullptr);
+    RdtSvgFilterProgram* sampled = nullptr;
+    {
+        SvgAnimationSourceScope instance(&doc, group);
+        sampled = render_svg_filter_program_acquire(&doc, filter_source); ASSERT_NE(sampled, nullptr);
+        EXPECT_NE(sampled, base); EXPECT_GT(sampled->animation_generation, 0u);
+        EXPECT_STREQ(svg_animation_value(flood, "flood-color"), "rgba(127.5,0,127.5,1)");
+    }
+    {
+        SvgAnimationSourceScope static_resource(&doc, outside);
+        RdtSvgFilterProgram* same = render_svg_filter_program_acquire(&doc, filter_source);
+        EXPECT_EQ(same, base); EXPECT_EQ(same->animation_generation, 0u);
+        render_svg_filter_program_release(same);
+    }
+    render_svg_filter_program_release(sampled); render_svg_filter_program_release(base);
 }
 
 TEST_F(SvgAnimationLifetimeTest, TypedSamplesResolveLengthListsPairsAnglesAndIntegerRounding) {
@@ -146,6 +377,122 @@ TEST_F(SvgAnimationLifetimeTest, ToAnimationsUseResourceAndFilterInitialValues) 
     svg_animation_pause(svg, true); svg_animation_set_time(svg, 1);
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
         EXPECT_STREQ(svg_animation_value(targets[i], cases[i].name), cases[i].expected) << cases[i].name;
+}
+
+TEST_F(SvgAnimationLifetimeTest, DiscreteToUsesSvgHalfwayAndKeyTimeBoundaries) {
+    DomElement* normal = element("rect", svg); ASSERT_NE(normal, nullptr);
+    DomElement* keyed = element("rect", svg); ASSERT_NE(keyed, nullptr);
+    DomElement* targets[] = {normal, keyed};
+    for (DomElement* target : targets) {
+        ASSERT_TRUE(target->set_attribute("x", "10"));
+        DomElement* animation = animate(target, "x", nullptr, "110"); ASSERT_NE(animation, nullptr);
+        ASSERT_TRUE(animation->set_attribute("calcMode", "discrete"));
+        if (target == keyed) ASSERT_TRUE(animation->set_attribute("keyTimes", "0;.75"));
+    }
+    svg_animation_pause(svg, true);
+    struct Case { double time; const char* normal; const char* keyed; };
+    const Case cases[] = {{0, "10", "10"}, {.5, "10", "10"}, {1, "110", "10"},
+        {1.5, "110", "110"}, {2, "110", "110"}, {0, "10", "10"}};
+    for (const Case& sample : cases) {
+        svg_animation_set_time(svg, sample.time);
+        EXPECT_STREQ(svg_animation_value(normal, "x"), sample.normal);
+        EXPECT_STREQ(svg_animation_value(keyed, "x"), sample.keyed);
+    }
+}
+
+TEST_F(SvgAnimationLifetimeTest, IndefiniteDurationIgnoresKeyTimesAndKeepsFirstValue) {
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    DomElement* animation = animate(rect, "x", "20", "100"); ASSERT_NE(animation, nullptr);
+    ASSERT_TRUE(animation->set_attribute("dur", "indefinite"));
+    ASSERT_TRUE(animation->set_attribute("keyTimes", ".5;1"));
+    ASSERT_TRUE(animation->set_attribute("end", "2s"));
+    svg_animation_pause(svg, true);
+    const double times[] = {0.0, 1.0, 2.0, 3.0};
+    for (double time : times) {
+        svg_animation_set_time(svg, time);
+        EXPECT_STREQ(svg_animation_value(rect, "x"), "20");
+    }
+}
+
+TEST_F(SvgAnimationLifetimeTest, DiscreteToUsesAbsentXmlEnumInitialValues) {
+    struct Case { const char* tag; const char* name; const char* to; const char* initial; };
+    const Case cases[] = {
+        {"linearGradient", "spreadMethod", "repeat", "pad"},
+        {"pattern", "patternUnits", "userSpaceOnUse", "objectBoundingBox"},
+        {"marker", "markerUnits", "userSpaceOnUse", "strokeWidth"},
+        {"svg", "preserveAspectRatio", "none", "xMidYMid meet"},
+        {"feComposite", "operator", "xor", "over"},
+        {"feTurbulence", "type", "fractalNoise", "turbulence"},
+    };
+    DomElement* targets[sizeof(cases) / sizeof(cases[0])] = {};
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        targets[i] = element(cases[i].tag, svg); ASSERT_NE(targets[i], nullptr);
+        ASSERT_NE(animate(targets[i], cases[i].name, nullptr, cases[i].to), nullptr);
+    }
+    svg_animation_pause(svg, true); svg_animation_set_time(svg, .5);
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        EXPECT_STREQ(svg_animation_value(targets[i], cases[i].name), cases[i].initial);
+    svg_animation_set_time(svg, 1);
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        EXPECT_STREQ(svg_animation_value(targets[i], cases[i].name), cases[i].to);
+        EXPECT_EQ(targets[i]->get_attribute(cases[i].name), nullptr);
+    }
+}
+
+TEST_F(SvgAnimationLifetimeTest, RelativeLengthsRetainFontDependencyAndOpacityPercentagesStayDimensionless) {
+    DomElement* parent = element("g", svg); ASSERT_NE(parent, nullptr);
+    ASSERT_TRUE(parent->set_attribute("font-size", "20"));
+    DomElement* font = animate(parent, "font-size", "20", "40"); ASSERT_NE(font, nullptr);
+    ASSERT_TRUE(font->set_attribute("begin", "0.5s")); ASSERT_TRUE(font->set_attribute("dur", "1s"));
+    Input* owner = authored_input(); ASSERT_NE(owner, nullptr); MarkBuilder builder(owner);
+    Item source = builder.element("rect").attr("width", "1em").attr("height", "20").final();
+    DomElement* rect = element("rect", parent, source.element); ASSERT_NE(rect, nullptr);
+    ASSERT_NE(animate(rect, "width", "1em", "2em"), nullptr);
+    ASSERT_NE(animate(rect, "opacity", "100%", "0.5"), nullptr);
+    DomElement* path = element("path", parent); ASSERT_NE(path, nullptr);
+    ASSERT_NE(animate(path, "stroke-dasharray", "1em 1em", "2em 2em"), nullptr);
+    source = builder.element("rect").attr("width", "1em").attr("height", "20").final();
+    DomElement* mixed = element("rect", parent, source.element); ASSERT_NE(mixed, nullptr);
+    ASSERT_NE(animate(mixed, "width", "1em", "80px"), nullptr);
+    svg_animation_pause(svg, true); svg_animation_set_time(svg, 1);
+    EXPECT_STREQ(svg_animation_value(rect, "width"), "1.5em");
+    EXPECT_STREQ(svg_animation_value(path, "stroke-dasharray"), "1.5em 1.5em");
+    EXPECT_STREQ(svg_animation_value(rect, "opacity"), "0.75");
+    float left, top, right, bottom;
+    ASSERT_TRUE(dom_svg_element_geometry_bounds(rect, &left, &top, &right, &bottom));
+    EXPECT_FLOAT_EQ(right - left, 45);
+    ASSERT_TRUE(dom_svg_element_geometry_bounds(mixed, &left, &top, &right, &bottom));
+    EXPECT_FLOAT_EQ(right - left, 55);
+    svg_animation_set_time(svg, 2);
+    ASSERT_TRUE(dom_svg_element_geometry_bounds(rect, &left, &top, &right, &bottom));
+    EXPECT_FLOAT_EQ(right - left, 80);
+    EXPECT_STREQ(svg_animation_value(rect, "opacity"), "0.5");
+}
+
+TEST_F(SvgAnimationLifetimeTest, ToAnimationsUseAbsentIriStopAndColorMatrixInitialValues) {
+    DomElement* use = element("use", svg); ASSERT_NE(use, nullptr);
+    ASSERT_NE(animate(use, "href", nullptr, "#shape"), nullptr);
+    DomElement* stop = element("stop", svg); ASSERT_NE(stop, nullptr);
+    ASSERT_NE(animate(stop, "offset", nullptr, "1"), nullptr);
+    DomElement* matrix = element("feColorMatrix", svg); ASSERT_NE(matrix, nullptr);
+    ASSERT_NE(animate(matrix, "values", nullptr, "0 0 1 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 1 0"), nullptr);
+    DomElement* typed = element("feColorMatrix", svg); ASSERT_NE(typed, nullptr);
+    ASSERT_TRUE(typed->set_attribute("type", "saturate"));
+    ASSERT_NE(animate(typed, "values", nullptr, "180"), nullptr);
+    DomElement* type = animate(typed, "type", nullptr, "hueRotate"); ASSERT_NE(type, nullptr);
+    ASSERT_TRUE(type->set_attribute("begin", "0.1s"));
+    ASSERT_TRUE(type->set_attribute("dur", "0.2s"));
+    svg_animation_pause(svg, true); svg_animation_set_time(svg, 0);
+    EXPECT_STREQ(svg_animation_value(use, "href"), "");
+    EXPECT_STREQ(svg_animation_value(matrix, "values"), "1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0");
+    svg_animation_set_time(svg, 1);
+    EXPECT_STREQ(svg_animation_value(use, "href"), "#shape");
+    EXPECT_STREQ(svg_animation_value(stop, "offset"), "0.5");
+    EXPECT_STREQ(svg_animation_value(matrix, "values"), "0.5 0 0.5 0 0 0 1 0 0 0 0.5 0 0.5 0 0 0 0 0 1 0");
+    // the default values list follows the sampled type, regardless of animation begin priority.
+    EXPECT_STREQ(svg_animation_value(typed, "type"), "hueRotate");
+    EXPECT_STREQ(svg_animation_value(typed, "values"), "90");
+    EXPECT_EQ(use->get_attribute("href"), nullptr);
 }
 
 TEST_F(SvgAnimationLifetimeTest, InvalidPathStructuresAndAttributeTypesDoNotReplaceBaseValues) {
@@ -335,7 +682,7 @@ TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
 TEST(SvgExportTest, RasterSnapshotRetainsTransparencyAndLogicalBoundsAtBothDensities) {
     rdt_engine_init(0);
     const char source[] = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>"
-        "<rect x='2' y='2' width='8' height='8' fill='red' opacity='.5'/></svg>";
+        "<rect x='2.25' y='2.25' width='8' height='8' fill='red' opacity='.5'/></svg>";
     RdtPicture* picture = rdt_picture_load_data(source, sizeof(source) - 1, "svg");
     ASSERT_NE(picture, nullptr);
     for (float density : {1.0f, 2.0f}) {
@@ -355,6 +702,11 @@ TEST(SvgExportTest, RasterSnapshotRetainsTransparencyAndLogicalBoundsAtBothDensi
         size_t coordinate = density == 1 ? 4 : 8;
         uint32_t red = pixels[coordinate * (size_t)surface->width + coordinate];
         EXPECT_EQ(red & 255u, 255u); EXPECT_NEAR(red >> 24, 128u, 1);
+        // the fractional left edge covers 3/4 of a 1x pixel, or 1/2 of a 2x pixel, at half opacity.
+        size_t edge_x = density == 1 ? 2 : 4;
+        uint32_t edge = pixels[coordinate * (size_t)surface->width + edge_x];
+        EXPECT_NEAR(edge & 255u, 255u, 1);
+        EXPECT_NEAR(edge >> 24, density == 1 ? 96u : 64u, 3);
         image_surface_destroy(surface);
     }
     rdt_picture_free(picture);
@@ -395,14 +747,111 @@ TEST(SvgExportTest, FinalPaintRetainsSampledVectorsAndOwnsDeferredClips) {
     rdt_picture_free(picture); rdt_engine_term();
 }
 
+TEST(SvgExportTest, FinalPaintRetainsNestedMetadataEmptyGroupsAndOutlinedText) {
+    rdt_engine_init(0);
+    const char source[] = "<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40' data-root='scene'>"
+        "<g data-graph-role='edge' data-edge-id='a&amp;&quot;b' data-route='0,0 40,20'>"
+        "<rect width='20' height='20' fill='red'/><g data-empty='kept'/>"
+        "<text x='0' y='35' font-size='12'>A &amp; B</text></g></svg>";
+    RdtPicture* picture = rdt_picture_load_data(source, sizeof(source) - 1, "svg");
+    ASSERT_NE(picture, nullptr);
+    PaintSvgSubscene scene = {};
+    render_svg_build_subscene(&scene, rdt_picture_get_svg_root(picture), 80, 40,
+        rdt_picture_get_pool(picture), 1, nullptr, nullptr, nullptr, nullptr, nullptr,
+        nullptr, 1, false, nullptr, true, -1);
+    scene.image_document = true;
+    StrBuf* svg = strbuf_new();
+    auto consume = [](PaintList* paint, void* context) {
+        PaintSvgLoweringStats stats = {};
+        paint_ir_lower_svg(paint, (StrBuf*)context, nullptr, &stats);
+        return stats.unsupported_count == 0;
+    };
+    ASSERT_TRUE(render_svg_subscene_with_paint(&scene, consume, svg));
+    EXPECT_NE(strstr(svg->str, "data-root=\"scene\""), nullptr);
+    EXPECT_NE(strstr(svg->str, "data-edge-id=\"a&amp;&quot;b\""), nullptr);
+    EXPECT_NE(strstr(svg->str, "data-route=\"0,0 40,20\""), nullptr);
+    EXPECT_NE(strstr(svg->str, "data-empty=\"kept\""), nullptr);
+    EXPECT_NE(strstr(svg->str, "<title>A &amp; B</title>"), nullptr);
+    EXPECT_NE(strstr(svg->str, "<path"), nullptr);
+    strbuf_free(svg); rdt_picture_free(picture); rdt_engine_term();
+}
+
+TEST(SvgExportTest, SemanticSnapshotsOwnValuesAndDoNotChangeRasterPaint) {
+    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "test.svg.export.semantics");
+    ASSERT_NE(arena, nullptr);
+    DisplayList dl = {}; dl_init(&dl, arena);
+    char name[] = "data-node-id", value[] = "n0", title[] = "label";
+    RenderSemanticAttribute attribute = {lam::up(name), lam::up(value)};
+    RenderSemanticGroup source = {lam::up(&attribute), 1, lam::up(title)}, snapshot = {};
+    ASSERT_TRUE(dl_copy_semantic_group(&dl, &snapshot, &source));
+    name[0] = value[0] = title[0] = '!';
+    EXPECT_STREQ(snapshot.attributes[0].name, "data-node-id");
+    EXPECT_STREQ(snapshot.attributes[0].value, "n0");
+    EXPECT_STREQ(snapshot.title, "label");
+    PaintList paint = {};
+    paint_begin_semantic_group(&paint, &snapshot);
+    Color red = {}; red.r = red.a = 255;
+    paint_fill_rect(&paint, 0, 0, 20, 20, red);
+    paint_end_semantic_group(&paint);
+    EXPECT_TRUE(paint_ir_validate(&paint, nullptr));
+    paint_ir_lower_raster(&paint, &dl);
+    ASSERT_EQ(dl.item_count(), 1);
+    EXPECT_EQ(dl.data()[0].op, DL_FILL_RECT);
+    paint_list_clear(&paint);
+    paint_end_semantic_group(&paint);
+    EXPECT_FALSE(paint_ir_validate(&paint, nullptr));
+    paint_list_destroy(&paint); dl_destroy(&dl); mem_arena_destroy(arena);
+}
+
+TEST(SvgExportTest, RasterFallbackRetainsSemanticGroupsAndTitles) {
+    rdt_engine_init(0);
+    const char* effects[] = {"opacity='.5'", "filter='url(#blur)'"};
+    for (const char* effect : effects) {
+        StrBuf* source = strbuf_create("<svg xmlns='http://www.w3.org/2000/svg' width='80' height='40'>"
+            "<defs><filter id='blur'><feGaussianBlur stdDeviation='1'/></filter></defs>");
+        strbuf_append_format(source,
+            "<g data-node-id='n0' %s><g data-node-id='n1'><rect width='20' height='20' fill='red'/>"
+            "<text x='0' y='35' font-size='12'>fallback label</text></g></g>"
+            "<text x='40' y='20' font-size='12'>vector label</text></svg>", effect);
+        RdtPicture* picture = rdt_picture_load_data(source->str, source->length, "svg");
+        strbuf_free(source);
+        ASSERT_NE(picture, nullptr);
+        PaintSvgSubscene scene = {};
+        render_svg_build_subscene(&scene, rdt_picture_get_svg_root(picture), 80, 40,
+            rdt_picture_get_pool(picture), 1, nullptr, nullptr, nullptr, nullptr, nullptr,
+            nullptr, 1, false, nullptr, true, -1);
+        scene.image_document = true;
+        StrBuf* svg = strbuf_new();
+        struct Output { StrBuf* svg; int calls; } output = {svg, 0};
+        auto consume = [](PaintList* paint, void* context) {
+            Output* output = (Output*)context;
+            output->calls++;
+            // reject vector geometry to exercise the whole-subscene fallback after private effect capture.
+            for (int i = 0; i < paint->item_count(); i++)
+                if (paint->data()[i].op == PAINT_FILL_PATH) return false;
+            PaintSvgLoweringStats stats = {};
+            paint_ir_lower_svg(paint, output->svg, nullptr, &stats);
+            return stats.unsupported_count == 0;
+        };
+        ASSERT_TRUE(render_svg_subscene_with_paint(&scene, consume, &output, true));
+        EXPECT_EQ(output.calls, 2);
+        EXPECT_NE(strstr(svg->str, "data-node-id=\"n0\""), nullptr);
+        EXPECT_NE(strstr(svg->str, "data-node-id=\"n1\""), nullptr);
+        EXPECT_NE(strstr(svg->str, "<title>fallback label</title>"), nullptr);
+        EXPECT_NE(strstr(svg->str, "data:image/png;base64,"), nullptr);
+        strbuf_free(svg); rdt_picture_free(picture);
+    }
+    rdt_engine_term();
+}
+
 static RdtSvgFilterProgram* svg_filter_test_program(DomDocument* document, Element* element, size_t count, float width, float height) {
     RdtSvgFilterProgram* program = render_svg_filter_program_acquire(document, element);
     if (!program) return nullptr;
     program->compiled = program->valid = true; program->count = count;
-    program->nodes = (RdtSvgFilterNode*)arena_calloc(program->arena, count * sizeof(RdtSvgFilterNode));
-    program->region[0] = program->region[1] = arena_strdup(program->arena, "0");
-    program->region[2] = arena_sprintf(program->arena, "%g", (double)width);
-    program->region[3] = arena_sprintf(program->arena, "%g", (double)height);
+    program->nodes = lam::own_arr((RdtSvgFilterNode*)arena_calloc(program->arena, count * sizeof(RdtSvgFilterNode)));
+    program->region[0] = program->region[1] = lam::own(arena_strdup(program->arena, "0"));
+    program->region[2] = lam::own(arena_sprintf(program->arena, "%g", (double)width));
+    program->region[3] = lam::own(arena_sprintf(program->arena, "%g", (double)height));
     return program;
 }
 
@@ -424,6 +873,41 @@ static bool svg_filter_test_source(void* data, const RdtSvgFilterRun* run, Bound
     return true;
 }
 
+TEST(SvgFilterTest, ResourceFontsAndReferencingViewportHaveDistinctLengthBases) {
+    DomDocument document; Element filter = {}, primitive = {};
+    RdtSvgFilterProgram* program = svg_filter_test_program(&document, &filter, 1, 20, 80);
+    ASSERT_NE(program, nullptr);
+    program->region[0] = lam::own(arena_strdup(program->arena, "1em"));
+    program->region[2] = lam::own(arena_strdup(program->arena, "2em"));
+    program->region[3] = lam::own(arena_strdup(program->arena, "50%"));
+    RdtSvgFilterNode* node = program->nodes;
+    node->kind = RDT_SVG_FILTER_FLOOD; node->valid = true; node->element = lam::up(&primitive);
+    node->color.r = node->color.a = 255;
+    node->region[0] = lam::own(arena_strdup(program->arena, "2em"));
+    node->region[1] = lam::own(arena_strdup(program->arena, "25%"));
+    node->region[2] = lam::own(arena_strdup(program->arena, "1em"));
+    node->region[3] = lam::own(arena_strdup(program->arena, "10%"));
+    Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,20,80};
+    run.lengths = {200,160,100,50}; run.frame = rdt_matrix_identity(); run.density = 1;
+    run.length_context = &filter;
+    run.resolve_lengths = [](void* context, Element* resource, SvgLengthContext* lengths) {
+        lengths->font_size = resource == context ? 10.0f : 5.0f;
+        lengths->x_height = lengths->font_size * .5f;
+    };
+    ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
+    ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
+    ASSERT_NE(result, nullptr);
+    EXPECT_FLOAT_EQ(bounds.left, 10); EXPECT_FLOAT_EQ(bounds.right, 30);
+    EXPECT_FLOAT_EQ(bounds.bottom, 80);
+    EXPECT_EQ(((uint32_t*)result->pixels)[40 * 20], 0xff0000ffu);
+    EXPECT_EQ(((uint32_t*)result->pixels)[40 * 20 + 5], 0u);
+    EXPECT_EQ(((uint32_t*)result->pixels)[39 * 20], 0u);
+    EXPECT_EQ(((uint32_t*)result->pixels)[56 * 20], 0u);
+    image_surface_destroy(result); scratch_release(&scratch); arena_destroy(arena);
+    render_svg_filter_program_release(program); document.destroy();
+}
+
 TEST(SvgFilterTest, CaptureAndFinalColorConversionShareTheGraphWorkBudget) {
     DomDocument document; Element element = {};
     RdtSvgFilterProgram* program = svg_filter_test_program(&document, &element, 1, 2, 2);
@@ -432,9 +916,9 @@ TEST(SvgFilterTest, CaptureAndFinalColorConversionShareTheGraphWorkBudget) {
     node->valid = true; node->input = RDT_SVG_FILTER_SOURCE;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
     unsigned calls = 0; size_t used = 0;
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1; run.draw_source = svg_filter_test_source;
-    run.source_context = &calls; run.work_used = &used; run.work_limit = 23;
+    run.source_context = &calls; run.work_used = lam::up(&used); run.work_limit = 23;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
     EXPECT_FALSE(render_svg_filter_execute(program, &run, &result, &bounds, &placement)); EXPECT_EQ(result, nullptr);
     EXPECT_EQ(calls, 1u); EXPECT_EQ(used, 20u);
@@ -461,11 +945,11 @@ TEST(SvgFilterTest, StandardInputsAreCapturedLazilyAndBackgroundAlphaSharesItsIm
     ASSERT_NE(program, nullptr); ASSERT_NE(program->nodes, nullptr);
     RdtSvgFilterNode* node = program->nodes; node->kind = RDT_SVG_FILTER_MERGE; node->valid = true;
     const int inputs[] = {RDT_SVG_FILTER_FILL, RDT_SVG_FILTER_STROKE, RDT_SVG_FILTER_BACKGROUND, RDT_SVG_FILTER_BACKGROUND_ALPHA};
-    node->merge_count = 4; node->merge_inputs = (int*)arena_alloc(program->arena, sizeof(inputs));
+    node->merge_count = 4; node->merge_inputs = lam::own_arr((int*)arena_alloc(program->arena, sizeof(inputs)));
     ASSERT_NE(node->merge_inputs, nullptr); memcpy(node->merge_inputs, inputs, sizeof(inputs));
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
     unsigned calls[3] = {};
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1; run.draw_input = svg_filter_test_input; run.input_context = calls;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
     ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
@@ -486,7 +970,7 @@ TEST(SvgFilterTest, GaussianExtensionSamplesTheInputBordersAndOppositeEdge) {
         ImageSurface* source = image_surface_create(width, height); ASSERT_NE(source, nullptr);
         for (unsigned index = 0; index < 6; index++) ((uint32_t*)source->pixels)[index] = index < 3 ? 0xff0000ffu : 0xffff0000u;
         Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-        RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source; run.geometry = run.source_bounds = {0,0,(float)width,(float)height};
+        RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source); run.geometry = run.source_bounds = {0,0,(float)width,(float)height};
         run.lengths = {(float)width,(float)height,16,8}; run.frame = rdt_matrix_identity(); run.density = 1;
         // normalized Gaussian taps at sigma 1 yield distinct transparent, duplicated and wrapped edge colors.
         const uint32_t expected[] = {0xb20100b1u, 0xff0100feu, 0xff4e00b1u};
@@ -510,13 +994,13 @@ TEST(SvgFilterTest, FractionalTilesInterpolateAcrossBothPeriodicBorders) {
         ASSERT_NE(program, nullptr); ASSERT_NE(program->nodes, nullptr);
         RdtSvgFilterNode* input = &program->nodes[0]; input->kind = RDT_SVG_FILTER_OFFSET;
         input->valid = true; input->input = RDT_SVG_FILTER_SOURCE;
-        input->region[axis + 2] = arena_strdup(program->arena, "5.5");
+        input->region[axis + 2] = lam::own(arena_strdup(program->arena, "5.5"));
         RdtSvgFilterNode* tile = &program->nodes[1]; tile->kind = RDT_SVG_FILTER_TILE;
         tile->valid = true; tile->input = 0;
         ImageSurface* source = image_surface_create(axis ? 1 : 6, axis ? 6 : 1); ASSERT_NE(source, nullptr);
         for (unsigned index = 0; index < 6; index++) ((uint32_t*)source->pixels)[index] = 0xff00ff00u;
         Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-        RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source;
+        RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
         run.geometry = {0,0,width,height}; run.source_bounds = {0,0,(float)source->width,(float)source->height};
         run.lengths = {width,height,16,8}; run.frame = rdt_matrix_identity(); run.density = 1;
         ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
@@ -540,7 +1024,7 @@ TEST(SvgFilterTest, LightingUsesSobelSlopesAtAllImageEdgesAndSpecularPremultipli
     for (unsigned row = 0; row < 5; row++) for (unsigned column = 0; column < 5; column++)
         ((uint32_t*)source->pixels)[row * 5 + column] = (32u + 16u * column + 8u * row) << 24;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source; run.geometry = run.source_bounds = {0,0,5,5};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source); run.geometry = run.source_bounds = {0,0,5,5};
     run.lengths = {5,5,16,8}; run.frame = rdt_matrix_identity(); run.density = 1;
     // the affine height field has the same analytically known normal at corners, edges and interiors.
     double nx = -32.0 / 255.0, ny = -16.0 / 255.0;
@@ -579,7 +1063,7 @@ TEST(SvgFilterTest, NamedGraphUsesPremultipliedSourceAndLeavesSourcePixelsOwned)
     ASSERT_NE(program, nullptr); ASSERT_NE(program->nodes, nullptr);
     program->nodes[0].kind = RDT_SVG_FILTER_OFFSET; program->nodes[0].valid = true;
     program->nodes[0].input = RDT_SVG_FILTER_SOURCE; program->nodes[0].input2 = RDT_SVG_FILTER_EMPTY;
-    program->nodes[0].values[0] = 2.0f; program->nodes[0].result = arena_strdup(program->arena, "moved");
+    program->nodes[0].values[0] = 2.0f; program->nodes[0].result = lam::own(arena_strdup(program->arena, "moved"));
     RdtSvgFilterNode* matrix = &program->nodes[1]; matrix->kind = RDT_SVG_FILTER_MATRIX; matrix->valid = true;
     matrix->input = render_svg_filter_input(program, 1, "moved"); matrix->input2 = RDT_SVG_FILTER_EMPTY;
     matrix->values[5] = matrix->values[18] = 1.0f;
@@ -591,7 +1075,7 @@ TEST(SvgFilterTest, NamedGraphUsesPremultipliedSourceAndLeavesSourcePixelsOwned)
     ASSERT_NE(source, nullptr);
     for (size_t index = 0; index < 4; index++) ((uint32_t*)source->pixels)[index] = 0x80000080u;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source;
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
     run.source_bounds = {0,0,2,2}; run.geometry = {0,0,2,2}; run.lengths = {8,8,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
@@ -600,12 +1084,16 @@ TEST(SvgFilterTest, NamedGraphUsesPremultipliedSourceAndLeavesSourcePixelsOwned)
     EXPECT_EQ(((uint32_t*)result->pixels)[2], 0x80008000u);
     EXPECT_EQ(((uint32_t*)result->pixels)[0], 0u);
     EXPECT_EQ(((uint32_t*)source->pixels)[0], 0x80000080u);
-    image_surface_destroy(result); result = nullptr;
+    ImageSurface* retained = result; result = nullptr;
     run.work_limit = 1;
     EXPECT_FALSE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
     EXPECT_EQ(result, nullptr);
     image_surface_destroy(source); scratch_release(&scratch); arena_destroy(arena);
     render_svg_filter_program_release(program); document.destroy();
+    // deferred paint owns its output after input, execution scratch and program teardown.
+    EXPECT_EQ(((uint32_t*)retained->pixels)[2], 0x80008000u);
+    EXPECT_EQ(((uint32_t*)retained->pixels)[0], 0u);
+    image_surface_destroy(retained);
 }
 
 TEST(SvgFilterTest, CoordinatorPreservesPinnedProgramsAndMutationRetiresOldFacts) {
@@ -642,7 +1130,7 @@ TEST(SvgFilterTest, MorphologySeparatesAxesAndPreservesPremultipliedExtrema) {
     for (unsigned row = 1; row < 6; row++) for (unsigned column = 2; column < 7; column++)
         ((uint32_t*)source->pixels)[row * 9 + column] = 0x80000080u;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source;
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
     run.source_bounds = run.geometry = {0,0,9,7}; run.lengths = {9,7,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f;
     for (unsigned dilate = 0; dilate < 2; dilate++) for (unsigned axis = 0; axis < 2; axis++) {
@@ -698,7 +1186,7 @@ TEST(SvgFilterTest, UnusedTreeDoesNotSpendWorkOrCaptureSource) {
     RdtSvgFilterNode* flood = &program->nodes[1]; flood->kind = RDT_SVG_FILTER_FLOOD; flood->valid = true;
     flood->color.r = 255; flood->color.a = 255;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f; run.work_limit = 64;
     unsigned calls = 0; run.draw_source = svg_filter_test_source; run.source_context = &calls;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
@@ -716,13 +1204,13 @@ TEST(SvgFilterTest, NoiseSeedTruncationAndRegenerationAreDeterministic) {
     RdtSvgFilterNode* node = program->nodes; node->kind = RDT_SVG_FILTER_TURBULENCE; node->valid = true;
     node->variant = 1; node->values[0] = .08f; node->values[1] = .1f; node->values[2] = 2;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f;
     ImageSurface* original = nullptr; Bound bounds = {}; RdtMatrix placement;
-    node->noise = render_svg_filter_noise_create(program->arena, nullptr, -4.8f); ASSERT_NE(node->noise, nullptr);
+    node->noise = lam::own(render_svg_filter_noise_create(program->arena, nullptr, -4.8f)); ASSERT_NE(node->noise, nullptr);
     ASSERT_TRUE(render_svg_filter_execute(program, &run, &original, &bounds, &placement));
     for (unsigned repetition = 0; repetition < 2; repetition++) {
-        node->noise = render_svg_filter_noise_create(program->arena, nullptr, -4.0f); ASSERT_NE(node->noise, nullptr);
+        node->noise = lam::own(render_svg_filter_noise_create(program->arena, nullptr, -4.0f)); ASSERT_NE(node->noise, nullptr);
         ImageSurface* result = nullptr; ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
         EXPECT_EQ(memcmp(original->pixels, result->pixels, 8 * 8 * 4), 0);
         for (size_t index = 0; index < 64; index++) {
@@ -886,7 +1374,7 @@ TEST(SvgGradientTest, RecordingOwnsStrokeDashesAndReplayPreservesSpread) {
     RdtGradientOptions options = {};
     options.spread = RDT_GRADIENT_REPEAT;
     options.stroke_width = 8.0f; options.miter_limit = 6.0f;
-    options.dash_array = dashes; options.dash_count = 2;
+    options.dash_array = lam::up(dashes); options.dash_count = 2;
     paint_fill_linear_gradient(&paint, path, 10.0f, 10.0f, 30.0f, 10.0f,
         stops, 2, RDT_FILL_WINDING, nullptr, nullptr, &options);
     dashes[0] = 0.0f;
@@ -917,7 +1405,7 @@ TEST(SvgGradientTest, RetainedFragmentOwnsStrokeFactsAfterRecordingArenaDies) {
     RdtGradientStop stops[] = {{.5f, 255, 0, 0, 255}, {.5f, 0, 0, 255, 255}};
     float dashes[] = {10.0f, 10.0f};
     RdtGradientOptions options = {}; options.spread = RDT_GRADIENT_REPEAT;
-    options.stroke_width = 8.0f; options.miter_limit = 6.0f; options.dash_array = dashes; options.dash_count = 2;
+    options.stroke_width = 8.0f; options.miter_limit = 6.0f; options.dash_array = lam::up(dashes); options.dash_count = 2;
     PaintList paint;
     paint_fill_linear_gradient(&paint, path, 10.0f, 10.0f, 30.0f, 10.0f, stops, 2,
         RDT_FILL_WINDING, nullptr, nullptr, &options);
@@ -1121,10 +1609,10 @@ TEST(SvgCascadeTest, InlineImportanceAndSelectorListSpecificity) {
     CssEngine* engine = css_engine_create(pool);
     SelectorMatcher* matcher = selector_matcher_create(pool);
     DomElement node = {};
-    node.tag_name = "rect";
-    node.id = "target";
+    node.tag_name = lam::up("rect");
+    node.id = lam::up("target");
     const char* classes[] = {"paint"};
-    node.class_names = classes;
+    node.class_names = lam::own_arr(classes);
     node.class_count = 1;
     CssStylesheet* sheets[] = {css_parse_stylesheet(engine,
         ".paint { fill:blue !important; } .paint, #target { stroke:red; } .paint { stroke:blue; }"

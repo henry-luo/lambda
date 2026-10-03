@@ -389,7 +389,7 @@ All issues below were first recorded on 2026-09-25.
 ## IL2-I22 — MIR Direct loses a return after a possibly empty `for`
 
 - **Area:** procedural return / MIR Direct.
-- **Reproduction:** under `LAMBDA_TIER=jit`, define
+- **Reproduction:** under `LAMBDA_EXEC_BACKEND=jit`, define
   `pn result() string { for (at in []) { return "hit" }; return "" }`.
   `type(result())` was `null`. Without the `for`, it was `string`. An unused
   map-assignment procedure initially exposed this defect by causing the

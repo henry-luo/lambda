@@ -901,7 +901,7 @@ inline CompileResult compile_and_dump(const std::string& script_path,
     } else {
         // A JS emission fixture must compile through whole-module MIR rather
         // than inherit the host's auto/AST backend selection.
-        spec.env.push_back(std::make_pair(std::string("JS_EXECUTION_BACKEND"),
+        spec.env.push_back(std::make_pair(std::string("JS_EXEC_BACKEND"),
             std::string("mir")));
     }
     spec.env.push_back(std::make_pair(std::string("LAMBDA_MIR_DUMP_PATH"), result.dump_path));

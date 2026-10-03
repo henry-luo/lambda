@@ -1,4 +1,5 @@
 #include "font_internal.h"
+#include "../generation.h"
 
 void font_context_reset_glyph_caches(FontContext* ctx) {
     if (!ctx) return;
@@ -18,8 +19,7 @@ void font_context_reset_glyph_caches(FontContext* ctx) {
     if (ctx->glyph_arena) {
         arena_clear(ctx->glyph_arena);
     }
-    ctx->glyph_cache_generation++;
-    if (ctx->glyph_cache_generation == 0) ctx->glyph_cache_generation = 1;
+    ctx->glyph_cache_generation = generation_next(ctx->glyph_cache_generation);
 
     log_info("font_context_reset_glyph_caches: cleared loaded/bitmap caches and glyph arena");
 }

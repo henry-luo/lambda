@@ -74,8 +74,8 @@ protected:
         state = reinterpret_cast<DocState*>(&fake_state);
         // generated nodes require canonical ownership fields and the lifecycle
         // registry after the legacy document aliases were removed.
-        doc_storage.document_pool = pool;
-        doc_storage.node_arena = arena;
+        doc_storage.document_pool = lam::own(pool);
+        doc_storage.node_arena = lam::own(arena);
         ASSERT_TRUE(dom_lifecycle_init(&doc_storage));
 
         div   = make_element();
@@ -107,7 +107,7 @@ protected:
         DomElement* e = new DomElement{};
         e->node_type = DOM_NODE_ELEMENT;
         e->set_synthetic(true);
-        e->doc = &doc_storage;
+        e->doc = lam::up(&doc_storage);
         return e;
     }
 
@@ -116,7 +116,7 @@ protected:
     DomText* make_text(const char* s, size_t len) {
         DomText* t = new DomText{};
         t->node_type = DOM_NODE_TEXT;
-        t->text = s;
+        t->text = lam::up(s);
         t->length = len;
         return t;
     }
@@ -188,7 +188,7 @@ TEST_F(DomRangeTest, BoundaryCompareAncestorContainerVsDescendant) {
 TEST(DomRangeUtf16, AsciiLengthMatchesByteLength) {
     DomText t = {};
     const char* s = "abcdef";
-    t.text = s;
+    t.text = lam::up(s);
     t.length = 6;
     EXPECT_EQ(dom_text_utf16_length(&t), 6u);
 }
@@ -197,7 +197,7 @@ TEST(DomRangeUtf16, BmpAndAstralCount) {
     // "a" + U+00E9 ("é", BMP, 2 UTF-8 bytes) + U+1F600 (😀, astral, 4 UTF-8 bytes)
     DomText t = {};
     const char* s = "a\xC3\xA9\xF0\x9F\x98\x80";
-    t.text = s;
+    t.text = lam::up(s);
     t.length = 7;
     // Expected UTF-16 code units: 1 (a) + 1 (é) + 2 (surrogate pair) = 4
     EXPECT_EQ(dom_text_utf16_length(&t), 4u);
@@ -227,7 +227,7 @@ TEST_F(DomRangeTest, RangeReleaseReusesFreelistSlot) {
     EXPECT_EQ(arena_total_used(arena), used_after_release);
     EXPECT_EQ(second->start.node, nullptr);
     EXPECT_EQ(second->end.node, nullptr);
-    EXPECT_EQ(second->ref_count, 1u);
+    EXPECT_EQ(ref_count_get(&second->ref_count), 1);
     dom_range_release(second);
 }
 
@@ -713,7 +713,7 @@ TEST_F(DomRangeTest, NodeCloneShallowText) {
 }
 
 TEST_F(DomRangeTest, NodeCloneDeepElement) {
-    span->tag_name = "span";
+    span->tag_name = lam::up("span");
     DomNode* clone = dom_node_clone(span, /*deep=*/true);
     ASSERT_NE(clone, nullptr);
     ASSERT_TRUE(clone->is_element());
@@ -896,7 +896,7 @@ TEST_F(DomRangeTest, BoundaryMoveCharacterCrossesTextNodes) {
     // should land at start of next text 'w' or step into it
     EXPECT_TRUE(b.node == (DomNode*)w || (b.node == (DomNode*)hello && b.offset == 5));
     delete w;
-    span->last_child = (DomNode*)hello;
+    span->last_child = lam::up((DomNode*)hello);
     hello->next_sibling = nullptr;
 }
 
@@ -911,7 +911,7 @@ TEST_F(DomRangeTest, BoundaryMoveDocumentBoundary) {
 
 TEST_F(DomRangeTest, BoundaryMoveWordWithinText) {
     // Replace hello content with literal that has a word boundary
-    hello->text = "abc def";
+    hello->text = lam::up("abc def");
     hello->length = 7;
     DomBoundary b{ hello, 0 };
     b = dom_boundary_move(b, DOM_MOD_WORD, +1);
@@ -925,7 +925,7 @@ TEST_F(DomRangeTest, BoundaryMoveWordWithinText) {
     // back to start of "def" -> offset 4
     EXPECT_EQ(b.offset, 4u);
     // restore
-    hello->text = "hello";
+    hello->text = lam::up("hello");
     hello->length = 5;
 }
 
@@ -943,7 +943,7 @@ TEST_F(DomRangeTest, SelectionModifyMoveCharacter) {
 }
 
 TEST_F(DomRangeTest, SelectionModifyMoveCharacterCollapsesWhitespaceRun) {
-    hello->text = "F    and";
+    hello->text = lam::up("F    and");
     hello->length = 9;
 
     DomSelection sel{};
@@ -966,7 +966,7 @@ TEST_F(DomRangeTest, SelectionModifyMoveCharacterCollapsesWhitespaceRun) {
     ASSERT_TRUE(dom_selection_modify(&sel, "move", "backward", "character", &exc));
     EXPECT_EQ(dom_selection_focus_offset(&sel), 1u);
 
-    hello->text = "hello";
+    hello->text = lam::up("hello");
     hello->length = 5;
 }
 
@@ -984,7 +984,7 @@ TEST_F(DomRangeTest, SelectionModifyExtendCharacter) {
 }
 
 TEST_F(DomRangeTest, SelectionModifyExtendForwardEntersCollapsedWhitespaceRun) {
-    hello->text = "f    oo   bar    baz";
+    hello->text = lam::up("f    oo   bar    baz");
     hello->length = 20;
 
     DomSelection sel{};
@@ -1002,7 +1002,7 @@ TEST_F(DomRangeTest, SelectionModifyExtendForwardEntersCollapsedWhitespaceRun) {
     EXPECT_EQ(dom_selection_anchor_offset(&sel), 5u);
     EXPECT_EQ(dom_selection_focus_offset(&sel), 14u);
 
-    hello->text = "hello";
+    hello->text = lam::up("hello");
     hello->length = 5;
 }
 
@@ -1065,7 +1065,7 @@ protected:
         rect_hello.start_index = 0;
         rect_hello.length      = 5;
         rect_hello.next        = nullptr;
-        hello->rect = &rect_hello;
+        hello->rect = lam::own(&rect_hello);
     }
 };
 

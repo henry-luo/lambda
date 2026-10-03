@@ -225,12 +225,12 @@ static void frame_clock_platform_destroy(RadiantFrameClockPlatform* platform) {
         platform->timer_fd = -1;
     }
 #endif
-    mem_free(platform);
+    lam::Temp<RadiantFrameClockPlatform> owned(platform);  // the clock releases its platform state
 }
 
 static RadiantFrameClockPlatform* frame_clock_platform_create(RadiantFrameClock* clock) {
     RadiantFrameClockPlatform* platform =
-        (RadiantFrameClockPlatform*)mem_calloc(1, sizeof(RadiantFrameClockPlatform), MEM_CAT_RENDER);
+        (RadiantFrameClockPlatform*)mem_calloc(1, sizeof(RadiantFrameClockPlatform), MEM_CAT_RENDER); // OBJ_HEAP_OK: owned by the frame clock; released at shutdown
     if (!platform) return NULL;
 
     platform->refresh_interval = clock->refresh_interval;

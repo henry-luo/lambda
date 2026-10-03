@@ -46,6 +46,15 @@ extern "C" Item dom_raise(Item name, Item message) {
 extern "C" Item dom_raise_named(const char* name, const char* message) {
     return dom_raise(js_name_item(name ? name : "Error"), js_name_item(message ? message : ""));
 }
+extern "C" Item dom_raise_exception(const char* name, const char* message) {
+    if (!dom_realm_active()) return dom_raise_named(name, message);
+    RootFrame roots(3);
+    Rooted<Item> name_root(roots, js_name_item(name));
+    Rooted<Item> message_root(roots, js_name_item(message));
+    Rooted<Item> exception(roots, dom_realm_new_dom_exception(name_root.get(), message_root.get()));
+    dom_realm_apply_prototype(exception.get(), "DOMException");
+    return dom_realm_throw(exception.get());
+}
 extern "C" Item dom_raise_type_error(const char* message) {
     return dom_raise_named("TypeError", message);
 }

@@ -10,6 +10,7 @@
 #ifndef RADIANT_EVENT_CORE_ONLY
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
+#include "../lib/ref_count.h"
 #include "../lib/utf.h"
 #include "../lambda/runtime/template_state.h"
 #include "../lambda/runtime/render_map.h"
@@ -799,7 +800,7 @@ typedef struct DomRange {
     uint32_t      id;               // monotonic, for diagnostics
     struct DomRange* prev;          // doubly-linked into state->live_ranges
     struct DomRange* next;
-    uint32_t      ref_count;        // selection holds 1; JS handle holds 1
+    RefCount      ref_count;        // selection holds 1; JS handle holds 1
 
     // Layout cache (filled by resolver). When `layout_valid == false` these
     // fields are stale and must be ignored by renderers/input handlers.

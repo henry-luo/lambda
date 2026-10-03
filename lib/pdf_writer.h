@@ -247,6 +247,10 @@ HPDF_STATUS HPDF_ExtGState_SetAlphaStroke(HPDF_ExtGState ext_gstate, float alpha
  */
 HPDF_STATUS HPDF_Page_SetExtGState(HPDF_Page page, HPDF_ExtGState ext_gstate);
 
+// concatenate an affine transform with the current graphics-state matrix.
+HPDF_STATUS HPDF_Page_Concat(HPDF_Page page, float a, float b, float c,
+                            float d, float e, float f);
+
 /*---------------------------------------------------------------------------*/
 /*  Path Construction Functions                                              */
 /*---------------------------------------------------------------------------*/

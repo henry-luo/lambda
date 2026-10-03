@@ -88,7 +88,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
 
     // Initialize BFC hierarchy
     ctx->parent = nullptr;
-    ctx->establishing_element = element;
+    ctx->establishing_element = lam::up(element);
     ctx->is_bfc_root = (element != nullptr);
 
     // BFC offset is 0 for BFC root (coordinates are relative to itself)
@@ -140,7 +140,7 @@ void block_context_init(BlockContext* ctx, ViewBlock* element, Pool* pool) {
     ctx->initial_letters = nullptr;
     ctx->initial_letters_tail = nullptr;
 
-    ctx->pool = pool;
+    ctx->pool = lam::up(pool);
 
     log_debug("[BlockContext] Init: element=%s, origin=(%.1f,%.1f), float_right=%.1f",
               element ? element->node_name() : "null", ctx->origin_x, ctx->origin_y, ctx->float_right_edge);
@@ -169,7 +169,7 @@ void block_context_add_initial_letter(BlockContext* ctx, ViewBlock* element,
     InitialLetterBox* box = (InitialLetterBox*)pool_calloc(ctx->pool, sizeof(InitialLetterBox));
     if (!box) return;
 
-    box->element = element;
+    box->element = lam::up(element);
     box->margin_box_left = left;
     box->margin_box_top = top;
     box->margin_box_right = right;
@@ -179,10 +179,11 @@ void block_context_add_initial_letter(BlockContext* ctx, ViewBlock* element,
     box->next = nullptr;
 
     if (!ctx->initial_letters) {
-        ctx->initial_letters = ctx->initial_letters_tail = box;
+        ctx->initial_letters = lam::up(box);
+        ctx->initial_letters_tail = lam::up(box);
     } else {
-        ctx->initial_letters_tail->next = box;
-        ctx->initial_letters_tail = box;
+        ctx->initial_letters_tail->next = lam::up(box);
+        ctx->initial_letters_tail = lam::up(box);
     }
 }
 
@@ -395,7 +396,7 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     FloatBox* box = block_context_alloc_float_box(ctx);
     if (!box) return;
 
-    box->element = float_elem;
+    box->element = lam::up(float_elem);
     box->float_side = side;
     box->initial_letter_clearance = float_elem->blk &&
         float_elem->block()->initial_letter_float_clearance;
@@ -409,20 +410,22 @@ void block_context_add_float(BlockContext* ctx, ViewBlock* float_elem) {
     // Add to appropriate list
     if (side == CSS_VALUE_LEFT) {
         if (!ctx->left_floats) {
-            ctx->left_floats = ctx->left_floats_tail = box;
+            ctx->left_floats = lam::up(box);
+            ctx->left_floats_tail = lam::up(box);
         } else {
-            ctx->left_floats_tail->next = box;
-            ctx->left_floats_tail = box;
+            ctx->left_floats_tail->next = lam::up(box);
+            ctx->left_floats_tail = lam::up(box);
         }
         ctx->left_float_count++;
         log_debug("[BlockContext] Added left float: count=%d, margin_bottom=%.1f",
                   ctx->left_float_count, box->margin_box_bottom);
     } else {
         if (!ctx->right_floats) {
-            ctx->right_floats = ctx->right_floats_tail = box;
+            ctx->right_floats = lam::up(box);
+            ctx->right_floats_tail = lam::up(box);
         } else {
-            ctx->right_floats_tail->next = box;
-            ctx->right_floats_tail = box;
+            ctx->right_floats_tail->next = lam::up(box);
+            ctx->right_floats_tail = lam::up(box);
         }
         ctx->right_float_count++;
         log_debug("[BlockContext] Added right float: count=%d, margin_bottom=%.1f",
