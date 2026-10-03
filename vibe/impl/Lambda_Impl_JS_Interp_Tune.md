@@ -1,9 +1,10 @@
 # LambdaJS Implementation Plan: AST Interpreter Tuning, Hot-Loop Elevation, and Alignment with Lambda T0
 
 **Date:** 2026-10-03
-**Status:** PROPOSED — analysis and plan; only the call-threshold default is
-implemented. The three policy points were ruled by the user on 2026-10-03
-(§8) and are recorded as **D8.1.3v22** and JSI18v2.
+**Status:** IN PROGRESS — J1, J3, J5 (with a dense-index read), E1 and E3
+implemented on branch `fix-continuation-param-inference` (§11); J2, J4, J6–J8,
+E2, E4 and track A not started. The three policy points were ruled by the user
+on 2026-10-03 (§8) and are recorded as **D8.1.3v22** and JSI18v2.
 **Source baseline:** `72cc6de76` (source reading); release executable built
 from `551d9cd3e` (`temp/bench_auto/lambda-fix-rel`) for timings and profiles.
 **Scope:** the LambdaJS boxed AST walker (`lambda/js/js_interp.cpp`), its P2
@@ -428,6 +429,115 @@ cd temp/js_interp; JS_EXECUTION_BACKEND=ast ../bench_auto/lambda-fix-rel js loop
 python3 temp/js_interp/incl.py temp/js_interp/loop.sample.txt
 ```
 
+## 11. Implementation record (2026-10-03)
+
+Commits on `fix-continuation-param-inference`: `8349baa75` (J1, J3, J5),
+`841b337ce` (E1), `87b781771` and `286c909d2` (E3). Every step passed
+`test_js_gtest` 484/484 and `test_js_script_gtest` 191/191, plus the
+differentials below. Timings are release builds on a shared machine (load 8–50
+during the session), interleaved per row, so they are ratios, not a record.
+
+### 11.1 Walker (J1, J3, J5)
+
+- **J1** — `js_interp_eval` asks the may-suspend question only when the frame
+  has a suspended activation; no plan-time fact was needed, because ordinary
+  frames never record replay values.
+- **J3** — the promotion policy is resolved once per `Runtime`
+  (`js_promotion_policy_resolved`, `js_promotion_auto`, call and back-edge
+  thresholds), at the first interpreted call that asks.
+- **J5** — the parser gives each static, non-private member name a slot in
+  the realm literal cache (`AstIdentNode::js_property_key_slot`, in tail
+  padding); the walker stores the canonical key there once per realm.
+  `js_canonical_property_string` now returns a key whose NameId resolves to
+  itself in the context pool instead of re-hashing it. The profile also showed
+  `a[i]` reads converting the Number index to a string key; a plain computed
+  read of an existing own dense array element now stops at the element, as
+  MIR's `js_get_reference` does.
+
+AST differential over `test/js/` (old vs new binary, forced AST): no
+divergence. Probes (exec ms, `JS_EXECUTION_BACKEND=ast`):
+
+| Probe | before | after |
+|---|---:|---:|
+| counting loop | 600 | 334 |
+| call loop | 866 | 624 |
+| object/array loop | 1,536 | 929 |
+| top-level loop | 2,628 | 2,335 |
+
+### 11.2 E1 — wider P2 admission
+
+Calls and `new` go through the ordinary kernels; unresolved names are global
+reads by name; script top-level bindings are admitted. Three lowering changes
+make that correct in a satellite:
+
+1. The clone numbers module vars in its own order. Every module var the
+   selected body names is pointed at the retained script's slab slot for the
+   same binding (`js_p2_remap_module_vars`), and its initial-type guess is
+   dropped. Without it a top-level `let` read returned another slot's value.
+2. Direct-callee resolution answers only the satellite's own function
+   (`JsMirTranspiler::p2_satellite_node`), set before analysis so no inferred
+   type assumes a callee the satellite does not define.
+3. A function-declaration read never lazily materializes another
+   definition's MIR item: the item is an undefined forward, and `MIR_link`
+   looped on it.
+
+Stress differential (`JS_JIT_THRESHOLD=2` AUTO vs forced AST over
+`test/js/`): no divergence.
+
+### 11.3 E3 — loop-head handoff
+
+As designed in §5, with these specifics:
+
+- **Continuation source.** The satellite clone parses the retained source
+  plus one appended top-level function `__lambda_loop_<fid>_<ordinal>`. Its
+  fresh parameters are copied into same-named `let` locals (`var` for a name
+  the region redeclares with `var`), and its body is the source text from the
+  head test to the end of the function body. A `for` resumes as
+  `for (;test;update)`. A never-executed call `if (0) __lambda_loop_…(…)` with
+  literals of the live values' types gives parameter-type evidence.
+- **Why `let` locals.** Measured on whole-module MIR, a numeric loop over
+  reassigned parameters or `var` locals is untyped and runs 10–20× slower than
+  the same loop over `let` locals (diviter's continuation: ~15 ns → ~2 ns per
+  iteration).
+- **Entry.** T0 calls the continuation through `js_call_from_ast` with the
+  frame's `this`; the wrapper gets the compiled-context ABI flag (and strict,
+  if the original is strict). The result is the activation's `return`.
+- **Refusals** pin the loop (`FN_LOOP_HANDOFF_PINNED`): P2 admission,
+  named function expressions, >32 or shadowed live-ins, an assigned `const`
+  live-in, a continuation that fails to compile. A live-in still in its TDZ
+  declines the handoff and stays T0.
+
+Stress differential (`JS_JIT_THRESHOLD=2 JS_JIT_BACKEDGE=1`): no divergence;
+31 handoffs in 19 of 471 files. Refusals are dominated by nested definitions
+(272 "closure capture"), the shared-environment work of JS design §9.5.
+
+AUTO exec ms, pre-round binary (`551d9cd3e`, threshold 5, no handoff) vs
+this round (threshold 1000, handoff), with whole-module MIR for reference:
+
+| Row | AUTO before | AUTO after | MIR |
+|---|---:|---:|---:|
+| r7rs/fib2 | 586 | 3.8 | 2.2 |
+| r7rs/tak2 | 62 | 4.5 | 0.9 |
+| r7rs/fibfp2 | 512 | 6.4 | 2.8 |
+| r7rs/sumfp2 | 41 | 5.1 | 0.1 |
+| r7rs/sum2 | 23 | 9.3 | 1.1 |
+| kostya/collatz | 3,306 | 2,088 | 2,186 |
+| larceny/diviter | 4,228 | 1,145 | 960 |
+| larceny/ray | 189 | 45 | 5.3 |
+
+Rows still far from MIR: `larceny/primes` and `array1` (now handed off; not
+re-timed in release), `r7rs/mbrot2` (handed off; 34 vs 5 ms), `larceny/quicksort`
+(46 → 156 ms: its hot function is called often but no longer promotes before
+1000 calls). The quiet-machine rerun (`temp/bench_auto/js_e3_quiet.sh`) is to
+replace this table.
+
+### 11.4 Not done
+
+J2 (loop facts at plan time), J4 (frame split), J6/J7 (frame-slot locals,
+planned root windows), J8, E2 (compile from the retained script, off-thread),
+E4 (threshold derivation), and track A. AWFY rows need P2 for class methods
+and CommonJS modules, which E1 does not cover.
+
 ## 10. Source map
 
 | Topic | Location |
@@ -437,7 +547,8 @@ python3 temp/js_interp/incl.py temp/js_interp/loop.sample.txt
 | Environments and binding reads | `js_interp_env.h`; `js_interp_env_create`, `js_interp_find_env`, `js_interp_read_binding` |
 | Call entry | `js_interp_call_function` |
 | P2 admission and promotion | `js_interp_p2_scan_node`, `js_interp_p2_admission_reason`, `js_interp_promote_function_if_hot` |
-| Satellite compile | `js_mir_module_batch_lowering.cpp` `js_mir_compile_function_satellite` |
+| Satellite compile | `js_mir_module_batch_lowering.cpp` `js_mir_compile_satellite_unit`, `js_p2_remap_module_vars` |
+| Loop handoff (E3) | `js_interp.cpp` `js_interp_loop_handoff_begin`, `js_interp_loop_continuation_compile`, `js_interp_loop_handoff_try` |
 | Lambda promotion driver and queue | `interp.cpp` `interp_satellite_*`, `interp_promote_function_if_hot` |
 | Lambda handoff plan and continuation | `interp_plan.cpp` `plan_mark_handoff_loops`; `interp.cpp` `interp_build_loop_continuation` |
 | Shared cell and plan types | `ast-core.hpp` `FnPromotionCell`, `FnFramePlan`, `AstLoopControlNode` |
