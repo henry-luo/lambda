@@ -511,25 +511,48 @@ Stress differential (`JS_JIT_THRESHOLD=2 JS_JIT_BACKEDGE=1`): no divergence;
 31 handoffs in 19 of 471 files. Refusals are dominated by nested definitions
 (272 "closure capture"), the shared-environment work of JS design §9.5.
 
-AUTO exec ms, pre-round binary (`551d9cd3e`, threshold 5, no handoff) vs
-this round (threshold 1000, handoff), with whole-module MIR for reference:
+AUTO exec ms on a quiet machine (load 3.7–8, 2026-10-03 16:16–16:25, min of
+three): pre-round binary (`551d9cd3e`, call threshold 5, no handoff) vs this
+round (`286c909d2`: threshold 1000, handoff), with whole-module MIR from the
+same binary. Geomean AUTO after/before over the 29 rows: **0.218**.
 
 | Row | AUTO before | AUTO after | MIR |
 |---|---:|---:|---:|
-| r7rs/fib2 | 586 | 3.8 | 2.2 |
-| r7rs/tak2 | 62 | 4.5 | 0.9 |
-| r7rs/fibfp2 | 512 | 6.4 | 2.8 |
-| r7rs/sumfp2 | 41 | 5.1 | 0.1 |
-| r7rs/sum2 | 23 | 9.3 | 1.1 |
-| kostya/collatz | 3,306 | 2,088 | 2,186 |
-| larceny/diviter | 4,228 | 1,145 | 960 |
-| larceny/ray | 189 | 45 | 5.3 |
+| r7rs/ack2 | 2,963 | 16.4 | 13.7 |
+| r7rs/fib2 | 271 | 3.7 | 1.9 |
+| r7rs/tak2 | 43.9 | 3.0 | 0.3 |
+| r7rs/cpstak2 | 83.7 | 3.4 | 0.7 |
+| r7rs/sum2 | 14.9 | 4.6 | 0.7 |
+| r7rs/sumfp2 | 31.6 | 4.0 | 0.1 |
+| r7rs/nqueens2 | 102 | 49.9 | 28.0 |
+| larceny/triangl | 60,664 | 6,932 | 5,537 |
+| larceny/array1 | 691 | 45.5 | 13.2 |
+| larceny/divrec | 722 | 21.2 | 16.1 |
+| larceny/diviter | 1,358 | 619 | 614 |
+| larceny/gcbench | 4,436 | 1,025 | 525 |
+| larceny/puzzle | 832 | 86.5 | 49.8 |
+| larceny/deriv | 403 | 107 | 87.2 |
+| larceny/ray | 357 | 89.3 | 6.5 |
+| kostya/matmul | 13,142 | 614 | 187 |
+| kostya/brainfuck | 10,854 | 1,894 | 1,748 |
+| kostya/base64 | 2,109 | 540 | 467 |
+| kostya/primes | 3,334 | 1,683 | 50.9 |
+| kostya/collatz | 1,984 | 1,644 | 1,587 |
+| larceny/primes | 3,952 | 3,629 | 98.6 |
+| kostya/levenshtein | 1,283 | 1,037 | 76.6 |
+| **regressions** | | | |
+| r7rs/mbrot2 | 9.8 | 24.3 | 2.2 |
+| r7rs/fft2 | 91.5 | 101 | 3.3 |
+| larceny/paraffins | 91.7 | 155 | 2.3 |
+| larceny/quicksort | 91.1 | 300 | 25.8 |
 
-Rows still far from MIR: `larceny/primes` and `array1` (now handed off; not
-re-timed in release), `r7rs/mbrot2` (handed off; 34 vs 5 ms), `larceny/quicksort`
-(46 → 156 ms: its hot function is called often but no longer promotes before
-1000 calls). The quiet-machine rerun (`temp/bench_auto/js_e3_quiet.sh`) is to
-replace this table.
+The regressions are rows whose hot functions are called fewer than 1000 times
+but more than five, with loops short of 10,000 back-edges per definition, or
+(quicksort) a recursive hot function that now runs 1000 interpreted calls
+before promoting. They are the expected cost of the provisional thresholds and
+the input for E4. `larceny/primes`, `kostya/primes` and `levenshtein` stay
+far from MIR: their hot code is not a direct-statement loop of an admitted
+function. Raw data: `temp/bench_auto/js_e3_time.json` (main checkout).
 
 ### 11.4 Not done
 
