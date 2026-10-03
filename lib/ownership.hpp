@@ -196,6 +196,19 @@ void free_owned(OwnArr<T>& field) {
     field = nullptr;
 }
 
+// The same for an owning field whose storage comes from a node's pool.
+template<class T>
+void free_owned(Pool* pool, Own<T>& field) {
+    if (field) pool_free(pool, (void*)field.get());
+    field = nullptr;
+}
+
+template<class T>
+void free_owned(Pool* pool, OwnArr<T>& field) {
+    if (field) pool_free(pool, (void*)field.get());
+    field = nullptr;
+}
+
 template<class T>
 PoolPtr<T> checked_pool_ptr(Pool* pool, T* raw) {
     (void)pool;

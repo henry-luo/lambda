@@ -183,13 +183,22 @@ RetainedDisplayListCache* retained_dl_cache_create(Pool* pool) {
     return cache.release();
 }
 
-static void retained_dl_fragment_free(RetainedDisplayListFragment* fragment) {
+// Fragments live in the cache's pool (the owner's node); a cache built
+// without a pool keeps them on the memtracked heap.
+static RetainedDisplayListFragment* retained_dl_fragment_alloc(Pool* pool) {
+    void* storage = pool ? pool_calloc(pool, sizeof(RetainedDisplayListFragment))
+                         : mem_calloc(1, sizeof(RetainedDisplayListFragment), MEM_CAT_RENDER);
+    return storage ? new (storage) RetainedDisplayListFragment() : nullptr;
+}
+
+static void retained_dl_fragment_free(Pool* pool, RetainedDisplayListFragment* fragment) {
     if (!fragment) return;
-    lam::Temp<RetainedDisplayListFragment> storage(fragment);  // destroyed below, storage freed on return
     if (fragment->initialized) dl_destroy(&fragment->list);
     // the list's scratch releases its arena ownership before the arena goes
     if (fragment->arena) mem_arena_destroy(fragment->arena);
     fragment->~RetainedDisplayListFragment();
+    if (pool) pool_free(pool, fragment);
+    else lam::Temp<RetainedDisplayListFragment> storage(fragment);
 }
 
 bool RetainedDisplayListCache::init(Pool* owner_pool) {
@@ -208,7 +217,7 @@ void RetainedDisplayListCache::destroy() {
         RetainedDisplayListEntry* entry = nullptr;
         while (map.next(&iter, &entry)) {
             if (entry && entry->fragment) {
-                retained_dl_fragment_free(entry->fragment);
+                retained_dl_fragment_free(pool, entry->fragment);
             }
         }
         map.destroy();
@@ -268,10 +277,8 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     RetainedDisplayListEntry* found = cache->map.get(query);
     if (found) return found->fragment;
 
-    RetainedDisplayListFragment* fragment =
-        (RetainedDisplayListFragment*)mem_calloc(1, sizeof(RetainedDisplayListFragment), MEM_CAT_RENDER); // OBJ_HEAP_OK: owned by the RetainedDisplayListCache; retained_dl_fragment_free releases it
+    RetainedDisplayListFragment* fragment = retained_dl_fragment_alloc(cache->pool);
     if (!fragment) return nullptr;
-    new (fragment) RetainedDisplayListFragment();
 
     fragment->view_id = view_id;
     // Factory-created fragment arenas outlive frame scratch resets; they are
@@ -281,7 +288,7 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
         cache->pool ? mem_node_owner((MemNode*)pool_get_mem_node(cache->pool)) : nullptr,
         MEM_ROLE_RENDER, "retained_dl.fragment");
     if (!fragment->arena) {
-        retained_dl_fragment_free(fragment);
+        retained_dl_fragment_free(cache->pool, fragment);
         return nullptr;
     }
     dl_init(&fragment->list, fragment->arena);
@@ -290,7 +297,7 @@ static RetainedDisplayListFragment* retained_dl_fragment_get_or_create(
     RetainedDisplayListEntry entry = { view_id, fragment };
     cache->map.set(entry);
     if (cache->map.oom()) {
-        retained_dl_fragment_free(fragment);
+        retained_dl_fragment_free(cache->pool, fragment);
         return nullptr;
     }
     return fragment;

@@ -5346,9 +5346,7 @@ static bool layout_single_file(
 
         if (doc->view_tree) {
             cleanup_phase_start = time_now_ns();
-            view_pool_destroy(doc->view_tree);
-            mem_free(doc->view_tree);
-            doc->view_tree = nullptr;
+            view_tree_shell_destroy(doc->view_tree);
             phase_timing.cleanup_view_ms += time_elapsed_ms_f(
                 cleanup_phase_start, time_now_ns());
         }

@@ -2736,6 +2736,13 @@ struct ViewTree {
 uint64_t inline_prop_hash(const InlineProp* value);
 bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
 LAM_NODE_OF(ViewTree, NodeViewTree);
+
+// The document's ViewTree shell. It stays on the memtracked heap: fixtures may
+// alias the document pool with the view tree's prop pool, which the tree
+// destroys before the shell is released.
+lam::Own<ViewTree> view_tree_shell_create();
+// Destroys the tree's storage and releases the shell; clears the field.
+void view_tree_shell_destroy(lam::Own<ViewTree>& tree);
 LAM_NODE_OF(RadiantBorderSide, NodeStack);
 LAM_NODE_OF(RadiantInsetSide, NodeStack);
 

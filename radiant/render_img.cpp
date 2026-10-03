@@ -389,10 +389,7 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
     if (doc) {
         script_runner_cleanup_js_state(doc);
-        if (doc->view_tree) {
-            view_pool_destroy(doc->view_tree);
-            lam::free_owned(doc->view_tree);
-        }
+        view_tree_shell_destroy(doc->view_tree);
         dom_document_destroy(doc);
     }
 

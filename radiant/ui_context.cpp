@@ -479,8 +479,7 @@ void free_document(DomDocument* doc) {
             doc->document_pool = nullptr;  // Pool will be destroyed by view_pool_destroy
         }
 
-        view_pool_destroy(doc->view_tree);
-        lam::free_owned(doc->view_tree);
+        view_tree_shell_destroy(doc->view_tree);
     }
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here

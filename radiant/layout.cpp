@@ -5201,13 +5201,13 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     bool reset_script_layout = false;
     if (is_reflow) {
         if (!doc->view_tree) {
-            doc->view_tree = lam::own((ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT)); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
+            doc->view_tree = view_tree_shell_create();
             init_view_pool = true;
         } else if (!doc->view_tree->prop_pool) {
             init_view_pool = true;
         }
     } else if (!doc->view_tree) {
-        doc->view_tree = lam::own((ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT)); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
+        doc->view_tree = view_tree_shell_create();
         init_view_pool = true;
     } else {
         // not leak a separate ViewTree ownership epoch.

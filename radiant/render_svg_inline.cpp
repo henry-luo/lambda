@@ -5284,9 +5284,12 @@ struct SvgLayerEntry {
     lam::Own<SvgLayerEntry> next;
 };
 
+// The registry and its entries live in one pool under the document's memory
+// context; entries are only ever added, so the pool is released whole.
 struct SvgLayerRegistry {
     lam::Own<SvgLayerEntry> entries;
     size_t cached_bytes;
+    lam::Own<Pool> pool;  // holds this registry and its entries
 };
 
 static const size_t SVG_LAYER_MAX_BYTES = (size_t)48 << 20;         // one layer
@@ -5316,14 +5319,13 @@ static void svg_layer_entry_release_surface(SvgLayerRegistry* registry, SvgLayer
 
 static void svg_layer_registry_destroy(void* data) {
     // the document resource hands its registry over for teardown
-    lam::Temp<SvgLayerRegistry> registry((SvgLayerRegistry*)data);
+    SvgLayerRegistry* registry = (SvgLayerRegistry*)data;
     if (!registry) return;
-    while (registry->entries) {
-        lam::Own<SvgLayerEntry> entry = registry->entries;
-        svg_layer_entry_release_surface(registry.get(), entry);
-        registry->entries = entry->next;
-        lam::free_owned(entry);
+    for (SvgLayerEntry* entry = registry->entries; entry; entry = entry->next) {
+        svg_layer_entry_release_surface(registry, entry);
     }
+    // the registry itself lives in this pool
+    mem_pool_destroy(registry->pool);
 }
 
 static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) {
@@ -5331,10 +5333,16 @@ static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) 
     SvgLayerRegistry* registry = (SvgLayerRegistry*)document->services.svg_layer_registry;
     if (registry) return registry;
     // the document takes ownership once its resource hook is registered
-    lam::Temp<SvgLayerRegistry> owned = lam::temp_array_zero<SvgLayerRegistry>(1, MEM_CAT_LAYOUT);
-    if (!owned) return nullptr;
-    if (!dom_document_add_resource(document, owned.get(), svg_layer_registry_destroy)) return nullptr;
-    registry = owned.release();
+    MemContext* context = (MemContext*)document->services.mem_ctx;
+    Pool* pool = mem_pool_create(context ? context : mem_context_process(MEM_ROLE_RENDER),
+                                 MEM_ROLE_RENDER, "svg_layer.registry");
+    if (!pool) return nullptr;
+    registry = (SvgLayerRegistry*)pool_calloc(pool, sizeof(SvgLayerRegistry));
+    if (!registry || !dom_document_add_resource(document, registry, svg_layer_registry_destroy)) {
+        mem_pool_destroy(pool);
+        return nullptr;
+    }
+    registry->pool = lam::own(pool);
     document->services.svg_layer_registry = registry;
     return registry;
 }
@@ -5343,7 +5351,7 @@ static SvgLayerEntry* svg_layer_entry_for_element(SvgLayerRegistry* registry, Do
     for (SvgLayerEntry* entry = registry->entries; entry; entry = entry->next) {
         if (entry->element == element) return entry;
     }
-    SvgLayerEntry* entry = (SvgLayerEntry*)mem_calloc(1, sizeof(SvgLayerEntry), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: owned by the document's SvgLayerRegistry entry list
+    SvgLayerEntry* entry = (SvgLayerEntry*)pool_calloc(registry->pool, sizeof(SvgLayerEntry));
     if (!entry) return nullptr;
     entry->element = element;
     entry->next = registry->entries;

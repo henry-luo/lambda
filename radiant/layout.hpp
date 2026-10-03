@@ -3216,13 +3216,15 @@ struct GridLayoutScope {
     GridLayoutScope& operator=(const GridLayoutScope&) = delete;
 };
 
-GridTrackList* create_grid_track_list(int initial_capacity);
-void destroy_grid_track_list(GridTrackList* track_list);
-GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value);
-GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size);
-void destroy_grid_track_size(GridTrackSize* track_size);
+// A GridProp's track graph lives in the element props' pool (`pool`): every
+// list, track, array and line name is allocated and released through it.
+GridTrackList* create_grid_track_list(Pool* pool, int initial_capacity);
+void destroy_grid_track_list(Pool* pool, GridTrackList* track_list);
+GridTrackSize* create_grid_track_size(Pool* pool, GridTrackSizeType type, int value);
+GridTrackSize* clone_grid_track_size(Pool* pool, const GridTrackSize* track_size);
+void destroy_grid_track_size(Pool* pool, GridTrackSize* track_size);
 char* grid_scratch_strdup(ScratchArena* scratch, const char* source);
-void destroy_grid_area(GridArea* area);
+void destroy_grid_area(Pool* pool, GridArea* area);
 void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_number, bool is_row);
 int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
 int collect_grid_item_nodes(LayoutContext* lycon, struct ViewBlock* container,
@@ -3235,8 +3237,8 @@ void resolve_track_sizes_enhanced(GridContainerLayout* grid_layout, struct ViewB
 void position_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, ScratchArena* sa);
 void align_grid_items(GridContainerLayout* grid_layout);
 void align_grid_item(struct ViewBlock* item, GridContainerLayout* grid_layout);
-void clear_grid_template_areas(GridProp* grid_layout);
-void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
+void clear_grid_template_areas(Pool* pool, GridProp* grid_layout);
+void parse_grid_template_areas(Pool* pool, GridProp* grid_layout, const char* areas_string, ScratchArena* sa);
 IntrinsicSizes calculate_grid_item_intrinsic_sizes(LayoutContext* lycon, ViewBlock* item, bool is_row_axis);
 void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 void layout_grid_content(LayoutContext* lycon, ViewBlock* grid_container);
@@ -3764,6 +3766,9 @@ BlockContextOffset block_context_offset_to_bfc(ViewElement* view, BlockContext* 
 // Property Allocation
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
+// The pool element props of this pass come from: the view tree's prop pool,
+// or the pass pool where a focused test has no view tree.
+Pool* layout_prop_pool(LayoutContext* lycon);
 FontProp* alloc_font_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_flex_item_prop(LayoutContext* lycon, ViewSpan* block);

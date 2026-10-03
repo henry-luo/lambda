@@ -16,12 +16,14 @@ static Prop* ensure_view_prop(Pool* pool, Field& storage, const Prop& defaults) 
 
 static Pool* prop_pool(ViewTree* tree) { return tree ? tree->prop_pool : nullptr; }
 
-static Pool* prop_pool(LayoutContext* lycon) {
+Pool* layout_prop_pool(LayoutContext* lycon) {
     if (!lycon) return nullptr;
     if (lycon->doc && lycon->doc->view_tree) return lycon->doc->view_tree->prop_pool;
     // Focused layout tests and embedders can provide the pass pool without a ViewTree shell.
     return lycon->pool;
 }
+
+static Pool* prop_pool(LayoutContext* lycon) { return layout_prop_pool(lycon); }
 
 static ViewTree* prop_tree(LayoutContext* lycon) {
     return lycon && lycon->doc ? lycon->doc->view_tree : nullptr;

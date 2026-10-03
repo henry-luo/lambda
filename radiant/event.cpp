@@ -7312,7 +7312,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
     if (!doc->view_tree) {
-        doc->view_tree = lam::own((ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT)); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets.
+        doc->view_tree = view_tree_shell_create();
         view_pool_reset_retained(doc->view_tree);
     } else {
         view_pool_reset_retained(doc->view_tree);

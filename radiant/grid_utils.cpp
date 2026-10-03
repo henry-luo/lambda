@@ -25,15 +25,14 @@ static bool grid_item_has_in_flow_content(ViewBlock* item) {
 }
 
 // Create a new grid track list
-GridTrackList* create_grid_track_list(int initial_capacity) {
-    GridTrackList* track_list = (GridTrackList*)mem_calloc(1, sizeof(GridTrackList), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: persistent CSS GridProp owns this track-list graph until view teardown.
+GridTrackList* create_grid_track_list(Pool* pool, int initial_capacity) {
+    if (!pool) return nullptr;
+    GridTrackList* track_list = (GridTrackList*)pool_calloc(pool, sizeof(GridTrackList));
     if (!track_list) return nullptr;
 
     track_list->allocated_tracks = initial_capacity;
-    // These arrays are children of the persistent track-list heap root and are
-    // released together by destroy_grid_track_list during view teardown.
-    track_list->tracks = lam::own_arr((GridTrackSize**)mem_calloc(initial_capacity, sizeof(GridTrackSize*), MEM_CAT_LAYOUT));
-    track_list->line_names = lam::own_arr((char**)mem_calloc(initial_capacity + 1, sizeof(char*), MEM_CAT_LAYOUT)); // +1 for end line
+    track_list->tracks = lam::own_arr((GridTrackSize**)pool_calloc(pool, initial_capacity * sizeof(GridTrackSize*)));
+    track_list->line_names = lam::own_arr((char**)pool_calloc(pool, (initial_capacity + 1) * sizeof(char*))); // +1 for end line
     track_list->track_count = 0;
     track_list->line_name_count = 0;
     track_list->is_repeat = false;
@@ -43,26 +42,29 @@ GridTrackList* create_grid_track_list(int initial_capacity) {
 }
 
 // Destroy a grid track list
-void destroy_grid_track_list(GridTrackList* track_list) {
-    if (!track_list) return;
+void destroy_grid_track_list(Pool* pool, GridTrackList* track_list) {
+    if (!track_list || !pool) return;
 
-    // Free tracks
-    lam::Temp<GridTrackList> owned(track_list);  // the caller hands the list over
     for (int i = 0; i < track_list->track_count; i++) {
-        destroy_grid_track_size(track_list->tracks[i]);
+        destroy_grid_track_size(pool, track_list->tracks[i]);
     }
-    lam::free_owned(track_list->tracks);
+    lam::free_owned(pool, track_list->tracks);
 
-    // Free line names
-    for (int i = 0; i < track_list->line_name_count; i++) {
-        lam::Temp<char> name(track_list->line_names[i]);
+    // line names are pool copies stored at their line index, so scan every
+    // slot (allocated_tracks + 1 lines), not the first line_name_count
+    if (track_list->line_names) {
+        for (int i = 0; i <= track_list->allocated_tracks; i++) {
+            if (track_list->line_names[i]) pool_free(pool, track_list->line_names[i]);
+        }
     }
-    lam::free_owned(track_list->line_names);
+    lam::free_owned(pool, track_list->line_names);
+    pool_free(pool, track_list);
 }
 
 // Create a new grid track size
-GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value) {
-    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: persistent CSS GridProp owns this track node until view teardown.
+GridTrackSize* create_grid_track_size(Pool* pool, GridTrackSizeType type, int value) {
+    if (!pool) return nullptr;
+    GridTrackSize* track_size = (GridTrackSize*)pool_calloc(pool, sizeof(GridTrackSize));
     if (!track_size) return nullptr;
 
     track_size->type = type;
@@ -75,30 +77,29 @@ GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value) {
     return track_size;
 }
 
-GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size) {
-    if (!track_size) return nullptr;
+GridTrackSize* clone_grid_track_size(Pool* pool, const GridTrackSize* track_size) {
+    if (!track_size || !pool) return nullptr;
 
-    GridTrackSize* copy = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: cloned CSS track remains in the persistent GridProp graph.
+    GridTrackSize* copy = (GridTrackSize*)pool_calloc(pool, sizeof(GridTrackSize));
     if (!copy) return nullptr;
 
     *copy = *track_size;
-    copy->min_size = lam::own(clone_grid_track_size(track_size->min_size));
-    copy->max_size = lam::own(clone_grid_track_size(track_size->max_size));
+    copy->min_size = lam::own(clone_grid_track_size(pool, track_size->min_size));
+    copy->max_size = lam::own(clone_grid_track_size(pool, track_size->max_size));
     copy->repeat_tracks = nullptr;
     copy->repeat_track_count = 0;
 
     if (track_size->repeat_tracks && track_size->repeat_track_count > 0) {
-        // Repeat children are part of the cloned persistent GridProp graph, not
-        // layout-pass scratch; destroy_grid_track_size recursively owns them.
-        copy->repeat_tracks = lam::own_arr((GridTrackSize**)mem_calloc(
-            track_size->repeat_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT));
+        // repeat children belong to the cloned graph; destroy_grid_track_size releases them
+        copy->repeat_tracks = lam::own_arr((GridTrackSize**)pool_calloc(
+            pool, track_size->repeat_track_count * sizeof(GridTrackSize*)));
         if (!copy->repeat_tracks) {
-            destroy_grid_track_size(copy);
+            destroy_grid_track_size(pool, copy);
             return nullptr;
         }
         copy->repeat_track_count = track_size->repeat_track_count;
         for (int i = 0; i < track_size->repeat_track_count; i++) {
-            copy->repeat_tracks[i] = clone_grid_track_size(track_size->repeat_tracks[i]);
+            copy->repeat_tracks[i] = clone_grid_track_size(pool, track_size->repeat_tracks[i]);
         }
     }
 
@@ -106,30 +107,25 @@ GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size) {
 }
 
 // Destroy a grid track size
-void destroy_grid_track_size(GridTrackSize* track_size) {
-    if (!track_size) return;
-    lam::Temp<GridTrackSize> owned(track_size);  // the caller hands the track over
+void destroy_grid_track_size(Pool* pool, GridTrackSize* track_size) {
+    if (!track_size || !pool) return;
 
-    if (track_size->min_size) {
-        destroy_grid_track_size(track_size->min_size);
-    }
-    if (track_size->max_size) {
-        destroy_grid_track_size(track_size->max_size);
-    }
+    if (track_size->min_size) destroy_grid_track_size(pool, track_size->min_size);
+    if (track_size->max_size) destroy_grid_track_size(pool, track_size->max_size);
     if (track_size->repeat_tracks) {
         for (int i = 0; i < track_size->repeat_track_count; i++) {
-            destroy_grid_track_size(track_size->repeat_tracks[i]);
+            destroy_grid_track_size(pool, track_size->repeat_tracks[i]);
         }
-        lam::free_owned(track_size->repeat_tracks);
+        lam::free_owned(pool, track_size->repeat_tracks);
     }
-
+    pool_free(pool, track_size);
 }
 
 // Destroy a grid area
-void destroy_grid_area(GridArea* area) {
+void destroy_grid_area(Pool* pool, GridArea* area) {
     if (!area) return;
 
-    lam::free_owned(area->name);
+    if (pool) lam::free_owned(pool, area->name);
     // Don't free the area itself if it's part of an array
 }
 
@@ -177,11 +173,11 @@ int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_
 }
 
 // Enhanced grid template areas parser
-void clear_grid_template_areas(GridProp* grid) {
+void clear_grid_template_areas(Pool* pool, GridProp* grid) {
     if (!grid) return;
 
     for (int i = 0; i < grid->area_count; i++) {
-        if (grid->grid_areas) lam::free_owned(grid->grid_areas[i].name);
+        if (grid->grid_areas) lam::free_owned(pool, grid->grid_areas[i].name);
     }
     grid->area_count = 0;
 }
@@ -190,12 +186,12 @@ void clear_grid_template_areas(GridProp* grid) {
 //   "header header header"
 //   "sidebar main aside"
 //   "footer footer footer"
-void parse_grid_template_areas(GridProp* grid, const char* areas_string, ScratchArena* sa) {
+void parse_grid_template_areas(Pool* pool, GridProp* grid, const char* areas_string, ScratchArena* sa) {
     if (!grid || !areas_string || areas_string[0] == '\0') {
         return;
     }
 
-    clear_grid_template_areas(grid);
+    clear_grid_template_areas(pool, grid);
 
     // Constants for grid limits
     const int MAX_GRID_SIZE = 16;   // Support up to 16x16 grids
@@ -298,8 +294,8 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
 
     // Ensure we have enough space for areas
     if (grid->allocated_areas < unique_count) {
-        if (!lam::mem_grow_array(&grid->grid_areas, &grid->allocated_areas,
-                                 unique_count, 4, MEM_CAT_LAYOUT)) {
+        if (!lam::pool_grow_array(pool, &grid->grid_areas, &grid->allocated_areas,
+                                 unique_count, 4)) {
             return;
         }
     }
@@ -335,7 +331,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
         if (is_rectangle && min_row <= max_row && min_col <= max_col) {
             GridArea* area = &grid->grid_areas[grid->area_count];
             // Allocate and copy name (GridArea.name is char*)
-            area->name = lam::own(mem_strdup(area_name, MEM_CAT_LAYOUT));
+            area->name = lam::own(pool_strdup(pool, area_name));
             // Convert to 1-based CSS grid line numbers
             area->row_start = min_row + 1;
             area->row_end = max_row + 2;      // +2 because end line is exclusive

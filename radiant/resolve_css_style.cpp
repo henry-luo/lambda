@@ -3986,16 +3986,16 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
 
 // Parse a single CssValue into a GridTrackSize
 // Returns NULL if the value cannot be converted to a track size
-static GridTrackSize* parse_css_value_to_track_size(const CssValue* val);
+static GridTrackSize* parse_css_value_to_track_size(Pool* pool, const CssValue* val);
 
-static GridTrackSize* parse_minmax_function(const CssValue* val) {
+static GridTrackSize* parse_minmax_function(Pool* pool, const CssValue* val) {
     if (!val || val->type != CSS_VALUE_TYPE_FUNCTION) return NULL;
     if (!val->data.function->name || strcmp(val->data.function->name, "minmax") != 0) return NULL;
     if (val->data.function->arg_count < 2) return NULL;
-    GridTrackSize* min_size = parse_css_value_to_track_size(val->data.function->args[0]);
-    GridTrackSize* max_size = parse_css_value_to_track_size(val->data.function->args[1]);
+    GridTrackSize* min_size = parse_css_value_to_track_size(pool, val->data.function->args[0]);
+    GridTrackSize* max_size = parse_css_value_to_track_size(pool, val->data.function->args[1]);
     if (!min_size && !max_size) return NULL;
-    GridTrackSize* track_size = create_grid_track_size(GRID_TRACK_SIZE_MINMAX, 0);
+    GridTrackSize* track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_MINMAX, 0);
     if (track_size) {
         track_size->min_size = lam::own(min_size);
         track_size->max_size = lam::own(max_size);
@@ -4003,7 +4003,7 @@ static GridTrackSize* parse_minmax_function(const CssValue* val) {
     return track_size;
 }
 
-static GridTrackSize* parse_repeat_function(const CssValue* val) {
+static GridTrackSize* parse_repeat_function(Pool* pool, const CssValue* val) {
     if (!val || val->type != CSS_VALUE_TYPE_FUNCTION) return NULL;
     if (!val->data.function->name || strcmp(val->data.function->name, "repeat") != 0) return NULL;
     if (val->data.function->arg_count < 2) return NULL;
@@ -4027,27 +4027,27 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
         return NULL;
     }
     int track_count = val->data.function->arg_count - 1;
-    // owned here until handed to the repeat track below
-    lam::Temp<GridTrackSize*> repeat_tracks =
-        lam::temp_array_zero<GridTrackSize*>((size_t)track_count, MEM_CAT_LAYOUT);
+    // the repeat track takes this array; until then it is released here
+    GridTrackSize** repeat_tracks = (GridTrackSize**)pool_calloc(
+        pool, (size_t)track_count * sizeof(GridTrackSize*));
     if (!repeat_tracks) return NULL;
     int actual_track_count = 0;
     for (int i = 1; i < val->data.function->arg_count && actual_track_count < track_count; i++) {
-        GridTrackSize* ts = parse_css_value_to_track_size(val->data.function->args[i]);
+        GridTrackSize* ts = parse_css_value_to_track_size(pool, val->data.function->args[i]);
         if (ts) {
             repeat_tracks[actual_track_count++] = ts;
         }
     }
-    if (actual_track_count == 0) {
-        return NULL;
-    }
-    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: owned by its GridTrackList; destroy_grid_track_size releases it
+    GridTrackSize* track_size = actual_track_count > 0
+        ? create_grid_track_size(pool, GRID_TRACK_SIZE_REPEAT, 0) : nullptr;
     if (!track_size) {
+        // the parsed children were leaked here before they moved to the pool
+        for (int i = 0; i < actual_track_count; i++) destroy_grid_track_size(pool, repeat_tracks[i]);
+        pool_free(pool, repeat_tracks);
         return NULL;
     }
-    track_size->type = GRID_TRACK_SIZE_REPEAT;
     track_size->repeat_count = repeat_count;
-    track_size->repeat_tracks = lam::own_arr(repeat_tracks.release());
+    track_size->repeat_tracks = lam::own_arr(repeat_tracks);
     track_size->repeat_track_count = actual_track_count;
     track_size->is_auto_fill = is_auto_fill;
     track_size->is_auto_fit = is_auto_fit;
@@ -4056,42 +4056,42 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
     return track_size;
 }
 
-static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
+static GridTrackSize* parse_css_value_to_track_size(Pool* pool, const CssValue* val) {
     if (!val) return NULL;
     GridTrackSize* track_size = NULL;
     if (val->type == CSS_VALUE_TYPE_LENGTH) {
         if (val->data.length.unit == CSS_UNIT_FR) {
             int fr_value = (int)(val->data.length.value * 100);
-            track_size = create_grid_track_size(GRID_TRACK_SIZE_FR, fr_value);
+            track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_FR, fr_value);
         } else {
             int px_value = (int)val->data.length.value;
-            track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, px_value);
+            track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_LENGTH, px_value);
         }
     } else if (val->type == CSS_VALUE_TYPE_PERCENTAGE) {
         int percent = (int)val->data.percentage.value;
-        track_size = create_grid_track_size(GRID_TRACK_SIZE_PERCENTAGE, percent);
+        track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_PERCENTAGE, percent);
         track_size->is_percentage = true;
     } else if (val->type == CSS_VALUE_TYPE_NUMBER) {
         // CSS spec: unitless 0 is valid as a <length> value
         int px_value = (int)val->data.number.value;
-        track_size = create_grid_track_size(GRID_TRACK_SIZE_LENGTH, px_value);
+        track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_LENGTH, px_value);
     } else if (val->type == CSS_VALUE_TYPE_KEYWORD) {
         if (val->data.keyword == CSS_VALUE_AUTO) {
-            track_size = create_grid_track_size(GRID_TRACK_SIZE_AUTO, 0);
+            track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_AUTO, 0);
         } else if (val->data.keyword == CSS_VALUE_MIN_CONTENT) {
-            track_size = create_grid_track_size(GRID_TRACK_SIZE_MIN_CONTENT, 0);
+            track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_MIN_CONTENT, 0);
         } else if (val->data.keyword == CSS_VALUE_MAX_CONTENT) {
-            track_size = create_grid_track_size(GRID_TRACK_SIZE_MAX_CONTENT, 0);
+            track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_MAX_CONTENT, 0);
         }
     } else if (val->type == CSS_VALUE_TYPE_FUNCTION) {
         const char* func_name = val->data.function->name;
         if (func_name) {
             if (strcmp(func_name, "minmax") == 0) {
-                track_size = parse_minmax_function(val);
+                track_size = parse_minmax_function(pool, val);
             } else if (strcmp(func_name, "repeat") == 0) {
-                track_size = parse_repeat_function(val);
+                track_size = parse_repeat_function(pool, val);
             } else if (strcmp(func_name, "fit-content") == 0) {
-                track_size = create_grid_track_size(GRID_TRACK_SIZE_FIT_CONTENT, 0);
+                track_size = create_grid_track_size(pool, GRID_TRACK_SIZE_FIT_CONTENT, 0);
                 if (track_size && val->data.function->arg_count > 0) {
                     CssValue* arg = val->data.function->args[0];
                     if (arg->type == CSS_VALUE_TYPE_LENGTH) {
@@ -4108,12 +4108,12 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
     return track_size;
 }
 
-static GridTrackList* replace_grid_track_list(lam::Own<GridTrackList>* track_list_ptr, int initial_capacity) {
+static GridTrackList* replace_grid_track_list(Pool* pool, lam::Own<GridTrackList>* track_list_ptr, int initial_capacity) {
     if (!track_list_ptr) return NULL;
     if (*track_list_ptr) {
-        destroy_grid_track_list(*track_list_ptr);
+        destroy_grid_track_list(pool, *track_list_ptr);
     }
-    *track_list_ptr = lam::own(create_grid_track_list(initial_capacity));
+    *track_list_ptr = lam::own(create_grid_track_list(pool, initial_capacity));
     return *track_list_ptr;
 }
 
@@ -4125,11 +4125,11 @@ static bool css_value_can_be_grid_track_size(const CssValue* val) {
                    val->type == CSS_VALUE_TYPE_FUNCTION);
 }
 
-static void append_grid_track_size(GridTrackList* track_list, GridTrackSize* track_size) {
+static void append_grid_track_size(Pool* pool, GridTrackList* track_list, GridTrackSize* track_size) {
     if (!track_size) return;
     // The first pass estimates capacity from parsed CSS values; keep this guard
     if (!track_list || track_list->track_count >= track_list->allocated_tracks) {
-        destroy_grid_track_size(track_size);
+        destroy_grid_track_size(pool, track_size);
         return;
     }
     track_list->tracks[track_list->track_count++] = track_size;
@@ -4141,22 +4141,22 @@ static int grid_fixed_repeat_count(const CssValue* value) {
     return count > MAX_GRID_SPAN ? MAX_GRID_SPAN : count;
 }
 
-static void append_grid_repeated_track_values(GridTrackList* track_list,
+static void append_grid_repeated_track_values(Pool* pool, GridTrackList* track_list,
                                               const CssValue* const* values,
                                               int value_count, int repeat_count) {
     if (!track_list || !values || value_count <= 0 || repeat_count <= 0) return;
     for (int repeat = 0; repeat < repeat_count; repeat++) {
         for (int value = 0; value < value_count; value++) {
             if (track_list->track_count >= track_list->allocated_tracks) return;
-            GridTrackSize* track = parse_css_value_to_track_size(values[value]);
-            if (track) append_grid_track_size(track_list, track);
+            GridTrackSize* track = parse_css_value_to_track_size(pool, values[value]);
+            if (track) append_grid_track_size(pool, track_list, track);
         }
     }
 }
 
 // Parse grid track list from CSS value list, handling repeat() functions
 // Parse grid track list from CSS value list
-static void parse_grid_track_list(const CssValue* value, lam::Own<GridTrackList>* track_list_ptr) {
+static void parse_grid_track_list(Pool* pool, const CssValue* value, lam::Own<GridTrackList>* track_list_ptr) {
     if (!value || value->type != CSS_VALUE_TYPE_LIST || !track_list_ptr) return;
     int count = value->data.list.count;
     CssValue** values = value->data.list.values;
@@ -4206,7 +4206,7 @@ static void parse_grid_track_list(const CssValue* value, lam::Own<GridTrackList>
         return;
     }
     // Replace previous tracks. CSS can be resolved repeatedly for the same DOM
-    *track_list_ptr = lam::own(replace_grid_track_list(track_list_ptr, total_tracks));
+    *track_list_ptr = lam::own(replace_grid_track_list(pool, track_list_ptr, total_tracks));
     GridTrackList* track_list = *track_list_ptr;
     if (!track_list) {
         return;
@@ -4226,22 +4226,22 @@ static void parse_grid_track_list(const CssValue* value, lam::Own<GridTrackList>
                                (count_val->data.keyword == CSS_VALUE_AUTO_FILL ||
                                 count_val->data.keyword == CSS_VALUE_AUTO_FIT);
                 if (is_auto) {
-                    GridTrackSize* ts = parse_repeat_function(val);
+                    GridTrackSize* ts = parse_repeat_function(pool, val);
                     if (ts) {
-                        append_grid_track_size(track_list, ts);
+                        append_grid_track_size(pool, track_list, ts);
                         track_list->is_repeat = true;
                     }
                 } else if (count_val && count_val->type == CSS_VALUE_TYPE_NUMBER) {
                     // Fixed repeat count - expand inline
-                    append_grid_repeated_track_values(
+                    append_grid_repeated_track_values(pool, 
                         track_list, val->data.function->args + 1,
                         val->data.function->arg_count - 1,
                         grid_fixed_repeat_count(count_val));
                 }
             } else {
-                GridTrackSize* ts = parse_css_value_to_track_size(val);
+                GridTrackSize* ts = parse_css_value_to_track_size(pool, val);
                 if (ts) {
-                    append_grid_track_size(track_list, ts);
+                    append_grid_track_size(pool, track_list, ts);
                 }
             }
             i++;
@@ -4262,7 +4262,7 @@ static void parse_grid_track_list(const CssValue* value, lam::Own<GridTrackList>
                     if (nv->type == CSS_VALUE_TYPE_KEYWORD) {
                         const CssEnumInfo* ki = css_enum_info(nv->data.keyword);
                         if (ki && ki->name && line_idx <= track_list->allocated_tracks && !track_list->line_names[line_idx]) {
-                            track_list->line_names[line_idx] = mem_strdup(ki->name, MEM_CAT_LAYOUT);
+                            track_list->line_names[line_idx] = pool_strdup(pool, ki->name);
                             track_list->line_name_count++;
                         }
                         continue;
@@ -4271,7 +4271,7 @@ static void parse_grid_track_list(const CssValue* value, lam::Own<GridTrackList>
                         const char* nn = nv->data.custom_property.name;
                         if (strcmp(nn, "[") == 0) break; // malformed nested bracket
                         if (line_idx <= track_list->allocated_tracks && !track_list->line_names[line_idx]) {
-                            track_list->line_names[line_idx] = mem_strdup(nn, MEM_CAT_LAYOUT);
+                            track_list->line_names[line_idx] = pool_strdup(pool, nn);
                             track_list->line_name_count++;
                         }
                     }
@@ -4297,34 +4297,34 @@ static void parse_grid_track_list(const CssValue* value, lam::Own<GridTrackList>
                     }
                     i++;
                 }
-                append_grid_repeated_track_values(
+                append_grid_repeated_track_values(pool, 
                     track_list, repeat_tracks, repeat_track_count, repeat_count);
                 continue;
             }
             i++;
             continue;
         }
-        GridTrackSize* ts = parse_css_value_to_track_size(val);
+        GridTrackSize* ts = parse_css_value_to_track_size(pool, val);
         if (ts) {
-            append_grid_track_size(track_list, ts);
+            append_grid_track_size(pool, track_list, ts);
         }
         i++;
     }
 
 }
 
-static void apply_grid_template_track_value(const CssValue* value,
+static void apply_grid_template_track_value(Pool* pool, const CssValue* value,
                                             lam::Own<GridTrackList>* track_list_ptr,
                                             const char* property_name) {
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
         if (*track_list_ptr) {
-            destroy_grid_track_list(*track_list_ptr);
+            destroy_grid_track_list(pool, *track_list_ptr);
             *track_list_ptr = NULL;
         }
         return;
     }
     if (value->type == CSS_VALUE_TYPE_LIST) {
-        parse_grid_track_list(value, track_list_ptr);
+        parse_grid_track_list(pool, value, track_list_ptr);
         return;
     }
     if (value->type != CSS_VALUE_TYPE_KEYWORD &&
@@ -4333,31 +4333,31 @@ static void apply_grid_template_track_value(const CssValue* value,
         value->type != CSS_VALUE_TYPE_PERCENTAGE) {
         return;
     }
-    GridTrackSize* track_size = parse_css_value_to_track_size(value);
+    GridTrackSize* track_size = parse_css_value_to_track_size(pool, value);
     if (!track_size) return;
     bool expand_repeat = track_size->type == GRID_TRACK_SIZE_REPEAT &&
         !track_size->is_auto_fill && !track_size->is_auto_fit &&
         track_size->repeat_count > 0;
     if (expand_repeat) {
         int total = track_size->repeat_count * track_size->repeat_track_count;
-        *track_list_ptr = lam::own(replace_grid_track_list(track_list_ptr, total));
+        *track_list_ptr = lam::own(replace_grid_track_list(pool, track_list_ptr, total));
         if (!*track_list_ptr) {
-            destroy_grid_track_size(track_size);
+            destroy_grid_track_size(pool, track_size);
             return;
         }
         for (int repeat = 0; repeat < track_size->repeat_count; repeat++) {
             for (int track = 0; track < track_size->repeat_track_count; track++) {
-                GridTrackSize* clone = clone_grid_track_size(track_size->repeat_tracks[track]);
+                GridTrackSize* clone = clone_grid_track_size(pool, track_size->repeat_tracks[track]);
                 if (clone) {
                     (*track_list_ptr)->tracks[(*track_list_ptr)->track_count++] = clone;
                 }
             }
         }
-        destroy_grid_track_size(track_size);
+        destroy_grid_track_size(pool, track_size);
     } else {
-        *track_list_ptr = lam::own(replace_grid_track_list(track_list_ptr, 1));
+        *track_list_ptr = lam::own(replace_grid_track_list(pool, track_list_ptr, 1));
         if (!*track_list_ptr) {
-            destroy_grid_track_size(track_size);
+            destroy_grid_track_size(pool, track_size);
             return;
         }
         (*track_list_ptr)->tracks[0] = track_size;
@@ -4384,18 +4384,18 @@ static bool grid_template_track_slice_is_supported(CssValue** values, int count)
     return has_track_size;
 }
 
-static void clear_grid_template_track_list(lam::Own<GridTrackList>* track_list_ptr) {
+static void clear_grid_template_track_list(Pool* pool, lam::Own<GridTrackList>* track_list_ptr) {
     if (!track_list_ptr || !*track_list_ptr) return;
-    destroy_grid_track_list(*track_list_ptr);
+    destroy_grid_track_list(pool, *track_list_ptr);
     *track_list_ptr = nullptr;
 }
 
-static bool apply_grid_template_shorthand(const CssValue* value, GridProp* grid) {
+static bool apply_grid_template_shorthand(Pool* pool, const CssValue* value, GridProp* grid) {
     if (!value || !grid) return false;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-        clear_grid_template_track_list(&grid->grid_template_rows);
-        clear_grid_template_track_list(&grid->grid_template_columns);
-        clear_grid_template_areas(grid);
+        clear_grid_template_track_list(pool, &grid->grid_template_rows);
+        clear_grid_template_track_list(pool, &grid->grid_template_columns);
+        clear_grid_template_areas(pool, grid);
         return true;
     }
     if (value->type != CSS_VALUE_TYPE_LIST || value->data.list.comma_separated) return false;
@@ -4422,17 +4422,17 @@ static bool apply_grid_template_shorthand(const CssValue* value, GridProp* grid)
     columns.data.list.values = values + separator_index + 1;
     columns.data.list.count = value_count - separator_index - 1;
     // CSS Grid §7.2: the slash form assigns row then column tracks and resets
-    apply_grid_template_track_value(&rows, &grid->grid_template_rows, "grid-template rows");
-    apply_grid_template_track_value(&columns, &grid->grid_template_columns, "grid-template columns");
-    clear_grid_template_areas(grid);
+    apply_grid_template_track_value(pool, &rows, &grid->grid_template_rows, "grid-template rows");
+    apply_grid_template_track_value(pool, &columns, &grid->grid_template_columns, "grid-template columns");
+    clear_grid_template_areas(pool, grid);
     return true;
 }
 
-static bool apply_grid_shorthand(const CssValue* value, GridProp* grid) {
-    if (!apply_grid_template_shorthand(value, grid)) return false;
+static bool apply_grid_shorthand(Pool* pool, const CssValue* value, GridProp* grid) {
+    if (!apply_grid_template_shorthand(pool, value, grid)) return false;
     // The `<grid-template>` branch of `grid` resets the implicit grid; otherwise
-    clear_grid_template_track_list(&grid->grid_auto_rows);
-    clear_grid_template_track_list(&grid->grid_auto_columns);
+    clear_grid_template_track_list(pool, &grid->grid_auto_rows);
+    clear_grid_template_track_list(pool, &grid->grid_auto_columns);
     grid->grid_auto_flow = CSS_VALUE_ROW;
     grid->is_dense_packing = false;
     return true;
@@ -5648,22 +5648,23 @@ static const CssValue* css_fit_content_function_limit(const CssValue* value) {
 
 static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
                                     const CssValue* value, bool rows) {
+    Pool* pool = layout_prop_pool(lycon);
     GridProp* grid = resolve_grid_prop(lycon, block);
     if (!grid) return;
     lam::Own<GridTrackList>* tracks = rows ? &grid->grid_auto_rows : &grid->grid_auto_columns;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
         if (*tracks) {
-            destroy_grid_track_list(*tracks);
+            destroy_grid_track_list(pool, *tracks);
             *tracks = nullptr;
         }
         return;
     }
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
-        GridTrackSize* track = parse_css_value_to_track_size(value);
+        GridTrackSize* track = parse_css_value_to_track_size(pool, value);
         if (!track) return;
-        *tracks = lam::own(replace_grid_track_list(tracks, 1));
+        *tracks = lam::own(replace_grid_track_list(pool, tracks, 1));
         if (!*tracks) {
-            destroy_grid_track_size(track);
+            destroy_grid_track_size(pool, track);
             return;
         }
         (*tracks)->tracks[0] = track;
@@ -5671,7 +5672,7 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
         return;
     }
     if (value->type == CSS_VALUE_TYPE_LIST) {
-        parse_grid_track_list(value, tracks);
+        parse_grid_track_list(pool, value, tracks);
     }
 }
 
@@ -8102,34 +8103,34 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             if (!grid) break;
             lam::Own<GridTrackList>* track_list_ptr = columns ?
                 &grid->grid_template_columns : &grid->grid_template_rows;
-            apply_grid_template_track_value(value, track_list_ptr, property_name);
+            apply_grid_template_track_value(layout_prop_pool(lycon), value, track_list_ptr, property_name);
             break;
         }
         case CSS_PROPERTY_GRID_TEMPLATE: {
             GridProp* grid = resolve_grid_prop(lycon, block);
-            if (grid) apply_grid_template_shorthand(value, grid);
+            if (grid) apply_grid_template_shorthand(layout_prop_pool(lycon), value, grid);
             break;
         }
         case CSS_PROPERTY_GRID: {
             GridProp* grid = resolve_grid_prop(lycon, block);
-            if (grid) apply_grid_shorthand(value, grid);
+            if (grid) apply_grid_shorthand(layout_prop_pool(lycon), value, grid);
             break;
         }
         case CSS_PROPERTY_GRID_TEMPLATE_AREAS: {
             GridProp* grid = resolve_grid_prop(lycon, block);
             if (!grid) break;
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                clear_grid_template_areas(grid);
+                clear_grid_template_areas(layout_prop_pool(lycon), grid);
                 break;
             }
             if (value->type == CSS_VALUE_TYPE_STRING) {
-                parse_grid_template_areas(grid, value->data.string, &lycon->scratch);
+                parse_grid_template_areas(layout_prop_pool(lycon), grid, value->data.string, &lycon->scratch);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST) {
                 ScratchScope join_scope(&lycon->scratch);
                 char* combined = css_join_grid_template_area_strings(value, &join_scope);
                 if (combined) {
-                    parse_grid_template_areas(grid, combined, &lycon->scratch);
+                    parse_grid_template_areas(layout_prop_pool(lycon), grid, combined, &lycon->scratch);
                 }
             }
             break;

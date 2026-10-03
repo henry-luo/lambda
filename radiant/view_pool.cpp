@@ -392,24 +392,24 @@ static void release_media_prop(EmbedProp* embed) {
     embed->video = nullptr;
 }
 
-static void release_grid_prop(GridProp* grid) {
+static void release_grid_prop(Pool* pool, GridProp* grid) {
     if (!grid) {
         return;
     }
 
-    destroy_grid_track_list(grid->grid_template_rows);
+    destroy_grid_track_list(pool, grid->grid_template_rows);
     grid->grid_template_rows = nullptr;
-    destroy_grid_track_list(grid->grid_template_columns);
+    destroy_grid_track_list(pool, grid->grid_template_columns);
     grid->grid_template_columns = nullptr;
-    destroy_grid_track_list(grid->grid_auto_rows);
+    destroy_grid_track_list(pool, grid->grid_auto_rows);
     grid->grid_auto_rows = nullptr;
-    destroy_grid_track_list(grid->grid_auto_columns);
+    destroy_grid_track_list(pool, grid->grid_auto_columns);
     grid->grid_auto_columns = nullptr;
     if (grid->grid_areas) {
         for (int i = 0; i < grid->area_count; i++) {
-            destroy_grid_area(&grid->grid_areas[i]);
+            destroy_grid_area(pool, &grid->grid_areas[i]);
         }
-        lam::free_owned(grid->grid_areas);
+        lam::free_owned(pool, grid->grid_areas);
         grid->area_count = 0;
         grid->allocated_areas = 0;
     }
@@ -431,25 +431,26 @@ void release_dom_owned_embed_images(DomElement* elem) {
     }
 }
 
-static void release_embed_prop(DomElement* elem) {
+// the grid's track graph lives in the view tree's prop pool
+static void release_embed_prop(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
     release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
     release_embedded_document(elem);
-    release_grid_prop(elem->embedp()->grid);
+    release_grid_prop(tree ? tree->prop_pool : nullptr, elem->embedp()->grid);
 }
 
-static void release_embed_prop_entry(DomElement* elem, ViewTree*) {
-    release_embed_prop(elem);
+static void release_embed_prop_entry(DomElement* elem, ViewTree* tree) {
+    release_embed_prop(elem, tree);
 }
 
-static void release_embed_prop_for_reset(DomElement* elem, ViewTree*) {
+static void release_embed_prop_for_reset(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
     // A retained layout reset invalidates media and sizing data, not the
     // browsing context owned by the still-connected iframe element.
     release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
-    release_grid_prop(elem->embedp()->grid);
+    release_grid_prop(tree ? tree->prop_pool : nullptr, elem->embedp()->grid);
 }
 
 static void free_embed_payload(DomElement* elem, ViewTree* tree) {
@@ -1076,6 +1077,16 @@ void ViewTree::destroy() {
 
 void view_pool_destroy(ViewTree* tree) {
     if (tree) tree->destroy();
+}
+
+lam::Own<ViewTree> view_tree_shell_create() {
+    return lam::own((ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT)); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets; see view_tree_shell_create.
+}
+
+void view_tree_shell_destroy(lam::Own<ViewTree>& tree) {
+    if (!tree) return;
+    view_pool_destroy(tree);
+    lam::free_owned(tree);
 }
 
 
