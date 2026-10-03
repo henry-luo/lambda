@@ -1152,7 +1152,7 @@ TEST_F(DomIntegrationTest, ScopeUsesDocumentRootOrQueryReceiver) {
     DomElement* root = create_element_with_backing("html");
     DomElement* child = create_element_with_backing("div");
     root->append_child(child);
-    doc->root = root;
+    doc->root = lam::up(root);
     CssSelectorGroup* group = css_parse_selector_group_text(
         ":scope", strlen(":scope"), pool);
     ASSERT_NE(group, nullptr);
@@ -1169,7 +1169,7 @@ TEST_F(DomIntegrationTest, NestingSelectorUsesQueryScopeOutsideRules) {
     DomElement* child = create_element_with_backing("div");
     ASSERT_TRUE(child->set_attribute("class", "active"));
     root->append_child(child);
-    doc->root = root;
+    doc->root = lam::up(root);
     CssSelectorGroup* group = css_parse_selector_group_text(
         "&.active, .other", strlen("&.active, .other"), pool);
     ASSERT_NE(group, nullptr);

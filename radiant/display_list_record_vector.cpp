@@ -277,7 +277,7 @@ void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
     } else {
         dl_record_set_unbounded(item);
     }
-    item->draw_picture.picture = lam::own(picture);  // ownership transferred to display list
+    item->draw_picture.picture = lam::counted(picture);  // the caller's reference moves to the display list
     item->draw_picture.opacity = opacity;
     item->draw_picture.has_transform = (transform != nullptr);
     if (transform) item->draw_picture.transform = *transform;

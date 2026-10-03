@@ -630,12 +630,10 @@ typedef struct ImageSurface {
     lam::OwnArr<uint8_t> owned_pixels;  // the buffer this surface owns; set through image_surface_adopt_pixels
     ImageAlphaMode alpha_mode; // decoded images are straight; native raster/effect surfaces are premultiplied
 #ifndef LAMBDA_HEADLESS
-    struct RdtPicture* pic;  // SVG picture (opaque, managed by rdt_vector API)
+    lam::Counted<struct RdtPicture> pic;  // SVG picture; the surface holds one reference
 #endif
     int max_render_width;  // maximum width for rendering the image
     Url* url;        // the resolved absolute URL of the image
-    bool cache_owned;      // true when UiContext image_cache owns this surface
-    bool network_owned;    // true when a NetworkResource releases this surface
     lam::Own<char> source_path;  // local file path for lazy decode (NULL if already decoded or HTTP)
     lam::OwnArr<unsigned char> source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data
@@ -666,7 +664,6 @@ extern ImageSurface* image_surface_decode_file(const char* path);
 extern ImageSurface* image_surface_decode_data(const unsigned char* data, size_t length);
 extern bool image_content_is_svg(const unsigned char* data, size_t length);
 extern uint64_t image_cache_resource_generation(struct UiContext* ui);
-extern bool image_surface_is_dom_owned(const ImageSurface* img_surface);
 extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
 extern void image_surface_bump_generation(ImageSurface* img_surface);
@@ -1729,7 +1726,7 @@ typedef struct MarkerProp {
     float trailing_space_width; // Collapsible separator after a default text marker
     lam::Own<char> text_content;      // Text content for numbered markers (decimal, roman, alpha)
     ListStyleImage image;     // list-style-image URL or gradient
-    ImageSurface* loaded_image; // cached loaded image for layout and render
+    lam::Up<ImageSurface> loaded_image; // borrowed from the image cache, for layout and render
     bool is_image_marker;     // true for a valid image without URL intrinsic size
     bool is_outside;         // true = outside position (rendered in margin area, no inline advance)
     bool reserves_first_line; // outside marker has no parent list gutter to occupy
@@ -2289,7 +2286,7 @@ typedef struct GridProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct EmbedProp {
-    ImageSurface* img;  // image surface
+    lam::Up<ImageSurface> img;  // borrowed: the image cache or a network resource owns it (O2)
     float content_image_resolution; // CSS image-set() density for intrinsic sizing, 0 means 1x
     lam::Own<DomDocument> doc;   // iframe document
     struct WebViewProp* webview;  // native OS web view (WKWebView/WebView2/WebKitGTK)
@@ -2299,7 +2296,7 @@ typedef struct EmbedProp {
     float object_position_x; // percent when object_position_x_is_percent, otherwise CSS px
     float object_position_y; // percent when object_position_y_is_percent, otherwise CSS px
     lam::Own<struct RdtVideo> video;  // video playback context (NULL for non-video elements)
-    ImageSurface* poster;    // poster image for <video> (displayed before playback starts)
+    lam::Up<ImageSurface> poster;    // borrowed from the image cache; poster image for <video> (displayed before playback starts)
     bool object_position_set;
     bool object_position_x_is_percent;
     bool object_position_y_is_percent;
@@ -2824,7 +2821,6 @@ void view_tree_canonical_destroy(ViewTree* tree);
 void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
                                   DomElement* parent);
 
-void release_dom_owned_embed_images(DomElement* elem);
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
 // Release iframe documents before lifecycle retirement checks their host nodes.
 // The embedded document otherwise keeps an external pin on a detached iframe.
@@ -4094,6 +4090,10 @@ extern void* load_styled_font(UiContext* uicon, const char* font_name, FontProp*
 extern void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop);
 extern void font_prop_release_handle(FontProp* fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
+// The image cache takes a surface decoded elsewhere under `key` and returns the
+// surface it holds for that key: `surface`, or an earlier one (then `surface`
+// is destroyed). Returns null, with `surface` destroyed, when it cannot store it.
+extern ImageSurface* image_cache_adopt(UiContext* uicon, const char* key, ImageSurface* surface);
 #endif // LAMBDA_HEADLESS
 
 typedef struct DomDocument DomDocument;  // Forward declaration for Lambda CSS DOM Document

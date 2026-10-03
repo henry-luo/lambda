@@ -795,7 +795,7 @@ void paint_draw_picture(PaintList* pl, RdtPicture* picture,
                         uint8_t opacity, const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_PICTURE);
     if (!cmd) return;
-    cmd->draw_picture.picture = lam::own(picture);
+    cmd->draw_picture.picture = lam::counted(picture);
     cmd->draw_picture.opacity = opacity;
     paint_assign_optional_transform(&cmd->draw_picture.has_transform,
                                     &cmd->draw_picture.transform, transform);

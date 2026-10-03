@@ -41,7 +41,7 @@ protected:
 
     void SetUp() override {
         ASSERT_TRUE(doc.init(&input));
-        root = element("div"); ASSERT_NE(root, nullptr); doc.root = root;
+        root = element("div"); ASSERT_NE(root, nullptr); doc.root = lam::up(root);
         svg = element("svg", root); ASSERT_NE(svg, nullptr);
         ASSERT_TRUE(svg->set_attribute("width", "200"));
         ASSERT_TRUE(svg->set_attribute("height", "200"));
@@ -781,8 +781,8 @@ TEST(SvgExportTest, SemanticSnapshotsOwnValuesAndDoNotChangeRasterPaint) {
     ASSERT_NE(arena, nullptr);
     DisplayList dl = {}; dl_init(&dl, arena);
     char name[] = "data-node-id", value[] = "n0", title[] = "label";
-    RenderSemanticAttribute attribute = {name, value};
-    RenderSemanticGroup source = {&attribute, 1, title}, snapshot = {};
+    RenderSemanticAttribute attribute = {lam::up(name), lam::up(value)};
+    RenderSemanticGroup source = {lam::up(&attribute), 1, lam::up(title)}, snapshot = {};
     ASSERT_TRUE(dl_copy_semantic_group(&dl, &snapshot, &source));
     name[0] = value[0] = title[0] = '!';
     EXPECT_STREQ(snapshot.attributes[0].name, "data-node-id");
@@ -848,10 +848,10 @@ static RdtSvgFilterProgram* svg_filter_test_program(DomDocument* document, Eleme
     RdtSvgFilterProgram* program = render_svg_filter_program_acquire(document, element);
     if (!program) return nullptr;
     program->compiled = program->valid = true; program->count = count;
-    program->nodes = (RdtSvgFilterNode*)arena_calloc(program->arena, count * sizeof(RdtSvgFilterNode));
-    program->region[0] = program->region[1] = arena_strdup(program->arena, "0");
-    program->region[2] = arena_sprintf(program->arena, "%g", (double)width);
-    program->region[3] = arena_sprintf(program->arena, "%g", (double)height);
+    program->nodes = lam::own_arr((RdtSvgFilterNode*)arena_calloc(program->arena, count * sizeof(RdtSvgFilterNode)));
+    program->region[0] = program->region[1] = lam::own(arena_strdup(program->arena, "0"));
+    program->region[2] = lam::own(arena_sprintf(program->arena, "%g", (double)width));
+    program->region[3] = lam::own(arena_sprintf(program->arena, "%g", (double)height));
     return program;
 }
 
@@ -877,18 +877,18 @@ TEST(SvgFilterTest, ResourceFontsAndReferencingViewportHaveDistinctLengthBases) 
     DomDocument document; Element filter = {}, primitive = {};
     RdtSvgFilterProgram* program = svg_filter_test_program(&document, &filter, 1, 20, 80);
     ASSERT_NE(program, nullptr);
-    program->region[0] = arena_strdup(program->arena, "1em");
-    program->region[2] = arena_strdup(program->arena, "2em");
-    program->region[3] = arena_strdup(program->arena, "50%");
+    program->region[0] = lam::own(arena_strdup(program->arena, "1em"));
+    program->region[2] = lam::own(arena_strdup(program->arena, "2em"));
+    program->region[3] = lam::own(arena_strdup(program->arena, "50%"));
     RdtSvgFilterNode* node = program->nodes;
-    node->kind = RDT_SVG_FILTER_FLOOD; node->valid = true; node->element = &primitive;
+    node->kind = RDT_SVG_FILTER_FLOOD; node->valid = true; node->element = lam::up(&primitive);
     node->color.r = node->color.a = 255;
-    node->region[0] = arena_strdup(program->arena, "2em");
-    node->region[1] = arena_strdup(program->arena, "25%");
-    node->region[2] = arena_strdup(program->arena, "1em");
-    node->region[3] = arena_strdup(program->arena, "10%");
+    node->region[0] = lam::own(arena_strdup(program->arena, "2em"));
+    node->region[1] = lam::own(arena_strdup(program->arena, "25%"));
+    node->region[2] = lam::own(arena_strdup(program->arena, "1em"));
+    node->region[3] = lam::own(arena_strdup(program->arena, "10%"));
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,20,80};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,20,80};
     run.lengths = {200,160,100,50}; run.frame = rdt_matrix_identity(); run.density = 1;
     run.length_context = &filter;
     run.resolve_lengths = [](void* context, Element* resource, SvgLengthContext* lengths) {
@@ -916,9 +916,9 @@ TEST(SvgFilterTest, CaptureAndFinalColorConversionShareTheGraphWorkBudget) {
     node->valid = true; node->input = RDT_SVG_FILTER_SOURCE;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
     unsigned calls = 0; size_t used = 0;
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1; run.draw_source = svg_filter_test_source;
-    run.source_context = &calls; run.work_used = &used; run.work_limit = 23;
+    run.source_context = &calls; run.work_used = lam::up(&used); run.work_limit = 23;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
     EXPECT_FALSE(render_svg_filter_execute(program, &run, &result, &bounds, &placement)); EXPECT_EQ(result, nullptr);
     EXPECT_EQ(calls, 1u); EXPECT_EQ(used, 20u);
@@ -945,11 +945,11 @@ TEST(SvgFilterTest, StandardInputsAreCapturedLazilyAndBackgroundAlphaSharesItsIm
     ASSERT_NE(program, nullptr); ASSERT_NE(program->nodes, nullptr);
     RdtSvgFilterNode* node = program->nodes; node->kind = RDT_SVG_FILTER_MERGE; node->valid = true;
     const int inputs[] = {RDT_SVG_FILTER_FILL, RDT_SVG_FILTER_STROKE, RDT_SVG_FILTER_BACKGROUND, RDT_SVG_FILTER_BACKGROUND_ALPHA};
-    node->merge_count = 4; node->merge_inputs = (int*)arena_alloc(program->arena, sizeof(inputs));
+    node->merge_count = 4; node->merge_inputs = lam::own_arr((int*)arena_alloc(program->arena, sizeof(inputs)));
     ASSERT_NE(node->merge_inputs, nullptr); memcpy(node->merge_inputs, inputs, sizeof(inputs));
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
     unsigned calls[3] = {};
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,2,2}; run.lengths = {2,2,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1; run.draw_input = svg_filter_test_input; run.input_context = calls;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
     ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
@@ -970,7 +970,7 @@ TEST(SvgFilterTest, GaussianExtensionSamplesTheInputBordersAndOppositeEdge) {
         ImageSurface* source = image_surface_create(width, height); ASSERT_NE(source, nullptr);
         for (unsigned index = 0; index < 6; index++) ((uint32_t*)source->pixels)[index] = index < 3 ? 0xff0000ffu : 0xffff0000u;
         Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-        RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source; run.geometry = run.source_bounds = {0,0,(float)width,(float)height};
+        RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source); run.geometry = run.source_bounds = {0,0,(float)width,(float)height};
         run.lengths = {(float)width,(float)height,16,8}; run.frame = rdt_matrix_identity(); run.density = 1;
         // normalized Gaussian taps at sigma 1 yield distinct transparent, duplicated and wrapped edge colors.
         const uint32_t expected[] = {0xb20100b1u, 0xff0100feu, 0xff4e00b1u};
@@ -994,13 +994,13 @@ TEST(SvgFilterTest, FractionalTilesInterpolateAcrossBothPeriodicBorders) {
         ASSERT_NE(program, nullptr); ASSERT_NE(program->nodes, nullptr);
         RdtSvgFilterNode* input = &program->nodes[0]; input->kind = RDT_SVG_FILTER_OFFSET;
         input->valid = true; input->input = RDT_SVG_FILTER_SOURCE;
-        input->region[axis + 2] = arena_strdup(program->arena, "5.5");
+        input->region[axis + 2] = lam::own(arena_strdup(program->arena, "5.5"));
         RdtSvgFilterNode* tile = &program->nodes[1]; tile->kind = RDT_SVG_FILTER_TILE;
         tile->valid = true; tile->input = 0;
         ImageSurface* source = image_surface_create(axis ? 1 : 6, axis ? 6 : 1); ASSERT_NE(source, nullptr);
         for (unsigned index = 0; index < 6; index++) ((uint32_t*)source->pixels)[index] = 0xff00ff00u;
         Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-        RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source;
+        RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
         run.geometry = {0,0,width,height}; run.source_bounds = {0,0,(float)source->width,(float)source->height};
         run.lengths = {width,height,16,8}; run.frame = rdt_matrix_identity(); run.density = 1;
         ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
@@ -1024,7 +1024,7 @@ TEST(SvgFilterTest, LightingUsesSobelSlopesAtAllImageEdgesAndSpecularPremultipli
     for (unsigned row = 0; row < 5; row++) for (unsigned column = 0; column < 5; column++)
         ((uint32_t*)source->pixels)[row * 5 + column] = (32u + 16u * column + 8u * row) << 24;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source; run.geometry = run.source_bounds = {0,0,5,5};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source); run.geometry = run.source_bounds = {0,0,5,5};
     run.lengths = {5,5,16,8}; run.frame = rdt_matrix_identity(); run.density = 1;
     // the affine height field has the same analytically known normal at corners, edges and interiors.
     double nx = -32.0 / 255.0, ny = -16.0 / 255.0;
@@ -1063,7 +1063,7 @@ TEST(SvgFilterTest, NamedGraphUsesPremultipliedSourceAndLeavesSourcePixelsOwned)
     ASSERT_NE(program, nullptr); ASSERT_NE(program->nodes, nullptr);
     program->nodes[0].kind = RDT_SVG_FILTER_OFFSET; program->nodes[0].valid = true;
     program->nodes[0].input = RDT_SVG_FILTER_SOURCE; program->nodes[0].input2 = RDT_SVG_FILTER_EMPTY;
-    program->nodes[0].values[0] = 2.0f; program->nodes[0].result = arena_strdup(program->arena, "moved");
+    program->nodes[0].values[0] = 2.0f; program->nodes[0].result = lam::own(arena_strdup(program->arena, "moved"));
     RdtSvgFilterNode* matrix = &program->nodes[1]; matrix->kind = RDT_SVG_FILTER_MATRIX; matrix->valid = true;
     matrix->input = render_svg_filter_input(program, 1, "moved"); matrix->input2 = RDT_SVG_FILTER_EMPTY;
     matrix->values[5] = matrix->values[18] = 1.0f;
@@ -1075,7 +1075,7 @@ TEST(SvgFilterTest, NamedGraphUsesPremultipliedSourceAndLeavesSourcePixelsOwned)
     ASSERT_NE(source, nullptr);
     for (size_t index = 0; index < 4; index++) ((uint32_t*)source->pixels)[index] = 0x80000080u;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source;
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
     run.source_bounds = {0,0,2,2}; run.geometry = {0,0,2,2}; run.lengths = {8,8,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
@@ -1130,7 +1130,7 @@ TEST(SvgFilterTest, MorphologySeparatesAxesAndPreservesPremultipliedExtrema) {
     for (unsigned row = 1; row < 6; row++) for (unsigned column = 2; column < 7; column++)
         ((uint32_t*)source->pixels)[row * 9 + column] = 0x80000080u;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.source = source;
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.source = lam::up(source);
     run.source_bounds = run.geometry = {0,0,9,7}; run.lengths = {9,7,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f;
     for (unsigned dilate = 0; dilate < 2; dilate++) for (unsigned axis = 0; axis < 2; axis++) {
@@ -1186,7 +1186,7 @@ TEST(SvgFilterTest, UnusedTreeDoesNotSpendWorkOrCaptureSource) {
     RdtSvgFilterNode* flood = &program->nodes[1]; flood->kind = RDT_SVG_FILTER_FLOOD; flood->valid = true;
     flood->color.r = 255; flood->color.a = 255;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f; run.work_limit = 64;
     unsigned calls = 0; run.draw_source = svg_filter_test_source; run.source_context = &calls;
     ImageSurface* result = nullptr; Bound bounds = {}; RdtMatrix placement;
@@ -1204,13 +1204,13 @@ TEST(SvgFilterTest, NoiseSeedTruncationAndRegenerationAreDeterministic) {
     RdtSvgFilterNode* node = program->nodes; node->kind = RDT_SVG_FILTER_TURBULENCE; node->valid = true;
     node->variant = 1; node->values[0] = .08f; node->values[1] = .1f; node->values[2] = 2;
     Arena* arena = arena_create_default(); ScratchArena scratch = {}; scratch_init(&scratch, arena);
-    RdtSvgFilterRun run = {}; run.scratch = &scratch; run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
+    RdtSvgFilterRun run = {}; run.scratch = lam::up(&scratch); run.geometry = {0,0,8,8}; run.lengths = {8,8,16,8};
     run.frame = rdt_matrix_identity(); run.density = 1.0f;
     ImageSurface* original = nullptr; Bound bounds = {}; RdtMatrix placement;
-    node->noise = render_svg_filter_noise_create(program->arena, nullptr, -4.8f); ASSERT_NE(node->noise, nullptr);
+    node->noise = lam::own(render_svg_filter_noise_create(program->arena, nullptr, -4.8f)); ASSERT_NE(node->noise, nullptr);
     ASSERT_TRUE(render_svg_filter_execute(program, &run, &original, &bounds, &placement));
     for (unsigned repetition = 0; repetition < 2; repetition++) {
-        node->noise = render_svg_filter_noise_create(program->arena, nullptr, -4.0f); ASSERT_NE(node->noise, nullptr);
+        node->noise = lam::own(render_svg_filter_noise_create(program->arena, nullptr, -4.0f)); ASSERT_NE(node->noise, nullptr);
         ImageSurface* result = nullptr; ASSERT_TRUE(render_svg_filter_execute(program, &run, &result, &bounds, &placement));
         EXPECT_EQ(memcmp(original->pixels, result->pixels, 8 * 8 * 4), 0);
         for (size_t index = 0; index < 64; index++) {
@@ -1374,7 +1374,7 @@ TEST(SvgGradientTest, RecordingOwnsStrokeDashesAndReplayPreservesSpread) {
     RdtGradientOptions options = {};
     options.spread = RDT_GRADIENT_REPEAT;
     options.stroke_width = 8.0f; options.miter_limit = 6.0f;
-    options.dash_array = dashes; options.dash_count = 2;
+    options.dash_array = lam::up(dashes); options.dash_count = 2;
     paint_fill_linear_gradient(&paint, path, 10.0f, 10.0f, 30.0f, 10.0f,
         stops, 2, RDT_FILL_WINDING, nullptr, nullptr, &options);
     dashes[0] = 0.0f;
@@ -1405,7 +1405,7 @@ TEST(SvgGradientTest, RetainedFragmentOwnsStrokeFactsAfterRecordingArenaDies) {
     RdtGradientStop stops[] = {{.5f, 255, 0, 0, 255}, {.5f, 0, 0, 255, 255}};
     float dashes[] = {10.0f, 10.0f};
     RdtGradientOptions options = {}; options.spread = RDT_GRADIENT_REPEAT;
-    options.stroke_width = 8.0f; options.miter_limit = 6.0f; options.dash_array = dashes; options.dash_count = 2;
+    options.stroke_width = 8.0f; options.miter_limit = 6.0f; options.dash_array = lam::up(dashes); options.dash_count = 2;
     PaintList paint;
     paint_fill_linear_gradient(&paint, path, 10.0f, 10.0f, 30.0f, 10.0f, stops, 2,
         RDT_FILL_WINDING, nullptr, nullptr, &options);
@@ -1609,10 +1609,10 @@ TEST(SvgCascadeTest, InlineImportanceAndSelectorListSpecificity) {
     CssEngine* engine = css_engine_create(pool);
     SelectorMatcher* matcher = selector_matcher_create(pool);
     DomElement node = {};
-    node.tag_name = "rect";
-    node.id = "target";
+    node.tag_name = lam::up("rect");
+    node.id = lam::up("target");
     const char* classes[] = {"paint"};
-    node.class_names = classes;
+    node.class_names = lam::own_arr(classes);
     node.class_count = 1;
     CssStylesheet* sheets[] = {css_parse_stylesheet(engine,
         ".paint { fill:blue !important; } .paint, #target { stroke:red; } .paint { stroke:blue; }"

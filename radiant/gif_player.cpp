@@ -100,9 +100,9 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
     }
 
     GifAnimation* ga = (GifAnimation*)mem_calloc(1, sizeof(GifAnimation), MEM_CAT_RENDER); // OBJ_HEAP_OK: media player handle outlives a single render pass and has explicit destroy.
-    ga->frames = gif_frames;
+    ga->frames = lam::own(gif_frames);
     ga->current_frame = 0;
-    ga->surface = surface;
+    ga->surface = lam::up(surface);
     ga->loop_count = gif_frames->loop_count;
     ga->loops_completed = 0;
     ga->frame_end_time = gif_frames->frames[0].delay_ms / 1000.0;

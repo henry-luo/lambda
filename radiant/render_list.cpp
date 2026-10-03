@@ -60,7 +60,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
 
     if (marker_prop->image.url && strcmp(marker_prop->image.url, "none") != 0) {
         if (!marker_prop->loaded_image) {
-            marker_prop->loaded_image = load_image(rdcon->ui_context, marker_prop->image.url);
+            marker_prop->loaded_image = lam::up(load_image(rdcon->ui_context, marker_prop->image.url));
         }
         if (marker_prop->loaded_image && marker_prop->loaded_image->pic) {
             float iw, ih;

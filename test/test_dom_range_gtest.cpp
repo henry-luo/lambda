@@ -227,7 +227,7 @@ TEST_F(DomRangeTest, RangeReleaseReusesFreelistSlot) {
     EXPECT_EQ(arena_total_used(arena), used_after_release);
     EXPECT_EQ(second->start.node, nullptr);
     EXPECT_EQ(second->end.node, nullptr);
-    EXPECT_EQ(second->ref_count, 1u);
+    EXPECT_EQ(ref_count_get(&second->ref_count), 1);
     dom_range_release(second);
 }
 

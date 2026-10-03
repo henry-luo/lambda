@@ -66,8 +66,7 @@ void LottiePlayer::finish(AnimationInstance* anim) {
     }
 
     // Free pixel buffer
-    lam::Temp<uint32_t> buffer(pixels);  // the player owns its raster buffer
-    pixels = NULL;
+    lam::free_owned(pixels);  // the player owns its raster buffer
     image_surface_detach_pixels(surface);
 
     anim->state = NULL;
@@ -158,10 +157,10 @@ static LottiePlayer* lottie_player_init(ImageSurface* surface,
     lp->total_frames = total_frames;
     lp->frame_rate = total_frames / duration;
     lp->duration = duration;
-    lp->pixels = pixels;
+    lp->pixels = lam::own_arr(pixels);
     lp->width = render_width;
     lp->height = render_height;
-    lp->surface = surface;
+    lp->surface = lam::up(surface);
     lp->loop = true;   // default: loop forever (like browsers)
     lp->playing = true;
 

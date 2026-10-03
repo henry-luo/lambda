@@ -2100,7 +2100,7 @@ extern "C" bool dom_engine_set_image_source(DomElement* element,
         }
     }
     if (!element->embed) return false;
-    element->embed->img = surface;
+    element->embed->img = lam::up(surface);
     return true;
 }
 

@@ -13,6 +13,7 @@
 #include <cmath>  // for INFINITY
 #include <string.h>
 #include <stdarg.h>
+#include "../lib/generation.h"
 
 // View allocation diagnostics are emitted per layout node and must remain opt-in.
 #define log_debug(...) log_trace(__VA_ARGS__)
@@ -416,26 +417,9 @@ static void release_grid_prop(Pool* pool, GridProp* grid) {
     }
 }
 
-void release_dom_owned_embed_images(DomElement* elem) {
-    if (!elem || !elem->embed) {
-        return;
-    }
-
-    // Detached DOM markup owns only uncached, non-network image surfaces.
-    if (image_surface_is_dom_owned(elem->embedp()->img)) {
-        image_surface_destroy(elem->embedp()->img);
-        elem->embed->img = nullptr;
-    }
-    if (image_surface_is_dom_owned(elem->embedp()->poster)) {
-        image_surface_destroy(elem->embedp()->poster);
-        elem->embed->poster = nullptr;
-    }
-}
-
 // the grid's track graph lives in the view tree's prop pool
 static void release_embed_prop(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
-    release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
     release_embedded_document(elem);
     release_grid_prop(tree ? tree->prop_pool : nullptr, elem->embedp()->grid);
@@ -449,7 +433,6 @@ static void release_embed_prop_for_reset(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->embed) return;
     // A retained layout reset invalidates media and sizing data, not the
     // browsing context owned by the still-connected iframe element.
-    release_dom_owned_embed_images(elem);
     release_media_prop(elem->embed);
     release_grid_prop(tree ? tree->prop_pool : nullptr, elem->embedp()->grid);
 }
@@ -1029,8 +1012,7 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 }
 
 void ViewTree::reset_retained() {
-    layout_generation++;
-    if (layout_generation == 0) layout_generation = 1;
+    layout_generation = generation_next32(layout_generation);
     if (root) {
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.

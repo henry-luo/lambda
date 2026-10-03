@@ -77,7 +77,7 @@ TEST_F(DisplayListTest, DescriptorCoversOpsAndOwnsPayloadCleanup) {
 
     DisplayItem picture_item = {};
     picture_item.op = DL_DRAW_PICTURE;
-    picture_item.draw_picture.picture = lam::own((RdtPicture*)1);
+    picture_item.draw_picture.picture = lam::counted((RdtPicture*)1);
     dl_item_free_owned_payload(&picture_item);
     EXPECT_EQ(picture_item.draw_picture.picture, nullptr);
 }

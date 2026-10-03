@@ -490,7 +490,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
         marker_prop->is_image_marker = true;
     } else if (image && image->url && strcmp(image->url, "none") != 0) {
         marker_prop->image.url = lam::shared(lam::promote_to_pool(lycon->pool, image->url).get());
-        marker_prop->loaded_image = load_image(lycon->ui_context, marker_prop->image.url);
+        marker_prop->loaded_image = lam::up(load_image(lycon->ui_context, marker_prop->image.url));
     }
 
     if (marker_css_content) {

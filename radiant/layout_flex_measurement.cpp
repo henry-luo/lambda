@@ -11,6 +11,7 @@
 #include "../lib/tagged.hpp"
 #include <float.h>
 #include <limits.h>
+#include "../lib/generation.h"
 
 LayoutTextRun flex_measure_prepare_text_run(DomNode* text_node, const char* text, size_t length) {
     CssEnum ws = get_white_space_value(text_node);
@@ -469,7 +470,7 @@ static bool ensure_measurement_cache_capacity(ViewTree* tree, int required) {
 
 void advance_measurement_cache_generation(ViewTree* tree) {
     if (!tree) return;
-    tree->measurement_cache_generation++;
+    tree->measurement_cache_generation = generation_next32(tree->measurement_cache_generation);
 }
 
 void store_in_measurement_cache(DomNode* node, float width, float height,

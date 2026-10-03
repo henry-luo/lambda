@@ -250,7 +250,7 @@ TEST_F(CustomLayoutTest, FlexEmbedImageDoesNotBecomeLinkIntrinsicSize) {
     init_block(&link, "a", 0.0f, 0.0f);
     link.display = {CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false};
     link.embed = lam::own(&embed);
-    link.embed->img = &image;
+    link.embed->img = lam::up(&image);
 
     EXPECT_FALSE(layout_replaced_image_surface_contributes(&link));
 

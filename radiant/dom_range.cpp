@@ -271,7 +271,7 @@ DomRange* dom_range_create(DocState* state) {
     // concurrent document lifecycles.
     if (state->next_range_id == 0) state->next_range_id = 1;
     r->id = state->next_range_id++;
-    r->ref_count = 1;
+    ref_count_init(&r->ref_count);
     // A fresh Range starts at (document, 0); leaving null boundaries made
     // detach() appear to destroy the Range even though detach is a legacy no-op.
     DomNode* document_root = dom_range_state_document_root(state);
@@ -282,17 +282,18 @@ DomRange* dom_range_create(DocState* state) {
 
 void dom_range_retain(DomRange* range) {
     if (!range) return;
-    range->ref_count++;
+    if (!ref_count_retain(&range->ref_count))
+        log_error("dom_range_retain: range already released (range id=%u)", range->id);
 }
 
 void dom_range_release(DomRange* range) {
     if (!range) return;
-    if (range->ref_count == 0) {
+    RefCountRelease released = ref_count_release(&range->ref_count);
+    if (released == REF_COUNT_UNDERFLOW) {
         log_error("dom_range_release: ref_count already 0 (range id=%u)", range->id);
         return;
     }
-    range->ref_count--;
-    if (range->ref_count == 0) {
+    if (released == REF_COUNT_LAST) {
         DocState* state = range->state;
         dom_range_unlink_from_state(state, range);
         DomRange** freelist = dom_range_state_range_freelist_slot(

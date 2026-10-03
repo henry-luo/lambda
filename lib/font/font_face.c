@@ -12,6 +12,7 @@
 
 #include "font_internal.h"
 #include "../str.h"
+#include "../generation.h"
 
 // ============================================================================
 // Register
@@ -75,7 +76,7 @@ bool font_face_register(FontContext* ctx, const FontFaceDesc* desc) {
     }
 
     ctx->face_descriptors[ctx->face_descriptor_count++] = entry;
-    ctx->resource_generation++;
+    ctx->resource_generation = generation_next(ctx->resource_generation);
 
     // Retain distinct rules: unicode-range and source order select a face per glyph.
     log_info("font_face: registered '%s' (weight=%d, slant=%d, sources=%d, ranges=%d)",
@@ -288,7 +289,7 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
             handle->is_document_font = true; // @font-face: cleared between documents
             if (entry) {
                 FontFaceEntry* mutable_entry = (FontFaceEntry*)entry;
-                if (!mutable_entry->loaded_handle) ctx->resource_generation++;
+                if (!mutable_entry->loaded_handle) ctx->resource_generation = generation_next(ctx->resource_generation);
                 // loaded_handle caches only one size; replacing it must drop the
                 // previous retained size-specific handle or document fonts leak.
                 if (mutable_entry->loaded_handle && mutable_entry->loaded_handle != handle) {
@@ -308,7 +309,7 @@ static FontHandle* font_face_load_entry(FontContext* ctx, const FontFaceEntry* e
     // Sources are immutable for a document, so do not retry a failed list on
     // every text measurement pass.
     ((FontFaceEntry*)entry)->load_failed = true;
-    ctx->resource_generation++;
+    ctx->resource_generation = generation_next(ctx->resource_generation);
     log_error("font_face: all sources failed for '%s'", entry->family);
     return NULL;
 }
@@ -354,7 +355,7 @@ FontHandle* font_resolve_document_face_for_codepoint(FontContext* ctx,
 
 void font_face_clear(FontContext* ctx) {
     if (!ctx) return;
-    if (ctx->face_descriptor_count) ctx->resource_generation++;
+    if (ctx->face_descriptor_count) ctx->resource_generation = generation_next(ctx->resource_generation);
 
     for (int i = 0; i < ctx->face_descriptor_count; i++) {
         FontFaceEntry* entry = ctx->face_descriptors[i];

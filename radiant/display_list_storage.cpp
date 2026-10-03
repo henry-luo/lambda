@@ -9,6 +9,7 @@
 #include "../lib/math_checked.hpp"
 #include <string.h>
 #include <limits.h>
+#include "../lib/generation.h"
 
 #define DL_INITIAL_CAPACITY 2048
 #define DL_VALIDATE_ELEMENT_STACK_LIMIT 1024
@@ -311,14 +312,14 @@ static bool dl_validate_resource_size(const void* resource, float w, float h) {
 }
 
 static bool dl_retainable_generation_resource(const void* resource, uint64_t generation) {
-    return !resource || generation != 0;
+    return !resource || generation_stamped(generation);
 }
 
 // Retained items reference surfaces by handle; an unregistered surface (null
 // handle) cannot be checked for liveness later, so it is never retained.
 static bool dl_retainable_surface(const void* borrowed, lam::Handle<ImageSurface> owner,
                                   uint64_t generation) {
-    return !borrowed || (!owner.is_null() && generation != 0);
+    return !borrowed || (!owner.is_null() && generation_stamped(generation));
 }
 
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {

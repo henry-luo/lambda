@@ -60,7 +60,7 @@ static FontHandle* create_handle(FontContext* ctx,
     if (!handle) return NULL;
 
     handle->tables = NULL;
-    handle->ref_count = 1;
+    ref_count_init(&handle->ref_count);
     handle->cache_identity = font_context_next_handle_identity(ctx);
     handle->ctx = ctx;
     handle->memory_buffer = memory_buffer;
@@ -114,7 +114,7 @@ static FontHandle* create_handle(FontContext* ctx,
     if (!handle) return NULL;
 
     handle->tables = NULL;
-    handle->ref_count = 1;
+    ref_count_init(&handle->ref_count);
     handle->cache_identity = font_context_next_handle_identity(ctx);
     handle->ctx = ctx;
     handle->memory_buffer = memory_buffer;
@@ -180,7 +180,7 @@ static FontHandle* create_handle(FontContext* ctx,
     if (!handle) return NULL;
 
     handle->tables = NULL;
-    handle->ref_count = 1;
+    ref_count_init(&handle->ref_count);
     handle->cache_identity = font_context_next_handle_identity(ctx);
     handle->ctx = ctx;
     handle->memory_buffer = memory_buffer;
@@ -286,7 +286,7 @@ static bool file_data_cache_lookup(FontContext* ctx, const char* path,
     FontFileDataEntry search = {.path = (char*)path, .data = NULL, .data_len = 0};
     FontFileDataEntry* found = (FontFileDataEntry*)hashmap_get(cache, &search);
     if (found) {
-        found->ref_count++;
+        ref_count_retain(&found->ref_count);
         *out_data = found->data;
         *out_len = found->data_len;
         return true;
@@ -301,7 +301,8 @@ static void file_data_cache_insert(FontContext* ctx, const char* path,
     if (!cache) return;
     char* dup_path = mem_strdup(path, MEM_CAT_FONT);  // raw strdup: freed by file_data_free/raw free
     FontFileDataEntry entry = {.path = dup_path, .data = data, .data_len = len,
-                                .ref_count = 1, .is_mmap = is_mmap};
+                                .is_mmap = is_mmap};
+    ref_count_init(&entry.ref_count);
     FontFileDataEntry* old = (FontFileDataEntry*)hashmap_set(cache, &entry);
     if (old) {
         // replaced an existing entry — free old data (but NOT our new entry's data).

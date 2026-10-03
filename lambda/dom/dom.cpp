@@ -927,7 +927,7 @@ extern "C" bool dom_commit_headless_layout_checkpoint(void) {
     UiContext* uicon = _js_current_ui_context;
     DomDocument* doc = uicon && uicon->document
         ? uicon->document : _js_current_document;
-    bool scroll_into_view_pending = doc && doc->pending_scroll_into_view_target;
+    bool scroll_into_view_pending = doc && doc->pending_scroll_into_view_target.address;
     if (!uicon || !uicon->headless || dom_is_host_driven_loop() ||
         !doc || !doc->view_tree || !doc->view_tree->root ||
         (doc->js.mutation_count == 0 && !scroll_into_view_pending)) {
@@ -7645,14 +7645,10 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
                                        DomScrollBehavior behavior = DOM_SCROLL_BEHAVIOR_AUTO) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
     if (!doc) return;
-    if (doc->pending_scroll_into_view_target) {
-        dom_node_unpin(doc,
-            {(DomNode*)doc->pending_scroll_into_view_target,
-             doc->pending_scroll_into_view_target_id},
-            DOM_NODE_PIN_RECONCILE);
+    if (doc->pending_scroll_into_view_target.address) {
+        dom_node_unpin(doc, doc->pending_scroll_into_view_target, DOM_NODE_PIN_RECONCILE);
     }
-    doc->pending_scroll_into_view_target = nullptr;
-    doc->pending_scroll_into_view_target_id = 0;
+    doc->pending_scroll_into_view_target = {};
     doc->pending_scroll_into_view_center = false;
     doc->pending_scroll_into_view_if_needed = false;
     doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
@@ -7663,8 +7659,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
         !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
         return;
     }
-    doc->pending_scroll_into_view_target = elem;
-    doc->pending_scroll_into_view_target_id = ref.expected_id;
+    doc->pending_scroll_into_view_target = ref;
     doc->pending_scroll_into_view_center = center;
     doc->pending_scroll_into_view_if_needed = if_needed;
     doc->pending_scroll_into_view_block = block_align;

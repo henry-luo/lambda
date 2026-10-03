@@ -4,6 +4,7 @@
 
 #include "render.hpp"
 #include "../lib/atomic.h"
+#include "../lib/ref_count.h"
 #include "../lib/log.h"
 #include "../lib/lambda_alloca.h"
 #include "../lib/mem_grow.hpp"
@@ -73,7 +74,7 @@ struct RdtPicture {
     Input* input;          // owns the parse arena (allocated from owned pool)
     Pool* pool;            // owned pool (created by rdt_picture_load*); freed on rdt_picture_free
     bool owns_pool;        // true for originals, false for dups
-    atomic_int32 ref_count; // SVG_DOM owner references, including cache and duplicate handles
+    RefCount ref_count;     // SVG_DOM owner references, including cache and duplicate handles
     RdtPicture* owner;     // duplicate handles retain the owning SVG_DOM picture
     Element* svg_root;     // root <svg> element
     char* source_path;     // original file path for resolving nested SVG refs
@@ -277,8 +278,7 @@ static RdtPicture* rdt_picture_svg_owner(RdtPicture* pic) {
 static bool rdt_picture_retain_svg_owner(RdtPicture* pic) {
     RdtPicture* owner = rdt_picture_svg_owner(pic);
     if (!owner || owner->kind != RdtPicture::KIND_SVG_DOM) return false;
-    atomic_inc32(&owner->ref_count);
-    return true;
+    return ref_count_retain(&owner->ref_count);
 }
 
 static void picture_cache_entry_release(const RdtPictureCacheEntry* entry) {
@@ -2056,7 +2056,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     p->input = input;
     p->pool = pool;
     p->owns_pool = true;
-    atomic_store32(&p->ref_count, 1);
+    ref_count_init(&p->ref_count);
     p->owner = nullptr;
     p->svg_root = svg_root;
     p->source_path = source_path ? mem_strdup(source_path, MEM_CAT_RENDER) : nullptr;  // RETAINED_FIELD_OK: TVG picture-local field, mem_strdup-owned, not a retained DOM field
@@ -2150,7 +2150,7 @@ RdtPicture* RdtPicture::dup() {
         if (!dup) return nullptr;
         RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the picture; RdtPicture::release frees it
         p->kind = RdtPicture::KIND_TVG_PAINT;
-        atomic_store32(&p->ref_count, 1);
+        ref_count_init(&p->ref_count);
         p->paint = dup;
         p->width = width;
         p->height = height;
@@ -2328,12 +2328,15 @@ void RdtPicture::release() {
             lam::Temp<RdtPicture> handle(pic);  // a duplicate handle goes; the shared owner may stay
             pic = owner;
         }
-        int32_t refs = atomic_dec32(&pic->ref_count);
-        if (refs > 0) return;
-        if (refs < 0) {
-            log_error("rdt_picture_free: SVG picture ref_count underflow");
-            return;
-        }
+    }
+    // every picture kind is counted; the last reference frees it
+    RefCountRelease released = ref_count_release(&pic->ref_count);
+    if (released == REF_COUNT_LIVE) return;
+    if (released == REF_COUNT_UNDERFLOW) {
+        log_error("rdt_picture_free: picture ref_count underflow");
+        return;
+    }
+    if (pic->kind == RdtPicture::KIND_SVG_DOM) {
         if (pic->pool) mem_pool_destroy(pic->pool);
         lam::Temp<char> source_path(pic->source_path);
         // input is allocated from the pool; destroyed implicitly above
@@ -2355,7 +2358,7 @@ RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     if (!paint) return nullptr;
     RdtPicture* pic = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the picture; RdtPicture::release frees it
     pic->kind = RdtPicture::KIND_TVG_PAINT;
-    atomic_store32(&pic->ref_count, 1);
+    ref_count_init(&pic->ref_count);
     pic->paint = paint;
     pic->width = w;
     pic->height = h;

@@ -2815,7 +2815,7 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
     size_t src_len = strlen(src_value);
     StrBuf* src_buf = strbuf_new_cap(src_len);
     strbuf_append_str_n(src_buf, src_value, src_len);
-    block->embed->img = load_image(lycon->ui_context, src_buf->str);
+    block->embed->img = lam::up(load_image(lycon->ui_context, src_buf->str));
     strbuf_free(src_buf);
     return block->embedp()->img;
 }

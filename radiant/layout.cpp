@@ -447,19 +447,17 @@ static bool layout_scroll_request_is_smooth(DomScrollBehavior behavior,
 static bool layout_resolve_pending_scroll_into_view(LayoutContext* lycon,
                                                     DomDocument* doc,
                                                     ViewBlock* root_block) {
-    if (!lycon || !doc || !root_block || !doc->pending_scroll_into_view_target)
+    if (!lycon || !doc || !root_block || !doc->pending_scroll_into_view_target.address)
         return false;
 
-    DomElement* target = doc->pending_scroll_into_view_target;
+    DomNodeRef target_ref = doc->pending_scroll_into_view_target;
+    DomElement* target = (DomElement*)target_ref.address;
     bool center = doc->pending_scroll_into_view_center;
     bool if_needed = doc->pending_scroll_into_view_if_needed;
     DomScrollAlign block_align = doc->pending_scroll_into_view_block;
     DomScrollAlign inline_align = doc->pending_scroll_into_view_inline;
     DomScrollBehavior behavior = doc->pending_scroll_into_view_behavior;
-    DomNodeRef target_ref = {(DomNode*)target,
-                             doc->pending_scroll_into_view_target_id};
-    doc->pending_scroll_into_view_target = nullptr;
-    doc->pending_scroll_into_view_target_id = 0;
+    doc->pending_scroll_into_view_target = {};
     doc->pending_scroll_into_view_center = false;
     doc->pending_scroll_into_view_if_needed = false;
     doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
@@ -5372,7 +5370,7 @@ void layout_html_doc(UiContext* uicon, DomDocument *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root && doc->view_tree->root->view_type == RDT_VIEW_BLOCK) {
         ViewBlock* root_block = lam::view_require_block(doc->view_tree->root);
         layout_finalize_static_positioned_abs_descendants(root_block);
-        bool has_scroll_into_view_target = doc->pending_scroll_into_view_target != nullptr;
+        bool has_scroll_into_view_target = doc->pending_scroll_into_view_target.address != nullptr;
         // CSSOM View scrollIntoView uses the target's current bounding box;
         // viewport scroll requests must resolve first so sticky layout sees the
         // post-scroll position instead of accumulating a pre-scroll translation.

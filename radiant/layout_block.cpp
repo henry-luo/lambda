@@ -1082,7 +1082,7 @@ static DomElement* pseudo_create_image_child(LayoutContext* lycon, DomElement* p
     if (!img_elem->embed) return nullptr;
     char* resolved_url = resolve_css_resource_url(lycon, content_decl, raw_url);
     if (!resolved_url) return nullptr;
-    img_elem->embed->img = load_image(lycon->ui_context, resolved_url);
+    img_elem->embed->img = lam::up(load_image(lycon->ui_context, resolved_url));
     return img_elem;
 }
 
@@ -8150,13 +8150,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
             const char* image_url = resolved_content_url ? resolved_content_url : src->str;
             ImageSurface* loaded_img = block->embedp()->img ? block->embedp()->img :
                 load_image(lycon->ui_context, image_url);
-            if (loaded_img) {
-                if (block->embedp()->img && block->embedp()->img != loaded_img &&
-                        image_surface_is_dom_owned(block->embedp()->img)) {
-                    image_surface_destroy(block->embedp()->img);
-                }
-                block->embed->img = loaded_img;
-            }
+            // the image cache owns the surface; the element only borrows it
+            if (loaded_img) block->embed->img = lam::up(loaded_img);
             strbuf_free(src);
             if (block->embedp()->img) {
                 block->embed->broken_alt_fallback = false;

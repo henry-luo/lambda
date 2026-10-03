@@ -383,18 +383,6 @@ extern "C" void radiant_state_request_repaint(DocState* state) {
     }
 }
 
-static void destroy_dom_owned_embed_images(DomNode* node) {
-    if (!node || !node->is_element()) return;
-    DomElement* elem = node->as_element();
-    DomNode* child = elem->first_child;
-    while (child) {
-        destroy_dom_owned_embed_images(child);
-        child = child->next_sibling;
-    }
-
-    release_dom_owned_embed_images(elem);
-}
-
 void free_document(DomDocument* doc) {
     if (!doc) return;
     // Every check that can refuse teardown runs before the first release, so a
@@ -468,8 +456,6 @@ void free_document(DomDocument* doc) {
         // attached controls, so release every validated document element.
         dom_lifecycle_release_all_form_props(doc);
     }
-
-    destroy_dom_owned_embed_images((DomNode*)doc->root);
 
     // State teardown releases context-owned maps, so the retained JS runtime
     // can be destroyed only after the document has detached those references.

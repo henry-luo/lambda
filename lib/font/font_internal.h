@@ -22,6 +22,7 @@
 #include "../hashmap.h"
 #include "../arraylist.h"
 #include "../log.h"
+#include "../ref_count.h"
 
 // macOS uses CoreText, Linux uses ThorVG+FontTables, and Windows uses DirectWrite.
 #if defined(_WIN32)
@@ -71,7 +72,7 @@ struct FontHandle {
     void*       platform_font_ref;       // platform native font face (CTFont/DWrite/etc.)
     void*       platform_aux_ref;        // secondary platform object (CT advance font/etc.)
     FontTables* tables;                 // parsed TTF/OTF tables (NULL if not available)
-    int         ref_count;              // reference counting
+    RefCount    ref_count;              // reference counting
     bool        resources_destroyed;    // native/file resources already released
     uint64_t    cache_identity;         // unique lifetime identity; addresses are reusable
 
@@ -371,7 +372,7 @@ typedef struct FontFileDataEntry {
     char*       path;           // malloc-allocated canonical path
     uint8_t*    data;           // raw font data (TTF/SFNT); mmap'd or mem_alloc'd
     size_t      data_len;
-    int         ref_count;      // number of active font handles using this data
+    RefCount    ref_count;      // number of active font handles using this data
     bool        is_mmap;        // true if data was mmap()'d (must munmap), false if mem_alloc'd
 } FontFileDataEntry;
 

@@ -314,6 +314,17 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         }
     }
 
+    // O2: the UI image cache owns decoded images; this resource and the
+    // element borrow them. A second decode of the same file (another element
+    // sharing the resource) resolves to the cached surface. Without a UI
+    // context there is no cache, and this resource owns the surface.
+    UiContext* cache_ui = res->manager ? (UiContext*)res->manager->ui_context : nullptr;
+    if (cache_ui && !res->image_surface_borrowed) {
+        img_surface = image_cache_adopt(cache_ui, res->local_path, img_surface);
+        if (!img_surface) return;
+        res->image_surface_borrowed = true;
+    }
+
     // ensure element has embed property allocated
     if (!img_element->embed) {
         if (img_element->doc && img_element->doc->view_tree) {
@@ -328,7 +339,8 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         // the prop; a heap copy here was never released (teardown audit F4)
         if (!img_element->embed) {
             log_error("network: failed to allocate embed property");
-            image_surface_destroy(img_surface);
+            // a cached surface stays with the cache
+            if (!res->image_surface_borrowed && img_surface != res->image_surface) image_surface_destroy(img_surface);
             return;
         }
     }
@@ -337,15 +349,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         image_surface_destroy(res->image_surface);
     }
     res->image_surface = img_surface;
-
-    // Async-loaded images are owned by the NetworkResource so teardown does not
-    // depend on which DOM/view embed survives reflow.
-    img_surface->network_owned = !res->image_surface_borrowed;
-    if (img_element->embed->img && img_element->embed->img != img_surface &&
-            image_surface_is_dom_owned(img_element->embed->img)) {
-        image_surface_destroy(img_element->embed->img);
-    }
-    img_element->embed->img = img_surface;
+    img_element->embed->img = lam::up(img_surface);
 
     // schedule reflow since image has intrinsic dimensions that affect layout
     if (res->manager) {
@@ -372,21 +376,16 @@ static void detach_image_surface_from_tree(DomNode* node, ImageSurface* surface)
 static void release_network_image(NetworkResource* res) {
     if (!res) return;
     ImageSurface* surface = res->image_surface;
-    if (surface && res->manager && res->manager->document) {
+    // a cached surface outlives the document; only a resource-owned one goes here
+    if (!surface || res->image_surface_borrowed) return;
+    if (res->manager && res->manager->document) {
         DomDocument* doc = res->manager->document;
         detach_image_surface_from_tree((DomNode*)doc->root, surface);
         if (doc->view_tree && doc->view_tree->root && doc->view_tree->root != (View*)doc->root) {
             detach_image_surface_from_tree((DomNode*)doc->view_tree->root, surface);
         }
     }
-    if (surface && !res->image_surface_borrowed) image_surface_destroy(surface);
-    if (!surface && res->owner_element && res->owner_element->embed) {
-        EmbedProp* embed = res->owner_element->embed;
-        if (image_surface_is_dom_owned(embed->img)) {
-            image_surface_destroy(embed->img);
-            embed->img = nullptr;
-        }
-    }
+    image_surface_destroy(surface);
 }
 
 static void request_network_layout_update(NetworkResourceManager* mgr,

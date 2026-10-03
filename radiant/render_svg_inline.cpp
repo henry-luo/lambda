@@ -7408,8 +7408,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
 // SVG that changes every frame never pays for a capture it would not reuse.
 
 struct SvgLayerEntry {
-    DomElement* element;
-    uint32_t node_id;               // guards against a recycled element address
+    DomNodeRef element;             // the node id guards against a recycled element address
     uint32_t generation;            // svg_layer_generation last painted
     uint64_t document_epoch;        // host styles and cross-root resource mutations
     uint64_t interaction_generation; // live HTML control values, focus and foreignObject scrolling
@@ -7493,11 +7492,11 @@ static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) 
 
 static SvgLayerEntry* svg_layer_entry_for_element(SvgLayerRegistry* registry, DomElement* element) {
     for (SvgLayerEntry* entry = registry->entries; entry; entry = entry->next) {
-        if (entry->element == element) return entry;
+        if (entry->element.address == (DomNode*)element) return entry;
     }
     SvgLayerEntry* entry = (SvgLayerEntry*)pool_calloc(registry->pool, sizeof(SvgLayerEntry));
     if (!entry) return nullptr;
-    entry->element = element;
+    entry->element = dom_node_ref(element);
     entry->next = registry->entries;
     registry->entries = lam::own(entry);
     return entry;
@@ -7697,7 +7696,6 @@ static bool svg_layer_paint(RenderContext* rdcon, DomElement* dom_elem, Element*
     if (!entry) return false;
 
     uint32_t generation = dom_elem->svg_layer_generation;
-    uint32_t node_id = dom_elem->DomNode::id;
     uint64_t document_epoch = rdcon->ui_context->document->mutation_epoch;
     DocState* state = rdcon->ui_context->document->state;
     uint64_t interaction_generation = state ? state->version : 0;
@@ -7705,7 +7703,7 @@ static bool svg_layer_paint(RenderContext* rdcon, DomElement* dom_elem, Element*
     uint64_t font_generation = font_context_glyph_cache_generation(rdcon->ui_context->font_ctx);
     uint64_t font_resource_generation = font_context_resource_generation(rdcon->ui_context->font_ctx);
     uint64_t image_generation = image_cache_resource_generation(rdcon->ui_context);
-    bool unchanged = entry->image_resource_generation == image_generation && entry->node_id == node_id && entry->generation == generation &&
+    bool unchanged = entry->image_resource_generation == image_generation && entry->element.expected_id == dom_elem->DomNode::id && entry->generation == generation &&
                      entry->document_epoch == document_epoch && entry->interaction_generation == interaction_generation &&
                      entry->animation_generation == animation_generation &&
                      entry->font_generation == font_generation &&
@@ -7714,7 +7712,7 @@ static bool svg_layer_paint(RenderContext* rdcon, DomElement* dom_elem, Element*
                      entry->scale == scale && svg_layer_paint_equal(&entry->paint, paint);
     if (!unchanged) {
         svg_layer_entry_release_surface(registry, entry);
-        entry->node_id = node_id;
+        entry->element = dom_node_ref(dom_elem);
         entry->generation = generation;
         entry->document_epoch = document_epoch;
         entry->interaction_generation = interaction_generation;

@@ -460,6 +460,28 @@ uint64_t image_cache_resource_generation(UiContext* ui) {
     return hash;
 }
 
+ImageSurface* image_cache_adopt(UiContext* uicon, const char* key, ImageSurface* surface) {
+    if (!surface) return nullptr;
+    if (!uicon || !key) { image_surface_destroy(surface); return nullptr; }
+    if (!uicon->image_cache) uicon->image_cache = ImageMap::create(10);
+    ImageEntry search_key = {.path = (char*)key, .image = NULL};
+    ImageEntry* entry = uicon->image_cache ? ImageMap::get(uicon->image_cache, search_key) : nullptr;
+    if (entry && entry->image) {
+        if (entry->image != surface) image_surface_destroy(surface);
+        return entry->image;
+    }
+    if (entry) {
+        // an earlier failed probe of this file left an unavailable entry
+        entry->image = surface; entry->unavailable = false;  // RETAINED_FIELD_OK: image-cache entry, not a retained DOM field
+        return surface;
+    }
+    lam::Temp<char> path(mem_strdup(key, MEM_CAT_RENDER));
+    if (!path || !uicon->image_cache) { image_surface_destroy(surface); return nullptr; }
+    ImageEntry new_entry = {.path = path.release(), .image = surface};
+    ImageMap::set(uicon->image_cache, new_entry);
+    return surface;
+}
+
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (!uicon || !img_url || !uicon->document) return nullptr;
     bool data_uri = strncmp(img_url, "data:", 5) == 0;
@@ -531,7 +553,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                 svg_read_intrinsic_metadata_in_memory((const char*)decoded.get(), decoded_len);
             surface = image_surface_alloc();
             surface->format = IMAGE_FORMAT_SVG;
-            surface->pic = rdt_picture_load_data((const char*)decoded.get(), (int)decoded_len, "svg");
+            surface->pic = lam::counted(rdt_picture_load_data((const char*)decoded.get(), (int)decoded_len, "svg"));
             if (!surface->pic) {
                 image_surface_destroy(surface);
                 return NULL;
@@ -575,7 +597,6 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
         // Inline image surfaces used to escape the shared cache, so shutdown
         // had no owner to release their decoded pixels.
-        surface->cache_owned = true;
         ImageEntry new_entry = {.path = (char*)cache_path, .image = surface};
         ImageMap::set(uicon->image_cache, new_entry);
         svg_image_animation_register(uicon, surface);
@@ -738,9 +759,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         surface = image_surface_alloc();
         surface->format = IMAGE_FORMAT_SVG;
         if (is_http && downloaded_data) {
-            surface->pic = rdt_picture_load_data((const char*)downloaded_data.get(), (int)downloaded_size, "svg");
+            surface->pic = lam::counted(rdt_picture_load_data((const char*)downloaded_data.get(), (int)downloaded_size, "svg"));
         } else {
-            surface->pic = rdt_picture_load(file_path.get());
+            surface->pic = lam::counted(rdt_picture_load(file_path.get()));
         }
         if (!surface->pic) {
             log_debug("failed to load SVG image: %s", file_path.get());
@@ -891,7 +912,6 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     }
 
     ImageEntry new_entry = {.path = file_path.release(), .image = surface};
-    surface->cache_owned = true;
     ImageMap::set(uicon->image_cache, new_entry);
     svg_image_animation_register(uicon, surface);
     return surface;
@@ -998,10 +1018,7 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
     raster_blit_surface_scaled(&ctx, src, src_rect, dst_rect, scale_mode, 255);
 }
 
-bool image_surface_is_dom_owned(const ImageSurface* img_surface) {
-    return img_surface && !img_surface->url && !img_surface->cache_owned &&
-        !img_surface->network_owned;
-}
+
 
 void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {

@@ -8,6 +8,7 @@
 
 #include <math.h>
 #include <string.h>
+#include "../lib/generation.h"
 
 struct RetainedDisplayListFragment {
     uint32_t view_id;
@@ -123,7 +124,7 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                 !out->fill_radial_gradient.options.dash_array) return false;
             break;
         case DL_DRAW_PICTURE:
-            out->draw_picture.picture = lam::own(in->draw_picture.picture ?
+            out->draw_picture.picture = lam::counted(in->draw_picture.picture ?
                 rdt_picture_dup(in->draw_picture.picture) : nullptr);
             if (in->draw_picture.picture && !out->draw_picture.picture) return false;
             break;
@@ -430,11 +431,11 @@ static bool retained_dl_dirty_rect_intersects_bound(const DirtyRect* dirty,
 static bool retained_dl_surface_generation_current(lam::Handle<ImageSurface> resource,
                                                    uint64_t generation) {
     ImageSurface* surface = image_surface_lookup(resource);
-    return surface && generation != 0 && surface->generation == generation;
+    return surface && generation_current(generation, surface->generation);
 }
 
 static bool retained_dl_generation_current(const void* resource, uint64_t generation, uint64_t current_generation) {
-    return !resource || (generation != 0 && generation == current_generation);
+    return !resource || generation_current(generation, current_generation);
 }
 
 bool retained_dl_fragment_resources_valid(const RetainedDisplayListFragment* fragment,

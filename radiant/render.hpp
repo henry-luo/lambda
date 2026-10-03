@@ -677,7 +677,7 @@ typedef struct {
 } DlDrawGlyph;
 
 typedef struct {
-    lam::Own<RdtPicture> picture;     // owned — display list frees on clear
+    lam::Counted<RdtPicture> picture;  // one reference; display list releases it on clear
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
@@ -1359,7 +1359,7 @@ typedef struct {
 } PaintDrawGlyph;
 
 typedef struct {
-    lam::Own<RdtPicture> picture;    // borrowed
+    lam::Counted<RdtPicture> picture;  // one reference, handed to the display list at lowering
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
@@ -2676,14 +2676,14 @@ struct DirtyTracker;
 // ============================================================================
 
 typedef struct GifAnimation {
-    GifFrames* frames;           // decoded frame data (owned, freed on destroy)
+    lam::Own<GifFrames> frames;  // decoded frame data (owned, freed on destroy)
     int current_frame;           // index of currently displayed frame
     double frame_end_time;       // next frame deadline in elapsed GIF seconds
     int loop_count;              // 0 = infinite (from GIF NETSCAPE extension)
     int loops_completed;         // number of loops finished so far
 
-    // Target surface — pixel pointer is swapped on frame change
-    struct ImageSurface* surface;
+    // Target surface (cache-owned) — pixel pointer is swapped on frame change
+    lam::Up<struct ImageSurface> surface;
     // the surface's own decode, restored when the animation ends: a cached
     // surface outlives the document whose scheduler drives this animation
     int still_pitch, still_decoded_width, still_decoded_height;
@@ -2740,11 +2740,11 @@ typedef struct LottiePlayer {
     float duration;             // seconds
 
     // Rendering target
-    uint32_t* pixels;           // ABGR8888 buffer (owned by this player)
+    lam::OwnArr<uint32_t> pixels;  // ABGR8888 buffer (owned by this player)
     int width, height;
 
     // Target image surface — pixel pointer is swapped on frame change
-    struct ImageSurface* surface;
+    lam::Up<struct ImageSurface> surface;
 
     bool loop;
     bool playing;

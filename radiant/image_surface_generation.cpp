@@ -2,6 +2,7 @@
 #include "../lib/slot_table.hpp"
 #include "../lib/mem_factory.h"
 #include <pthread.h>
+#include "../lib/generation.h"
 
 // Process-wide slot table behind ImageSurface::self. Surfaces are created and
 // destroyed on loader and render threads, and tile workers look handles up
@@ -43,8 +44,7 @@ void image_surface_release_slot(ImageSurface* surface) {
 
 void image_surface_bump_generation(ImageSurface* img_surface) {
     if (!img_surface) return;
-    img_surface->generation++;
-    if (img_surface->generation == 0) img_surface->generation = 1;
+    img_surface->generation = generation_next(img_surface->generation);
 }
 
 void image_surface_detach_pixels(ImageSurface* img_surface) {
