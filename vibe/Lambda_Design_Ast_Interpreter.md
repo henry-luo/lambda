@@ -198,6 +198,12 @@ Whole-module fallback and task satellites in the table above apply to AUTO.
 An AST template prepared by an import worker must obey the same pin when
 the execution runtime activates it.
 
+**Support checkpoint (2026-10-03):** untyped arithmetic store keys compose the
+same checked binding path as direct keys; Queens executes entirely in T0.
+Keys remain boxed through the existing setter, preserving **S7.1.3v2** errors
+and **S9.1.2/S9.1.3** snapshot/borrow semantics. Mask, character-range and N-D
+admission remain separate. Evidence: [typed performance audit §9](impl/Lambda_Impl_Typed_Performance_Audit.md#9-untyped-queens-interpreter-support-2026-10-03).
+
 ## 5. Tier-up: per-function MIR compilation
 
 ### 5.1 Trigger

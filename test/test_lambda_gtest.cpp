@@ -571,12 +571,10 @@ TEST(LambdaTune31Tests, NestedCounterAgreesOnEveryTier) {
     }
 }
 
-TEST(LambdaTune31Tests, RecursiveArrayWitnessHonorsTierSupport) {
-    // dynamic derived indices remain outside T0's scalar-index proof
-    expect_interp_rejection(LAMBDA_EXE,
-        "test/mir/lambda/tune31_recursive_array_witness.ls", "AST_NODE_INDEX_ASSIGN_STAM");
-    static const char* const tiers[] = {"jit", "auto"};
-    for (size_t t = 0; t < 2; t++) {
+TEST(LambdaTune31Tests, RecursiveArrayWitnessAgreesOnEveryTier) {
+    // derived keys use the checked setter through recursive var forwarding
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
         SCOPED_TRACE(tiers[t]);
         test_lambda_script_against_file("test/mir/lambda/tune31_recursive_array_witness.ls",
             "test/mir/lambda/tune31_recursive_array_witness.txt", true, tiers[t]);

@@ -110,7 +110,7 @@ The runner previously treated rejection identically for INTERP and AUTO, then en
 
 The fix enforces **D8.1.1v15** at each of these boundaries: explicit interp reports `E501` and increments `excluded`, with no execution/fallback; AUTO retains its fallback behavior. A cached support profile remains mode-independent, and strict execution separately validates indexed definitions before accepting it. Synchronous procedures conservatively marked task-capable keep their existing local proof. The formal design and Ast_Interpreter working ledger (AI24) record the user ruling.
 
-**Queens now rejects honestly; this change does not add interpreter support for it.** Its untyped `c + r` / `c - r + 7` store keys fail the current scalar-index proof. Supporting those expressions requires a separate general proof/setter change, with mask, character-range, and N-D negative cases.
+**At the strict-pin checkpoint, Queens was rejected before execution.** Its untyped `c + r` / `c - r + 7` store keys failed the scalar-index admission test. The subsequent interpreter support fix is recorded in §9.
 
 Regression coverage includes Queens, a task satellite, an immutable task alias, an imported task module using AST prebuild, and the existing character-range exclusion. Older parity/COW tests that actually relied on fallback now explicitly assert rejection under interp and retain their JIT/AUTO correctness checks.
 
@@ -139,3 +139,18 @@ After rebuilding the final release (including only the pin-policy code changes),
 | pidigits | 0.300 | 0.301 | +0.3% | 8 |
 
 All output pairs agree. Bounce, fasta, nqueens and fannkuch retain the direction seen in v50; puzzle also merits follow-up. The pidigits penalty did not reproduce, which illustrates why the smaller five-pair deltas are a watchlist rather than proof of a compiler regression.
+
+## 9. Untyped Queens interpreter support (2026-10-03)
+
+The support scanner accepted a bare untyped binding as a store key, but its arithmetic-expression walk accepted only integer literals and proved integer range-loop variables. Consequently, `free_maxs[c + r] = v` rejected the whole untyped Queens script even though both operands independently had an executable interpreter path. The typed port passed because its key expression had an explicit integer type.
+
+`interp_checked_scalar_index_expr` now composes the existing binding, integer-type, and range-loop admission cases through `+`, `-`, and `*`. These expressions retain their boxed keys through the existing `member_set_cow` / checked typed-array / COW-path setters: no machine conversion or unchecked store is added. Runtime keys and values retain **S7.1.3v2** validation, snapshots retain **S9.1.2**, and only `var` borrows write through under **S9.1.3**. Mask dispatch, character-range exclusions, and the separate N-D coordinate gate remain. The strict pin still follows **D8.1.1v15**.
+
+Regression coverage runs both Queens ports under explicit interp, checks the validated-board golden, and requires `executed=1 fallback=0 excluded=0`. `proc_derived_untyped_index.ls` covers untyped and typed borrowed stores, nested paths, plain-parameter and binding snapshots, and rejected fractional/null/negative/out-of-bounds/vector keys and incompatible typed values against a shared golden under both pinned tiers.
+
+Validation on tree `6a5170563` plus this support fix:
+
+- `make release` succeeds; both Queens ports and all **8/8 focused regressions pass** with the release executable. The mask, character-range, dynamic N-D rejection, task-satellite, and cached-import pin checks are included.
+- `make test-lambda-baseline`: **6,170/6,182 pass**. The remaining 12 rendering failures reproduce with the scanner restored to the pre-change source and rebuilt against the same tree. Evidence: `temp/queens_interp_fix/before_render_tests.log`. The old recursive-array test's rejection expectation is replaced by golden checks on interp, jit and AUTO, all passing.
+- Full release interpreter/MIR sweep: **944 matches, 39 exclusions, one mismatch, zero timeouts** across 984 scripts; no explicit interp fallback. The mismatch remains the MIR `pipe_filter.ls` crash; the same-tree pre-change executable also exits on signal 11. Every previously excluded corpus row keeps its exclusion verdict. Full list regeneration refuses the mismatch, so the committed partition is retained.
+- Raw results are under `temp/queens_interp_fix/`; `git diff --check` passes. Release SHA-256: `bbea26454ee908d48d86fbe86fd11b8dc47b48139889b117de2ecf065f185ded`.

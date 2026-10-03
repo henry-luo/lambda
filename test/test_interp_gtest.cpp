@@ -729,10 +729,39 @@ TEST(InterpFallback, ExplicitInterpreterRejectsUnsupportedImport) {
         trim_trailing(read_file("temp/interp_case_strict_import.txt")));
 }
 
-TEST(InterpFallback, QueensCannotSilentlyUseMir) {
-    // untyped derived indices currently fail T0's scalar-index proof
-    expect_interp_rejection(LAMBDA_EXE, "test/benchmark/awfy/queens.ls",
-        "AST_NODE_INDEX_ASSIGN_STAM");
+TEST(InterpWalker, QueensRunsEntirelyUnderInterpreter) {
+    // both source variants must solve and validate the board under strict T0
+    const char* scripts[] = {
+        "test/benchmark/awfy/queens.ls", "test/benchmark/awfy/queens2.ls"
+    };
+    for (const char* script : scripts) {
+        auto interp = run_script(script, "interp", true);
+        ASSERT_EQ(interp.exit_code, 0) << script << interp.stderr_text;
+        EXPECT_EQ(summary_field(interp.stderr_text, "executed="), 1) << script;
+        EXPECT_EQ(summary_field(interp.stderr_text, "fallback="), 0) << script;
+        EXPECT_EQ(summary_field(interp.stderr_text, "excluded="), 0) << script;
+        auto timing = interp.stdout_text.find("__TIMING__:");
+        ASSERT_LT(timing, interp.stdout_text.size()) << script;
+        EXPECT_EQ(trim_trailing(interp.stdout_text.substr(0, timing)),
+            trim_trailing(read_file("test/benchmark/awfy/queens.txt"))) << script;
+    }
+}
+
+TEST(InterpWalker, DerivedUntypedIndicesKeepCheckedStoresAndSnapshots) {
+    // dynamic arithmetic keys keep S7.1.3v2 checks and S9.1.2/S9.1.3 COW
+    const char* script = "test/lambda/proc/proc_derived_untyped_index.ls";
+    for (const char* tier : {"interp", "jit"}) {
+        auto result = run_script(script, tier, true);
+        ASSERT_EQ(result.exit_code, 0) << tier << result.stderr_text;
+        EXPECT_EQ(trim_trailing(result.stdout_text),
+            trim_trailing(read_file("test/lambda/proc/proc_derived_untyped_index.txt")))
+            << tier;
+        if (strcmp(tier, "interp") == 0) {
+            EXPECT_EQ(summary_field(result.stderr_text, "executed="), 1);
+            EXPECT_EQ(summary_field(result.stderr_text, "fallback="), 0);
+            EXPECT_EQ(summary_field(result.stderr_text, "excluded="), 0);
+        }
+    }
 }
 
 //==============================================================================
@@ -942,6 +971,24 @@ TEST(InterpFallback, CharacterRangeIndexRemainsPinned) {
         "    for c in \"a\" to \"c\" { values[c] = c }\n"
         "}\n");
     expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_INDEX_ASSIGN_STAM");
+}
+
+TEST(InterpFallback, DerivedDynamicNdimCoordinatesRemainUnsupported) {
+    // a scalar arithmetic key must not admit an unplanned coordinate list
+    const char* path = "temp/interp_case_derived_ndim_index.ls";
+    write_script(path,
+        "pn write_coords(var values, i, j) { values[i + 0, j + 0] = 99 }\n"
+        "pn main() {\n"
+        "    var values = [[1, 2], [3, 4]]\n"
+        "    write_coords(values, 0, 1)\n"
+        "    print(values[0, 1] ++ \"\\n\")\n"
+        "}\n");
+    write_script("temp/interp_case_derived_ndim_index.txt", "99\n");
+    expect_interp_rejection(LAMBDA_EXE, path, "AST_NODE_INDEX_ASSIGN_STAM");
+    auto jit = run_script(path, "jit", true);
+    ASSERT_EQ(jit.exit_code, 0) << jit.stderr_text;
+    EXPECT_EQ(trim_trailing(jit.stdout_text),
+        trim_trailing(read_file("temp/interp_case_derived_ndim_index.txt")));
 }
 
 }  // namespace
