@@ -167,7 +167,12 @@ void render_composite_apply_region(ImageSurface* surface, const uint32_t* backdr
             uint32_t* pixel = &pixels[(y0 + row) * pitch + (x0 + col)];
             uint32_t source = backdrop[row * width + col];
             if (mode == RENDER_COMPOSITE_REGION_BLEND) {
-                *pixel = render_composite_blend_pixel(source, *pixel, blend_mode);
+                // blend functions use straight channels; native opacity groups retain premultiplied pixels.
+                bool premultiplied = surface->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED;
+                uint32_t result = render_composite_blend_pixel(
+                    premultiplied ? render_pixel_unpremultiply_abgr(source) : source,
+                    premultiplied ? render_pixel_unpremultiply_abgr(*pixel) : *pixel, blend_mode);
+                *pixel = premultiplied ? render_pixel_premultiply_abgr(result) : result;
             } else if (mode == RENDER_COMPOSITE_REGION_PREMULTIPLIED) {
                 *pixel = render_pixel_source_over_premultiplied_pair(source,
                     render_pixel_scale_premultiplied(*pixel, opacity));

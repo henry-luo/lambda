@@ -26,6 +26,13 @@ uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha) {
     return (uint8_t)(value > 255u ? 255u : value);
 }
 
+uint32_t render_pixel_premultiply_abgr(uint32_t pixel) {
+    uint8_t alpha = (uint8_t)(pixel >> 24);
+    return raster_pack_pixel(render_pixel_premultiply_channel((uint8_t)pixel, alpha),
+        render_pixel_premultiply_channel((uint8_t)(pixel >> 8), alpha),
+        render_pixel_premultiply_channel((uint8_t)(pixel >> 16), alpha), alpha);
+}
+
 uint32_t render_pixel_unpremultiply_abgr(uint32_t pixel) {
     uint8_t alpha = (uint8_t)(pixel >> 24);
     return render_pixel_pack_abgr(render_pixel_unpremultiply_channel((uint8_t)pixel, alpha),

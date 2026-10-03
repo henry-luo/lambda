@@ -594,7 +594,7 @@ Do not infer performance from debug-build functional runs.
 | P4 | Implemented | Shared PNG/JPEG/GIF/static-WebP images, placement/aspect fitting, isolated SVG resources, relative URIs, retained ownership/promotion and GIF-frame invalidation. |
 | P5 | Implemented; T2 paint servers finish in P6 | UTF-16 positioning lists, repeated rotation, logical glyph metrics, inherited spacing/baselines, nested textLength, outline/bitmap coverage paint, decoration and shared character-cell targeting. Font/image documents own isolated font descriptors. |
 | P6 | Implemented; aggregate Radiant validation passed | Typed inherited fill/stroke/currentColor/resource/context paints; gradient transforms, spread, focal circles, dynamic styled stops and local/external templates; resource-style font metrics; clipped pattern tiles with units/viewBox/templates and bounded sampling. Recursive use context paint preserves source bounds/frame/document. Marker context paint finishes in P7. |
-| P7 | Implementation present; oracle review open | Affine non-scaling strokes, complete dash/miter/order data, authored marker topology and instance paint/hit geometry. Two original raster fixtures retain pending reviewed oracle corrections. |
+| P7 | Implementation present; oracle review open | Affine non-scaling strokes, complete dash/miter/order data, authored marker topology and instance paint/hit geometry. The marker geometry oracle was corrected during the requested baseline repair below; the other original stroke raster fixture still needs review. |
 | P8 | Implemented; focused validation passed | Common premultiplied effect capture for shapes, containers, text/tspan, image, use, symbol and SVG viewports; clip unions/rules/units/transforms; alpha/luminance/linear masks; exact clipped pointer targeting and mutation invalidation. Final aggregate gates remain required. |
 | P9 | Implemented with focused validation | Shared path metrics, local/external path references, SVG2 basic shapes/inline paths, calibrated offsets, anchoring, reversed and closed paths, nested positioning, textLength, warped outlines/color glyphs and live pointer/mutation behavior. |
 | P10 | In progress | F1-F4 graph kernels and focused browser/specification gates are implemented. Additional filter audits and final aggregate validation remain outstanding. |
@@ -1394,7 +1394,63 @@ state; float-cast lint and `git diff --check` pass. Evidence is in
 The proposal is **not complete**. Resume with the prepared fourteen-fixture
 export matrix (`p13-export-fixtures.json`), expanded density/alpha-edge and
 visible-overflow/effect/resource/font checks, namespace and platform smoke,
-remaining P12 timing/default/instance/cache audits, P7's pending oracle approval,
+remaining P12 timing/default/instance/cache audits, P7's remaining oracle review,
 then fresh Radiant/Lambda/Test262 aggregate gates and support-matrix updates.
 No final aggregate gate was run after these export changes. The user's pause
 supersedes the earlier instruction to continue until the proposal is complete.
+
+### Requested Radiant baseline repair (2026-10-03)
+
+The subsequent request to fix UI Automation, DOM UI Integration, View UI Fixtures
+and Render Visual addresses those gates while the full SVG proposal stays paused.
+The marker fixture retains all 95 assertions. The arrow sample moves from an
+antialiased edge to its solid interior, and two marker samples now follow
+[SVG2 §13.7.1](https://www.w3.org/TR/SVG2/painting.html#MarkerUnitsAttribute):
+`markerUnits="strokeWidth"` markers share `non-scaling-stroke` behavior. Their
+4-unit viewports with a 6px painted stroke are 24×24 physical pixels under
+`scale(3,1)`. Chromium 143 scales them horizontally instead.
+
+`test/svg/oracles/svg_marker_geometry_reference.html` replaces only these two
+marker instances with explicitly positioned rectangles. This independent browser
+reference and the native fixture both pass **95/95** at 1×; the original browser
+capture also passes its original 95 checks and remains recorded under
+`temp/radiant-baseline-fix/`. The fixture's `oracle` metadata records the exception.
+The native marker renderer did not change.
+
+The opacity/blend regression came from passing premultiplied surface channels to
+a straight-channel blend function. The shared compositor now converts at that
+boundary and preserves the surface's alpha representation. A six-case numerical
+regression covers opaque, translucent and transparent backdrops/sources in both
+representations. Pixel encoding moves into a document-independent module so the
+display-list runner links the production encoder without the export loader. The
+allocation-budget helper is shared with surface creation, preserving its existing
+memory limit, reclaim and retry policy for the encoding copy.
+
+DOM event dispatch now checks node kind before calling the element-only SMIL
+seam. Real text/comment/fragment event dispatch and the htmx cleanup paths cover
+the previously unchecked cast. The subtree pruning fixture now uses scroll
+state; detached live form values remain retained until DOM retirement. This
+follows **D4.5.1v4** ("pin, gen-check, copy-as-value"). Comment-backed Mark children
+also retain their DOM wrappers during relinking and explicitly unlink on removal,
+with both comment tag forms and DOCTYPE covered by a native regression.
+
+Final validation for this repair:
+
+| Gate | Result |
+|---|---|
+| `make test-radiant-baseline` | Passed: 4,294 recorded entries, with 3,937 passes and 357 accepted partial layout results. UI Automation 289/289; DOM UI Integration 126/126; View UI 10/10; all 211 required visual baseline cases satisfied, with five expected failures and one skip retained. |
+| Focused native gates | Vector 60/60, display list 77/77, DOM CRUD 64/64, detached-state lifetime 4/4. The encoder's memory-budget regression verifies rejection and recovery. |
+| Final release binary | Seven affected UI fixtures plus two scheduler units passed; the full visual baseline again satisfied all 211 recorded cases. |
+| `make test-lambda-baseline` | 6,169/6,181 passed; 12 SVG export structure/metadata failures remain. |
+| `make test262-baseline` | Zero regressions and zero failures: 40,259 fully passing cases; two slow Unicode identifier cases passed on isolated retry and retain the runner's non-fully-passing classification. |
+| Hygiene | Float-cast lint and `git diff --check` passed. |
+
+The Lambda failures cover custom-layout projection and Mermaid, Graphviz and
+Structurizr exports. Generic SVG paint lowering drops authored wrapper groups
+and their `data-*` metadata; the projection reproducer emits an empty clipped
+group instead of its authored `<g data-projection-...>`. That conversion path is
+unchanged by this repair and remains part of P13's outstanding export work. No
+expected results or baseline classifications were changed to hide these failures.
+Evidence is under `temp/radiant-baseline-fix/`, including `radiant-complete.log`,
+`lambda-baseline.log`, `test262-baseline.log`, `render-release.log` and
+`projection-svg-output.txt`. The proposal remains paused and incomplete.

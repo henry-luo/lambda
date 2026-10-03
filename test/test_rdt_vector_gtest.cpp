@@ -292,6 +292,46 @@ TEST(SvgAnimationTest, PictureDuplicatesRetainPrivateTimeWithoutChangingTheParse
     rdt_picture_free(cached); rdt_picture_free(duplicate); rdt_picture_free(picture);
 }
 
+TEST(RenderCompositeTest, MultiplyPreservesSurfaceAlphaRepresentation) {
+    const struct {
+        ImageAlphaMode mode;
+        uint32_t backdrop, source, expected;
+    } cases[] = {
+        {IMAGE_ALPHA_STRAIGHT, 0xff808080u, 0x800000ffu, 0xff404080u},
+        {IMAGE_ALPHA_PREMULTIPLIED, 0xff808080u, 0x80000080u, 0xff404080u},
+        {IMAGE_ALPHA_STRAIGHT, 0x8000ff00u, 0x800000ffu, 0xc0005555u},
+        {IMAGE_ALPHA_PREMULTIPLIED, 0x80008000u, 0x80000080u, 0xc0004040u},
+        {IMAGE_ALPHA_PREMULTIPLIED, 0u, 0x80000080u, 0x80000080u},
+        {IMAGE_ALPHA_PREMULTIPLIED, 0x80008000u, 0u, 0x80008000u},
+    };
+    for (const auto& sample : cases) {
+        uint32_t pixel = sample.source;
+        ImageSurface surface = {};
+        surface.width = surface.height = 1; surface.pitch = sizeof(pixel);
+        surface.pixels = &pixel; surface.alpha_mode = sample.mode;
+        render_composite_blend_surface(&surface, &sample.backdrop, 0, 0, 1, 1, CSS_VALUE_MULTIPLY);
+        EXPECT_EQ(pixel, sample.expected) << "alpha mode " << sample.mode;
+    }
+}
+
+TEST(SvgExportTest, EncodingCopyRespectsMemoryBudgetAndRecovers) {
+    uint32_t pixels[64 * 64] = {};
+    ImageSurface surface = {};
+    surface.width = surface.height = 64; surface.pitch = 64 * sizeof(uint32_t);
+    surface.pixels = pixels; surface.alpha_mode = IMAGE_ALPHA_PREMULTIPLIED;
+    size_t soft, hard, critical;
+    memtrack_get_limits(&soft, &hard, &critical);
+    // the 16KB straight-alpha copy cannot fit the temporary 256-byte critical budget.
+    memtrack_set_limits(0, 0, 256);
+    StrBuf* rejected = render_encode_surface_data_uri(&surface);
+    memtrack_set_limits(soft, hard, critical);
+    EXPECT_EQ(rejected, nullptr);
+    if (rejected) strbuf_free(rejected);
+    StrBuf* recovered = render_encode_surface_data_uri(&surface);
+    EXPECT_NE(recovered, nullptr);
+    if (recovered) strbuf_free(recovered);
+}
+
 TEST(SvgExportTest, RasterSnapshotRetainsTransparencyAndLogicalBoundsAtBothDensities) {
     rdt_engine_init(0);
     const char source[] = "<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'>"

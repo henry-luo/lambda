@@ -1977,11 +1977,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
             // convert an owned upload copy; shared decoded images retain their straight-alpha pixels.
             for (int x = 0; x < src_w; x++) {
                 uint32_t pixel = source[x];
-                uint8_t alpha = (uint8_t)(pixel >> 24);
-                target[x] = straight_alpha ? render_pixel_pack_abgr(
-                    render_pixel_premultiply_channel(pixel & 255u, alpha),
-                    render_pixel_premultiply_channel((pixel >> 8) & 255u, alpha),
-                    render_pixel_premultiply_channel((pixel >> 16) & 255u, alpha), alpha) : pixel;
+                target[x] = straight_alpha ? render_pixel_premultiply_abgr(pixel) : pixel;
             }
         }
         raw_pixels = tight_pixels.get();

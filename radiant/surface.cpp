@@ -971,16 +971,6 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     return img_surface;
 }
 
-bool render_memory_allow_allocation(MemContext* memory, size_t bytes) {
-    size_t limit = 0; memtrack_get_limits(nullptr, nullptr, &limit);
-    if (!limit) return true;
-    size_t usage = memtrack_get_current_usage();
-    if (usage < limit && bytes <= limit - usage) return true;
-    mem_context_request_reclaim(memory, MEM_PRESSURE_HIGH, bytes);
-    usage = memtrack_get_current_usage();
-    return usage < limit && bytes <= limit - usage;
-}
-
 ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height) {
     width = ceilf(width); height = ceilf(height);
     if (!isfinite(width) || !isfinite(height) || width <= 0.0f || height <= 0.0f ||
