@@ -1,0 +1,1020 @@
+{
+  "name": "SMIL begin and end lists, restart modes, repeat duration, fractional repeats, negative begin and maximum duration",
+  "html": "test/ui/svg_smil_timing.html",
+  "viewport": {
+    "width": 620,
+    "height": 470
+  },
+  "events": [
+    {
+      "type": "click",
+      "x": 30,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "10,10,10,10,10,10,60,10"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 90,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "35,35,35,35,35,35,85,35"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 150,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "60,60,60,60,60,60,110,60"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 210,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "85,85,85,85,85,85,110,85"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 270,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "110,110,110,85,10,10,110,10"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 330,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "10,10,110,10,60,60,110,60"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 390,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "60,60,110,60,10,10,110,60"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 450,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "85,85,110,85,35,35,110,60"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 45,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 510,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "110,110,110,85,60,60,110,60"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 570,
+      "y": 435
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-values",
+      "equals": "110,110,110,85,110,60,110,60"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 20,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 95,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 220,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 270,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 370,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    }
+  ]
+}

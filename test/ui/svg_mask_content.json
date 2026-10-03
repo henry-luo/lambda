@@ -1,0 +1,187 @@
+{
+  "name": "SVG mask image text stroke alpha linear luminance and reference cycles",
+  "html": "test/ui/svg_mask_content.html",
+  "viewport": {
+    "width": 640,
+    "height": 360
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 30,
+      "min_r": 220,
+      "max_r": 236,
+      "min_g": 220,
+      "max_g": 236,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 170,
+      "y": 30,
+      "min_r": 119,
+      "max_r": 135,
+      "min_g": 119,
+      "max_g": 135,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 290,
+      "y": 30,
+      "min_r": 119,
+      "max_r": 135,
+      "min_g": 119,
+      "max_g": 135,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 410,
+      "y": 30,
+      "min_r": 192,
+      "max_r": 208,
+      "min_g": 192,
+      "max_g": 208,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 530,
+      "y": 30,
+      "min_r": 169,
+      "max_r": 185,
+      "min_g": 119,
+      "max_g": 135,
+      "min_b": 119,
+      "max_b": 135
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 130,
+      "min_r": 119,
+      "max_r": 135,
+      "min_g": 119,
+      "max_g": 135,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 170,
+      "y": 130,
+      "min_r": 236,
+      "max_r": 252,
+      "min_g": 236,
+      "max_g": 252,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 260,
+      "y": 120,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 300,
+      "y": 120,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 430,
+      "y": 150,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 390,
+      "y": 150,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 430,
+      "y": 125,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 530,
+      "y": 130,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 530,
+      "y": 110,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 230,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 170,
+      "y": 230,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ],
+  "oracle": "Chromium 143 pixels except two invalid-reference cases: CSS Masking 1 section 7.1 specifies transparent-black layers for nonexistent masks; SVG 2 section 16.1.2 treats circular references as invalid. Chromium paints unmasked blue at (50,230) and (170,230)."
+}

@@ -1,0 +1,499 @@
+{
+  "name": "SVG blend/composite/morphology/displacement graphs on group, text, image and use sources",
+  "html": "test/ui/svg_filter_advanced_sources.html",
+  "viewport": {
+    "width": 640,
+    "height": 480
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 90,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 310,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 350,
+      "y": 50,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 390,
+      "y": 50,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 70,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 110,
+      "y": 170,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 310,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 350,
+      "y": 170,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 30,
+      "y": 230,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 250,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 490,
+      "y": 230,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 470,
+      "y": 250,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 110,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 183,
+      "max_g": 199,
+      "min_b": 183,
+      "max_b": 199
+    },
+    {
+      "type": "assert_pixel",
+      "x": 130,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 90,
+      "y": 320,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 59,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 26,
+      "max_g": 42,
+      "min_b": 26,
+      "max_b": 42
+    },
+    {
+      "type": "assert_pixel",
+      "x": 56,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 102,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 104,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    }
+  ],
+  "oracle": "Filter Effects 1 section 9.11 leaves displacement interpolation to the renderer. Lambda uses bilinear sampling; Chromium uses nearest sampling here. All coordinates and +/-8 tolerances are retained. The (59,40) 1x edge is independently checked by equivalent fractional-offset rendering in test/svg/oracles/svg_filter_advanced_sources_reference.html (RGB 255,34,34); at 2x the same point is interior red. The linearRGB map value rounds to 55/255, giving an output translation of 4*(.5-55/255).",
+  "pixel_oracles": {
+    "2": [
+      {
+        "type": "assert_pixel",
+        "x": 30,
+        "y": 40,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 70,
+        "y": 40,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 70,
+        "y": 90,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 310,
+        "y": 50,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 350,
+        "y": 50,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 390,
+        "y": 50,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 30,
+        "y": 170,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 70,
+        "y": 170,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 110,
+        "y": 170,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 310,
+        "y": 170,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 350,
+        "y": 170,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 30,
+        "y": 230,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 50,
+        "y": 250,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 490,
+        "y": 230,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 470,
+        "y": 250,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 110,
+        "y": 320,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 183,
+        "max_g": 199,
+        "min_b": 183,
+        "max_b": 199
+      },
+      {
+        "type": "assert_pixel",
+        "x": 130,
+        "y": 320,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 90,
+        "y": 320,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 59,
+        "y": 40,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 56,
+        "y": 40,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 102,
+        "y": 40,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 104,
+        "y": 40,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      }
+    ]
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "name": "SVG diffuse and specular lighting with distant, point and spot lights and an alpha-height gradient",
+  "html": "test/ui/svg_filter_lighting.html",
+  "viewport": {
+    "width": 840,
+    "height": 320
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 70,
+      "min_r": 94,
+      "max_r": 110,
+      "min_g": 94,
+      "max_g": 110,
+      "min_b": 94,
+      "max_b": 110
+    },
+    {
+      "type": "assert_pixel",
+      "x": 200,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 175,
+      "max_g": 191,
+      "min_b": 175,
+      "max_b": 191
+    },
+    {
+      "type": "assert_pixel",
+      "x": 340,
+      "y": 70,
+      "min_r": 56,
+      "max_r": 72,
+      "min_g": 152,
+      "max_g": 168,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 480,
+      "y": 70,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 437,
+      "y": 70,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 620,
+      "y": 70,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 120,
+      "max_b": 136
+    },
+    {
+      "type": "assert_pixel",
+      "x": 760,
+      "y": 70,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 120,
+      "max_g": 136,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 717,
+      "y": 70,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 220,
+      "min_r": 157,
+      "max_r": 173,
+      "min_g": 157,
+      "max_g": 173,
+      "min_b": 157,
+      "max_b": 173
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 220,
+      "min_r": 157,
+      "max_r": 173,
+      "min_g": 157,
+      "max_g": 173,
+      "min_b": 157,
+      "max_b": 173
+    },
+    {
+      "type": "assert_pixel",
+      "x": 120,
+      "y": 220,
+      "min_r": 157,
+      "max_r": 173,
+      "min_g": 157,
+      "max_g": 173,
+      "min_b": 157,
+      "max_b": 173
+    }
+  ]
+}

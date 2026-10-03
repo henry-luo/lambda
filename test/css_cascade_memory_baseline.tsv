@@ -20,6 +20,12 @@
 # and cold-cache storage are strict ceilings. A recascade must not grow
 # canonical CSS beyond that margin.
 #
+# On 2026-10-02, strongest matching selector-list specificity separates footer
+# copyright links from other footer links in bootstrap5_kitchen_sink: one extra
+# canonical recipe and seven shared payload bindings, with zero recascade growth.
+# Only the affected structural ceilings change; byte budgets retain the prior capture.
+# D4.2.2v2-D4.2.4 and D4.5.1v3 continue to govern snapshot ownership.
+#
 # fixture phase document_live document_live_delta work_live_delta css_live canonical_live canonical_live_delta entries bound_refs payloads payload_refs bound_entries cold_entries cold_bytes
 jqueryui initial 176242 67082 415 321604 321604 317508 78 327 411 763 78 0 0
 jqueryui recascade 176242 37770 104 321604 321604 0 78 327 411 763 78 0 0
@@ -27,8 +33,8 @@ linuxmint initial 715354 502944 754 577222 577222 573126 154 506 594 1768 154 0 
 linuxmint recascade 715354 243360 104 577222 577222 0 154 506 594 1768 154 0 0
 netflix initial 464141 355136 592 224337 224337 220241 57 245 283 628 57 0 0
 netflix recascade 465741 228160 104 224337 224337 0 57 245 283 628 57 0 0
-bootstrap5_kitchen_sink initial 4184606 3584791 1202 1044081 1044081 1039985 250 1212 834 3302 250 0 0
-bootstrap5_kitchen_sink recascade 4553618 2922267 104 1046285 1046285 0 250 1224 834 3302 250 0 0
+bootstrap5_kitchen_sink initial 4184606 3584791 1202 1044081 1044081 1039985 251 1212 834 3309 251 0 0
+bootstrap5_kitchen_sink recascade 4553618 2922267 104 1046285 1046285 0 251 1224 834 3309 251 0 0
 matrix_admin initial 717288 552224 439 340279 340279 336183 90 367 386 995 90 0 0
 matrix_admin recascade 733224 362272 104 340279 340279 0 90 367 386 995 90 0 0
 bschool initial 1018890 742992 561 632405 632405 628309 124 424 639 2069 124 0 0

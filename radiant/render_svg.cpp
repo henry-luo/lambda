@@ -97,29 +97,16 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
     paint_list_clear(&ctx->paint_list);
 }
 
-static void svg_append_base64(StrBuf* out, const uint8_t* data, size_t len) {
-    if (!out || !data) return;
-    char* b64 = base64_encode_alloc(data, len, BASE64_STD);
-    if (!b64) return;
-    strbuf_append_str(out, b64);
-    mem_free(b64);
-}
-
-static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx,
-                                           ImageSurface* surface,
-                                           float x,
-                                           float y,
-                                           float width,
-                                           float height) {
-    StrBuf* png_bytes = render_encode_surface_png(surface);
-    if (!png_bytes) return false;
+static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx, ImageSurface* surface,
+                                           float x, float y, float width, float height) {
+    StrBuf* uri = render_encode_surface_data_uri(surface);
+    if (!uri) return false;
     svg_indent(ctx);
     strbuf_append_format(ctx->svg_content,
-        "<image data-radiant-fallback=\"effect-raster\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"data:image/png;base64,",
+        "<image data-radiant-fallback=\"effect-raster\" x=\"%.2f\" y=\"%.2f\" width=\"%.2f\" height=\"%.2f\" href=\"",
         x, y, width, height);
-    svg_append_base64(ctx->svg_content, (const uint8_t*)png_bytes->str, png_bytes->length);
-    strbuf_append_str(ctx->svg_content, "\" />\n");
-    strbuf_free(png_bytes);
+    strbuf_append_str_n(ctx->svg_content, uri->str, uri->length);
+    strbuf_append_str(ctx->svg_content, "\" />\n"); strbuf_free(uri);
     return true;
 }
 
@@ -938,14 +925,13 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     image_block.x = abs_x - block->x;
     image_block.y = abs_y - block->y;
     Rect content_rect = render_geometry_block_content_rect(&image_block, block, 1.0f);
-    float img_width = content_rect.width;
-    float img_height = content_rect.height;
-
-
-    if (img->url && img->url->href) {
-        paint_draw_image_resource(svg_active_paint_list(ctx), img,
-                                  content_rect.x, content_rect.y,
-                                  img_width, img_height, 255, nullptr);
+    PaintList* paint = svg_active_paint_list(ctx);
+    if (render_media_paint_svg_picture(paint, ctx->ui_context, block, &content_rect)) {
+        svg_lower_paint_list(ctx);
+    } else if (img->url && img->url->href) {
+        Rect image_rect = render_media_image_rect(block, img, content_rect, 1.0f);
+        paint_draw_image_resource(paint, img, image_rect.x, image_rect.y,
+            image_rect.width, image_rect.height, 255, nullptr);
         svg_lower_paint_list(ctx);
     }
 }
@@ -987,7 +973,7 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.fill_none,
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
-                              initial_paint.stroke_width);
+                              initial_paint.stroke_width, ctx->ui_context);
     subscene.id_scope = render_svg_reference_scope(dom_elem);
     paint_svg_subscene(svg_active_paint_list(ctx), &subscene);
     svg_lower_paint_list(ctx);
@@ -1325,8 +1311,8 @@ static void render_caret_svg(SvgRenderContext* ctx, DocState* state) {
 }
 
 // Main SVG rendering function
-char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int height, DocState* state) {
-    if (!root_view || !uicon) {
+char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, float height, DocState* state, float output_scale) {
+    if (!root_view || !uicon || !isfinite(output_scale) || output_scale <= 0) {
         return NULL;
     }
 
@@ -1359,8 +1345,8 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     strbuf_append_format(ctx.svg_content,
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
         "<svg xmlns=\"http://www.w3.org/2000/svg\" "
-        "width=\"%d\" height=\"%d\" viewBox=\"0 0 %d %d\">\n",
-        width, height, width, height);
+        "width=\"%.6g\" height=\"%.6g\" viewBox=\"0 0 %.6g %.6g\">\n",
+        width * output_scale, height * output_scale, width, height);
 
     ctx.indent_level++;
 
@@ -1451,11 +1437,9 @@ static int render_export_session_to_svg(RenderExportSession* session, const char
 
     // Render to SVG (apply scale to output dimensions)
     if (doc->view_tree && doc->view_tree->root) {
-        // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
-        int svg_width = (int)(session->content_width * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
-        int svg_height = (int)(session->content_height * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
+        // only the outer dimensions scale; the viewBox retains CSS coordinates for every subscene.
         char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
-                                                   svg_width, svg_height, doc->state);
+            (float)session->content_width, (float)session->content_height, doc->state, session->output_scale);
         if (svg_content) {
             if (save_svg_to_file(svg_content, svg_file)) {
                 log_info("Successfully rendered HTML to SVG: %s", svg_file);

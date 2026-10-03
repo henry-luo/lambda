@@ -12,6 +12,8 @@ extern "C" {
 
 // Forward declarations
 struct CssPropertyValueParser;
+struct DomElement;
+struct SelectorMatcher;
 
 enum {
     CSS_CONDITION_CACHE_CAPACITY = 128,
@@ -183,6 +185,13 @@ void css_engine_set_root_font_size(CssEngine* engine, double size);
 
 // CSS parsing
 CssStylesheet* css_parse_stylesheet(CssEngine* engine, const char* css_text, const char* base_url);
+
+// Resolve authored declarations without requiring layout boxes. The result
+// borrows its payload from the supplied sheets/inline list; its priority is copied.
+bool css_select_element_declaration(CssEngine* engine, struct SelectorMatcher* matcher,
+    struct DomElement* element, CssStylesheet** sheets, size_t sheet_count,
+    CssDeclaration** inline_declarations, size_t inline_count,
+    const char* property_name, CssDeclaration* result);
 CssRule* css_parse_rule(CssEngine* engine, const char* rule_text);
 
 // Style system integration

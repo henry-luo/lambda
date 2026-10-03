@@ -1,0 +1,210 @@
+{
+  "name": "A partial frozen to-animation captures the underlying sandwich at its active end and retains it across base mutations",
+  "html": "test/ui/svg_smil_frozen_to.html",
+  "viewport": {
+    "width": 500,
+    "height": 140
+  },
+  "events": [
+    {
+      "type": "click",
+      "x": 25,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "10"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 20,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 90,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "43"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 53,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 155,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "70"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 220,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "70"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 285,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "70"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 350,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "70"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 415,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "70"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "x": 475,
+      "y": 105
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-x",
+      "equals": "70"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 80,
+      "y": 30,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#rect"
+      },
+      "attribute": "x",
+      "equals": "50"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+<!doctype html><html><head><style>
+html,body { margin:0; background:white; }
+#scene { position:absolute; left:0; top:0; }
+#advance { position:absolute; left:0; top:130px; width:120px; height:30px; }
+</style></head><body>
+<svg id="scene" width="300" height="100">
+ <rect id="clipped" x="10" y="10" width="100" height="80" fill="blue" clip-path="url(#cut)"/>
+ <rect id="masked" x="160" y="10" width="100" height="80" fill="blue" mask="url(#shade)"/>
+</svg>
+<svg width="0" height="0" style="position:absolute"><defs>
+ <clipPath id="cut" clipPathUnits="objectBoundingBox"><rect id="window" width=".5" height="1"/></clipPath>
+ <mask id="shade" maskUnits="userSpaceOnUse" x="160" y="10" width="100" height="80"><rect x="160" y="10" width="100" height="80" fill="white"/><rect id="hole" x="210" y="10" width="50" height="80" fill="black"/></mask>
+</defs></svg>
+<button id="advance" data-step="0">advance</button>
+<script>
+var step=0;
+document.getElementById('advance').addEventListener('click',function(){
+ step++;
+ if(step===1){document.getElementById('window').setAttribute('x','.5');document.getElementById('hole').setAttribute('x','160');}
+ if(step===2){document.getElementById('window').setAttribute('width','1');document.getElementById('window').setAttribute('x','0');document.getElementById('shade').setAttribute('mask-type','alpha');}
+ if(step===3){document.getElementById('clipped').setAttribute('clip-path','none');document.getElementById('masked').setAttribute('opacity','.5');}
+ this.setAttribute('data-step',String(step));
+});
+</script></body></html>

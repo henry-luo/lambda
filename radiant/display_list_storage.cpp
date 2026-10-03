@@ -344,13 +344,15 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
                 break;
             case DL_FILL_LINEAR_GRADIENT:
                 if (!item->fill_linear_gradient.path || !item->fill_linear_gradient.stops ||
-                    item->fill_linear_gradient.stop_count <= 0) {
+                    item->fill_linear_gradient.stop_count <= 0 ||
+                    !rdt_gradient_options_valid(&item->fill_linear_gradient.options)) {
                     return fail("linear gradient payload is invalid");
                 }
                 break;
             case DL_FILL_RADIAL_GRADIENT:
                 if (!item->fill_radial_gradient.path || !item->fill_radial_gradient.stops ||
                     item->fill_radial_gradient.stop_count <= 0 ||
+                    !rdt_gradient_options_valid(&item->fill_radial_gradient.options) ||
                     item->fill_radial_gradient.r < 0.0f) {
                     return fail("radial gradient payload is invalid");
                 }
@@ -611,6 +613,17 @@ static bool dl_union_item_bounds(float* left, float* top,
     if (r > *right) *right = r;
     if (b > *bottom) *bottom = b;
     return true;
+}
+
+Bound dl_content_bounds(const DisplayList* dl) {
+    Bound bounds = {};
+    bool valid = false;
+    if (dl) for (int index = 0; index < dl->item_count(); index++) {
+        const DisplayItem* item = &dl->data()[index];
+        if (dl_op_has_flags(item->op, DL_OP_FLAG_PRESERVES_REPLAY_STATE)) continue;
+        valid = dl_union_item_bounds(&bounds.left, &bounds.top, &bounds.right, &bounds.bottom, item, valid);
+    }
+    return bounds;
 }
 
 int dl_begin_element(DisplayList* dl, uint32_t view_id,

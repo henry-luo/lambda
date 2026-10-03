@@ -1,0 +1,17 @@
+<!doctype html><html><head><style>
+html,body{margin:0}svg{position:absolute;left:0;top:0}button{position:absolute;top:190px;width:60px;height:30px}
+</style></head><body><svg id="scene" width="560" height="180">
+<defs>
+<linearGradient id="base" gradientUnits="objectBoundingBox"><stop stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient>
+<linearGradient id="mixed" href="#base"><animate attributeName="x2" from="100%" to="50%" dur="2s" fill="freeze"/></linearGradient>
+<filter id="matrix" color-interpolation-filters="sRGB"><feColorMatrix values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0"><animate attributeName="values" from="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0" to="0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 0 0 1 0" dur="2s" fill="freeze"/></feColorMatrix></filter>
+<filter id="morph" x="-50%" y="-50%" width="200%" height="200%"><feMorphology operator="dilate" radius="0 0"><animate attributeName="radius" from="0 0" to="10 0" dur="2s" fill="freeze"/></feMorphology></filter>
+<marker id="angle" markerUnits="userSpaceOnUse" markerWidth="30" markerHeight="30" refX="0" refY="0" overflow="visible" orient="0"><rect x="0" y="-5" width="20" height="10" fill="blue"/><animate attributeName="orient" from="0deg" to="90deg" dur="2s" fill="freeze"/></marker>
+</defs>
+<rect x="10" y="10" width="180" height="30" fill="url(#mixed)"/>
+<rect x="220" y="10" width="40" height="30" fill="red" filter="url(#matrix)"/>
+<line x1="10" y1="80" x2="190" y2="80" stroke="red" stroke-width="12" stroke-dasharray="10 10"><animate attributeName="stroke-dasharray" from="10 10" to="20 20" dur="2s" fill="freeze"/></line>
+<rect x="220" y="70" width="30" height="30" fill="red" filter="url(#morph)"/>
+<path d="M300 100 L350 100" stroke="black" marker-end="url(#angle)"/>
+<text id="letters" x="10 50" y="150" font-family="DejaVu Sans" font-size="24">AB<animate attributeName="x" from="10 50" to="50 90" dur="2s" fill="freeze"/></text>
+</svg><button id="sample0" style="left:10px">0s</button><button id="sample1" style="left:90px">1s</button><button id="sample2" style="left:170px">2s</button><script>var scene=document.getElementById("scene");if(typeof scene.pauseAnimations==="function"){scene.pauseAnimations();scene.setCurrentTime(0);}function sample(t){if(typeof scene.setCurrentTime!=="function"){scene.setAttribute("data-bounds","unsupported");return;}scene.setCurrentTime(t);scene.setAttribute("data-bounds",Math.round(document.getElementById("letters").getBBox().x));}document.getElementById("sample0").onclick=function(){sample(0);};document.getElementById("sample1").onclick=function(){sample(1);};document.getElementById("sample2").onclick=function(){sample(2);};</script></body></html>

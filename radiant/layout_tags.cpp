@@ -64,3 +64,20 @@ bool layout_tag_is_default_inline(NameId tag) {
     return layout_tag_in_list(tag, inline_tags,
                               sizeof(inline_tags) / sizeof(*inline_tags));
 }
+
+/**
+ * Check if an element is a form control that needs special layout.
+ */
+bool is_form_control(DomElement* elem) {
+    if (!elem) return false;
+
+    switch (elem->tag_id) {
+    case MARKUP_NAME_INPUT:
+    case MARKUP_NAME_BUTTON:
+    case MARKUP_NAME_SELECT:
+    case MARKUP_NAME_TEXTAREA:
+        return true;
+    default:
+        return false;
+    }
+}

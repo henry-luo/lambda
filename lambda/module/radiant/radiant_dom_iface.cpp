@@ -203,7 +203,12 @@ const char radiant_dom_interface_decl[] =
     "    create_svg_point: fn() any, create_svg_matrix: fn() any,\n"
     "    create_svg_transform: fn() any,\n"
     "    create_svg_transform_from_matrix: fn(a0: any) any, get_bbox: fn() any,\n"
-    "    get_ctm: fn() any, get_screen_ctm: fn() any\n"
+    "    get_ctm: fn() any, get_screen_ctm: fn() any,\n"
+    "    pause_animations: fn() any, unpause_animations: fn() any,\n"
+    "    animations_paused: fn() bool, get_current_time: fn() float,\n"
+    "    set_current_time: fn(a0: any) any,\n"
+    "    begin_element: fn() any, begin_element_at: fn(a0: any) any,\n"
+    "    end_element: fn() any, end_element_at: fn(a0: any) any\n"
     "}\n"
     "type input_element : html_element {\n"
     "    read_only: bool, readonly: bool,\n"
@@ -1295,6 +1300,15 @@ static const JubeMemberBind radiant_dom_svg_element_members[] = {
     BIND_CALL_JS("get_bbox", "getBBox", radiant_dom_m4d_get_bbox),
     BIND_CALL_JS("get_ctm", "getCTM", radiant_dom_m4d_get_ctm),
     BIND_CALL_JS("get_screen_ctm", "getScreenCTM", radiant_dom_m4d_get_screen_ctm),
+    BIND_CALL_JS("pause_animations", "pauseAnimations", radiant_dom_m4d_pause_animations),
+    BIND_CALL_JS("unpause_animations", "unpauseAnimations", radiant_dom_m4d_unpause_animations),
+    BIND_CALL_JS("animations_paused", "animationsPaused", radiant_dom_m4d_animations_paused),
+    BIND_CALL_JS("get_current_time", "getCurrentTime", radiant_dom_m4d_get_current_time),
+    BIND_CALL_JS("set_current_time", "setCurrentTime", radiant_dom_m4d_set_current_time),
+    BIND_CALL_JS("begin_element", "beginElement", radiant_dom_m4d_begin_element),
+    BIND_CALL_JS("begin_element_at", "beginElementAt", radiant_dom_m4d_begin_element_at),
+    BIND_CALL_JS("end_element", "endElement", radiant_dom_m4d_end_element),
+    BIND_CALL_JS("end_element_at", "endElementAt", radiant_dom_m4d_end_element_at),
 };
 
 static const JubeMemberBind radiant_dom_input_element_members[] = {

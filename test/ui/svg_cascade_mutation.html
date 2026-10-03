@@ -1,0 +1,28 @@
+<!DOCTYPE html><html><head>
+<style id="palette">
+html,body { margin:0; background:white; }
+.red #paint { fill:red; }
+.blue #paint { fill:blue; }
+#scene { position:absolute;left:0;top:0; }
+#advance { position:absolute;left:0;top:120px;width:120px;height:30px; }
+</style></head><body class="red">
+<svg id="scene" width="200" height="100">
+ <rect id="paint" x="10" y="10" width="50" height="50"/>
+ <g visibility="hidden"><rect id="hidden" x="70" y="10" width="30" height="50"/><rect id="visible" x="110" y="10" width="30" height="50" visibility="visible" fill="red"/></g>
+ <use href="#resource" x="150" y="10"/>
+</svg>
+<svg style="display:none"><defs><rect id="resource" width="30" height="50" fill="red"/></defs></svg>
+<button id="advance" data-step="0">advance</button>
+<script>
+var step = 0;
+document.getElementById('advance').addEventListener('click', function () {
+ step++;
+ if (step === 1) document.body.className = 'blue';
+ if (step === 2) document.getElementById('palette').textContent += '\n.blue #paint { fill:#00ff00 !important; } #visible { visibility:hidden; }';
+ if (step === 3) {
+  document.getElementById('visible').setAttribute('style', 'visibility:visible');
+  document.getElementById('resource').setAttribute('fill', '#00ffff');
+ }
+ this.setAttribute('data-step', String(step));
+});
+</script></body></html>

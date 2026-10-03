@@ -104,10 +104,13 @@ void font_backend_destroy(FontHandle* handle) {
 #ifdef __APPLE__
 void font_backend_use_ct_font(FontHandle* handle, void* ct_font_ref) {
     if (!handle || !ct_font_ref) return;
+    // callers may select the handle's existing auxiliary face; retain before releasing aliases.
+    void* measured = font_platform_retain_ct_font(ct_font_ref);
+    void* raster = font_platform_retain_ct_font(ct_font_ref);
     if (handle->ct_font_ref) font_platform_destroy_ct_font(handle->ct_font_ref);
     if (handle->ct_raster_ref) font_platform_destroy_ct_font(handle->ct_raster_ref);
-    handle->ct_font_ref = font_platform_retain_ct_font(ct_font_ref);
-    handle->ct_raster_ref = font_platform_retain_ct_font(ct_font_ref);
+    handle->ct_font_ref = measured;
+    handle->ct_raster_ref = raster;
     handle->platform_font_ref = handle->ct_raster_ref;
     handle->platform_aux_ref = handle->ct_font_ref;
     handle->backend_kind = FONT_BACKEND_CORETEXT;

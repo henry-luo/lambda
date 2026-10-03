@@ -1,0 +1,189 @@
+{
+  "name": "SVG textPath live geometry and offsets from zero-size resource viewport",
+  "html": "test/ui/svg_text_path_mutation_zero.html",
+  "viewport": {
+    "width": 360,
+    "height": 310
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 40,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 40,
+      "expected_selector": "#moving-path"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 180,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "1"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 40,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 180,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 180,
+      "expected_selector": "#moving-path"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 40,
+      "y": 180,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 160,
+      "y": 180,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 160,
+      "y": 180,
+      "expected_selector": "#moving-path"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "3"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 160,
+      "y": 180,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 160,
+      "y": 180,
+      "expected_selector": "#scene"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 260,
+      "y": 180,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 260,
+      "y": 180,
+      "expected_selector": "#moving-path"
+    }
+  ],
+  "oracle": "Chromium 143 agrees on 15/19 checks. A referenced-path transform mutation keeps old paint/cells until a later startOffset change triggers layout; the native implementation updates both immediately as SVG2 requires. Original event captures are preserved."
+}

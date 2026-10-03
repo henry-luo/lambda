@@ -108,7 +108,7 @@ static void filter_apply_rgb_matrix(uint8_t* r, uint8_t* g, uint8_t* b,
  * Rotates hue by the specified angle (in radians).
  * Uses rotation in the RGB color space.
  */
-static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
+void render_filter_hue_matrix(float angle, float matrix[3][3]) {
     // normalize angle to [0, 2π).
     angle = math_wrap_positive_f(angle, math_tau_f());
 
@@ -129,7 +129,11 @@ static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
          0.072f + 0.928f * cos_a + 0.072f * sin_a}
     };
 
-    filter_apply_rgb_matrix(r, g, b, mat);
+    memcpy(matrix, mat, sizeof(mat));
+}
+
+static void filter_hue_rotate(uint8_t* r, uint8_t* g, uint8_t* b, float angle) {
+    float matrix[3][3]; render_filter_hue_matrix(angle, matrix); filter_apply_rgb_matrix(r, g, b, matrix);
 }
 
 /**
@@ -150,10 +154,7 @@ static void filter_invert(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
  * saturate(amount)
  * Adjusts saturation. amount=1 is no effect, 0 is desaturated, >1 is oversaturated.
  */
-static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
-    if (amount < 0) amount = 0;
-    if (amount == 1) return;
-
+void render_filter_saturate_matrix(float amount, float matrix[3][3]) {
     // Saturation matrix (from CSS Filter Effects spec)
     float s = amount;
     float mat[3][3] = {
@@ -162,7 +163,13 @@ static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
         {0.213f - 0.213f * s, 0.715f - 0.715f * s, 0.072f + 0.928f * s}
     };
 
-    filter_apply_rgb_matrix(r, g, b, mat);
+    memcpy(matrix, mat, sizeof(mat));
+}
+
+static void filter_saturate(uint8_t* r, uint8_t* g, uint8_t* b, float amount) {
+    if (amount < 0) amount = 0;
+    if (amount == 1.0f) return;
+    float matrix[3][3]; render_filter_saturate_matrix(amount, matrix); filter_apply_rgb_matrix(r, g, b, matrix);
 }
 
 /**

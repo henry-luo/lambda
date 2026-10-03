@@ -256,6 +256,19 @@
       "link": "static"
     },
     {
+      "name": "webp",
+      "version": "1.6.0",
+      "include": "/opt/homebrew/include",
+      "lib": "/opt/homebrew/lib/libwebp.a",
+      "link": "static"
+    },
+    {
+      "name": "sharpyuv",
+      "description": "SharpYUV companion required by static WebP encoders",
+      "lib": "/opt/homebrew/lib/libsharpyuv.a",
+      "link": "static"
+    },
+    {
       "name": "re2",
       "version": "2023-03-01",
       "description": "RE2 regular expression library for string pattern matching",
@@ -462,6 +475,7 @@
         "ThorVG",
         "png",
         "turbojpeg",
+        "webp",
         "gif",
         "pthread"
       ],
@@ -477,7 +491,6 @@
           "dbghelp",
           "iphlpapi",
           "userenv",
-          "webp",
           "opengl32",
           "imm32",
           "ws2_32",
@@ -491,13 +504,19 @@
           "rpcrt4",
           "wsock32",
           "secur32",
-          "wldap32"
+          "wldap32",
+          "sharpyuv"
         ]
       },
       "defines": [
         "UTF8PROC_STATIC",
         "MEMPOOL_RUNTIME_VM_PROVIDER"
-      ]
+      ],
+      "macos": {
+        "additional_libraries": [
+          "sharpyuv"
+        ]
+      }
     },
     {
       "name": "lambda-data",
@@ -855,6 +874,7 @@
         "ThorVG",
         "png",
         "turbojpeg",
+        "webp",
         "glfw"
       ],
       "target_name": "lambda-static",
@@ -863,7 +883,17 @@
       "link_options_macos": [
         "-mmacosx-version-min=15.7"
       ],
-      "link": "executable"
+      "link": "executable",
+      "macos": {
+        "additional_libraries": [
+          "sharpyuv"
+        ]
+      },
+      "windows": {
+        "additional_libraries": [
+          "sharpyuv"
+        ]
+      }
     },
     {
       "name": "lambda-cst",
@@ -953,6 +983,7 @@
         "glfw",
         "png",
         "turbojpeg",
+        "webp",
         "pthread"
       ],
       "linux": {
@@ -972,9 +1003,17 @@
       "windows": {
         "exclude_libraries": [
           "fribidi"
+        ],
+        "additional_libraries": [
+          "sharpyuv"
         ]
       },
-      "link": "static"
+      "link": "static",
+      "macos": {
+        "additional_libraries": [
+          "sharpyuv"
+        ]
+      }
     }
   ],
   "static_module_validation": {
@@ -1029,6 +1068,10 @@
     },
     "nghttp2": {
       "lib": "-lnghttp2",
+      "link": "dynamic"
+    },
+    "webp": {
+      "lib": "-lwebp",
       "link": "dynamic"
     }
   },
@@ -1545,6 +1588,12 @@
           "link": "static"
         },
         {
+          "name": "sharpyuv",
+          "description": "SharpYUV companion required by static WebP encoders",
+          "lib": "/clang64/lib/libsharpyuv.a",
+          "link": "static"
+        },
+        {
           "name": "brotlidec",
           "description": "Brotli decompression (WOFF2 dependency)",
           "lib": "/clang64/lib/libbrotlidec.a",
@@ -1781,6 +1830,12 @@
         {
           "name": "gif",
           "lib": "/usr/lib/${multiarch}/libgif.a",
+          "link": "static"
+        },
+        {
+          "name": "webp",
+          "include": "/usr/include",
+          "lib": "/usr/lib/${multiarch}/libwebp.a",
           "link": "static"
         },
         {
@@ -3170,6 +3225,7 @@
               "gif",
               "png",
               "turbojpeg",
+              "webp",
               "zlib"
             ],
             "additional_sources": [
@@ -3733,6 +3789,7 @@
               "gif",
               "png",
               "turbojpeg",
+              "webp",
               "zlib"
             ],
             "additional_sources": [

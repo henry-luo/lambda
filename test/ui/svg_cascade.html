@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html><head><style>
+html, body { margin: 0; background: white; }
+#scene { position: absolute; left: 0; top: 0; }
+.host rect.host { fill: #ff0000; }
+.host g > .child, .host .listed { fill: #00ff00; }
+.host .important { fill: #0000ff !important; }
+.host .hidden { visibility: hidden; }
+.host .shown { visibility: visible; }
+.host .invalid { fill: #ff0000; fill: invalid-color; }
+.host .isolated { fill: #ff0000; }
+.host .font { font-family: monospace; font-size: 36px; font-weight: bold; font-style: italic; }
+</style></head><body class="host">
+<svg id="scene" width="500" height="160" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    g > .embedded, .embedded-list { fill: #00ffff; }
+    .embedded-important { fill: #ff00ff !important; }
+    #low, .specific { fill: #ff0000; }
+    .specific { fill: #0000ff; }
+    .sheet-invalid { fill: #00ff00; fill: not-a-color; }
+    .stops stop { stop-color: #ff0000; }
+  </style>
+  <rect class="host" x="10" y="10" width="30" height="30" fill="blue"/>
+  <g><rect class="child" x="60" y="10" width="30" height="30"/></g>
+  <rect class="listed" x="110" y="10" width="30" height="30"/>
+  <rect class="important" x="160" y="10" width="30" height="30" style="fill:red"/>
+  <rect class="important" x="210" y="10" width="30" height="30" style="fill:red !important"/>
+  <g><rect class="embedded" x="260" y="10" width="30" height="30"/></g>
+  <rect class="embedded-list" x="310" y="10" width="30" height="30"/>
+  <rect class="embedded-important" x="360" y="10" width="30" height="30" style="fill:red"/>
+  <rect id="low" class="specific" x="410" y="10" width="30" height="30"/>
+  <rect class="invalid" x="460" y="10" width="30" height="30"/>
+  <g class="hidden" fill="red">
+    <rect id="hidden-hit" x="10" y="60" width="30" height="30"/>
+    <rect id="visible-hit" class="shown" x="60" y="60" width="30" height="30"/>
+  </g>
+  <rect class="sheet-invalid" x="110" y="60" width="30" height="30"/>
+  <rect x="160" y="60" width="30" height="30" style="fill:red;fill:blue"/>
+  <rect x="210" y="60" width="30" height="30" style="fill:green;fill:bad-color"/>
+  <defs>
+    <linearGradient id="styled" class="stops"><stop offset="0"/><stop offset="1"/></linearGradient>
+    <linearGradient id="current-stops" color="#0000ff"><stop offset="0" style="stop-color:currentColor;stop-opacity:50%"/><stop offset="1" style="stop-color:currentColor;stop-opacity:50%"/></linearGradient>
+  </defs>
+  <rect x="310" y="60" width="30" height="30" fill="url(#styled)"/>
+  <rect x="360" y="60" width="30" height="30" fill="url(#current-stops)"/>
+  <g class="font"><text x="10" y="145">SVG</text></g>
+</svg>
+<img src="svg_cascade_isolated.svg" style="position:absolute;left:260px;top:60px;width:30px;height:30px">
+</body></html>

@@ -5,6 +5,7 @@
 #include "../lib/font/font.h"
 #include "../lambda/input/css/dom_node.hpp"
 #include "../lambda/input/css/dom_element.hpp"
+#include "../lambda/dom/dom.h"
 #include "../lib/memtrack.h"
 #include "../lib/math_utils.h"
 #include "../lib/color.h"
@@ -75,13 +76,13 @@ static const FilterAmountSpec* find_filter_amount_spec(const char* name) {
     return nullptr;
 }
 
-static int css_value_count(const CssValue* value, int limit) {
+int css_value_count(const CssValue* value, int limit) {
     if (!value) return 0;
     int count = value->type == CSS_VALUE_TYPE_LIST ? value->data.list.count : 1;
     return limit > 0 ? min(count, limit) : count;
 }
 
-static const CssValue* css_value_at(const CssValue* value, int index) {
+const CssValue* css_value_at(const CssValue* value, int index) {
     if (!value || index < 0) return nullptr;
     return value->type == CSS_VALUE_TYPE_LIST
         ? value->data.list.values[index] : index == 0 ? value : nullptr;
@@ -203,7 +204,7 @@ static bool resolve_keyword_slot(const CssValue* value, SlotType* slot) {
     return true;
 }
 
-static float resolve_transform_angle(const CssValue* value) {
+float resolve_css_angle_value(const CssValue* value) {
     if (!value) return 0.0f;
     if (value->type == CSS_VALUE_TYPE_NUMBER) {
         return math_degrees_to_radians((float)value->data.number.value);
@@ -268,7 +269,7 @@ static float transform_length_value(LayoutContext* lycon, CssPropertyCode prop_i
     return value ? resolve_length_value(lycon, prop_id, value) : 0.0f;
 }
 
-static void resolve_transform_translate_arg(LayoutContext* lycon, CssPropertyCode prop_id,
+static void resolve_transform_translate_arg(TransformLengthResolver resolve_length, void* context,
                                             const CssValue* value, float* length,
                                             float* percent) {
     if (!value) return;
@@ -276,18 +277,16 @@ static void resolve_transform_translate_arg(LayoutContext* lycon, CssPropertyCod
         *percent = (float)value->data.percentage.value;
         *length = 0.0f;
     } else {
-        *length = transform_length_value(lycon, prop_id, value);
+        *length = resolve_length ? resolve_length(context, value) : 0.0f;
     }
 }
 
-static TransformFunction* resolve_transform_function(LayoutContext* lycon,
-                                                     CssPropertyCode prop_id,
-                                                     const CssValue* func_value) {
-    if (!func_value || func_value->type != CSS_VALUE_TYPE_FUNCTION) return nullptr;
+bool resolve_transform_function_value(const CssValue* func_value, TransformFunction* tf,
+    TransformLengthResolver resolve_length, void* context) {
+    if (!tf || !func_value || func_value->type != CSS_VALUE_TYPE_FUNCTION) return false;
     const CssFunction* func = func_value->data.function;
     TransformFunctionType type = transform_function_type(func ? func->name : nullptr);
-    if (type == TRANSFORM_NONE) return nullptr;
-    TransformFunction* tf = (TransformFunction*)alloc_prop(lycon, sizeof(TransformFunction));
+    if (type == TRANSFORM_NONE) return false;
     memset(tf, 0, sizeof(TransformFunction));
     tf->type = type;
     tf->translate_x_percent = NAN;
@@ -298,20 +297,20 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
     const CssValue* arg3 = func->arg_count >= 4 ? func->args[3] : nullptr;
     switch (type) {
         case TRANSFORM_TRANSLATE:
-            resolve_transform_translate_arg(lycon, prop_id, arg0,
+            resolve_transform_translate_arg(resolve_length, context, arg0,
                                             &tf->params.translate.x,
                                             &tf->translate_x_percent);
-            resolve_transform_translate_arg(lycon, prop_id, arg1,
+            resolve_transform_translate_arg(resolve_length, context, arg1,
                                             &tf->params.translate.y,
                                             &tf->translate_y_percent);
             break;
         case TRANSFORM_TRANSLATEX:
-            resolve_transform_translate_arg(lycon, prop_id, arg0,
+            resolve_transform_translate_arg(resolve_length, context, arg0,
                                             &tf->params.translate.x,
                                             &tf->translate_x_percent);
             break;
         case TRANSFORM_TRANSLATEY:
-            resolve_transform_translate_arg(lycon, prop_id, arg0,
+            resolve_transform_translate_arg(resolve_length, context, arg0,
                                             &tf->params.translate.y,
                                             &tf->translate_y_percent);
             break;
@@ -344,17 +343,17 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
         case TRANSFORM_ROTATEX:
         case TRANSFORM_ROTATEY:
         case TRANSFORM_ROTATEZ:
-            tf->params.angle = resolve_transform_angle(arg0);
+            tf->params.angle = resolve_css_angle_value(arg0);
             break;
         case TRANSFORM_SKEW:
-            tf->params.skew.x = resolve_transform_angle(arg0);
-            tf->params.skew.y = resolve_transform_angle(arg1);
+            tf->params.skew.x = resolve_css_angle_value(arg0);
+            tf->params.skew.y = resolve_css_angle_value(arg1);
             break;
         case TRANSFORM_ROTATE3D:
             tf->params.rotate3d.x = transform_number_value(arg0);
             tf->params.rotate3d.y = transform_number_value(arg1);
             tf->params.rotate3d.z = transform_number_value(arg2);
-            tf->params.rotate3d.angle = resolve_transform_angle(arg3);
+            tf->params.rotate3d.angle = resolve_css_angle_value(arg3);
             break;
         case TRANSFORM_MATRIX:
             tf->params.matrix.a = 1.0f;
@@ -378,26 +377,41 @@ static TransformFunction* resolve_transform_function(LayoutContext* lycon,
             break;
         case TRANSFORM_TRANSLATE3D:
             // Percentage translate components resolve against this element's transform box.
-            resolve_transform_translate_arg(lycon, prop_id, arg0,
+            resolve_transform_translate_arg(resolve_length, context, arg0,
                                             &tf->params.translate3d.x,
                                             &tf->translate_x_percent);
-            resolve_transform_translate_arg(lycon, prop_id, arg1,
+            resolve_transform_translate_arg(resolve_length, context, arg1,
                                             &tf->params.translate3d.y,
                                             &tf->translate_y_percent);
-            tf->params.translate3d.z = transform_length_value(lycon, prop_id, arg2);
+            tf->params.translate3d.z = resolve_length ? resolve_length(context, arg2) : 0.0f;
             break;
         case TRANSFORM_TRANSLATEZ:
-            tf->params.translate3d.z = transform_length_value(lycon, prop_id, arg0);
+            tf->params.translate3d.z = resolve_length ? resolve_length(context, arg0) : 0.0f;
             break;
         case TRANSFORM_PERSPECTIVE:
-            tf->params.perspective = transform_length_value(lycon, prop_id, arg0);
+            tf->params.perspective = resolve_length ? resolve_length(context, arg0) : 0.0f;
             break;
         default:
             break;
     }
-    return tf;
+    return true;
 }
 
+
+static float resolve_layout_transform_length(void* context, const CssValue* value) {
+    return transform_length_value((LayoutContext*)context, CSS_PROPERTY_TRANSFORM, value);
+}
+
+static TransformFunction* resolve_transform_function(LayoutContext* lycon,
+    CssPropertyCode prop_id, const CssValue* value) {
+    TransformFunction function = {};
+    if (!resolve_transform_function_value(value, &function, resolve_layout_transform_length, lycon)) {
+        return nullptr;
+    }
+    TransformFunction* stored = (TransformFunction*)alloc_prop(lycon, sizeof(TransformFunction));
+    if (stored) *stored = function;
+    return stored;
+}
 static void append_transform_function(TransformFunction** head,
                                        TransformFunction** tail,
                                        TransformFunction* function) {
@@ -447,11 +461,11 @@ static void resolve_origin_keyword(CssEnum keyword, int index,
     }
 }
 
-static void resolve_origin_list(LayoutContext* lycon, CssPropertyCode property,
+static void resolve_origin_list(TransformLengthResolver resolve_length, void* context,
                                 const CssValue* value, bool allow_number,
                                 bool include_z, float* x, bool* x_percent,
                                 float* y, bool* y_percent, float* z) {
-    if (!lycon || !value || value->type != CSS_VALUE_TYPE_LIST || !x || !y) return;
+    if (!value || value->type != CSS_VALUE_TYPE_LIST || !x || !y) return;
     int limit = include_z ? 3 : 2;
     int count = value->data.list.count < limit ? value->data.list.count : limit;
     float* axis[2] = {x, y};
@@ -469,7 +483,7 @@ static void resolve_origin_list(LayoutContext* lycon, CssPropertyCode property,
                    (allow_number && item->type == CSS_VALUE_TYPE_NUMBER)) {
             float length = item->type == CSS_VALUE_TYPE_NUMBER
                 ? (float)item->data.number.value
-                : resolve_length_value(lycon, property, item);
+                : (resolve_length ? resolve_length(context, item) : 0.0f);
             if (i < 2) {
                 *axis[i] = length;
                 if (axis_percent[i]) *axis_percent[i] = false;
@@ -482,6 +496,33 @@ static void resolve_origin_list(LayoutContext* lycon, CssPropertyCode property,
     }
 }
 
+
+void resolve_transform_origin_value(const CssValue* value, TransformProp* transform,
+    TransformLengthResolver resolve_length, void* context) {
+    if (!value || !transform) return;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        resolve_origin_list(resolve_length, context, value, true, true,
+            &transform->origin_x, &transform->origin_x_percent,
+            &transform->origin_y, &transform->origin_y_percent, &transform->origin_z);
+    } else if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        resolve_origin_keyword(value->data.keyword, 0,
+            &transform->origin_x, &transform->origin_x_percent,
+            &transform->origin_y, &transform->origin_y_percent);
+    } else if (value->type == CSS_VALUE_TYPE_PERCENTAGE) {
+        transform->origin_x = (float)value->data.percentage.value;
+        transform->origin_x_percent = true;
+    } else if (resolve_length) {
+        transform->origin_x = resolve_length(context, value);
+        transform->origin_x_percent = false;
+    }
+}
+
+static void resolve_origin_list(LayoutContext* lycon, CssPropertyCode property,
+    const CssValue* value, bool allow_number, bool include_z,
+    float* x, bool* x_percent, float* y, bool* y_percent, float* z) {
+    resolve_origin_list(resolve_layout_transform_length, lycon, value, allow_number,
+        include_z, x, x_percent, y, y_percent, z);
+}
 static void append_counter_text(StringBuf* buffer, const char* text) {
     if (!text) return;
     stringbuf_append_all(buffer, 2, buffer->length > 0 ? " " : "", text);
@@ -2135,13 +2176,14 @@ static bool css_text_has_top_level_comma(const char* text, size_t len) {
     return text && strn_scan_top_level(text, text + len, ",", '(', ')', "\"'", true) < text + len;
 }
 
-static void resolve_background_url_function(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
-    if (!value || value->type != CSS_VALUE_TYPE_FUNCTION || !value->data.function ||
-        !value->data.function->name || !str_ieq_cstr(value->data.function->name, "url")) {
-        return;
-    }
+static const char* css_background_url_value(const CssValue* value);
+
+static bool resolve_background_url_value(LayoutContext* lycon, const CssDeclaration* decl, const CssValue* value) {
+    if (!css_background_url_value(value)) return false;
+    // the parser's canonical URL and legacy url() function share the same image longhand.
     lam::CssTempDecl img_decl(decl, CSS_PROPERTY_BACKGROUND_IMAGE, (CssValue*)value);
     img_decl.resolve(lycon);
+    return true;
 }
 
 static const CssValue* css_find_background_function(const CssValue* value,
@@ -2414,8 +2456,11 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
         str_copy(copy, url_len + 1, url, url_len);
         return copy;
     }
+    char* owned_base = !base_path ? radiant_document_resource_base(lycon->doc, MEM_CAT_TEMP) : nullptr;
+    if (owned_base) base_path = owned_base;
     char* resolved = radiant_resolve_resource_path(
         url, base_path, false, MEM_CAT_TEMP);
+    mem_free(owned_base);
     if (!resolved) return nullptr;
     size_t resolved_len = strlen(resolved);
     char* copy = (char*)alloc_prop(lycon, resolved_len + 1);
@@ -2432,13 +2477,10 @@ static void resolve_background_layer_component(LayoutContext* lycon,
                                                const CssDeclaration* decl,
                                                CssValue* item) {
     if (!lycon || !decl || !item) return;
+    if (resolve_background_url_value(lycon, decl, item)) return;
     if (item->type == CSS_VALUE_TYPE_FUNCTION && item->data.function &&
         item->data.function->name) {
-        const char* name = item->data.function->name;
-        size_t length = strlen(name);
-        if (str_ieq_const(name, length, "url")) {
-            resolve_background_url_function(lycon, decl, item);
-        } else if (css_background_gradient_type(item) != GRADIENT_NONE) {
+        if (css_background_gradient_type(item) != GRADIENT_NONE) {
             lam::CssTempDecl gradient_decl(decl, CSS_PROPERTY_BACKGROUND, item);
             gradient_decl.resolve(lycon);
         } else if (css_value_is_background_color_candidate(item)) {
@@ -2657,7 +2699,7 @@ static const char* css_var_function_name(const CssFunction* func) {
     return first_arg->type == CSS_VALUE_TYPE_STRING ? first_arg->data.string : nullptr;
 }
 
-static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const CssValue* value,
+static const CssValue* resolve_var_function_inner(const CssValue* value, CssVariableLookupFn lookup, void* context,
                                                   const char** var_stack, int stack_count) {
     if (!value || value->type != CSS_VALUE_TYPE_FUNCTION) {
         return value;  // Not a function, return as-is
@@ -2668,7 +2710,7 @@ static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const Cs
     }
     auto resolve_fallback = [&]() -> const CssValue* {
         return func->arg_count >= 2 && func->args[1]
-            ? resolve_var_function_inner(lycon, func->args[1], var_stack, stack_count)
+            ? resolve_var_function_inner(func->args[1], lookup, context, var_stack, stack_count)
             : nullptr;
     };
     const char* var_name = css_var_function_name(func);
@@ -2679,12 +2721,12 @@ static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const Cs
     if (stack_count >= 32 || css_var_stack_contains(var_stack, stack_count, var_name)) {
         return resolve_fallback();
     }
-    const CssValue* var_value = lookup_css_variable(lycon, var_name);
+    const CssValue* var_value = lookup ? lookup(context, var_name) : nullptr;
     if (var_value) {
         const char* next_stack[32];
         for (int i = 0; i < stack_count; i++) next_stack[i] = var_stack[i];
         next_stack[stack_count] = var_name;
-        const CssValue* resolved = resolve_var_function_inner(lycon, var_value, next_stack, stack_count + 1);
+        const CssValue* resolved = resolve_var_function_inner(var_value, lookup, context, next_stack, stack_count + 1);
         if (resolved) return resolved;
         return resolve_fallback();
     }
@@ -2693,9 +2735,15 @@ static const CssValue* resolve_var_function_inner(LayoutContext* lycon, const Cs
 
 // Helper: resolve var() function to get the actual CSS value
 // Returns the resolved value, or the original value if not a var() function
-const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
+const CssValue* css_resolve_var_value(const CssValue* value, CssVariableLookupFn lookup, void* context) {
     const char* var_stack[32];
-    return resolve_var_function_inner(lycon, value, var_stack, 0);
+    return resolve_var_function_inner(value, lookup, context, var_stack, 0);
+}
+
+const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value) {
+    return css_resolve_var_value(value, [](void* context, const char* name) -> const CssValue* {
+        return lookup_css_variable((LayoutContext*)context, name);
+    }, lycon);
 }
 
 // Helper: extract a numeric value from a CssValue (number, percentage, length)
@@ -3337,6 +3385,18 @@ DisplayValue resolve_display_value(void* child) {
     if (!node || !node->is_element() || !node->parent ||
         !node->parent->is_element()) {
         return display;
+    }
+
+    for (DomNode* parent = node->parent; parent && parent->is_element(); parent = parent->parent) {
+        if (parent->tag() == MARKUP_NAME_SVG) break;
+        if (parent->tag() != MARKUP_NAME_FOREIGNOBJECT) continue;
+        const char* uri = dom_element_namespace_uri(node->as_element());
+        bool html = uri && strcmp(uri, "http://www.w3.org/1999/xhtml") == 0;
+        bool math = uri && strcmp(uri, "http://www.w3.org/1998/Math/MathML") == 0;
+        bool svg_root = node->tag() == MARKUP_NAME_SVG && dom_element_is_svg(node->as_element());
+        // SVG2 §12.5: foreignObject invokes supported foreign vocabularies and complete nested SVG fragments.
+        if (!html && !math && !svg_root) return {CSS_VALUE_NONE, CSS_VALUE_NONE};
+        break;
     }
 
     // CSS Ruby 1 §2.2: in-flow block-level children of ruby boxes are
@@ -8501,8 +8561,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                         }
                     } else if (url_layer) {
                         if (!bg->image) {
-                            lam::CssTempDecl img_decl(decl, CSS_PROPERTY_BACKGROUND_IMAGE, (CssValue*)url_layer);
-                            img_decl.resolve(lycon);
+                            resolve_background_url_value(lycon, decl, url_layer);
                         }
                     }
                 }
@@ -8561,11 +8620,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 color_decl.resolve(lycon);
                 return;
             }
-            if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name &&
-                str_ieq_cstr(value->data.function->name, "url")) {
-                resolve_background_url_function(lycon, decl, value);
-                return;
-            }
+            if (resolve_background_url_value(lycon, decl, value)) return;
             if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function && value->data.function->name) {
                 const char* func_name = value->data.function->name;
                 if (str_ieq_cstr(func_name, "rgb") || str_ieq_cstr(func_name, "rgba") ||

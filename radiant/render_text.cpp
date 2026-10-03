@@ -1043,58 +1043,15 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
     rect.width = text_rect->width * s;
     rect.height = thickness;
 
-    if (deco_style == CSS_VALUE_DASHED) {
-        float dash_len = thickness * 3.0f;
-        float gap_len = thickness * 3.0f;
-        float dx = rect.x;
-        while (dx < rect.x + rect.width) {
-            float seg_w = fminf(dash_len, rect.x + rect.width - dx);
-            Rect seg = {dx, rect.y, seg_w, thickness};
-            rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &seg, deco_color.c,
-                &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-            dx += dash_len + gap_len;
+    if (deco_style == CSS_VALUE_DASHED || deco_style == CSS_VALUE_DOTTED ||
+        deco_style == CSS_VALUE_DOUBLE || deco_style == CSS_VALUE_WAVY) {
+        RdtPath* path = render_path_create_decoration(&rect, deco_style);
+        if (path) {
+            if (deco_style == CSS_VALUE_WAVY) rc_stroke_path(rdcon, path, deco_color,
+                fmaxf(1.0f, thickness * 0.5f), RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
+            else rc_fill_path(rdcon, path, deco_color, RDT_FILL_WINDING, NULL);
+            rdt_path_free(path);
         }
-    } else if (deco_style == CSS_VALUE_DOTTED) {
-        float dx = rect.x;
-        while (dx < rect.x + rect.width) {
-            float seg_w = fminf(thickness, rect.x + rect.width - dx);
-            Rect seg = {dx, rect.y, seg_w, thickness};
-            rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &seg, deco_color.c,
-                &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-            dx += thickness * 2.0f;
-        }
-    } else if (deco_style == CSS_VALUE_DOUBLE) {
-        float line_t = thickness;
-        float gap = fmaxf(1.0f, thickness - 1.0f);
-        Rect top_line = {rect.x, rect.y, rect.width, line_t};
-        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &top_line, deco_color.c,
-            &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-        Rect bot_line = {rect.x, rect.y + line_t + gap, rect.width, line_t};
-        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &bot_line, deco_color.c,
-            &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-    } else if (deco_style == CSS_VALUE_WAVY) {
-        float wave_amp = thickness * 1.5f;
-        float wave_len = thickness * 4.0f;
-        float wave_center = rect.y + wave_amp;
-        RdtPath* p = rdt_path_new();
-        float wx = rect.x;
-        rdt_path_move_to(p, wx, wave_center);
-        while (wx < rect.x + rect.width) {
-            float half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
-            rdt_path_cubic_to(p, wx + half * 0.33f, wave_center - wave_amp,
-                              wx + half * 0.67f, wave_center - wave_amp,
-                              wx + half, wave_center);
-            wx += half;
-            if (wx >= rect.x + rect.width) break;
-            half = fminf(wave_len / 2.0f, rect.x + rect.width - wx);
-            rdt_path_cubic_to(p, wx + half * 0.33f, wave_center + wave_amp,
-                              wx + half * 0.67f, wave_center + wave_amp,
-                              wx + half, wave_center);
-            wx += half;
-        }
-        rc_stroke_path(rdcon, p, deco_color, fmaxf(1.0f, thickness * 0.5f),
-                       RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
-        rdt_path_free(p);
     } else {
         bool apply_skip_ink = (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE);
         if (apply_skip_ink) {

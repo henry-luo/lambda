@@ -786,3 +786,21 @@ void parse_xml(Input* input, const char* xml_string) {
     // This ensures all XML content is wrapped in a <document> element
     input->root = doc_element.final();
 }
+
+Element* parse_svg_document(Input* input, const char* svg_source) {
+    if (!input || !svg_source) return nullptr;
+    if (strlen(svg_source) >= 3 && (unsigned char)svg_source[0] == 0xEF &&
+        (unsigned char)svg_source[1] == 0xBB && (unsigned char)svg_source[2] == 0xBF) svg_source += 3;
+    // XML preserves namespace declarations, case and self-closing foreign-content boundaries.
+    parse_xml(input, svg_source);
+    if (get_type_id(input->root) != LMD_TYPE_ELEMENT) return nullptr;
+    Element* document = input->root.element;
+    for (int64_t i = 0; i < document->length; i++) {
+        Item child = document->items[i];
+        if (get_type_id(child) != LMD_TYPE_ELEMENT) continue;
+        TypeElmt* type = (TypeElmt*)child.element->type;
+        if (type && type->name.str && strcmp(type->name.str, "svg") == 0) return child.element;
+    }
+    log_error("svg_document: no SVG root element found in external XML document");
+    return nullptr;
+}

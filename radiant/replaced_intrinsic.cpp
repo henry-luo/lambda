@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "view.hpp"
 #include "render.hpp"
+#include "svg_animation.hpp"
 #include "rdt_video.h"
 #include "../lib/tagged.hpp"
 
@@ -116,6 +117,7 @@ ReplacedIntrinsicFacts layout_replaced_intrinsic_facts(LayoutContext* lycon,
     }
 
     if (block->tag() == MARKUP_NAME_SVG && block->is_element()) {
+        SvgAnimationSourceScope animation_sources(block->as_element()->doc);
         Element* svg = dom_element_backing(lam::dom_require_element(block));
         SvgIntrinsicSize intrinsic = calculate_svg_intrinsic_size(svg);
         if (intrinsic.has_intrinsic_width) {

@@ -1,0 +1,54 @@
+{
+  "name": "foreignObject CSS opacity and filter captures retain local coordinates beyond the host raster surface and in negative overflow",
+  "html": "test/ui/svg_foreign_object_surface.html",
+  "viewport": {
+    "width": 240,
+    "height": 140
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 200,
+      "y": 80,
+      "min_r": 184,
+      "max_r": 200,
+      "min_g": 56,
+      "max_g": 72,
+      "min_b": 56,
+      "max_b": 72
+    },
+    {
+      "type": "assert_pixel",
+      "x": 40,
+      "y": 40,
+      "min_r": 56,
+      "max_r": 72,
+      "min_g": 56,
+      "max_g": 72,
+      "min_b": 184,
+      "max_b": 200
+    },
+    {
+      "type": "assert_pixel",
+      "x": 60,
+      "y": 110,
+      "min_r": 184,
+      "max_r": 200,
+      "min_g": 56,
+      "max_g": 72,
+      "min_b": 56,
+      "max_b": 72
+    },
+    {
+      "type": "assert_pixel",
+      "x": 220,
+      "y": 100,
+      "min_r": 120,
+      "max_r": 136,
+      "min_g": 120,
+      "max_g": 136,
+      "min_b": 120,
+      "max_b": 136
+    }
+  ]
+}

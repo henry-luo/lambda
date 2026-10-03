@@ -574,7 +574,7 @@ static double render_block_finish_children_phase(RenderContext* rdcon, ViewBlock
     return time_elapsed_ms_f(phase->start_time, time_now_ns());
 }
 
-static double render_block_paint_children_phase(RenderContext* rdcon, ViewBlock* block) {
+double render_block_paint_children(RenderContext* rdcon, ViewBlock* block) {
     RenderBlockChildrenPhase phase = render_block_begin_children_phase(rdcon, block);
     render_block_walk_children_phase(rdcon, block, &phase);
     return render_block_finish_children_phase(rdcon, block, &phase);
@@ -635,7 +635,7 @@ static double raster_block_paint_children(void* ctx, ViewBlock* block, void* pha
     (void)phase;
     RasterBlockPaintDriver* driver = (RasterBlockPaintDriver*)ctx;
     if (!driver || !driver->rdcon || !block) return 0.0;
-    return render_block_paint_children_phase(driver->rdcon, block);
+    return render_block_paint_children(driver->rdcon, block);
 }
 
 static void raster_block_paint_finish(void* ctx, ViewBlock* block, void* phase) {

@@ -1,0 +1,30 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white;}svg{position:absolute;left:0;top:0;}</style></head><body><svg width="500" height="330">
+<defs>
+ <pattern id="user" patternUnits="userSpaceOnUse" width="20" height="20"><rect width="10" height="20" fill="red"/><rect x="10" width="10" height="20" fill="blue"/></pattern>
+ <pattern id="bbox" width=".25" height=".5" patternContentUnits="objectBoundingBox"><rect width=".125" height=".5" fill="red"/><rect x=".125" width=".125" height=".5" fill="blue"/></pattern>
+ <pattern id="view" patternUnits="userSpaceOnUse" width="20" height="20" viewBox="10 20 2 2"><rect x="10" y="20" width="1" height="2" fill="red"/><rect x="11" y="20" width="1" height="2" fill="blue"/></pattern>
+ <pattern id="template" href="#view"/><pattern id="rotated" href="#template" patternTransform="rotate(90)"/>
+ <pattern id="shifted" href="#user" patternTransform="translate(5 0)"/>
+ <pattern id="skewed" href="#user" patternTransform="skewX(45)"/>
+ <pattern id="clipped" patternUnits="userSpaceOnUse" width="20" height="20"><rect width="30" height="20" fill="red"/><rect x="10" width="10" height="20" fill="blue"/></pattern>
+ <pattern id="overlap" patternUnits="userSpaceOnUse" width="20" height="20"><rect width="15" height="20" fill="red"/><rect x="5" width="15" height="20" fill="red"/></pattern>
+ <pattern id="independent" patternUnits="userSpaceOnUse" width="20" height="20"><rect width="20" height="20"/></pattern>
+ <pattern id="bad" href="#bad" width=".25" height=".5"/>
+ <pattern id="small" patternUnits="userSpaceOnUse" width=".1" height=".1"><rect width=".1" height=".1" fill="lime"/></pattern>
+</defs>
+<rect x="10" y="10" width="80" height="40" fill="url(#user)"/>
+<rect x="110" y="10" width="80" height="40" fill="url(#bbox)"/>
+<rect x="210" y="10" width="80" height="40" fill="url(#view)"/>
+<rect x="310" y="10" width="80" height="40" fill="url(#template)"/>
+<rect x="410" y="10" width="80" height="40" fill="url(#rotated)"/>
+<rect x="10" y="70" width="80" height="40" fill="url(#shifted)"/>
+<rect x="110" y="70" width="80" height="40" fill="url(#skewed)"/>
+<rect x="210" y="70" width="80" height="40" fill="url(#clipped)"/>
+<rect x="310" y="70" width="80" height="40" fill="url(#overlap)" fill-opacity=".5"/>
+<g fill="lime"><rect x="410" y="70" width="80" height="40" fill="url(#independent)"/></g>
+<rect x="15" y="135" width="70" height="30" fill="none" stroke="url(#user)" stroke-width="10"/>
+<rect x="110" y="130" width="80" height="40" fill="url(#bad) red"/>
+<rect x="210" y="130" width="80" height="40" fill="url(#small)"/>
+<g transform="translate(310 130) rotate(15 40 20)"><rect width="80" height="40" fill="url(#user)"/></g>
+<rect x="410" y="130" width="80" height="40" fill="url(#missing) lime"/>
+</svg></body></html>

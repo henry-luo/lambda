@@ -73,26 +73,43 @@ static void paint_cmd_free_owned_payload(PaintCmd* cmd) {
     if (!cmd) return;
     // deferred lowerers can transfer heap payloads into PaintList commands; central cleanup prevents backend-specific ownership switches from drifting.
     switch (cmd->op) {
+    case PAINT_PUSH_CLIP:
+        rdt_path_free(cmd->push_clip.clip_path);
+        cmd->push_clip.clip_path = nullptr;
+        break;
     case PAINT_FILL_PATH:
         paint_free_owned_path(&cmd->fill_path.path, &cmd->fill_path.owns_path);
         break;
     case PAINT_STROKE_PATH:
         paint_free_owned_path(&cmd->stroke_path.path, &cmd->stroke_path.owns_path);
+        mem_free((void*)cmd->stroke_path.dash_array);
+        cmd->stroke_path.dash_array = nullptr;
         break;
     case PAINT_FILL_LINEAR_GRADIENT:
         paint_free_owned_gradient_payload(&cmd->fill_linear_gradient.path,
                                           &cmd->fill_linear_gradient.owns_path,
                                           &cmd->fill_linear_gradient.stops,
                                           &cmd->fill_linear_gradient.owns_stops);
+        mem_free((void*)cmd->fill_linear_gradient.options.dash_array);
+        cmd->fill_linear_gradient.options.dash_array = nullptr;
         break;
     case PAINT_FILL_RADIAL_GRADIENT:
         paint_free_owned_gradient_payload(&cmd->fill_radial_gradient.path,
                                           &cmd->fill_radial_gradient.owns_path,
                                           &cmd->fill_radial_gradient.stops,
                                           &cmd->fill_radial_gradient.owns_stops);
+        mem_free((void*)cmd->fill_radial_gradient.options.dash_array);
+        cmd->fill_radial_gradient.options.dash_array = nullptr;
         break;
     case PAINT_GLYPH_RUN:
         paint_free_owned_glyph_run_text(&cmd->glyph_run);
+        break;
+    case PAINT_DRAW_IMAGE_RESOURCE:
+        if (cmd->draw_image_resource.release_image) {
+            cmd->draw_image_resource.release_image(cmd->draw_image_resource.image);
+            cmd->draw_image_resource.image = nullptr;
+            cmd->draw_image_resource.release_image = nullptr;
+        }
         break;
     default:
         break;
@@ -233,7 +250,8 @@ static bool paint_ir_validate_glyph_bitmap(const GlyphBitmap* bitmap) {
 
 static bool paint_ir_validate_stroke_path(const PaintStrokePath* stroke) {
     return stroke && stroke->path &&
-           stroke->width >= 0.0f &&
+           isfinite(stroke->width) && stroke->width >= 0.0f &&
+           isfinite(stroke->miter_limit) && stroke->miter_limit >= 1.0f &&
            stroke->dash_count >= 0 &&
            (stroke->dash_count == 0 || stroke->dash_array);
 }
@@ -254,7 +272,7 @@ static bool paint_ir_validate_glyph_run(const PaintGlyphRun* run) {
     return run->glyph_ids && run->xs && run->ys && run->count > 0;
 }
 
-static bool paint_ir_image_resource_pixels(ImageSurface* image,
+bool render_image_resource_pixels(ImageSurface* image,
                                            float dst_w, float dst_h,
                                            const uint32_t** pixels,
                                            int* src_w, int* src_h,
@@ -364,7 +382,8 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
         case PAINT_FILL_LINEAR_GRADIENT:
             if (!paint_ir_validate_gradient_payload(cmd->fill_linear_gradient.path,
                                                     cmd->fill_linear_gradient.stops,
-                                                    cmd->fill_linear_gradient.stop_count)) {
+                                                    cmd->fill_linear_gradient.stop_count) ||
+                !rdt_gradient_options_valid(&cmd->fill_linear_gradient.options)) {
                 return fail("linear gradient payload is invalid");
             }
             break;
@@ -372,6 +391,7 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
             if (!paint_ir_validate_gradient_payload(cmd->fill_radial_gradient.path,
                                                     cmd->fill_radial_gradient.stops,
                                                     cmd->fill_radial_gradient.stop_count) ||
+                !rdt_gradient_options_valid(&cmd->fill_radial_gradient.options) ||
                 cmd->fill_radial_gradient.r < 0.0f) {
                 return fail("radial gradient payload is invalid");
             }
@@ -591,10 +611,18 @@ void paint_fill_path(PaintList* pl, RdtPath* path, Color color,
                                     &cmd->fill_path.transform, transform);
 }
 
+static const float* paint_copy_dashes(const float* source, int count) {
+    if (!source || count <= 0) return nullptr;
+    size_t bytes = (size_t)count * sizeof(float);
+    float* copy = (float*)mem_alloc(bytes, MEM_CAT_RENDER);
+    if (copy) memcpy(copy, source, bytes);
+    return copy;
+}
+
 void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
                        RdtStrokeCap cap, RdtStrokeJoin join,
                        const float* dash_array, int dash_count, float dash_phase,
-                       const RdtMatrix* transform) {
+                       const RdtMatrix* transform, float miter_limit) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_STROKE_PATH);
     if (!cmd) return;
     cmd->stroke_path.path = path;
@@ -602,18 +630,28 @@ void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
     cmd->stroke_path.width = width;
     cmd->stroke_path.cap = cap;
     cmd->stroke_path.join = join;
-    cmd->stroke_path.dash_array = dash_array;
+    cmd->stroke_path.miter_limit = miter_limit;
+    // deferred strokes retain computed lengths after SVG walk scratch dies.
+    cmd->stroke_path.dash_array = paint_copy_dashes(dash_array, dash_count);
     cmd->stroke_path.dash_count = dash_count;
     cmd->stroke_path.dash_phase = dash_phase;
     paint_assign_optional_transform(&cmd->stroke_path.has_transform,
                                     &cmd->stroke_path.transform, transform);
 }
 
+static void paint_assign_gradient_options(RdtGradientOptions* target,
+                                           const RdtGradientOptions* source) {
+    *target = source ? *source : RdtGradientOptions{};
+    target->dash_array = nullptr;
+    if (source) target->dash_array = paint_copy_dashes(source->dash_array, source->dash_count);
+}
+
 void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
                                 float x1, float y1, float x2, float y2,
                                 const RdtGradientStop* stops, int stop_count,
                                 RdtFillRule rule, const RdtMatrix* transform,
-                                const RdtMatrix* gradient_transform) {
+                                const RdtMatrix* gradient_transform,
+                                const RdtGradientOptions* options) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_LINEAR_GRADIENT);
     if (!cmd) return;
     cmd->fill_linear_gradient.path = path;
@@ -628,13 +666,15 @@ void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
                                     &cmd->fill_linear_gradient.transform, transform);
     paint_assign_optional_transform(&cmd->fill_linear_gradient.has_gradient_transform,
                                     &cmd->fill_linear_gradient.gradient_transform, gradient_transform);
+    paint_assign_gradient_options(&cmd->fill_linear_gradient.options, options);
 }
 
 void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
                                 float cx, float cy, float r,
                                 const RdtGradientStop* stops, int stop_count,
                                 RdtFillRule rule, const RdtMatrix* transform,
-                                const RdtMatrix* gradient_transform) {
+                                const RdtMatrix* gradient_transform,
+                                const RdtGradientOptions* options) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_RADIAL_GRADIENT);
     if (!cmd) return;
     cmd->fill_radial_gradient.path = path;
@@ -648,6 +688,7 @@ void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
                                     &cmd->fill_radial_gradient.transform, transform);
     paint_assign_optional_transform(&cmd->fill_radial_gradient.has_gradient_transform,
                                     &cmd->fill_radial_gradient.gradient_transform, gradient_transform);
+    paint_assign_gradient_options(&cmd->fill_radial_gradient.options, options);
 }
 
 void paint_draw_image(PaintList* pl, const uint32_t* pixels,
@@ -675,10 +716,15 @@ void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
                                float dst_x, float dst_y,
                                float dst_w, float dst_h,
                                uint8_t opacity,
-                               const RdtMatrix* transform) {
+                               const RdtMatrix* transform, void (*release_image)(ImageSurface*)) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_IMAGE_RESOURCE);
-    if (!cmd) return;
+    if (!cmd) {
+        // D4: ownership transfers at submission, including a failed command allocation.
+        if (release_image && image) release_image(image);
+        return;
+    }
     cmd->draw_image_resource.image = image;
+    cmd->draw_image_resource.release_image = release_image;
     cmd->draw_image_resource.dst_x = dst_x;
     cmd->draw_image_resource.dst_y = dst_y;
     cmd->draw_image_resource.dst_w = dst_w;
@@ -749,9 +795,11 @@ void paint_webview_layer_placeholder(PaintList* pl, void* surface,
 }
 
 void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform) {
+    RdtPath* owned = rdt_path_clone(clip_path);
+    if (!owned) return;
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_PUSH_CLIP);
-    if (!cmd) return;
-    cmd->push_clip.clip_path = clip_path;
+    if (!cmd) { rdt_path_free(owned); return; }
+    cmd->push_clip.clip_path = owned;
     paint_assign_optional_transform(&cmd->push_clip.has_transform,
                                     &cmd->push_clip.transform, transform);
 }
@@ -1085,7 +1133,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             const PaintStrokePath* p = &cmd->stroke_path;
             dl_stroke_path(dl, p->path, p->color, p->width, p->cap, p->join,
                            p->dash_array, p->dash_count, p->dash_phase,
-                           paint_optional_transform(p->has_transform, &p->transform));
+                           paint_optional_transform(p->has_transform, &p->transform), p->miter_limit);
             break;
         }
         case PAINT_FILL_LINEAR_GRADIENT: {
@@ -1094,7 +1142,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
                                     p->stops, p->stop_count, p->rule,
                                     paint_optional_transform(p->has_transform, &p->transform),
                                     paint_optional_transform(p->has_gradient_transform,
-                                                             &p->gradient_transform));
+                                                             &p->gradient_transform), &p->options);
             break;
         }
         case PAINT_FILL_RADIAL_GRADIENT: {
@@ -1103,7 +1151,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
                                     p->stops, p->stop_count, p->rule,
                                     paint_optional_transform(p->has_transform, &p->transform),
                                     paint_optional_transform(p->has_gradient_transform,
-                                                             &p->gradient_transform));
+                                                             &p->gradient_transform), &p->options);
             break;
         }
         case PAINT_DRAW_IMAGE: {
@@ -1112,7 +1160,8 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             dl_draw_image(dl, p->pixels, p->src_w, p->src_h, p->src_stride,
                           p->dst_x, p->dst_y, p->dst_w, p->dst_h, p->opacity,
                           paint_optional_transform(p->has_transform, &p->transform),
-                          owner, owner ? owner->generation : 0);
+                          owner, owner ? owner->generation : 0, false,
+                          owner && owner->alpha_mode == IMAGE_ALPHA_STRAIGHT);
             break;
         }
         case PAINT_DRAW_IMAGE_RESOURCE: {
@@ -1121,14 +1170,16 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
             int src_w = 0;
             int src_h = 0;
             int src_stride = 0;
-            if (paint_ir_image_resource_pixels(p->image, p->dst_w, p->dst_h,
+            if (render_image_resource_pixels(p->image, p->dst_w, p->dst_h,
                                                &pixels, &src_w, &src_h,
                                                &src_stride)) {
                 dl_draw_image(dl, pixels, src_w, src_h, src_stride,
                               p->dst_x, p->dst_y, p->dst_w, p->dst_h,
                               p->opacity,
                               paint_optional_transform(p->has_transform, &p->transform),
-                              p->image, p->image->generation);
+                              p->release_image ? nullptr : p->image,
+                              p->release_image ? 0 : p->image->generation, p->release_image,
+                              p->image->alpha_mode == IMAGE_ALPHA_STRAIGHT);
             }
             break;
         }
@@ -1547,16 +1598,42 @@ static void paint_svg_append_gradient_stops(StrBuf* out,
     }
 }
 
+static void paint_svg_append_stroke_attributes(StrBuf* out, float width,
+    RdtStrokeCap cap, RdtStrokeJoin join, const float* dashes, int dash_count,
+    float dash_phase, float miter_limit = 4.0f) {
+    strbuf_append_format(out,
+        " stroke-width=\"%.2f\" stroke-linecap=\"%s\" stroke-linejoin=\"%s\"",
+        width, paint_svg_stroke_cap_name(cap), paint_svg_stroke_join_name(join));
+    if (miter_limit != 4.0f) strbuf_append_format(out, " stroke-miterlimit=\"%.3f\"", miter_limit);
+    if (dashes && dash_count > 0) {
+        strbuf_append_str(out, " stroke-dasharray=\"");
+        for (int i = 0; i < dash_count; i++) {
+            if (i > 0) strbuf_append_char(out, ' ');
+            strbuf_append_format(out, "%.2f", dashes[i]);
+        }
+        strbuf_append_char(out, '"');
+        if (dash_phase != 0.0f) strbuf_append_format(out, " stroke-dashoffset=\"%.2f\"", dash_phase);
+    }
+}
+
 static void paint_svg_append_gradient_fill_path(StrBuf* out,
                                                 int indent_level,
                                                 const char* path_data,
                                                 const char* gradient_name,
                                                 int gradient_id,
                                                 int fill_rule,
-                                                const RdtMatrix* transform) {
+                                                const RdtMatrix* transform,
+                                                const RdtGradientOptions* options) {
     paint_svg_indent(out, indent_level);
-    strbuf_append_format(out, "<path d=\"%s\" fill=\"url(#paint-ir-%s-%d)\"",
-                         path_data, gradient_name, gradient_id);
+    bool stroke = options && options->stroke_width > 0.0f;
+    strbuf_append_format(out, "<path d=\"%s\" %s=\"url(#paint-ir-%s-%d)\"",
+        path_data, stroke ? "stroke" : "fill", gradient_name, gradient_id);
+    if (stroke) {
+        strbuf_append_str(out, " fill=\"none\"");
+        paint_svg_append_stroke_attributes(out, options->stroke_width, options->cap, options->join,
+            options->dash_array, options->dash_count, options->dash_phase,
+            options->miter_limit >= 1.0f ? options->miter_limit : 4.0f);
+    }
     if (fill_rule == RDT_FILL_EVEN_ODD) {
         strbuf_append_str(out, " fill-rule=\"evenodd\"");
     }
@@ -1572,18 +1649,21 @@ static void paint_svg_append_gradient_scene(StrBuf* out, int indent_level, int g
                                             const RdtMatrix* gradient_transform,
                                             const RdtGradientStop* stops, int stop_count,
                                             const char* path_data, int fill_rule,
-                                            const RdtMatrix* fill_transform) {
+                                            const RdtMatrix* fill_transform,
+                                            const RdtGradientOptions* options) {
     paint_svg_indent(out, indent_level);
     strbuf_append_format(out,
         "<defs><%s id=\"paint-ir-%s-%d\" gradientUnits=\"userSpaceOnUse\" %s",
         element_name, kind_name, gradient_id, coord_attrs);
     paint_svg_append_named_matrix_attr(out, "gradientTransform", gradient_transform);
+    if (options && options->spread != RDT_GRADIENT_PAD) strbuf_append_format(out,
+        " spreadMethod=\"%s\"", options->spread == RDT_GRADIENT_REPEAT ? "repeat" : "reflect");
     strbuf_append_str(out, ">\n");
     paint_svg_append_gradient_stops(out, stops, stop_count, indent_level + 1);
     paint_svg_indent(out, indent_level);
     strbuf_append_format(out, "</%s></defs>\n", element_name);
     paint_svg_append_gradient_fill_path(out, indent_level, path_data, kind_name,
-                                        gradient_id, fill_rule, fill_transform);
+                                        gradient_id, fill_rule, fill_transform, options);
 }
 
 void paint_svg_lowering_state_init(PaintSvgLoweringState* state, int indent_level) {
@@ -1664,7 +1744,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                              bool has_transform, const RdtMatrix* transform,
                              bool has_gradient_transform, const RdtMatrix* gradient_transform,
                              const char* element_name, const char* id_prefix,
-                             const char* coord_attrs, PaintOp op, int gradient_id) -> bool {
+                             const char* coord_attrs, PaintOp op, int gradient_id,
+                             const RdtGradientOptions* paint_options) -> bool {
         if (!paint_svg_caps_allow_gradient(caps, has_transform || has_gradient_transform) ||
             !stops || stop_count <= 0) {
             note_unsupported(op);
@@ -1676,7 +1757,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             out, indent_level, gradient_id, element_name, id_prefix, coord_attrs,
             paint_optional_transform(has_gradient_transform, gradient_transform),
             stops, stop_count, path_data->str, rule,
-            paint_optional_transform(has_transform, transform));
+            paint_optional_transform(has_transform, transform), paint_options);
         strbuf_free(path_data);
         active_stats->emitted_count++;
         return true;
@@ -1750,21 +1831,9 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             paint_svg_indent(out, indent_level);
             strbuf_append_format(out, "<path d=\"%s\" fill=\"none\" stroke=\"", path_data->str);
             paint_svg_append_color(out, p->color);
-            strbuf_append_format(out,
-                "\" stroke-width=\"%.2f\" stroke-linecap=\"%s\" stroke-linejoin=\"%s\"",
-                p->width, paint_svg_stroke_cap_name(p->cap),
-                paint_svg_stroke_join_name(p->join));
-            if (p->dash_array && p->dash_count > 0) {
-                strbuf_append_str(out, " stroke-dasharray=\"");
-                for (int dash_i = 0; dash_i < p->dash_count; dash_i++) {
-                    if (dash_i > 0) strbuf_append_char(out, ' ');
-                    strbuf_append_format(out, "%.2f", p->dash_array[dash_i]);
-                }
-                strbuf_append_char(out, '"');
-                if (p->dash_phase != 0.0f) {
-                    strbuf_append_format(out, " stroke-dashoffset=\"%.2f\"", p->dash_phase);
-                }
-            }
+            strbuf_append_char(out, '"');
+            paint_svg_append_stroke_attributes(out, p->width, p->cap, p->join,
+                p->dash_array, p->dash_count, p->dash_phase, p->miter_limit);
             paint_svg_append_matrix_attr(out,
                                          paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_str(out, " />\n");
@@ -1782,20 +1851,44 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
                           p->has_transform, &p->transform,
                           p->has_gradient_transform, &p->gradient_transform,
                           "linearGradient", "linear", coord_attrs,
-                          cmd->op, resource_id_base + i);
+                          cmd->op, resource_id_base + i, &p->options);
             break;
         }
         case PAINT_FILL_RADIAL_GRADIENT: {
             const PaintFillRadialGradient* p = &cmd->fill_radial_gradient;
-            char coord_attrs[128];
+            char coord_attrs[256];
             snprintf(coord_attrs, sizeof(coord_attrs),
                      "cx=\"%.3f\" cy=\"%.3f\" r=\"%.3f\"",
                      p->cx, p->cy, p->r);
+            if (p->options.has_focal) {
+                size_t used = strlen(coord_attrs);
+                snprintf(coord_attrs + used, sizeof(coord_attrs) - used,
+                    " fx=\"%.3f\" fy=\"%.3f\" fr=\"%.3f\"", p->options.fx, p->options.fy, p->options.fr);
+            }
             emit_gradient(p->path, p->stops, p->stop_count, p->rule,
                           p->has_transform, &p->transform,
                           p->has_gradient_transform, &p->gradient_transform,
                           "radialGradient", "radial", coord_attrs,
-                          cmd->op, resource_id_base + i);
+                          cmd->op, resource_id_base + i, &p->options);
+            break;
+        }
+        case PAINT_DRAW_IMAGE: {
+            const PaintDrawImage* p = &cmd->draw_image;
+            if (!paint_svg_caps_allow_image(caps, p->has_transform)) { note_unsupported(cmd->op); break; }
+            ImageSurface view = {}; view.width = p->src_w; view.height = p->src_h;
+            view.pitch = p->src_stride * 4; view.pixels = (void*)p->pixels;
+            ImageSurface* owner = (ImageSurface*)p->resource_owner;
+            view.alpha_mode = owner ? owner->alpha_mode : IMAGE_ALPHA_PREMULTIPLIED;
+            StrBuf* uri = render_encode_surface_data_uri(&view);
+            if (!uri) { note_unsupported(cmd->op); break; }
+            paint_svg_indent(out, indent_level);
+            strbuf_append_format(out, "<image x=\"%.6g\" y=\"%.6g\" width=\"%.6g\" height=\"%.6g\" href=\"",
+                p->dst_x, p->dst_y, p->dst_w, p->dst_h);
+            strbuf_append_str_n(out, uri->str, uri->length);
+            strbuf_append_str(out, "\" preserveAspectRatio=\"none\"");
+            if (p->opacity < 255) strbuf_append_format(out, " opacity=\"%.6g\"", p->opacity / 255.0f);
+            paint_svg_append_matrix_attr(out, paint_optional_transform(p->has_transform, &p->transform));
+            strbuf_append_str(out, " />\n"); strbuf_free(uri); active_stats->emitted_count++;
             break;
         }
         case PAINT_DRAW_IMAGE_RESOURCE: {

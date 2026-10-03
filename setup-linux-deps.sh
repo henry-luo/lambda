@@ -33,6 +33,7 @@ RADIANT_DEPS=(
     "zlib1g-dev"             # Compression library (already included above)
     "libturbojpeg0-dev"      # TurboJPEG library with turbojpeg.h header
     "libgif-dev"             # GIF image format support
+    "libwebp-dev"            # shared raster WebP decoder
     "gettext"                # For libintl support
     "libgl1-mesa-dev"        # OpenGL development libraries
     "libglu1-mesa-dev"       # OpenGL utility libraries

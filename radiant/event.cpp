@@ -99,14 +99,7 @@ static bool event_view_pointer_events_none(View* view) {
     return false;
 }
 
-static bool event_view_is_inside_svg(View* view) {
-    for (DomNode* node = static_cast<DomNode*>(view); node; node = node->parent) {
-        if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_SVG) {
-            return true;
-        }
-    }
-    return false;
-}
+
 
 static bool event_view_is_float(View* view) {
     if (!view || !view->is_element()) return false;
@@ -1204,6 +1197,33 @@ static bool event_block_is_top_level_viewport(ViewBlock* block) {
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
     log_enter();
+    if (block && block->tag() == MARKUP_NAME_SVG) {
+        // SVG subtrees have user-space geometry; HTML boxes inside foreignObject
+        // must be walked only after the SVG frame has mapped the pointer locally.
+        float input_x = evcon->event.mouse_position.x, input_y = evcon->event.mouse_position.y;
+        float screen_x = evcon->viewport_pointer_x, screen_y = evcon->viewport_pointer_y;
+        DomElement* hit = (DomElement*)dom_svg_element_from_point(block, screen_x, screen_y);
+        if (hit) {
+            for (DomNode* ancestor = hit; ancestor && ancestor != static_cast<DomNode*>(block);
+                 ancestor = ancestor->parent) {
+                DomElement* element = ancestor->as_element();
+                if (!element || element->tag() != MARKUP_NAME_FOREIGNOBJECT) continue;
+                float local_x, local_y;
+                ViewBlock* foreign = lam::view_as_block(element);
+                if (foreign && dom_svg_foreign_object_local_point(element, screen_x, screen_y, &local_x, &local_y)) {
+                    BlockBlot parent = evcon->block; evcon->block = {};
+                    evcon->event.mouse_position.x = local_x; evcon->event.mouse_position.y = local_y;
+                    target_block_view(evcon, foreign);
+                    evcon->event.mouse_position.x = input_x; evcon->event.mouse_position.y = input_y;
+                    if (!evcon->target) evcon->block = parent;
+                }
+                break;
+            }
+            if (!evcon->target) evcon->target = static_cast<View*>(hit);
+        }
+        log_leave();
+        return;
+    }
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     // Undo this block's translation for the duration of the subtree walk.
     float tdx = 0.0f, tdy = 0.0f;
@@ -1448,6 +1468,9 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
 
 void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
     if (!evcon || !view_tree) return;
+    float saved_x = evcon->viewport_pointer_x, saved_y = evcon->viewport_pointer_y;
+    evcon->viewport_pointer_x = evcon->event.mouse_position.x;
+    evcon->viewport_pointer_y = evcon->event.mouse_position.y;
     View* root_view = view_tree->root;
     if (root_view && root_view->view_type == RDT_VIEW_BLOCK) {
         log_debug("target root view");
@@ -1456,39 +1479,15 @@ void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
         log_debug("target_html_doc default font: %s, html version: %d", default_font->family, view_tree->html_version);
         setup_font(evcon->ui_context, &evcon->font, default_font);
         target_block_view(evcon, lam::view_require_block(root_view));
-        DomNode* root_node = static_cast<DomNode*>(root_view);
-        DomDocument* doc = root_node && root_node->is_element()
-            ? root_node->as_element()->doc : nullptr;
-        MousePositionEvent* mouse = &evcon->event.mouse_position;
-        if (evcon->target && event_view_is_inside_svg(evcon->target)) {
-            // Only SVG targets need paint-geometry refinement. PDF text layers
-            // already own their pointer input through normal CSS box hit-testing.
-            DomElement* svg_hit = doc ? (DomElement*)dom_document_svg_element_from_point(
-                doc, (float)mouse->x, (float)mouse->y) : nullptr;
-            if (svg_hit) {
-                bool target_contains_svg = false;
-                for (DomNode* node = (DomNode*)svg_hit; node; node = node->parent) {
-                    if (node == static_cast<DomNode*>(evcon->target)) {
-                        target_contains_svg = true;
-                        break;
-                    }
-                }
-                if (target_contains_svg) {
-                    // SVG paint geometry has no per-shape CSS boxes. Preserve the
-                    // normal page-layer winner, then refine only inside that winner
-                    // with the SVG CTM/bounds hit result used by elementFromPoint().
-                    evcon->target = static_cast<View*>(svg_hit);
-                }
-            }
-        }
         evcon->font = pa_font;
     }
     else {
         log_error("Invalid root view: %d", root_view ? root_view->view_type : -1);
     }
+    evcon->viewport_pointer_x = saved_x; evcon->viewport_pointer_y = saved_y;
 }
 
-void* radiant_document_element_from_point(DomDocument* doc, float x, float y) {
+static void* radiant_element_from_point(DomDocument* doc, DomElement* root, float x, float y) {
     if (!doc || !doc->view_tree || !doc->view_tree->root ||
         !doc->js.host_ui_context) return nullptr;
     UiContext* uicon = (UiContext*)doc->js.host_ui_context;
@@ -1500,13 +1499,29 @@ void* radiant_document_element_from_point(DomDocument* doc, float x, float y) {
     DomDocument* saved_document = uicon->document;
     uicon->document = doc;
     event_context_init(&evcon, uicon, &hit_event);
-    target_html_doc(&evcon, doc->view_tree);
+    if (root) {
+        float frame[6];
+        if (dom_svg_foreign_object_client_transform(root, frame)) {
+            evcon.viewport_pointer_x = frame[0] * x + frame[1] * y + frame[2];
+            evcon.viewport_pointer_y = frame[3] * x + frame[4] * y + frame[5];
+        }
+        ViewBlock* block = lam::view_as_block(root);
+        if (block) target_block_view(&evcon, block);
+    } else target_html_doc(&evcon, doc->view_tree);
     uicon->document = saved_document;
     DomElement* element = view_geometry_nearest_dom_element(
         static_cast<DomNode*>(evcon.target), 0);
     void* hit = element;
     event_context_cleanup(&evcon);
     return hit;
+}
+
+void* radiant_document_element_from_point(DomDocument* doc, float x, float y) {
+    return radiant_element_from_point(doc, nullptr, x, y);
+}
+
+void* radiant_subtree_element_from_point(DomElement* root, float x, float y) {
+    return root ? radiant_element_from_point(root->doc, root, x, y) : nullptr;
 }
 
 ArrayList* build_view_stack(EventContext* evcon, View* view) {
@@ -7889,33 +7904,59 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
     }
 }
 
-void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
-                                const char* type, const char* detail_name,
-                                const char* detail_value, double elapsed_time) {
-    if (!uicon || !target || !target->doc || !type || !type[0]) return;
+typedef Item (*RadiantJsEventBuilder)(void* userdata);
+
+static void radiant_dispatch_timing_event(UiContext* uicon, DomElement* target,
+    RadiantJsEventBuilder build, void* userdata) {
+    if (!uicon || !target || !target->doc) return;
     EventContext evcon = {};
-    evcon.ui_context = uicon;
-    evcon.target_document = target->doc;
+    evcon.ui_context = uicon; evcon.target_document = target->doc;
     JsCtxScope scope = {};
     bool entered_scope = radiant_js_ctx_enter(&scope, &evcon);
-    // Batch DOM execution still owns the live JIT context but does not retain
-    // it on the document; CSS completion must dispatch through that active frame.
     if (!entered_scope && (!context || dom_get_document() != target->doc)) return;
-
-    Item event_item = js_create_native_css_event(type, detail_name,
-        detail_value, elapsed_time);
-    dom_dispatch_event(dom_wrap_element(target), event_item);
-
-    // CSS events run inside the animation scheduler. Rebuilding immediately
-    // would invalidate its current View pointers; the mutation ledger requests
-    // the safe event-loop reflow after this scheduler tick completes.
+    // D5.3.3: target-wrapper allocation and callbacks can collect either argument.
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, dom_wrap_element(target));
+    Rooted<Item> event_root(roots, build(userdata));
+    dom_dispatch_event(target_root.get(), event_root.get());
+    // Scheduler callbacks defer layout until the enclosing frame has finished.
     if (entered_scope) {
         input_context = scope.saved_input_ctx;
         scope.active = false;
     }
 }
 
-typedef Item (*RadiantJsEventBuilder)(void* userdata);
+struct RadiantTimingEventData {
+    const char* type;
+    const char* name;
+    const char* value;
+    double seconds;
+    double detail;
+};
+
+static Item radiant_build_css_timing_event(void* userdata) {
+    RadiantTimingEventData* data = (RadiantTimingEventData*)userdata;
+    return js_create_native_css_event(data->type, data->name, data->value, data->seconds);
+}
+
+static Item radiant_build_svg_timing_event(void* userdata) {
+    RadiantTimingEventData* data = (RadiantTimingEventData*)userdata;
+    return js_create_native_svg_time_event(data->type, data->detail, data->seconds);
+}
+
+void radiant_dispatch_css_event(UiContext* uicon, DomElement* target,
+    const char* type, const char* detail_name, const char* detail_value, double elapsed_time) {
+    if (!type || !*type) return;
+    RadiantTimingEventData data = {type, detail_name, detail_value, elapsed_time, 0};
+    radiant_dispatch_timing_event(uicon, target, radiant_build_css_timing_event, &data);
+}
+
+void radiant_dispatch_svg_time_event(UiContext* uicon, DomElement* target,
+    const char* type, double detail, double seconds) {
+    if (!type || !*type) return;
+    RadiantTimingEventData data = {type, nullptr, nullptr, seconds, detail};
+    radiant_dispatch_timing_event(uicon, target, radiant_build_svg_timing_event, &data);
+}
 
 static bool radiant_dispatch_built_event(EventContext* evcon, View* target,
                                          RadiantJsEventBuilder build_event,
@@ -8614,6 +8655,11 @@ void event_context_init(EventContext* evcon, UiContext* uicon, RdtEvent* event) 
     evcon->dom_event_root_lifetime = true;
     evcon->ui_context = uicon;
     evcon->event = *event;
+    if ((event->type >= RDT_EVENT_MOUSE_DOWN && event->type <= RDT_EVENT_SCROLL) ||
+        event->type == RDT_EVENT_CLICK || event->type == RDT_EVENT_DBL_CLICK) {
+        evcon->viewport_pointer_x = event->mouse_position.x;
+        evcon->viewport_pointer_y = event->mouse_position.y;
+    }
     evcon->target_document = uicon
         ? event_context_find_focused_document(uicon->document, 0,
                                               &evcon->iframe_container)

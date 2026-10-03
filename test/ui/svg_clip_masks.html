@@ -1,0 +1,28 @@
+<!DOCTYPE html><html><head><style>html,body{margin:0;background:white}svg{position:absolute;left:0;top:0}.css-clip{clip-path:url(#multi)}</style></head><body>
+<svg id="scene" width="640" height="480">
+ <defs>
+  <clipPath id="multi"><path d="M10 10H45V70H10Z"/><path d="M70 10V70H105V10Z"/></clipPath>
+  <clipPath id="union"><path d="M10 10H110V90H10Z M30 30H90V70H30Z" clip-rule="evenodd"/><rect x="60" y="30" width="30" height="40"/></clipPath>
+  <clipPath id="child-transform" transform="translate(5 0)"><rect x="10" y="10" width="30" height="60" transform="translate(20 0)"/><circle cx="90" cy="40" r="20"/></clipPath>
+  <clipPath id="bbox" clipPathUnits="objectBoundingBox"><rect x=".25" y=".25" width=".5" height=".5"/></clipPath>
+  <linearGradient id="fade"><stop stop-color="white"/><stop offset="1" stop-color="black"/></linearGradient>
+  <mask id="gradient" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="80"><rect width="120" height="80" fill="url(#fade)"/></mask>
+  <mask id="cutout" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="80"><rect width="120" height="80" fill="white"/><circle cx="60" cy="40" r="20" fill="black"/></mask>
+  <mask id="alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="80" mask-type="alpha"><rect width="120" height="80" fill="black"/><circle cx="60" cy="40" r="20" fill="white" opacity=".5"/></mask>
+  <mask id="content-bbox" maskContentUnits="objectBoundingBox"><rect x=".25" y=".25" width=".5" height=".5" fill="white"/></mask>
+  <mask id="half" maskUnits="userSpaceOnUse" x="0" y="0" width="140" height="90"><rect width="140" height="90" fill="white" opacity=".5"/></mask>
+  <clipPath id="left"><rect width="60" height="90"/></clipPath>
+ </defs>
+ <g transform="translate(0 0)"><rect width="120" height="90" fill="blue" class="css-clip"/></g>
+ <g transform="translate(140 0)"><rect width="120" height="100" fill="blue" clip-path="url(#union)"/></g>
+ <rect transform="translate(280 0)" width="120" height="90" fill="blue" clip-path="url(#child-transform)"/>
+ <rect x="20" y="20" width="100" height="60" transform="translate(400 0)" fill="blue" clip-path="url(#bbox)"/>
+ <g transform="translate(0 120)"><rect width="120" height="80" fill="blue" mask="url(#gradient)"/></g>
+ <g transform="translate(140 120)"><rect width="120" height="80" fill="blue" mask="url(#cutout)"/></g>
+ <g transform="translate(280 120)"><rect width="120" height="80" fill="blue" mask="url(#alpha)"/></g>
+ <rect x="20" y="20" width="100" height="60" transform="translate(400 120)" fill="blue" mask="url(#content-bbox)"/>
+ <g transform="translate(0 240)" mask="url(#half)" opacity=".5"><rect width="80" height="80" fill="blue"/><rect x="40" width="80" height="80" fill="blue"/></g>
+ <g transform="translate(140 240)" mask="url(#half)"><g mask="url(#cutout)"><rect width="120" height="80" fill="blue"/></g></g>
+ <g transform="translate(280 240)" mask="url(#half)" clip-path="url(#left)"><rect width="120" height="80" fill="blue"/></g>
+ <rect x="440" y="240" width="80" height="80" fill="blue" stroke="red" stroke-width="20" opacity=".5"/>
+</svg></body></html>

@@ -1768,6 +1768,15 @@ extern "C" Item js_create_native_event(const char* type, bool bubbles,
     return event_root.get();
 }
 
+extern "C" Item js_create_native_svg_time_event(const char* type, double detail, double seconds) {
+    RootFrame roots(1);
+    Rooted<Item> event(roots, js_create_native_event(type, false, false));
+    event_set_double(event.get(), "detail", detail);
+    event_set_double(event.get(), "timeStamp", seconds * 1000.0);
+    event_set_item(event.get(), "view", ItemNull);
+    return event.get();
+}
+
 static void stamp_modifier_init(Item init, bool ctrl, bool shift, bool alt, bool meta) {
     event_set_bool(init, "ctrlKey",  ctrl);
     event_set_bool(init, "shiftKey", shift);
@@ -2290,6 +2299,13 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
 
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
+
+    // SMIL consumes the same dispatch occurrence after the native re-entry guard.
+    if (DomElement* target = (DomElement*)dom_unwrap_element(elem_root.get())) {
+        double detail = 0;
+        item_try_to_double(event_get_item(event_root.get(), "detail"), &detail);
+        dom_engine_svg_timing_event(target, type, bubbles, detail);
+    }
 
     // Per DOM spec, the propagation flags (stop, stop-immediate, canceled)
     // are NOT reset at the start of dispatch. They persist whether set

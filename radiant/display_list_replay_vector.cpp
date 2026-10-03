@@ -33,7 +33,7 @@ DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
             DlStrokePath* r = &item->stroke_path;
             rdt_stroke_path(vec, r->path, r->color, r->width, r->cap, r->join,
                             r->dash_array, r->dash_count, r->dash_phase,
-                            r->has_transform ? &r->transform : nullptr);
+                            r->has_transform ? &r->transform : nullptr, r->miter_limit);
             return DL_REPLAY_VECTOR_DREW;
         }
 
@@ -42,7 +42,7 @@ DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
             rdt_fill_linear_gradient(vec, r->path, r->x1, r->y1, r->x2, r->y2,
                                      r->stops, r->stop_count, r->rule,
                                      r->has_transform ? &r->transform : nullptr,
-                                     r->has_gradient_transform ? &r->gradient_transform : nullptr);
+                                     r->has_gradient_transform ? &r->gradient_transform : nullptr, &r->options);
             return DL_REPLAY_VECTOR_DREW;
         }
 
@@ -51,16 +51,26 @@ DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
             rdt_fill_radial_gradient(vec, r->path, r->cx, r->cy, r->r,
                                      r->stops, r->stop_count, r->rule,
                                      r->has_transform ? &r->transform : nullptr,
-                                     r->has_gradient_transform ? &r->gradient_transform : nullptr);
+                                     r->has_gradient_transform ? &r->gradient_transform : nullptr, &r->options);
             return DL_REPLAY_VECTOR_DREW;
         }
 
         case DL_DRAW_IMAGE: {
             DlDrawImage* r = &item->draw_image;
-            rdt_draw_image(vec, r->pixels, r->src_w, r->src_h, r->src_stride,
+            const uint32_t* pixels = r->pixels;
+            int width = r->src_w, height = r->src_h, stride = r->src_stride;
+            uint64_t generation = r->resource_generation;
+            ImageSurface* image = (ImageSurface*)r->resource_owner;
+            // a later image draw can promote a shared decode before this recording replays.
+            if (image && image->generation != generation) {
+                if (!render_image_resource_pixels(image, r->dst_w, r->dst_h,
+                    &pixels, &width, &height, &stride)) return DL_REPLAY_VECTOR_DREW;
+                generation = image->generation;
+            }
+            rdt_draw_image(vec, pixels, width, height, stride,
                            r->dst_x, r->dst_y, r->dst_w, r->dst_h, r->opacity,
                            r->has_transform ? &r->transform : nullptr,
-                           r->resource_generation);
+                           generation, image ? image->alpha_mode == IMAGE_ALPHA_STRAIGHT : r->straight_alpha);
             return DL_REPLAY_VECTOR_DREW;
         }
 

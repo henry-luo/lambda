@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "font.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +56,10 @@ typedef struct {
 // on error or empty glyph (e.g. space), out->num_contours is set to 0.
 int glyf_get_outline(FontTables* tables, uint16_t glyph_id,
                      GlyphOutline* out, Arena* arena);
+
+// visit the shared quadratic-to-cubic contour conversion with an affine scale.
+bool glyf_visit_outline(const GlyphOutline* outline, float sx, float sy,
+    float tx, float ty, FontPathVisitFn visitor, void* context);
 
 #ifdef __cplusplus
 }

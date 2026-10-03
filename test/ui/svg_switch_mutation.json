@@ -1,0 +1,282 @@
+{
+  "name": "SVG switch conditions invalidate selected branches, text layout, bounds and transformed real clicks",
+  "html": "test/ui/svg_switch_mutation.html",
+  "viewport": {
+    "width": 360,
+    "height": 230
+  },
+  "env": {
+    "LANGUAGE": "en-US:en"
+  },
+  "events": [
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 45,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 45,
+      "expected_selector": "#first"
+    },
+    {
+      "type": "click",
+      "x": 50,
+      "y": 45
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "first"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 235,
+      "y": 40,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_pixel",
+      "x": 275,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "1"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-box",
+      "equals": "10,50"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 45,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 45,
+      "expected_selector": "#fallback"
+    },
+    {
+      "type": "click",
+      "x": 50,
+      "y": 45
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "fallback"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 235,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 275,
+      "y": 40,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "2"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 45,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 45,
+      "expected_selector": "#back"
+    },
+    {
+      "type": "click",
+      "x": 50,
+      "y": 45
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "back"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "3"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 45,
+      "min_r": 0,
+      "max_r": 8,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 50,
+      "y": 45,
+      "expected_selector": "#fallback"
+    },
+    {
+      "type": "click",
+      "x": 50,
+      "y": 45
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "fallback"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#advance"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#advance"
+      },
+      "attribute": "data-step",
+      "equals": "4"
+    },
+    {
+      "type": "assert_pixel",
+      "x": 160,
+      "y": 40,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 0,
+      "max_g": 8,
+      "min_b": 0,
+      "max_b": 8
+    },
+    {
+      "type": "assert_pixel",
+      "x": 50,
+      "y": 45,
+      "min_r": 247,
+      "max_r": 255,
+      "min_g": 247,
+      "max_g": 255,
+      "min_b": 247,
+      "max_b": 255
+    },
+    {
+      "type": "assert_hit_test",
+      "x": 160,
+      "y": 40,
+      "expected_selector": "#first"
+    },
+    {
+      "type": "click",
+      "x": 160,
+      "y": 40
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#scene"
+      },
+      "attribute": "data-last",
+      "equals": "first"
+    }
+  ]
+}
