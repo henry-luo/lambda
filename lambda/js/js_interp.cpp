@@ -94,7 +94,29 @@ struct JsInterpFrame {
     // and if/loop/switch/try/with reset it to undefined (UpdateEmpty).
     // Function frames leave it null.
     uint64_t* completion_home = NULL;
+    // D8.1.3v22: the back-edge counter of the handoff loop this activation is
+    // inside; nested loops count toward it. Null outside a handoff loop.
+    uint32_t* handoff_backedges = NULL;
 };
+
+// D8.1.3v22 loop-head handoff (Lambda_Impl_JS_Interp_Tune.md E3): a loop that
+// is a direct statement of a function body counts its back-edges, nested loops
+// included, in the definition's promotion cell.
+struct JsInterpLoopHandoff {
+    JsFunction* function;
+    FnPromotionCell* cell;
+    uint32_t* backedges;
+    uint8_t ordinal;
+};
+
+static inline void js_interp_count_backedge(uint32_t* backedges) {
+    if (backedges && *backedges != UINT32_MAX) (*backedges)++;
+}
+
+static bool js_interp_loop_handoff_begin(JsInterpFrame* frame,
+    AstLoopControlNode* loop, JsInterpLoopHandoff* out);
+static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
+    AstLoopControlNode* loop, JsInterpLoopHandoff* handoff, JsInterpCompletion* out);
 
 // D8.1.3v21: where a name resolved when linked direct eval code walked its
 // environments by name, in the order ResolveBinding visits them.
@@ -5849,7 +5871,16 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         uint8_t resume_phase = resume ? resume->payload.loop.resume_phase : JS_LOOP_RESUME_TEST;
         if (loop->form == LOOP_FORM_WHILE) {
             bool resume_body = resume && resume_phase == JS_LOOP_RESUME_BODY;
+            JsInterpLoopHandoff handoff = {};
+            bool handoff_loop = !resume && js_interp_loop_handoff_begin(frame, loop, &handoff);
+            uint32_t* backedges = handoff_loop ? handoff.backedges : frame->handoff_backedges;
             for (;;) {
+                if (handoff_loop && !resume_body) {
+                    JsInterpCompletion handed_off;
+                    if (js_interp_loop_handoff_try(frame, loop, &handoff, &handed_off)) {
+                        return handed_off;
+                    }
+                }
                 if (!resume_body) {
                     int64_t test_ledger = js_interp_ledger_position(frame);
                     JsInterpCompletion test = js_interp_eval(frame, (JsAstNode*)loop->test);
@@ -5873,6 +5904,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 JsInterpFrame body_frame = *frame;
                 body_frame.active_label = NULL;
                 body_frame.active_label_len = 0;
+                body_frame.handoff_backedges = backedges;
                 int64_t body_ledger = js_interp_ledger_position(frame);
                 JsInterpCompletion body = js_interp_exec(&body_frame, (JsAstNode*)loop->body);
                 if (js_interp_completion_suspends(body)) {
@@ -5896,6 +5928,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                 if (completing_resumed_body) {
                     js_interp_expression_replay_finish_phase(frame);
                 }
+                js_interp_count_backedge(backedges);
             }
         }
         if (loop->form == LOOP_FORM_DO_WHILE) {
@@ -5933,6 +5966,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                     }
                 }
                 resume_test = false;
+                js_interp_count_backedge(frame->handoff_backedges);
                 int64_t test_ledger = js_interp_ledger_position(frame);
                 JsInterpCompletion test = js_interp_eval(frame, (JsAstNode*)loop->test);
                 if (js_interp_completion_suspends(test)) {
@@ -5985,9 +6019,20 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
         bool resume_body = resume && resume_phase == JS_LOOP_RESUME_BODY;
         bool resume_update = resume && resume_phase == JS_LOOP_RESUME_UPDATE;
         bool resume_test = resume && resume_phase == JS_LOOP_RESUME_TEST;
+        JsInterpLoopHandoff handoff = {};
+        bool handoff_loop = !resume && js_interp_loop_handoff_begin(frame, loop, &handoff);
+        uint32_t* backedges = handoff_loop ? handoff.backedges : frame->handoff_backedges;
         for (;;) {
             JsInterpFrame loop_frame = *frame;
             loop_frame.env = env_root.env;
+            loop_frame.handoff_backedges = backedges;
+            if (handoff_loop && !resume_update && !resume_body) {
+                // the update has run: the continuation starts at the test
+                JsInterpCompletion handed_off;
+                if (js_interp_loop_handoff_try(&loop_frame, loop, &handoff, &handed_off)) {
+                    return handed_off;
+                }
+            }
             if (!resume_update) {
                 if (!resume_body && loop->test) {
                     int64_t test_ledger = js_interp_ledger_position(frame);
@@ -6080,6 +6125,7 @@ static JsInterpCompletion js_interp_exec(JsInterpFrame* frame, JsAstNode* node) 
                     js_interp_expression_replay_finish_phase(frame);
                 }
             }
+            js_interp_count_backedge(backedges);
         }
         }
     }
@@ -6694,6 +6740,259 @@ bool js_interp_promote_function_if_hot(JsFunction* function) {
     promotion->boxed_entry = entry;
     promotion->state = FN_PROMOTION_COMPILED;
     log_info("js-p2: promoted definition calls=%u", promotion->call_count);
+    return true;
+}
+
+// D8.1.3v22 loop-head handoff. A `while`, or a `for (init; test; update)`
+// with a test, that is a direct statement of a function body may hand its
+// running activation to compiled code at the loop-head test. The compiled
+// continuation is a top-level function appended to the satellite clone's
+// source: its parameters are the bindings live at the head, and its body is
+// the source text from the head test to the end of the function body. T0
+// calls it through the ordinary invoke kernel with the frame's `this` and
+// returns its result as this activation's result; nothing is written back.
+static bool js_interp_loop_handoff_begin(JsInterpFrame* frame,
+        AstLoopControlNode* loop, JsInterpLoopHandoff* out) {
+    if (!frame || !loop || frame->handoff_backedges || frame->suspended_activation ||
+            frame->generator_state || !frame->active_function) {
+        return false;
+    }
+    if (loop->form != LOOP_FORM_WHILE &&
+            !(loop->form == LOOP_FORM_FOR_C && loop->test)) {
+        return false;
+    }
+    JsFunction* function = frame->active_function;
+    AstFuncNode* definition = js_fn_ast_function(function);
+    if (!definition || !function->code || !definition->body ||
+            definition->body->node_type != AST_NODE_BLOCK) {
+        return false;
+    }
+    Runtime* policy = js_interp_promotion_policy();
+    if (!policy || !policy->js_promotion_auto) return false;
+    FnPromotionCell* cell = &function->code->p2_promotion;
+    if (cell->loop_state == FN_LOOP_HANDOFF_PINNED) return false;
+    uint8_t ordinal = 0;
+    bool found = false;
+    for (AstNode* statement = ((JsBlockNode*)definition->body)->statements;
+            statement && !found; statement = statement->next) {
+        if (statement->node_type != AST_NODE_LOOP) continue;
+        if (++ordinal > INTERP_HANDOFF_LOOP_MAX) return false;
+        found = statement == (AstNode*)loop;
+    }
+    // one continuation per definition: the first loop to reach the threshold
+    if (!found || (cell->loop_state != FN_LOOP_HANDOFF_NONE &&
+            cell->loop_ordinal != ordinal)) {
+        return false;
+    }
+    out->function = function;
+    out->cell = cell;
+    out->ordinal = ordinal;
+    out->backedges = &cell->loop_backedges[ordinal - 1];
+    return true;
+}
+
+enum { JS_LOOP_LIVE_IN_MAX = 32 };
+
+struct JsLoopLiveInScan {
+    NameScope* scopes[3];        // function vars, body-block lexicals, loop lexicals
+    uint32_t region_start;       // body-block lexicals declared here or later are not live
+    NameEntry* live[JS_LOOP_LIVE_IN_MAX];
+    int count;
+    const char* failure;
+};
+
+static bool js_loop_scan_owns(JsLoopLiveInScan* scan, NameEntry* entry) {
+    for (int i = 0; i < 3; i++) {
+        if (scan->scopes[i] && entry->scope == scan->scopes[i]) return true;
+    }
+    return false;
+}
+
+static void js_loop_scan_assigned(JsLoopLiveInScan* scan, AstNode* target) {
+    if (!target || target->node_type != AST_NODE_IDENT) return;
+    NameEntry* entry = ((JsIdentifierNode*)target)->entry;
+    // a const live-in becomes a parameter, which would accept the write that
+    // T0 rejects with a TypeError
+    if (entry && entry->is_const && js_loop_scan_owns(scan, entry)) {
+        scan->failure = "assigned const live-in";
+    }
+}
+
+static void js_loop_scan_node(JsAstNode* node, void* opaque) {
+    JsLoopLiveInScan* scan = (JsLoopLiveInScan*)opaque;
+    if (!node || scan->failure) return;
+    if (node->node_type == AST_NODE_ASSIGN) {
+        js_loop_scan_assigned(scan, ((JsAssignmentNode*)node)->left);
+    } else if (node->node_type == AST_NODE_UNARY) {
+        AstUnaryNode* unary = (AstUnaryNode*)node;
+        if (unary->op == OPERATOR_JS_INCREMENT || unary->op == OPERATOR_JS_DECREMENT) {
+            js_loop_scan_assigned(scan, unary->operand);
+        }
+    } else if (node->node_type == AST_NODE_IDENT) {
+        if (js_interp_p2_is_this_identifier(node)) return;
+        NameEntry* entry = ((JsIdentifierNode*)node)->entry;
+        if (!entry || !js_loop_scan_owns(scan, entry)) return;
+        // a body lexical declared at or after the head is declared again by
+        // the continuation text itself, still in its TDZ
+        if (entry->scope == scan->scopes[1] && entry->node &&
+                entry->node->source_span.start_byte >= scan->region_start) {
+            return;
+        }
+        for (int i = 0; i < scan->count; i++) {
+            if (scan->live[i] == entry) return;
+            if (js_interp_name_matches(scan->live[i]->name, entry->name)) {
+                scan->failure = "shadowed live-in name";
+                return;
+            }
+        }
+        if (scan->count >= JS_LOOP_LIVE_IN_MAX) {
+            scan->failure = "too many live-ins";
+            return;
+        }
+        scan->live[scan->count++] = entry;
+        return;
+    }
+    js_ast_visit_children(node, js_loop_scan_node, opaque);
+}
+
+// Build and compile the continuation; returns the refusal reason, or NULL
+// with the cell READY.
+static const char* js_interp_loop_continuation_compile(JsFunction* function,
+        AstLoopControlNode* loop, uint8_t ordinal, FnPromotionCell* cell) {
+    AstFunctionId function_id = AST_FUNCTION_ID_INVALID;
+    const char* reason = js_interp_p2_admission_reason(function, &function_id);
+    if (reason) return reason;
+    AstFuncNode* definition = js_fn_ast_function(function);
+    JsScript* script = js_fn_ast_script(function);
+    // a named expression's own name is not a script binding of the clone
+    if (definition->node_type != AST_NODE_FUNC && definition->name) {
+        return "named function expression";
+    }
+    JsBlockNode* body = (JsBlockNode*)definition->body;
+    uint32_t start = loop->form == LOOP_FORM_FOR_C
+        ? loop->test->source_span.start_byte : loop->source_span.start_byte;
+    uint32_t end = body->source_span.end_byte;
+    if (!script || !script->source || end > script->source_length || start >= end) {
+        return "source span";
+    }
+    while (end > start && script->source[end - 1] != '}') end--;
+    if (end <= start) return "source span";
+    end--;   // the body's closing brace
+
+    JsLoopLiveInScan scan = {};
+    scan.scopes[0] = definition->vars;
+    scan.scopes[1] = body->vars;
+    scan.scopes[2] = loop->form == LOOP_FORM_FOR_C ? loop->vars : NULL;
+    scan.region_start = loop->source_span.start_byte;
+    if (loop->form == LOOP_FORM_FOR_C) {
+        // the init has run; only the test, update and body continue
+        js_loop_scan_node((JsAstNode*)loop->test, &scan);
+        js_loop_scan_node((JsAstNode*)loop->update, &scan);
+        js_loop_scan_node((JsAstNode*)loop->body, &scan);
+    } else {
+        js_loop_scan_node((JsAstNode*)loop, &scan);
+    }
+    for (AstNode* statement = loop->next; statement && !scan.failure;
+            statement = statement->next) {
+        js_loop_scan_node((JsAstNode*)statement, &scan);
+    }
+    if (scan.failure) return scan.failure;
+
+    bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
+    char name[64];
+    snprintf(name, sizeof(name), "__lambda_loop_%u_%u", (unsigned)function_id,
+        (unsigned)ordinal);
+    StrBuf* text = strbuf_new_cap(script->source_length + (end - start) + 256);
+    if (!text) return "out of memory";
+    strbuf_append_str_n(text, script->source, script->source_length);
+    strbuf_append_str(text, "\n;function ");
+    strbuf_append_str(text, name);
+    strbuf_append_char(text, '(');
+    for (int i = 0; i < scan.count; i++) {
+        if (i) strbuf_append_char(text, ',');
+        strbuf_append_str_n(text, scan.live[i]->name->chars, scan.live[i]->name->len);
+    }
+    strbuf_append_str(text, strict ? ") {'use strict';\n" : ") {\n");
+    if (loop->form == LOOP_FORM_FOR_C) strbuf_append_str(text, "for (;");
+    strbuf_append_str_n(text, script->source + start, end - start);
+    strbuf_append_str(text, "\n}\n");
+
+    void* entry = NULL;
+    bool compiled = js_mir_compile_loop_continuation(context ? context->runtime : NULL,
+        script, text->str, text->length, name, &entry);
+    strbuf_free(text);
+    if (!compiled || !entry) return "continuation compile failed";
+
+    NameEntry** live = (NameEntry**)pool_calloc(script->pool,
+        sizeof(NameEntry*) * (size_t)(scan.count > 0 ? scan.count : 1));
+    if (!live) return "out of memory";
+    memcpy(live, scan.live, sizeof(NameEntry*) * (size_t)scan.count);
+    cell->loop_live_ins = live;
+    cell->loop_live_in_count = (uint8_t)scan.count;
+    cell->loop_ordinal = ordinal;
+    cell->loop_entry = entry;
+    cell->loop_state = FN_LOOP_HANDOFF_READY;
+    log_info("js-loop-handoff: compiled loop=%u live_ins=%d", (unsigned)ordinal,
+        scan.count);
+    return NULL;
+}
+
+static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
+        AstLoopControlNode* loop, JsInterpLoopHandoff* handoff,
+        JsInterpCompletion* out) {
+    FnPromotionCell* cell = handoff->cell;
+    Runtime* policy = js_interp_promotion_policy();
+    if (!policy || *handoff->backedges < policy->js_promotion_backedge_threshold) {
+        return false;
+    }
+    if (cell->loop_state == FN_LOOP_HANDOFF_NONE) {
+        const char* why = js_interp_loop_continuation_compile(handoff->function,
+            loop, handoff->ordinal, cell);
+        if (why) {
+            cell->loop_state = FN_LOOP_HANDOFF_PINNED;
+            log_info("js-loop-handoff: pinned loop=%u reason=%s",
+                (unsigned)handoff->ordinal, why);
+            return false;
+        }
+    }
+    if (cell->loop_state != FN_LOOP_HANDOFF_READY ||
+            cell->loop_ordinal != handoff->ordinal) {
+        return false;
+    }
+    int count = cell->loop_live_in_count;
+    RootFrame roots(3);
+    Rooted<Item> callee_root(roots, js_new_function_mir(cell->loop_entry, count));
+    Rooted<Item> this_root(roots, js_interp_frame_this(frame));
+    Rooted<Item> result_root(roots, ItemNull);
+    if (get_type_id(callee_root.get()) != LMD_TYPE_FUNC) return false;
+    // The wrapper is cached by entry. Like a P2 publication, it uses the
+    // compiled-context call ABI; the kernel coerces `this` for a sloppy
+    // callee, so a strict original's continuation must be strict too.
+    JsFunction* continuation = (JsFunction*)callee_root.get().function;
+    if (!(continuation->flags & JS_FUNC_FLAG_MIR_CONTEXT_ABI)) {
+        continuation->flags |= JS_FUNC_FLAG_MIR_CONTEXT_ABI |
+            (handoff->function->flags & JS_FUNC_FLAG_STRICT);
+        js_function_finalize_capabilities(continuation);
+    }
+    RootSpan arguments((size_t)(count > 0 ? count : 1));
+    for (int i = 0; i < count; i++) {
+        NameEntry* entry = cell->loop_live_ins[i];
+        JsInterpEnv* env = js_interp_find_env(frame->env, entry->scope);
+        if (!env || entry->slot < 0 || (uint32_t)entry->slot >= env->slot_count) return false;
+        Item value = js_interp_env_slot_read(env, (uint32_t)entry->slot, false);
+        // a binding still in its TDZ: stay in T0, which raises it in order
+        if (value.item == ITEM_JS_TDZ) return false;
+        arguments.items()[i] = value;
+    }
+    Item result = js_call_from_ast(callee_root.get(), this_root.get(),
+        arguments.items(), count, result_root.home());
+    result = scalar_storage_read(result, false);
+    if (!cell->loop_entered) {
+        cell->loop_entered = true;
+        log_info("js-loop-handoff: entered loop=%u", (unsigned)handoff->ordinal);
+    }
+    *out = item_is_error(result) ? js_interp_throw(result)
+        : (JsInterpCompletion){JS_INTERP_RETURN, result, NULL, 0};
     return true;
 }
 

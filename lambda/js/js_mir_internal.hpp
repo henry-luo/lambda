@@ -833,6 +833,11 @@ void jm_emit_eval_local_pop_if_needed(JsMirTranspiler* mt);
 bool transpile_js_mir_ast(JsMirTranspiler* mt);
 bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
     AstFunctionId function_id, void** out_entry);
+// D8.1.3v22: compile the appended top-level loop continuation `function_name`
+// of `source` (the retained script text plus that function) as a satellite.
+bool js_mir_compile_loop_continuation(Runtime* runtime, JsScript* script,
+        const char* source, size_t source_length, const char* function_name,
+        void** out_entry);
 bool js_mir_link_runtime_state(JsMirTranspiler* mt);
 bool jm_validate_mir_labels(MIR_context_t ctx);
 bool js_activate_runtime_name_pool(void);
