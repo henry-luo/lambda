@@ -20,6 +20,7 @@
 #include "dom_xhr.h"
 #include "dom_cssom.h"
 #include "../js/js_runtime.h"
+#include "../js/js_event_loop.h"
 #include "../js/js_props.h"
 #include "../js/js_property_attrs.h"
 #include "../js/js_runtime_state.hpp"
@@ -45,12 +46,16 @@
 #include "../../lib/strbuf.h"
 #include "../../lib/mempool.h"
 #include "../../lib/mem_grow.hpp"
+#include "../../lib/tagged.hpp"
 
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_weak(uint64_t* slot);
 extern Item js_make_number(double d);
 extern "C" Item dom_form_submit_bridge(Item form_item);
 extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
+extern "C" const char* dom_input_type_lower(void* dom_elem);
+static bool dom_get_indeterminate(DomElement* element);
+static bool dom_radio_group_has_checked(DomElement* element);
 #include "../../lib/arena.h"
 #include "../../lib/str.h"
 #include "../../lib/utf.h"
@@ -75,6 +80,7 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter);
 #include "../input/html5/html5_parser.h"
 #include "../../lib/hashmap.h"
 #include "../../lib/hashmap_typed.hpp"
+#include "../../lib/re2_glue.hpp"
 
 extern "C" Item vmap_new(void);
 extern "C" Item vmap_backing_get(VMap* vm, Item key);
@@ -98,6 +104,31 @@ static inline bool is_js_undefined(Item val) {
 
 static inline Item js_string_key(const char* s) {
     return js_name_item(s);
+}
+
+struct DomScrollOperationOverride {
+    bool active;
+    float x, y;
+    DomScrollBehavior behavior;
+};
+
+static thread_local DomScrollOperationOverride dom_scroll_operation_override = {};
+
+static bool dom_scroll_should_animate(DomElement* elem) {
+    if (dom_scroll_operation_override.active) {
+        if (dom_scroll_operation_override.behavior == DOM_SCROLL_BEHAVIOR_INSTANT)
+            return false;
+        if (dom_scroll_operation_override.behavior == DOM_SCROLL_BEHAVIOR_SMOOTH)
+            return true;
+    }
+    return elem && elem->scroll()->scroll_behavior == CSS_VALUE_SMOOTH;
+}
+
+static DomScrollBehavior dom_scroll_behavior_from_item(Item value) {
+    const char* name = fn_to_cstr(value);
+    if (name && strcmp(name, "smooth") == 0) return DOM_SCROLL_BEHAVIOR_SMOOTH;
+    if (name && strcmp(name, "instant") == 0) return DOM_SCROLL_BEHAVIOR_INSTANT;
+    return DOM_SCROLL_BEHAVIOR_AUTO;
 }
 
 // Pre-order walk over `node` and its following siblings, descending into each
@@ -707,6 +738,81 @@ static inline void dom_mutation_notify(DomJsMutationKind kind = DOM_JS_MUTATION_
     }
 }
 
+extern "C" void dom_custom_elements_registry_changed(void) {
+    // A new definition changes :defined across the document, so the next
+    // cascade must revisit elements outside any mutation subtree.
+    if (_js_current_document && _js_current_document->root) {
+        dom_mutation_notify(DOM_JS_MUTATION_UNKNOWN,
+            static_cast<DomNode*>(_js_current_document->root));
+    }
+}
+
+static DomElement* dom_form_first_submitter_in_tree(DomNode* node,
+                                                    DomElement* form,
+                                                    bool skip_disabled) {
+    for (DomNode* current = node; current; current = current->next_sibling) {
+        if (!current->is_element()) continue;
+        DomElement* element = current->as_element();
+        if (dom_is_submit_button((void*)element) &&
+            dom_find_form_owner((void*)element) == form &&
+            (!skip_disabled || !dom_is_disabled((void*)element))) {
+            return element;
+        }
+        DomElement* nested = dom_form_first_submitter_in_tree(
+            element->first_child, form, skip_disabled);
+        if (nested) return nested;
+    }
+    return nullptr;
+}
+
+extern "C" void* dom_form_first_submitter(void* form_ptr, bool skip_disabled) {
+    DomElement* form = (DomElement*)form_ptr;
+    if (!form) return nullptr;
+    DomDocument* doc = form->doc;
+    bool connected = false;
+    if (doc && doc->root) {
+        for (DomNode* node = form; node; node = node->parent) {
+            if (node == (DomNode*)doc->root) {
+                connected = true;
+                break;
+            }
+        }
+    }
+    return dom_form_first_submitter_in_tree(
+        connected ? (DomNode*)doc->root : form->first_child,
+        form, skip_disabled);
+}
+
+extern "C" bool dom_css_element_is_default(void* element_ptr) {
+    DomElement* element = (DomElement*)element_ptr;
+    if (!element || !element->tag_name) return false;
+    if (str_icmp_cstr(element->tag_name, "option") == 0) {
+        return element->has_attribute("selected");
+    }
+    if (str_icmp_cstr(element->tag_name, "input") == 0) {
+        const char* type = dom_input_type_lower(element);
+        if (strcmp(type, "checkbox") == 0 || strcmp(type, "radio") == 0) {
+            return element->has_attribute("checked");
+        }
+    }
+    if (!dom_is_submit_button((void*)element)) return false;
+    DomElement* form = (DomElement*)dom_find_form_owner((void*)element);
+    return form && dom_form_first_submitter(form, false) == element;
+}
+
+extern "C" bool dom_css_element_is_indeterminate(void* element_ptr) {
+    DomElement* element = (DomElement*)element_ptr;
+    if (!element || !element->tag_name) return false;
+    if (str_icmp_cstr(element->tag_name, "progress") == 0) {
+        return !element->has_attribute("value");
+    }
+    if (str_icmp_cstr(element->tag_name, "input") != 0) return false;
+    const char* type = dom_input_type_lower(element);
+    if (strcmp(type, "checkbox") == 0) return dom_get_indeterminate(element);
+    if (strcmp(type, "radio") == 0) return !dom_radio_group_has_checked(element);
+    return false;
+}
+
 extern "C" void dom_notify_mutation(DomJsMutationKind kind, void* target, void* parent) {
     // Module-owned DOM setters must still publish mutations through the JS DOM ledger.
     dom_mutation_notify(kind, (DomNode*)target, (DomNode*)parent);
@@ -791,11 +897,22 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
         ? _js_current_ui_context->document : _js_current_document;
     DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
     AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
-    if (!scheduler || !scheduler->has_active_animations) return false;
+    if (!state) return false;
     // Batch documents have no native frame clock; advance the same scheduler
     // deterministically so transition events cannot remain queued forever.
-    double now = scheduler->current_time + (delta_seconds >= 0.0 ? delta_seconds : 1.0 / 60.0);
-    return animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
+    bool active = false;
+    if (scheduler && scheduler->has_active_animations) {
+        double now = scheduler->current_time +
+            (delta_seconds >= 0.0 ? delta_seconds : 1.0 / 60.0);
+        active = animation_scheduler_tick(scheduler, now, &state->dirty_tracker);
+    }
+    if (state->has_active_smooth_scroll) {
+        double now = js_event_loop_virtual_clock_enabled()
+            ? js_event_loop_virtual_clock_now_ms() / 1000.0
+            : js_performance_monotonic_now_ms() / 1000.0;
+        active = scroll_smooth_tick_document(doc, now) || active;
+    }
+    return active;
 }
 
 extern "C" bool dom_tick_headless_animation_frame(void) {
@@ -1669,6 +1786,16 @@ static const char* _input_type_lower(DomElement* elem) {
     return buf;
 }
 
+static bool dom_input_kind_has_range(RadiantInputValueKind kind) {
+    return kind == RADIANT_INPUT_VALUE_NUMBER ||
+        kind == RADIANT_INPUT_VALUE_RANGE ||
+        kind == RADIANT_INPUT_VALUE_DATE ||
+        kind == RADIANT_INPUT_VALUE_MONTH ||
+        kind == RADIANT_INPUT_VALUE_WEEK ||
+        kind == RADIANT_INPUT_VALUE_TIME ||
+        kind == RADIANT_INPUT_VALUE_DATETIME_LOCAL;
+}
+
 static bool _is_checkbox_or_radio(DomElement* elem) {
     if (!_is_tag(elem, "input")) return false;
     const char* t = _input_type_lower(elem);
@@ -1677,7 +1804,9 @@ static bool _is_checkbox_or_radio(DomElement* elem) {
 
 static DocState* _state_for_element(DomElement* elem) {
     if (elem && elem->doc && elem->doc->state) return elem->doc->state;
-    return dom_current_state();
+    // Static CSS matching runs before a JS realm is active; its element has
+    // no DocState, and the context-local current-document macro needs a realm.
+    return js_active_runtime_state ? dom_current_state() : nullptr;
 }
 
 // Read the live "checkedness" state. Initialised lazily from the
@@ -1685,6 +1814,8 @@ static DocState* _state_for_element(DomElement* elem) {
 static bool _get_checkedness(DomElement* elem) {
     DocState* state = _state_for_element(elem);
     if (state) return form_control_get_checked(state, (View*)elem);
+
+    if (!js_active_runtime_state) return elem->has_attribute("checked");
 
     Item exp = expando_get_map((DomNode*)elem);
     if (exp.item != ITEM_NULL) {
@@ -1708,6 +1839,29 @@ static void _set_checkedness(DomElement* elem, bool v) {
     Item exp = expando_get_or_create_map((DomNode*)elem);
     if (exp.item == ITEM_NULL) return;
     dom_realm_set_name(exp, "__checked", (Item){.item = b2it(v)});
+}
+
+static bool dom_get_indeterminate(DomElement* element) {
+    DocState* state = _state_for_element(element);
+    if (state) return state_get_bool(state, element, STATE_INDETERMINATE);
+    if (!js_active_runtime_state) return false;
+    return dom_expando_flag_is(element, "__indeterminate");
+}
+
+static void dom_set_indeterminate(DomElement* element, bool value) {
+    DocState* state = _state_for_element(element);
+    if (!state && element->doc && js_active_runtime_state) {
+        state = dom_engine_document_ensure_state(element->doc,
+            "dom_set_indeterminate");
+    }
+    if (state) {
+        state_set_bool(state, element, STATE_INDETERMINATE, value);
+    } else {
+        dom_expando_flag_set(element, "__indeterminate",
+            (Item){.item = b2it(value)});
+    }
+    // The IDL state is independent of checkedness and changes :indeterminate.
+    dom_engine_sync_pseudo_state((View*)element, PSEUDO_STATE_INDETERMINATE, value);
 }
 
 // Exposed for dom_events.cpp pre/post-click activation.
@@ -2058,33 +2212,17 @@ static const char* dom_html_interface_name(DomElement* elem) {
 }
 
 extern "C" const char* dom_element_lookup_namespace_uri(void* element, const char* prefix) {
-    DomElement* elem = (DomElement*)element;
-    if (!elem) return nullptr;
-    if (prefix && strcmp(prefix, "xml") == 0) return "http://www.w3.org/XML/1998/namespace";
-    if (prefix && strcmp(prefix, "xmlns") == 0) return "http://www.w3.org/2000/xmlns/";
-    char declaration[128] = "xmlns";
-    if (prefix && *prefix) {
-        size_t length = strlen(prefix);
-        if (!length || length + 7 > sizeof(declaration)) return nullptr;
-        declaration[5] = ':';
-        memcpy(declaration + 6, prefix, length);
-        declaration[6 + length] = '\0';
-    }
-    // XML namespace declarations inherit independently of HTML parser integration points.
-    for (DomNode* node = elem; node; node = node->parent) {
-        if (!node->is_element()) continue;
-        const char* namespace_uri = node->as_element()->get_attribute(declaration);
-        if (namespace_uri) return *namespace_uri ? namespace_uri : nullptr;
-    }
-    return nullptr;
+    return dom_element_lookup_namespace_uri((DomElement*)element, prefix);
 }
 
 extern "C" const char* dom_element_attribute_ns(void* element, const char* namespace_uri, const char* local_name) {
     DomElement* elem = (DomElement*)element;
     if (!elem || !local_name) return nullptr;
-    if (!namespace_uri || !*namespace_uri) return elem->get_attribute(local_name);
+    const char* wanted_uri = namespace_uri ? namespace_uri : "";
+    const char* recorded = dom_element_get_namespaced_attribute(elem, wanted_uri, local_name);
+    if (recorded) return recorded;
     char mirror_name[128];
-    if (strcmp(namespace_uri, "http://www.w3.org/1999/xlink") == 0) {
+    if (strcmp(wanted_uri, "http://www.w3.org/1999/xlink") == 0) {
         snprintf(mirror_name, sizeof(mirror_name), "__lambda_xlink_%s", local_name);
         const char* mirror = elem->get_attribute(mirror_name);
         if (mirror) return mirror;
@@ -2092,44 +2230,17 @@ extern "C" const char* dom_element_attribute_ns(void* element, const char* names
     int count = 0;
     const char** names = elem->attribute_names(&count);
     for (int i = 0; names && i < count; i++) {
-        const char* colon = strchr(names[i], ':');
-        if (!colon || strcmp(colon + 1, local_name) != 0) continue;
-        char prefix[128]; size_t length = colon - names[i];
-        if (!length || length >= sizeof(prefix)) continue;
-        memcpy(prefix, names[i], length); prefix[length] = 0;
-        const char* uri = dom_element_lookup_namespace_uri(elem, prefix);
-        if (uri && strcmp(uri, namespace_uri) == 0) return elem->get_attribute(names[i]);
+        if (dom_is_internal_attr(names[i])) continue;
+        const char* candidate_local = nullptr;
+        const char* uri = dom_element_attribute_namespace_uri(elem, names[i], &candidate_local);
+        if (uri && candidate_local && strcmp(uri, wanted_uri) == 0 &&
+            strcmp(candidate_local, local_name) == 0) return elem->get_attribute(names[i]);
     }
     return nullptr;
 }
 
 extern "C" const char* dom_element_namespace_uri(void* element) {
-    DomElement* elem = (DomElement*)element;
-    if (!elem || !elem->tag_name) return nullptr;
-    const char* namespace_uri = elem->get_attribute("__lambda_ns_uri");
-    if (namespace_uri) return *namespace_uri ? namespace_uri : nullptr;
-    const char* colon = strchr(elem->tag_name, ':');
-    char prefix[128] = {};
-    if (colon) {
-        size_t length = colon - elem->tag_name;
-        if (!length || length >= sizeof(prefix)) return nullptr;
-        memcpy(prefix, elem->tag_name, length);
-    }
-    namespace_uri = dom_element_lookup_namespace_uri(elem, prefix);
-    if (namespace_uri) return namespace_uri;
-    if (colon) return nullptr;
-    for (DomNode* current = (DomNode*)elem; current; current = current->parent) {
-        if (!current->is_element()) continue;
-        DomElement* ancestor = current->as_element();
-        // HTML integration points stop SVG namespace inheritance; nested svg starts it again.
-        if (current != (DomNode*)elem && ancestor && ancestor->tag_name &&
-            (str_icmp_cstr(ancestor->tag_name, "foreignObject") == 0 ||
-             str_icmp_cstr(ancestor->tag_name, "desc") == 0 || str_icmp_cstr(ancestor->tag_name, "title") == 0)) break;
-        if (ancestor && ancestor->tag_name && str_icmp_cstr(ancestor->tag_name, "svg") == 0) {
-            return "http://www.w3.org/2000/svg";
-        }
-    }
-    return "http://www.w3.org/1999/xhtml";
+    return dom_element_namespace_uri((DomElement*)element);
 }
 
 extern "C" bool dom_element_is_svg(void* element) {
@@ -6008,6 +6119,10 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
     for (int i = 0; attr_names && i < attr_count; i++) {
         const char* name = attr_names[i];
         if (!name || dom_is_internal_attr(name)) continue;
+        if (strncmp(name, "xlink:", 6) == 0) {
+            has_xlink_attr = true;
+            break;
+        }
         char xlink_name[128];
         snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
         if (elem->get_attribute(xlink_name)) {
@@ -6016,8 +6131,7 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         }
     }
     if (has_xlink_attr && !elem->get_attribute("xmlns:xlink")) {
-        // XLink attributes mirror an unprefixed renderer attribute internally;
-        // XMLSerializer must restore their qualified XML identity on output.
+        // A qualified XLink attribute needs its namespace declaration in XML.
         strbuf_append_str(sb, " xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
     }
     for (int i = 0; attr_names && i < attr_count; i++) {
@@ -6027,7 +6141,8 @@ static void collect_xml_node(DomNode* node, StrBuf* sb) {
         snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", name);
         bool is_xlink_attr = elem->get_attribute(xlink_name) != nullptr;
         strbuf_append_char(sb, ' ');
-        if (is_xlink_attr) strbuf_append_str(sb, "xlink:");
+        if (is_xlink_attr && strncmp(name, "xlink:", 6) != 0)
+            strbuf_append_str(sb, "xlink:");
         strbuf_append_all(sb, 2, name, "=\"");
         const char* value = elem->get_attribute(name);
         if (value) collect_xml_attr_value(value, sb);
@@ -6815,6 +6930,7 @@ static bool dom_form_named_getter_reserved_name(const char* prop);
     X(HTML_FOR,                  "htmlFor") \
     X(ID,                        "id") \
     X(IMPLEMENTATION,            "implementation") \
+    X(INDETERMINATE,             "indeterminate") \
     X(INDEX,                     "index") \
     X(INNER_HTML,                "innerHTML") \
     X(INNER_TEXT,                "innerText") \
@@ -7524,7 +7640,8 @@ JS_FORWARD_ITEM(dom_text_control_set_range_text_bridge, (void* dom_elem,        
 static void dom_queue_scroll_into_view(DomElement* elem, bool center,
                                        bool if_needed = false,
                                        DomScrollAlign block_align = DOM_SCROLL_ALIGN_START,
-                                       DomScrollAlign inline_align = DOM_SCROLL_ALIGN_NEAREST) {
+                                       DomScrollAlign inline_align = DOM_SCROLL_ALIGN_NEAREST,
+                                       DomScrollBehavior behavior = DOM_SCROLL_BEHAVIOR_AUTO) {
     DomDocument* doc = elem ? (elem->doc ? elem->doc : _js_current_document) : nullptr;
     if (!doc) return;
     if (doc->pending_scroll_into_view_target) {
@@ -7539,6 +7656,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
     doc->pending_scroll_into_view_if_needed = false;
     doc->pending_scroll_into_view_block = DOM_SCROLL_ALIGN_START;
     doc->pending_scroll_into_view_inline = DOM_SCROLL_ALIGN_NEAREST;
+    doc->pending_scroll_into_view_behavior = DOM_SCROLL_BEHAVIOR_AUTO;
     DomNodeRef ref = dom_node_ref((DomNode*)elem);
     if (!dom_node_ref_validate(doc, ref) ||
         !dom_node_pin(doc, ref, DOM_NODE_PIN_RECONCILE)) {
@@ -7550,6 +7668,7 @@ static void dom_queue_scroll_into_view(DomElement* elem, bool center,
     doc->pending_scroll_into_view_if_needed = if_needed;
     doc->pending_scroll_into_view_block = block_align;
     doc->pending_scroll_into_view_inline = inline_align;
+    doc->pending_scroll_into_view_behavior = behavior;
     if (doc->state) doc_state_request_reflow(doc->state);
 }
 
@@ -7814,7 +7933,7 @@ static bool _elem_is_barred(DomElement* elem) {
     // Constraint validation, selector matching, and focusability share the
     // StateStore disabled-fieldset rule so a dynamically inserted control
     // cannot disagree about whether the first-legend exemption applies.
-    if (form_control_is_disabled(elem->doc ? elem->doc->state : dom_current_state(),
+    if (form_control_is_disabled(_state_for_element(elem),
                                  static_cast<View*>(elem))) return true;
     // barred if readonly
     if (elem->has_attribute("readonly")) return true;
@@ -7859,11 +7978,16 @@ static const char* _elem_current_value(DomElement* elem) {
             elem->get_attribute("type"));
         if (kind != RADIANT_INPUT_VALUE_TEXT &&
             kind != RADIANT_INPUT_VALUE_UNSUPPORTED) {
-            return dom_engine_input_live_value(elem);
+            const char* live = dom_engine_input_live_value(elem);
+            if (live) return live;
+            const char* fallback = elem->get_attribute("value");
+            return fallback ? fallback : "";
         }
         if (tc_is_text_control(elem)) {
             tc_ensure_init(elem);
-            return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
+            if (elem->form && elem->form->current_value) return elem->form->current_value;
+            const char* fallback = elem->get_attribute("value");
+            return fallback ? fallback : "";
         }
         const char* v = elem->get_attribute("value");
         return v ? v : "";
@@ -7873,6 +7997,48 @@ static const char* _elem_current_value(DomElement* elem) {
         return (elem->form && elem->form->current_value) ? elem->form->current_value : "";
     }
     return "";
+}
+
+static bool dom_element_value_is_empty(DomElement* element, const char* value) {
+    if (value && value[0]) return false;
+    if (!_is_tag(element, "textarea") || js_active_runtime_state) return true;
+    StrBuf* content = strbuf_new_cap(32);
+    if (!content) return true;
+    collect_text_content((DomNode*)element, content);
+    bool empty = content->length == 0;
+    strbuf_free(content);
+    return empty;
+}
+
+extern "C" int dom_css_element_placeholder_shown(void* element_ptr) {
+    DomElement* element = (DomElement*)element_ptr;
+    if (!element || !tc_is_text_control(element)) return 0;
+    const char* placeholder = element->get_attribute("placeholder");
+    return placeholder && *placeholder &&
+        dom_element_value_is_empty(element, _elem_current_value(element));
+}
+
+extern "C" bool dom_css_element_matches_range(void* element_ptr,
+                                                 bool out_of_range) {
+    DomElement* element = (DomElement*)element_ptr;
+    if (!_is_tag(element, "input") || _elem_is_barred(element)) return false;
+    const char* type = dom_input_type_lower(element);
+    RadiantInputValueKind kind = (RadiantInputValueKind)
+        dom_engine_input_value_kind(type);
+    if (!dom_input_kind_has_range(kind)) return false;
+    const char* min_value = element->get_attribute("min");
+    const char* max_value = element->get_attribute("max");
+    double parsed_bound = 0.0;
+    bool has_limit = kind == RADIANT_INPUT_VALUE_RANGE ||
+        (min_value && dom_engine_input_value_as_number(type, min_value, &parsed_bound)) ||
+        (max_value && dom_engine_input_value_as_number(type, max_value, &parsed_bound));
+    if (!has_limit) return false;
+    const char* value = _elem_current_value(element);
+    RadiantInputValidity validity = {};
+    dom_engine_input_value_validate(type, value ? value : "",
+        min_value, max_value, element->get_attribute("step"), &validity);
+    bool outside = validity.range_underflow || validity.range_overflow;
+    return out_of_range ? outside : !outside;
 }
 
 // Build and return a ValidityState plain JS object for the given element.
@@ -7928,6 +8094,7 @@ static char* _option_text(DomElement* opt) {
 static bool _get_selectedness(DomElement* opt) {
     if (!opt) return false;
     if (opt->has_option_selectedness()) return dom_option_is_selected(opt);
+    if (!js_active_runtime_state) return dom_option_is_selected(opt);
     Item exp = expando_get_map((DomNode*)opt);
     if (exp.item != ITEM_NULL) {
         Item v = dom_realm_get_name(exp, "__selected");
@@ -8681,51 +8848,59 @@ extern "C" void dom_set_option_text_bridge(void* dom_elem, const char* value) {
 // A placeholder label option = the first option child of the select whose
 // value is "" AND text is empty. Only applies when display size is 1 and
 // multiple is unset; otherwise placeholders are not recognized.
+typedef struct SelectValidityScan {
+    DomElement* select;
+    DomElement* first_option;
+    DomElement* first_enabled;
+    DomElement* placeholder;
+    bool is_listbox;
+    bool any_selected;
+    bool any_non_placeholder_selected;
+} SelectValidityScan;
+
+static bool _select_validity_visit(DomElement* elem, void* context) {
+    SelectValidityScan* scan = (SelectValidityScan*)context;
+    if (_is_tag(elem, "select")) return false;
+    if (!_is_tag(elem, "option") || _option_owner_select(elem) != scan->select) {
+        return true;
+    }
+    if (!scan->first_option) {
+        scan->first_option = elem;
+        if (!scan->is_listbox && elem->parent == (DomNode*)scan->select) {
+            char* value = _option_value(elem);
+            if (!value || !*value) scan->placeholder = elem;
+            mem_free(value);
+        }
+    }
+    if (!scan->first_enabled && !elem->has_attribute("disabled")) {
+        scan->first_enabled = elem;
+    }
+    if (_get_selectedness(elem)) {
+        scan->any_selected = true;
+        if (elem != scan->placeholder) scan->any_non_placeholder_selected = true;
+    }
+    return true;
+}
+
 static bool _select_value_missing(DomElement* sel) {
     if (!sel) return true;
-    Item arr = js_array_new(0);
-    _collect_options(sel->first_child, arr);
-    int64_t n = js_array_length(arr);
-    if (n == 0) return true;
     int size = 0;
     const char* sz = sel->get_attribute("size");
     if (sz) { char* ep = nullptr; long v = strtol(sz, &ep, 10); if (ep != sz && v > 0) size = (int)v; }
     bool is_listbox = sel->has_attribute("multiple") || size > 1;
-    // Identify the placeholder option: the first option in the select's
-    // option list, only if it is a direct child of the select and has empty
-    // value. Options inside an optgroup don't qualify.
-    DomElement* placeholder = nullptr;
-    if (!is_listbox && n > 0) {
-        DomElement* first_opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, 0));
-        if (first_opt && first_opt->parent == (DomNode*)sel) {
-            char* v = _option_value(first_opt);
-            bool empty_value = !v || !*v;
-            mem_free(v);
-            if (empty_value) placeholder = first_opt;
-        }
-    }
-    bool any_non_placeholder_selected = false;
-    bool any_selected = false;
-    for (int64_t i = 0; i < n; i++) {
-        DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
-        if (!opt) continue;
-        if (_get_selectedness(opt)) {
-            any_selected = true;
-            if (opt != placeholder) { any_non_placeholder_selected = true; break; }
-        }
-    }
+    // Native traversal keeps the same option order when initial CSS matching
+    // runs before a JS realm can allocate the usual options array.
+    SelectValidityScan scan = {sel, nullptr, nullptr, nullptr,
+        is_listbox, false, false};
+    dom_walk_elements(sel->first_child, _select_validity_visit, &scan);
+    if (!scan.first_option) return true;
     // Apply default-reset: if no option selected and not dirty/listbox, the
     // first non-disabled option counts as selected.
-    if (!any_selected && !is_listbox && !_select_is_dirty(sel)) {
-        for (int64_t i = 0; i < n; i++) {
-            DomElement* opt = (DomElement*)dom_unwrap_element(js_elements_get_int(arr, i));
-            if (!opt || opt->has_attribute("disabled")) continue;
-            any_selected = true;
-            if (opt != placeholder) any_non_placeholder_selected = true;
-            break;
-        }
+    if (!scan.any_selected && !is_listbox && !_select_is_dirty(sel) &&
+        scan.first_enabled != scan.placeholder) {
+        scan.any_non_placeholder_selected = scan.first_enabled != nullptr;
     }
-    return !any_non_placeholder_selected;
+    return !scan.any_non_placeholder_selected;
 }
 
 // ----------------------------------------------------------------------
@@ -8736,6 +8911,7 @@ static bool _select_value_missing(DomElement* sel) {
 // spec §4.10.21.4 "Form reset" + each control's reset algorithm.
 static void _reset_form_control(DomElement* elem) {
     if (!elem || !elem->tag_name) return;
+    dom_set_user_validity(elem, false);
     const char* tag = elem->tag_name;
     if (str_icmp_cstr(tag, "input") == 0) {
         const char* itype = _input_type_lower(elem);
@@ -8915,18 +9091,43 @@ static bool _radio_group_visit(DomElement* elem, void* ctx) {
     if (strcmp(dom_input_type_lower(elem), "radio") != 0) return true;
     const char* name = elem->get_attribute("name");
     if (!name || strcmp(name, state->name) != 0) return true;
-    if (_nearest_enclosing_form(elem, NULL) == state->form_scope) {
+    if (dom_find_form_owner(elem) == state->form_scope) {
         if (dom_get_checkedness(elem)) *state->any_checked = true;
         if (elem->has_attribute("required")) *state->any_required = true;
     }
     return true;
 }
 
-static Item _build_validity_state(DomElement* elem) {
-    Item vs = js_new_object();
-    // Set Symbol.toStringTag = "ValidityState" so
-    // Object.prototype.toString.call(validity) === "[object ValidityState]"
-    dom_realm_set(vs, js_well_known_symbol_key(4), js_name_item("ValidityState"));
+static bool dom_radio_group_has_checked(DomElement* element) {
+    if (!element) return false;
+    const char* name = element->get_attribute("name");
+    if (!name || !name[0]) return dom_get_checkedness(element);
+    DomNode* root = element;
+    while (root->parent) root = root->parent;
+    bool any_checked = false;
+    bool any_required = false;
+    RadioGroupScanCtx context = {
+        name, dom_find_form_owner(element), &any_checked, &any_required
+    };
+    dom_walk_elements(root, _radio_group_visit, &context);
+    return any_checked;
+}
+
+typedef struct DomValiditySnapshot {
+    bool value_missing;
+    bool type_mismatch;
+    bool pattern_mismatch;
+    bool too_long;
+    bool too_short;
+    bool range_overflow;
+    bool range_underflow;
+    bool step_mismatch;
+    bool bad_input;
+    bool custom_error;
+    bool valid;
+} DomValiditySnapshot;
+
+static DomValiditySnapshot dom_compute_validity(DomElement* elem) {
     bool value_missing   = false;
     bool type_mismatch   = false;
     bool pattern_mismatch = false;
@@ -8953,7 +9154,7 @@ static Item _build_validity_state(DomElement* elem) {
 
         const char* tag = elem->tag_name ? elem->tag_name : "";
         const char* val = _elem_current_value(elem);
-        bool val_empty  = (val[0] == '\0');
+        bool val_empty = dom_element_value_is_empty(elem, val);
 
         // Typed value setters already sanitize through the module codec. Keeping
         // validity on that same grammar prevents calendar and step semantics
@@ -8994,8 +9195,12 @@ static Item _build_validity_state(DomElement* elem) {
                             }
                         }
                     }
-                    DomElement* root = form_scope ? form_scope :
-                        (_js_current_document ? (DomElement*)_js_current_document->root : nullptr);
+                    DomElement* root = form_scope;
+                    if (!root) {
+                        DomNode* top = elem;
+                        while (top->parent) top = top->parent;
+                        root = top->is_element() ? top->as_element() : nullptr;
+                    }
                     bool any_checked = false;
                     bool any_required = own_required;
                     RadioGroupScanCtx scan_ctx = {
@@ -9013,9 +9218,13 @@ static Item _build_validity_state(DomElement* elem) {
                 if (strcmp(itype, "checkbox") == 0) {
                     value_missing = !dom_get_checkedness(elem);
                 } else if (strcmp(itype, "file") == 0) {
-                    Item files = radiant_input_files(elem);
-                    value_missing = get_type_id(files) != LMD_TYPE_ARRAY ||
-                                    js_array_length(files) == 0;
+                    if (js_active_runtime_state) {
+                        Item files = radiant_input_files(elem);
+                        value_missing = get_type_id(files) != LMD_TYPE_ARRAY ||
+                                        js_array_length(files) == 0;
+                    } else {
+                        value_missing = true;
+                    }
                 } else {
                     value_missing = val_empty;
                 }
@@ -9056,12 +9265,22 @@ static Item _build_validity_state(DomElement* elem) {
                 char* full_pattern = mem_join3("^(?:", 4, pattern, plen, ")$", 2,
                                                MEM_CAT_JS_RUNTIME);
                 if (full_pattern) {
-                    Item re = js_create_regex(full_pattern, (int)strlen(full_pattern), "", 0);
+                    if (js_active_runtime_state) {
+                        Item re = js_create_regex(full_pattern,
+                            (int)strlen(full_pattern), "", 0);
+                        Item result = js_regex_test(re, js_name_item(val));
+                        pattern_mismatch = !((result.item & 0xFF) != 0 &&
+                            result.item != ITEM_NULL);
+                    } else {
+                        re2::RE2::Options options = lam::re2_glue_default_options();
+                        re2::RE2* re = lam::re2_glue_compile(full_pattern,
+                            strlen(full_pattern), options, "dom-validity");
+                        if (re) {
+                            pattern_mismatch = !re2::RE2::FullMatch(val, *re);
+                            lam::re2_glue_release(re);
+                        }
+                    }
                     mem_free(full_pattern);
-                    Item val_item = js_name_item(val);
-                    Item result = js_regex_test(re, val_item);
-                    // pattern mismatch if regex does NOT match
-                    pattern_mismatch = !((result.item & 0xFF) != 0 && result.item != ITEM_NULL);
                 }
             }
         }
@@ -9115,6 +9334,17 @@ static Item _build_validity_state(DomElement* elem) {
                   bad_input || custom_error);
     }
 
+    return {value_missing, type_mismatch, pattern_mismatch, too_long,
+        too_short, range_overflow, range_underflow, step_mismatch, bad_input,
+        custom_error, valid};
+}
+
+static Item _build_validity_state(DomElement* elem) {
+    DomValiditySnapshot validity = dom_compute_validity(elem);
+    Item vs = js_new_object();
+    // Set Symbol.toStringTag = "ValidityState" so
+    // Object.prototype.toString.call(validity) === "[object ValidityState]"
+    dom_realm_set(vs, js_well_known_symbol_key(4), js_name_item("ValidityState"));
     auto _b = [](bool v) -> Item { return (Item){.item = b2it(v)}; };
 #define JS_DOM_VALIDITY_FIELDS(M) \
     M("valueMissing", value_missing) M("typeMismatch", type_mismatch) \
@@ -9122,7 +9352,7 @@ static Item _build_validity_state(DomElement* elem) {
     M("tooShort", too_short) M("rangeOverflow", range_overflow) \
     M("rangeUnderflow", range_underflow) M("stepMismatch", step_mismatch) \
     M("badInput", bad_input) M("customError", custom_error) M("valid", valid)
-#define JS_DOM_SET_VALIDITY_FIELD(name, value) dom_realm_set_cstr(vs, name, _b(value));
+#define JS_DOM_SET_VALIDITY_FIELD(name, value) dom_realm_set_cstr(vs, name, _b(validity.value));
     JS_DOM_VALIDITY_FIELDS(JS_DOM_SET_VALIDITY_FIELD)
 #undef JS_DOM_SET_VALIDITY_FIELD
 #undef JS_DOM_VALIDITY_FIELDS
@@ -9136,6 +9366,88 @@ static bool dom_is_constraint_control(DomElement* elem) {
            str_icmp_cstr(elem->tag_name, "select") == 0 ||
            str_icmp_cstr(elem->tag_name, "textarea") == 0 ||
            str_icmp_cstr(elem->tag_name, "button") == 0;
+}
+
+typedef struct DomInvalidDescendantScan {
+    DomElement* scope;
+    bool by_form_owner;
+    bool found_invalid;
+} DomInvalidDescendantScan;
+
+static bool dom_invalid_descendant_visit(DomElement* element, void* context) {
+    DomInvalidDescendantScan* scan = (DomInvalidDescendantScan*)context;
+    if (scan->found_invalid) return false;
+    if (dom_is_constraint_control(element) &&
+        (!scan->by_form_owner || dom_find_form_owner(element) == scan->scope) &&
+        !dom_compute_validity(element).valid) {
+        scan->found_invalid = true;
+        return false;
+    }
+    return true;
+}
+
+extern "C" int dom_css_element_matches_validity(void* element_ptr,
+        bool invalid, bool user) {
+    DomElement* element = (DomElement*)element_ptr;
+    if (!element || !element->tag_name) return 0;
+    const char* tag = element->tag_name;
+    bool form = str_icmp_cstr(tag, "form") == 0;
+    bool fieldset = str_icmp_cstr(tag, "fieldset") == 0;
+    if (user && (form || fieldset ||
+        (str_icmp_cstr(tag, "input") != 0 &&
+         str_icmp_cstr(tag, "textarea") != 0 &&
+         str_icmp_cstr(tag, "select") != 0))) return 0;
+    if (form || fieldset) {
+        DomInvalidDescendantScan scan = {element, form, false};
+        if (form) {
+            DomNode* root = element;
+            while (root->parent) root = root->parent;
+            dom_walk_elements(root, dom_invalid_descendant_visit, &scan);
+        } else {
+            dom_walk_elements(element->first_child, dom_invalid_descendant_visit,
+                &scan);
+        }
+        return scan.found_invalid == invalid;
+    }
+    if (!dom_is_constraint_control(element) ||
+        (user && !element->user_validity())) return 0;
+    return (!dom_compute_validity(element).valid) == invalid;
+}
+
+extern "C" void dom_set_user_validity(void* element_ptr, bool value) {
+    DomElement* element = (DomElement*)element_ptr;
+    if (!element || element->user_validity() == value) return;
+    element->set_user_validity(value);
+    // User validity can change without a value change (for example submit).
+    dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE, element);
+}
+
+typedef struct DomFormUserValidityScan {
+    DomElement* form;
+    bool changed;
+} DomFormUserValidityScan;
+
+static bool dom_form_user_validity_visit(DomElement* element, void* context) {
+    DomFormUserValidityScan* scan = (DomFormUserValidityScan*)context;
+    if (element->tag_name &&
+        (_is_tag(element, "input") || _is_tag(element, "textarea") ||
+         _is_tag(element, "select")) &&
+        dom_find_form_owner(element) == scan->form &&
+        !element->user_validity()) {
+        element->set_user_validity(true);
+        scan->changed = true;
+    }
+    return true;
+}
+
+extern "C" void dom_form_mark_user_validity(void* form_ptr) {
+    DomElement* form = (DomElement*)form_ptr;
+    if (!_is_tag(form, "form")) return;
+    DomNode* root = form;
+    while (root->parent) root = root->parent;
+    DomFormUserValidityScan scan = {form, false};
+    dom_walk_elements(root, dom_form_user_validity_visit, &scan);
+    if (scan.changed) dom_mutation_notify(DOM_JS_MUTATION_CONTROL_VALUE, form);
 }
 
 static void dom_dispatch_invalid_event(Item target_item) {
@@ -10072,7 +10384,7 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     // namespace. The direct createElementNS Document binding records this URI.
     if (prop_id == JS_DOM_PROP_NAMESPACE_URI) {
         const char* ns = dom_element_namespace_uri(elem);
-        return ns ? js_name_item(ns) : ItemNull;
+        return ns && *ns ? js_name_item(ns) : ItemNull;
     }
 
     if (prop_id == JS_DOM_PROP_OWNER_SVGELEMENT) {
@@ -10531,6 +10843,10 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
     if (prop_id == JS_DOM_PROP_CHECKED && _is_tag(elem, "input")) {
         return (Item){.item = b2it(_get_checkedness(elem))};
     }
+    if (prop_id == JS_DOM_PROP_INDETERMINATE &&
+        _is_tag(elem, "input") && strcmp(_input_type_lower(elem), "checkbox") == 0) {
+        return (Item){.item = b2it(dom_get_indeterminate(elem))};
+    }
     if (prop_id == JS_DOM_PROP_DISABLED &&
         (_is_tag(elem, "input") || _is_tag(elem, "button") ||
          _is_tag(elem, "select") || _is_tag(elem, "textarea") ||
@@ -10539,6 +10855,12 @@ extern "C" Item dom_get_property_impl(Item elem_item, Item prop_name) {
         return (Item){.item = b2it(elem->has_attribute("disabled"))};
     }
     if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
+        RadiantInputValueKind kind = (RadiantInputValueKind)
+            dom_engine_input_value_kind(_input_type_lower(elem));
+        if (dom_input_kind_has_range(kind)) {
+            const char* live = dom_engine_input_live_value(elem);
+            return js_name_item(live ? live : "");
+        }
         const char* v = elem->get_attribute("value");
         return js_name_item(v ? v : "");
     }
@@ -11203,12 +11525,30 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             if (scroll_value < 0.0f) scroll_value = 0.0f;
             float next_x = is_vertical ? old_scroll_x : scroll_value;
             float next_y = is_vertical ? scroll_value : old_scroll_y;
+            if (dom_scroll_operation_override.active) {
+                next_x = dom_scroll_operation_override.x;
+                next_y = dom_scroll_operation_override.y;
+            }
+            // The atomic two-axis API path must retain the root setter's
+            // nonnegative viewport range on both coordinates.
+            if (next_x < 0.0f) next_x = 0.0f;
+            if (next_y < 0.0f) next_y = 0.0f;
             DocState* state = elem->doc->state;
             if (state && dom_has_committed_geometry_snapshot(elem->doc) &&
                 elem->scroller && elem->scroll()->pane) {
                 ScrollPane* pane = elem->scroll()->pane;
-                scroll_state_set_position_for_view(state, static_cast<View*>(elem),
-                    pane, next_x, next_y, true);
+                // A committed CSSOM scroll write must use the same snap positions
+                // as wheel scrolling before its value becomes observable.
+                scroll_snap_adjust_position(lam::view_as_block(static_cast<View*>(elem)),
+                    &next_x, &next_y);
+                bool smooth = dom_scroll_should_animate(elem) &&
+                    scroll_state_begin_smooth_for_view(state, static_cast<View*>(elem),
+                        pane, next_x, next_y);
+                if (!smooth) {
+                    scroll_state_cancel_smooth_for_view(state, static_cast<View*>(elem));
+                    scroll_state_set_position_for_view(state, static_cast<View*>(elem),
+                        pane, next_x, next_y, true);
+                }
                 scroll_state_get_position_for_view(state, static_cast<View*>(elem),
                     pane, &next_x, &next_y, nullptr, nullptr);
             } else if (_js_current_ui_context &&
@@ -11267,15 +11607,24 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
             DocState* state = elem->doc ? elem->doc->state : nullptr;
             scroll_state_get_position_for_view(state, static_cast<View*>(elem),
                 elem->scroll()->pane, &current_x, &current_y, NULL, NULL);
-            if (is_vertical) {
-                scroll_state_set_position_for_view(state, static_cast<View*>(elem),
-                    elem->scroll()->pane, current_x, scroll_value, false);
-                elem->set_has_pending_element_scroll_y(false);
-            } else {
-                scroll_state_set_position_for_view(state, static_cast<View*>(elem),
-                    elem->scroll()->pane, scroll_value, current_y, false);
-                elem->set_has_pending_element_scroll_x(false);
+            float next_x = is_vertical ? current_x : scroll_value;
+            float next_y = is_vertical ? scroll_value : current_y;
+            if (dom_scroll_operation_override.active) {
+                next_x = dom_scroll_operation_override.x;
+                next_y = dom_scroll_operation_override.y;
             }
+            scroll_snap_adjust_position(lam::view_as_block(static_cast<View*>(elem)),
+                &next_x, &next_y);
+            bool smooth = dom_scroll_should_animate(elem) &&
+                scroll_state_begin_smooth_for_view(state, static_cast<View*>(elem),
+                    elem->scroll()->pane, next_x, next_y);
+            if (!smooth) {
+                scroll_state_cancel_smooth_for_view(state, static_cast<View*>(elem));
+                scroll_state_set_position_for_view(state, static_cast<View*>(elem),
+                    elem->scroll()->pane, next_x, next_y, false);
+            }
+            if (is_vertical) elem->set_has_pending_element_scroll_y(false);
+            else elem->set_has_pending_element_scroll_x(false);
             log_debug("dom_set_property: set %s=%.1f on <%s>",
                       prop, scroll_value, elem->tag_name ? elem->tag_name : "?");
             dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
@@ -11284,6 +11633,27 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 
         // initial script execution can see a pane before flex sizing computes its max;
         // defer the requested scroll so finalization clamps it against the real overflow.
+        if (dom_scroll_operation_override.active) {
+            float pending_x = dom_scroll_operation_override.x;
+            float pending_y = dom_scroll_operation_override.y;
+            if (!elem->scroller || !elem->scroll()->pane) {
+                // A combined call bypasses the scalar setter's provisional
+                // range check; apply it to both axes before retaining them.
+                if (pending_x < 0.0f &&
+                    layout_element_writing_mode(elem) != WM_VERTICAL_RL) {
+                    pending_x = 0.0f;
+                }
+                if (pending_y < 0.0f && flex_direction != CSS_VALUE_COLUMN_REVERSE) {
+                    pending_y = 0.0f;
+                }
+            }
+            elem->set_pending_scroll_x(pending_x);
+            elem->set_pending_scroll_y(pending_y);
+            elem->set_has_pending_element_scroll_x(true);
+            elem->set_has_pending_element_scroll_y(true);
+            dom_queue_scroll_event(elem, old_scroll_x, old_scroll_y);
+            return value;
+        }
         if (is_vertical) {
             elem->set_pending_scroll_y(scroll_value);
             elem->set_has_pending_element_scroll_y(true);
@@ -11500,6 +11870,11 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
         dom_expando_flag_set(elem, "__chkDirty", (Item){.item = b2it(true)});
         return value;
     }
+    if (prop_id == JS_DOM_PROP_INDETERMINATE &&
+        _is_tag(elem, "input") && strcmp(_input_type_lower(elem), "checkbox") == 0) {
+        dom_set_indeterminate(elem, js_is_truthy(value));
+        return value;
+    }
 
     // input.defaultChecked setter — reflects `checked` attribute. Per spec,
     // when the dirty checkedness flag is false, current checkedness also
@@ -11595,6 +11970,16 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
     }
     if (prop_id == JS_DOM_PROP_VALUE && _is_tag(elem, "input") && !tc_is_text_control_elem(elem)) {
         const char* s = dom_to_attr_cstr(value);
+        RadiantInputValueKind kind = (RadiantInputValueKind)
+            dom_engine_input_value_kind(_input_type_lower(elem));
+        if (dom_input_kind_has_range(kind)) {
+            // Numeric/date IDL values are live state; the content attribute is
+            // only the default and must not replace it on each assignment.
+            dom_engine_input_set_live_value(elem, s);
+            dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem, elem->parent,
+                "value");
+            return value;
+        }
         elem->set_attribute("value", s);
         if (elem->form) {
             elem->form->value = elem->get_attribute("value");
@@ -14204,6 +14589,7 @@ static Item dom_scroll_into_view_with_options(DomElement* elem,
     if (!elem) return make_js_undefined();
     DomScrollAlign block = DOM_SCROLL_ALIGN_START;
     DomScrollAlign inline_align = DOM_SCROLL_ALIGN_NEAREST;
+    DomScrollBehavior behavior = DOM_SCROLL_BEHAVIOR_AUTO;
     if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
         RootFrame roots(1);
         Rooted<Item> options(roots, args[0]);
@@ -14211,11 +14597,13 @@ static Item dom_scroll_into_view_with_options(DomElement* elem,
             dom_realm_get_cstr(options.get(), "block"), block);
         inline_align = dom_scroll_align_from_item(
             dom_realm_get_cstr(options.get(), "inline"), inline_align);
+        behavior = dom_scroll_behavior_from_item(
+            dom_realm_get_cstr(options.get(), "behavior"));
     } else if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_BOOL &&
                !it2b(args[0])) {
         block = DOM_SCROLL_ALIGN_END;
     }
-    dom_queue_scroll_into_view(elem, false, false, block, inline_align);
+    dom_queue_scroll_into_view(elem, false, false, block, inline_align, behavior);
     log_debug("dom_scrollIntoView: queued target <%s>",
               elem->tag_name ? elem->tag_name : "?");
     return make_js_undefined();
@@ -14234,11 +14622,24 @@ extern "C" Item dom_scroll_operation_bridge(Item elem_item,
                                                 Item* args, int argc) {
     float x = 0.0f;
     float y = 0.0f;
+    DomScrollBehavior behavior = DOM_SCROLL_BEHAVIOR_AUTO;
     if (argc >= 1 && get_type_id(args[0]) == LMD_TYPE_MAP) {
         Item left = dom_realm_get_cstr(args[0], "left");
         Item top = dom_realm_get_cstr(args[0], "top");
         x = dom_item_to_float(left);
         y = dom_item_to_float(top);
+        if (operation != JUBE_DOM_SCROLL_BY) {
+            if (is_js_undefined(left)) {
+                x = dom_item_to_float(dom_get_property_impl(
+                    elem_item, js_string_key("scrollLeft")));
+            }
+            if (is_js_undefined(top)) {
+                y = dom_item_to_float(dom_get_property_impl(
+                    elem_item, js_string_key("scrollTop")));
+            }
+        }
+        behavior = dom_scroll_behavior_from_item(
+            dom_realm_get_cstr(args[0], "behavior"));
     } else {
         if (argc >= 1) x = dom_item_to_float(args[0]);
         if (argc >= 2) y = dom_item_to_float(args[1]);
@@ -14249,10 +14650,10 @@ extern "C" Item dom_scroll_operation_bridge(Item elem_item,
         x += dom_item_to_float(dom_get_property_impl(elem_item, js_string_key("scrollLeft")));
         y += dom_item_to_float(dom_get_property_impl(elem_item, js_string_key("scrollTop")));
     }
-    // scroll(), scrollTo(), and scrollBy() share the element scroll setters
-    // so pending viewport/element scroll state stays in one place.
-    dom_set_property_impl(elem_item, js_string_key("scrollLeft"), dom_float_item(x));
+    // One scroll API call updates both axes and applies one behavior decision.
+    dom_scroll_operation_override = {true, x, y, behavior};
     dom_set_property_impl(elem_item, js_string_key("scrollTop"), dom_float_item(y));
+    dom_scroll_operation_override = {};
     return make_js_undefined();
 }
 
@@ -15838,7 +16239,12 @@ extern "C" Item dom_core_set_attribute(Item n, Item name, Item value) {
     if (!attr_name || !attr_val) return ItemNull;
     if (dom_is_internal_attr(attr_name)) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
-    elem->set_attribute(attr_name, attr_val);
+    if (!elem->set_attribute(attr_name, attr_val)) return ItemNull;
+    if (strchr(attr_name, ':')) {
+        // setAttribute creates a null-namespace attribute even when its name
+        // contains a colon; a prefix in the spelling does not bind a URI.
+        dom_element_record_namespaced_attribute(elem, "", attr_name, attr_val);
+    }
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_compile_event_attr_to_expando(elem, attr_name, attr_val);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
@@ -15859,6 +16265,9 @@ extern "C" Item dom_core_remove_attribute(Item n, Item name) {
     if (!attr_name) return ItemNull;
     const char* old_value = elem->get_attribute(attr_name);
     elem->remove_attribute(attr_name);
+    if (strchr(attr_name, ':')) {
+        dom_element_remove_namespaced_attribute(elem, "", attr_name);
+    }
     dom_aria_clear_direct_ref(elem, attr_name);
     dom_clear_event_attr_expando(elem, attr_name);
     dom_reinit_behavior_if_constraint_attr(elem, attr_name);
@@ -15962,6 +16371,7 @@ extern "C" Item dom_core_matches(Item n, Item selector) {
     }
 
     SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
+    selector_matcher_set_scope_element(matcher, elem);
     MatchResult result;
     bool matched = selector_matcher_matches_group(matcher, selector_group, elem, &result);
     return (Item){.item = b2it(matched ? 1 : 0)};
@@ -15981,6 +16391,7 @@ extern "C" Item dom_core_closest(Item n, Item selector) {
     }
 
     SelectorMatcher* matcher = dom_create_selector_matcher(elem->doc);
+    selector_matcher_set_scope_element(matcher, elem);
     MatchResult mresult;
     DomElement* current = elem;
     while (current) {
@@ -16086,6 +16497,23 @@ extern "C" Item dom_core_split_text(Item n, Item offset) {
 // Namespaced-attribute and predicate rows.
 // ---------------------------------------------------------------------------
 
+static const char* dom_find_qualified_attribute(DomElement* elem,
+    const char* namespace_uri, const char* local_name) {
+    if (!elem || !namespace_uri || !local_name) return nullptr;
+    int count = 0;
+    const char** names = elem->attribute_names(&count);
+    for (int i = 0; names && i < count; i++) {
+        if (dom_is_internal_attr(names[i])) continue;
+        const char* candidate_local = nullptr;
+        const char* candidate_uri = dom_element_attribute_namespace_uri(
+            elem, names[i], &candidate_local);
+        if (candidate_uri && candidate_local &&
+            strcmp(candidate_uri, namespace_uri) == 0 &&
+            strcmp(candidate_local, local_name) == 0) return names[i];
+    }
+    return nullptr;
+}
+
 extern "C" Item dom_core_get_attribute_ns(Item n, Item ns, Item local) {
     DomElement* elem = dom_op_element(n);
     if (!elem) return ItemNull;
@@ -16103,18 +16531,12 @@ extern "C" Item dom_core_set_attribute_ns(Item n, Item ns, Item qname, Item valu
     const char* qualified_name = fn_to_cstr(qname);
     const char* value = dom_to_attr_cstr(value_arg);
     if (!qualified_name || !value) return ItemNull;
-    const char* local_name = strrchr(qualified_name, ':');
-    local_name = local_name ? local_name + 1 : qualified_name;
     const char* stored_name = qualified_name;
-    char xlink_name[128];
-    if (namespace_uri && strcmp(namespace_uri, "http://www.w3.org/1999/xlink") == 0) {
-        snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", local_name);
-        elem->set_attribute(xlink_name, value);
-        // Renderer-side image/use resolution reads the ordinary SVG name.
-        stored_name = local_name;
-    }
     const char* old_value = elem->get_attribute(stored_name);
-    elem->set_attribute(stored_name, value);
+    if (!elem->set_attribute(stored_name, value)) return ItemNull;
+    if (namespace_uri && *namespace_uri &&
+        !dom_element_record_namespaced_attribute(
+            elem, namespace_uri, qualified_name, value)) return ItemNull;
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, stored_name, old_value);
     return ItemNull;
@@ -16126,14 +16548,33 @@ extern "C" Item dom_core_remove_attribute_ns(Item n, Item ns, Item local) {
     const char* namespace_uri = fn_to_cstr(ns);
     const char* local_name = fn_to_cstr(local);
     if (!local_name) return ItemNull;
+    const char* qualified_name = nullptr;
+    for (DomNamespacedAttribute* attr = dom_element_namespaced_attributes(elem);
+         attr; attr = attr->next) {
+        if (attr->active && namespace_uri &&
+            strcmp(attr->namespace_uri, namespace_uri) == 0 &&
+            strcmp(attr->local_name, local_name) == 0) {
+            qualified_name = attr->qualified_name;
+            break;
+        }
+    }
+    const char* stored_name = qualified_name ? qualified_name :
+        dom_find_qualified_attribute(
+            elem, namespace_uri ? namespace_uri : "", local_name);
+    if (!stored_name) return ItemNull;
     char xlink_name[128];
-    const char* stored_name = local_name;
     if (namespace_uri && strcmp(namespace_uri, "http://www.w3.org/1999/xlink") == 0) {
+        // Older documents may carry the retired internal mirror key.
         snprintf(xlink_name, sizeof(xlink_name), "__lambda_xlink_%s", local_name);
         elem->remove_attribute(xlink_name);
+        if (!qualified_name) {
+            snprintf(xlink_name, sizeof(xlink_name), "xlink:%s", local_name);
+            stored_name = xlink_name;
+        }
     }
     const char* old_value = elem->get_attribute(stored_name);
     elem->remove_attribute(stored_name);
+    dom_element_remove_namespaced_attribute(elem, namespace_uri, local_name);
     dom_mutation_notify(DOM_JS_MUTATION_ATTRIBUTE, (DomNode*)elem,
                            elem->parent, stored_name, old_value);
     return ItemNull;
@@ -16665,10 +17106,8 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
         return dom_core_set_attribute(elem_item, argc > 0 ? args[0] : ItemNull, argc > 1 ? args[1] : ItemNull);
     }
 
-    // SVG/XLink attributes must retain namespace identity while also mirroring
-    // their qualified name into the shared DOM attribute store used by the SVG
-    // renderer. The legacy XLink branch is the only non-null namespace traced
-    // by the drawing probes; other namespaces keep ordinary DOM semantics.
+    // Namespaced attributes retain URI identity separately from the renderer's
+    // qualified-name attribute store.
     if (operation == JUBE_DOM_SET_ATTRIBUTE_NS) {
         if (argc < 3) return ItemNull;
         return dom_core_set_attribute_ns(elem_item, argc >= 1 ? args[0] : ItemNull, argc >= 2 ? args[1] : ItemNull, argc >= 3 ? args[2] : ItemNull);

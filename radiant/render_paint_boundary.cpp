@@ -283,24 +283,15 @@ bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float
     if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
                                    stops, stop_capacity, &path, &stop_count)) return false;
 
-    float angle_rad = math_degrees_to_radians(gradient->angle);
-    float dx = sinf(angle_rad);
-    float dy = -cosf(angle_rad);
-    float half_w = view->width * 0.5f;
-    float half_h = view->height * 0.5f;
-    float center_x = x + half_w;
-    float center_y = y + half_h;
-    float abs_dx = fabsf(dx);
-    float abs_dy = fabsf(dy);
-    float dist = (abs_dx * view->height < abs_dy * view->width)
-        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
-        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
+    Rect rect = {x, y, view->width, view->height};
+    RadiantGradientLine line = radiant_linear_gradient_line(
+        rect, radiant_linear_gradient_used_angle(gradient, rect));
 
     out->path = path;
-    out->x1 = center_x - dx * dist;
-    out->y1 = center_y - dy * dist;
-    out->x2 = center_x + dx * dist;
-    out->y2 = center_y + dy * dist;
+    out->x1 = line.x1;
+    out->y1 = line.y1;
+    out->x2 = line.x2;
+    out->y2 = line.y2;
     out->stops = stops;
     out->stop_count = stop_count;
     return true;

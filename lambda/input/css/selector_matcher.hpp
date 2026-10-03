@@ -68,7 +68,8 @@ typedef enum PseudoElementType {
     PSEUDO_ELEMENT_MARKER,        // ::marker
     PSEUDO_ELEMENT_PLACEHOLDER,   // ::placeholder
     // keep existing numeric values stable because cascade routing uses them
-    PSEUDO_ELEMENT_BACKDROP       // ::backdrop
+    PSEUDO_ELEMENT_BACKDROP,      // ::backdrop
+    PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON // ::file-selector-button
 } PseudoElementType;
 
 /**
@@ -461,7 +462,7 @@ bool selector_matcher_matches_not(SelectorMatcher* matcher,
  * @param selectors Array of selectors
  * @param count Number of selectors
  * @param element Element to test
- * @return true if element has a descendant matching any selector
+ * @return true if any relative selector matches from the element as anchor
  */
 bool selector_matcher_matches_has(SelectorMatcher* matcher,
                                   CssSelector** selectors,

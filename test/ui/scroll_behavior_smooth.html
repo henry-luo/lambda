@@ -1,0 +1,48 @@
+<!doctype html>
+<style>
+  body { margin: 0; }
+  .pane { width: 160px; height: 100px; overflow: auto; }
+  #smooth { scroll-behavior: smooth; }
+  .content { width: 500px; height: 500px; }
+</style>
+<button id="start">Start smooth scroll</button>
+<button id="instant">Override with instant scroll</button>
+<button id="plain-set">Set auto scroll</button>
+<button id="forced">Force smooth scroll on auto pane</button>
+<button id="top-only">Change only top coordinate</button>
+<span id="computed"></span>
+<span id="immediate"></span>
+<span id="midpoint"></span>
+<span id="forced-immediate"></span>
+<div id="smooth" class="pane"><div class="content"></div></div>
+<div id="plain" class="pane"><div class="content"></div></div>
+<script>
+  document.getElementById('start').addEventListener('click', () => {
+    const pane = document.getElementById('smooth');
+    document.getElementById('computed').textContent =
+      window.getComputedStyle(pane).scrollBehavior;
+    pane.scrollTop = 300;
+    document.getElementById('immediate').textContent =
+      String(Math.round(pane.scrollTop));
+    setTimeout(() => {
+      const position = pane.scrollTop;
+      document.getElementById('midpoint').textContent =
+        position > 0 && position < 300 ? 'in-flight' : 'outside';
+    }, 150);
+  });
+  document.getElementById('plain-set').addEventListener('click', () => {
+    document.getElementById('plain').scrollTop = 300;
+  });
+  document.getElementById('instant').addEventListener('click', () => {
+    document.getElementById('smooth').scrollTo({top: 0, behavior: 'instant'});
+  });
+  document.getElementById('forced').addEventListener('click', () => {
+    const pane = document.getElementById('plain');
+    pane.scrollTo({left: 120, top: 120, behavior: 'smooth'});
+    document.getElementById('forced-immediate').textContent =
+      String(Math.round(pane.scrollLeft)) + ',' + String(Math.round(pane.scrollTop));
+  });
+  document.getElementById('top-only').addEventListener('click', () => {
+    document.getElementById('plain').scrollTo({top: 0, behavior: 'instant'});
+  });
+</script>

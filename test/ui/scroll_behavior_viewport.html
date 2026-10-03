@@ -1,0 +1,32 @@
+<!doctype html>
+<style>
+  html { scroll-behavior: smooth; }
+  html.body-only { scroll-behavior: auto; }
+  body.body-only { scroll-behavior: smooth; }
+  body { margin: 0; }
+  #go { position: fixed; top: 0; left: 0; }
+  #sample { position: fixed; top: 28px; left: 0; }
+  #body-only { position: fixed; top: 56px; left: 0; }
+  #before { height: 500px; }
+  #target { height: 100px; }
+  #after { height: 500px; }
+</style>
+<button id="go">Scroll viewport</button>
+<button id="body-only">Body smooth only</button><span id="sample"></span>
+<div id="before"></div><div id="target"></div><div id="after"></div>
+<script>
+  document.getElementById('go').addEventListener('click', () => {
+    document.getElementById('target').scrollIntoView({block: 'start'});
+    setTimeout(() => {
+      const position = document.documentElement.scrollTop;
+      document.getElementById('sample').textContent =
+        position > 0 && position < 500 ? 'in-flight' : 'outside';
+    }, 150);
+  });
+  document.getElementById('body-only').addEventListener('click', () => {
+    document.documentElement.scrollTo({top: 0, behavior: 'instant'});
+    document.documentElement.className = 'body-only';
+    document.body.className = 'body-only';
+    document.getElementById('target').scrollIntoView({block: 'start'});
+  });
+</script>

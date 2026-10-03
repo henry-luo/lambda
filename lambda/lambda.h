@@ -2954,6 +2954,8 @@ extern "C" {
     // Admit an exact primitive ArrayNum, or reify an empty ordinary Array,
     // under a rank-one primitive T[] contract and install its certificate.
     // Other carriers retain the complete checked-boundary path.
+    Item lambda_fill_for_contract(Item count, Item value, Type* expected,
+        const char* boundary);
     Item lambda_array_admit_numeric_contract(Item value, Type* expected,
         const char* boundary);
     // `[]` admitted under `expected`: a certified empty ArrayNum for a

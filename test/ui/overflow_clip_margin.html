@@ -1,0 +1,29 @@
+<!doctype html>
+<style>
+  body { margin: 0; background: white; }
+  .box { position: absolute; left: 20px; width: 100px; height: 50px;
+         overflow: clip; background: #ddd; }
+  .child { position: absolute; left: -8px; top: 20px;
+           width: 10px; height: 10px; background: red; }
+  #default { top: 20px; }
+  #expanded { top: 100px; overflow-clip-margin: 10px; }
+  #hidden { top: 180px; overflow: hidden; overflow-clip-margin: border-box 15px; }
+  .edge { position: absolute; left: 140px; width: 100px; height: 50px;
+          box-sizing: border-box; border: 4px solid black; padding: 10px;
+          overflow: clip; background: #ddd; }
+  .edge .inside { position: absolute; left: 0; top: 20px;
+                  width: 20px; height: 10px; background: red; }
+  #content { top: 20px; overflow-clip-margin: content-box; }
+  #content-expanded { top: 100px; overflow-clip-margin: content-box 7px; }
+  #inset { top: 180px; overflow-clip-margin: padding-box -5px; }
+</style>
+<div id="default" class="box"><div class="child"></div></div>
+<div id="expanded" class="box"><div class="child"></div></div>
+<div id="hidden" class="box"><div class="child"></div></div>
+<div id="content" class="edge"><div class="inside"></div></div>
+<div id="content-expanded" class="edge"><div class="inside"></div></div>
+<div id="inset" class="edge"><div class="inside"></div></div>
+<script>
+  document.querySelector('#expanded .child').addEventListener('click', () =>
+    document.body.setAttribute('data-hit', 'yes'));
+</script>

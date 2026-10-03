@@ -1,6 +1,6 @@
 # Julia benchmark ports
 
-Native Julia implementations of all **69 registered entries**, or **63 canonical
+Native Julia implementations of all **73 registered entries**, or **67 canonical
 rows** after the shared runner removes duplicate workloads. Tested with Julia
 1.13.1 on macOS arm64 and the runner's pinned Node v22.13.0. No Julia packages
 are required; the ports use Base and the Printf standard library.
@@ -14,6 +14,11 @@ are required; the ports use Base and the Printf standard library.
 | Larceny | 12 |
 | Text | 7 |
 | JetStream | 9 |
+| Julia microbenchmarks | 4 |
+
+The new `julia` workload suite is documented in [SUITE.md](SUITE.md). Its
+native Julia scripts live in `julia/julia/`; its other language ports share the
+outer `julia/` suite directory.
 
 From the repository root, with `julia` on PATH or `JULIA_EXE` set:
 
@@ -60,6 +65,10 @@ body are excluded from that marker and included in process time. Printing inside
 a workload formats into an IOBuffer during timing; flushing to stdout occurs
 afterward. Node uses each checked-in script's own warmup and output policy, so
 these execution figures do not have identical compilation/I/O accounting.
+The `julia` microbenchmark suite fixes one warmup in **every** language and
+times synchronous formatted output to the OS null device. Its output is not
+buffered until after the timer, and its warmup is not disabled by the setting
+below.
 
 For process measurements with one workload and no extra warmup:
 
@@ -72,8 +81,8 @@ Both policies use one Julia thread. The runner keeps Julia's depot and temporary
 files under `temp/`, records runtime version, executable hash, source hashes and
 fixture hashes, and fails on crashes, failed result checks, timeouts, or missing
 timing markers. `--verify-node` additionally requires matching result output
-after timing lines are removed. It checks all 69 entries with `--all`; without
-that flag it uses the authoritative manifest's 63 canonical rows.
+after timing lines are removed. It checks all 73 entries with `--all`; without
+that flag it uses the authoritative manifest's 67 canonical rows.
 
 AWFY inner/outer counts come from `awfy_node_iterations()`. JetStream repeat
 counts come from each Node source's `runIteration()` body:

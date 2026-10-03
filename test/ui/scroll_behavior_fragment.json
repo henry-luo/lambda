@@ -1,0 +1,17 @@
+{
+  "name": "Fragment navigation uses root scroll behavior",
+  "html": "test/ui/scroll_behavior_fragment.html",
+  "viewport": {"width": 240, "height": 240},
+  "events": [
+    {"type": "click", "target": {"selector": "#jump"}},
+    {"type": "assert_state", "target": {"selector": "#target"},
+     "state": ":target", "value": true},
+    {"type": "render_pending"},
+    {"type": "advance_time", "ms": 150, "steps": 10},
+    {"type": "assert_text", "target": {"selector": "#sample"},
+     "equals": "in-flight"},
+    {"type": "advance_time", "ms": 250, "steps": 16},
+    {"type": "assert_state_store", "target": {"selector": "html"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 500, "tolerance": 1}
+  ]
+}

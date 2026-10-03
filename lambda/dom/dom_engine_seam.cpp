@@ -30,6 +30,10 @@ DOM_ENGINE_WEAK bool dom_engine_history_set_location(DomDocument* d, const char*
 }
 DOM_ENGINE_WEAK int dom_engine_input_value_kind(const char* type) { (void)type; return 0; }
 DOM_ENGINE_WEAK const char* dom_engine_input_live_value(DomElement* e) { (void)e; return nullptr; }
+DOM_ENGINE_WEAK bool dom_engine_input_value_as_number(const char* t, const char* v,
+                                                       double* out) {
+    (void)t; (void)v; (void)out; return false;
+}
 DOM_ENGINE_WEAK bool dom_engine_input_set_live_value(DomElement* e, const char* v) {
     (void)e; (void)v; return false;
 }

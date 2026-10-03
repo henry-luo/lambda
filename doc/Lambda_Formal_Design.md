@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 19.0.0 (2026-10-03)
+**Spec version:** 20.0.0 (2026-10-03)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1316,11 +1316,16 @@ loosely across the corpus — context disambiguates, and we live with it.
   two-tier: lint rules + five boundary DSOs that must link
   fatal-undefined-clean; the rt→radiant residue (Class F) is a ratcheted
   import baseline — additions fail, deletions are progress.* [SM13, SM5]
-- **D7.1.4** Headless is **two profiles**: profile A is a link-time omission
-  of `radiant.a`; profile B a runtime flag inside radiant — same archive,
-  no `#ifdef`-stripping. Radiant sits **above** rt (layered, Option A)
-  and embeds it via a narrow `embed.h`. Public headers never define
-  build-profile macros. [SM9, SM10]
+- **D7.1.4v2** Headless is **three profiles**: A (`lambda-cli`, D7.1.6) is
+  a link-time omission of `radiant.a`; B is a runtime flag inside radiant in
+  the full `lambda.exe`; C (`lambda-headless`) is the full engine — Lambda +
+  Radiant + JS — linked against a **null windowing backend** in place of
+  GLFW, OpenGL and the native GUI/webview toolkits, with `view`/`edit`
+  refused explicitly. B and C compile the **same Radiant sources** — no
+  `#ifdef`-stripping of display code; the null backend behaves as
+  uninitialized GLFW, the state B already runs in. Radiant sits **above** rt
+  (layered, Option A) and embeds it via a narrow `embed.h`. Public headers
+  never define build-profile macros. [SM9, SM10, SM16]
 - **D7.1.5** Mark API ownership: `MarkReader` is core; `MarkBuilder` /
   `MarkEditor` are io (they take `Input*`) — ownership resolves the
   layering, not callback abstractions; forwarding shims are deleted once
@@ -2616,7 +2621,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
-| D7.1 | SM1–SM15 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
+| D7.1 | SM1–SM16 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |

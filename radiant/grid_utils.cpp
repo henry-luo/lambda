@@ -62,7 +62,7 @@ void destroy_grid_track_list(GridTrackList* track_list) {
 }
 
 // Create a new grid track size
-GridTrackSize* create_grid_track_size(GridTrackSizeType type, int value) {
+GridTrackSize* create_grid_track_size(GridTrackSizeType type, float value) {
     GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: persistent CSS GridProp owns this track node until view teardown.
     if (!track_size) return nullptr;
 

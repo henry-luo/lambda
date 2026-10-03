@@ -30,6 +30,76 @@ protected:
     }
 };
 
+TEST_F(SelectorGroupTest, InvalidOrdinaryListDoesNotApplyPartialRule) {
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        ".a, .a:bogus { color: red; } .a { color: blue; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+
+    sheet = css_parse_stylesheet(engine,
+        ".a, > .bad { color: red; } .a { color: blue; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_EQ(sheet->rule_count, 1u);
+}
+
+TEST_F(SelectorGroupTest, KnownShadowPseudoKeepsOrdinarySelectorListValid) {
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        ":host, html { line-height: 1.5; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    ASSERT_EQ(sheet->rules[0]->data.style_rule.selector_group->selector_count, 2u);
+    sheet = css_parse_stylesheet(engine,
+        "select, ::picker(select) { appearance: base-select; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    EXPECT_EQ(sheet->rules[0]->data.style_rule.selector_group->selector_count, 2u);
+}
+
+TEST_F(SelectorGroupTest, IsAndWhereDropOnlyInvalidArguments) {
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        ":is(.a, .a:bogus, > .bad), :where(.b, :bogus) { color: red; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssSelectorGroup* group = sheet->rules[0]->data.style_rule.selector_group;
+    ASSERT_NE(group, nullptr);
+    ASSERT_EQ(group->selector_count, 2u);
+    for (size_t i = 0; i < group->selector_count; i++) {
+        CssSimpleSelector* simple = group->selectors[i]->compound_selectors[0]->simple_selectors[0];
+        EXPECT_EQ(simple->function_selector_count, 1u);
+    }
+
+    sheet = css_parse_stylesheet(engine,
+        ":not(.a, :bogus) { color: red; } .a { color: blue; }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    EXPECT_EQ(sheet->rule_count, 1u);
+}
+
+TEST_F(SelectorGroupTest, CssIdentifiersUseAsciiInsensitiveNames) {
+    CssEngine* engine = CreateEngine();
+    ASSERT_NE(engine, nullptr);
+    CssStylesheet* sheet = css_parse_stylesheet(engine,
+        "@MEDIA all { DIV:FIRST-CHILD { WIDTH: 4px; } }", nullptr);
+    ASSERT_NE(sheet, nullptr);
+    ASSERT_EQ(sheet->rule_count, 1u);
+    CssRule* media = sheet->rules[0];
+    ASSERT_EQ(media->type, CSS_RULE_MEDIA);
+    ASSERT_EQ(media->data.conditional_rule.rule_count, 1u);
+    CssRule* rule = media->data.conditional_rule.rules[0];
+    ASSERT_NE(rule, nullptr);
+    ASSERT_EQ(rule->data.style_rule.declaration_count, 1u);
+    EXPECT_EQ(rule->data.style_rule.declarations[0]->property_code, CSS_PROPERTY_WIDTH);
+    CssSelector* selector = rule->data.style_rule.selector_group->selectors[0];
+    ASSERT_EQ(selector->compound_selectors[0]->simple_selector_count, 2u);
+    EXPECT_EQ(selector->compound_selectors[0]->simple_selectors[1]->type,
+              CSS_SELECTOR_PSEUDO_FIRST_CHILD);
+}
+
 // ============================================================================
 // Simple Element Selector Groups
 // ============================================================================

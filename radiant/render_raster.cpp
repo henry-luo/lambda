@@ -4,6 +4,15 @@
 #include <algorithm>
 #include <math.h>
 
+ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating) {
+    CssEnum rendering = view && view->in_line
+        ? view->inl()->image_rendering : CSS_VALUE_AUTO;
+    if (rendering == CSS_VALUE_PIXELATED) return SCALE_MODE_PIXELATED;
+    if (rendering == CSS_VALUE_CRISP_EDGES ||
+        rendering == CSS_VALUE_OPTIMIZE_SPEED) return SCALE_MODE_NEAREST;
+    return repeating ? SCALE_MODE_LINEAR_WRAP : SCALE_MODE_LINEAR;
+}
+
 static void raster_fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
     uint32_t* pixel = (uint32_t*)pixels + x;
     uint32_t* end = pixel + wd;
@@ -106,6 +115,45 @@ static uint32_t raster_area_average(ImageSurface* src, float x0, float y0, float
     return r | (g << 8) | (b << 16) | (a << 24);
 }
 
+static int raster_pixelated_source_index(float intermediate_index, float multiple,
+                                         float source_origin, float source_extent,
+                                         int source_limit) {
+    float source_index = source_origin + floorf(intermediate_index / multiple);
+    float first = std::max(0.0f, floorf(source_origin));
+    float last = std::min((float)(source_limit - 1),
+                          ceilf(source_origin + source_extent) - 1.0f);
+    return (int)std::max(first, std::min(source_index, last)); // INT_CAST_OK: image sample index
+}
+
+static uint32_t raster_pixelated_sample(ImageSurface* src, const Rect* src_rect,
+                                        const Rect* dst_rect, int dst_x, int dst_y,
+                                        int src_w, int src_h,
+                                        float x_multiple, float y_multiple) {
+    // Sample the virtual nearest-neighbor integer-multiple image through the
+    // shared bilinear mixer, so noninteger final scales blend only at pixel edges.
+    float ix = (dst_x - dst_rect->x + 0.5f) *
+        (src_rect->width * x_multiple / dst_rect->width) - 0.5f;
+    float iy = (dst_y - dst_rect->y + 0.5f) *
+        (src_rect->height * y_multiple / dst_rect->height) - 0.5f;
+    float ix0 = floorf(ix);
+    float iy0 = floorf(iy);
+    int sx0 = raster_pixelated_source_index(ix0, x_multiple,
+        src_rect->x, src_rect->width, src_w);
+    int sx1 = raster_pixelated_source_index(ix0 + 1.0f, x_multiple,
+        src_rect->x, src_rect->width, src_w);
+    int sy0 = raster_pixelated_source_index(iy0, y_multiple,
+        src_rect->y, src_rect->height, src_h);
+    int sy1 = raster_pixelated_source_index(iy0 + 1.0f, y_multiple,
+        src_rect->y, src_rect->height, src_h);
+    const uint8_t* pixels = (const uint8_t*)src->pixels;
+    const uint8_t* p11 = pixels + (size_t)sy0 * src->pitch + sx0 * 4;
+    const uint8_t* p21 = pixels + (size_t)sy0 * src->pitch + sx1 * 4;
+    const uint8_t* p12 = pixels + (size_t)sy1 * src->pitch + sx0 * 4;
+    const uint8_t* p22 = pixels + (size_t)sy1 * src->pitch + sx1 * 4;
+    return render_pixel_bilinear_mix(p11, p21, p12, p22,
+                                     ix - ix0, iy - iy0, false);
+}
+
 void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect* src_rect,
                                 Rect* dst_rect, ScaleMode scale_mode, uint8_t opacity) {
     Rect rect;
@@ -114,7 +162,8 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
     Bound* clip = ctx->clip;
     ClipShape** clip_shapes = ctx->clip_shapes;
     int clip_depth = ctx->clip_depth;
-    if (!src || !dst || !dst_rect) return;
+    if (!src || !dst || !dst_rect || dst_rect->width <= 0.0f ||
+        dst_rect->height <= 0.0f) return;
     int src_w = (src->decoded_width > 0) ? src->decoded_width : src->width;
     int src_h = (src->decoded_height > 0) ? src->decoded_height : src->height;
     Bound default_clip = {0, 0, (float)dst->width, (float)dst->height};
@@ -133,12 +182,17 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
         rect = (Rect){0, 0, (float)src_w, (float)src_h};
         src_rect = &rect;
     }
+    if (src_rect->width <= 0.0f || src_rect->height <= 0.0f) return;
     log_debug("blit surface: src(%f, %f, %f, %f) to dst(%f, %f, %f, %f), scale_mode=%d",
         src_rect->x, src_rect->y, src_rect->width, src_rect->height,
         dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height, scale_mode);
 
     float x_ratio = (float)src_rect->width / dst_rect->width;
     float y_ratio = (float)src_rect->height / dst_rect->height;
+    float pixelated_x_multiple = std::max(1.0f,
+        floorf(dst_rect->width / src_rect->width + 0.5f));
+    float pixelated_y_multiple = std::max(1.0f,
+        floorf(dst_rect->height / src_rect->height + 0.5f));
     bool downscaling = (x_ratio > 1.5f || y_ratio > 1.5f);
     int left = (int)std::max(clip->left, dst_rect->x);
     int right = (int)std::min(clip->right, dst_rect->x + dst_rect->width);
@@ -195,13 +249,14 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
         }
         uint8_t* row_pixels = (uint8_t*)dst->pixels + (i - y_off) * dst->pitch;
         for (int j = row_left; j < row_right; j++) {
-            float src_x = src_rect->x + (j - dst_rect->x) * x_ratio;
-            float src_y = src_rect->y + (i - dst_rect->y) * y_ratio;
-
             uint8_t* dst_pixel = (uint8_t*)row_pixels + (j * 4);
 
             uint32_t src_color;
-            if (scale_mode == SCALE_MODE_LINEAR && downscaling) {
+            if (scale_mode == SCALE_MODE_PIXELATED) {
+                src_color = raster_pixelated_sample(src, src_rect, dst_rect,
+                    j, i, src_w, src_h,
+                    pixelated_x_multiple, pixelated_y_multiple);
+            } else if (scale_mode == SCALE_MODE_LINEAR && downscaling) {
                 float box_x0 = src_rect->x + (j - dst_rect->x) * x_ratio;
                 float box_y0 = src_rect->y + (i - dst_rect->y) * y_ratio;
                 float box_x1 = box_x0 + x_ratio;
@@ -218,8 +273,12 @@ void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect
                 src_color = render_pixel_sample_bilinear(
                     (const uint8_t*)src->pixels, src_w, src_h, src->pitch, bx, by, true, false);
             } else {
-                int int_src_x = (int)(src_x + 0.5f);
-                int int_src_y = (int)(src_y + 0.5f);
+                // Nearest sampling chooses the source pixel under the output
+                // pixel center; rounding its left edge shifts a 2x upscale.
+                int int_src_x = (int)floorf(src_rect->x +
+                    (j - dst_rect->x + 0.5f) * x_ratio); // INT_CAST_OK: image sample index.
+                int int_src_y = (int)floorf(src_rect->y +
+                    (i - dst_rect->y + 0.5f) * y_ratio); // INT_CAST_OK: image sample index.
 
                 if (int_src_x < 0 || int_src_x >= src_w || int_src_y < 0 || int_src_y >= src_h) {
                     continue;

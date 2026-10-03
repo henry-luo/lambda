@@ -47,23 +47,22 @@ inline TrackSizingFunction convert_to_track_sizing(GridTrackSize* old_size) {
 
     switch (old_size->type) {
         case GRID_TRACK_SIZE_LENGTH:
-            return TrackSizingFunction::Length(static_cast<float>(old_size->value));
+            return TrackSizingFunction::Length(old_size->value);
         case GRID_TRACK_SIZE_PERCENTAGE:
-            return TrackSizingFunction::Percent(static_cast<float>(old_size->value));
+            return TrackSizingFunction::Percent(old_size->value);
         case GRID_TRACK_SIZE_MIN_CONTENT:
             return TrackSizingFunction::MinContent();
         case GRID_TRACK_SIZE_MAX_CONTENT:
             return TrackSizingFunction::MaxContent();
         case GRID_TRACK_SIZE_FR:
-            // The parser stores the fr factor scaled by 100.
-            return TrackSizingFunction::Fr(static_cast<float>(old_size->value) / 100.0f);
+            return TrackSizingFunction::Fr(old_size->value);
         case GRID_TRACK_SIZE_FIT_CONTENT:
             // CSS Grid §7.2.3.2 uses an auto minimum for fit-content().
             return old_size->is_percentage
                 ? TrackSizingFunction::FitContentPercent(
-                    static_cast<float>(old_size->fit_content_limit))
+                    old_size->fit_content_limit)
                 : TrackSizingFunction::FitContent(
-                    static_cast<float>(old_size->fit_content_limit));
+                    old_size->fit_content_limit);
         case GRID_TRACK_SIZE_MINMAX: {
             TrackSizingFunction minimum = convert_to_track_sizing(old_size->min_size);
             TrackSizingFunction maximum = convert_to_track_sizing(old_size->max_size);

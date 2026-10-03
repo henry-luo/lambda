@@ -1,0 +1,12 @@
+{
+  "name": "Pair scroll snapping keeps both axes on the same area",
+  "html": "test/ui/scroll_snap_pair.html",
+  "viewport": {"width": 300, "height": 240},
+  "events": [
+    {"type": "scroll", "target": {"selector": "#pair"}, "dx": -1.2, "dy": -1.2},
+    {"type": "assert_state_store", "target": {"selector": "#pair"},
+     "view_state": true, "kind": "scroll", "view_scroll_x": 100, "tolerance": 1},
+    {"type": "assert_state_store", "target": {"selector": "#pair"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 0, "tolerance": 1}
+  ]
+}

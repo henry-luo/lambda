@@ -125,12 +125,15 @@ def runtime_metadata():
                 for path in sorted((PROJECT_ROOT / "test/benchmark/text").glob("*.json"))}
     fasta = PROJECT_ROOT / "test/benchmark/beng/input/fasta_1000.txt"
     fixtures[str(fasta.relative_to(PROJECT_ROOT))] = sha256(fasta)
+    contract = JULIA_ROOT / "expected.json"
+    fixtures[str(contract.relative_to(PROJECT_ROOT))] = sha256(contract)
     return {"executable": executable,
             "version": subprocess.check_output([executable, "--version"], text=True).strip()
                        if executable else None,
             "executable_sha256": sha256(executable) if executable else None,
             "flags": ["--startup-file=no", "--history-file=no", "--threads=1"],
             "warmup_runs": warmup_runs(),
+            "suite_warmup_runs": {"julia": 1},
             "warmup": "fresh state for warmup and measurement",
             "timing": "execution excludes startup, warmup and post-work verification; process includes all",
             "threads": 1, "sources_sha256": sources, "fixtures_sha256": fixtures}
@@ -145,7 +148,7 @@ def main():
     parser.add_argument("--verify-node", action="store_true", help="require matching Node result output")
     parser.add_argument("--timeout", type=float, default=180)
     parser.add_argument("--warmup", type=int, choices=(0, 1), default=None,
-                        help="full warmup runs before timing (default: 1); use 0 for one-workload process timings")
+                        help="full warmup runs before timing (default: 1); julia microbenchmarks always use 1 in every language")
     parser.add_argument("--output", type=Path, help="write validation results to this JSON file")
     args = parser.parse_args()
     if args.warmup is not None:
