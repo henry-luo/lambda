@@ -6546,12 +6546,10 @@ static void js_interp_p2_scan_node(JsAstNode* node,
         break;
     }
     case AST_NODE_NEW_EXPR:
-        js_interp_p2_reject(scan, "construct boundary");
-        break;
     case AST_NODE_CALL_EXPR:
-        // Calls go through the ordinary invoke kernel; the callee may be
-        // interpreted or native (JSI9). A satellite never calls another
-        // definition's MIR item directly.
+        // Calls and constructions go through the ordinary invoke/construct
+        // kernels; the callee may be interpreted or native (JSI9). A
+        // satellite never calls another definition's MIR item directly.
         break;
     case AST_NODE_MEMBER_EXPR:
     case AST_NODE_INDEX_EXPR: {
@@ -6798,6 +6796,9 @@ struct JsLoopLiveInScan {
     uint32_t region_start;       // body-block lexicals declared here or later are not live
     NameEntry* live[JS_LOOP_LIVE_IN_MAX];
     int count;
+    // function `var`s the region declares again: their copies must be `var`
+    NameEntry* redeclared[JS_LOOP_LIVE_IN_MAX];
+    int redeclared_count;
     const char* failure;
 };
 
@@ -6821,7 +6822,18 @@ static void js_loop_scan_assigned(JsLoopLiveInScan* scan, AstNode* target) {
 static void js_loop_scan_node(JsAstNode* node, void* opaque) {
     JsLoopLiveInScan* scan = (JsLoopLiveInScan*)opaque;
     if (!node || scan->failure) return;
-    if (node->node_type == AST_NODE_ASSIGN) {
+    if (node->node_type == AST_NODE_VARIABLE_DECLARATOR) {
+        AstNode* id = ((JsVariableDeclaratorNode*)node)->id;
+        NameEntry* declared = id && id->node_type == AST_NODE_IDENT
+            ? ((JsIdentifierNode*)id)->entry : NULL;
+        if (declared && declared->scope == scan->scopes[0]) {
+            if (scan->redeclared_count >= JS_LOOP_LIVE_IN_MAX) {
+                scan->failure = "too many redeclared vars";
+                return;
+            }
+            scan->redeclared[scan->redeclared_count++] = declared;
+        }
+    } else if (node->node_type == AST_NODE_ASSIGN) {
         js_loop_scan_assigned(scan, ((JsAssignmentNode*)node)->left);
     } else if (node->node_type == AST_NODE_UNARY) {
         AstUnaryNode* unary = (AstUnaryNode*)node;
@@ -6857,8 +6869,9 @@ static void js_loop_scan_node(JsAstNode* node, void* opaque) {
 
 // Build and compile the continuation; returns the refusal reason, or NULL
 // with the cell READY.
-static const char* js_interp_loop_continuation_compile(JsFunction* function,
-        AstLoopControlNode* loop, uint8_t ordinal, FnPromotionCell* cell) {
+static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
+        JsFunction* function, AstLoopControlNode* loop, uint8_t ordinal,
+        FnPromotionCell* cell) {
     AstFunctionId function_id = AST_FUNCTION_ID_INVALID;
     const char* reason = js_interp_p2_admission_reason(function, &function_id);
     if (reason) return reason;
@@ -6907,15 +6920,55 @@ static const char* js_interp_loop_continuation_compile(JsFunction* function,
     strbuf_append_str_n(text, script->source, script->source_length);
     strbuf_append_str(text, "\n;function ");
     strbuf_append_str(text, name);
+    // Fresh parameters are copied into same-named `let` locals: lowering does
+    // not type a reassigned parameter or a `var`, but types a block local from
+    // its initializer and assignments (a 10-20x difference on a numeric loop).
+    // A name the region redeclares with `var` keeps a `var` copy, since `let`
+    // and `var` cannot share a name. No live-in is captured or in its TDZ.
     strbuf_append_char(text, '(');
     for (int i = 0; i < scan.count; i++) {
         if (i) strbuf_append_char(text, ',');
-        strbuf_append_str_n(text, scan.live[i]->name->chars, scan.live[i]->name->len);
+        strbuf_append_format(text, "__lambda_in%d", i);
     }
     strbuf_append_str(text, strict ? ") {'use strict';\n" : ") {\n");
+    for (int pass = 0; pass < 2; pass++) {
+        bool first = true;
+        for (int i = 0; i < scan.count; i++) {
+            bool is_var = false;
+            for (int k = 0; k < scan.redeclared_count; k++) {
+                if (scan.redeclared[k] == scan.live[i]) is_var = true;
+            }
+            if (is_var != (pass == 1)) continue;
+            strbuf_append_str(text, first ? (pass ? "var " : "let ") : ", ");
+            strbuf_append_str_n(text, scan.live[i]->name->chars, scan.live[i]->name->len);
+            strbuf_append_format(text, " = __lambda_in%d", i);
+            first = false;
+        }
+        if (!first) strbuf_append_str(text, ";\n");
+    }
     if (loop->form == LOOP_FORM_FOR_C) strbuf_append_str(text, "for (;");
     strbuf_append_str_n(text, script->source + start, end - start);
     strbuf_append_str(text, "\n}\n");
+    // Lowering infers parameter types from the module's call sites, and the
+    // continuation has none. A never-executed call whose literals have the
+    // types of the values live at this head gives it the evidence a caller
+    // would; the body stays correct for any other value, as for any callee.
+    strbuf_append_str(text, "if (0) ");
+    strbuf_append_str(text, name);
+    strbuf_append_char(text, '(');
+    for (int i = 0; i < scan.count; i++) {
+        NameEntry* live_entry = scan.live[i];
+        JsInterpEnv* env = js_interp_find_env(frame->env, live_entry->scope);
+        Item value = env && live_entry->slot >= 0 &&
+                (uint32_t)live_entry->slot < env->slot_count
+            ? js_interp_env_slot_read(env, (uint32_t)live_entry->slot, false) : ItemNull;
+        TypeId type = get_type_id(value);
+        if (i) strbuf_append_char(text, ',');
+        strbuf_append_str(text, type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
+            type == LMD_TYPE_FLOAT ? "0" : type == LMD_TYPE_BOOL ? "false" :
+            type == LMD_TYPE_STRING ? "\"\"" : "undefined");
+    }
+    strbuf_append_str(text, ");\n");
 
     void* entry = NULL;
     bool compiled = js_mir_compile_loop_continuation(context ? context->runtime : NULL,
@@ -6946,8 +6999,8 @@ static bool js_interp_loop_handoff_try(JsInterpFrame* frame,
         return false;
     }
     if (cell->loop_state == FN_LOOP_HANDOFF_NONE) {
-        const char* why = js_interp_loop_continuation_compile(handoff->function,
-            loop, handoff->ordinal, cell);
+        const char* why = js_interp_loop_continuation_compile(frame,
+            handoff->function, loop, handoff->ordinal, cell);
         if (why) {
             cell->loop_state = FN_LOOP_HANDOFF_PINNED;
             log_info("js-loop-handoff: pinned loop=%u reason=%s",
