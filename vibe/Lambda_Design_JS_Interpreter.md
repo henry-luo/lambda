@@ -23,7 +23,7 @@ source, and the MIR dynamic-code compilation service is deleted. See §5.6,
 
 **Direct-eval linking revision (USER, 2026-09-24):** **D8.1.3v21 / JSI36** links a direct eval from interpreted code to its caller frame's live environment chain. Eval code and the closures it creates resolve free names by name through that chain, and a sloppy eval's var-scoped declarations bind in the caller's nearest function variable environment. The `EvalContext` bridge now serves MIR callers only, until P4 shared environment cells. See §5.6, §16 item 13, and Appendix S3.
 
-**Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_JIT_THRESHOLD` defaults to 100 calls (D8.1.3v23; 1000 in v22, five before), and a loop that reaches `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
+**Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_FUNC_JIT_THRESHOLD` defaults to 100 calls (D8.1.3v23; 1000 in v22, five before), and a loop that reaches `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
 
 **Static-module prebuild revision (2026-09-19):** `JS_EXECUTION_BACKEND=auto`
 is now an explicit AST-first module policy. The shared prebuild scheduler
@@ -32,7 +32,7 @@ to `InputScriptCache` from isolated worker runtimes, and canonicalizes the
 runtime import lookup before reuse. Interpreter-supported modules execute from
 those templates; unsupported units retain whole-module MIR. Unset remains MIR
 and forced `ast` remains fail-closed. AUTO now promotes an admitted closed,
-synchronous classic top-level function at `JS_JIT_THRESHOLD` calls (default
+synchronous classic top-level function at `JS_FUNC_JIT_THRESHOLD` calls (default
 five; 100 since D8.1.3v23) to a boxed MIR satellite; its local-data slice admits non-spread arrays,
 data objects with static or local computed keys, and static or local-key
 computed member chains. Whole-module MIR fallback is not a promotion. This is
@@ -1097,7 +1097,7 @@ differential tests select each backend explicitly (**D8.1.3v18**).
 
 ### 9.3 Promotion point
 
-*(Revised 2026-10-03, D8.1.3v22 / JSI18v2.)* Promotion has two triggers, both hot hits. The call count belongs to the static AST definition (`JsCallableCode`); `JS_JIT_THRESHOLD` defaults to 100 (D8.1.3v23). The threshold-crossing call has not started its body, so it may enter the published native satellite.
+*(Revised 2026-10-03, D8.1.3v22 / JSI18v2.)* Promotion has two triggers, both hot hits. The call count belongs to the static AST definition (`JsCallableCode`); `JS_FUNC_JIT_THRESHOLD` defaults to 100 (D8.1.3v23). The threshold-crossing call has not started its body, so it may enter the published native satellite.
 
 A loop that is a direct statement of a function body counts its back-edges in the same definition's promotion cell. At `JS_LOOP_JIT_THRESHOLD` (default 10000) the statements from that loop to the end of the body are compiled as a continuation over the live-in bindings, and the running activation enters it at the loop's next head test. The interpreter then returns the continuation's result as the activation's result; nothing is written back. Eligibility conditions and sequencing are in the [tuning plan](impl/Lambda_Impl_JS_Interp_Tune.md) §5 E3. No other interpreter PC is transferable. Both thresholds are provisional until release profiling. Direct validated self-tail handoff may be considered only after the ordinary entry satellite is correct and separately gated.
 

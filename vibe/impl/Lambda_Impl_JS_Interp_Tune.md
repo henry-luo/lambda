@@ -208,7 +208,7 @@ Expected: 18–31% of T0.
 on `AstLoopControlNode` beside `interp_handoff_ordinal`.
 
 **J3 — Resolve the selector once.** Read `JS_EXECUTION_BACKEND` and
-`JS_JIT_THRESHOLD` once per runtime, as `lambda_tier_selected()` does.
+`JS_FUNC_JIT_THRESHOLD` once per runtime, as `lambda_tier_selected()` does.
 Expected: 7% on call-heavy code.
 
 **J4 — Split the frame.** Keep script, environment, `this` home and flags in
@@ -299,7 +299,7 @@ properties, so there are no live-ins, but the continuation must return the
 script's completion value and the rest of the script must not run twice.
 
 **E4 — Threshold.** Start with `JS_LOOP_JIT_THRESHOLD` at 10,000 and
-`JS_JIT_THRESHOLD` at 1000 (§8) and re-derive both for JS after E2. Today's
+`JS_FUNC_JIT_THRESHOLD` at 1000 (§8) and re-derive both for JS after E2. Today's
 break-even is `promotion cost ÷ (T0 − T1 cost per iteration)`, about
 6,000 iterations for a tiny file and about 90,000 at 87 KB, because the cost
 scales with source size. That dependence disappears with E2; the JS value
@@ -321,7 +321,7 @@ What is shared today, and what is not:
 | AST nodes, `AstIndex`, `NameEntry`, `Script` | yes | yes (`JsScript : Script`) | yes |
 | `FnPromotionCell` (counts, state, loop fields) | all fields | `call_count`, `state`, `boxed_entry` | type only |
 | Promotion driver | `interp_promote_function_if_hot`, worker pool, queue, publish at safe point, cancel | `js_interp_promote_function_if_hot`, synchronous | no |
-| Tier selector and knobs | `LAMBDA_TIER`, `LAMBDA_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE`, `LAMBDA_SATELLITE_SYNC`, cached | `JS_EXECUTION_BACKEND`, `JS_JIT_THRESHOLD`, `getenv` per call | no |
+| Tier selector and knobs | `LAMBDA_TIER`, `LAMBDA_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE`, `LAMBDA_SATELLITE_SYNC`, cached | `JS_EXECUTION_BACKEND`, `JS_FUNC_JIT_THRESHOLD`, `getenv` per call | no |
 | Plan pass | `interp_plan.cpp` (frame plan, block shape, handoff ordinals, call shape) | support scan plus run-time walks | call-shape prep only |
 | Frame storage | `FnFramePlan` slot window | GC `JsInterpEnv` per scope | storage helper only |
 | Activation chain | `InterpState::top` | `JsInterpFrame` + `JsCallActivation` | no (JSI26 unbuilt) |
@@ -398,11 +398,12 @@ off at a loop-head test in the **D8.1.1v14** shape. This replaces the v13
 sentence that no active AST frame transfers to MIR, and JSI18's entry-only
 rule. E3 is unblocked; it still depends on E1 to be useful.
 
-**R2 — JS keeps its own names.** `JS_EXECUTION_BACKEND` and
-`JS_JIT_THRESHOLD` stay. The loop threshold is `JS_LOOP_JIT_THRESHOLD`. The shared
+**R2 — JS keeps its own names.** `JS_EXECUTION_BACKEND` stays. The call and
+loop thresholds are `JS_FUNC_JIT_THRESHOLD` and `JS_LOOP_JIT_THRESHOLD`
+(renamed by the user from `JS_JIT_THRESHOLD` and `JS_JIT_BACKEDGE`). The shared
 kernel of A1/A2 takes its policy values from the profile, so each language
 reads its own knobs; the stress differential for JS is
-`JS_JIT_THRESHOLD=1 JS_LOOP_JIT_THRESHOLD=1` with synchronous publication.
+`JS_FUNC_JIT_THRESHOLD=1 JS_LOOP_JIT_THRESHOLD=1` with synchronous publication.
 
 **R3 — Hotness-only promotion; call threshold 1000, then 100.** A JS definition is
 compiled only on a hot hit: 1000 calls (five before; **100** since
@@ -482,7 +483,7 @@ make that correct in a satellite:
    definition's MIR item: the item is an undefined forward, and `MIR_link`
    looped on it.
 
-Stress differential (`JS_JIT_THRESHOLD=2` AUTO vs forced AST over
+Stress differential (`JS_FUNC_JIT_THRESHOLD=2` AUTO vs forced AST over
 `test/js/`): no divergence.
 
 ### 11.3 E3 — loop-head handoff
@@ -508,7 +509,7 @@ As designed in §5, with these specifics:
   live-in, a continuation that fails to compile. A live-in still in its TDZ
   declines the handoff and stays T0.
 
-Stress differential (`JS_JIT_THRESHOLD=2 JS_LOOP_JIT_THRESHOLD=1`): no divergence;
+Stress differential (`JS_FUNC_JIT_THRESHOLD=2 JS_LOOP_JIT_THRESHOLD=1`): no divergence;
 31 handoffs in 19 of 471 files. Refusals are dominated by nested definitions
 (272 "closure capture"), the shared-environment work of JS design §9.5.
 

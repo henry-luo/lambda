@@ -786,7 +786,7 @@ TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function squareSum(limit) { "
@@ -800,7 +800,7 @@ TEST(JsInterpreter, AutoPromotesClosedHotFunctionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-satellite.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
@@ -820,7 +820,7 @@ TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function advance(delta) { \"use strict\"; "
@@ -830,7 +830,7 @@ TEST(JsInterpreter, AutoPromotesHotThisPropertyMethodToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-this-property.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
@@ -855,7 +855,7 @@ TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "var multiply = function(value) { "
@@ -864,7 +864,7 @@ TEST(JsInterpreter, AutoPromotesTopLevelFunctionExpressionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-function-expression.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
@@ -883,7 +883,7 @@ TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function grow(seed, delta) { "
@@ -894,7 +894,7 @@ TEST(JsInterpreter, AutoPromotesHotLocalObjectPropertyChainToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-local-object-property-chain.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
@@ -913,7 +913,7 @@ TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function pair(left, right) { return [left, right]; } "
@@ -921,7 +921,7 @@ TEST(JsInterpreter, AutoPromotesHotArrayLiteralFunctionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-array-literal.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
@@ -941,7 +941,7 @@ TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function read(object, key) { return object[key]; } "
@@ -950,7 +950,7 @@ TEST(JsInterpreter, AutoPromotesHotComputedPropertyFunctionToMirSatellite) {
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-computed-property-pinned.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;
@@ -971,7 +971,7 @@ TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) 
     Runtime runtime = {};
     runtime_init(&runtime);
     ASSERT_EQ(setenv("JS_EXECUTION_BACKEND", "auto", 1), 0);
-    ASSERT_EQ(setenv("JS_JIT_THRESHOLD", "2", 1), 0);
+    ASSERT_EQ(setenv("JS_FUNC_JIT_THRESHOLD", "2", 1), 0);
 
     const char source[] =
         "function materialize(key, value) { "
@@ -980,7 +980,7 @@ TEST(JsInterpreter, AutoPromotesHotComputedObjectLiteralFunctionToMirSatellite) 
     Item function_item = transpile_js_to_mir(&runtime, source,
         "p2-computed-object-literal.js", NULL);
 
-    ASSERT_EQ(unsetenv("JS_JIT_THRESHOLD"), 0);
+    ASSERT_EQ(unsetenv("JS_FUNC_JIT_THRESHOLD"), 0);
     ASSERT_EQ(unsetenv("JS_EXECUTION_BACKEND"), 0);
     ASSERT_EQ(get_type_id(function_item), LMD_TYPE_FUNC);
     JsFunction* function = (JsFunction*)function_item.function;

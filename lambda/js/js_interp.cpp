@@ -6656,7 +6656,7 @@ static Runtime* js_interp_promotion_policy(void) {
     if (!runtime || runtime->js_promotion_policy_resolved) return runtime;
     runtime->js_promotion_auto = js_execution_auto_requested();
     runtime->js_promotion_call_threshold = js_interp_policy_threshold(
-        "JS_JIT_THRESHOLD", JS_FUNC_JIT_THRESHOLD);
+        "JS_FUNC_JIT_THRESHOLD", JS_FUNC_JIT_THRESHOLD);
     runtime->js_promotion_backedge_threshold = js_interp_policy_threshold(
         "JS_LOOP_JIT_THRESHOLD", JS_LOOP_JIT_THRESHOLD);
     runtime->js_promotion_policy_resolved = true;
