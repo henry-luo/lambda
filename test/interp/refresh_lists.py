@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 PROC_DIRS = ("test/lambda/proc", "test/lambda/conc", "test/lambda/pdf")
-FALLBACK_RE = re.compile(r"interp: fallback file=\S+ reason=node:(\S+)")
+REJECTION_RE = re.compile(r"interp: unsupported file=\S+ reason=node:(\S+)")
 
 SUBSET_HEADER = """# T0 interpreter — interpreted-script list (LAMBDA_TIER=interp)
 #
@@ -35,9 +35,9 @@ SUBSET_HEADER = """# T0 interpreter — interpreted-script list (LAMBDA_TIER=int
 
 EXCLUDED_HEADER = """# T0 interpreter — exclusion list (LAMBDA_TIER=interp)
 #
-# Scripts whose pre-scan finds a construct the walker does not execute. Each
-# runs on the whole-module JIT path instead, counted in the run summary
-# (`interp: … fallback=N`) — there are no silent caps (design risk R4).
+# Scripts whose pre-scan finds a construct the walker does not execute fail
+# before execution under explicit interp, counted as excluded with fallback=0
+# (D8.1.1v15). Only AUTO may choose whole-module MIR instead.
 #
 # This file, interp_p0_subset.txt, and interp_inconclusive.txt partition the
 # classified corpus; regenerate all three with this script.
@@ -46,11 +46,8 @@ EXCLUDED_HEADER = """# T0 interpreter — exclusion list (LAMBDA_TIER=interp)
 # either tier, or its whole import cone was rejected before it was reached.
 #
 # `node:AST_NODE_PROC` is usually the task-backed boundary rather than the `pn`
-# spelling: a procedure the concurrency analysis marks await-capable runs its
-# body through the boxed MIR satellite, and that membrane fails closed on local
-# `var`/assignment statements and on indirect Lambda calls (D8.1.1v4, D3.3.1).
-# A `pn main` that starts or waits on a task and also keeps mutable locals is
-# therefore expected here, not a walker defect.
+# spelling: suspension-capable bodies need a MIR satellite and are therefore
+# unsupported under the strict T0 pin (D8.1.1v15).
 #
 # format: <script>\tnode:<first unsupported kind>
 """
@@ -75,13 +72,10 @@ def reject_reason(script, timeout):
     env = dict(os.environ)
     env["LAMBDA_TIER"] = "interp"
     try:
-        subprocess.run(argv, env=env, capture_output=True, timeout=timeout)
-    except Exception:
-        pass
-    try:
-        with open("log.txt", errors="replace") as f:
-            hits = FALLBACK_RE.findall(f.read())
-    except OSError:
+        result = subprocess.run(argv, env=env, capture_output=True, text=True,
+                                errors="replace", timeout=timeout)
+        hits = REJECTION_RE.findall(result.stderr)
+    except (OSError, subprocess.TimeoutExpired):
         hits = []
     return hits[-1] if hits else "none"
 
@@ -114,11 +108,11 @@ def main() -> int:
         pass
     match = [r[0] for r in rows
              if r[1] == "match" and r[0] not in golden_drift]
-    fallback = [r[0] for r in rows
-                if r[1] == "fallback" and r[0] not in golden_drift]
+    excluded = [r[0] for r in rows
+                if r[1] == "excluded" and r[0] not in golden_drift]
     mismatch = [r[0] for r in rows if r[1] == "mismatch"]
     inconclusive = [(r[0], r[1]) for r in rows
-                    if r[1] not in ("match", "fallback", "mismatch")
+                    if r[1] not in ("match", "excluded", "mismatch")
                     and r[0] not in golden_drift]
     inconclusive.extend(golden_drift.items())
 
@@ -136,7 +130,7 @@ def main() -> int:
             f.write(f"{s}\t{mode_of(s)}\n")
 
     reasons = []
-    for s in fallback:
+    for s in excluded:
         reasons.append((s, reject_reason(s, args.timeout)))
     with open("test/lambda/interp_excluded.txt", "w") as f:
         f.write(EXCLUDED_HEADER)
@@ -148,7 +142,7 @@ def main() -> int:
         for s, verdict in inconclusive:
             f.write(f"{s}\t{verdict}\n")
 
-    print(f"subset={len(match)} excluded={len(fallback)} "
+    print(f"subset={len(match)} excluded={len(excluded)} "
           f"inconclusive={len(inconclusive)} "
           f"procedural={sum(1 for s in match if mode_of(s) == 'run')}")
     for kind, count in collections.Counter(r for _, r in reasons).most_common(10):

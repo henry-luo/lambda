@@ -28,6 +28,7 @@
 // test_mir_check_helpers.hpp.
 
 #include <gtest/gtest.h>
+#include "test_lambda_tier_helpers.hpp"
 
 #include <cstdint>
 #include <cstdio>
@@ -1002,7 +1003,10 @@ TEST(LambdaOptCow, RmwSiblingHandlesBorrowWithoutCopies) {
 // rotation's `var` admission, leaving one fewer shared map per rotation
 // (83 -> 43 copies, 206 -> 166 marks).
 TEST(LambdaOptCow, MoveOutBindsBorrow) {
-    static const char* const tiers[] = {"jit", "interp"};
+    // this construct needs MIR; a strict T0 pin must reject it (D8.1.1v15)
+    expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_move_out_bind.ls",
+        "AST_NODE_MEMBER_ASSIGN_STAM");
+    static const char* const tiers[] = {"jit", "auto"};
     for (int t = 0; t < 2; t++) {
         FixtureRun run = run_fixture("cow_move_out_bind", tiers[t],
             fixture_source("test/lambda/proc/cow_move_out_bind.ls"), true);
@@ -1016,7 +1020,10 @@ TEST(LambdaOptCow, MoveOutBindsBorrow) {
 // slot detaches exactly once; the 1,000 appends through one unique place
 // never copy (array_unique_mutations counts them).
 TEST(LambdaOptCow, PlaceMutatorDetachesEachAliasedSlotOnce) {
-    static const char* const tiers[] = {"jit", "interp"};
+    // this construct needs MIR; a strict T0 pin must reject it (D8.1.1v15)
+    expect_interp_rejection(opt_executable(), "test/lambda/proc/cow_place_mutator.ls",
+        "AST_NODE_SYS_FUNC");
+    static const char* const tiers[] = {"jit", "auto"};
     for (int t = 0; t < 2; t++) {
         FixtureRun run = run_fixture("cow_place_mutator", tiers[t],
             fixture_source("test/lambda/proc/cow_place_mutator.ls"), true);

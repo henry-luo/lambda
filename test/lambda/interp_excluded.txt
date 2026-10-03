@@ -1,8 +1,8 @@
 # T0 interpreter — exclusion list (LAMBDA_TIER=interp)
 #
-# Scripts whose pre-scan finds a construct the walker does not execute. Each
-# runs on the whole-module JIT path instead, counted in the run summary
-# (`interp: … fallback=N`) — there are no silent caps (design risk R4).
+# Scripts whose pre-scan finds a construct the walker does not execute fail
+# before execution under explicit interp, counted as excluded with fallback=0
+# (D8.1.1v15). Only AUTO may choose whole-module MIR instead.
 #
 # This file, interp_p0_subset.txt, and interp_inconclusive.txt partition the
 # classified corpus; regenerate all three with this script.
@@ -11,12 +11,46 @@
 # either tier, or its whole import cone was rejected before it was reached.
 #
 # `node:AST_NODE_PROC` is usually the task-backed boundary rather than the `pn`
-# spelling: a procedure the concurrency analysis marks await-capable runs its
-# body through the boxed MIR satellite, and that membrane fails closed on local
-# `var`/assignment statements and on indirect Lambda calls (D8.1.1v4, D3.3.1).
-# A `pn main` that starts or waits on a task and also keeps mutable locals is
-# therefore expected here, not a walker defect.
+# spelling: suspension-capable bodies need a MIR satellite and are therefore
+# unsupported under the strict T0 pin (D8.1.1v15).
 #
 # format: <script>	node:<first unsupported kind>
+test/lambda/conc/cancel_before_run.ls	node:AST_NODE_PROC
+test/lambda/conc/cancel_nested_cleanup.ls	node:AST_NODE_PROC
+test/lambda/conc/cancel_parked.ls	node:AST_NODE_PROC
+test/lambda/conc/colorless_chain.ls	node:AST_NODE_PROC
+test/lambda/conc/conc_worker_mod.ls	node:AST_NODE_PROC
+test/lambda/conc/imported_call.ls	node:AST_NODE_PROC
+test/lambda/conc/indirect_call.ls	node:AST_NODE_PROC
+test/lambda/conc/io_read.ls	node:AST_NODE_PROC
+test/lambda/conc/io_read_error.ls	node:AST_NODE_PROC
+test/lambda/conc/js_promise_wait.ls	node:AST_NODE_PROC
+test/lambda/conc/mailbox_full.ls	node:AST_NODE_PROC
+test/lambda/conc/message_fifo.ls	node:AST_NODE_PROC
+test/lambda/conc/no_replay.ls	node:AST_NODE_PROC
+test/lambda/conc/proc_handler_after_wait.ls	node:AST_NODE_PROC
+test/lambda/conc/proc_handler_fault_after_wait.ls	node:AST_NODE_PROC
+test/lambda/conc/scope_error_cancel.ls	node:AST_NODE_PROC
+test/lambda/conc/scope_escape.ls	node:AST_NODE_PROC
+test/lambda/conc/scope_join.ls	node:AST_NODE_PROC
+test/lambda/conc/scope_loop_exit.ls	node:AST_NODE_PROC
+test/lambda/conc/scope_return.ls	node:AST_NODE_PROC
+test/lambda/conc/select_basic.ls	node:AST_NODE_PROC
+test/lambda/conc/start_wait.ls	node:AST_NODE_PROC
+test/lambda/conc/task_system_fault.ls	node:AST_NODE_PROC
+test/lambda/conc/timeout_no_cancel.ls	node:AST_NODE_PROC
+test/lambda/conc/to_promise.ls	node:AST_NODE_PROC
+test/lambda/proc/cow_move_out_bind.ls	node:AST_NODE_MEMBER_ASSIGN_STAM
+test/lambda/proc/cow_place_mutator.ls	node:AST_NODE_SYS_FUNC
+test/lambda/proc/cow_rmw_branch_store_back.ls	node:AST_NODE_MEMBER_ASSIGN_STAM
+test/lambda/proc/cow_var_nullable_record_typed_handle.ls	node:AST_NODE_MEMBER_ASSIGN_STAM
+test/lambda/proc/fn_pn_function_types.ls	node:AST_NODE_PROC
+test/lambda/proc/pn_arrow.ls	node:AST_NODE_PROC
+test/lambda/proc/proc_async_partial_item_gc.ls	node:AST_NODE_PROC
+test/lambda/proc/proc_local_error_destructure_async.ls	node:AST_NODE_PROC
+test/lambda/proc/proc_ndim_index_write.ls	node:AST_NODE_INDEX_EXPR
 test/lambda/proc/proc_stack_frame.ls	node:AST_NODE_PROC
+test/lambda/proc/subscript_last_scope.ls	node:AST_NODE_INDEX_ASSIGN_STAM
 test/lambda/proc/typed_var_record_store.ls	node:AST_NODE_INDEX_ASSIGN_STAM
+test/lambda/proc/wide_scalar_across_await.ls	node:AST_NODE_PROC
+test/lambda/subscript_selection.ls	node:AST_NODE_INDEX_EXPR
