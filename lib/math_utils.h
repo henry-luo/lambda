@@ -138,6 +138,24 @@ static inline float math_turns_to_radians(float turns) {
 }
 
 // period must be finite and positive. A nonfinite value retains fmodf's NaN result.
+// Float to int with saturation: NaN becomes 0 and out-of-range values clamp
+// to the int range. A plain (int) cast of an out-of-range or NaN float is
+// undefined behaviour; values that feed an index, size or count go through
+// one of these. Rounding matches the named C function (trunc, floor, ceil,
+// lround).
+static inline int math_float_to_int_sat(float v) {
+    if (!(v == v)) return 0;
+    if (v >= 2147483647.0f) return INT32_MAX;
+    if (v <= -2147483648.0f) return INT32_MIN;
+    return (int)v;
+}
+
+static inline int math_floor_to_int_sat(float v) { return math_float_to_int_sat(floorf(v)); }
+static inline int math_ceil_to_int_sat(float v) { return math_float_to_int_sat(ceilf(v)); }
+static inline int math_round_to_int_sat(float v) {
+    return math_float_to_int_sat(v == v ? roundf(v) : v);
+}
+
 static inline float math_wrap_positive_f(float value, float period) {
     float wrapped = fmodf(value, period);
     return wrapped < 0.0f ? wrapped + period : wrapped;

@@ -4,20 +4,34 @@
 #include "../lib/mempool.h"
 #include "../lib/arena.h"
 
+// Tests link only the surface registry, not the full image teardown; their
+// surfaces own no pixels, so releasing the slot and the struct is complete.
+static void free_test_surface(ImageSurface* surface) {
+    image_surface_release_slot(surface);
+    mem_free(surface);
+}
+
+
 class RetainedDisplayListTest : public ::testing::Test {
 protected:
     Pool* pool = nullptr;
-    Arena* arena = nullptr;
+    Arena* arena = nullptr;          // source list's arena
+    Arena* replay_arena = nullptr;   // each list's scratch owns its arena
 
     void SetUp() override {
         pool = pool_create();
         arena = arena_create_default();
+        replay_arena = arena_create_default();
     }
 
     void TearDown() override {
         if (arena) {
             arena_destroy(arena);
             arena = nullptr;
+        }
+        if (replay_arena) {
+            arena_destroy(replay_arena);
+            replay_arena = nullptr;
         }
         if (pool) {
             pool_destroy(pool);
@@ -96,7 +110,7 @@ TEST_F(RetainedDisplayListTest, CapturesAndAppendsMatchedElementFragment) {
     EXPECT_EQ(stats.copy_failed, 0);
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
     ASSERT_EQ(replay.size(), 3u);
     EXPECT_EQ(replay.data()[0].op, DL_BEGIN_ELEMENT);
@@ -196,7 +210,7 @@ TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentForExternalDirtySource) {
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -228,7 +242,7 @@ TEST_F(RetainedDisplayListTest, AppendsRetainedFragmentWhenUnknownDirtyMissesVis
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -259,7 +273,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForUnknownIntersectingDir
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -291,7 +305,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentForDirtySourceInsideSubtr
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -322,7 +336,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentWhenMarkerBoundsChanged) 
     Bound moved_marker = {11.0f, 20.0f, 41.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, moved_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -354,7 +368,7 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedFragmentDuringFullRepaint) {
     Bound current_marker = {10.0f, 20.0f, 40.0f, 60.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -386,7 +400,7 @@ TEST_F(RetainedDisplayListTest, AppliesDirtyScaleWhenTestingFragmentVisualBounds
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 2.0f,
         retained_test_contains_view_id, &contained_id));
@@ -420,7 +434,7 @@ TEST_F(RetainedDisplayListTest, ReusesWhenUnknownDirtyMissesAndExternalDirtyInte
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -435,10 +449,11 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
     DisplayList source = {};
     dl_init(&source, arena);
 
-    ImageSurface surface = {};
-    surface.width = 10;
-    surface.height = 10;
-    surface.generation = 5;
+    ImageSurface* surface = image_surface_alloc();
+    ASSERT_NE(surface, nullptr);
+    surface->width = 10;
+    surface->height = 10;
+    surface->generation = 5;
 
     int begin = dl_begin_element(&source, 77, 0.0f, 0.0f, 10.0f, 10.0f);
     DisplayItem* blit = dl_alloc_item(&source);
@@ -446,8 +461,9 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
     blit->op = DL_BLIT_SURFACE_SCALED;
     blit->bounds[2] = 10.0f;
     blit->bounds[3] = 10.0f;
-    blit->blit_surface_scaled.src_surface = &surface;
-    blit->blit_surface_scaled.src_generation = surface.generation;
+    blit->blit_surface_scaled.src_surface = surface;
+    blit->blit_surface_scaled.src_resource = surface->self;
+    blit->blit_surface_scaled.src_generation = surface->generation;
     dl_end_element(&source, begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -458,11 +474,12 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
     ASSERT_NE(fragment, nullptr);
     EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
-    surface.generation++;
+    surface->generation++;
     EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
+    free_test_surface(surface);
 }
 
 TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay) {
@@ -497,7 +514,7 @@ TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay
     vy[0] = 200.0f;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     ASSERT_TRUE(retained_dl_append_fragment(&replay, fragment));
     ASSERT_EQ(replay.size(), 3u);
     ASSERT_EQ(replay.data()[1].op, DL_FILL_SURFACE_RECT);
@@ -538,7 +555,7 @@ TEST_F(RetainedDisplayListTest, AppendsTransformedVisualFragmentWithStableMarker
     uint32_t contained_id = 7777;
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_TRUE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, &contained_id));
@@ -554,10 +571,11 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedImageGeneration) {
     DisplayList source = {};
     dl_init(&source, arena);
 
-    ImageSurface surface = {};
-    surface.width = 2;
-    surface.height = 2;
-    surface.generation = 9;
+    ImageSurface* surface = image_surface_alloc();
+    ASSERT_NE(surface, nullptr);
+    surface->width = 2;
+    surface->height = 2;
+    surface->generation = 9;
     uint32_t pixels[4] = {0xff0000ff, 0xff00ff00, 0xffff0000, 0xffffffff};
 
     int begin = dl_begin_element(&source, 78, 0.0f, 0.0f, 2.0f, 2.0f);
@@ -567,8 +585,8 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedImageGeneration) {
     image->bounds[2] = 2.0f;
     image->bounds[3] = 2.0f;
     image->draw_image.pixels = pixels;
-    image->draw_image.resource_owner = &surface;
-    image->draw_image.resource_generation = surface.generation;
+    image->draw_image.resource = surface->self;
+    image->draw_image.resource_generation = surface->generation;
     dl_end_element(&source, begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -579,8 +597,78 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedImageGeneration) {
     ASSERT_NE(fragment, nullptr);
     EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
-    surface.generation++;
+    surface->generation++;
     EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+    free_test_surface(surface);
+}
+
+// A retained image whose surface was destroyed must be rejected through the
+// slot table, without reading the freed surface.
+TEST_F(RetainedDisplayListTest, RejectsRetainedImageAfterSurfaceDestroyed) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+
+    ImageSurface* surface = image_surface_alloc();
+    ASSERT_NE(surface, nullptr);
+    ASSERT_FALSE(surface->self.is_null());
+    surface->width = 2;
+    surface->height = 2;
+    surface->generation = 3;
+    uint32_t pixels[4] = {0xff0000ff, 0xff00ff00, 0xffff0000, 0xffffffff};
+
+    int begin = dl_begin_element(&source, 80, 0.0f, 0.0f, 2.0f, 2.0f);
+    DisplayItem* image = dl_alloc_item(&source);
+    ASSERT_NE(image, nullptr);
+    image->op = DL_DRAW_IMAGE;
+    image->bounds[2] = 2.0f;
+    image->bounds[3] = 2.0f;
+    image->draw_image.pixels = pixels;
+    image->draw_image.resource = surface->self;
+    image->draw_image.resource_generation = surface->generation;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 80);
+    ASSERT_NE(fragment, nullptr);
+    EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 1));
+
+    lam::Handle<ImageSurface> stale = surface->self;
+    free_test_surface(surface);
+    EXPECT_EQ(image_surface_lookup(stale), nullptr);
+    EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
+
+    retained_dl_cache_destroy(cache);
+    dl_destroy(&source);
+}
+
+TEST_F(RetainedDisplayListTest, StackSurfaceIsNotRetained) {
+    DisplayList source = {};
+    dl_init(&source, arena);
+    ImageSurface surface = {};
+    surface.width = 2;
+    surface.height = 2;
+    surface.generation = 4;
+    uint32_t pixels[4] = {0, 0, 0, 0};
+    int begin = dl_begin_element(&source, 81, 0.0f, 0.0f, 2.0f, 2.0f);
+    DisplayItem* image = dl_alloc_item(&source);
+    ASSERT_NE(image, nullptr);
+    image->op = DL_DRAW_IMAGE;
+    image->bounds[2] = 2.0f;
+    image->bounds[3] = 2.0f;
+    image->draw_image.pixels = pixels;
+    image->draw_image.resource = surface.self;  // null: built on the stack
+    image->draw_image.resource_generation = surface.generation;
+    dl_end_element(&source, begin);
+
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    retained_dl_cache_capture(cache, &source);
+    EXPECT_EQ(retained_dl_cache_get(cache, 81), nullptr);  // no handle: liveness uncheckable
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
@@ -598,7 +686,7 @@ TEST_F(RetainedDisplayListTest, RejectsBorrowedImageWithoutGenerationAtCapture) 
     image->bounds[2] = 2.0f;
     image->bounds[3] = 2.0f;
     image->draw_image.pixels = pixels;
-    image->draw_image.resource_owner = nullptr;
+    image->draw_image.resource = lam::Handle<ImageSurface>{};
     image->draw_image.resource_generation = 0;
     dl_end_element(&source, begin);
 
@@ -673,7 +761,7 @@ TEST_F(RetainedDisplayListTest, UnsafeRecaptureClearsPreviousFragment) {
     dl_end_element(&safe_source, safe_begin);
 
     DisplayList unsafe_source = {};
-    dl_init(&unsafe_source, arena);
+    dl_init(&unsafe_source, replay_arena);
     int fake_filter = 1;
     int unsafe_begin = dl_begin_element(&unsafe_source, 86, 0.0f, 0.0f, 10.0f, 10.0f);
     DisplayItem* filter = dl_alloc_item(&unsafe_source);
@@ -796,7 +884,7 @@ TEST_F(RetainedDisplayListTest, RejectsUnknownDirtyIntersectingOnlyEffectOverflo
     Bound current_marker = {50.0f, 50.0f, 70.0f, 70.0f};
 
     DisplayList replay = {};
-    dl_init(&replay, arena);
+    dl_init(&replay, replay_arena);
     EXPECT_FALSE(retained_dl_append_fragment_for_dirty(
         &replay, fragment, current_marker, &tracker, 1.0f,
         retained_test_contains_view_id, nullptr));
@@ -838,10 +926,11 @@ TEST_F(RetainedDisplayListTest, RejectsStaleWebviewSurfaceGeneration) {
     DisplayList source = {};
     dl_init(&source, arena);
 
-    ImageSurface surface = {};
-    surface.width = 12;
-    surface.height = 8;
-    surface.generation = 3;
+    ImageSurface* surface = image_surface_alloc();
+    ASSERT_NE(surface, nullptr);
+    surface->width = 12;
+    surface->height = 8;
+    surface->generation = 3;
 
     int begin = dl_begin_element(&source, 90, 0.0f, 0.0f, 12.0f, 8.0f);
     DisplayItem* webview = dl_alloc_item(&source);
@@ -849,8 +938,9 @@ TEST_F(RetainedDisplayListTest, RejectsStaleWebviewSurfaceGeneration) {
     webview->op = DL_WEBVIEW_LAYER_PLACEHOLDER;
     webview->bounds[2] = 12.0f;
     webview->bounds[3] = 8.0f;
-    webview->webview_layer_placeholder.surface = &surface;
-    webview->webview_layer_placeholder.surface_generation = surface.generation;
+    webview->webview_layer_placeholder.surface = surface;
+    webview->webview_layer_placeholder.resource = surface->self;
+    webview->webview_layer_placeholder.surface_generation = surface->generation;
     dl_end_element(&source, begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -861,9 +951,10 @@ TEST_F(RetainedDisplayListTest, RejectsStaleWebviewSurfaceGeneration) {
     ASSERT_NE(fragment, nullptr);
     EXPECT_TRUE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
-    surface.generation++;
+    surface->generation++;
     EXPECT_FALSE(retained_dl_fragment_resources_valid(fragment, 0, 1));
 
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
+    free_test_surface(surface);
 }

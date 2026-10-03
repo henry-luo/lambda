@@ -204,7 +204,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
-                   void* resource_owner, uint64_t resource_generation, bool copy_pixels, bool straight_alpha) {
+                   ImageSurface* resource_owner, uint64_t resource_generation, bool copy_pixels, bool straight_alpha) {
     if (copy_pixels) {
         // standalone decoders can expire before replay; the recording owns this copy.
         size_t size = (size_t)src_stride * (size_t)src_h * sizeof(uint32_t);
@@ -217,7 +217,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
     item->op = DL_DRAW_IMAGE;
     dl_record_set_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, transform, 1.0f);
     item->draw_image.pixels = pixels;
-    item->draw_image.resource_owner = resource_owner;
+    item->draw_image.resource = resource_owner ? resource_owner->self : lam::Handle<ImageSurface>{};
     item->draw_image.resource_generation = resource_generation;
     item->draw_image.src_w = src_w;
     item->draw_image.src_h = src_h;

@@ -4431,16 +4431,11 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             });
 
             // Table column counts come from the DOM, so avoid input-sized stack frames.
-            float* col_min = num_columns > 0
-                ? (float*)scratch_calloc(&lycon->scratch, (size_t)num_columns * sizeof(float))
-                : nullptr;
-            float* col_max = num_columns > 0
-                ? (float*)scratch_calloc(&lycon->scratch, (size_t)num_columns * sizeof(float))
-                : nullptr;
+            ScratchScope col_scope(&lycon->scratch);
+            float* col_min = num_columns > 0 ? col_scope.array_zero<float>(num_columns) : nullptr;
+            float* col_max = num_columns > 0 ? col_scope.array_zero<float>(num_columns) : nullptr;
             if (num_columns > 0 && (!col_min || !col_max)) {
                 log_error("measure_element_intrinsic_widths: failed to allocate %d table column widths", num_columns);
-                scratch_free(&lycon->scratch, col_max);
-                scratch_free(&lycon->scratch, col_min);
                 return sizes;
             }
 
@@ -4546,8 +4541,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
             }
             sizes.min_content = max(sizes.min_content, table_min);
             sizes.max_content = max(sizes.max_content, table_max);
-            scratch_free(&lycon->scratch, col_max);
-            scratch_free(&lycon->scratch, col_min);
+            col_scope.end();
 
             // Handle captions
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -4817,8 +4811,9 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         if (col_count > 0) {
             // Compute per-column max-content: assign each child to a column (auto-placement)
             // and take max of children's max-content in each column
-            float* col_min = (float*)scratch_calloc(&lycon->scratch, col_count * sizeof(float));
-            float* col_max = (float*)scratch_calloc(&lycon->scratch, col_count * sizeof(float));
+            ScratchScope col_scope(&lycon->scratch);
+            float* col_min = col_scope.array_zero<float>(col_count);
+            float* col_max = col_scope.array_zero<float>(col_count);
 
             int item_idx = 0;
             for (DomNode* child = element->first_child; child; child = child->next_sibling) {
@@ -4871,8 +4866,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
                 total_max += column_gap * (col_count - 1);
             }
 
-            scratch_free(&lycon->scratch, col_max);
-            scratch_free(&lycon->scratch, col_min);
+            col_scope.end();
 
             // Add padding and border
             float pad_left = 0, pad_right = 0, border_left = 0, border_right = 0;
@@ -6771,7 +6765,8 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             int row_count = (child_count + grid_column_count - 1) / grid_column_count;
 
             // Grid child counts come from the DOM, so avoid input-sized stack frames.
-            float* child_heights = (float*)scratch_calloc(&lycon->scratch, (size_t)child_count * sizeof(float));
+            ScratchScope heights_scope(&lycon->scratch);
+            float* child_heights = heights_scope.array_zero<float>((size_t)child_count);
             if (!child_heights) {
                 log_error("calculate_max_content_height: failed to allocate %d grid child heights", child_count);
                 return height;
@@ -6805,7 +6800,6 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
                     height += grid_row_gap;
                 }
             }
-            scratch_free(&lycon->scratch, child_heights);
         }
     } else if (is_flex_row && is_flex_wrap && width > 0) {
         // Special handling for wrapping flex row containers

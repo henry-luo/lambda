@@ -42,19 +42,19 @@ typedef struct Arena Arena;
 typedef struct ArenaStats {
     size_t backing_bytes;       // always zero: Arena owns its blocks directly
     size_t committed_bytes;     // aggregate chunk data capacity
-    size_t bump_used_bytes;     // bump extent including recyclable interior blocks
-    size_t active_bytes;        // bump_used_bytes minus recyclable_bytes
-    size_t recyclable_bytes;    // interior blocks available through free bins
+    size_t bump_used_bytes;     // bump extent including retained interior blocks
+    size_t active_bytes;        // bump_used_bytes minus retired_bytes
+    size_t retired_bytes;       // blocks retained for reuse (arena_retire)
     size_t waste_bytes;         // unused chunk tails
     size_t overhead_bytes;      // arena/chunk headers and allocator rounding
     size_t high_water_active_bytes;
     uint64_t allocation_count;
-    uint64_t free_count;
-    uint64_t reuse_hits;
-    uint64_t reuse_misses;
+    uint64_t rewind_count;      // tail-region rewinds (arena_rewind)
+    uint64_t retire_count;      // arena_retire calls
+    uint64_t reuse_hits;        // allocations served from retained blocks
     uint64_t split_count;
     uint64_t coalesce_count;
-    uint64_t bump_back_count;
+    uint64_t bump_back_count;   // retained spans that rejoined the tail
     uint64_t fresh_chunk_count;
     uint64_t fresh_growth_bytes;
     uint64_t reset_count;
@@ -187,11 +187,40 @@ size_t arena_chunk_count(Arena* arena);
 /** Copy the allocator's detailed logical/backing counters. */
 void arena_get_stats(Arena* arena, ArenaStats* out);
 
-// Scoped scratch users register their lifetime so reset/clear cannot invalidate
-// active temporary pointers.
+// An arena releases memory only in batch: whole-arena reset/clear/destroy, or
+// rewinding its tail to a mark. A block is never individually freed or
+// discarded; it may only be retained for reuse within the same arena
+// (arena_retire), as DOM node retirement does (D4.1.4v5).
+
+// A scratch arena registers as the sole owner of its backing arena's tail, so
+// reset/clear cannot invalidate its pointers and no other allocation can land
+// inside the region it rewinds. While registered, arena_alloc asserts; the
+// owner allocates through arena_scope_alloc.
 void arena_scope_enter(Arena* arena);
 void arena_scope_leave(Arena* arena);
 uint32_t arena_active_scope_count(Arena* arena);
+void* arena_scope_alloc(Arena* arena, size_t size, size_t alignment);
+
+// Tail position for the mark/rewind batch-free variant.
+typedef struct ArenaMark {
+    void* chunk;        // opaque chunk at the mark
+    size_t used;        // bytes used in that chunk at the mark
+    size_t total_used;  // arena-wide bytes used at the mark
+} ArenaMark;
+
+ArenaMark arena_mark(Arena* arena);
+// Frees everything allocated after `mark`; later chunks are kept for reuse.
+// Not valid on an arena holding retired blocks.
+void arena_rewind(Arena* arena, ArenaMark mark);
+
+/**
+ * Retain a block on the arena's retired list for reuse by later allocations
+ * from the same arena. The memory stays arena-owned until reset/destroy; a
+ * retained span that reaches the tail rejoins it. Not allowed while a scratch
+ * scope owns the arena.
+ * @param size the size the block was allocated with
+ */
+void arena_retire(Arena* arena, void* ptr, size_t size);
 
 /**
  * Check if a pointer belongs to this arena
@@ -215,32 +244,6 @@ void  arena_set_mem_category(Arena* arena, int category);
  * mem_node. Set by the allocator factory; NULL by default (no-op).
  */
 void arena_set_node_release_hook(void (*fn)(void* node));
-
-/**
- * Reallocate memory in arena with free-list support
- * Similar to realloc() but works within arena memory management
- * - If ptr is NULL, allocates new memory (like arena_alloc)
- * - If new_size is 0, frees memory to free-list (like arena_free)
- * - If shrinking, excess space added to free-list for reuse
- * - If growing at end of chunk, extends in-place if possible
- * - Otherwise allocates new, copies old data, and frees old block
- * @param arena Arena to reallocate from
- * @param ptr Pointer to existing allocation (or NULL for new allocation)
- * @param old_size Size of existing allocation in bytes (or 0 if ptr is NULL)
- * @param new_size Desired new size in bytes
- * @return Pointer to reallocated memory, or NULL on failure
- */
-void* arena_realloc(Arena* arena, void* ptr, size_t old_size, size_t new_size);
-
-/**
- * Free memory back to arena's free-list for reuse
- * Memory is not returned to pool, but added to internal free-list
- * for future arena_alloc() or arena_realloc() calls
- * @param arena Arena that owns the memory
- * @param ptr Pointer to free (must be from this arena)
- * @param size Size of allocation to free in bytes
- */
-void arena_free(Arena* arena, void* ptr, size_t size);
 
 #ifdef __cplusplus
 }

@@ -999,18 +999,20 @@ TEST(SvgImageTest, ReplayRefreshesPixelsAfterSharedDecodePromotion) {
     dl_init(&dl, arena);
     uint32_t old_pixels[] = {0xff0000ffu};
     uint32_t new_pixels[] = {0xffff0000u, 0xffff0000u};
-    ImageSurface image = {};
-    image.width = image.height = 1;
-    image.pitch = 4;
-    image.pixels = old_pixels;
-    image.generation = 1;
+    // shared decode owners now register the handle used by deferred replay.
+    ImageSurface* image = image_surface_alloc();
+    ASSERT_NE(image, nullptr); ASSERT_FALSE(image->self.is_null());
+    image->width = image->height = 1;
+    image->pitch = 4;
+    image->pixels = old_pixels;
+    image->generation = 1;
     dl_draw_image(&dl, old_pixels, 1, 1, 1, 0.0f, 0.0f, 8.0f, 8.0f,
-        255, nullptr, &image, image.generation);
-    image.pixels = new_pixels;
-    image.decoded_width = 2;
-    image.decoded_height = 1;
-    image.pitch = 8;
-    image.generation++;
+        255, nullptr, image, image->generation);
+    image->pixels = new_pixels;
+    image->decoded_width = 2;
+    image->decoded_height = 1;
+    image->pitch = 8;
+    image->generation++;
     uint32_t pixels[8 * 8] = {};
     RdtVector vector = {};
     rdt_vector_init(&vector, pixels, 8, 8, 8);
@@ -1018,6 +1020,12 @@ TEST(SvgImageTest, ReplayRefreshesPixelsAfterSharedDecodePromotion) {
     EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
     rdt_vector_end_batch(&vector);
     EXPECT_EQ(pixels[4 * 8 + 4], 0xffff0000u);
+    image_surface_detach_pixels(image); image_surface_destroy(image);
+    memset(pixels, 0, sizeof(pixels));
+    rdt_vector_begin_batch(&vector);
+    EXPECT_EQ(dl_replay_vector_item(&vector, &dl.data()[0], false), DL_REPLAY_VECTOR_DREW);
+    rdt_vector_end_batch(&vector);
+    EXPECT_EQ(pixels[4 * 8 + 4], 0u);
     rdt_vector_destroy(&vector);
     dl_destroy(&dl);
     arena_destroy(arena);

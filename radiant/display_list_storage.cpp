@@ -285,10 +285,11 @@ static bool dl_retainable_generation_resource(const void* resource, uint64_t gen
     return !resource || generation != 0;
 }
 
-static bool dl_retainable_image_pixels(const void* pixels,
-                                       const void* resource_owner,
-                                       uint64_t generation) {
-    return !pixels || (resource_owner && generation != 0);
+// Retained items reference surfaces by handle; an unregistered surface (null
+// handle) cannot be checked for liveness later, so it is never retained.
+static bool dl_retainable_surface(const void* borrowed, lam::Handle<ImageSurface> owner,
+                                  uint64_t generation) {
+    return !borrowed || (!owner.is_null() && generation != 0);
 }
 
 bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
@@ -539,9 +540,9 @@ bool dl_item_is_retainable_for_fragment(const DisplayItem* item) {
 
     switch (item->op) {
         case DL_DRAW_IMAGE:
-            if (!dl_retainable_image_pixels(item->draw_image.pixels,
-                                            item->draw_image.resource_owner,
-                                            item->draw_image.resource_generation)) {
+            if (!dl_retainable_surface(item->draw_image.pixels,
+                                       item->draw_image.resource,
+                                       item->draw_image.resource_generation)) {
                 return false;
             }
             break;
@@ -552,8 +553,9 @@ bool dl_item_is_retainable_for_fragment(const DisplayItem* item) {
             }
             break;
         case DL_BLIT_SURFACE_SCALED:
-            if (!dl_retainable_generation_resource(item->blit_surface_scaled.src_surface,
-                                                   item->blit_surface_scaled.src_generation)) {
+            if (!dl_retainable_surface(item->blit_surface_scaled.src_surface,
+                                       item->blit_surface_scaled.src_resource,
+                                       item->blit_surface_scaled.src_generation)) {
                 return false;
             }
             break;
@@ -564,8 +566,9 @@ bool dl_item_is_retainable_for_fragment(const DisplayItem* item) {
             }
             break;
         case DL_WEBVIEW_LAYER_PLACEHOLDER:
-            if (!dl_retainable_generation_resource(item->webview_layer_placeholder.surface,
-                                                   item->webview_layer_placeholder.surface_generation)) {
+            if (!dl_retainable_surface(item->webview_layer_placeholder.surface,
+                                       item->webview_layer_placeholder.resource,
+                                       item->webview_layer_placeholder.surface_generation)) {
                 return false;
             }
             break;

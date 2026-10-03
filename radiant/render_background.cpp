@@ -302,7 +302,8 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
     // Build gradient stops
     int stop_count = gradient->stop_count;
     // gradient stop counts come from parsed CSS; use render scratch to avoid attacker-sized stack frames.
-    RdtGradientStop* stops = (RdtGradientStop*)scratch_calloc(&rdcon->scratch, (size_t)stop_count * sizeof(RdtGradientStop));
+    ScratchScope scope(&rdcon->scratch);
+    RdtGradientStop* stops = scope.array_zero<RdtGradientStop>((size_t)stop_count);
     if (!stops) {
         log_error("[GRADIENT] failed to allocate %d linear gradient stops", stop_count);
         rdt_path_free(p);
@@ -367,7 +368,6 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
-    scratch_free(&rdcon->scratch, stops);
 }
 
 static void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
@@ -436,7 +436,8 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
 
 
     // gradient stop counts come from parsed CSS; use render scratch to avoid attacker-sized stack frames.
-    RdtGradientStop* stops = (RdtGradientStop*)scratch_calloc(&rdcon->scratch, (size_t)gradient->stop_count * sizeof(RdtGradientStop));
+    ScratchScope scope(&rdcon->scratch);
+    RdtGradientStop* stops = scope.array_zero<RdtGradientStop>((size_t)gradient->stop_count);
     if (!stops) {
         log_error("[GRADIENT] failed to allocate %d radial gradient stops", gradient->stop_count);
         rdt_path_free(p);
@@ -458,7 +459,6 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
     rdt_path_free(p);
-    scratch_free(&rdcon->scratch, stops);
 }
 
 void render_list_marker_linear_gradient(RenderContext* rdcon,
@@ -631,7 +631,8 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
 
     // Allocate temporary buffer for one pass
     size_t buf_size = (size_t)rw * rh;
-    uint32_t* temp = (uint32_t*)scratch_alloc(sa, buf_size * sizeof(uint32_t));
+    ScratchScope scope(sa);
+    uint32_t* temp = scope.array<uint32_t>(buf_size);
     if (!temp) return;
 
     // 3-pass box blur (horizontal then vertical each pass)
@@ -718,7 +719,6 @@ void box_blur_region(ScratchArena* sa, ImageSurface* surface, int rx, int ry, in
         }
     }
 
-    scratch_free(sa, temp);
 }
 
 static bool clip_surface_region(ImageSurface* surface, int* rx, int* ry, int* rw, int* rh) {
@@ -729,10 +729,11 @@ static bool clip_surface_region(ImageSurface* surface, int* rx, int* ry, int* rw
     return *rw > 0 && *rh > 0;
 }
 
-static int render_collect_box_shadows(RenderContext* rdcon, ViewBlock* view,
+// The shadow list lives in the caller's scope.
+static int render_collect_box_shadows(ScratchScope* scope, ViewBlock* view,
                                       bool inset, BoxShadow*** out_shadows) {
     if (out_shadows) *out_shadows = nullptr;
-    if (!rdcon || !view || !view->bound || !view->boundary()->box_shadow || !out_shadows) {
+    if (!scope || !view || !view->bound || !view->boundary()->box_shadow || !out_shadows) {
         return 0;
     }
     int count = 0;
@@ -740,8 +741,7 @@ static int render_collect_box_shadows(RenderContext* rdcon, ViewBlock* view,
         if (shadow->inset == inset) count++;
     }
     if (count == 0) return 0;
-    BoxShadow** shadows = (BoxShadow**)scratch_calloc(
-        &rdcon->scratch, (size_t)count * sizeof(BoxShadow*));
+    BoxShadow** shadows = scope->array_zero<BoxShadow*>((size_t)count);
     if (!shadows) {
         log_error("[BOX-SHADOW] failed to allocate shadow list for %d shadow(s)", count);
         return 0;
@@ -826,7 +826,8 @@ void box_blur_region_inset(ScratchArena* sa, ImageSurface* surface,
 
     // Copy expanded region from surface to temp buffer
     size_t buf_size = (size_t)ew * eh;
-    uint32_t* buf = (uint32_t*)scratch_alloc(sa, buf_size * sizeof(uint32_t));
+    ScratchScope scope(sa);
+    uint32_t* buf = scope.array<uint32_t>(buf_size);
     if (!buf) return;
 
     for (int row = 0; row < eh; row++) {
@@ -885,7 +886,6 @@ void box_blur_region_inset(ScratchArena* sa, ImageSurface* surface,
         }
     }
 
-    scratch_free(sa, buf);
 }
 
 /**
@@ -976,9 +976,11 @@ typedef struct OuterShadowImage {
 } OuterShadowImage;
 
 // Both retained-image and immediate-composite shadows must rasterize and blur
-// the same isolated source, or their edge falloff diverges.
+// the same isolated source, or their edge falloff diverges. With a scope the
+// buffer belongs to it; without one it stays with `sa` (the retained display
+// list's arena, released with the list).
 static bool build_outer_shadow_image(
-    ScratchArena* sa, ImageSurface* surface,
+    ScratchArena* sa, ScratchMark* scope, ImageSurface* surface,
     float shadow_x, float shadow_y, float shadow_w, float shadow_h,
     float sr_tl, float sr_tr, float sr_br, float sr_bl,
     Color shadow_color, float blur_radius, OuterShadowImage* image)
@@ -999,7 +1001,9 @@ static bool build_outer_shadow_image(
     if (br_w <= 0 || br_h <= 0) return false;
 
     size_t buf_n = (size_t)br_w * br_h;
-    uint32_t* shadow_buf = (uint32_t*)scratch_alloc(sa, buf_n * sizeof(uint32_t));
+    uint32_t* shadow_buf = scope
+        ? (uint32_t*)scratch_scope_alloc(sa, scope, buf_n * sizeof(uint32_t))
+        : (uint32_t*)scratch_alloc(sa, buf_n * sizeof(uint32_t));
     if (!shadow_buf) return false;
     memset(shadow_buf, 0, buf_n * sizeof(uint32_t));
 
@@ -1040,7 +1044,8 @@ void render_outer_shadow_blur_composite(
 {
     if (!surface || !surface->pixels || shadow_color.a == 0) return;
     OuterShadowImage image = {};
-    if (!build_outer_shadow_image(sa, surface,
+    ScratchScope scope(sa);
+    if (!build_outer_shadow_image(sa, &scope.mark, surface,
             shadow_x, shadow_y, shadow_w, shadow_h,
             sr_tl, sr_tr, sr_br, sr_bl, shadow_color, blur_radius, &image)) return;
     uint32_t* shadow_buf = image.pixels;
@@ -1080,7 +1085,7 @@ static uint32_t* render_outer_shadow_blur_image(
     if (!sa || !surface || shadow_color.a == 0) return nullptr;
 
     OuterShadowImage image = {};
-    if (!build_outer_shadow_image(sa, surface,
+    if (!build_outer_shadow_image(sa, nullptr, surface,
             shadow_x, shadow_y, shadow_w, shadow_h,
             sr_tl, sr_tr, sr_br, sr_bl, shadow_color, blur_radius, &image)) return nullptr;
     uint32_t* shadow_buf = image.pixels;
@@ -1128,8 +1133,9 @@ static uint32_t* render_outer_shadow_blur_image(
 void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->box_shadow) return;
 
+    ScratchScope scope(&rdcon->scratch);
     BoxShadow** shadows = nullptr;
-    int shadow_count = render_collect_box_shadows(rdcon, view, false, &shadows);
+    int shadow_count = render_collect_box_shadows(&scope, view, false, &shadows);
     if (shadow_count == 0) return;
 
     // Scale factor: rect is in physical pixels but shadow props and border radii
@@ -1257,8 +1263,6 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
             }
         }
     }
-
-    scratch_free(&rdcon->scratch, shadows);
 }
 
 /**
@@ -1278,8 +1282,9 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
 void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->box_shadow) return;
 
+    ScratchScope scope(&rdcon->scratch);
     BoxShadow** shadows = nullptr;
-    int shadow_count = render_collect_box_shadows(rdcon, view, true, &shadows);
+    int shadow_count = render_collect_box_shadows(&scope, view, true, &shadows);
     if (shadow_count == 0) return;
 
     // Scale factor: rect is in physical pixels but shadow props and border radii
@@ -1411,8 +1416,6 @@ void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
                                    inset_save_rx, inset_save_ry, inset_save_rw, inset_save_rh, 0);
         }
     }
-
-    scratch_free(&rdcon->scratch, shadows);
 }
 
 /**

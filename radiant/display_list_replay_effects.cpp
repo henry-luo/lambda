@@ -77,7 +77,8 @@ void dl_replay_box_blur_region(ScratchArena* scratch,
     }
     if (blur->clip_type && surface && surface->pixels) {
         IRect region = {};
-        uint32_t* saved = surface_region_save(surface, scratch,
+        ScratchScope scope(scratch);
+        uint32_t* saved = surface_region_save(surface, scratch, &scope.mark,
                                               blur->rx, blur->ry, blur->rw, blur->rh,
                                               &region);
         box_blur_region(scratch, surface, blur->rx, blur->ry, blur->rw, blur->rh, blur->blur_radius);

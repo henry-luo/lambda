@@ -355,19 +355,18 @@ static int jpeg_exif_orientation_from_file(const char* file_path) {
         return 1;
     }
 
-    unsigned char* bytes = (unsigned char*)mem_alloc((size_t)file_size, MEM_CAT_IMAGE);
+    lam::Temp<unsigned char> bytes = lam::temp_array<unsigned char>((size_t)file_size, MEM_CAT_IMAGE);
     if (!bytes) {
         fclose(fp);
         return 1;
     }
-    size_t read_count = fread(bytes, 1, (size_t)file_size, fp);
+    size_t read_count = fread(bytes.get(), 1, (size_t)file_size, fp);
     fclose(fp);
 
     int orientation = 1;
     if (read_count == (size_t)file_size) {
-        orientation = jpeg_exif_orientation_from_memory(bytes, (size_t)file_size);
+        orientation = jpeg_exif_orientation_from_memory(bytes.get(), (size_t)file_size);
     }
-    mem_free(bytes);
     return orientation;
 }
 
@@ -535,12 +534,12 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (is_svg) {
             SvgImageIntrinsicMetadata svg_meta =
                 svg_read_intrinsic_metadata_in_memory((const char*)decoded, decoded_len);
-            surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+            surface = image_surface_alloc();
             surface->format = IMAGE_FORMAT_SVG;
             surface->pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
             if (!surface->pic) {
                 mem_free(decoded);
-                mem_free(surface);
+                image_surface_destroy(surface);
                 return NULL;
             }
             float svg_w, svg_h;
@@ -755,7 +754,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         SvgImageIntrinsicMetadata svg_meta = is_http && downloaded_data
             ? svg_read_intrinsic_metadata_in_memory((const char*)downloaded_data, downloaded_size)
             : svg_read_intrinsic_metadata_in_file(file_path);
-        surface = (ImageSurface *)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+        surface = image_surface_alloc();
         surface->format = IMAGE_FORMAT_SVG;
         if (is_http && downloaded_data) {
             surface->pic = rdt_picture_load_data((const char*)downloaded_data, (int)downloaded_size, "svg");
@@ -764,7 +763,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
         if (!surface->pic) {
             log_debug("failed to load SVG image: %s", file_path);
-            mem_free(surface);
+            image_surface_destroy(surface);
             load_image_cleanup_failed(uicon, abs_url, file_path, downloaded_data);
             return NULL;
         }
@@ -779,7 +778,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     else if ((!is_http && lottie_detect_by_path(file_path)) ||
              (is_http && downloaded_data && lottie_detect_by_content(downloaded_data, downloaded_size))) {
         // Create a placeholder surface — pixels will be filled by the LottiePlayer
-        surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+        surface = image_surface_alloc();
         // Try to get natural dimensions from the Lottie via ThorVG picture
         // For now, use a default render size; the layout will resize as needed
         surface->width = 300;   // default Lottie render width
@@ -812,7 +811,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
                     // Not a valid Lottie — fall through to raster path is not possible here
                     // Free and return NULL
                     log_debug("lottie detect: failed to load as Lottie: %s", file_path);
-                    mem_free(surface);
+                    image_surface_destroy(surface);
                     surface = NULL;
                 }
             }
@@ -830,7 +829,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         if (is_http && downloaded_data) {
             // HTTP images: read dimensions from memory header, keep data for lazy decode
             if (image_get_dimensions_from_memory(downloaded_data, downloaded_size, &width, &height)) {
-                surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+                surface = image_surface_alloc();
                 surface->width = width;
                 surface->height = height;
                 {
@@ -852,7 +851,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         } else {
             // Local files: read dimensions from file header only
             if (image_get_dimensions(file_path, &width, &height)) {
-                surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+                surface = image_surface_alloc();
                 surface->width = width;
                 surface->height = height;
                 {
@@ -951,7 +950,7 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
         log_error("[surface] Invalid image surface dimensions");
         return NULL;
     }
-    ImageSurface* img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+    ImageSurface* img_surface = image_surface_alloc();
     if (!img_surface) {
         log_error("[surface] Could not allocate image surface");
         return NULL;
@@ -966,7 +965,7 @@ ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
     img_surface->pixels = mem_calloc((size_t)pixel_width * (size_t)pixel_height, sizeof(uint32_t), MEM_CAT_IMAGE);
     if (!img_surface->pixels) {
         log_error("[surface] Could not allocate memory for image surface");
-        mem_free(img_surface);
+        image_surface_destroy(img_surface);
         return NULL;
     }
     return img_surface;
@@ -1004,7 +1003,7 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
         log_error("[surface] Invalid image surface dimensions or pixels");
         return NULL;
     }
-    ImageSurface* img_surface = (ImageSurface*)mem_calloc(1, sizeof(ImageSurface), MEM_CAT_IMAGE);
+    ImageSurface* img_surface = image_surface_alloc();
     if (img_surface) {
         img_surface->width = pixel_width;  img_surface->height = pixel_height;
         img_surface->encoded_width = pixel_width;  img_surface->encoded_height = pixel_height;
@@ -1038,6 +1037,8 @@ bool image_surface_is_dom_owned(const ImageSurface* img_surface) {
 
 void image_surface_destroy(ImageSurface* img_surface) {
     if (img_surface) {
+        // stale handles stop resolving before the memory goes away
+        image_surface_release_slot(img_surface);
         if (img_surface->pixels) mem_free(img_surface->pixels);
         if (img_surface->pic) {
             rdt_picture_free(img_surface->pic);

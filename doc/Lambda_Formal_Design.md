@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 15.0.0 (2026-10-02)
+**Spec version:** 18.1.0 (2026-10-03)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -443,6 +443,19 @@ language-visible counterparts are the semantics spec's SI ledger.
   header is public ABI for MIR and the GC; the asserts are the enforcement.
   [OB22]
 
+- **D2.6.12v2*** **Virtual output lists carry their builder.** A PDF file's
+  content destination extends the existing List prefix (through Element)
+  with a builder pointer. Its `is_virtual` representation flag dispatches
+  content append to that builder instead of an Item array; it is independent
+  of the `is_spreadable` kind bit. Normal lists keep their existing storage.
+  A common builder interface admits future destinations. No output context
+  or allocator context is installed or changed. Finish and ownership follow
+  the extended destination. The PDFBuilder's MVP object encoder reads borrowed
+  map/array storage and writes bytes directly, retaining no source Item edges;
+  document construction stays in Lambda. Producer forwarding and the remaining
+  lifecycle and observation contracts are tracked in DO32/SO48.
+  [PDF_Output §5.4–§5.6]
+
 ### D2.7 The scalar-GC invariant
 
 - **D2.7.1** **No standalone scalar cell in the GC heap**: no
@@ -763,17 +776,24 @@ that carries them.
 - **D4.1.3** Input/format allocations are pool/arena-owned and **outside GC
   rooting entirely**; any future GC-heap boundary there requires an
   explicit audit. [CR8]
-- **D4.1.4v4*** Heap bytes are kept by exactly **four mechanisms** — tracked
+- **D4.1.4v5*** Heap bytes are kept by exactly **four mechanisms** — tracked
   raw allocation (`memtrack`), GC heap, arena, pool — and no fifth may be
   added without a new ruling. **Arena = sequential allocation + batch
-  free**, where batch free has exactly two variants: whole-arena
+  release**, where batch release has exactly two variants: whole-arena
   (reset/destroy) and tail-region (mark/rewind — the sidecar-stack
-  pattern). **Pool = individual allocation + individual free** (plus
-  owner-wide teardown as the safety net). Both share
+  pattern). An arena block is **never individually freed or discarded**; it
+  may only be **retained for reuse** — kept on the arena's retired list and
+  handed back to a later allocation from the same arena, its bytes released
+  with the arena. *Retain, never discard.* Retention is the exception, not a
+  second free path: its sanctioned user is DOM node retirement, which
+  recycles node slots inside their document or `Input` arena. Any other site
+  needing individual free is reclassified to pool. A tail-rewound arena has
+  **one owner** (a scratch stack) that owns its tail: no other allocation and
+  no retention may land in it. **Pool = individual allocation + individual
+  free** (plus owner-wide teardown as the safety net). Both share
   single-writer/multi-reader: published allocations are readable from any
-  thread; all mutation (alloc, free, reset, rewind, destroy) stays on the
-  one writer thread. A site needing non-tail free is reclassified to pool —
-  free lists are never added to arena. The general variable-size Pool
+  thread; all mutation (alloc, retire, free, reset, rewind, destroy) stays on
+  the one writer thread. The general variable-size Pool
   implementation owns growth extents, subdivides them into boundary-tagged
   blocks, and indexes **free blocks by span** in segregated free lists. Its
   optional initial reservation is clamped to at least 1 KiB and rounded up to
@@ -857,7 +877,7 @@ that carries them.
   once, newest first, when the pool releases its blocks (destroy, drain,
   reset), while those blocks are still valid. It is lifecycle only — the
   pool keeps none of the resource's bytes — so it is not a fifth mechanism
-  (D4.1.4v4). **Every `Input` is owned by the pool it lives in**: it has
+  (D4.1.4v5). **Every `Input` is owned by the pool it lives in**: it has
   its own context (D4.2.3), created under the pool's context, for its arena
   and name pool, and it registers its release as a cleanup, so it is
   released explicitly or, at the latest, with its pool — the lifetime its
@@ -970,14 +990,17 @@ that carries them.
 
 ### D4.5 The Radiant seam
 
-- **D4.5.1v3** One system-allocation substrate (`memtrack` + VM regions,
+- **D4.5.1v4** One system-allocation substrate (`memtrack` + VM regions,
   owned through `MemContext`), **two policies**: Lambda traces; Radiant uses
   arenas-as-regions + type-stable pools + generation handles + RAII, never
   GC'd — *the document arena is the cycle collector*. Ordinary Arena owns
   its blocks directly and exposes **batch lifetime only** — whole-arena
-  reset/destroy or tail-region mark/rewind (D4.1.4); former individual-free
-  users are reclassified, not accommodated. Seam contracts: **pin,
-  gen-check, copy-as-value**. [Memory_Model §7; Mem_Heap §4, MP-15]
+  reset/destroy or tail-region mark/rewind — plus retention for reuse
+  (D4.1.4v5): retired DOM nodes stay on their arena's retired list for later
+  node allocations; other former individual-free users are reclassified,
+  not accommodated. Each layout, render and display-list scratch stack owns
+  its own arena. Seam contracts: **pin, gen-check, copy-as-value**.
+  [Memory_Model §7; Mem_Heap §4, MP-15]
 
 ### D4.6 Name identity
 
@@ -1302,6 +1325,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   `MarkEditor` are io (they take `Input*`) — ownership resolves the
   layering, not callback abstractions; forwarding shims are deleted once
   call sites migrate. [SM §9.4]
+- **D7.1.6** **`lambda-cli` is the runtime-only host**: it carries only
+  the Lambda runtime — core, io, the Lambda engine and validator, and the
+  third-party libraries they need — and excludes **Radiant, the JS/TS
+  runtime and DOM, Jube host modules, and the HTTP server (`serve`)**. It is
+  a reduced build profile beside the one `lambda.exe` (D1.1), not a bundle
+  of it. An excluded command fails with an explicit "excluded from this
+  build" diagnostic; importing a `.js`/`.ts` or Jube module is an ordinary
+  import error. Nothing degrades silently. [SM15]
 
 ### D7.2 Script packages
 
@@ -1483,7 +1514,7 @@ loosely across the corpus — context disambiguates, and we live with it.
 
 ### D8.1 Structure
 
-- **D8.1.1v13*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
+- **D8.1.1v14*** First-party Lambda C lexer + hybrid recursive-descent/Pratt
   parser → the shared typed AST → **tiered execution**. The parser reduces
   directly into the retained `AstNode` graph; no Lambda CST or replacement
   syntax tree is retained. The default file/module path is the C parser, while
@@ -1493,17 +1524,24 @@ loosely across the corpus — context disambiguates, and we live with it.
   the shipped Lambda script policy is **AUTO**: each definition starts in T0,
   and an eligible hot definition may promote to its P2 boxed MIR satellite.
   Ordinary interpreted entries promote at `LAMBDA_JIT_THRESHOLD` (**5** by
-  default); *(v7, 2026-09-07)* a procedure whose body owns a loop statement
-  promotes at its **first** entry -- it is hot by construction, and a
-  once-called `main` that owns the workload's loop never reached the entry
-  threshold while back-edge promotion only takes effect at the next entry.
-  A direct, validated self-tail edge also increments the
+  default). A direct, validated self-tail edge also increments the
   definition-site call and tail-edge counters; at the same threshold it may
   synchronously publish the eligible satellite and transfer to its ordinary
   boxed entry with the rooted next-call arguments. This is a tail-entry
-  handoff, not general OSR: no interpreter program counter or arbitrary local
-  frame is materialized into MIR. General loop backedges remain next-entry
-  promotion candidates (`LAMBDA_JIT_BACKEDGE`, default 1024). *(v6, 2026-09-06)*
+  handoff: a tail expression has no continuation, so its state is exactly the
+  next entry's arguments. *(v14, 2026-10-02, USER)* A running T0 activation
+  may also hand off at a **loop-head test**. Back-edges are counted per loop
+  site; a loop that reaches `LAMBDA_JIT_BACKEDGE` (**10000** by default)
+  queues its definition once, and that image carries, beside the boxed entry,
+  a loop entry for that loop. After publication the activation enters it at
+  the next head test of the same loop with its frame's named slots; compiled
+  code completes the activation and returns its result, and T0 unwinds as for
+  `return`. Handoff is one-way: compiled code never returns control to the
+  interpreter mid-activation. A loop is eligible only where every T0 value
+  live at its head is a named frame slot; every other loop, and every guard
+  miss, stays T0. Owning a loop does not promote a definition at entry: the
+  call threshold, the self-tail threshold and the loop threshold are the only
+  triggers. [Ast_Interpreter AI23] *(v6, 2026-09-06)*
   A satellite is always entered through its boxed `_b` wrapper, so a definition
   whose signature carries plain `any` parameters is promotable: an `any`
   parameter has no raw carrier to mis-decode, and a lane the body alone infers
@@ -1568,10 +1606,12 @@ loosely across the corpus — context disambiguates, and we live with it.
   facts in a private MIR context and returns a sealed image; it may not mutate
   the Script MIR context, module slab, constant/type/property-key images,
   shared import resolver, AST analysis facts, or Function entries. Only a
-  later ordinary execution safe point verifies the generation and publishes the
-  target boxed entry. A failed, stale, or unsupported image is discarded and
-  pins that execution-local definition to T0. This is asynchronous code
-  generation, not OSR: no active interpreter frame is replaced. The first
+  later ordinary execution safe point -- an interpreted function entry or a
+  loop-head test -- verifies the generation and publishes the image's
+  entries. A failed, stale, or unsupported image is discarded and
+  pins that execution-local definition to T0. Publication itself replaces no
+  active frame; the loop-head handoff above is the only transfer of a running
+  activation. The first
   parallel implementation excludes async closures, cross-language imports,
   pattern prepasses, and constant-list growth; those cases do not revert to
   synchronous compilation. Private direct-callee cluster images remain future
@@ -2253,7 +2293,7 @@ slice; no formal semantic ruling or document semver changes.
 | D3.1.1 | `Type*` kind-discrimination is code-authoritative only — no design record owns the first-class type-value representation (DO22); the type-graph de-pointering census is deferred to its own doc (CP §6 census C). |
 | D3.2.2 | Constrained-type enforcement is base-only; the `is`/`fn_is`/validator three-way divergence is open (TE-6 P5). |
 | D3.4.3v3 | **Implemented 2026-09-25 ([Impl_Element_Type_Sharing](../vibe/impl/Lambda_Impl_Element_Type_Sharing.md) P0–P3).** Maps built through `map_put` — every `MarkBuilder` parser and every JS object — share through the per-`Input` tree (`map_put_with_data_growth`): the edge table dates from 2026-06-25, the shared root and the bounds (256 edges from the root, 16 from any other type, 1,024 map types per `Input`) from 2026-09-09; maps stopped interning through the shape pool on 2026-08-08. Parsed elements share since P1: `ElementBuilder` starts each element on its tag's root (`elmt_tree_root`) and `putToElement` adds attributes through the tree (`elmt_put_tree`), under their own budget of 16,384 per `Input`. Editor rebuilds since P2 replay their field list through the tree (`type_tree_root_like`, `type_tree_follow`), editing in place only a type the container owns — the old guard had also rewritten tree and literal types, re-laying a sibling map's fields. P3 deleted the shape pool (`shape_pool.cpp`, `Input::shape_pool`, `elmt_finalize_shape`, `map_finalize_shape`, `shape_builder_finalize`). Verification: peak RSS on a 13 MiB layout-test corpus (203K elements, 1,775 types) 184.0 → 120.2 MB and on a 13 MiB page corpus 109.6 → 85.8 MB, parse 1.42× and 1.39× faster; 17,230 HTML files, 99 test inputs and 84 formatter outputs identical to the pre-change build; the map budget took the test262 batch peak from 5,662 to 891 MB (2026-09-09). Since 2026-09-25 tree nodes and edges come from the `Input`'s arena and go with the `Input` (D4.1.4v4, D4.2.6; `input_tree_alloc`); the element-root table stays a pool block and frees its old copy when it grows; JavaScript descriptor retags (`js_property_attrs.cpp`) keep `js_input`'s pool. **v3 implemented 2026-09-25** (`transition_target_for_key`): a child extends its parent's chain in place while the parent's `last` has no successor, and takes the parent's lookup table while it has room and holds no entry with the added field's identity (`typemap_hash_holds_equal`); an entry the tree appends records its position (`ShapeEntry::chain_index`, in padding) and `typemap_hash_entry_is_own` rejects a descendant's; an in-place child shares the parent's `slot_entries`. Every walk goes through `FOR_EACH_MAP_FIELD` / `typemap_next_field` / `shape_chain_next_until` — the link is renamed `ShapeEntry::chain_next`, 181 walks were converted, and lint `no-raw-shape-chain-walk` flags a raw read — and the collector stops at `last` (`LAMBDA_GC_OFF_TYPE_MAP_LAST`). Verification (release, medians of five): one 1,000-key JSON object's parse peak 94.1 → 16.5 MB (debug: 98.8 → 17.4 MB; a 1,000-key JS object 84.7 → 18.4 MB); 13 MiB HTML corpora (real-site pages 99.3 → 99.0 MB, layout tests 104.7 → 104.5 MB) and 60K 20-field JSON records (102.7 MB) unchanged in memory and parse time; Lambda baseline 5,924/5,924, Radiant baseline green, test262 baseline 40,261/40,261 with an unchanged batch peak (643.9 vs 639.8 MB); `TransitionTreePrefixSharingTest` (6). |
-| D4.1.4v4 | Semantics remain live; the separate arena-level `arena_mark`/`arena_rewind` promotion is still pending (ScratchArena currently provides `scratch_mark`/`scratch_restore`). Pool v2 core landed in Mem_Heap R7 on 2026-08-11: `pool_alloc` carves user bytes from Pool-owned growth extents, uses boundary-tagged blocks and segregated free lists, and no longer calls `mem_alloc_loc`/`mem_free_loc` per user allocation or uses a pointer index. Growth starts at an optional reservation clamped to 1 KiB and rounded up to `1 KiB * 2^n`, doubles subsequent reservations, uses the context/memtrack path below 4 KiB and page-backed VM at/above 4 KiB, and commits at least `max(4 KiB, required block bytes)` page-rounded. |
+| D4.1.4v5 | **v5 implemented 2026-10-02:** `arena_free`, `arena_realloc` and the arena free list are removed; `arena_retire` keeps a block on the arena's retired list (binned by span, coalesced, rejoining the tail when adjacent to it) and `arena_alloc` reuses it; its only caller is DOM node retirement (`dom_retire_recycle_one`). `arena_mark`/`arena_rewind` landed; ScratchArena rewinds its backing arena on scope end, restore and release, and registers as the arena's sole owner — a second owner, a direct `arena_alloc`, or an `arena_retire` on an owned arena asserts, and `arena_rewind` asserts on an arena holding retired blocks. Verification: layout view trees identical to the prior binary for 10,331 layout test files; `ArenaRetireTest` (7), `ArenaRewindTest` (4), `ArenaScopeOwnerTest` (2). Still pending: the every-arena audit for sites other than DOM retirement that would need retention. Pool v2 core landed in Mem_Heap R7 on 2026-08-11: `pool_alloc` carves user bytes from Pool-owned growth extents, uses boundary-tagged blocks and segregated free lists, and no longer calls `mem_alloc_loc`/`mem_free_loc` per user allocation or uses a pointer index. Growth starts at an optional reservation clamped to 1 KiB and rounded up to `1 KiB * 2^n`, doubles subsequent reservations, uses the context/memtrack path below 4 KiB and page-backed VM at/above 4 KiB, and commits at least `max(4 KiB, required block bytes)` page-rounded. |
 | D4.2.1v3 | MemContext owns allocator identity/lifecycle; hardened memtrack and the VM region provider are the normative system-allocation substrate. Pool is a context-owned VM-extent allocator; its user blocks are not `memtrack_pool_*` allocations. The Pool v2 core migration is landed and verified; the broader every-allocator context-binding audit remains pending. |
 | D4.2.2v2 | Stage 2 page allocation and the single MemContext failure coordinator are implemented as the allocator-retirement foundation. Full cost-based reclaimers remain follow-up work. |
 | D4.1.5 | String-builder two-case model matches the code (`StrBuf` standalone; `StringBuf` owner-backed, pool-backed `realloc` growth). The arena-backed tail-growth variant does not exist yet — it needs the `arena_mark`/`arena_rewind` promotion of D4.1.4 (Mem_Heap R6). Formatters are the first consumer (already structurally ready: destination pool passed in, scratch on a separate pool, no destination allocations during the walk); parsers follow, subject to the tail-ownership hazard. NamePool still takes a `Pool*` — conversion is Mem_Heap R4b. |
@@ -2263,7 +2303,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.2.6 | **Implemented 2026-09-25.** `pool_add_cleanup` (`lib/mempool`) runs a pool's cleanups newest first on destroy, drain and reset, before any block is released. Every `Input` has a context (`input.doc` with a URL, `input.local` without) created under its pool's context (`mem_node_owner`), and registers `input_pool_cleanup`; inside a cascade the cleanup skips the registry (`mem_context_in_teardown`). Before this, a URL-less `Input`'s arena stayed registered in the root context until exit — the owner it lost when arenas stopped drawing chunks from their pool (2026-08-08). The audit of every creator fixed three places that relied on that leak: npm `package.json` Items kept past their parse pool, the per-thread sysinfo cache reusing a destroyed pool's `Input`, and Script loading owning the direct parser's registries twice. Verification: Lambda baseline 5,903/5,903, Radiant baseline (all required), test262 40,261/40,261; `PoolCleanupTest` (6) and `InputLifetimeTest` (3), whose 64 created-and-destroyed URL-less `Input`s leave the allocator count unchanged; `NpmPackageJsonTest` (3) and `SysInfoRuntimeTest` (1) pin the two leak-dependent fixes and fail with them undone. |
 | D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
 | D4.3.4 | Decided 2026-09-07: `gc_trace_shape_field` marks a `null`-typed lane's word conservatively (`gc_mark_possible_item`). Found through DO30: the auto tier's fast splay figure came from collections that freed the linked right subtrees (17k of 420k objects traced); reproduced deterministically on every tier with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; pin `test/mir/lambda/gc_splay_null_lane` under the forced-collection stress sweep. The companion robustness fix keeps `fn_map_set`'s same-width retag from typing a shared literal shape's field as `error`. |
-| D4.5.1v3 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 records batch-only arena lifetime (two variants, D4.1.4). |
+| D4.5.1v4 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 recorded batch-only arena lifetime (two variants, D4.1.4); v4 (2026-10-02) admits retention for reuse for DOM node retirement and gives each scratch stack its own arena: `view_tree.scratch_arena` (layout), `view_tree.render_scratch_arena`, `view_tree.display_list_arena`, `view_tree.layout_pass_arena` (counter state and generated content), one arena per retained display-list fragment, and `OffscreenRenderArenas` for offscreen SVG and effect renders. |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.4.5 | Decided 2026-09-14 (CW35, `vibe/Lambda_Design_Runtime_COW.md` §11.12): move-out binds (`var left = node.left; …; node.left = branch; left.right = node`) borrow their place; static rule in `build_ast` (`rmw_moves_out`), runtime spine test shared with CW34. Fixture `test/lambda/proc/cow_move_out_bind.ls`. JetStream splay does not benefit yet: its `splay_node` binds store back inside `if` branches, so the rotations receive already-shared roots and keep the snapshot bind. |
 | D4.4.4v4 | Ruled 2026-09-17 (user). **Implemented (partial scope) 2026-09-17 (Tune29 T29-1, `vibe/impl/Lambda_Impl_Tune29.md` §12):** synthesized handles for record places spelled repeatedly on declared `var` roots, planned once in `build_ast` and ignored by T0; writing binds un-share through `cow_place_leaf_fixed`. Deltablue2 hot functions −35% instructions, −5% time; roots with a CW34 named borrow and `for` statements are excluded. Originally recorded as not implemented (CW37, `vibe/Lambda_Design_Runtime_COW.md` §11.14 + Appendix D). Motivation: the typed lane re-navigates `w.cons[cid]` on every access — ~38 MIR instructions per field read and ~42 per field write against one in the c2m port, the whole deltablue/havlak/richards/splay/cd family (`vibe/impl/Lambda_Impl_Tune29.md`; evidence `temp/r46/`). The star stays: named borrows, `for` loops and non-record places are still outside the implemented scope. **2026-09-17 (Tune29 §20):** a named handle may also be passed as a plain argument to a procedure that keeps no root; MIR joins its may-be-shared binding facts at control-flow merges (LR12-17). |
@@ -2295,6 +2335,7 @@ slice; no formal semantic ruling or document semver changes.
 | D8.1.1v11 | Revised 2026-09-22 (v11): static file-backed import prebuild uses one bounded closure-wide task pool. Parse-accurate discovery immediately canonicalizes, deduplicates, and queues each static-import request; a completed child notifies and releases all direct parents, so a shared child is built once without dependency-depth batch barriers. Worker tasks publish only AST templates and never wait on child work; the cache retains its ordinary single-flight handling for separate closures. Initialization, execution, and MIR stay on the receiving runtime. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.1.1v12 | Revised 2026-09-22: AUTO P2 promotion queues one deduplicated, snapshot-safe target definition to the bounded process-wide compiler service and continues the triggering call in T0. A worker produces only a private, immutable MIR image from frozen facts; it never mutates a live Script context, AST analysis fact, module image, or Function entry. A later ordinary safe point generation-checks and publishes the target boxed entry. Stale/failed/unsupported work pins that execution-local definition to T0. This adds no OSR or active-frame replacement; private direct-callee cluster images remain later work. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. **Conformance fix 2026-09-22 (LR01-16):** the worker placed its image's property-key suffix from the owner slab's key count. That thread-local read saw an empty slab, and publication kept any suffix whose count differed, so every image after the first resolved member names through the first image's keys. The suffix is now placed when the safe point binds the image, linked by key-ID content and recorded in `LambdaModuleLayout::property_key_base`, which the generated code reads; `LAMBDA_SATELLITE_SYNC=1` pins publication for tests. |
 | D8.1.1v13 | Revised 2026-09-22: static import prebuild moves from a per-root closure graph to a process-global canonical profile/path task-future registry and one bounded pool. Root discovery is fire-and-forget; tasks immediately request all children, deduplicate a shared child, and release only direct parents by continuation. AST build workers never wait on child work. Ordinary Lambda/JS import consumers wait only for their direct dependency future; prebuild-worker loaders bypass that wait. The cache separately validates exact source identity before an artifact is consumed, and cycle/prebuild failure falls back to ordinary-loader diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
+| D8.1.1v14 | Ruled 2026-10-02 (USER); **partially implemented** 2026-10-02 (branch `worktree-interp-tune2`). Implemented: the per-loop back-edge trigger at 10000, retirement of the loop-owner first-entry trigger, and handoff at the loop head. The loop entry is a synthesized procedure over the live-in locals (the body's statements from the loop onward), entered through its boxed wrapper, so every live-in is admitted like an unknown caller's argument. Residue: eligible loops are only `while` statements directly in a `pn` body, and back-edges of their nested loops count toward them; the loop-triggered image does not carry the definition's own boxed entry. Under AUTO, `mandelbrot2` 12.0 s → 0.10 s and `matmul2` 6.3 s → 0.11 s (eager JIT 0.06 s / 0.05 s, debug build). AUTO corpus differential 1092/1092 identical; with `LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1` every eligible loop hands off and the corpus matches `interp` except one pre-existing sync-mode satellite abort. Plan and evidence: `vibe/impl/Lambda_Impl_Interp_Tune2.md` §12.2. Working record: `vibe/Lambda_Design_Ast_Interpreter.md` §5.1.1. |
 | D8.1.2v3 | Revised 2026-09-14 (v3, USER): the obsolete `grammar-lambda.js` and complete-oracle claim are retired. `lambda/tree-sitter-lambda/grammar.js` is the best structural reference and first-cut fuzz verifier, but known corner cases require reviewed fixtures. The first-party C parser remains the final production implementation, not an unquestioned oracle; every C/Tree-sitter acceptance disagreement is adjudicated against the formal syntax rulings and current vibe records, then pinned by a fixture and fixed on the incorrect side. Generated `parser.c` remains reference-only and is never hand-edited. Working record: `vibe/Lambda_Test_Fuzzy.md` §3 and `vibe/Lambda_Grammar_Parser.md` CGP5v2. |
 | D8.1.3v19 | Revised 2026-09-23: the unset `JS_EXECUTION_BACKEND` now selects AUTO. Interpreter-supported units execute through the retained AST path and may promote admitted hot definitions to P2; unsupported units retain whole-module MIR. `ast` remains explicit and fail-closed, `mir` remains an explicit whole-module selector. MIR link-interface and O1 decisions are selected through shared `mir_select_link_interface`, so large modules/documents can install the MIR interpreter without changing generated MIR. The v18 parser, AST-interpreter, module-registry, and P2 admission record remains otherwise unchanged. Working record: `vibe/Lambda_Design_Compiling_Pipeline_JS.md` LC4.1–LC4.12. |
 | D8.1.3v20 | Revised 2026-09-24 (USER): dynamic source — direct/indirect `eval`, the `Function`-family constructors, string timers, and `$262.evalScript` — parses into a retained `JsScript` and executes only in the AST interpreter, whatever the caller's tier or the unit selector. The MIR dynamic-code service (expression-wrapper and whole-script eval tiers, the dynamic-Function MIR cache, eval preambles, the `is_eval_direct` lowering mode) is deleted; a MIR caller keeps only the direct-eval bridge projection and write-back. Script top-level lexical realm records link their module slots on both tiers, so interpreted readers see live values and TDZ, and a projected caller binding outranks a global lexical of the same name. Dynamic source shares the AST template cache (a direct eval naming private members is parsed per call); whitespace/comment-only and lone-RegExp sources create no script. Verified: test262 baseline 40261/40261 with 0 regressions; `make test-lambda-baseline` 3754/3754 (incl. `test_js_gtest` 479/479, `test_js_script_gtest` 191/191); `test_js_gtest --baseline --full-mir` 477/477. Residue: eval-created closures lose projected caller locals after the eval returns, `eval("arguments")` in functions and `new.target` in direct eval remain unsupported (pre-existing). Working record: `vibe/Lambda_Design_JS_Interpreter.md` §5.6/JSI35; `vibe/impl/Lambda_Impl_JS_Interpreter.md`. |
@@ -2315,6 +2356,13 @@ slice; no formal semantic ruling or document semver changes.
 | D8.5.1v7 | Revised 2026-09-22: static-module prebuild is a process-global future registry, not a closure-owned graph and `wait_all()` barrier. Canonical profile/path requests share one in-flight or completed future across all roots; direct dependency continuations schedule parent AST builds without worker-side waits. Ordinary Lambda/JS import consumption waits only for its direct module future. The `InputScriptCache` remains the exact-source/profile artifact authority, so task readiness never bypasses source invalidation or normal diagnostics. Working record: `vibe/Lambda_Design_Script_Cache.md` §12.1. |
 | D8.5.2–D8.5.3 | L3 code-image cache: nothing landed (D0–D6 sequence); de-pointering (MC4) independently shippable, not started. |
 | D8.6.4v2 | Timing/MIR instrumentation is landed. At commit `44b98dcebd19a548a14bbb75785091b545445f00`, the governed tree is 310,711 lines. The audited atomic direct-frontend retirement `9f3f05e1ff65a2c42acf14776da7361ea1961c0c` is `+1,366/-8,450 = -7,084` in `lambda/runtime` + `lambda/js`; its named deleted files alone credit `-6,204`, excluding the out-of-scope TypeScript deletion. The current checker reports 287,618 against the stricter ≤308,711 cap. The 2026-09-05 prescribed captures (one warm-up, five release samples, identical manifests) compare the pre-bind base with the same two semantic repairs applied to both trees: Lambda compiler median ratio `0.512534` and JS ratio `0.690065`, satisfying the ≤0.90 and ≤0.80 ratchets. Finalized JS MIR diagnostics are complete `1.000181` and library `0.999995`; the complete-corpus change is below 0.02% and the library decreased. Large-library and complete-corpus MIR counts remain required diagnostics, not exit gates. |
+
+**D2.6.12v2 — MVP with dictionaries, 2026-10-02.** Interpreter/MIR file
+construction selects `VirtualOutputElement`/`PDFBuilder`; raw byte appends,
+dictionary encoding, and `output` are implemented.
+The builder owns no Item edges and is released by the existing GC external
+payload hook. Producer-return lists and retained-content contracts remain DO32.
+[Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
 
 ## Appendix B — Open Design Issues (DO#)
 
@@ -2386,15 +2434,16 @@ Numbered `DO#` (design-open); each links to its record.
   deleted from the tree; the impl doc's status line now reads IMPLEMENTED.
   OE1–OE10 may be cited as landed. History: `vibe/jube/JS_Runtime_Redesign.md`
   JR3.
-- **DO25** Interpreter tier (D8.1.1v6) remains open for breadth/performance: satellite-module
+- **DO25** Interpreter tier (D8.1.1v14) remains open for breadth/performance: satellite-module
   treatment under the MT7 emission budgets (AIO2); cross-context visibility of
-  promotion cells (AIO8); once-called hot bodies — `run`-mode `main` with
-  heavy inline loops never re-enters, so backedge marking never pays; escape
-  hatches vs eventual OSR (AIO11); and the remaining full call-site matrix
+  promotion cells (AIO8); loop-head handoff breadth — loops outside the
+  eligible shape, a second handoff loop per definition, work-weighted
+  counting, and a per-Script image budget (AIO13); and the remaining full
+  call-site matrix
   needed to widen promotion beyond the current fail-closed boundary (AIO1).
   The release AUTO correctness gate is green; these are follow-on tiering
   breadth/performance questions, not correctness blockers. [Ast_Interpreter
-  AIO1–AIO12]
+  AIO1–AIO13]
 
 **Runtime services & modules**
 - **DO16** Name identity: temporal canonical accepted; dynamic-intern
@@ -2524,6 +2573,13 @@ Numbered `DO#` (design-open); each links to its record.
   eager tier's time by right.
 - **DO31** Whether an object declaration may name an element tag — `type <B> { x: int; string* }`, B being both the type name and the tag — and how a hierarchy's tags would relate. Deferred 2026-09-25: a nominal name is the type's name only and is never matched against a tag (D2.6.6v3); a tag is enforced by a structural element pattern, `type e = <tag …>`. [Type_Object OB23]
 
+- **DO32** Virtual PDF output follow-up: producer destination forwarding,
+  retained-file representation (SO48), structured encoder placement, byte
+  accounting, expression rollback, and phase-2 native helpers. The MVP uses
+  builder-owned bytes with precise wrapper lifetime, and does not promise
+  elimination of producer-return lists or migration of Radiant export.
+  [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
+
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |
@@ -2532,6 +2588,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D2.1 | Item_Boxing §0–§8 (R7–R10, W1–W3) | `Lambda_Design_Item_Boxing.md` |
 | D2.2 | Double_Boxing; Int_Type §5.1; Stack_API §15 | `Lambda_Type_Double_Boxing.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Design_Stack_API.md` |
 | D2.3 | Box_Unbox, Box_Unbox2 | `Lambda_Box_Unbox.md`, `Lambda_Box_Unbox2.md` |
+| D2.6.12v2 | PDF virtual-list and dictionary MVP | `Lambda_Design_PDF_Output.md` §5.4–§5.6 |
 | D2.4 | Lane §1–§9 | `Lambda_Design_Compiling_Lane.md` |
 | D2.5–D2.6 | Nullable §1–§10; CW16; LR09-R2/R3; OB1–OB2, OB4, OB6, OB10, OB13–OB22 | `Lambda_Design_Compiling_Nullable.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Issue_Ledger.md`, `Lambda_Type_Object.md` |
 | D2.7 | SG1–SG8 | `Lambda_Design_Scalar_GC_Invariant.md` |
@@ -2553,10 +2610,10 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
-| D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
+| D7.1 | SM1–SM15 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
-| D8.1–D8.2 | U1–U36; AI1–AI22, AIO1–AIO12; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
+| D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
 | D8.3 | DF1–DF17, O1–O14 | `Lambda_Design_Compiling_Dual_Func.md` |
 | D8.4 | LC1v2 + call-ABI notes; IR1–IR8; T10-0–T10-5; REH-D2–REH-D14 | `Lambda_Design_Compiling.md`, `Lambda_Design_JS_IC_Retire.md`, `jube/JS_Tune10_Fast_Paths.md`, `Lambda_Design_Runtime_Error_Handling.md` |
 | D8.5 | MC1–MC8; L3-1–L3-10 | `Lambda_Design_MIR_Cache.md`, `Lambda_Design_MIR_Cache_L3.md`, `Lambda_Design_Script_Cache.md` |

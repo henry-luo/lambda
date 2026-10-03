@@ -1202,7 +1202,7 @@
       ]
     },
     "cli": {
-      "description": "Headless CLI-only build: Lambda scripting without Radiant layout engine or GUI support",
+      "description": "Runtime-only CLI build: Lambda scripting without Radiant, the JavaScript runtime and DOM, Jube host modules, or the HTTP server",
       "output": "lambda-cli.exe",
       "source_dirs": [
         "lib",
@@ -1211,7 +1211,6 @@
         "lambda/io",
         "lambda/runtime",
         "lambda/runtime/gc",
-        "lambda/jube",
         "lambda/input",
         "lambda/input/css",
         "lambda/input/html5",
@@ -1221,20 +1220,22 @@
         "lambda/input/markup/format",
         "lambda/format",
         "lambda/validator",
-        "lambda/js",
-        "lambda/js/mvp",
-        "lambda/dom",
-        "lambda/network",
-        "lambda/serve"
+        "lambda/network"
+      ],
+      "source_files": [
+        "lib/sqlite/sqlite3.c",
+        "lambda/runtime/parser/source_parser.c",
+        "lambda/js/js_well_known_names.c"
       ],
       "exclude_source_files": [
+        "lambda/runtime/lambda-decimal-runtime.cpp",
+        "lambda/runtime/path_runtime.c",
+        "lambda/runtime/http_module.cpp",
+        "lambda/runtime/concurrency_js.cpp",
         "lambda/format/format_latex_html_v2.cpp",
         "lambda/input/input-adoc.cpp",
         "lib/font/font_config.c",
         "lib/clock_compat.c",
-        "lib/image.c",
-        "radiant/resource_loaders.cpp",
-        "radiant/network_integration.cpp",
         "lambda/network/network_resource_manager.cpp"
       ],
       "includes": [
@@ -1245,12 +1246,8 @@
       "exclude_libraries": [
         "glfw",
         "ThorVG",
-        "png",
-        "turbojpeg",
-        "gif",
         "brotlidec",
-        "brotlicommon",
-        "libuv"
+        "brotlicommon"
       ],
       "exclude_macos_libraries": [
         "Cocoa",
@@ -1262,7 +1259,10 @@
         "Carbon"
       ],
       "defines": [
-        "LAMBDA_HEADLESS"
+        "LAMBDA_HEADLESS",
+        "LAMBDA_NO_JS",
+        "LAMBDA_NO_JUBE",
+        "LAMBDA_NO_SERVE"
       ],
       "flags": [
         "std=c++17",
@@ -2974,6 +2974,7 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "radiant/image_surface_generation.cpp",
               "radiant/display_list_bounds.cpp",
               "radiant/display_list_storage.cpp",
               "radiant/view_clip.cpp",
@@ -2995,6 +2996,7 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "radiant/image_surface_generation.cpp",
               "radiant/display_list_bounds.cpp",
               "radiant/display_list_storage.cpp",
               "radiant/view_clip.cpp",
@@ -3154,6 +3156,7 @@
               "gtest_main"
             ],
             "additional_sources": [
+              "radiant/image_surface_generation.cpp",
               "lambda/input/css/dom_node.cpp",
               "lambda/input/css/dom_element.cpp",
               "lambda/input/css/dom_lifecycle.cpp",
@@ -4924,6 +4927,9 @@
           {
             "source": "test/test_lambda_errors_gtest.cpp",
             "name": "Lambda Error System Tests",
+            "additional_sources": [
+              "test/test_pdf_builder_gtest.cpp"
+            ],
             "dependencies": [
               "lambda-rt",
               "node-core",

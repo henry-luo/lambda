@@ -4,6 +4,37 @@
 
 #include <stdio.h>
 
+bool escape_append_pdf_literal(StrBuf* out, const char* text, size_t length) {
+    if (!out || (!text && length)) return false;
+    size_t encoded_length = 2;
+    for (size_t i = 0; i < length; i++) {
+        unsigned char byte = (unsigned char)text[i];
+        size_t width = byte < 32 || byte > 126 ? 4 :
+            (byte == '(' || byte == ')' || byte == '\\' ? 2 : 1);
+        if (width > SIZE_MAX - encoded_length) return false;
+        encoded_length += width;
+    }
+    if (encoded_length > SIZE_MAX - out->length - 1 ||
+            !strbuf_ensure_cap(out, out->length + encoded_length + 1)) return false;
+
+    // reserve the whole token before writing so callers can reject allocation failure.
+    strbuf_append_char(out, '(');
+    for (size_t i = 0; i < length; i++) {
+        unsigned char byte = (unsigned char)text[i];
+        if (byte < 32 || byte > 126) {
+            // three octal digits prevent a following digit from joining the escape.
+            char escape[] = {'\\', (char)('0' + (byte >> 6)),
+                (char)('0' + ((byte >> 3) & 7)), (char)('0' + (byte & 7))};
+            strbuf_append_str_n(out, escape, sizeof(escape));
+        } else {
+            if (byte == '(' || byte == ')' || byte == '\\') strbuf_append_char(out, '\\');
+            strbuf_append_char(out, (char)byte);
+        }
+    }
+    strbuf_append_char(out, ')');
+    return true;
+}
+
 const EscapeRule ESCAPE_RULES_JSON[] = {
     {'"', "\\\""},
     {'\\', "\\\\"},

@@ -428,22 +428,18 @@ void counter_get_all_values(CounterContext* ctx, const char* name, int** values,
     // Allocate array (from innermost to innermost)
     *values = (int*)arena_alloc(ctx->arena, sizeof(int) * counter_count); // INT_CAST_OK: pointer cast
     if (!*values) return;
-    // Collect values from outermost to innermost
-    int* temp = (int*)mem_alloc(sizeof(int) * counter_count, MEM_CAT_LAYOUT); // INT_CAST_OK: pointer cast
+    // Collect values from outermost to innermost, straight into the output
     int idx = 0;
 
     scope = ctx->current_scope;
     while (scope && idx < counter_count) {
         CounterValue* cv = CounterMap::get(scope->counters, search_key);
         if (cv) {
-            temp[counter_count - 1 - idx] = cv->value;
+            (*values)[counter_count - 1 - idx] = cv->value;
             idx++;
         }
         scope = scope->parent;
     }
-    // Copy to output array
-    memcpy(*values, temp, sizeof(int) * counter_count); // INT_CAST_OK: size comparison
-    mem_free(temp);
 
     *count = counter_count;
 }

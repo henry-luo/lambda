@@ -1109,6 +1109,7 @@ static void plan_assign_scope(PlanCtx* pc, NameScope* scope) {
 static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
     if (!ident) return;
     ident->interp_capture_owner = NULL;
+    ident->interp_frame_slot_read = false;
     if (!pc || !pc->function || !ident->entry) return;
     uint16_t slot = 0;
     for (FnCapture* capture = pc->function->captures; capture;
@@ -1118,6 +1119,20 @@ static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
         ident->interp_capture_slot = slot;
         return;
     }
+    // Not a capture: a register binding read here is one of this function's
+    // own frame slots, unless it names something the generic read resolves
+    // elsewhere (eval_expr's IDENT arm and interp_read_binding_at_capture_slot).
+    NameEntry* entry = ident->entry;
+    AstNode* decl = entry->node;
+    bool special_decl = decl && (decl->node_type == AST_NODE_KEY_EXPR ||
+        decl->node_type == AST_NODE_OBJECT_TYPE ||
+        decl->node_type == AST_NODE_STRING_PATTERN ||
+        decl->node_type == AST_NODE_SYMBOL_PATTERN ||
+        (decl->node_type == AST_NODE_VARIABLE_DECLARATOR &&
+            ((AstDeclaratorNode*)decl)->is_type_definition));
+    ident->interp_frame_slot_read = entry->storage_assigned &&
+        entry->binding_storage == BINDING_STORAGE_REGISTER &&
+        !entry->is_binder && !entry->import && !special_decl && entry->slot >= 0;
 }
 
 static void plan_link_call_shape(AstCallNode* call) {
@@ -1711,6 +1726,65 @@ static void plan_finish(PlanCtx* pc) {
     plan->planned = true;
 }
 
+// A procedural block's value is its LAST value expression; every earlier one,
+// and every declaration, loop and side-effect statement, runs as a statement.
+// Returns that item (NULL when the block has none) and the three counts.
+AstNode* interp_proc_block_last_value(AstListNode* list_node,
+        int* value_count, int* decl_count, int* stam_count) {
+    AstNode* last_executable = NULL;
+    for (AstNode* scan = list_node->item; scan; scan = scan->next) {
+        if (!is_declaration_node(scan->node_type)) last_executable = scan;
+    }
+    AstNode* last_value = NULL;
+    for (AstNode* item = list_node->item; item; item = item->next) {
+        if (is_declaration_node(item->node_type)) { (*decl_count)++; continue; }
+        if (is_side_effect_stam(item->node_type) ||
+                is_proc_flow_side_effect_node(item, last_executable) ||
+                item->node_type == AST_NODE_LOOP ||
+                ast_for_discards_result(item)) {
+            (*stam_count)++;
+            continue;
+        }
+        (*value_count)++;
+        last_value = item;
+    }
+    return last_value;
+}
+
+// Record a block's procedural shape once; eval_content read it from the
+// items at every evaluation (3% of a loop-heavy T0 profile). Counts that do
+// not fit the fields leave the block unscanned, so it keeps the live scan.
+static void plan_scan_proc_block(AstListNode* list_node) {
+    int values = 0, decls = 0, stams = 0;
+    AstNode* last_value = interp_proc_block_last_value(list_node, &values, &decls, &stams);
+    if (values > UINT16_MAX || decls > UINT16_MAX || stams > UINT16_MAX) return;
+    list_node->interp_proc_last_value = last_value;
+    list_node->interp_proc_value_count = (uint16_t)values;
+    list_node->interp_proc_decl_count = (uint16_t)decls;
+    list_node->interp_proc_stam_count = (uint16_t)stams;
+    list_node->interp_proc_scanned = true;
+}
+
+// D8.1.1v14: a `while` that is a direct statement of a `pn` body can hand the
+// running activation to compiled code at its head test. There T0's whole live
+// state is the frame's named slots, and the statements from the loop to the
+// end of the body form a function of them (the continuation). Nested loops
+// are not numbered: their back-edges count toward the enclosing handoff loop.
+static void plan_mark_handoff_loops(AstFuncNode* fn) {
+    if (((AstNode*)fn)->node_type != AST_NODE_PROC) return;
+    AstNode* body = ast_unwrap_primary(fn->body);
+    if (!body || (body->node_type != AST_NODE_CONTENT &&
+            body->node_type != AST_NODE_LIST)) return;
+    uint8_t ordinal = 0;
+    for (AstNode* item = ((AstListNode*)body)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_LOOP) continue;
+        AstLoopControlNode* loop = (AstLoopControlNode*)item;
+        if (loop->form != LOOP_FORM_WHILE) continue;
+        if (ordinal >= INTERP_HANDOFF_LOOP_MAX) break;
+        loop->interp_handoff_ordinal = ++ordinal;
+    }
+}
+
 // Enter a nested function definition: a fresh plan, a fresh slot space.
 static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     if (!fn || !fn->body) return;
@@ -1746,6 +1820,7 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     pc.param_count = (uint32_t)param_index;
 
     plan_walk(fn->body, &pc);
+    plan_mark_handoff_loops(fn);
     // should_use_tco is lowering's own eligibility test (named, not a closure,
     // has a tail-recursive call), so both tiers turn the same functions into
     // loops and a deep tail recursion cannot overflow in only one of them (R8).
@@ -1803,6 +1878,7 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_LIST:
     case AST_NODE_CONTENT:
         plan_assign_scope(pc, ((AstListNode*)node)->vars);
+        plan_scan_proc_block((AstListNode*)node);
         break;
     case AST_NODE_FOR_EXPR:
         plan_assign_scope(pc, ((AstForNode*)node)->vars);

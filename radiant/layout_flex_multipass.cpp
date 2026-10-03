@@ -1546,8 +1546,9 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     flex_for_each_final_content_item(flex_container, flex,
         [&](ViewElement*) { original_height_count++; });
 
+    ScratchScope heights_scope(&lycon->scratch);
     float* original_heights = original_height_count > 0
-        ? (float*)scratch_calloc(&lycon->scratch, (size_t)original_height_count * sizeof(float))
+        ? heights_scope.array_zero<float>((size_t)original_height_count)
         : nullptr;
     if (original_height_count > 256) {
         log_warn("[RAD_CAP_FLEX_ORIGINAL_HEIGHTS] tracking %d flex item heights beyond legacy cap 256 for %s",
@@ -1786,9 +1787,7 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
 
     flex_normalize_break_item_boxes(lycon, flex_container);
 
-    if (original_heights) {
-        scratch_free(&lycon->scratch, original_heights);
-    }
+    heights_scope.end();
     log_leave();
 }
 

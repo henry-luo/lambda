@@ -60,7 +60,9 @@ DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
             const uint32_t* pixels = r->pixels;
             int width = r->src_w, height = r->src_h, stride = r->src_stride;
             uint64_t generation = r->resource_generation;
-            ImageSurface* image = (ImageSurface*)r->resource_owner;
+            ImageSurface* image = image_surface_lookup(r->resource);
+            // a released owner invalidates borrowed pixels before either decode refresh or upload.
+            if (!r->resource.is_null() && !image) return DL_REPLAY_VECTOR_DREW;
             // a later image draw can promote a shared decode before this recording replays.
             if (image && image->generation != generation) {
                 if (!render_image_resource_pixels(image, r->dst_w, r->dst_h,

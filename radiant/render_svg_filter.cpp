@@ -448,7 +448,9 @@ static ImageSurface* svg_filter_blur(SvgFilterExecution* execution, int input, f
         int high = edge ? (int)fmaxf(0.0f, fminf(extent, region_high)) : (axis ? current->height : current->width); // INT_CAST_OK: bounded raster sample index
         size_t taps = (size_t)radius * 2 + 1;
         if (!svg_filter_spend(execution, pixels * taps)) { image_surface_destroy(current); return nullptr; }
-        float* weights = (float*)scratch_alloc(execution->run->scratch, taps * sizeof(float));
+        // each separable pass releases its kernel through the incoming LIFO scratch contract.
+        ScratchScope kernel_scope(execution->run->scratch);
+        float* weights = kernel_scope.array<float>(taps);
         ImageSurface* output = svg_filter_surface(execution);
         if (!weights || !output) { if (output) image_surface_destroy(output); image_surface_destroy(current); return nullptr; }
         float sum = 0.0f;
@@ -467,7 +469,7 @@ static ImageSurface* svg_filter_blur(SvgFilterExecution* execution, int input, f
             }
             destination[(size_t)row * (size_t)current->width + (size_t)column] = svg_filter_pack(values);
         }
-        scratch_free(execution->run->scratch, weights); image_surface_destroy(current); current = output; data = destination;
+        image_surface_destroy(current); current = output; data = destination;
     }
     return current;
 }
@@ -486,7 +488,8 @@ static ImageSurface* svg_filter_morphology(SvgFilterExecution* execution, int in
         int radius = outside_all ? length : (int)radius_value; // INT_CAST_OK: bounded physical raster kernel radius
         size_t pixels = (size_t)length * (size_t)lines;
         if (pixels > SIZE_MAX / 4 || !svg_filter_spend(execution, pixels * 4)) { image_surface_destroy(current); return nullptr; }
-        int* deque = (int*)scratch_alloc(execution->run->scratch, (size_t)length * sizeof(int));
+        ScratchScope window_scope(execution->run->scratch);
+        int* deque = window_scope.array<int>((size_t)length);
         ImageSurface* output = svg_filter_surface(execution);
         if (!deque || !output) { if (output) image_surface_destroy(output); image_surface_destroy(current); return nullptr; }
         uint32_t* source = (uint32_t*)current->pixels, *destination = (uint32_t*)output->pixels;
@@ -508,7 +511,7 @@ static ImageSurface* svg_filter_morphology(SvgFilterExecution* execution, int in
                 destination[offset(position)] |= component << (channel * 8);
             }
         }
-        scratch_free(execution->run->scratch, deque); image_surface_destroy(current); current = output;
+        image_surface_destroy(current); current = output;
     }
     return current;
 }

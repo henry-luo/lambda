@@ -649,7 +649,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             } else if (!(cv->type == CSS_VALUE_TYPE_KEYWORD && cv->data.keyword == CSS_VALUE_NORMAL)) {
                 // explicit content (not 'normal') - resolve using counter context
                 marker_css_content = dom_element_get_pseudo_element_content_with_counters(
-                    list_elem, 6, lycon->counter_context, lycon->scratch.arena);
+                    list_elem, 6, lycon->counter_context, lycon->pass_arena);
                 if (marker_css_content) {
                     has_marker = true;
                 }

@@ -1233,15 +1233,17 @@ static EmbedProp* resolve_embed_prop(LayoutContext* lycon, ViewBlock* block) {
     return block->embed;
 }
 
+// The joined string lives in the caller's scope.
 static char* css_join_grid_template_area_strings(const CssValue* value,
-                                                 ScratchArena* scratch) {
+                                                 ScratchScope* scope) {
     size_t total_len = 0;
     for (int i = 0; i < value->data.list.count; i++) {
         const CssValue* part = value->data.list.values[i];
         if (part->type == CSS_VALUE_TYPE_STRING) total_len += strlen(part->data.string) + 4;
     }
     if (!total_len) return nullptr;
-    char* combined = (char*)scratch_alloc(scratch, total_len + 1);
+    char* combined = scope->array<char>(total_len + 1);
+    if (!combined) return nullptr;
     combined[0] = '\0';
     size_t combined_len = 0;
     for (int i = 0; i < value->data.list.count; i++) {
@@ -4093,7 +4095,9 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
         return NULL;
     }
     int track_count = val->data.function->arg_count - 1;
-    GridTrackSize** repeat_tracks = (GridTrackSize**)mem_calloc(track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+    // owned here until handed to the repeat track below
+    lam::Temp<GridTrackSize*> repeat_tracks =
+        lam::temp_array_zero<GridTrackSize*>((size_t)track_count, MEM_CAT_LAYOUT);
     if (!repeat_tracks) return NULL;
     int actual_track_count = 0;
     for (int i = 1; i < val->data.function->arg_count && actual_track_count < track_count; i++) {
@@ -4103,17 +4107,15 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
         }
     }
     if (actual_track_count == 0) {
-        mem_free(repeat_tracks);
         return NULL;
     }
     GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
     if (!track_size) {
-        mem_free(repeat_tracks);
         return NULL;
     }
     track_size->type = GRID_TRACK_SIZE_REPEAT;
     track_size->repeat_count = repeat_count;
-    track_size->repeat_tracks = repeat_tracks;
+    track_size->repeat_tracks = repeat_tracks.release();
     track_size->repeat_track_count = actual_track_count;
     track_size->is_auto_fill = is_auto_fill;
     track_size->is_auto_fit = is_auto_fit;
@@ -8186,11 +8188,10 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 parse_grid_template_areas(grid, value->data.string, &lycon->scratch);
             }
             else if (value->type == CSS_VALUE_TYPE_LIST) {
-                char* combined = css_join_grid_template_area_strings(
-                    value, &lycon->scratch);
+                ScratchScope join_scope(&lycon->scratch);
+                char* combined = css_join_grid_template_area_strings(value, &join_scope);
                 if (combined) {
                     parse_grid_template_areas(grid, combined, &lycon->scratch);
-                    scratch_free(&lycon->scratch, combined);
                 }
             }
             break;

@@ -561,11 +561,11 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
         if (bg->gradient_type == GRADIENT_LINEAR && bg->linear_gradient &&
             bg->linear_gradient->stop_count >= 2) {
             int stop_count = bg->linear_gradient->stop_count;
-            RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
-                (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+            lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
+                (size_t)stop_count, MEM_CAT_RENDER);
             BoundaryLinearGradientPaint gradient = {};
             if (stops &&
-                render_paint_boundary_build_linear_gradient(view, x, y, stops,
+                render_paint_boundary_build_linear_gradient(view, x, y, stops.get(),
                                                             stop_count, &gradient)) {
                 paint_fill_linear_gradient(svg_active_paint_list(ctx), gradient.path,
                                            gradient.x1, gradient.y1,
@@ -575,15 +575,14 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 svg_lower_paint_list(ctx);
                 rdt_path_free(gradient.path);
             }
-            if (stops) mem_free(stops);
         } else if (bg->gradient_type == GRADIENT_RADIAL && bg->radial_gradient &&
                    bg->radial_gradient->stop_count >= 2) {
             int stop_count = bg->radial_gradient->stop_count;
-            RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
-                (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+            lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
+                (size_t)stop_count, MEM_CAT_RENDER);
             BoundaryRadialGradientPaint gradient = {};
             if (stops &&
-                render_paint_boundary_build_radial_gradient(view, x, y, stops,
+                render_paint_boundary_build_radial_gradient(view, x, y, stops.get(),
                                                             stop_count, &gradient)) {
                 paint_fill_radial_gradient(svg_active_paint_list(ctx), gradient.path,
                                            gradient.cx, gradient.cy, gradient.r,
@@ -592,7 +591,6 @@ static void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
                 svg_lower_paint_list(ctx);
                 rdt_path_free(gradient.path);
             }
-            if (stops) mem_free(stops);
         }
     }
 

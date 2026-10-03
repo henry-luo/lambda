@@ -534,6 +534,7 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
     if (backdrop_depth > 0) {
         log_error("[DL_REPLAY_TILE] unbalanced backdrop stack: %d entries left", backdrop_depth);
     }
+    dl_replay_close_open_scopes(&backdrop_stack, &shadow_clip, scratch);
 
     log_debug("[DL_REPLAY_TILE] tile(%d,%d) %d/%d items drawn",
               (int)(tile_x / tile_w), (int)(tile_y / tile_h), items_drawn, dl->item_count());

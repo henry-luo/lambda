@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 53.1.0 (2026-10-02)
+**Spec version:** 55.0.0 (2026-10-02)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -453,6 +453,24 @@ harnesses.
   place, a string or binary written beside one of its kind merges with it,
   and removing an item that kept two strings apart merges them. Positions
   after the write may therefore shift.
+- **S2.6.6v2*** **An explicitly PDF-formatted file selects a byte-output
+  destination.** In an evaluated `<file format:'pdf', …>` (also accepting
+  string `"pdf"`), strings contribute UTF-8 bytes and binaries contribute
+  their exact bytes, in evaluation order; null and empty text contribute
+  nothing, and lists spread. Selection follows evaluated attributes and
+  leaves ordinary files and script top level unchanged. Construction builds
+  an in-memory value; `output(file, path)` writes its payload under S12.1.1v2.
+  Map contributions encode as PDF dictionaries with surrounding ASCII spaces;
+  nested maps/arrays preserve object slots, including null and empty text.
+  Dictionary entry order follows S2.3.1.
+  Text keys and symbols encode as case-preserving PDF names (`#XX` escapes,
+  no NUL); strings encode as escaped ASCII literals or UTF-16BE hex strings
+  with a BOM, and binaries as hex strings. Booleans and integers retain their
+  values; finite floats use shortest round-trip digits expanded without an
+  exponent. Decimal encoding, remaining object kinds, and retained-content
+  observation/update contracts remain open (SO48). Unsupported object values
+  reject construction instead of publishing partial bytes.
+  [PDF_Output §2, §5]
 
 ---
 
@@ -2646,6 +2664,14 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S12.3.5v2 | **Ruled 2026-09-22; conformant since P4 of the list fixes (2026-09-23, both tiers).** `*x` builds the list of x's items instead of marking x, so spreading never modifies its operand and the JIT no longer rewrites a pooled literal (`fn g() => [1, "y"]` returned a list on every later call — the tier divergence is pinned on all three tiers by `test/lambda/spread_star.ls`). A range is materialized (`[*(1 to 3), 9]` is `[1, 2, 3, 9]`), `*null` splices nothing, and a non-sequence — text included — is one item, so `[*xs]` packages any value as an array. Because it is a value, `*x` also finishes by position (S2.5.5v2): `let b = *[2, 3]` is the list `(2, 3)`. |
 | S2.2.3, S2.6.1v2, S2.6.2, S2.6.4, S2.6.5 | **Ruled 2026-09-21; conformant since P3 of the list fixes (2026-09-23, both tiers)**. The LaTeX parser deviation closed on 2026-10-02 (S2.6.1v2): consecutive command string arguments are array children. S2.6.3 conforms: lists spread recursively with their spliced nulls and `""` dropped, for-expression results spread, arrays and ranges stay one item, script top level and element literals agree; strings merge at construction and never with a binary. Closed by P3: (1) a lone `""` is dropped (`<e "">` has no children, and a bare `""` at the top level prints nothing); (2) adjacent binaries merge (`<e b'\x01' b'\x02'>` has one child); (3) content writes normalize — `e[1] = "m"` on `<e "x" 1 "y">` leaves one child `"xmy"`, `e[1] = null` removes the child and merges its neighbours, `e[0] = ""` removes it, `e[0] = (3, 4)` splices, and `push` on an element appends content. String merging no longer waits for an input context (D2.6.5v3). Parser-owned element construction now uses the content append; collection append helpers also normalize element destinations (D2.6.5v4), including the string and null members of group elements (S14.1.1). MarkEditor insert, batch insert, replace and delete now rebuild through the owner-aware content append in both edit modes, with 54/54 editor and 112/112 DOM node/range tests passing. Verified 2026-10-02: Lambda baseline 6151/6151, including MathLive 921/921; MarkBuilder/deep-copy 121/121. Argument: [Design_Syntax §7.27](../vibe/Lambda_Design_Syntax.md). |
 
+**S2.6.6v2 — MVP with dictionaries, 2026-10-02.** Raw strings/binaries, null/empty dropping,
+list spreading, computed selectors, empty files, and byte output are implemented
+on both tiers. Physical maps, spreads, nested dictionaries/arrays (including
+typed slabs), and scalar object encodings are implemented. Decimal values,
+virtual sources, direct array/scalar contributions, and retained-content
+behavior remain SO48. Fixtures: `proc/proc_pdf_file.ls`, `proc/proc_pdf_maps.ls`,
+`pdf/pdf_file_mvp.ls`. [Implementation record](../vibe/impl/Lambda_Impl_PDF_Output_MVP.md).
+
 ## Appendix B — Open Design Issues
 
 Numbered `SO#` (semantics-open) for stable reference; each links to its
@@ -2750,12 +2776,19 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
   unaffected, since `function` is a base type name. [S11.1.5v2,
   S11.1.6v2]
 - **SO46** How an element pattern spells *content must be empty*. S11.1.6v3 leaves content unconstrained when a pattern has no content section; a present-but-empty content pattern would mean *no children*, but no spelling is ruled — `<div ()>` and `<div null>` are candidates. The former `<div;>` is not one: S16.9.3 leaves `;` no role inside `<…>`, so it is a syntax error. [Shape_Transitions §7]
+- **SO48** PDF file content: remaining object kinds, decimal encoding, virtual
+  source containers, direct array/scalar contributions, readable retained
+  children, indexing/equality/copy/mutation, nested-file contribution, and a
+  single-pass byte-position API. The raw-fragment/dictionary subset does not
+  settle these contracts. [PDF Output §5.6](../vibe/Lambda_Design_PDF_Output.md#56-what-the-virtual-list-resolves-and-what-remains)
+
 ## Appendix C — Decision-Record Index
 
 | Section | Records | Where argued |
 |---|---|---|
 | S1 principles | C1–C18 distilled; Features §3.6 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Features.md` |
 | S2 value domain | C1, C1.6a, C2, C8.6-R; Design_Syntax §7.23, §7.27–§7.28; PTH1v2, PTH2v3, PTH3–PTH29; OB1–OB3, OB7–OB9, OB13–OB18 | `Lambda_Semantics_Formal.md`, `Lambda_Type_Path.md`, `Lambda_Type_Object.md` |
+| S2.6.6v2 | PDF raw file and dictionary MVP | `Lambda_Design_PDF_Output.md` §2, §5 |
 | S3 truthiness | C2, C17 | ibid.; `Lambda_Semantics_Formal2.md` |
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |

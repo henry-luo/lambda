@@ -169,6 +169,7 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
     if (backdrop_depth > 0) {
         log_error("[DL_REPLAY] unbalanced backdrop stack: %d entries left", backdrop_depth);
     }
+    dl_replay_close_open_scopes(&backdrop_stack, &shadow_clip, scratch);
 
     dl_replay_pop_dirty_clip(vec, &dirty_clip);
 

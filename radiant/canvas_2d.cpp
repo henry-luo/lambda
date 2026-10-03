@@ -194,12 +194,11 @@ static CanvasRegistry* canvas_registry_for_document(DomDocument* document,
     if (!document) return nullptr;
     CanvasRegistry* registry = (CanvasRegistry*)document->services.canvas_registry;
     if (registry || !create) return registry;
-    registry = (CanvasRegistry*)mem_calloc(1, sizeof(CanvasRegistry), MEM_CAT_LAYOUT);
-    if (!registry) return nullptr;
-    if (!dom_document_add_resource(document, registry, canvas_registry_destroy)) {
-        mem_free(registry);
-        return nullptr;
-    }
+    // the document takes ownership once its resource hook is registered
+    lam::Temp<CanvasRegistry> owned = lam::temp_array_zero<CanvasRegistry>(1, MEM_CAT_LAYOUT);
+    if (!owned) return nullptr;
+    if (!dom_document_add_resource(document, owned.get(), canvas_registry_destroy)) return nullptr;
+    registry = owned.release();
     document->services.canvas_registry = registry;
     return registry;
 }
@@ -469,13 +468,10 @@ extern "C" bool radiant_canvas_get_state(void* canvas_element,
 extern "C" bool radiant_canvas_save(void* canvas_element) {
     CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
     if (!entry) return false;
-    CanvasSavedState* saved = (CanvasSavedState*)mem_calloc(
-        1, sizeof(CanvasSavedState), MEM_CAT_LAYOUT);
-    if (!saved) return false;
-    if (!canvas_state_copy(&saved->state, &entry->state)) {
-        mem_free(saved);
-        return false;
-    }
+    lam::Temp<CanvasSavedState> owned = lam::temp_array_zero<CanvasSavedState>(1, MEM_CAT_LAYOUT);
+    if (!owned) return false;
+    if (!canvas_state_copy(&owned->state, &entry->state)) return false;
+    CanvasSavedState* saved = owned.release();  // linked into the entry below
     saved->clip_depth = entry->clip_depth;
     saved->next = entry->saved_states;
     entry->saved_states = saved;
@@ -678,13 +674,11 @@ extern "C" bool radiant_canvas_arc(void* canvas_element, float x, float y,
 extern "C" bool radiant_canvas_clip(void* canvas_element) {
     CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
     if (!canvas_ensure_path(entry)) return false;
-    CanvasClip* clip = (CanvasClip*)mem_calloc(1, sizeof(CanvasClip), MEM_CAT_LAYOUT);
-    if (!clip) return false;
-    clip->path = rdt_path_clone(entry->path);
-    if (!clip->path) {
-        mem_free(clip);
-        return false;
-    }
+    lam::Temp<CanvasClip> owned = lam::temp_array_zero<CanvasClip>(1, MEM_CAT_LAYOUT);
+    if (!owned) return false;
+    owned->path = rdt_path_clone(entry->path);
+    if (!owned->path) return false;
+    CanvasClip* clip = owned.release();  // linked into the entry below
     clip->transform = entry->state.transform;
     clip->next = entry->clips;
     entry->clips = clip;
@@ -726,18 +720,15 @@ extern "C" bool radiant_canvas_clear_rect(void* canvas_element,
     }
     int pixel_width = entry->surface->width;
     int pixel_height = entry->surface->height;
-    uint32_t* mask_pixels = (uint32_t*)mem_calloc(
-        (size_t)pixel_width * (size_t)pixel_height, sizeof(uint32_t), MEM_CAT_LAYOUT);
+    lam::Temp<uint32_t> mask_pixels = lam::temp_array_zero<uint32_t>(
+        (size_t)pixel_width * (size_t)pixel_height, MEM_CAT_LAYOUT);
     if (!mask_pixels) return false;
 
     RdtPath* rect = rdt_path_new();
-    if (!rect) {
-        mem_free(mask_pixels);
-        return false;
-    }
+    if (!rect) return false;
     rdt_path_add_rect(rect, x, y, width, height, 0.0f, 0.0f);
     RdtVector vector = {};
-    rdt_vector_init(&vector, mask_pixels, pixel_width, pixel_height, pixel_width);
+    rdt_vector_init(&vector, mask_pixels.get(), pixel_width, pixel_height, pixel_width);
     int saved_clip_depth = 0;
     int pushed_clips = canvas_push_clips(entry, &vector, &saved_clip_depth);
     // Render the transformed rect through the active clip before clearing pixels.
@@ -756,7 +747,6 @@ extern "C" bool radiant_canvas_clear_rect(void* canvas_element,
             }
         }
     }
-    mem_free(mask_pixels);
     canvas_note_pixels_changed(entry);
     return true;
 }

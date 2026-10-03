@@ -30,6 +30,10 @@ TypeParam* alloc_type_param(Pool* pool, const Type* carrier);
 // full_type selection). Used for `fn(a: T)` parameters.
 void apply_declared_param_type(Transpiler* tp, TypeParam* param_type, Type* declared);
 
+// The contract half of apply_declared_param_type: retain `contract` and pick
+// full_type from it. Also builds synthesized parameters (D8.1.1v14).
+void apply_param_contract(TypeParam* param_type, Type* contract, bool is_explicit);
+
 // Declare a fn type's return contract.
 void set_fn_return_contract(TypeFunc* fn_type, Type* contract, bool is_explicit);
 

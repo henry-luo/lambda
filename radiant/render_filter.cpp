@@ -266,13 +266,13 @@ static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
 
             size_t row_bytes = (size_t)blur_w * sizeof(uint32_t);
             size_t buf_bytes = row_bytes * (size_t)blur_h;
-            uint32_t* src_px = (uint32_t*)scratch_alloc(sa, buf_bytes);
+            ScratchScope scope(sa);
+            uint32_t* src_px = (uint32_t*)scope.alloc(buf_bytes);
             if (!src_px) {
                 return false;
             }
-            uint32_t* dst_px = (uint32_t*)scratch_alloc(sa, buf_bytes);
+            uint32_t* dst_px = (uint32_t*)scope.alloc(buf_bytes);
             if (!dst_px) {
-                scratch_free(sa, src_px);
                 return false;
             }
 
@@ -310,13 +310,8 @@ static bool render_filter_apply_native_backend(const RenderBackendCaps* caps,
             } else {
                 log_debug("[FILTER] vImage blur failed error=%ld; falling back to software",
                           (long)error);
-                scratch_free(sa, dst_px);
-                scratch_free(sa, src_px);
                 return false;
             }
-
-            scratch_free(sa, dst_px);
-            scratch_free(sa, src_px);
         }
         func = func->next;
     }
@@ -502,7 +497,8 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
             if (ew <= 0 || eh <= 0) { ds_func = ds_func->next; continue; }
 
             // Allocate shadow buffer same size as element region (ABGR pixel format)
-            uint32_t* shadow_px = (uint32_t*)scratch_alloc(sa, (size_t)ew * eh * sizeof(uint32_t));
+            ScratchScope scope(sa);
+            uint32_t* shadow_px = scope.array<uint32_t>((size_t)ew * (size_t)eh);
             if (!shadow_px) { ds_func = ds_func->next; continue; }
 
             // Fill shadow buffer in premultiplied ABGR. The filter result is
@@ -553,8 +549,6 @@ void apply_css_filters(ScratchArena* sa, ImageSurface* surface, FilterProp* filt
                     // This also keeps transparent shadow fringes from storing straight color.
                 }
             }
-
-            scratch_free(sa, shadow_px);
         }
         ds_func = ds_func->next;
     }

@@ -42,6 +42,10 @@ char escape_decode_c_char(char c);
  * `\a`. Any other character is a NonEscapeCharacter and decodes to itself. */
 char escape_decode_js_char(char c);
 
+/* Append a length-delimited PDF literal byte string, including parentheses.
+ * Return false on overflow/allocation failure without appending partial text. */
+bool escape_append_pdf_literal(StrBuf* out, const char* text, size_t length);
+
 /* Decode four UTF-16 escape digits and an immediately following low surrogate.
  * When replacement is set, lone surrogate code units become U+FFFD. */
 bool escape_decode_utf16_escape(const char* s, size_t len, bool replacement,

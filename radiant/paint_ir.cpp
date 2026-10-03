@@ -695,7 +695,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       int src_w, int src_h, int src_stride,
                       float dst_x, float dst_y, float dst_w, float dst_h,
                       uint8_t opacity, const RdtMatrix* transform,
-                      void* resource_owner) {
+                      ImageSurface* resource_owner) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_IMAGE);
     if (!cmd) return;
     cmd->draw_image.pixels = pixels;
@@ -778,7 +778,7 @@ void paint_video_placeholder(PaintList* pl, void* video,
     cmd->video_placeholder.video_generation = video_generation;
 }
 
-void paint_webview_layer_placeholder(PaintList* pl, void* surface,
+void paint_webview_layer_placeholder(PaintList* pl, ImageSurface* surface,
                                      float dst_x, float dst_y, float dst_w, float dst_h,
                                      const Bound* clip,
                                      uint64_t surface_generation) {
@@ -938,7 +938,7 @@ void paint_fill_surface_rect(PaintList* pl, float x, float y, float w, float h,
     cmd->fill_surface_rect.clip_depth = clip_depth;
 }
 
-void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
+void paint_blit_surface_scaled(PaintList* pl, ImageSurface* src_surface,
                                float dst_x, float dst_y, float dst_w, float dst_h,
                                int scale_mode, const Bound* clip,
                                ClipShape** clip_shapes, int clip_depth,
@@ -1156,7 +1156,7 @@ static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl)
         }
         case PAINT_DRAW_IMAGE: {
             const PaintDrawImage* p = &cmd->draw_image;
-            ImageSurface* owner = (ImageSurface*)p->resource_owner;
+            ImageSurface* owner = p->resource_owner;
             dl_draw_image(dl, p->pixels, p->src_w, p->src_h, p->src_stride,
                           p->dst_x, p->dst_y, p->dst_w, p->dst_h, p->opacity,
                           paint_optional_transform(p->has_transform, &p->transform),

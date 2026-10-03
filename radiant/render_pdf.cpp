@@ -1421,45 +1421,39 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
         view->boundary()->background->linear_gradient &&
         view->boundary()->background->linear_gradient->stop_count >= 2) {
         int stop_count = view->boundary()->background->linear_gradient->stop_count;
-        RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
-            (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+        lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
+            (size_t)stop_count, MEM_CAT_RENDER);
         BoundaryLinearGradientPaint gradient = {};
-        bool owns_payload = false;
         if (stops &&
             render_paint_boundary_build_linear_gradient(view, abs_x, abs_y,
-                                                        stops, stop_count,
+                                                        stops.get(), stop_count,
                                                         &gradient)) {
-            owns_payload = pdf_paint_fill_linear_gradient(ctx, &gradient, stops);
-            if (!owns_payload) {
+            // on success the PDF paint list takes the stops and the path
+            if (pdf_paint_fill_linear_gradient(ctx, &gradient, stops.get())) {
+                stops.release();
+            } else {
                 rdt_path_free(gradient.path);
             }
-        } else {
-            if (stops) mem_free(stops);
-            stops = nullptr;
         }
-        if (stops && !owns_payload) mem_free(stops);
     } else if (view->boundary()->background &&
                view->boundary()->background->gradient_type == GRADIENT_RADIAL &&
                view->boundary()->background->radial_gradient &&
                view->boundary()->background->radial_gradient->stop_count >= 2) {
         int stop_count = view->boundary()->background->radial_gradient->stop_count;
-        RdtGradientStop* stops = (RdtGradientStop*)mem_alloc(
-            (size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_RENDER);
+        lam::Temp<RdtGradientStop> stops = lam::temp_array<RdtGradientStop>(
+            (size_t)stop_count, MEM_CAT_RENDER);
         BoundaryRadialGradientPaint gradient = {};
-        bool owns_payload = false;
         if (stops &&
             render_paint_boundary_build_radial_gradient(view, abs_x, abs_y,
-                                                        stops, stop_count,
+                                                        stops.get(), stop_count,
                                                         &gradient)) {
-            owns_payload = pdf_paint_fill_radial_gradient(ctx, &gradient, stops);
-            if (!owns_payload) {
+            // on success the PDF paint list takes the stops and the path
+            if (pdf_paint_fill_radial_gradient(ctx, &gradient, stops.get())) {
+                stops.release();
+            } else {
                 rdt_path_free(gradient.path);
             }
-        } else {
-            if (stops) mem_free(stops);
-            stops = nullptr;
         }
-        if (stops && !owns_payload) mem_free(stops);
     }
 
     // Borders

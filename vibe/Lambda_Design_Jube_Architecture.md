@@ -628,6 +628,13 @@ and the policy model (what gates exist, how realms are named, how
 capabilities are granted and revoked) is a design of its own, listed as
 open item 8.
 
+**Follow-on rulings (proposed 2026-10-02):** JA16.1–JA16.4 put connection
+lifecycle under the host. A module may open a native connection inside vendor
+code, but it must register it in the host's JA7 rid table. The host authorises
+targets before connecting, owns every close (owner scopes `CALL` / `BLOCK` /
+`POOL`), and limits the vendor-IO checker exemption to registered connections.
+Drafted for the RDB driver module in `vibe/Lambda_IO_RDB.md` §13.5.
+
 ## JA11. Lifecycle and ABI evolution
 
 **Decision.**

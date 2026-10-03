@@ -19,7 +19,7 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
     dl_store_clip_shapes(dl, &item->fill_surface_rect.clip_shapes, clip_shapes, clip_depth);
 }
 
-void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
+void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
                             float dst_x, float dst_y, float dst_w, float dst_h,
                             int scale_mode, const Bound* clip,
                             ClipShape** clip_shapes, int clip_depth, uint8_t opacity,
@@ -28,6 +28,7 @@ void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
     item->op = DL_BLIT_SURFACE_SCALED;
     dl_set_clipped_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     item->blit_surface_scaled.src_surface = src_surface;
+    item->blit_surface_scaled.src_resource = src_surface ? src_surface->self : lam::Handle<ImageSurface>{};
     item->blit_surface_scaled.src_generation = src_generation;
     item->blit_surface_scaled.dst_x = dst_x;
     item->blit_surface_scaled.dst_y = dst_y;
@@ -56,7 +57,7 @@ void dl_video_placeholder(DisplayList* dl, void* video,
     item->video_placeholder.clip = clip ? *clip : dl_unbounded_clip();
 }
 
-void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
+void dl_webview_layer_placeholder(DisplayList* dl, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation) {
@@ -64,6 +65,7 @@ void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
     item->op = DL_WEBVIEW_LAYER_PLACEHOLDER;
     dl_set_clipped_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, clip);
     item->webview_layer_placeholder.surface = surface;
+    item->webview_layer_placeholder.resource = surface ? surface->self : lam::Handle<ImageSurface>{};
     item->webview_layer_placeholder.surface_generation = surface_generation;
     item->webview_layer_placeholder.dst_x = dst_x;
     item->webview_layer_placeholder.dst_y = dst_y;

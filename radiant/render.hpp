@@ -1,5 +1,6 @@
 #pragma once
 #include "../lib/arraylist.hpp"
+#include "../lib/mem_factory.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -636,7 +637,10 @@ typedef struct {
 } DlFillRadialGradient;
 
 typedef struct {
-    void* resource_owner;    // optional ImageSurface* owner for generation checks
+    // Owning surface, by handle: a retained list checks liveness through the
+    // slot table instead of reading a surface that may be gone. Null when the
+    // pixels have no registered owner (then the item is never retained).
+    lam::Handle<ImageSurface> resource;
     uint64_t resource_generation;
     const uint32_t* pixels;  // borrowed — image lifetime must exceed display list
     int src_w, src_h, src_stride;
@@ -690,7 +694,8 @@ typedef struct {
 
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
 typedef struct {
-    void* src_surface;       // ImageSurface* — borrowed
+    ImageSurface* src_surface;           // borrowed for replay
+    lam::Handle<ImageSurface> src_resource;  // liveness for retained replay; may be null
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
@@ -792,7 +797,8 @@ typedef struct {
 
 // Webview layer placeholder: records the layout rect and clip for post-composite blit.
 typedef struct {
-    void* surface;           // ImageSurface* — borrowed, lifetime managed by WebViewProp
+    ImageSurface* surface;           // borrowed for replay, lifetime managed by WebViewProp
+    lam::Handle<ImageSurface> resource;  // liveness for retained replay; may be null
     uint64_t surface_generation;
     float dst_x, dst_y, dst_w, dst_h;
     Bound clip;
@@ -885,7 +891,37 @@ void dl_item_free_owned_payload(DisplayItem* item);
 
 // Initialise a display list.  backing_arena is used for variable-length data
 // (path copies, gradient stops, dash arrays).
+// `backing_arena` must not be shared: the list's scratch owns its tail.
 void dl_init(DisplayList* dl, Arena* backing_arena);
+
+// Allocators for a private one-shot display-list render: a temp pool, and
+// separate arenas for the list payloads and the replay scratch, since each
+// scratch arena owns its backing arena exclusively.
+struct OffscreenRenderArenas {
+    Pool* pool = nullptr;
+    Arena* list_arena = nullptr;
+    Arena* scratch_arena = nullptr;
+
+    bool init(const char* pool_label, const char* list_label, const char* scratch_label) {
+        pool = mem_pool_create(NULL, MEM_ROLE_RENDER, pool_label);
+        list_arena = pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, list_label) : nullptr;
+        scratch_arena = list_arena ? mem_arena_create(NULL, MEM_ROLE_RENDER, scratch_label) : nullptr;
+        if (scratch_arena) return true;
+        destroy();
+        return false;
+    }
+
+    // the arenas are registered under the root context, not the pool, so each
+    // is destroyed explicitly
+    void destroy() {
+        if (scratch_arena) mem_arena_destroy(scratch_arena);
+        if (list_arena) mem_arena_destroy(list_arena);
+        if (pool) mem_pool_destroy(pool);
+        scratch_arena = nullptr;
+        list_arena = nullptr;
+        pool = nullptr;
+    }
+};
 
 // Reset the display list for re-recording (rewinds arena, zeroes count).
 void dl_clear(DisplayList* dl);
@@ -928,7 +964,7 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
-                   void* resource_owner = nullptr,
+                   ImageSurface* resource_owner = nullptr,
                    uint64_t resource_generation = 0, bool copy_pixels = false,
                    bool straight_alpha = false);
 
@@ -949,7 +985,7 @@ void dl_fill_surface_rect(DisplayList* dl, float x, float y, float w, float h,
                           uint32_t color, const Bound* clip,
                           ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 
-void dl_blit_surface_scaled(DisplayList* dl, void* src_surface,
+void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
                             float dst_x, float dst_y, float dst_w, float dst_h,
                             int scale_mode, const Bound* clip,
                             ClipShape** clip_shapes = nullptr, int clip_depth = 0,
@@ -996,7 +1032,7 @@ void dl_video_placeholder(DisplayList* dl, void* video,
                           uint64_t video_generation = 0);
 
 // Webview layer placeholder (rect + clip only; actual blit is post-composite)
-void dl_webview_layer_placeholder(DisplayList* dl, void* surface,
+void dl_webview_layer_placeholder(DisplayList* dl, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation = 0);
@@ -1266,7 +1302,7 @@ typedef struct {
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
-    void* resource_owner;   // optional ImageSurface* owner for generation checks
+    ImageSurface* resource_owner;   // optional owner for generation checks
 } PaintDrawImage;
 
 typedef struct {
@@ -1307,7 +1343,7 @@ typedef struct {
 } PaintVideoPlaceholder;
 
 typedef struct {
-    void* surface;           // ImageSurface* — borrowed
+    ImageSurface* surface;   // borrowed
     float dst_x, dst_y, dst_w, dst_h;
     bool has_clip;
     Bound clip;
@@ -1399,7 +1435,7 @@ typedef struct {
 } PaintFillSurfaceRect;
 
 typedef struct {
-    void* src_surface;       // ImageSurface* — borrowed
+    ImageSurface* src_surface;   // borrowed
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
@@ -1597,7 +1633,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       int src_w, int src_h, int src_stride,
                       float dst_x, float dst_y, float dst_w, float dst_h,
                       uint8_t opacity, const RdtMatrix* transform,
-                      void* resource_owner);
+                      ImageSurface* resource_owner);
 void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
                                float dst_x, float dst_y,
                                float dst_w, float dst_h,
@@ -1615,7 +1651,7 @@ void paint_video_placeholder(PaintList* pl, void* video,
                              float dst_x, float dst_y, float dst_w, float dst_h,
                              int object_fit, const Bound* clip,
                              uint64_t video_generation);
-void paint_webview_layer_placeholder(PaintList* pl, void* surface,
+void paint_webview_layer_placeholder(PaintList* pl, ImageSurface* surface,
                                      float dst_x, float dst_y, float dst_w, float dst_h,
                                      const Bound* clip,
                                      uint64_t surface_generation);
@@ -1650,7 +1686,7 @@ void paint_outer_shadow(PaintList* pl,
 void paint_fill_surface_rect(PaintList* pl, float x, float y, float w, float h,
                              uint32_t color, const Bound* clip,
                              ClipShape** clip_shapes, int clip_depth);
-void paint_blit_surface_scaled(PaintList* pl, void* src_surface,
+void paint_blit_surface_scaled(PaintList* pl, ImageSurface* src_surface,
                                float dst_x, float dst_y, float dst_w, float dst_h,
                                int scale_mode, const Bound* clip,
                                ClipShape** clip_shapes, int clip_depth,
@@ -2108,16 +2144,17 @@ static inline bool surface_region_clip(ImageSurface* surface,
     return w > 0 && h > 0;
 }
 
+// The saved pixels belong to `scope`, which the caller ends after restoring.
 static inline uint32_t* surface_region_save(ImageSurface* surface,
-                                            ScratchArena* scratch,
+                                            ScratchArena* scratch, ScratchMark* scope,
                                             int rx, int ry, int rw, int rh,
                                             IRect* out_region) {
-    if (!scratch || !surface_region_clip(surface, rx, ry, rw, rh, out_region)) return nullptr;
+    if (!scratch || !scope || !surface_region_clip(surface, rx, ry, rw, rh, out_region)) return nullptr;
     int x0 = out_region->x;
     int y0 = out_region->y;
     int w = out_region->w;
     int h = out_region->h;
-    uint32_t* saved = (uint32_t*)scratch_alloc(scratch, (size_t)w * h * sizeof(uint32_t));
+    uint32_t* saved = (uint32_t*)scratch_scope_alloc(scratch, scope, (size_t)w * h * sizeof(uint32_t));
     if (!saved) return nullptr;
     uint32_t* px = (uint32_t*)surface->pixels;
     int pitch = surface->pitch / 4;
@@ -2223,6 +2260,7 @@ void dl_replay_webview_layer_placeholder_at_offset(ImageSurface* surface,
 typedef struct DisplayReplayBackdropStack {
     uint32_t* stack[DL_REPLAY_MAX_BACKDROP_DEPTH];
     IRect region[DL_REPLAY_MAX_BACKDROP_DEPTH];
+    ScratchMark scope[DL_REPLAY_MAX_BACKDROP_DEPTH];  // owns stack[i]; ended when popped
     int sp;
 } DisplayReplayBackdropStack;
 
@@ -2256,7 +2294,14 @@ bool dl_replay_backdrop_skip_item(DisplayReplayBackdropStack* stack,
 typedef struct DisplayReplayShadowClip {
     uint32_t* saved;
     IRect region;
+    ScratchArena* scratch;  // arena holding `saved`
+    ScratchMark scope;      // owns `saved`; ended on restore or discard
 } DisplayReplayShadowClip;
+
+// End any save scopes an unbalanced display list left open.
+void dl_replay_close_open_scopes(DisplayReplayBackdropStack* stack,
+                                 DisplayReplayShadowClip* clip,
+                                 ScratchArena* scratch);
 
 void dl_replay_shadow_clip_init(DisplayReplayShadowClip* clip);
 void dl_replay_shadow_clip_save(DisplayReplayShadowClip* clip,
@@ -2941,7 +2986,7 @@ static inline void paint_record_video_placeholder(PaintRecordTarget* target, con
 }
 
 static inline void paint_record_webview_layer_placeholder(PaintRecordTarget* target,
-                                                         const char* op, void* surface,
+                                                         const char* op, ImageSurface* surface,
                                                          float dst_x, float dst_y,
                                                          float dst_w, float dst_h,
                                                          const Bound* clip,
@@ -3182,7 +3227,7 @@ void rc_video_placeholder(RenderContext* rdcon, void* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation);
-void rc_webview_layer_placeholder(RenderContext* rdcon, void* surface,
+void rc_webview_layer_placeholder(RenderContext* rdcon, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation);
@@ -3412,6 +3457,7 @@ typedef struct RenderClipScope {
     bool active;
     bool pushed_shape;
     bool owns_shape;
+    ScratchMark mem;  // owns the shape when owns_shape; ended on pop
 } RenderClipScope;
 
 RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
@@ -3815,9 +3861,6 @@ int render_document_transform_to_output_target(const char* document_file,
     const LambdaDocumentTransformOption* options, int option_count,
     const char* output_file, int viewport_width, int viewport_height,
     float output_scale, float device_scale, int jpeg_quality);
-
-// Detect graph syntax inputs before routing through the native transform configuration.
-bool graph_path_is_graph(const char* graph_file);
 
 // ===== render_overlay.hpp =====
 struct RenderContext;

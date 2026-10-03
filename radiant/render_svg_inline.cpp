@@ -1939,11 +1939,12 @@ static bool svg_replay_capture(SvgInlineRenderContext* ctx, DisplayList* dl, Ima
 
 static bool svg_rasterize_traversal(SvgInlineRenderContext* source, Element* content,
     SvgElementDrawFn draw, void* data, ImageSurface** surface, Bound* bounds, float padding = 0.0f, bool allow_empty = false) {
-    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.capture");
-    if (!arena) return false;
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.svg.capture", "render.svg.capture.list_arena",
+        "render.svg.capture.scratch_arena")) return false;
     ScratchArena scratch = {};
-    mem_scratch_init(nullptr, &scratch, arena, MEM_ROLE_RENDER, "render.svg.capture.scratch");
-    DisplayList dl = {}; dl_init(&dl, arena);
+    mem_scratch_init(nullptr, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.svg.capture.scratch");
+    DisplayList dl = {}; dl_init(&dl, arenas.list_arena);
     PaintList paint;
     SvgInlineRenderContext ctx = *source;
     ctx.dl = &dl; ctx.paint_list = &paint;
@@ -1968,7 +1969,7 @@ static bool svg_rasterize_traversal(SvgInlineRenderContext* source, Element* con
         }
     }
     if (valid && *surface) valid = svg_replay_capture(&ctx, &dl, *surface, bounds, &scratch);
-    paint.clear(); dl_destroy(&dl); scratch_release(&scratch); mem_arena_destroy(arena);
+    paint.clear(); dl_destroy(&dl); scratch_release(&scratch); arenas.destroy();
     return valid;
 }
 
@@ -5775,7 +5776,7 @@ static UiContext* svg_style_layout_html(SvgInlineRenderContext* ctx, SvgStyleCon
     ui->viewport_width = ctx->current_viewport_w; ui->viewport_height = ctx->current_viewport_h;
     ui->device_scale = ui->device_scale_x = ui->device_scale_y = ctx->raster_scale;
     ui_context_init_default_fonts(ui);
-    doc->view_tree = tree; tree->init();
+    doc->view_tree = tree; tree->init((MemContext*)doc->services.mem_ctx);
     radiant_apply_css_stylesheets_to_tree(doc, doc->root, doc->stylesheets,
         doc->stylesheet_count, doc->document_pool, style->engine, style->matcher);
     // isolated layout never runs document scripts or publishes host observer callbacks.
@@ -6976,7 +6977,8 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
         }
         case DL_DRAW_IMAGE: {
             const DlDrawImage& p = item.draw_image;
-            ImageSurface* image = (ImageSurface*)arena_calloc(arena, sizeof(ImageSurface));
+            // the display-list stack exclusively owns this arena until synchronous export ends.
+            ImageSurface* image = (ImageSurface*)scratch_calloc(&dl.arena, sizeof(ImageSurface));
             if (!image) { valid = false; break; }
             image->width = p.src_w; image->height = p.src_h; image->pitch = p.src_stride * 4;
             image->pixels = (void*)p.pixels;
@@ -7004,9 +7006,10 @@ ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bo
         !isfinite(subscene->viewport_width) || !isfinite(subscene->viewport_height) ||
         subscene->viewport_width <= 0 || subscene->viewport_height <= 0) return nullptr;
     float scale = isfinite(subscene->raster_scale) && subscene->raster_scale > 0 ? subscene->raster_scale : 1;
-    Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.export");
-    if (!arena) return nullptr;
-    DisplayList dl = {}; dl_init(&dl, arena);
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.svg.export", "render.svg.export.list_arena",
+        "render.svg.export.scratch_arena")) return nullptr;
+    DisplayList dl = {}; dl_init(&dl, arenas.list_arena);
     PaintSvgSubscene local = *subscene;
     local.transform = rdt_matrix_scale(scale, scale);
     render_svg_subscene_to_display_list(&local, &dl);
@@ -7024,7 +7027,8 @@ ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bo
     ImageSurface* surface = render_surface_create_budgeted(memory, bounds.right - bounds.left, bounds.bottom - bounds.top);
     if (surface && dl_validate_or_log(&dl, "svg_export_snapshot")) {
         RdtVector vec = {}; rdt_vector_init(&vec, (uint32_t*)surface->pixels, surface->width, surface->height, surface->width);
-        ScratchArena scratch = {}; mem_scratch_init(memory, &scratch, arena, MEM_ROLE_RENDER, "render.svg.export.replay");
+        ScratchArena scratch = {}; mem_scratch_init(memory, &scratch, arenas.scratch_arena,
+            MEM_ROLE_RENDER, "render.svg.export.replay");
         dl_replay_tile(&dl, &vec, surface, &scratch, bounds.left, bounds.top,
             (float)surface->width, (float)surface->height, scale);
         rdt_vector_flush_batch(&vec); rdt_vector_destroy(&vec); scratch_release(&scratch);
@@ -7034,7 +7038,7 @@ ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bo
         surface->alpha_mode = IMAGE_ALPHA_STRAIGHT;
         *logical_bounds = {bounds.left / scale, bounds.top / scale, bounds.right / scale, bounds.bottom / scale};
     } else if (surface) { image_surface_destroy(surface); surface = nullptr; }
-    dl_destroy(&dl); mem_arena_destroy(arena);
+    dl_destroy(&dl); arenas.destroy();
     return surface;
 }
 
@@ -7116,20 +7120,16 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
         return;
     }
 
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
-    if (!temp_pool) return;
-    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_inline.arena");
-    if (!temp_arena) {
-        mem_pool_destroy(temp_pool);
-        return;
-    }
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.svg_inline", "render.svg_inline.list_arena",
+                     "render.svg_inline.scratch_arena")) return;
 
     DisplayList dl = {};
     PaintList paint_list = {};
     ScratchArena scratch = {};
-    dl_init(&dl, temp_arena);
-    paint_list_init(&paint_list, temp_arena);
-    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
+    dl_init(&dl, arenas.list_arena);
+    paint_list_init(&paint_list, nullptr);
+    mem_scratch_init(NULL, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.svg_inline.scratch");
 
     // this list is private, so no RenderContext may receive its glyphs
     RenderContext* saved_svg_rdcon = g_svg_active_rdcon;
@@ -7166,8 +7166,7 @@ void render_svg_to_vec_via_display_list(RdtVector* vec, Element* svg_element,
     scratch_release(&scratch);
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
-    mem_arena_destroy(temp_arena);
-    mem_pool_destroy(temp_pool);
+    arenas.destroy();
 }
 
 // ============================================================================
@@ -7245,12 +7244,11 @@ static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) 
     if (!document) return nullptr;
     SvgLayerRegistry* registry = (SvgLayerRegistry*)document->services.svg_layer_registry;
     if (registry) return registry;
-    registry = (SvgLayerRegistry*)mem_calloc(1, sizeof(SvgLayerRegistry), MEM_CAT_LAYOUT);
-    if (!registry) return nullptr;
-    if (!dom_document_add_resource(document, registry, svg_layer_registry_destroy)) {
-        mem_free(registry);
-        return nullptr;
-    }
+    // the document takes ownership once its resource hook is registered
+    lam::Temp<SvgLayerRegistry> owned = lam::temp_array_zero<SvgLayerRegistry>(1, MEM_CAT_LAYOUT);
+    if (!owned) return nullptr;
+    if (!dom_document_add_resource(document, owned.get(), svg_layer_registry_destroy)) return nullptr;
+    registry = owned.release();
     document->services.svg_layer_registry = registry;
     return registry;
 }
@@ -7290,18 +7288,17 @@ static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomEl
                                   const SvgInitialPaint* paint, uint32_t* pixels,
                                   int width, int height, uint32_t backdrop) {
     for (size_t i = 0, n = (size_t)width * (size_t)height; i < n; i++) pixels[i] = backdrop;
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_layer");
-    Arena* temp_arena = temp_pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_layer.arena") : nullptr;
-    if (!temp_arena) {
-        if (temp_pool) mem_pool_destroy(temp_pool);
+    OffscreenRenderArenas arenas;
+    if (!arenas.init("render.svg_layer", "render.svg_layer.list_arena",
+                     "render.svg_layer.scratch_arena")) {
         return false;
     }
     DisplayList dl = {};
     PaintList paint_list = {};
     ScratchArena scratch = {};
-    dl_init(&dl, temp_arena);
-    paint_list_init(&paint_list, temp_arena);
-    mem_scratch_init(NULL, &scratch, temp_arena, MEM_ROLE_RENDER, "render.svg_layer.scratch");
+    dl_init(&dl, arenas.list_arena);
+    paint_list_init(&paint_list, nullptr);
+    mem_scratch_init(NULL, &scratch, arenas.scratch_arena, MEM_ROLE_RENDER, "render.svg_layer.scratch");
 
     DisplayList* saved_dl = rdcon->dl;
     PaintList* saved_paint_list = rdcon->paint_list;
@@ -7360,8 +7357,7 @@ static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomEl
     scratch_release(&scratch);
     paint_list_destroy(&paint_list);
     dl_destroy(&dl);
-    mem_arena_destroy(temp_arena);
-    mem_pool_destroy(temp_pool);
+    arenas.destroy();
     return ok;
 }
 
@@ -7400,16 +7396,17 @@ static bool svg_layer_capture(RenderContext* rdcon, SvgLayerRegistry* registry,
     }
     ImageSurface* surface = image_surface_create(width, height);
     if (!surface) return false;
-    uint32_t* over_black = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
-    uint32_t* over_white = (uint32_t*)mem_alloc(bytes, MEM_CAT_IMAGE);
+    lam::Temp<uint32_t> over_black = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
+    lam::Temp<uint32_t> over_white = lam::temp_array<uint32_t>(count, MEM_CAT_IMAGE);
     bool ok = over_black && over_white &&
         svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
-                              paint, over_black, width, height, 0xFF000000u) &&
+                              paint, over_black.get(), width, height, 0xFF000000u) &&
         svg_layer_render_pass(rdcon, svg_elem, dom_elem, viewport_width, viewport_height, scale,
-                              paint, over_white, width, height, 0xFFFFFFFFu);
-    if (ok) svg_layer_resolve_alpha(over_black, over_white, (uint32_t*)surface->pixels, count);
-    if (over_black) mem_free(over_black);
-    if (over_white) mem_free(over_white);
+                              paint, over_white.get(), width, height, 0xFFFFFFFFu);
+    if (ok) svg_layer_resolve_alpha(over_black.get(), over_white.get(),
+                                    (uint32_t*)surface->pixels, count);
+    over_black.reset();
+    over_white.reset();
     if (!ok) {
         image_surface_destroy(surface);
         return false;
