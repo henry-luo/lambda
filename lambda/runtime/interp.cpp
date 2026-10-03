@@ -6217,11 +6217,15 @@ static AstFuncNode* interp_build_loop_continuation(Pool* pool, AstFuncNode* def,
             param->declared_type = source_param->declared_type;
         } else {
             // a local's declared contract, or an explicit `any`: an untyped
-            // local may hold an error value, which TYPE_ANY_NO_ERROR rejects
-            Type* declared = entry->declared_type;
+            // local may hold an error value, which TYPE_ANY_NO_ERROR rejects.
+            // As resolve_param does, unwrap the annotation's simple TypeType
+            // first: a local's declared_type can be that wrapper, and copying
+            // its prefix tagged a `string` live-in as a type value (pidigits2).
+            Type* declared = unwrap_simple_type_type(entry->declared_type);
             type = alloc_type_param(pool, declared ? declared : &TYPE_ANY);
             if (!type) return NULL;
             apply_param_contract(type, declared ? declared : &TYPE_ANY, true);
+            if (declared) type->full_type = declared;
             param->declared_type = declared;
         }
         ((AstNode*)param)->type = type;

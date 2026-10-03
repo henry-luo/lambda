@@ -82,6 +82,51 @@ pn count_to(n: int) int {
     acc
 }
 
+// (g) untyped live-ins compared against a float: a continuation has no call
+// sites to infer its parameter lanes from
+pn float_bound(limit) {
+    var i = 0
+    var hits = 0
+    while (i < limit) {
+        if (i * 0.5 >= 100.0) { hits = hits + 1 }
+        i = i + 1
+    }
+    hits
+}
+
+// (h) a plain parameter written through `var` borrows, handed off once per
+// call: every call's pushes stay on its own snapshot
+pn vec_add(var v, item) { push(v, item) }
+pn arr_add(var arr, item) { vec_add(arr.vals, item) }
+pn fill_up(arr, n) {
+    var i = 0
+    while (i < n) {
+        arr_add(arr, i)
+        i = i + 1
+    }
+    return arr
+}
+
+// (i) a typed string live-in appended in place, and a typed string parameter
+// entered through a literal argument and through a function value
+pn digits(n: int) string {
+    var s: string = ""
+    var i: int = 0
+    while (i < n) {
+        s = s ++ (i % 10)
+        i = i + 1
+    }
+    return s
+}
+pn extend(s: string, n: int) string {
+    var i: int = 0
+    while (i < n) {
+        s = s ++ (i % 10)
+        i = i + 1
+    }
+    return s
+}
+
 pn main() {
     alias_write()
     print(find_first(100000)); print(" ")
@@ -98,5 +143,16 @@ pn main() {
         j = j + 1
     }
     print(sum)
+    print("\n")
+    print(float_bound(20000.5)); print(" ")
+    var src = { jt: 5, vals: [] }
+    var fa = fill_up(src, 12000)
+    var fb = fill_up(src, 11000)
+    print(len(fa.vals)); print(" "); print(len(fb.vals)); print(" ")
+    print(len(src.vals)); print(" ")
+    var d = digits(12000)
+    print(len(d)); print(" "); print(slice(d, 11990, 12000)); print(" ")
+    let ext = extend
+    print(len(extend("78", 11000))); print(" "); print(slice(ext("x", 11000), 0, 6))
     print("\n")
 }

@@ -9751,6 +9751,22 @@ static MIR_reg_t mir_emit_cow_path_borrow(MirTranspiler* mt, MirVarEntry* root,
     return leaf;
 }
 
+// CW25 / S9.2.2: a `var` argument that names a PLACE (`f(var m.rows[i])`)
+// borrows that place, not merely its root. Detach the whole spine and return
+// the rooted slot of the detached leaf, already installed in its parent, so
+// the callee's in-place writes land in the caller's container. Returns -1 when
+// the argument is a bare binding or no place of a COW-tracked root. Shared by
+// the direct and the dynamic (cross-image) call edges.
+static int mir_borrow_var_place_argument(MirTranspiler* mt, AstNode* arg) {
+    if (!arg || mir_direct_root_binding(mt, arg)) return -1;
+    AstCowPath borrow_path = {};
+    if (!ast_collect_cow_path(&borrow_path, arg) || borrow_path.count <= 0) return -1;
+    MirVarEntry* place_root = mir_direct_root_binding(mt, borrow_path.root);
+    if (!place_root || !mir_root_may_need_cow(place_root)) return -1;
+    MIR_reg_t leaf = mir_emit_cow_path_borrow(mt, place_root, &borrow_path, false);
+    return create_gc_root_slot(mt, leaf);
+}
+
 // T22-5b: a statically named nested `int` field can use the same one-shot
 // rooted spine borrow as a `var` place.  The header/lane guards prove the
 // packed slot before the final raw store; every miss resumes the established
@@ -19361,6 +19377,14 @@ static bool mir_finite_loop_plan(MirTranspiler* mt, AstWhileNode* while_node,
         return false;
     }
     NameEntry* bound = literal_bound ? NULL : ((AstIdentNode*)right)->entry;
+    // the entry guard range-checks the bound's register as an int lane; a
+    // `float` bound (`while (i < limit: float)`) would emit an integer
+    // compare on a double register
+    MirVarEntry* bound_var = bound ? mir_var_for_binding(mt, bound) : NULL;
+    if (bound_var && (bound_var->type_id != LMD_TYPE_INT ||
+            bound_var->mir_type != MIR_T_I64)) {
+        return false;
+    }
 
     // T30-4: the left side may be any sum of non-negative terms that contains
     // the counter with a positive coefficient -- `nc1 * 4 <= m`,
@@ -33230,24 +33254,15 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // This must precede the arms because several of them (contract
                 // boundaries, native lanes) re-evaluate the argument expression
                 // themselves and would each need the same treatment.
-                if (type_param && type_param->is_var_param &&
-                        resolved_args[i] &&
-                        !mir_direct_root_binding(mt, resolved_args[i])) {
-                    AstCowPath borrow_path = {};
-                    if (ast_collect_cow_path(&borrow_path, resolved_args[i]) &&
-                            borrow_path.count > 0) {
-                        MirVarEntry* place_root =
-                            mir_direct_root_binding(mt, borrow_path.root);
-                        if (place_root && mir_root_may_need_cow(place_root)) {
-                            MIR_reg_t leaf = mir_emit_cow_path_borrow(mt, place_root,
-                                &borrow_path, false);
-                            arg_root_slots[i] = create_gc_root_slot(mt, leaf);
-                            leaf = load_gc_root_slot(mt, arg_root_slots[i], "borrow_leaf");
-                            arg_ops[i] = MIR_new_reg_op(mt->ctx, leaf);
-                            arg_vars[i] = {MIR_T_I64, "arg", 0};
-                            if (param_iter) param_iter = (AstNamedNode*)param_iter->next;
-                            continue;
-                        }
+                if (type_param && type_param->is_var_param) {
+                    int leaf_slot = mir_borrow_var_place_argument(mt, resolved_args[i]);
+                    if (leaf_slot >= 0) {
+                        arg_root_slots[i] = leaf_slot;
+                        MIR_reg_t leaf = load_gc_root_slot(mt, leaf_slot, "borrow_leaf");
+                        arg_ops[i] = MIR_new_reg_op(mt->ctx, leaf);
+                        arg_vars[i] = {MIR_T_I64, "arg", 0};
+                        if (param_iter) param_iter = (AstNamedNode*)param_iter->next;
+                        continue;
                     }
                 }
 
@@ -33529,10 +33544,14 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                             }
                             val_rep = VALUE_REP_F64;
                         }
-                        if (val_tid == param_tid) {
+                        if (val_tid == param_tid && val_rep != VALUE_REP_ITEM) {
                             // Direct native match — pass through
                             arg_ops[i] = MIR_new_reg_op(mt->ctx, val);
-                        } else if (val_tid == LMD_TYPE_ANY || val_tid == LMD_TYPE_NULL) {
+                        } else if (val_tid == param_tid || val_tid == LMD_TYPE_ANY ||
+                                val_tid == LMD_TYPE_NULL) {
+                            // A rooted `string` local reads as a boxed Item
+                            // even though its TypeId names the lane; the
+                            // native entry takes the raw pointer (D2.4.1).
                             // Boxed Item → unbox to expected native type
                             MIR_reg_t unboxed = emit_unbox_contract_lane(mt, val,
                                 param_tid, parameter_contract);
@@ -34258,6 +34277,8 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     TypeFunc* dyn_var_signature = mir_dynamic_call_var_signature(call_node);
     MirVarHome dyn_homes[LAMBDA_MAX_FUNCTION_ARGS] = {};
     int dyn_home_count = 0;
+    int dyn_place_leaf_slots[LAMBDA_MAX_FUNCTION_ARGS];
+    for (int i = 0; i < LAMBDA_MAX_FUNCTION_ARGS; i++) dyn_place_leaf_slots[i] = -1;
     if (dyn_var_signature) {
         // the borrowed-call entry lets the dispatcher accept the `var`
         // signature; it takes the args as a list, so every arity uses the
@@ -34275,6 +34296,10 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     mir_root_may_need_cow(borrow_root)) {
                 (void)mir_prepare_cow_root(mt, borrow_root);
             }
+            // a place argument (`vec_add(arr.vals, x)` across satellite
+            // images) passed by value left `vals` shared: the callee's push
+            // detached a private copy and the caller's container never saw it
+            dyn_place_leaf_slots[i] = mir_borrow_var_place_argument(mt, position_arg);
         }
     }
     auto emit_dyn_var_transports = [&](MIR_reg_t const* boxed_args, int count) {
@@ -34400,8 +34425,13 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         int dyn_boxed_count = 0;
         arg = call_node->argument;
         while (arg) {
-            MIR_reg_t boxed_arg = mir_box_call_argument(mt, arg);
-            int boxed_arg_root = create_gc_root_slot(mt, boxed_arg);
+            int place_slot = dyn_boxed_count < LAMBDA_MAX_FUNCTION_ARGS
+                ? dyn_place_leaf_slots[dyn_boxed_count] : -1;
+            MIR_reg_t boxed_arg = place_slot >= 0
+                ? load_gc_root_slot(mt, place_slot, "borrow_leaf")
+                : mir_box_call_argument(mt, arg);
+            int boxed_arg_root = place_slot >= 0 ? place_slot
+                : create_gc_root_slot(mt, boxed_arg);
             args_list = load_gc_root_slot(mt, args_list_root, "dynamic_args");
             boxed_arg = load_gc_root_slot(mt, boxed_arg_root, "dynamic_arg");
             if (dyn_boxed_count < LAMBDA_MAX_FUNCTION_ARGS) {
@@ -35292,10 +35322,13 @@ static MIR_reg_t transpile_assign_stam_core(MirTranspiler* mt, AstAssignStamNode
             // longer left-associated chain enters only when every suffix
             // succeeds as a String, preserving left-to-right evaluation while
             // avoiding frozen intermediate joins (S9.1.1, D5.2.2v3).
-            MIR_reg_t left_item = var->root_slot >= 0
-                ? load_gc_root_slot(mt, var->root_slot, "strcat_left")
-                : var->reg;
-            MIR_reg_t left_ptr = emit_unbox(mt, left_item, LMD_TYPE_STRING);
+            // A native `string` parameter arrives in its raw pointer lane
+            // (D2.4.1); only a rooted binding holds an Item. Reading the
+            // carrier by rep keeps `s = s ++ x` from unboxing a raw String*
+            // into "<error>" on wrapper/literal-argument entries.
+            MIR_reg_t left_ptr = emit_text_pointer_lane(mt,
+                mir_string_binding_value(mt, concat_left, var, false),
+                LMD_TYPE_STRING);
             for (int i = 0; i < part_count; i++) {
                 left_ptr = mir_emit_string_concat_item(mt, var, left_ptr,
                     parts[i]);
@@ -40117,6 +40150,13 @@ static void mir_param_key_walk(MirParamKeyWalk* walk, AstNode* node) {
 static void infer_param_types_batched(MirTranspiler* mt, AstFuncNode* fn_node, bool is_proc,
                                        TypeId* out_types, int param_count) {
     if (!fn_node->body || param_count == 0) return;
+    // D8.1.1v14: a loop continuation's parameters are a T0 activation's live
+    // locals and it has no call sites, so usage is the only evidence --
+    // `2.0 * y / sz` read an int `y` as float and the continuation compared
+    // an int lane with a double register (invalid MIR, awfy/mandelbrot,
+    // r7rs/fft). Untyped live-ins stay boxed; the `_b` wrapper admits them
+    // and locals the body declares still take their own lanes.
+    if (fn_node->is_loop_continuation) return;
 
     // Exact direct-call evidence is still valuable when the function also
     // escapes: it selects a raw fast shape, while the escaped entry keeps the
@@ -43823,8 +43863,14 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     mt->var_param_home_contracts[pi] = mir_named_contract(param);
                     }
                 }
-                if (param->entry && (param->entry->cow_param_mutated ||
-                        fn_node->is_loop_continuation) &&
+                if (fn_node->is_loop_continuation && !native_param->is_var_param) {
+                    // D8.1.1v14: possibly shared and an owner, never a forced
+                    // snapshot (see the boxed branch below)
+                    native_param->cow_marked = true;
+                    native_param->cow_children_may_be_shared = true;
+                    native_param->cow_owned = true;
+                }
+                if (param->entry && param->entry->cow_param_mutated &&
                         !native_param->is_var_param) {
                     // A plain parameter is an activation-local snapshot even
                     // on the native witness edge. Publish the boundary now,
@@ -43837,7 +43883,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                     emit_call_1(mt, mir_cow_site_import("cow_mark_shared", "cow_mark_shared_profiled"), MIR_T_I64,
                         MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_param));
                     native_param->cow_marked = true;
-                    if (fn_node->is_loop_continuation) native_param->cow_owned = true;
                 }
             }
             log_debug("mir: native param '%s' registered directly, mir_type=%d", pname, mtype);
@@ -43924,13 +43969,22 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             if (param_var) {
                 param_var->full_type = param->declared_type;
             }
-            // A loop continuation's parameters are a T0 activation's locals:
-            // their containers may be shared with other T0 bindings, so they
-            // take the same entry snapshot (D8.1.1v14).
+            // D8.1.1v14: a loop continuation's parameters are a T0 activation's
+            // locals. T0 already records their real sharing on each container
+            // (the shared bit set at alias points), so they are only modelled
+            // as possibly shared -- every store tests that bit -- and as owners
+            // whose aliases mark. A written declared param still takes the
+            // entry snapshot below; marking every live-in at entry would only
+            // re-copy containers T0 already owns uniquely.
+            if (param_var && fn_node->is_loop_continuation &&
+                    (!declared_param || !declared_param->is_var_param)) {
+                param_var->cow_marked = true;
+                param_var->cow_children_may_be_shared = true;
+                param_var->cow_owned = true;
+            }
             if (param_var && fn_as_node->node_type == AST_NODE_PROC &&
                     (!declared_param || !declared_param->is_var_param) &&
-                    param->entry && (param->entry->cow_param_mutated ||
-                        fn_node->is_loop_continuation)) {
+                    param->entry && param->entry->cow_param_mutated) {
                 // CW29/S9.1.3 (gated): this plain param's body writes through
                 // it, so the activation snapshots it -- one share-mark at
                 // entry; the first write detaches a private copy. Non-mutating
@@ -43940,9 +43994,6 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
                 emit_call_1(mt, mir_cow_site_import("cow_mark_shared", "cow_mark_shared_profiled"), MIR_T_I64,
                     MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_param));
                 param_var->cow_marked = true;
-                // its history is unknown here, so an alias of it is an
-                // ownership boundary, as for a declared owner (S9.1.2)
-                if (fn_node->is_loop_continuation) param_var->cow_owned = true;
             }
             if (param_var && declared_param && declared_param->is_var_param) {
                 // A caller can detach the root before this var borrow while
