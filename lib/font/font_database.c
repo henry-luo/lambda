@@ -1193,31 +1193,40 @@ const char* font_format_to_str(FontFormat format) {
 // ============================================================================
 
 // helper: write a length-prefixed string (uint16 len + bytes, including NUL)
-static bool write_cache_string(FILE* f, const char* s) {
-    uint16_t len = 0;
-    if (s) len = (uint16_t)(strlen(s) + 1);
+#define FONT_CACHE_MAX_BYTES ((int64_t)64 * 1024 * 1024)
+#define FONT_CACHE_MAX_NAME_BYTES 4096
+#define FONT_CACHE_MAX_PATH_BYTES 32768
+
+static bool write_cache_string(FILE* f, const char* s, uint16_t max_len) {
+    size_t text_len = s ? strlen(s) : 0;
+    if (text_len >= max_len || text_len >= UINT16_MAX) return false;
+    size_t full_len = s ? text_len + 1 : 0;
+    uint16_t len = (uint16_t)full_len;
     if (fwrite(&len, 2, 1, f) != 1) return false;
     if (len > 0 && fwrite(s, 1, len, f) != len) return false;
     return true;
 }
 
 // helper: read a length-prefixed string into arena
-static char* read_cache_string(FILE* f, Arena* arena) {
+static bool read_cache_string(FILE* f, Arena* arena, uint16_t max_len, char** out) {
+    *out = NULL;
     uint16_t len = 0;
-    if (fread(&len, 2, 1, f) != 1) return NULL;
-    if (len == 0) return NULL;
+    if (fread(&len, 2, 1, f) != 1) return false;
+    if (len == 0) return true;
+    if (len > max_len) return false;
     char* buf = (char*)arena_alloc(arena, len);
-    if (!buf) return NULL;
-    if (fread(buf, 1, len, f) != len) return NULL;
-    buf[len - 1] = '\0'; // ensure NUL
-    return buf;
+    if (!buf) return false;
+    if (fread(buf, 1, len, f) != len) return false;
+    if (buf[len - 1] != '\0' || memchr(buf, '\0', len - 1) != NULL) return false;
+    *out = buf;
+    return true;
 }
 
 bool font_database_save_cache_internal(FontDatabase* db, const char* path) {
     if (!db || !path) return false;
     if (!db->scanned) return false; // nothing to save
 
-    FILE* f = fopen(path, "wb");
+    FILE* f = file_open_regular_write(path, true);
     if (!f) {
         log_error("font_database_save_cache: cannot open '%s' for writing", path);
         return false;
@@ -1241,10 +1250,10 @@ bool font_database_save_cache_internal(FontDatabase* db, const char* path) {
         FontEntry* e = (FontEntry*)db->all_fonts->data[i];
         if (!e || !e->file_path) continue;
 
-        if (!write_cache_string(f, e->family_name))    goto fail;
-        if (!write_cache_string(f, e->subfamily_name)) goto fail;
-        if (!write_cache_string(f, e->postscript_name)) goto fail;
-        if (!write_cache_string(f, e->file_path))      goto fail;
+        if (!write_cache_string(f, e->family_name, FONT_CACHE_MAX_NAME_BYTES)) goto fail;
+        if (!write_cache_string(f, e->subfamily_name, FONT_CACHE_MAX_NAME_BYTES)) goto fail;
+        if (!write_cache_string(f, e->postscript_name, FONT_CACHE_MAX_NAME_BYTES)) goto fail;
+        if (!write_cache_string(f, e->file_path, FONT_CACHE_MAX_PATH_BYTES)) goto fail;
 
         int32_t weight = (int32_t)e->weight;
         uint8_t slant  = (uint8_t)e->style;
@@ -1267,10 +1276,14 @@ bool font_database_save_cache_internal(FontDatabase* db, const char* path) {
     }
 
     // rewrite the actual count (may differ from all_fonts->length if we skipped some)
-    fseek(f, 8, SEEK_SET);
-    fwrite(&written, 4, 1, f);
-
-    fclose(f);
+    bool finalized = fseek(f, 8, SEEK_SET) == 0;
+    if (finalized) finalized = fwrite(&written, 4, 1, f) == 1;
+    if (finalized) finalized = fflush(f) == 0;
+    if (fclose(f) != 0) finalized = false;
+    if (!finalized) {
+        log_error("font_database_save_cache: finalization error");
+        return false;
+    }
     db->cache_dirty = false;
     log_info("font_database_save_cache: wrote %u entries to '%s'", written, path);
     return true;
@@ -1284,9 +1297,17 @@ fail:
 bool font_database_load_cache_internal(FontDatabase* db, const char* path) {
     if (!db || !path) return false;
 
-    FILE* f = fopen(path, "rb");
+    FILE* f = file_open_regular_read(path);
     if (!f) {
         log_debug("font_database_load_cache: cache file '%s' not found, will scan", path);
+        return false;
+    }
+
+    struct stat cache_stat;
+    if (fstat(fileno(f), &cache_stat) != 0 || cache_stat.st_size < 12 ||
+        cache_stat.st_size > FONT_CACHE_MAX_BYTES) {
+        log_error("FONT-CACHE-SIZE: rejecting cache outside the 12..64MiB range");
+        fclose(f);
         return false;
     }
 
@@ -1317,10 +1338,18 @@ bool font_database_load_cache_internal(FontDatabase* db, const char* path) {
     int stale = 0;
 
     for (uint32_t i = 0; i < count; i++) {
-        char* family    = read_cache_string(f, arena);
-        char* subfamily = read_cache_string(f, arena);
-        char* psname    = read_cache_string(f, arena);
-        char* file_path = read_cache_string(f, arena);
+        char* family = NULL;
+        char* subfamily = NULL;
+        char* psname = NULL;
+        char* file_path = NULL;
+        if (!read_cache_string(f, arena, FONT_CACHE_MAX_NAME_BYTES, &family) ||
+            !read_cache_string(f, arena, FONT_CACHE_MAX_NAME_BYTES, &subfamily) ||
+            !read_cache_string(f, arena, FONT_CACHE_MAX_NAME_BYTES, &psname) ||
+            !read_cache_string(f, arena, FONT_CACHE_MAX_PATH_BYTES, &file_path)) {
+            log_error("FONT-CACHE-STRING: malformed entry at index %u", i);
+            fclose(f);
+            return false;
+        }
 
         int32_t weight; uint8_t slant, format, mono, coll;
         int32_t coll_idx; int64_t mtime, fsize;

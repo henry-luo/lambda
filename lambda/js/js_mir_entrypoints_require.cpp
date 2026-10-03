@@ -1952,7 +1952,11 @@ static void js_require_normalize_lexical_path(char* path_buf, int path_buf_size)
 
     js_normalize_path_separators(path_buf);
     char normalized[512];
-    path_str_normalize_lexical_posix(path_buf, normalized, sizeof(normalized), false);
+    if (path_str_normalize_lexical_posix(path_buf, normalized,
+            sizeof(normalized), false) < 0) {
+        path_buf[0] = '\0';
+        return;
+    }
     snprintf(path_buf, path_buf_size, "%s", normalized);
 }
 

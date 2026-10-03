@@ -161,6 +161,16 @@ TEST_F(ShellExecTest, TimeoutKillsProcessGroup) {
     shell_result_free(&r);
 }
 
+TEST_F(ShellExecTest, ParentExitCleansUpDescendantHeldPipes) {
+    ShellOptions opts = {0};
+    opts.timeout_ms = 1000;
+    const char* args[] = {"sh", "-c", "sleep 30 & exit 0", NULL};
+    ShellResult r = shell_exec("sh", args, &opts);
+    EXPECT_FALSE(r.timed_out);
+    EXPECT_EQ(r.exit_code, 0);
+    shell_result_free(&r);
+}
+
 /* ================================================================== *
  *  §2  Shell Line Execution                                          *
  * ================================================================== */
@@ -572,6 +582,32 @@ TEST_F(ShellEdgeTest, LargeOutput) {
     ASSERT_NE(r.stdout_buf, nullptr);
     EXPECT_GE(r.stdout_len, (size_t)(100 * 1024));
     shell_result_free(&r);
+}
+
+TEST_F(ShellEdgeTest, CaptureHonorsOutputQuota) {
+    const char* args[] = {"sh", "-c", "printf '%01024d' 0", NULL};
+    ShellOptions opts = {0};
+    opts.max_output_bytes = 128;
+    ShellResult r = shell_exec("sh", args, &opts);
+    EXPECT_EQ(r.exit_code, 0);
+    EXPECT_EQ(r.stdout_len, 128u);
+    EXPECT_TRUE(r.output_limit_exceeded);
+    shell_result_free(&r);
+}
+
+TEST_F(ShellEdgeTest, BackgroundWaitDrainsLargeOutput) {
+    const char* args[] = {"sh", "-c", "yes x | head -c 262144", NULL};
+    ShellOptions opts = {0};
+    opts.max_output_bytes = 1024;
+    ShellProcess* proc = shell_spawn("sh", args, &opts);
+    ASSERT_NE(proc, nullptr);
+    ShellResult r = shell_process_wait(proc, 5000);
+    EXPECT_FALSE(r.timed_out);
+    EXPECT_EQ(r.exit_code, 0);
+    EXPECT_EQ(r.stdout_len, 1024u);
+    EXPECT_TRUE(r.output_limit_exceeded);
+    shell_result_free(&r);
+    shell_process_free(proc);
 }
 
 TEST_F(ShellEdgeTest, LargeStdoutAndStderrAreDrainedConcurrently) {

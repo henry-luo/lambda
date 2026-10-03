@@ -121,6 +121,28 @@ TEST_F(Base64Test, DecodeRejectsBadLength) {
     EXPECT_EQ(dlen, 0u);
 }
 
+TEST_F(Base64Test, DecodeRejectsDataAfterPadding) {
+    size_t dlen = 99;
+    uint8_t* d = base64_decode("TQ==AAAA", 0, &dlen);
+    EXPECT_EQ(d, nullptr);
+    EXPECT_EQ(dlen, 0u);
+}
+
+TEST_F(Base64Test, DecodeRejectsMalformedPadding) {
+    const char* malformed[] = {"=TQ=", "T=Q=", "TQ=", "TQ===", "TWE=="};
+    for (const char* input : malformed) {
+        size_t dlen = 99;
+        uint8_t* d = base64_decode(input, 0, &dlen);
+        EXPECT_EQ(d, nullptr) << input;
+        EXPECT_EQ(dlen, 0u) << input;
+    }
+}
+
+TEST_F(Base64Test, EncodedLenRejectsOverflow) {
+    EXPECT_EQ(base64_encoded_len(SIZE_MAX, BASE64_STD), 0u);
+    EXPECT_EQ(base64_encoded_len(SIZE_MAX, BASE64_URL), 0u);
+}
+
 // ── base64_encode writes exactly base64_encoded_len bytes ──
 TEST_F(Base64Test, EncodeReturnLength) {
     char out[32];

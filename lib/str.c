@@ -13,6 +13,7 @@
  */
 
 #include "str.h"
+#include "math_checked.hpp"
 #include "hash.h"
 #include "math_utils.h"
 #include <string.h>
@@ -907,6 +908,7 @@ char* str_replace_all(const char* s, size_t s_len,
                       const char* old, size_t old_len,
                       const char* new_s, size_t new_len,
                       size_t* out_len) {
+    if (new_len > 0 && !new_s) return NULL;
     if (!s || s_len == 0 || !old || old_len == 0) {
         /* no replacements; return a copy */
         char* copy = str_dup(s, s_len);
@@ -922,8 +924,15 @@ char* str_replace_all(const char* s, size_t s_len,
         return copy;
     }
 
-    size_t result_len = s_len - cnt * old_len + cnt * new_len;
-    char* result = (char*)malloc(result_len + 1);
+    size_t removed_len = 0;
+    size_t added_len = 0;
+    size_t result_len = 0;
+    size_t allocation_size = 0;
+    if (!math_checked_mul(cnt, old_len, &removed_len) || removed_len > s_len ||
+        !math_checked_mul(cnt, new_len, &added_len) ||
+        !math_checked_add(s_len - removed_len, added_len, &result_len) ||
+        !math_checked_add(result_len, 1, &allocation_size)) return NULL;
+    char* result = (char*)malloc(allocation_size);
     if (!result) return NULL;
 
     char* dst = result;
@@ -957,6 +966,7 @@ char* str_replace_first(const char* s, size_t s_len,
                         const char* old, size_t old_len,
                         const char* new_s, size_t new_len,
                         size_t* out_len) {
+    if (new_len > 0 && !new_s) return NULL;
     if (!s || s_len == 0 || !old || old_len == 0) {
         char* copy = str_dup(s, s_len);
         if (out_len) *out_len = s_len;
@@ -970,8 +980,12 @@ char* str_replace_first(const char* s, size_t s_len,
         return copy;
     }
 
-    size_t result_len = s_len - old_len + new_len;
-    char* result = (char*)malloc(result_len + 1);
+    size_t result_len = 0;
+    size_t allocation_size = 0;
+    if (old_len > s_len ||
+        !math_checked_add(s_len - old_len, new_len, &result_len) ||
+        !math_checked_add(result_len, 1, &allocation_size)) return NULL;
+    char* result = (char*)malloc(allocation_size);
     if (!result) return NULL;
 
     memcpy(result, s, found);

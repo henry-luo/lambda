@@ -723,6 +723,13 @@ TEST_F(UrlTest, FileUrlToLocalPath_NullInput) {
     EXPECT_EQ(path, nullptr) << "url_to_local_path should handle NULL input";
 }
 
+TEST_F(UrlTest, FileUrlToLocalPath_RejectsPercentEncodedNul) {
+    Url* url = url_parse("file:///safe%00hidden.txt");
+    ASSERT_NE(url, nullptr);
+    EXPECT_EQ(url_to_local_path(url), nullptr);
+    url_destroy(url);
+}
+
 TEST_F(UrlTest, FileUrlToLocalPath_ComplexPath) {
     #ifndef _WIN32
     // Test complex path with multiple segments

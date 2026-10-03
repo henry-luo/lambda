@@ -47,6 +47,12 @@ static Item node_path_throw_type_error(const char* code, const char* message) {
     return node_path_host->node->error->throw_type_error_code(node_path_session, code, message);
 }
 
+static Item node_path_throw_range_error(const char* code, const char* message) {
+    if (!node_path_host || !node_path_host->node || !node_path_host->node->error ||
+            !node_path_host->node->error->throw_range_error_code) return ItemNull;
+    return node_path_host->node->error->throw_range_error_code(node_path_session, code, message);
+}
+
 static void node_path_describe_invalid_object(Item value, char* out, int out_size) {
     if (!out || out_size <= 0) return;
     int kind = node_path_value_kind(value);
@@ -257,16 +263,24 @@ extern "C" Item js_path_join(Item args_item) {
 
     for (int i = 0; i < argc; i++) {
         Item seg_item = js_elements_get_int(args_item, i);
-        char seg_buf[1024];
+        char seg_buf[4096];
         const char* seg = item_to_cstr(seg_item, seg_buf, sizeof(seg_buf));
-        if (!seg || seg[0] == '\0') continue;
+        if (!seg) {
+            return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                               "Path segment exceeds normalization limits");
+        }
+        if (seg[0] == '\0') continue;
 
         if (result_len == 0) {
             result_len = path_str_copy(result, sizeof(result), seg);
         } else {
             char joined[4096];
             result_len = path_str_join_posix_into(joined, sizeof(joined), result, seg);
-            path_str_copy(result, sizeof(result), joined);
+            if (result_len >= 0) result_len = path_str_copy(result, sizeof(result), joined);
+        }
+        if (result_len < 0) {
+            return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                               "Path exceeds normalization limits");
         }
     }
 
@@ -278,6 +292,10 @@ extern "C" Item js_path_join(Item args_item) {
     // normalize the result (resolve . and .. segments)
     char normalized[4096];
     int nlen = normalize_path_buf(result, normalized, sizeof(normalized));
+    if (nlen < 0) {
+        return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                           "Path exceeds normalization limits");
+    }
 
     // Node.js: preserve trailing slash if original joined path had one
     if (had_trailing_sep && nlen > 0 && normalized[nlen - 1] != '/') {
@@ -318,9 +336,13 @@ extern "C" Item js_path_resolve(Item args_item) {
 
     for (int i = 0; i < argc; i++) {
         Item seg_item = js_elements_get_int(args_item, i);
-        char seg_buf[1024];
+        char seg_buf[4096];
         const char* seg = item_to_cstr(seg_item, seg_buf, sizeof(seg_buf));
-        if (!seg || seg[0] == '\0') continue;
+        if (!seg) {
+            return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                               "Path segment exceeds normalization limits");
+        }
+        if (seg[0] == '\0') continue;
 
         // if absolute, replace resolved
 #ifdef _WIN32
@@ -329,11 +351,17 @@ extern "C" Item js_path_resolve(Item args_item) {
         bool is_abs = path_str_posix_is_absolute(seg);
 #endif
         if (is_abs) {
-            path_str_copy(resolved, sizeof(resolved), seg);
+            if (path_str_copy(resolved, sizeof(resolved), seg) < 0) {
+                return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                                   "Path exceeds normalization limits");
+            }
         } else {
             char joined[4096];
-            path_str_join_posix_into(joined, sizeof(joined), resolved, seg);
-            path_str_copy(resolved, sizeof(resolved), joined);
+            if (path_str_join_posix_into(joined, sizeof(joined), resolved, seg) < 0 ||
+                path_str_copy(resolved, sizeof(resolved), joined) < 0) {
+                return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                                   "Path exceeds normalization limits");
+            }
         }
     }
 
@@ -348,6 +376,10 @@ extern "C" Item js_path_resolve(Item args_item) {
     // path doesn't exist — normalize manually (remove trailing slashes, resolve . and ..)
     char normalized[4096];
     int nlen = normalize_path_buf(resolved, normalized, sizeof(normalized));
+    if (nlen < 0) {
+        return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                           "Path exceeds normalization limits");
+    }
     return make_string_item(normalized, nlen);
 }
 
@@ -361,6 +393,10 @@ extern "C" Item js_path_normalize(Item path_item) {
 
     char result[4096];
     int rlen = normalize_path_buf(path, result, sizeof(result));
+    if (rlen < 0) {
+        return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                           "Path exceeds normalization limits");
+    }
     int path_len = (int)strlen(path);
     if (path_len > 0 && path[path_len - 1] == '/' && rlen > 0 && result[rlen - 1] != '/' &&
             rlen < (int)sizeof(result) - 1) {
@@ -582,6 +618,10 @@ static Item js_path_win32_normalize(Item path_item) {
 
     char result[4096];
     int result_len = path_str_normalize_lexical_win32(path, result, sizeof(result), true);
+    if (result_len < 0) {
+        return node_path_throw_range_error("ERR_OUT_OF_RANGE",
+                                           "Path exceeds normalization limits");
+    }
     int input_len = (int)strlen(path);
     if (input_len > 0 && path_str_is_win32_separator(path[input_len - 1]) &&
             result_len > 0 && !path_str_is_win32_separator(result[result_len - 1]) &&
@@ -852,7 +892,9 @@ static Item js_path_win32_toNamespacedPath(Item path_item) {
         return make_string_item(path_buf);
     }
     char normalized[4096];
-    path_str_normalize_lexical_win32(path, normalized, sizeof(normalized), true);
+    if (path_str_normalize_lexical_win32(path, normalized, sizeof(normalized), true) < 0) {
+        return path_item;
+    }
     if (path_str_is_win32_separator(normalized[0]) && path_str_is_win32_separator(normalized[1])) {
         char result[4096];
         snprintf(result, sizeof(result), "\\\\?\\UNC\\%s%s", normalized + 2,

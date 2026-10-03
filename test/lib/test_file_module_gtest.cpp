@@ -44,6 +44,7 @@ extern "C" {
 #include "../../lib/file_utils.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/log.h"
+#include "../../lib/path_str.h"
 }
 
 // Test directory root — all tests write under this
@@ -242,6 +243,27 @@ TEST_F(FileOpsTest, CopyFileOverwrite) {
     EXPECT_STREQ(content, "new content");
     free(content);
 }
+
+#ifndef _WIN32
+TEST_F(FileOpsTest, CopyRejectsSymlinkDestination) {
+    const char* src = "temp/test_file_module/copy_link_src.txt";
+    const char* target = "temp/test_file_module/copy_target.txt";
+    const char* link = "temp/test_file_module/copy_link.txt";
+    write_text_file(src, "replacement");
+    write_text_file(target, "original");
+    ASSERT_TRUE(file_is_file(src));
+    ASSERT_TRUE(file_is_file(target));
+    ASSERT_EQ(symlink("copy_target.txt", link), 0);
+
+    FileCopyOptions opts = {true, false};
+    EXPECT_EQ(file_copy(src, link, &opts), -1);
+
+    char* content = read_text_file(target);
+    ASSERT_NE(content, nullptr);
+    EXPECT_STREQ(content, "original");
+    free(content);
+}
+#endif
 
 TEST_F(FileOpsTest, CopyFileCreatesDirs) {
     std::string src = test_path("copy_src4.txt");
@@ -611,6 +633,7 @@ TEST_F(FileTempTest, TempPath) {
     EXPECT_TRUE(strstr(path, "temp/") != nullptr);
     EXPECT_TRUE(strstr(path, "test") != nullptr);
     EXPECT_TRUE(strstr(path, ".json") != nullptr);
+    file_delete(path);
     free(path);
 }
 
@@ -618,6 +641,7 @@ TEST_F(FileTempTest, TempPathDefaults) {
     char* path = file_temp_path(NULL, NULL);
     ASSERT_NE(path, nullptr);
     EXPECT_TRUE(strstr(path, "temp/tmp") != nullptr);
+    file_delete(path);
     free(path);
 }
 
@@ -627,8 +651,16 @@ TEST_F(FileTempTest, TempPathUnique) {
     ASSERT_NE(p1, nullptr);
     ASSERT_NE(p2, nullptr);
     EXPECT_STRNE(p1, p2);
+    file_delete(p1);
+    file_delete(p2);
     free(p1);
     free(p2);
+}
+
+TEST_F(FileTempTest, RejectsTraversalComponents) {
+    EXPECT_EQ(file_temp_path("../escape", ".txt"), nullptr);
+    EXPECT_EQ(file_temp_create("safe", "/escape"), nullptr);
+    EXPECT_EQ(dir_temp_create("../escape"), nullptr);
 }
 
 TEST_F(FileTempTest, TempCreate) {
@@ -660,6 +692,35 @@ TEST_F(FilePathTest, JoinSimple) {
     ASSERT_NE(p, nullptr);
     EXPECT_STREQ(p, "src/main.c");
     free(p);
+}
+
+TEST_F(FilePathTest, LexicalNormalizationRejectsExcessSegments) {
+    char input[1024] = {0};
+    size_t pos = 0;
+    for (int i = 0; i < 257; i++) {
+        input[pos++] = 'a';
+        input[pos++] = '/';
+    }
+    input[pos] = '\0';
+    char output[1024];
+    EXPECT_EQ(path_str_normalize_lexical_posix(input, output, sizeof(output), false), -1);
+    EXPECT_EQ(path_str_normalize_lexical_win32(input, output, sizeof(output), false), -1);
+}
+
+TEST_F(FilePathTest, LexicalNormalizationRejectsSmallOutputBuffer) {
+    char output[4] = {'x', 'x', 'x', '\0'};
+    EXPECT_EQ(path_str_normalize_lexical_posix("abcdef", output, sizeof(output), false), -1);
+    EXPECT_STREQ(output, "");
+    EXPECT_EQ(path_str_normalize_lexical_win32("abcdef", output, sizeof(output), false), -1);
+    EXPECT_STREQ(output, "");
+}
+
+TEST_F(FilePathTest, PathCopyAndJoinRejectTruncation) {
+    char output[4] = {'x', 'x', 'x', '\0'};
+    EXPECT_EQ(path_str_copy(output, sizeof(output), "abcd"), -1);
+    EXPECT_STREQ(output, "");
+    EXPECT_EQ(path_str_join_posix_into(output, sizeof(output), "ab", "cd"), -1);
+    EXPECT_STREQ(output, "");
 }
 
 TEST_F(FilePathTest, JoinTrailingSlash) {

@@ -23,13 +23,14 @@ typedef struct {
     char* stderr_buf;       // captured stderr (caller frees via shell_result_free)
     size_t stderr_len;      // length of stderr
     bool timed_out;         // true if killed by timeout
+    bool output_limit_exceeded; // true when captured output was truncated
 } ShellResult;
 
 // --- Opaque handle for a background process ---
 typedef struct ShellProcess ShellProcess;
 
 // --- Callback for streaming line-by-line output ---
-// Return false to abort the process early.
+// Callbacks run after completion; return false to stop further line delivery.
 typedef bool (*ShellLineCallback)(const char* line, size_t len, void* user_data);
 
 // --- Environment variable pair ---
@@ -48,7 +49,10 @@ typedef struct {
     ShellLineCallback on_stdout;    // streaming stdout callback (NULL = buffer all)
     ShellLineCallback on_stderr;    // streaming stderr callback (NULL = buffer all)
     void* user_data;                // passed to callbacks
+    size_t max_output_bytes;        // per stream; 0 uses SHELL_DEFAULT_MAX_OUTPUT_BYTES
 } ShellOptions;
+
+#define SHELL_DEFAULT_MAX_OUTPUT_BYTES ((size_t)16 * 1024 * 1024)
 
 // ---------------------------------------------------------------------------
 // Core synchronous execution

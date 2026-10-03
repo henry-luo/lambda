@@ -24,6 +24,7 @@ CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 #include "arraylist.h"
 #include "grow_capacity.h"
+#include "math_checked.hpp"
 
 /* malloc() / free() testing */
 
@@ -57,7 +58,12 @@ ArrayList *arraylist_new(int length)
 
 	/* Allocate the data array */
 
-	new_arraylist->data = malloc(length * sizeof(ArrayListValue));
+	size_t allocation_size = 0;
+	if (!math_checked_mul((size_t)length, sizeof(ArrayListValue), &allocation_size)) {
+		free(new_arraylist);
+		return NULL;
+	}
+	new_arraylist->data = malloc(allocation_size);
 
 	if (new_arraylist->data == NULL) {
 		free(new_arraylist);
@@ -95,6 +101,7 @@ static int arraylist_enlarge(ArrayList *arraylist)
 
 int arraylist_insert(ArrayList *arraylist, int index, ArrayListValue data)
 {
+	if (!arraylist || !arraylist->data || arraylist->length >= INT_MAX) return 0;
 	/* Sanity check the index */
 
 	if (index < 0 || index > arraylist->length) {
@@ -126,6 +133,7 @@ int arraylist_insert(ArrayList *arraylist, int index, ArrayListValue data)
 
 int arraylist_append(ArrayList *arraylist, ArrayListValue data)
 {
+	if (!arraylist) return 0;
 	return arraylist_insert(arraylist, arraylist->length, data);
 }
 
@@ -138,7 +146,8 @@ void arraylist_remove_range(ArrayList *arraylist, int index, int length)
 {
 	/* Check this is a valid range */
 
-	if (index < 0 || length < 0 || index + length > arraylist->length) {
+	if (!arraylist || index < 0 || length < 0 || index > arraylist->length ||
+	    length > arraylist->length - index) {
 		return;
 	}
 

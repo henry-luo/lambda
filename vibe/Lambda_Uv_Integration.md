@@ -548,19 +548,14 @@ if (rename(tmp, filename) != 0) { ... }
 
 Without `fsync`, a crash between `rename` and the page-cache flush can yield a present-but-empty file — disastrous for configs, save files, the build cache.
 
-### A.4 Thread-safe temp counter
+### A.4 Atomic temp reservation
 
-```c
-#include <stdatomic.h>
-static atomic_long s_temp_counter = 0;
-
-char* file_temp_path(const char* prefix, const char* suffix) {
-    long n = atomic_fetch_add(&s_temp_counter, 1) + 1;
-    // ... snprintf using n ...
-}
-```
-
-Required for Section 4's network/cache workers, which may call temp-path helpers concurrently.
+`file_temp_path` reserves the returned file atomically (`mkstemps` on POSIX,
+cryptographically randomized exclusive creation on Windows) rather than merely
+predicting an unused name. Prefixes and suffixes are single validated path
+components, and every result remains under `./temp/`. This prevents races and
+path escape when Section 4's network/cache workers call the helper concurrently,
+and keeps temp creation inside the policy boundary required by **D7.5.2**.
 
 ### A.5 Bounded `dir_walk_recursive`
 

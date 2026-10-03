@@ -2,6 +2,7 @@
 #include "memtrack.h"
 #include "log.h"
 #include "str.h"
+#include "math_checked.hpp"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -55,12 +56,18 @@ static const char base64url_encode_table[65] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 size_t base64_encoded_len(size_t in_len, Base64Variant variant) {
+    size_t groups = in_len / 3;
+    if (in_len % 3 != 0 && !math_checked_add(groups, 1, &groups)) return 0;
     if (variant == BASE64_URL) {
-        // unpadded: ceil(in_len * 4 / 3)
-        return (in_len * 4 + 2) / 3;
+        size_t full_len = 0;
+        if (!math_checked_mul(in_len / 3, 4, &full_len)) return 0;
+        size_t tail_len = in_len % 3 == 0 ? 0 : in_len % 3 + 1;
+        size_t encoded_len = 0;
+        return math_checked_add(full_len, tail_len, &encoded_len) ? encoded_len : 0;
     }
     // padded to a multiple of 4
-    return 4 * ((in_len + 2) / 3);
+    size_t encoded_len = 0;
+    return math_checked_mul(groups, 4, &encoded_len) ? encoded_len : 0;
 }
 
 size_t base64_encode(const void* data, size_t len, char* out, Base64Variant variant) {
@@ -88,9 +95,15 @@ size_t base64_encode(const void* data, size_t len, char* out, Base64Variant vari
 
 char* base64_encode_alloc(const void* data, size_t len, Base64Variant variant) {
     size_t out_len = base64_encoded_len(len, variant);
-    char* out = (char*)mem_alloc(out_len + 1, MEM_CAT_TEMP);
+    size_t allocation_size = 0;
+    if ((len > 0 && out_len == 0) ||
+        !math_checked_add(out_len, 1, &allocation_size)) {
+        log_error("base64_encode_alloc: encoded length overflow for %zu bytes", len);
+        return NULL;
+    }
+    char* out = (char*)mem_alloc(allocation_size, MEM_CAT_TEMP);
     if (!out) {
-        log_error("base64_encode_alloc: malloc failed for %zu bytes", out_len + 1);
+        log_error("base64_encode_alloc: malloc failed for %zu bytes", allocation_size);
         return NULL;
     }
     base64_encode(data, len, out, variant);
@@ -115,15 +128,29 @@ uint8_t* base64_decode_variant(const char* input, size_t input_len, size_t* outp
 
     const int8_t* table = (variant == BASE64_URL) ? base64url_decode_table : base64_decode_table;
 
-    // first pass: count data characters (padding '=' and whitespace are skipped)
+    // Validate padding while sizing so the decode pass cannot stop before the
+    // number of bytes promised to the caller has actually been initialized.
     size_t data_chars = 0;
+    size_t padding_chars = 0;
+    bool saw_padding = false;
     for (size_t i = 0; i < input_len; i++) {
         unsigned char c = (unsigned char)input[i];
         int8_t val = table[c];
         if (val >= 0) {
+            if (saw_padding) {
+                log_error("base64_decode: data after padding at position %zu", i);
+                *output_len = 0;
+                return NULL;
+            }
             data_chars++;
-        } else if (val == -2) { // '=' padding, ignored for sizing
-            // no-op
+        } else if (val == -2) {
+            saw_padding = true;
+            padding_chars++;
+            if (padding_chars > 2) {
+                log_error("base64_decode: too much padding at position %zu", i);
+                *output_len = 0;
+                return NULL;
+            }
         } else if (!isspace(c)) {
             // invalid character
             log_error("base64_decode: invalid character '%c' (0x%02x) at position %zu",
@@ -141,6 +168,14 @@ uint8_t* base64_decode_variant(const char* input, size_t input_len, size_t* outp
         *output_len = 0;
         return NULL;
     }
+    if (padding_chars > 0 &&
+        ((data_chars + padding_chars) % 4 != 0 ||
+         (padding_chars == 1 && rem != 3) ||
+         (padding_chars == 2 && rem != 2))) {
+        log_error("base64_decode: invalid padding for %zu data characters", data_chars);
+        *output_len = 0;
+        return NULL;
+    }
 
     // calculate output size from the non-padding data characters
     size_t decoded_len = (data_chars / 4) * 3;
@@ -148,7 +183,12 @@ uint8_t* base64_decode_variant(const char* input, size_t input_len, size_t* outp
     else if (rem == 3) decoded_len += 2;
 
     // allocate output buffer
-    uint8_t* output = (uint8_t*)mem_alloc(decoded_len + 1, MEM_CAT_TEMP); // +1 for null terminator
+    size_t allocation_size = 0;
+    if (!math_checked_add(decoded_len, 1, &allocation_size)) {
+        *output_len = 0;
+        return NULL;
+    }
+    uint8_t* output = (uint8_t*)mem_alloc(allocation_size, MEM_CAT_TEMP); // +1 for null terminator
     if (!output) {
         log_error("base64_decode: malloc failed for %zu bytes", decoded_len);
         *output_len = 0;
@@ -180,8 +220,14 @@ uint8_t* base64_decode_variant(const char* input, size_t input_len, size_t* outp
         // whitespace: silently skip
     }
 
-    output[decoded_len] = '\0'; // null-terminate for safety
-    *output_len = decoded_len;
+    if (out_idx != decoded_len) {
+        log_error("base64_decode: decoded length mismatch (%zu != %zu)", out_idx, decoded_len);
+        mem_free(output);
+        *output_len = 0;
+        return NULL;
+    }
+    output[out_idx] = '\0'; // null-terminate for safety
+    *output_len = out_idx;
 
     log_debug("base64_decode: decoded %zu data chars to %zu bytes", data_chars, decoded_len);
     return output;

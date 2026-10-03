@@ -3,6 +3,9 @@
 #include <cstring>
 
 #include "../../lib/font/font_internal.h"
+#include "../../lib/font/font_glyf.h"
+#include "../../lib/font/font_tables.h"
+#include "../../lib/arena.h"
 #include "../../lib/hashmap_helpers.h"
 
 static uint64_t test_loaded_glyph_cache_hash(const void* item,
@@ -30,6 +33,100 @@ static int test_loaded_glyph_cache_compare(const void* left, const void* right,
         return a->emoji_presentation ? 1 : -1;
     }
     return 0;
+}
+
+TEST(FontSecurityTest, RejectsWrappedTableRange) {
+    uint8_t data[32] = {0};
+    FontTableDir directory = {};
+    directory.tag = FONT_TAG('g', 'l', 'y', 'f');
+    directory.offset = 0xfffffff0u;
+    directory.length = 0x20u;
+    FontTables tables = {};
+    tables.data = data;
+    tables.data_len = sizeof(data);
+    tables.dirs = &directory;
+    tables.num_tables = 1;
+    EXPECT_EQ(font_tables_find(&tables, directory.tag, NULL), nullptr);
+}
+
+static void test_font_security_tables(FontTables* tables, FontTableDir directories[2],
+                                      HeadTable* head, MaxpTable* maxp,
+                                      const uint8_t* data, size_t data_len,
+                                      uint32_t glyph_len) {
+    memset(tables, 0, sizeof(*tables));
+    memset(directories, 0, sizeof(FontTableDir) * 2);
+    head->index_to_loc_format = 1;
+    maxp->num_glyphs = 1;
+    directories[0].tag = FONT_TAG('l', 'o', 'c', 'a');
+    directories[0].offset = 0;
+    directories[0].length = 8;
+    directories[1].tag = FONT_TAG('g', 'l', 'y', 'f');
+    directories[1].offset = 8;
+    directories[1].length = glyph_len;
+    tables->data = data;
+    tables->data_len = data_len;
+    tables->dirs = directories;
+    tables->num_tables = 2;
+    tables->head = head;
+    tables->maxp = maxp;
+    tables->parsed_flags = FONT_PARSED_HEAD | FONT_PARSED_MAXP;
+}
+
+TEST(FontSecurityTest, RejectsCyclicCompoundGlyph) {
+    uint8_t data[24] = {0};
+    data[7] = 16;                 // long loca: glyph 0 spans [0, 16)
+    data[8] = 0xff; data[9] = 0xff; // compound glyph marker
+    data[18] = 0; data[19] = 2;  // component args are XY byte values
+    FontTables tables = {};
+    FontTableDir directories[2] = {};
+    HeadTable head = {};
+    MaxpTable maxp = {};
+    test_font_security_tables(&tables, directories, &head, &maxp,
+                              data, sizeof(data), 16);
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    GlyphOutline outline = {};
+    EXPECT_EQ(glyf_get_outline(&tables, 0, &outline, arena), -1);
+    arena_destroy(arena);
+}
+
+TEST(FontSecurityTest, RejectsNonMonotonicContourEndpoints) {
+    uint8_t data[22] = {0};
+    data[7] = 14;                 // long loca: glyph 0 spans [0, 14)
+    data[8] = 0; data[9] = 2;    // two simple contours
+    data[18] = 0; data[19] = 2;
+    data[20] = 0; data[21] = 1;  // second endpoint moves backwards
+    FontTables tables = {};
+    FontTableDir directories[2] = {};
+    HeadTable head = {};
+    MaxpTable maxp = {};
+    test_font_security_tables(&tables, directories, &head, &maxp,
+                              data, sizeof(data), 14);
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    GlyphOutline outline = {};
+    EXPECT_EQ(glyf_get_outline(&tables, 0, &outline, arena), -1);
+    arena_destroy(arena);
+}
+
+TEST(FontSecurityTest, RejectsFlagRepeatPastPointCount) {
+    uint8_t data[24] = {0};
+    data[7] = 16;                 // long loca: glyph 0 spans [0, 16)
+    data[8] = 0; data[9] = 1;    // one simple contour
+    data[18] = 0; data[19] = 0;  // one point
+    data[22] = 0x38;              // repeated flag with unchanged x/y
+    data[23] = 1;                 // repeats beyond the declared point count
+    FontTables tables = {};
+    FontTableDir directories[2] = {};
+    HeadTable head = {};
+    MaxpTable maxp = {};
+    test_font_security_tables(&tables, directories, &head, &maxp,
+                              data, sizeof(data), 16);
+    Arena* arena = arena_create_default();
+    ASSERT_NE(arena, nullptr);
+    GlyphOutline outline = {};
+    EXPECT_EQ(glyf_get_outline(&tables, 0, &outline, arena), -1);
+    arena_destroy(arena);
 }
 
 TEST(FontContextTest, FamilyListParserPreservesOrderAndQuotedNames) {

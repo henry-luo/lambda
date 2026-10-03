@@ -1,4 +1,9 @@
 /* Enable POSIX/XSI interfaces used by nftw(), realpath(), and fileno(). */
+#ifdef __APPLE__
+#ifndef _DARWIN_C_SOURCE
+#define _DARWIN_C_SOURCE
+#endif
+#endif
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -20,6 +25,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <time.h>
+#include "math_checked.hpp"
 
 #ifdef _WIN32
   #define WIN32_LEAN_AND_MEAN
@@ -27,6 +33,7 @@
   #include <io.h>
   #include <direct.h>
   #include <process.h>
+  #include <fcntl.h>
   #define getpid _getpid
   #define mkdir_compat(p, m) _mkdir(p)
   #define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
@@ -36,6 +43,7 @@
   #include <unistd.h>
   #include <sys/types.h>
   #include <utime.h>
+  #include <fcntl.h>
   #define mkdir_compat(p, m) mkdir(p, m)
 #endif
 
@@ -45,6 +53,75 @@ extern char *strdup(const char *s);
 #include "file.h"
 #include "log.h"
 #include "str.h"
+
+FILE* file_open_regular_read(const char* filename) {
+    if (!filename) return NULL;
+#ifdef _WIN32
+    HANDLE handle = CreateFileA(filename, GENERIC_READ, FILE_SHARE_READ, NULL,
+                                OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (handle == INVALID_HANDLE_VALUE) return NULL;
+    BY_HANDLE_FILE_INFORMATION info;
+    if (!GetFileInformationByHandle(handle, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+        CloseHandle(handle);
+        errno = EACCES;
+        return NULL;
+    }
+    int fd = _open_osfhandle((intptr_t)handle, _O_RDONLY | _O_BINARY);
+    if (fd < 0) { CloseHandle(handle); return NULL; }
+    FILE* file = _fdopen(fd, "rb");
+    if (!file) _close(fd);
+    return file;
+#else
+    int fd = open(filename, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) return NULL;
+    struct stat sb;
+    if (fstat(fd, &sb) != 0 || !S_ISREG(sb.st_mode)) {
+        close(fd);
+        errno = EACCES;
+        return NULL;
+    }
+    FILE* file = fdopen(fd, "rb");
+    if (!file) close(fd);
+    return file;
+#endif
+}
+
+FILE* file_open_regular_write(const char* filename, bool overwrite) {
+    if (!filename) return NULL;
+#ifdef _WIN32
+    DWORD disposition = overwrite ? CREATE_ALWAYS : CREATE_NEW;
+    HANDLE handle = CreateFileA(filename, GENERIC_WRITE, 0, NULL, disposition,
+                                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (handle == INVALID_HANDLE_VALUE) return NULL;
+    BY_HANDLE_FILE_INFORMATION info;
+    if (!GetFileInformationByHandle(handle, &info) ||
+        (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+        CloseHandle(handle);
+        errno = EACCES;
+        return NULL;
+    }
+    int fd = _open_osfhandle((intptr_t)handle, _O_WRONLY | _O_BINARY);
+    if (fd < 0) { CloseHandle(handle); return NULL; }
+    FILE* file = _fdopen(fd, "wb");
+    if (!file) _close(fd);
+    return file;
+#else
+    int flags = O_WRONLY | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK |
+                (overwrite ? O_TRUNC : O_EXCL);
+    int fd = open(filename, flags, 0666);
+    if (fd < 0) return NULL;
+    struct stat sb;
+    if (fstat(fd, &sb) != 0 || !S_ISREG(sb.st_mode)) {
+        close(fd);
+        errno = EACCES;
+        return NULL;
+    }
+    FILE* file = fdopen(fd, "wb");
+    if (!file) close(fd);
+    return file;
+#endif
+}
 
 bool file_read_all(const char* filename, MemCategory category,
                    char** out_data, size_t* out_size) {
@@ -329,43 +406,74 @@ int write_text_file_atomic(const char* filename, const char* content) {
 
     // build temp file name in same directory
     size_t flen = strlen(filename);
-    size_t tlen = flen + 8; // ".XXXXXX"
-    char* tmp = (char*)mem_alloc(tlen + 1, MEM_CAT_TEMP);
+    size_t tlen = 0;
+    size_t allocation_size = 0;
+    if (!math_checked_add(flen, 7, &tlen) ||
+        !math_checked_add(tlen, 1, &allocation_size)) return -1;
+    char* tmp = (char*)mem_alloc(allocation_size, MEM_CAT_TEMP);
     if (!tmp) return -1;
-    snprintf(tmp, tlen + 1, "%s.XXXXXX", filename);
+    snprintf(tmp, allocation_size, "%s.XXXXXX", filename);
 
+    int fd = -1;
 #ifdef _WIN32
-    // _mktemp modifies in-place
-    if (_mktemp(tmp) == NULL) {
+    if (_mktemp_s(tmp, allocation_size) != 0 ||
+        (fd = _open(tmp, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY,
+                    _S_IREAD | _S_IWRITE)) < 0) {
         log_error("write_text_file_atomic: _mktemp failed");
         mem_free(tmp);
         return -1;
     }
 #else
-    int fd = mkstemp(tmp);
+    fd = mkstemp(tmp);
     if (fd < 0) {
         log_error("write_text_file_atomic: mkstemp failed: %s", strerror(errno));
         mem_free(tmp);
         return -1;
     }
-    close(fd);
 #endif
 
-    // write content to temp file
-    FILE* f = fopen(tmp, "w");
+    // Keep using the exclusively-created descriptor; reopening the pathname
+    // would reintroduce a symlink swap between creation and writing.
+#ifdef _WIN32
+    FILE* f = _fdopen(fd, "wb");
+#else
+    FILE* f = fdopen(fd, "wb");
+#endif
     if (!f) {
         log_error("write_text_file_atomic: cannot open temp '%s': %s", tmp, strerror(errno));
+#ifdef _WIN32
+        _close(fd);
+#else
+        close(fd);
+#endif
+        remove(tmp);
         mem_free(tmp);
         return -1;
     }
-    if (fprintf(f, "%s", content) < 0) {
+    size_t content_len = strlen(content);
+    if (fwrite(content, 1, content_len, f) != content_len || fflush(f) != 0) {
         log_error("write_text_file_atomic: write error on '%s'", tmp);
         fclose(f);
         remove(tmp);
         mem_free(tmp);
         return -1;
     }
-    fclose(f);
+#ifdef _WIN32
+    if (_commit(fd) != 0) {
+#else
+    if (fsync(fd) != 0) {
+#endif
+        log_error("write_text_file_atomic: sync error on '%s'", tmp);
+        fclose(f);
+        remove(tmp);
+        mem_free(tmp);
+        return -1;
+    }
+    if (fclose(f) != 0) {
+        remove(tmp);
+        mem_free(tmp);
+        return -1;
+    }
 
     // file_rename replaces an existing target on Windows; plain rename does not.
     if (file_rename(tmp, filename) != 0) {
@@ -390,25 +498,17 @@ int file_copy(const char* src, const char* dst, const FileCopyOptions* opts) {
         return -1;
     }
 
-    // check if destination exists when overwrite is not set
-    if (!opts || !opts->overwrite) {
-        struct stat st;
-        if (stat(dst, &st) == 0) {
-            log_error("file_copy: destination '%s' exists", dst);
-            return -1;
-        }
-    }
-
     // ensure parent directory exists
     ensure_parent_dir(dst);
 
-    FILE* fin = fopen(src, "rb");
+    FILE* fin = file_open_regular_read(src);
     if (!fin) {
         log_error("file_copy: cannot open source '%s': %s", src, strerror(errno));
         return -1;
     }
 
-    FILE* fout = fopen(dst, "wb");
+    bool overwrite = opts && opts->overwrite;
+    FILE* fout = file_open_regular_write(dst, overwrite);
     if (!fout) {
         log_error("file_copy: cannot open destination '%s': %s", dst, strerror(errno));
         fclose(fin);
@@ -422,11 +522,19 @@ int file_copy(const char* src, const char* dst, const FileCopyOptions* opts) {
             log_error("file_copy: write error on '%s'", dst);
             fclose(fin);
             fclose(fout);
+            if (!overwrite) remove(dst);
             return -1;
         }
     }
-    fclose(fin);
-    fclose(fout);
+    bool read_ok = !ferror(fin);
+    bool write_ok = fflush(fout) == 0 && !ferror(fout);
+    if (fclose(fin) != 0) read_ok = false;
+    if (fclose(fout) != 0) write_ok = false;
+    if (!read_ok || !write_ok) {
+        log_error("file_copy: incomplete copy '%s' -> '%s'", src, dst);
+        if (!overwrite) remove(dst);
+        return -1;
+    }
 
     // preserve metadata if requested
     if (opts && opts->preserve_metadata) {
@@ -502,28 +610,63 @@ static int delete_recursive_cb(const char* fpath, const struct stat* sb,
 }
 #endif
 
+#ifdef _WIN32
+static int file_delete_recursive_win32(const char* path) {
+    DWORD attributes = GetFileAttributesA(path);
+    if (attributes == INVALID_FILE_ATTRIBUTES) return -1;
+    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+        return DeleteFileA(path) ? 0 : -1;
+    }
+    // Directory reparse points are links, not trees owned by this path.
+    if (attributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+        return RemoveDirectoryA(path) ? 0 : -1;
+    }
+
+    char* pattern = file_path_join(path, "*");
+    if (!pattern) return -1;
+    WIN32_FIND_DATAA entry;
+    HANDLE search = FindFirstFileA(pattern, &entry);
+    mem_free(pattern);
+    if (search == INVALID_HANDLE_VALUE && GetLastError() != ERROR_FILE_NOT_FOUND) return -1;
+
+    int result = 0;
+    if (search != INVALID_HANDLE_VALUE) {
+        do {
+            if (strcmp(entry.cFileName, ".") == 0 || strcmp(entry.cFileName, "..") == 0) continue;
+            char* child = file_path_join(path, entry.cFileName);
+            if (!child || file_delete_recursive_win32(child) != 0) result = -1;
+            if (child) mem_free(child);
+            if (result != 0) break;
+        } while (FindNextFileA(search, &entry));
+        if (result == 0 && GetLastError() != ERROR_NO_MORE_FILES) result = -1;
+        FindClose(search);
+    }
+    if (result == 0 && !RemoveDirectoryA(path)) result = -1;
+    return result;
+}
+#endif
+
 int file_delete_recursive(const char* path) {
     if (!path) {
         log_error("file_delete_recursive: NULL path");
         return -1;
     }
+#ifdef _WIN32
+    int result = file_delete_recursive_win32(path);
+    if (result != 0) {
+        log_error("FILE-DELETE-RECURSIVE-WIN32: failed for '%s': %lu",
+                  path, GetLastError());
+    }
+    return result;
+#else
     struct stat st;
-    if (stat(path, &st) != 0) {
+    if (lstat(path, &st) != 0) {
         log_error("file_delete_recursive: path does not exist: '%s'", path);
         return -1;
     }
     if (!S_ISDIR(st.st_mode)) {
         return file_delete(path);
     }
-#ifdef _WIN32
-    char cmd[4096];
-    snprintf(cmd, sizeof(cmd), "rmdir /S /Q \"%s\"", path);
-    int result = system(cmd);
-    if (result != 0) {
-        log_error("file_delete_recursive: failed to delete directory '%s'", path);
-    }
-    return result;
-#else
     return nftw(path, delete_recursive_cb, 64, FTW_DEPTH | FTW_PHYS);
 #endif
 }
@@ -805,49 +948,110 @@ int file_read_lines(const char* filename, FileLineCallback cb, void* user_data) 
 // Temporary files (under ./temp/ per project rules)
 // ---------------------------------------------------------------------------
 
-static long s_temp_counter = 0;
+static bool file_temp_component_valid(const char* component, bool allow_dot) {
+    if (!component) return true;
+    for (const unsigned char* p = (const unsigned char*)component; *p; p++) {
+        if ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+            (*p >= '0' && *p <= '9') || *p == '_' || *p == '-' ||
+            (allow_dot && *p == '.')) continue;
+        return false;
+    }
+    return true;
+}
 
-char* file_temp_path(const char* prefix, const char* suffix) {
+static int file_temp_open_unique(const char* prefix, const char* suffix, char** out_path) {
+    if (out_path) *out_path = NULL;
     const char* pfx = prefix ? prefix : "tmp";
     const char* sfx = suffix ? suffix : "";
+    if (!out_path || !file_temp_component_valid(pfx, false) ||
+        !file_temp_component_valid(sfx, true) || !create_dir("temp")) {
+        log_error("FILE-TEMP-NAME: invalid prefix or suffix");
+        return -1;
+    }
 
-    // ensure ./temp/ exists
-    create_dir("temp");
+    size_t path_size = 0;
+    if (!math_checked_add(strlen(pfx), strlen(sfx), &path_size) ||
+        !math_checked_add(path_size, 5 + 1 + 16 + 1, &path_size)) return -1;
+    char* path = (char*)mem_alloc(path_size, MEM_CAT_TEMP);
+    if (!path) return -1;
 
-    char buf[512];
-    snprintf(buf, sizeof(buf), "temp/%s_%ld_%d%s",
-             pfx, ++s_temp_counter, (int)getpid(), sfx);
-    return mem_strdup(buf, MEM_CAT_TEMP);
+#ifdef _WIN32
+    int fd = -1;
+    for (int attempt = 0; attempt < 128; attempt++) {
+        unsigned int random_a = 0;
+        unsigned int random_b = 0;
+        if (rand_s(&random_a) != 0 || rand_s(&random_b) != 0) break;
+        snprintf(path, path_size, "temp/%s_%08x%08x%s", pfx,
+                 random_a, random_b, sfx);
+        fd = _open(path, _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY,
+                   _S_IREAD | _S_IWRITE);
+        if (fd >= 0) break;
+        if (errno != EEXIST) break;
+    }
+#else
+    snprintf(path, path_size, "temp/%s_XXXXXX%s", pfx, sfx);
+    size_t suffix_len = strlen(sfx);
+    if (suffix_len > INT_MAX) {
+        mem_free(path);
+        return -1;
+    }
+    int fd = mkstemps(path, (int)suffix_len);
+#endif
+    if (fd < 0) {
+        log_error("FILE-TEMP-CREATE: cannot reserve a unique path: %s", strerror(errno));
+        mem_free(path);
+        return -1;
+    }
+    *out_path = path;
+    return fd;
+}
+
+char* file_temp_path(const char* prefix, const char* suffix) {
+    char* path = NULL;
+    int fd = file_temp_open_unique(prefix, suffix, &path);
+    if (fd < 0) return NULL;
+#ifdef _WIN32
+    _close(fd);
+#else
+    close(fd);
+#endif
+    return path;
 }
 
 char* file_temp_create(const char* prefix, const char* suffix) {
-    char* path = file_temp_path(prefix, suffix);
-    if (!path) return NULL;
-
-    FILE* f = fopen(path, "w");
-    if (!f) {
-        log_error("file_temp_create: cannot create '%s': %s", path, strerror(errno));
-        mem_free(path);
-        return NULL;
-    }
-    fclose(f);
-    return path;
+    return file_temp_path(prefix, suffix);
 }
 
 char* dir_temp_create(const char* prefix) {
     const char* pfx = prefix ? prefix : "tmpdir";
-
-    create_dir("temp");
-
-    char buf[512];
-    snprintf(buf, sizeof(buf), "temp/%s_%ld_%d",
-             pfx, ++s_temp_counter, (int)getpid());
-
-    if (!create_dir(buf)) {
-        log_error("dir_temp_create: cannot create '%s'", buf);
+    if (!file_temp_component_valid(pfx, false) || !create_dir("temp")) {
+        log_error("DIR-TEMP-NAME: invalid prefix");
         return NULL;
     }
-    return mem_strdup(buf, MEM_CAT_TEMP);
+    size_t path_size = 0;
+    if (!math_checked_add(strlen(pfx), 5 + 1 + 16 + 1, &path_size)) return NULL;
+    char* path = (char*)mem_alloc(path_size, MEM_CAT_TEMP);
+    if (!path) return NULL;
+#ifdef _WIN32
+    bool created = false;
+    for (int attempt = 0; attempt < 128; attempt++) {
+        unsigned int random_a = 0;
+        unsigned int random_b = 0;
+        if (rand_s(&random_a) != 0 || rand_s(&random_b) != 0) break;
+        snprintf(path, path_size, "temp/%s_%08x%08x", pfx, random_a, random_b);
+        if (CreateDirectoryA(path, NULL)) { created = true; break; }
+        if (GetLastError() != ERROR_ALREADY_EXISTS) break;
+    }
+    if (!created) {
+#else
+    snprintf(path, path_size, "temp/%s_XXXXXX", pfx);
+    if (!mkdtemp(path)) {
+#endif
+        log_error("DIR-TEMP-CREATE: cannot reserve a unique directory");
+        mem_free(path);
+        return NULL;
+    }
+    return path;
 }
 
 // ---------------------------------------------------------------------------

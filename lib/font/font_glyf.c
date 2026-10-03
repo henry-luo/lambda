@@ -55,6 +55,20 @@
 
 // maximum compound glyph recursion depth (prevents malicious fonts)
 #define MAX_COMPOUND_DEPTH 32
+#define MAX_EXPANDED_COMPONENTS 4096
+#define MAX_EXPANDED_CONTOURS 65536
+#define MAX_EXPANDED_POINTS 1048576
+
+typedef struct GlyfParseBudget {
+    int remaining_components;
+    int remaining_contours;
+    int remaining_points;
+} GlyfParseBudget;
+
+static int glyf_get_outline_internal(FontTables* tables, uint16_t glyph_id,
+                                     GlyphOutline* out, Arena* arena,
+                                     uint16_t* glyph_stack, int depth,
+                                     GlyfParseBudget* budget);
 
 // ============================================================================
 // Internal: locate glyph data in glyf table via loca
@@ -77,20 +91,20 @@ static const uint8_t* glyf_locate(FontTables* tables, uint16_t glyph_id, uint32_
     if (head->index_to_loc_format == 0) {
         // short format: uint16 × 2
         uint32_t idx = (uint32_t)glyph_id * 2;
-        if (idx + 4 > loca_len) return NULL;
+        if (!font_data_range_valid(loca_len, idx, 4)) return NULL;
         offset      = (uint32_t)rd16(loca + idx) * 2;
         next_offset = (uint32_t)rd16(loca + idx + 2) * 2;
     } else {
         // long format: uint32
         uint32_t idx = (uint32_t)glyph_id * 4;
-        if (idx + 8 > loca_len) return NULL;
+        if (!font_data_range_valid(loca_len, idx, 8)) return NULL;
         offset      = rd32(loca + idx);
         next_offset = rd32(loca + idx + 4);
     }
 
     // empty glyph (e.g. space)
-    if (offset >= next_offset) return NULL;
-    if (offset + 10 > glyf_len) return NULL;
+    if (offset >= next_offset || next_offset > glyf_len ||
+        !font_data_range_valid(glyf_len, offset, 10)) return NULL;
 
     if (out_len) *out_len = next_offset - offset;
     return glyf + offset;
@@ -101,29 +115,37 @@ static const uint8_t* glyf_locate(FontTables* tables, uint16_t glyph_id, uint32_
 // ============================================================================
 
 static int parse_simple_glyph(const uint8_t* data, uint32_t data_len,
-                               int num_contours, GlyphOutline* out, Arena* arena) {
+                               int num_contours, GlyphOutline* out, Arena* arena,
+                               GlyfParseBudget* budget) {
     if (num_contours <= 0) return -1;
+    if (!budget || num_contours > budget->remaining_contours) return -1;
+    budget->remaining_contours -= num_contours;
 
     // read contour end points
-    uint32_t pos = 10; // skip glyph header (numberOfContours + bbox = 10 bytes)
-    if (pos + (uint32_t)num_contours * 2 > data_len) return -1;
+    size_t pos = 10; // skip glyph header (numberOfContours + bbox = 10 bytes)
+    size_t endpoint_bytes = (size_t)num_contours * 2;
+    if (!font_data_range_valid(data_len, pos, endpoint_bytes)) return -1;
 
     uint16_t* end_pts = (uint16_t*)arena_alloc(arena, (size_t)num_contours * sizeof(uint16_t));
     if (!end_pts) return -1;
 
     for (int i = 0; i < num_contours; i++) {
         end_pts[i] = rd16(data + pos);
+        if (i > 0 && end_pts[i] <= end_pts[i - 1]) return -1;
         pos += 2;
     }
 
     int total_points = (int)end_pts[num_contours - 1] + 1;
     if (total_points <= 0 || total_points > 65535) return -1;
+    if (total_points > budget->remaining_points) return -1;
+    budget->remaining_points -= total_points;
 
     // skip instructions
-    if (pos + 2 > data_len) return -1;
+    if (!font_data_range_valid(data_len, pos, 2)) return -1;
     uint16_t inst_len = rd16(data + pos);
-    pos += 2 + inst_len;
-    if (pos > data_len) return -1;
+    pos += 2;
+    if (!font_data_range_valid(data_len, pos, inst_len)) return -1;
+    pos += inst_len;
 
     // read flags (with repeat expansion)
     uint8_t* flags = (uint8_t*)arena_alloc(arena, (size_t)total_points);
@@ -136,7 +158,8 @@ static int parse_simple_glyph(const uint8_t* data, uint32_t data_len,
         if (flag & GLYF_FLAG_REPEAT) {
             if (pos >= data_len) return -1;
             uint8_t repeat_count = data[pos++];
-            for (int r = 0; r < repeat_count && fi < total_points; r++) {
+            if ((int)repeat_count > total_points - fi) return -1;
+            for (int r = 0; r < repeat_count; r++) {
                 flags[fi++] = flag;
             }
         }
@@ -157,7 +180,7 @@ static int parse_simple_glyph(const uint8_t* data, uint32_t data_len,
             if (flags[i] & GLYF_FLAG_X_SAME) {
                 // x is the same as previous (delta = 0)
             } else {
-                if (pos + 2 > data_len) return -1;
+                if (!font_data_range_valid(data_len, pos, 2)) return -1;
                 x += rd16s(data + pos);
                 pos += 2;
             }
@@ -179,7 +202,7 @@ static int parse_simple_glyph(const uint8_t* data, uint32_t data_len,
             if (flags[i] & GLYF_FLAG_Y_SAME) {
                 // y is the same as previous (delta = 0)
             } else {
-                if (pos + 2 > data_len) return -1;
+                if (!font_data_range_valid(data_len, pos, 2)) return -1;
                 y += rd16s(data + pos);
                 pos += 2;
             }
@@ -256,7 +279,9 @@ static int parse_simple_glyph(const uint8_t* data, uint32_t data_len,
 // ============================================================================
 
 static int parse_compound_glyph(FontTables* tables, const uint8_t* data, uint32_t data_len,
-                                 GlyphOutline* out, Arena* arena, int depth) {
+                                 GlyphOutline* out, Arena* arena,
+                                 uint16_t* glyph_stack, int depth,
+                                 GlyfParseBudget* budget) {
     if (depth >= MAX_COMPOUND_DEPTH) {
         log_debug("font_glyf: compound glyph recursion depth exceeded");
         return -1;
@@ -269,12 +294,13 @@ static int parse_compound_glyph(FontTables* tables, const uint8_t* data, uint32_
     if (!components) return -1;
 
     int num_components = 0;
+    int parsed_components = 0;
     int total_contours = 0;
-    uint32_t pos = 10; // skip glyph header
+    size_t pos = 10; // skip glyph header
 
     uint16_t flags;
     do {
-        if (pos + 4 > data_len) return -1;
+        if (!font_data_range_valid(data_len, pos, 4)) return -1;
         flags = rd16(data + pos);
         uint16_t glyph_id = rd16(data + pos + 2);
         pos += 4;
@@ -282,14 +308,14 @@ static int parse_compound_glyph(FontTables* tables, const uint8_t* data, uint32_
         // read translation
         float tx = 0, ty = 0;
         if (flags & COMP_FLAG_ARG_1_AND_2_ARE_WORDS) {
-            if (pos + 4 > data_len) return -1;
+            if (!font_data_range_valid(data_len, pos, 4)) return -1;
             if (flags & COMP_FLAG_ARGS_ARE_XY_VALUES) {
                 tx = (float)rd16s(data + pos);
                 ty = (float)rd16s(data + pos + 2);
             }
             pos += 4;
         } else {
-            if (pos + 2 > data_len) return -1;
+            if (!font_data_range_valid(data_len, pos, 2)) return -1;
             if (flags & COMP_FLAG_ARGS_ARE_XY_VALUES) {
                 tx = (float)(int8_t)data[pos];
                 ty = (float)(int8_t)data[pos + 1];
@@ -300,16 +326,16 @@ static int parse_compound_glyph(FontTables* tables, const uint8_t* data, uint32_
         // read scale/transform
         float a = 1.0f, b = 0.0f, c_val = 0.0f, d = 1.0f;
         if (flags & COMP_FLAG_WE_HAVE_A_SCALE) {
-            if (pos + 2 > data_len) return -1;
+            if (!font_data_range_valid(data_len, pos, 2)) return -1;
             a = d = (float)rd16s(data + pos) / 16384.0f;
             pos += 2;
         } else if (flags & COMP_FLAG_WE_HAVE_AN_X_AND_Y_SCALE) {
-            if (pos + 4 > data_len) return -1;
+            if (!font_data_range_valid(data_len, pos, 4)) return -1;
             a = (float)rd16s(data + pos) / 16384.0f;
             d = (float)rd16s(data + pos + 2) / 16384.0f;
             pos += 4;
         } else if (flags & COMP_FLAG_WE_HAVE_A_TWO_BY_TWO) {
-            if (pos + 8 > data_len) return -1;
+            if (!font_data_range_valid(data_len, pos, 8)) return -1;
             a     = (float)rd16s(data + pos) / 16384.0f;
             b     = (float)rd16s(data + pos + 2) / 16384.0f;
             c_val = (float)rd16s(data + pos + 4) / 16384.0f;
@@ -317,14 +343,24 @@ static int parse_compound_glyph(FontTables* tables, const uint8_t* data, uint32_
             pos += 8;
         }
 
-        // recursively get the component outline
-        if (num_components >= max_components) {
+        // Bound every component record, including empty glyphs, so malformed
+        // chains cannot bypass the work limit by referencing empty outlines.
+        if (parsed_components >= max_components) {
             log_debug("font_glyf: too many compound components");
-            break;
+            return -1;
         }
+        if (!budget || budget->remaining_components <= 0) {
+            log_debug("font_glyf: expanded component budget exceeded");
+            return -1;
+        }
+        budget->remaining_components--;
+        parsed_components++;
 
         GlyphOutline comp = {0};
-        if (glyf_get_outline(tables, glyph_id, &comp, arena) == 0 && comp.num_contours > 0) {
+        int component_result = glyf_get_outline_internal(
+            tables, glyph_id, &comp, arena, glyph_stack, depth + 1, budget);
+        if (component_result != 0) return -1;
+        if (comp.num_contours > 0) {
             // apply affine transform to all points
             for (int ci = 0; ci < comp.num_contours; ci++) {
                 GlyfContour* contour = &comp.contours[ci];
@@ -366,10 +402,24 @@ static int parse_compound_glyph(FontTables* tables, const uint8_t* data, uint32_
 // Public API
 // ============================================================================
 
-int glyf_get_outline(FontTables* tables, uint16_t glyph_id,
-                     GlyphOutline* out, Arena* arena) {
+static int glyf_get_outline_internal(FontTables* tables, uint16_t glyph_id,
+                                     GlyphOutline* out, Arena* arena,
+                                     uint16_t* glyph_stack, int depth,
+                                     GlyfParseBudget* budget) {
     if (!tables || !out || !arena) return -1;
     memset(out, 0, sizeof(GlyphOutline));
+
+    if (depth >= MAX_COMPOUND_DEPTH) {
+        log_debug("font_glyf: compound glyph recursion depth exceeded");
+        return -1;
+    }
+    for (int i = 0; i < depth; i++) {
+        if (glyph_stack[i] == glyph_id) {
+            log_debug("font_glyf: compound glyph cycle rejected");
+            return -1;
+        }
+    }
+    glyph_stack[depth] = glyph_id;
 
     uint32_t glyph_len = 0;
     const uint8_t* data = glyf_locate(tables, glyph_id, &glyph_len);
@@ -387,11 +437,11 @@ int glyf_get_outline(FontTables* tables, uint16_t glyph_id,
 
     if (num_contours >= 0) {
         // simple glyph
-        return parse_simple_glyph(data, glyph_len, num_contours, out, arena);
-    } else {
-        // compound glyph (num_contours == -1)
-        // recursion depth starts at 0
-        int result = parse_compound_glyph(tables, data, glyph_len, out, arena, 0);
+        return parse_simple_glyph(data, glyph_len, num_contours, out, arena, budget);
+    } else if (num_contours == -1) {
+        // compound glyph
+        int result = parse_compound_glyph(tables, data, glyph_len, out, arena,
+                                          glyph_stack, depth, budget);
         if (result == 0 && out->num_contours > 0) {
             // recompute bounding box from actual points
             float xmin = 1e30f, ymin = 1e30f, xmax = -1e30f, ymax = -1e30f;
@@ -412,6 +462,19 @@ int glyf_get_outline(FontTables* tables, uint16_t glyph_id,
         }
         return result;
     }
+    return -1;
+}
+
+int glyf_get_outline(FontTables* tables, uint16_t glyph_id,
+                     GlyphOutline* out, Arena* arena) {
+    uint16_t glyph_stack[MAX_COMPOUND_DEPTH];
+    GlyfParseBudget budget = {
+        MAX_EXPANDED_COMPONENTS,
+        MAX_EXPANDED_CONTOURS,
+        MAX_EXPANDED_POINTS
+    };
+    return glyf_get_outline_internal(tables, glyph_id, out, arena,
+                                     glyph_stack, 0, &budget);
 }
 
 // midpoint insertion guarantees every quadratic segment has an on-curve end.

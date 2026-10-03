@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <string.h>
+#include <limits.h>
 
 static inline void path_str_normalize_separators(char* path) {
     if (!path) return;
@@ -38,8 +39,12 @@ static inline int path_str_copy(char* result, int result_size, const char* src) 
         result[0] = '\0';
         return 0;
     }
-    int len = (int)strlen(src);
-    if (len >= result_size) len = result_size - 1;
+    size_t source_len = strlen(src);
+    if (source_len > INT_MAX || source_len >= (size_t)result_size) {
+        result[0] = '\0';
+        return -1;
+    }
+    int len = (int)source_len;
     memcpy(result, src, (size_t)len);
     result[len] = '\0';
     return len;
@@ -50,12 +55,18 @@ static inline int path_str_join_posix_into(char* result,
                                            const char* base,
                                            const char* segment) {
     int pos = path_str_copy(result, result_size, base);
+    if (pos < 0) return -1;
     if (!result || result_size <= 0 || !segment || !*segment) return pos;
-    if (pos > 0 && pos < result_size - 1 && result[pos - 1] != '/') {
-        result[pos++] = '/';
+    bool needs_separator = pos > 0 && result[pos - 1] != '/';
+    size_t segment_len = strlen(segment);
+    size_t available = (size_t)(result_size - 1 - pos);
+    if (segment_len > INT_MAX || segment_len > available ||
+        (needs_separator && (available == 0 || segment_len > available - 1))) {
+        result[0] = '\0';
+        return -1;
     }
-    int seg_len = (int)strlen(segment);
-    if (pos + seg_len >= result_size) seg_len = result_size - 1 - pos;
+    if (needs_separator) result[pos++] = '/';
+    int seg_len = (int)segment_len;
     if (seg_len > 0) {
         memcpy(result + pos, segment, (size_t)seg_len);
         pos += seg_len;
@@ -85,8 +96,9 @@ static inline int path_str_normalize_lexical_posix(const char* path,
     bool is_absolute = (path[0] == '/');
 
     char temp[4096];
-    int plen = (int)strlen(path);
-    if (plen >= (int)sizeof(temp)) plen = (int)sizeof(temp) - 1;
+    size_t path_len = strlen(path);
+    if (path_len >= sizeof(temp) || path_len > INT_MAX) return -1;
+    int plen = (int)path_len;
     memcpy(temp, path, (size_t)plen);
     temp[plen] = '\0';
 
@@ -107,29 +119,37 @@ static inline int path_str_normalize_lexical_posix(const char* path,
                     continue;
                 }
             }
-            if (!is_absolute && segment_count < 256) {
+            if (!is_absolute) {
+                if (segment_count >= 256) return -1;
                 segments[segment_count] = start;
                 segment_lens[segment_count] = len;
                 segment_count++;
             }
             continue;
         }
-        if (segment_count < 256) {
-            segments[segment_count] = start;
-            segment_lens[segment_count] = len;
-            segment_count++;
-        }
+        if (segment_count >= 256) return -1;
+        segments[segment_count] = start;
+        segment_lens[segment_count] = len;
+        segment_count++;
     }
 
     int pos = 0;
-    if (is_absolute && pos < result_size - 1) result[pos++] = '/';
-    for (int i = 0; i < segment_count; i++) {
-        if (i > 0 && pos < result_size - 1) result[pos++] = '/';
-        for (int j = 0; j < segment_lens[i] && pos < result_size - 1; j++) {
-            result[pos++] = segments[i][j];
-        }
+    if (is_absolute) {
+        if (result_size < 2) return -1;
+        result[pos++] = '/';
     }
-    if (pos == 0 && empty_relative_dot && !is_absolute && result_size > 1) {
+    for (int i = 0; i < segment_count; i++) {
+        int separator = i > 0 ? 1 : 0;
+        if (segment_lens[i] > result_size - 1 - pos - separator) {
+            result[0] = '\0';
+            return -1;
+        }
+        if (separator) result[pos++] = '/';
+        memcpy(result + pos, segments[i], (size_t)segment_lens[i]);
+        pos += segment_lens[i];
+    }
+    if (pos == 0 && empty_relative_dot && !is_absolute) {
+        if (result_size < 2) return -1;
         result[pos++] = '.';
     }
     result[pos] = '\0';
@@ -417,7 +437,9 @@ static inline int path_str_normalize_lexical_win32(const char* path,
         return 0;
     }
 
-    int plen = (int)strlen(path);
+    size_t path_len = strlen(path);
+    if (path_len > INT_MAX) return -1;
+    int plen = (int)path_len;
     const char* segments[256];
     int seg_count = 0;
     bool is_absolute = false;
@@ -462,7 +484,7 @@ static inline int path_str_normalize_lexical_win32(const char* path,
     char temp[4096];
     int remaining_start = prefix_len;
     int rlen = plen - remaining_start;
-    if (rlen >= (int)sizeof(temp)) rlen = (int)sizeof(temp) - 1;
+    if (rlen >= (int)sizeof(temp)) return -1;
     memcpy(temp, path + remaining_start, (size_t)rlen);
     temp[rlen] = '\0';
 
@@ -484,44 +506,52 @@ static inline int path_str_normalize_lexical_win32(const char* path,
             } else if (is_unc_path && seg_count == 2) {
                 // A UNC share root cannot be traversed above its share name.
                 continue;
-            } else if (!is_absolute && seg_count < 256) {
+            } else if (!is_absolute) {
+                if (seg_count >= 256) return -1;
                 segments[seg_count++] = "..";
-            } else if (is_unc_path && seg_count < 256) {
+            } else if (is_unc_path) {
                 // Before a complete server/share root, keep traversal lexical.
+                if (seg_count >= 256) return -1;
                 segments[seg_count++] = "..";
             }
-        } else if (seg_count < 256) {
+        } else {
+            if (seg_count >= 256) return -1;
             segments[seg_count++] = seg_start;
         }
     }
 
     int pos = 0;
-    for (int i = 0; i < prefix_len && pos < result_size - 1; i++) {
-        result[pos++] = prefix[i];
-    }
+    if (prefix_len > result_size - 1) return -1;
+    memcpy(result, prefix, (size_t)prefix_len);
+    pos = prefix_len;
     if (prefix_len == 0 && seg_count > 0 &&
+            strlen(segments[0]) >= 2 &&
             ((path_str_is_drive_letter(segments[0][0]) && segments[0][1] == ':') ||
-             (segments[0][0] == '?' && segments[0][1] == '?')) &&
-            pos < result_size - 2) {
+             (segments[0][0] == '?' && segments[0][1] == '?'))) {
         // Keep a drive-like segment relative after traversal; otherwise
         // "test/../C:/..." would incorrectly become a drive-rooted path.
+        if (result_size - 1 - pos < 2) return -1;
         result[pos++] = '.';
         result[pos++] = '\\';
     }
-    for (int i = 0; i < seg_count && pos < result_size - 1; i++) {
-        if (i > 0 && pos < result_size - 1) result[pos++] = '\\';
+    for (int i = 0; i < seg_count; i++) {
         int slen = (int)strlen(segments[i]);
-        if (pos + slen >= result_size) slen = result_size - 1 - pos;
-        if (slen > 0) {
-            memcpy(result + pos, segments[i], (size_t)slen);
-            pos += slen;
+        int separator = i > 0 ? 1 : 0;
+        if (slen > result_size - 1 - pos - separator) {
+            result[0] = '\0';
+            return -1;
         }
+        if (separator) result[pos++] = '\\';
+        memcpy(result + pos, segments[i], (size_t)slen);
+        pos += slen;
     }
-    if (prefix_len == 2 && seg_count == 0 && pos < result_size - 1) {
+    if (prefix_len == 2 && seg_count == 0) {
         // A drive-relative root is normalized as "C:." by Node, not "C:".
+        if (pos >= result_size - 1) return -1;
         result[pos++] = '.';
     }
-    if (pos == 0 && empty_relative_dot && result_size > 1) {
+    if (pos == 0 && empty_relative_dot) {
+        if (result_size < 2) return -1;
         result[pos++] = '.';
     }
     result[pos] = '\0';
