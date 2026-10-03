@@ -1638,9 +1638,11 @@ The P7 stroke/marker oracle review and P10 F1–F4 coordinate/resource audit pas
 including resource font units, mutation recovery and output survival after
 scratch/program teardown. macOS SVG/PDF exports and the complete Radiant gate
 pass. P12's clock dependency/default/fragment/detach audits and initial-time export
-contract are implemented in the plan's §7.15. SMIL remains partial: access-key/
-wallclock timing and per-use instance event retargeting remain open, alongside
-Linux/Windows P13 runtime smoke. Broader SVG2 vector effects
+contract are implemented. The plan's §7.16 closes access-key/wallclock timing,
+local/external/nested use event state, qualified broadcasts, clone timing events
+and animation DOM queries/TimeEvents. N1 is implemented; the broad SMIL row stays
+partial for motion/discard, general SVG DOM expansion and unavailable renderer
+features. Linux/Windows P13 runtime smoke remains open. Broader SVG2 vector effects
 (`non-scaling-size`, `non-rotation`, `fixed-position`, combinations and explicit
 viewport/screen selectors), filter component transfer/convolution and the larger
 SVG document/cache architecture remain explicit limits rather than full support

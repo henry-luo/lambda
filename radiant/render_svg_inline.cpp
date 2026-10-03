@@ -508,6 +508,8 @@ struct SvgResourceDocument {
     SvgResourceDocument* next;
 };
 
+static void svg_resource_document_destroy(SvgResourceDocument* document);
+
 DomElement* build_dom_tree_from_element(Element* elem, DomDocument* doc, DomElement* parent);
 static const char* get_direct_text_content(Element* elem);
 
@@ -570,9 +572,7 @@ static void svg_style_destroy(SvgStyleContext* style) {
     // D4.2: external template documents outlive all borrowed resolution facts in this walk.
     for (SvgResourceDocument* resource = style->resources; resource;) {
         SvgResourceDocument* next = resource->next;
-        svg_style_destroy(&resource->style);
-        if (resource->fonts) font_context_destroy(resource->fonts);
-        rdt_picture_free(resource->picture); mem_free(resource->path); mem_free(resource);
+        svg_resource_document_destroy(resource);
         resource = next;
     }
     if (style->matcher) selector_matcher_destroy(style->matcher);
@@ -592,6 +592,13 @@ static void svg_style_destroy(SvgStyleContext* style) {
     }
     if (style->pool) mem_pool_destroy(style->pool);
     *style = {};
+}
+
+static void svg_resource_document_destroy(SvgResourceDocument* document) {
+    if (!document) return;
+    svg_style_destroy(&document->style);
+    if (document->fonts) font_context_destroy(document->fonts);
+    rdt_picture_free(document->picture); mem_free(document->path); mem_free(document);
 }
 
 static bool svg_style_init(SvgStyleContext* style, Element* root,
@@ -1635,6 +1642,76 @@ typedef struct {
     SvgResourceDocument* document;
 } SvgResourceReference;
 
+static SvgResourceDocument* svg_resource_document_create(SvgInlineRenderContext* ctx,
+    RdtPicture* picture, const char* path) {
+    Element* root = picture ? rdt_picture_get_svg_root(picture) : nullptr;
+    SvgResourceDocument* document = root ? (SvgResourceDocument*)mem_calloc(1, sizeof(*document), MEM_CAT_RENDER) : nullptr;
+    if (!document) { rdt_picture_free(picture); return nullptr; }
+    document->picture = picture; document->path = mem_strdup(path, MEM_CAT_RENDER);
+    if (!document->path || !svg_style_init(&document->style, root, ctx->current_viewport_w,
+        ctx->current_viewport_h, nullptr, path, ctx->image_document)) {
+        svg_resource_document_destroy(document); return nullptr;
+    }
+    document->style.resource_document = document;
+    svg_animation_mark_reference(document->style.document->root);
+    document->fonts = svg_style_font_context(&document->style, document->path,
+        ctx->raster_scale, ctx->image_document, ctx->font_ctx);
+    return document;
+}
+
+struct SvgUseResourceCache {
+    DomDocument* document;
+    SvgResourceDocument* documents;
+};
+
+static void svg_use_resource_cache_destroy(void* data) {
+    SvgUseResourceCache* cache = (SvgUseResourceCache*)data;
+    for (SvgResourceDocument* document = cache->documents; document;) {
+        SvgResourceDocument* next = document->next;
+        // instance controls release their borrowed DOM refs before the source owner is destroyed (D4.2.6).
+        svg_animation_forget_source_document(cache->document, document->style.document);
+        svg_resource_document_destroy(document); document = next;
+    }
+    cache->document->services.svg_use_resource_cache = nullptr;
+    mem_free(cache);
+}
+
+static SvgResourceReference svg_retain_use_reference(SvgInlineRenderContext* ctx, DomElement* host,
+    const SvgResourceReference* source, const char* fragment) {
+    SvgResourceReference result = {};
+    if (!host || !source->document || host->doc->services.svg_image_document) return result;
+    SvgUseResourceCache* cache = (SvgUseResourceCache*)host->doc->services.svg_use_resource_cache;
+    if (!cache) {
+        cache = (SvgUseResourceCache*)mem_calloc(1, sizeof(*cache), MEM_CAT_RENDER);
+        if (!cache) return result;
+        cache->document = host->doc;
+        if (!dom_document_add_resource(host->doc, cache, svg_use_resource_cache_destroy)) {
+            mem_free(cache); return result;
+        }
+        host->doc->services.svg_use_resource_cache = cache;
+    }
+    Element* root = rdt_picture_get_svg_root(source->document->picture);
+    SvgResourceDocument* retained = nullptr;
+    unsigned count = 0;
+    for (SvgResourceDocument* document = cache->documents; document; document = document->next) {
+        if (rdt_picture_get_svg_root(document->picture) == root && strcmp(document->path, source->document->path) == 0)
+            retained = document;
+        count++;
+    }
+    if (!retained) {
+        if (count >= SVG_MAX_ELEM_DEFS) {
+            log_error("SVG_USE_RESOURCE_LIMIT: retained documents exceed %d", SVG_MAX_ELEM_DEFS);
+            return result;
+        }
+        retained = svg_resource_document_create(ctx, rdt_picture_dup(source->document->picture), source->document->path);
+        if (!retained) return result;
+        retained->next = cache->documents; cache->documents = retained;
+    }
+    result.document = retained;
+    result.element = rdt_picture_find_svg_element_by_id(retained->picture, fragment);
+    return result;
+}
+
 static SvgInlineRenderContext svg_reference_render_context(SvgInlineRenderContext* ctx,
                                                            const SvgResourceReference* reference) {
     SvgInlineRenderContext result = *ctx;
@@ -1671,19 +1748,10 @@ static SvgResourceReference svg_resolve_reference(SvgInlineRenderContext* ctx, c
         ImageSurface* image = ui ? load_image(ui, path) : nullptr;
         RdtPicture* picture = image && image->format == IMAGE_FORMAT_SVG
             ? rdt_picture_dup(image->pic) : ui ? nullptr : rdt_picture_load(path);
-        Element* root = picture ? rdt_picture_get_svg_root(picture) : nullptr;
-        document = root ? (SvgResourceDocument*)mem_calloc(1, sizeof(SvgResourceDocument), MEM_CAT_RENDER) : nullptr;
-        if (document && svg_style_init(&document->style, root, ctx->current_viewport_w, ctx->current_viewport_h,
-            nullptr, path, ctx->image_document)) {
-            document->path = path; path = nullptr; document->picture = picture;
+        document = svg_resource_document_create(ctx, picture, path);
+        if (document) {
             document->style.resource_owner = owner; document->style.resource_document = document;
-            svg_animation_mark_reference(document->style.document->root);
-            document->fonts = svg_style_font_context(&document->style, document->path,
-                ctx->raster_scale, ctx->image_document, ctx->font_ctx);
             document->next = owner->resources; owner->resources = document;
-        } else {
-            if (document) { svg_style_destroy(&document->style); mem_free(document); }
-            rdt_picture_free(picture); document = nullptr;
         }
     }
     if (document) result = {rdt_picture_find_svg_element_by_id(document->picture, fragment), document};
@@ -5793,7 +5861,7 @@ static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem
         svg_animation_prepare_instance(use_entry->node, instance_style->document->root);
     // SVG 2 §5.6.5: external use instances sample the host timeline; resource documents stay static.
     SvgAnimationSourceScope instance_sources(instance_style ? instance_style->document : nullptr,
-        instance_entry ? instance_entry->node : nullptr);
+        instance_entry ? instance_entry->node : nullptr, use_entry ? use_entry->node : nullptr);
     if (!has_bounds) {
         SvgStyleEntry* ref_entry = svg_style_entry((SvgStyleContext*)instance.style_context, ref);
         if (ref_entry && dom_svg_element_geometry_bounds(ref_entry->node, &context.geometry_box.left,
@@ -5825,6 +5893,12 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     if (!ctx || !use_elem || !href || ctx->image_document) return false;
     SvgResourceReference reference = svg_resolve_reference(ctx, href);
     if (!reference.element || !reference.document) return false;
+    SvgStyleEntry* entry = svg_style_entry((SvgStyleContext*)ctx->style_context, use_elem);
+    const char* fragment = strrchr(href, '#');
+    if (entry && fragment) {
+        reference = svg_retain_use_reference(ctx, entry->node, &reference, fragment + 1);
+        if (!reference.element || !reference.document) return false;
+    }
     SvgInlineRenderContext source = svg_reference_render_context(ctx, &reference);
     render_svg_use_target(ctx, use_elem, reference.element, href, &source);
     return true;

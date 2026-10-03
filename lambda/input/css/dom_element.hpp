@@ -215,6 +215,7 @@ struct DomDocumentServices {
     void* svg_layer_registry;  // document-owned inline <svg> raster layers (render_svg_inline.cpp)
     void* svg_filter_registry; // document-owned compiled SVG filter programs
     void* svg_animation_registry; // document-owned SMIL clocks and sampled values
+    void* svg_use_resource_cache; // retained external-use DOM/style owners
     char* preferred_languages; // document-owned UI preference snapshot, refreshed by the host setter
     bool svg_image_document; // SVG image processing forbids external subordinate resources
 
@@ -222,7 +223,7 @@ struct DomDocumentServices {
         keyframe_registry(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), canvas_registry(nullptr),
-        svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
+        svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
 };
 
 static inline const char* dom_reconcile_mode_name(DomReconcileMode mode) {

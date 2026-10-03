@@ -290,6 +290,7 @@ Item dom_absent_to_null(Item v);
 // message still reach the log so a Lambda caller's failure is not silent.
 Item dom_raise(Item name, Item message);
 Item dom_raise_named(const char* name, const char* message);
+Item dom_raise_exception(const char* name, const char* message);
 Item dom_raise_type_error(const char* message);
 
 // Rows that are literally their JS-facing bridge: the bridge already has the

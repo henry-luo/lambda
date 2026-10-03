@@ -89,6 +89,7 @@ bool dom_ensure_geometry_snapshot(struct DomDocument* dom_doc);
  */
 void* dom_document_svg_element_from_point(void* dom_doc, float x, float y);
 void* dom_svg_element_from_point(void* element, float x, float y);
+void dom_svg_dispatch_use_timing_event(void* element, float x, float y, const char* type, bool bubbles, double detail);
 // geometry bounds in the element's local SVG user coordinate system.
 bool dom_svg_element_geometry_bounds(void* element, float* left, float* top,
     float* right, float* bottom);

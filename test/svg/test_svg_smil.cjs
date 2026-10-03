@@ -59,11 +59,18 @@ async function runBrowser() {
         await page.setViewport({...fixture.viewport, deviceScaleFactor: scale});
         await page.goto(`http://127.0.0.1:${server.address().port}/${source}`, {waitUntil: 'load'});
         await page.evaluate(() => document.fonts.ready);
+        // timing-attribute changes made by fixture scripts reach SVG paint on the next frame.
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
         for (const event of fixture.events) {
           if (event.type === 'advance_time') { await new Promise(resolve => setTimeout(resolve, event.ms)); continue; }
           if (event.type === 'click') {
             if (event.target) await page.click(event.target.selector);
             else await page.mouse.click(event.x, event.y);
+            await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+            continue;
+          }
+          if (event.type === 'key_press') {
+            await page.keyboard.press(event.key);
             await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
             continue;
           }

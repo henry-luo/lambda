@@ -29,7 +29,7 @@ This proposal makes the following decisions explicit:
 
 ## Implementation Status
 
-Status as of 2026-10-03: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table retains the 2026-05-07 architecture audit; the latest SVG behavior work is recorded below.
+Status as of 2026-10-03: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table below reconciles the earlier architecture audit with the current SVG behavior work. The larger resource/cache design remains separate from the support proposal.
 
 The [SVG support implementation plan](../impl/Lambda_Impl_SVG_Support.md#74-progress-record)
 records six repaired gaps: rectangle radius fallback, default line stroke,
@@ -38,7 +38,7 @@ and object-bounding-box gradients on paths/polygons/polylines. These changes
 continue through Radiant parsing, PaintIR and the ThorVG adapter. They preserve
 the existing retained document/resource ownership (**D4.2.2v2–D4.2.4** in
 [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)); the full cascade,
-typed paints, advanced effects, animation and export remain planned.
+typed paints, advanced effects, animation and macOS export were completed in the subsequent support proposal records below.
 
 **2026-10-03 P7/P10 audit.** The
 [current implementation record](../impl/Lambda_Impl_SVG_Support.md#714-p7p10-final-stroke-oracle-and-filter-resource-audit)
@@ -49,7 +49,7 @@ bounding-box bases remain target-specific. Resource mutation, cycle/missing
 recovery, graph pin/reclamation and retained-output teardown are validated
 under **D4.2.2v2–D4.2.6/D4.5.1v4**. Radiant still records paint through the
 ThorVG adapter; no vendor source changed. Broader SVG2 vector effects, component
-transfer/convolution, remaining SMIL extensions and Linux/Windows export smoke are
+transfer/convolution, motion/discard animation and Linux/Windows export smoke are
 explicit residue; this does not complete the larger resource/cache proposal.
 
 **2026-10-03 P12 audit.** The
@@ -59,8 +59,15 @@ dependencies, XML implicit values, fragment clocks across HTML integration,
 detach driver guards and deterministic initial exports. Sampled strings are copied
 into longer-lived caches; pinned filter snapshots survive retirement under
 **D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check, copy-as-value). Interpolation/timing
-continue on the Lambda side of the ThorVG adapter. Access-key/wallclock timing and
-per-use instance event retargeting remain open; the SMIL support row is partial.
+continue on the Lambda side of the ThorVG adapter. The
+[final P12 closeout](../impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout)
+adds access-key/wallclock values, expired-interval filtering, private local/
+external/nested use controls and timing events, animation queries and TimeEvent
+initialization. Source documents retain parsed owners until host controls are
+released (**D4.2.6/D4.5.1v4**); interface hooks and precise roots follow
+**D7.4.4/D5.3.3**. N1's inventory is implemented. Motion/discard, broader SVG DOM
+and unavailable renderer features keep the broad SMIL row partial; Linux/Windows
+P13 runtime smoke remains open.
 
 | Area | Status | Notes |
 |------|--------|-------|
@@ -70,16 +77,16 @@ per-use instance event retargeting remain open; the SMIL support row is partial.
 | `background-image: url(foo.svg)` vector path | Mostly done | Background SVG tiles draw through duplicated `RdtPicture` instances and `rc_draw_picture()`. It still uses the current `ImageSurface` compatibility wrapper. |
 | Nested SVG `<image href="nested.svg">` | Done for local files/data URIs | SVG data URIs and local `.svg` hrefs route through `RdtPicture`; raster image hrefs still use the existing ThorVG image loader path. Relative file resolution is now source-path aware. |
 | External `<use href="external.svg#id">` | Done for synchronous local files | The renderer splits file/fragment, loads the external SVG DOM, finds the referenced id, and renders by reference with the `<use>` transform/viewport behavior. It does not yet use a shared async resource cache. |
-| Embedded `<style>` inside external SVG | Partial | A lightweight scoped style bridge handles simple selectors (`tag`, `.class`, `#id`, and simple combinations) for presentation properties used by the SVG renderer. It is not yet routed through the full HTML CSS parser/cascade engine. |
-| Inline SVG host CSS inheritance/selectors | Existing/partial | Inline SVG remains in the host DOM path. Full spec-grade CSS/SVG cascade normalization is still future work. |
+| Embedded `<style>` inside external SVG | Done for the support inventory | Shared CSS parser, selector matcher and cascade, with isolated style/font ownership. |
+| Inline SVG host CSS inheritance/selectors | Done for the support inventory | Host stylesheets, specificity/importance, inherited paint/fonts/visibility and mutation invalidation use the shared cascade. General CSS limits remain in the support matrix. |
 | `SvgDocument` / `SvgDocumentRef` API | Not yet | Current implementation extends `RdtPicture` as the compatibility document wrapper instead of introducing the formal structs. |
 | Shared `SvgResourceManager`, URL cache, async/network integration | Not yet | External SVG loads are still synchronous in the render/resource paths that were touched. Cache-by-canonical-URL and async repaint/reflow are pending. |
 | Central id table | Not yet | Id lookup is recursive or render-time defs based. A persistent document-level id table is still pending. |
 | Renderer API rename/split (`svg_render_document`, `svg_render_element`) | Not yet | `render_svg_to_vec()` remains the shared lower-level renderer; `render_svg_inline.cpp` still contains general SVG rendering logic. |
 | Cycle detection for recursive SVG references | Partial | Local file SVG recursion now has a thread-local render stack guard. Recursive external `<use>` and file-based nested SVG `<image>` references are skipped with a debug log; broader async/cache-cycle detection is still pending. |
-| Full CSS parser integration for SVG `<style>` | Not yet | The current bridge is intentionally narrow; full selector/cascade support remains part of the style cleanup phase. |
+| Full CSS parser integration for SVG `<style>` | Done | The shared parser/cascade replaced the earlier lightweight bridge; this does not imply that every CSS feature is implemented. |
 
-So, no: **not every designed action item has been implemented**. The implemented slice covers the high-impact behavior requested first: parser unification for external SVG pictures, vector-first external image rendering, nested SVG image support, local external `<use>` render-by-reference, and basic scoped embedded styles.
+So, no: **not every designed action item has been implemented**. The implemented slice covers the high-impact behavior requested first: parser unification for external SVG pictures, vector-first external image rendering, nested SVG image support, local external `<use>` render-by-reference, shared isolated/host CSS, typed paints, effects, text, embedded HTML, the N1 animation inventory and macOS exports. The formal resource manager/API redesign and platform gates remain open.
 
 ## Current State
 

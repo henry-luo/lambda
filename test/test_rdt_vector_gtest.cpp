@@ -10,6 +10,7 @@
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/selector_matcher.hpp"
 #include "../lambda/dom/dom.h"
+#include "../lambda/dom/dom_engine.h"
 #include "../lambda/io/mark_builder.hpp"
 
 #include "../lib/image.h"
@@ -73,6 +74,155 @@ protected:
         return allocations;
     }
 };
+
+TEST_F(SvgAnimationLifetimeTest, WallclockGrammarCalendarZonesAndFractionalSeconds) {
+    const double origin = 946684800.25; // 2000-01-01T00:00:00.25Z
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock(2000-01-01T00:00Z)", origin), -.25);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock( 2000-01-01T01:00:01.125+01:00 )", origin), .875);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock(1999-12-31T23:00:00-01:00)", origin), -.25);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value("wallclock(2000-02-29T00:00Z)", origin), 59 * 86400.0 - .25);
+    EXPECT_TRUE(isfinite(svg_animation_wallclock_value("wallclock(9999-12-31T23:59:59Z)", origin)));
+    time_t epoch = (time_t)floor(origin);
+    struct tm local = {};
+#ifdef _WIN32
+    ASSERT_EQ(localtime_s(&local, &epoch), 0);
+#else
+    ASSERT_NE(localtime_r(&epoch, &local), nullptr);
+#endif
+    char clock[64], value[96];
+    ASSERT_GT(strftime(clock, sizeof(clock), "%H:%M:%S", &local), 0u);
+    snprintf(value, sizeof(value), "wallclock(%s)", clock);
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value(value, origin), -.25);
+    ASSERT_GT(strftime(clock, sizeof(clock), "%Y-%m-%d", &local), 0u);
+    snprintf(value, sizeof(value), "wallclock(%s)", clock);
+    local.tm_hour = local.tm_min = local.tm_sec = 0; local.tm_isdst = -1;
+    EXPECT_DOUBLE_EQ(svg_animation_wallclock_value(value, origin), (double)mktime(&local) - origin);
+    const char* invalid[] = {"wallclock(2001-02-29T00:00Z)", "wallclock(2000-04-31)",
+        "wallclock(2000-01-01t00:00Z)", "wallclock(2000-01-01T24:00Z)", "wallclock(00:00:60)",
+        "wallclock(00:00:01.)", "wallclock(00:00 +01:00)", "wallclock(00:00+01)",
+        "wallclock(2000-01-01Z)", "wallclock(2000-01-01T00:00Z)+1s", "wallclock()"};
+    for (const char* value : invalid) EXPECT_TRUE(isnan(svg_animation_wallclock_value(value, origin))) << value;
+}
+
+TEST_F(SvgAnimationLifetimeTest, AccessKeysResolveOffsetsRestartAndEndAcrossFocusedFragments) {
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    ASSERT_TRUE(rect->set_attribute("x", "10"));
+    DomElement* animation = animate(rect, "x", "10", "110"); ASSERT_NE(animation, nullptr);
+    ASSERT_TRUE(animation->set_attribute("begin", "accessKey(\xc3\xa9)+0.5s;accessKey(a)"));
+    ASSERT_TRUE(animation->set_attribute("end", "accessKey(z)"));
+    svg_animation_pause(svg, true);
+    dom_engine_svg_timing_key(root, "\xc3\xa9");
+    svg_animation_set_time(svg, 1);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "35");
+    dom_engine_svg_timing_key(root, "z");
+    svg_animation_set_time(svg, 2);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "35");
+    dom_engine_svg_timing_key(root, "a");
+    svg_animation_set_time(svg, 3);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+    ASSERT_TRUE(animation->set_attribute("restart", "whenNotActive"));
+    dom_engine_svg_timing_key(root, "a");
+    svg_animation_set_time(svg, 3.5);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "85");
+}
+
+TEST_F(SvgAnimationLifetimeTest, AnimationQueriesUseResolvedIntervalsAndLiveTarget) {
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    DomElement* animation = animate(rect, "x", "10", "110"); ASSERT_NE(animation, nullptr);
+    ASSERT_TRUE(animation->set_attribute("begin", "2s;6s"));
+    svg_animation_pause(svg, true);
+    double start = -1;
+    EXPECT_TRUE(svg_animation_start_time(animation, &start)); EXPECT_DOUBLE_EQ(start, 2);
+    EXPECT_DOUBLE_EQ(svg_animation_simple_duration(animation), 2);
+    EXPECT_EQ(svg_animation_target_element(animation), rect);
+    svg_animation_set_time(svg, 4);
+    EXPECT_TRUE(svg_animation_start_time(animation, &start)); EXPECT_DOUBLE_EQ(start, 6);
+    svg_animation_set_time(svg, 8);
+    EXPECT_FALSE(svg_animation_start_time(animation, &start));
+    ASSERT_TRUE(animation->set_attribute("href", "#absent"));
+    EXPECT_EQ(svg_animation_target_element(animation), nullptr);
+    ASSERT_TRUE(animation->set_attribute("dur", "indefinite"));
+    EXPECT_TRUE(isnan(svg_animation_simple_duration(animation)));
+}
+
+TEST_F(SvgAnimationLifetimeTest, ExpiredNegativeIntervalsDoNotFreezeOrFeedSyncbases) {
+    DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);
+    DomElement* expired = animate(rect, "x", "10", "110"); ASSERT_NE(expired, nullptr);
+    ASSERT_TRUE(expired->set_attribute("id", "expired"));
+    ASSERT_TRUE(expired->set_attribute("begin", "-3s"));
+    DomElement* dependent = animate(rect, "y", "10", "110"); ASSERT_NE(dependent, nullptr);
+    ASSERT_TRUE(dependent->set_attribute("begin", "expired.end+2s"));
+    svg_animation_pause(svg, true);
+    svg_animation_set_time(svg, 1.5);
+    EXPECT_EQ(svg_animation_value(rect, "x"), nullptr);
+    EXPECT_EQ(svg_animation_value(rect, "y"), nullptr);
+    double start = 0;
+    EXPECT_FALSE(svg_animation_start_time(expired, &start));
+    ASSERT_TRUE(expired->set_attribute("begin", "-1s"));
+    svg_animation_set_time(svg, 0);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+    ASSERT_TRUE(expired->set_attribute("begin", "-3s;1s"));
+    svg_animation_set_time(svg, 2);
+    EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+    EXPECT_TRUE(svg_animation_start_time(expired, &start)); EXPECT_DOUBLE_EQ(start, 1);
+}
+
+TEST_F(SvgAnimationLifetimeTest, UseControlsIsolateImplicitEventsShareQualifiedIdsAndReleaseTheirOwners) {
+    DomElement* defs = element("defs", svg); ASSERT_NE(defs, nullptr);
+    DomElement* prototype = element("g", defs); ASSERT_NE(prototype, nullptr);
+    ASSERT_TRUE(prototype->set_attribute("id", "prototype"));
+    DomElement* rect = element("rect", prototype); ASSERT_NE(rect, nullptr);
+    ASSERT_TRUE(rect->set_attribute("id", "source"));
+    DomElement* implicit = animate(rect, "x", "10", "110"); ASSERT_NE(implicit, nullptr);
+    ASSERT_TRUE(implicit->set_attribute("begin", "click"));
+    DomElement* qualified = animate(rect, "y", "10", "110"); ASSERT_NE(qualified, nullptr);
+    ASSERT_TRUE(qualified->set_attribute("begin", "source.click"));
+    DomElement* first = element("use", svg); ASSERT_NE(first, nullptr);
+    DomElement* second = element("use", svg); ASSERT_NE(second, nullptr);
+    svg_animation_pause(svg, true);
+    { SvgAnimationSourceScope scope(&doc, prototype, first); EXPECT_EQ(svg_animation_value(rect, "x"), nullptr); }
+    { SvgAnimationSourceScope scope(&doc, prototype, second); EXPECT_EQ(svg_animation_value(rect, "x"), nullptr); }
+    svg_animation_use_event(first, rect, "click", true, 0);
+    svg_animation_set_time(svg, 1);
+    {
+        SvgAnimationSourceScope scope(&doc, prototype, first);
+        EXPECT_STREQ(svg_animation_value(rect, "x"), "60");
+        EXPECT_STREQ(svg_animation_value(rect, "y"), "60");
+    }
+    {
+        SvgAnimationSourceScope scope(&doc, prototype, second);
+        EXPECT_EQ(svg_animation_value(rect, "x"), nullptr);
+        EXPECT_STREQ(svg_animation_value(rect, "y"), "60");
+    }
+    EXPECT_EQ(svg_animation_value(rect, "x"), nullptr);
+    uint64_t retained = animation_allocations();
+    svg_animation_forget_source_document(&doc, &doc);
+    EXPECT_LT(animation_allocations(), retained);
+    EXPECT_EQ(svg_animation_use_source(first), nullptr);
+    EXPECT_EQ(svg_animation_use_source(second), nullptr);
+}
+
+TEST_F(SvgAnimationLifetimeTest, UseRepeatEventsDriveQualifiedDependentsOnTheHostClock) {
+    DomElement* defs = element("defs", svg); ASSERT_NE(defs, nullptr);
+    DomElement* prototype = element("g", defs); ASSERT_NE(prototype, nullptr);
+    DomElement* rect = element("rect", prototype); ASSERT_NE(rect, nullptr);
+    DomElement* pulse = animate(rect, "x", "10", "110"); ASSERT_NE(pulse, nullptr);
+    ASSERT_TRUE(pulse->set_attribute("id", "pulse"));
+    ASSERT_TRUE(pulse->set_attribute("begin", "click"));
+    ASSERT_TRUE(pulse->set_attribute("dur", "1s"));
+    ASSERT_TRUE(pulse->set_attribute("repeatCount", "2"));
+    DomElement* dependent = animate(rect, "y", "10", "110"); ASSERT_NE(dependent, nullptr);
+    ASSERT_TRUE(dependent->set_attribute("begin", "pulse.repeat(1)"));
+    DomElement* first = element("use", svg); ASSERT_NE(first, nullptr);
+    DomElement* second = element("use", svg); ASSERT_NE(second, nullptr);
+    svg_animation_prepare(svg);
+    { SvgAnimationSourceScope scope(&doc, prototype, first); EXPECT_EQ(svg_animation_value(rect, "y"), nullptr); }
+    { SvgAnimationSourceScope scope(&doc, prototype, second); EXPECT_EQ(svg_animation_value(rect, "y"), nullptr); }
+    svg_animation_use_event(first, rect, "click", true, 0);
+    ASSERT_TRUE(animation_scheduler_tick(doc.state->animation_scheduler, 1.25, nullptr));
+    { SvgAnimationSourceScope scope(&doc, prototype, first); EXPECT_STREQ(svg_animation_value(rect, "y"), "22.5"); }
+    { SvgAnimationSourceScope scope(&doc, prototype, second); EXPECT_STREQ(svg_animation_value(rect, "y"), "22.5"); }
+}
 
 TEST_F(SvgAnimationLifetimeTest, ClockSurvivesLayoutReleaseAndStopsOnPauseDetachAndDocumentTeardown) {
     DomElement* rect = element("rect", svg); ASSERT_NE(rect, nullptr);

@@ -6699,6 +6699,7 @@ extern "C" Item dom_document_create_event_bridge(Item interface_name) {
     if (strcmp(interface_text, "TextEvent") == 0) {
         return js_create_text_event_init("", false, false, false, ItemNull, "");
     }
+    if (strcmp(interface_text, "TimeEvent") == 0) return js_create_time_event_init("", 0, ItemNull);
     return js_create_event_init("", false, false, false);
 }
 
@@ -12963,6 +12964,7 @@ static JsDomSvgBounds dom_svg_bounds_for_element(DomElement* elem, int depth = 0
         }
     } else if (str_icmp_cstr(tag, "use") == 0) {
         DomElement* reference = dom_svg_use_reference(elem);
+        SvgAnimationSourceScope animation_scope(elem->doc, reference, elem);
         bounds = dom_svg_bounds_for_element(reference, depth + 1);
         RdtMatrix reference_transform = reference ? dom_svg_transform_from_element(reference) : rdt_matrix_identity();
         dom_svg_bounds_apply_transform(&bounds, &reference_transform);
@@ -13613,6 +13615,9 @@ typedef struct JsDomSvgShapeHit {
     bool bounding_box;
     bool fill_painted;
     bool stroke_painted;
+    DomElement* instance_source;
+    DomElement* instance_hosts[16];
+    unsigned instance_depth;
 } JsDomSvgShapeHit;
 
 static void dom_svg_configure_stroke_hit(DomElement* elem, JsDomSvgPathHitContext* context) {
@@ -13809,7 +13814,9 @@ static DomElement* dom_svg_use_reference(DomElement* elem) {
     if (!elem || !elem->doc || !dom_svg_tag_is(elem, "use")) return nullptr;
     const char* href = elem->get_attribute("href");
     if (!href) href = elem->get_attribute("xlink:href");
-    if (!href || href[0] != '#' || !href[1]) return nullptr;
+    if (!href || !*href) return nullptr;
+    if (href[0] != '#') return svg_animation_use_source(elem);
+    if (!href[1]) return nullptr;
     return dom_find_element_by_id(elem->doc->root, href + 1);
 }
 
@@ -13857,6 +13864,7 @@ static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* referen
         result = dom_svg_basic_shape_hit_local_point(reference, local_x, local_y, min_scale, reference_ctm);
         result.fill_painted = result.fill && dom_svg_paint_is_present(reference, "fill", true);
         result.stroke_painted = result.stroke && dom_svg_paint_is_present(reference, "stroke", false);
+        if (result.fill_painted || result.stroke_painted) result.instance_source = reference;
         return result;
     }
     if (dom_svg_tag_is(reference, "use"))
@@ -13872,6 +13880,11 @@ static JsDomSvgShapeHit dom_svg_reference_hit_viewport_point(DomElement* referen
         JsDomSvgShapeHit hit = dom_svg_reference_hit_viewport_point(child_elem, &child_ctm, viewport_x, viewport_y);
         result.fill |= hit.fill; result.stroke |= hit.stroke; result.bounding_box |= hit.bounding_box;
         result.fill_painted |= hit.fill_painted; result.stroke_painted |= hit.stroke_painted;
+        if (!result.instance_source && hit.instance_source) {
+            result.instance_source = hit.instance_source;
+            result.instance_depth = hit.instance_depth;
+            memcpy(result.instance_hosts, hit.instance_hosts, hit.instance_depth * sizeof(*hit.instance_hosts));
+        }
     }
     return result;
 }
@@ -13891,6 +13904,7 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
         dom_svg_attribute_number(elem, "y", 0.0f));
     RdtMatrix frame = rdt_matrix_multiply(instance_ctm, &offset);
     SvgDomStyleScope scope = {reference, elem, g_dom_svg_style_scope, 0.0f, 0.0f, false};
+    SvgAnimationSourceScope animation_scope(reference->doc, reference, elem);
     const SvgDomStyleScope* saved_scope = g_dom_svg_style_scope;
     g_dom_svg_style_scope = &scope;
     RdtMatrix local = dom_svg_transform_from_element(reference);
@@ -13906,6 +13920,8 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
         }
     }
     result = dom_svg_reference_hit_viewport_point(reference, &frame, viewport_x, viewport_y);
+    if (result.instance_source && result.instance_depth < 16)
+        result.instance_hosts[result.instance_depth++] = elem;
     JsDomSvgBounds bounds = dom_svg_bounds_for_element(reference);
     float local_x = 0.0f, local_y = 0.0f;
     if (bounds.valid && rdt_matrix_unproject_affine_point(&frame, viewport_x, viewport_y, &local_x, &local_y))
@@ -13918,6 +13934,28 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
 static JsDomSvgShapeHit dom_svg_use_hit_viewport_point(DomElement* elem, float viewport_x, float viewport_y) {
     RdtMatrix frame = dom_svg_ctm(elem, true);
     return dom_svg_use_instance_hit(elem, &frame, viewport_x, viewport_y);
+}
+
+static void dom_svg_dispatch_use_timing_hit(const JsDomSvgShapeHit* hit, unsigned depth,
+    const char* type, bool bubbles, double detail) {
+    if (!depth) return;
+    DomElement* host = hit->instance_hosts[depth - 1];
+    if (depth == 1) {
+        svg_animation_use_event(host, hit->instance_source, type, bubbles, detail);
+        return;
+    }
+    DomElement* reference = dom_svg_use_reference(host);
+    if (!reference) return;
+    // replay the hit's instance chain so identical nested source nodes retain distinct timing owners.
+    SvgAnimationSourceScope scope(reference->doc, reference, host);
+    dom_svg_dispatch_use_timing_hit(hit, depth - 1, type, bubbles, detail);
+}
+
+void dom_svg_dispatch_use_timing_event(void* element, float x, float y, const char* type, bool bubbles, double detail) {
+    DomElement* use = (DomElement*)element;
+    if (!use || !dom_svg_tag_is(use, "use")) return;
+    JsDomSvgShapeHit hit = dom_svg_use_hit_viewport_point(use, x, y);
+    if (hit.instance_source) dom_svg_dispatch_use_timing_hit(&hit, hit.instance_depth, type, bubbles, detail);
 }
 
 typedef enum JsDomSvgPointerEventsMode {
@@ -17253,25 +17291,52 @@ extern "C" Item dom_element_operation_impl(Item elem_item,
     if (elem->tag() == MARKUP_NAME_SVG) {
         if (operation == JUBE_DOM_PAUSE_ANIMATIONS || operation == JUBE_DOM_UNPAUSE_ANIMATIONS) {
             svg_animation_pause(elem, operation == JUBE_DOM_PAUSE_ANIMATIONS);
-            return ItemNull;
+            return make_js_undefined();
         }
         if (operation == JUBE_DOM_ANIMATIONS_PAUSED) return Item{.item = svg_animation_paused(elem) ? ITEM_TRUE : ITEM_FALSE};
         if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(svg_animation_current_time(elem));
         if (operation == JUBE_DOM_SET_CURRENT_TIME) {
             double seconds = 0.0;
-            if (argc && item_try_to_double(args[0], &seconds)) svg_animation_set_time(elem, seconds);
-            return ItemNull;
+            if (!argc) return dom_raise_type_error("setCurrentTime requires one argument");
+            JS_ASSIGN_OR_RETURN(numeric, js_to_number(args[0]));
+            if (!item_try_to_double(numeric, &seconds) || !isfinite(seconds) || fabs(seconds) > FLT_MAX)
+                return dom_raise_type_error("setCurrentTime requires a finite time");
+            svg_animation_set_time(elem, (float)seconds);
+            return make_js_undefined();
         }
+    }
+    if (dom_element_is_svg(elem)) {
+        if (operation == JUBE_DOM_GET_TARGET_ELEMENT) {
+            DomElement* target = svg_animation_target_element(elem);
+            return target ? dom_wrap_element(target) : ItemNull;
+        }
+        if (operation == JUBE_DOM_GET_START_TIME) {
+            double seconds;
+            return svg_animation_start_time(elem, &seconds) ? push_d(seconds) :
+                dom_raise_exception("InvalidStateError", "The animation has no current interval");
+        }
+        if (operation == JUBE_DOM_GET_SIMPLE_DURATION) {
+            double seconds = svg_animation_simple_duration(elem);
+            return isfinite(seconds) ? push_d(seconds) :
+                dom_raise_exception("NotSupportedError", "The animation has no finite simple duration");
+        }
+        if (operation == JUBE_DOM_GET_CURRENT_TIME) return push_d(svg_animation_current_time(elem));
     }
     if (dom_element_is_svg(elem) && (operation == JUBE_DOM_BEGIN_ELEMENT ||
         operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT ||
         operation == JUBE_DOM_END_ELEMENT_AT)) {
         double offset = 0.0;
-        if ((operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT_AT) &&
-            (!argc || !item_try_to_double(args[0], &offset))) return ItemNull;
+        if (operation == JUBE_DOM_BEGIN_ELEMENT_AT || operation == JUBE_DOM_END_ELEMENT_AT) {
+            if (!argc) return dom_raise_type_error("Animation timing requires one argument");
+            JS_ASSIGN_OR_RETURN(numeric, js_to_number(args[0]));
+            if (!item_try_to_double(numeric, &offset) || !isfinite(offset) || fabs(offset) > FLT_MAX)
+                return dom_raise_type_error("Animation timing requires a finite offset");
+            offset = (float)offset;
+        }
         svg_animation_begin_end(elem, operation == JUBE_DOM_END_ELEMENT ||
             operation == JUBE_DOM_END_ELEMENT_AT, offset);
-        return ItemNull;
+        // the shared DOM publication boundary maps JS void to Lambda null.
+        return make_js_undefined();
     }
 
     // getBoundingClientRect() — returns {top, left, right, bottom, width, height}

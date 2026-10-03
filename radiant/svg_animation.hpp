@@ -7,8 +7,16 @@ struct DomElement;
 struct Element;
 struct UiContext;
 struct ImageSurface;
+struct SvgAnimationRegistry;
 
 double svg_animation_clock_value(const char* value, double fallback);
+double svg_animation_wallclock_value(const char* value, double origin);
+DomElement* svg_animation_target_element(DomElement* animation);
+void svg_animation_use_event(DomElement* host, DomElement* source, const char* type, bool bubbles, double detail);
+void svg_animation_forget_source_document(DomDocument* host, DomDocument* source);
+DomElement* svg_animation_use_source(DomElement* host);
+bool svg_animation_start_time(DomElement* animation, double* seconds);
+double svg_animation_simple_duration(DomElement* animation);
 void svg_animation_prepare(DomElement* element);
 void svg_animation_mark_reference(DomElement* root);
 void svg_animation_prepare_instance(DomElement* host, DomElement* source_root);
@@ -30,6 +38,7 @@ const char* svg_animation_source_value(Element* element, const char* name);
 struct SvgAnimationSourceScope {
     DomDocument* previous;
     DomElement* previous_instance;
-    explicit SvgAnimationSourceScope(DomDocument* document, DomElement* instance = nullptr);
+    SvgAnimationRegistry* previous_registry;
+    explicit SvgAnimationSourceScope(DomDocument* document, DomElement* instance = nullptr, DomElement* host = nullptr);
     ~SvgAnimationSourceScope();
 };

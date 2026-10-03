@@ -456,18 +456,14 @@ Animations run on the frame clock of `lambda view` ([RAD_16](dev/radiant/RAD_16_
 
 Radiant parses and paints SVG itself, whichever way it arrives: inline `<svg>` in HTML, a standalone `.svg` file given to `lambda render` or `lambda view`, `<img src="x.svg">`, CSS `url(x.svg)`, `data:` SVG URIs, SVG `<image href="x.svg">`, and external `<use href="f.svg#id">`. ThorVG is the rasterizer underneath; its own SVG loader is not used. Design: [RAD_14 — SVG, Vector Graphics & Diagram Layout](dev/radiant/RAD_14_SVG_Vector_Graph.md). SVG *output* is covered in [§17](#17-output-targets).
 
-**2026-10-02 update:** radius defaults, default line paint, path error recovery,
-basic CSS colors, group opacity and geometry bounds for gradient fills have
-fresh Chromium pixel checks. Host/embedded CSS cascade, inherited group fonts,
-visibility, styled stops and mutation invalidation now have fresh paint/input checks. The implementation and validation record is in
-[SVG Support](../vibe/impl/Lambda_Impl_SVG_Support.md#74-progress-record).
-Other entries retain the 2026-09-28 evidence date.
-
-**2026-10-03 P7/P10 update:** stroke/marker paint and pointer fixtures pass at
-1×/2× with caching off/eager. Filter graphs pass the final coordinate/resource
-audit, including resource font units and live image/font replacement. The
-[audit record](../vibe/impl/Lambda_Impl_SVG_Support.md#714-p7p10-final-stroke-oracle-and-filter-resource-audit)
-identifies independent references for browser implementation differences.
+**2026-10-03 closeout:** the listed geometry, cascade, text, paint-server,
+clip/mask, stroke/marker, filter and embedded-HTML work is implemented. P12 also
+implements access-key/wallclock timing, private local/external/nested use event
+state and animation DOM queries/TimeEvents. The
+[closeout record](../vibe/impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout)
+separates the advertised inventory, browser differences and outstanding
+Linux/Windows P13 runtime smoke. Retained source/sample ownership follows
+**D4.2.6/D4.5.1v4**, “pin, gen-check, copy-as-value.”
 
 ### 15.1 Elements
 
@@ -479,19 +475,19 @@ identifies independent references for browser implementation differences.
 | `<rect>` | ✅ | Either omitted radius uses the other radius; used radii are clamped to half the corresponding dimension. An explicit zero radius gives square corners. |
 | `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>` | ✅ | |
 | `<line>` | ✅ | The default stroke is `none`; explicit, inherited and inline CSS strokes use normal paint resolution. |
-| `<text>`, `<tspan>` | ◐ | Addressable-character `x`/`y`/`dx`/`dy` lists, repeated `rotate`, `text-anchor`, inherited font family/size/weight/style, fill/stroke and inherited paint opacity, text/tspan compositing, spacing, baseline alignment/shift, decorations, nested `textLength`/`lengthAdjust`, `xml:space`, and character-cell targeting. Glyph outlines and bitmap coverage share paint geometry. Gradient/pattern text paint and complete clip/mask/filter boundaries remain pending; general shaping retains the font engine limitations. Specification fixtures record Chromium 143 differences in supplementary-character lists, nested length calibration and SVG 2 decoration styles/colors. |
-| `<textPath>` | ❌ | Its content is skipped. |
+| `<text>`, `<tspan>` | ◐ | Addressable-character `x`/`y`/`dx`/`dy` lists, repeated `rotate`, `text-anchor`, inherited font family/size/weight/style, fill/stroke and inherited paint opacity, text/tspan compositing, spacing, baseline alignment/shift, decorations, nested `textLength`/`lengthAdjust`, `xml:space`, and character-cell targeting. Glyph outlines and bitmap coverage share paint geometry. Gradient/pattern text paint and complete clip/mask/filter boundaries are implemented; general shaping retains the font engine limitations. Specification fixtures record Chromium 143 differences in supplementary-character lists, nested length calibration and SVG 2 decoration styles/colors. |
+| `<textPath>` | ✅ | Local/external paths and SVG2 basic-shape/inline references, calibrated offsets, anchoring, side, align/stretch, closed contours, nested positioning/textLength, decoration and character-cell hits. Specification references identify Chromium gaps and live reference-mutation differences. |
 | `<a>` | ✅ | Uses the shared group transform/paint/font state; transformed children retain link click bubbling. |
 | `<use>`, `<symbol>`, `<defs>` | ✅ | `href` and `xlink:href`, `x`/`y`, the symbol's `viewBox` and `preserveAspectRatio`, external `file.svg#id`, a cycle guard, nesting up to 16 levels. |
 | `<image>` | ✅ | Shared PNG/JPEG/GIF/WebP/SVG and data-URI resources; document-relative URLs, x/y, all aspect alignments, meet/slice/none, transformed clipping and opacity. GIF frames invalidate recorded paint. Referenced SVG images isolate styles and block external file references; standalone SVG has a live document DOM. |
-| `<switch>` | ❌ | Every child renders. |
-| `<foreignObject>` | ❌ | Nothing renders. |
+| `<switch>` | ✅ | First eligible child, conditional language/extension checks, no-match behavior and live mutation. |
+| `<foreignObject>` | ✅ | Transformed/clipped HTML layout, paint, input and mutation, including prefixed XHTML. SVG images use isolated styles and secure image restrictions. |
 | `<style>` inside SVG | ✅ | Uses the shared CSS parser, selector matcher and cascade, including lists, combinators, specificity and `!important`; external image documents retain isolated styles. |
 | `<title>`, `<desc>` | ✅ | Not painted, as in browsers; no tooltip. |
-| `<linearGradient>`, `<radialGradient>` | ◐ | See the paint-server table below. |
+| `<linearGradient>`, `<radialGradient>` | ✅ | See the paint-server table below. |
 | `<pattern>` | ✅ | Tile/content units, x/y/width/height, affine transforms, viewBox/PAR and local/external href templates. Tiles are clipped and sampled once for fill/stroke; tiny periods have bounded traversal. |
-| `<clipPath>` | ◐ | The union of basic shapes, or only the first `<path>`. Child transforms, `clipPathUnits="objectBoundingBox"` and `style="clip-path:…"` are ignored, and the clip ignores the clipped element's own transform. |
-| `<mask>` | ◐ | Luminance of solid-filled shapes. Gradient masks are ignored (the element paints unmasked), and black shapes cannot cut holes. |
+| `<clipPath>` | ✅ | Child contour unions, transforms, object-bounding-box/user units, CSS references, nonzero/even-odd rules and shared clipped pointer geometry. |
+| `<mask>` | ✅ | Ordinary shape/text/image/paint-server mask content, alpha/luminance and color-space conversion; shared source capture and final compositing. Missing/circular masks are transparent. |
 | `<marker>` | ✅ | Start/mid/end on paths, lines, polylines and polygons, including closed/degenerate segment tangents; orientation, reference points, units, viewBox/aspect fitting, overflow and context paint. |
 | `<filter>` | ◐ | Named multi-primitive graphs on shapes, groups, text, images, use and viewports; standard paint/backdrop inputs, primitive/filter regions, bounding-box/user units, color spaces and bounded execution. The 15 implemented primitives are listed below; component transfer and convolution remain unsupported. |
 | `feGaussianBlur`, `feDropShadow`, `feOffset`, `feMerge`, `feColorMatrix`, `feFlood` | ✅ | Anisotropic blur and edge extension; complete chains and named intermediate results. |
@@ -499,7 +495,7 @@ identifies independent references for browser implementation differences.
 | `feTurbulence`, `feDisplacementMap`, `feImage`, `feTile` | ✅ | Deterministic stitched noise, selected-channel bilinear displacement, local/external images and fragments, and fractional repeat periods. |
 | `feDiffuseLighting`, `feSpecularLighting` | ✅ | Distant/point/spot children, Sobel boundaries, cone edges and premultiplied output. |
 | `feComponentTransfer`, `feConvolveMatrix` | ❌ | Outside the proposal's F1–F4 primitive inventory; unavailable primitives reject the graph with a diagnostic. |
-| SMIL animation (`<animate>`, `<animateTransform>`, `<set>`) | ◐ | Document clocks, pause/seek, begin/end/restart, repeats, freeze/remove, event/syncbase timing, keyTimes/keySplines, discrete/linear/paced/spline, additive/accumulate. Numeric, integer, length/list, color/paint, matching path/point lists, discrete attributes and translate/scale/rotate/skew transforms are implemented on rendered targets. Resource caches follow samples; external use follows its host clock, SVG images run in isolated mode, and exports sample initial time. Access-key/wallclock timing and per-use instance event retargeting remain unsupported; animation does not add unavailable filter/text capabilities. [Class inventory and validation](../vibe/impl/Lambda_Impl_SVG_Support.md#715-p12-smil-clock-dependency-default-and-lifetime-audit). |
+| SMIL animation (`<animate>`, `<animateTransform>`, `<set>`) | ◐ | Document clocks, pause/seek, begin/end/restart, repeats, freeze/remove, event/syncbase timing, keyTimes/keySplines, discrete/linear/paced/spline, additive/accumulate. Numeric, integer, length/list, color/paint, matching path/point lists, discrete attributes and translate/scale/rotate/skew transforms are implemented on rendered targets. Resource caches follow samples; external use follows its host clock, SVG images run in isolated mode, and exports sample initial time. Access-key/wallclock timing, isolated local/external/nested use events, ID-qualified broadcasts and animation DOM queries/TimeEvents are implemented. Expired intervals before parent zero are excluded. The row remains partial for broader SMIL/SVG animation: motion/discard and general SVG DOM expansion are outside N1; animation does not add unavailable filter/text capabilities. [Class inventory and closeout](../vibe/impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout). |
 
 ### 15.2 Attributes, styling and paint servers
 
@@ -515,7 +511,7 @@ identifies independent references for browser implementation differences.
 | `gradientTransform`, `spreadMethod`, gradient `href` templates, `fx`/`fy`/`fr` | ✅ | Affine transforms, pad/repeat/reflect, local/external templates with cycles, styled stops and two-circle radial cones. Lambda-side raster lowering covers ThorVG focal-circle limitations. |
 | `stop-color`, `stop-opacity` | ✅ | Presentation attributes and authored CSS, including inherited `currentColor` and percentage stop opacity. |
 | `fill-rule` | ✅ | |
-| `clip-rule` | ❌ | |
+| `clip-rule` | ✅ | Nonzero/even-odd child contours inside shared clipping. |
 | `opacity`, `fill-opacity`, `stroke-opacity` | ✅ | Shapes, containers, text and referenced content share source capture, filter, clip/mask and final opacity ordering. |
 | `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `stroke-dashoffset` | ✅ | |
 | `stroke-dasharray` | ✅ | Preserves zero-length round-cap dots, repeats odd lists, treats all-zero/invalid negative lists as solid, and resolves percentages against the viewport diagonal. |
@@ -527,11 +523,11 @@ identifies independent references for browser implementation differences.
 | Font properties on `<g>` | ✅ | Presentation attributes and shared CSS inherit family, size, weight and slant into descendant text. |
 | `display="none"` | ✅ | |
 | `visibility` | ✅ | Inherited hidden content retains geometry; visible descendants can paint and receive pointer targets. Hidden text retains advances. |
-| Units | ◐ | `px`, `pt`, `pc`, `mm`, `cm`, `in`. Shape geometry, transforms and stroke/dash values resolve `em`/`ex` from computed font metrics and `%` from the viewport axis/diagonal. Positioned text and resource-specific unit consumers are still being extended. |
+| Units | ◐ | `px`, `pt`, `pc`, `mm`, `cm`, `in`. Shape geometry, transforms and stroke/dash values resolve `em`/`ex` from computed font metrics and `%` from the viewport axis/diagonal. Positioned text and resource-specific consumers use shared viewport/font bases, including declaration-font filter regions. Newer CSS units and general CSS expression limits remain those in §6. |
 
 ## 16. Image Formats
 
-The image decoders linked into `lambda` are libpng, libjpeg-turbo and giflib (`lib/image.c`); SVG goes through Radiant's own SVG renderer, and Lottie through ThorVG.
+The image decoders linked into `lambda` are libpng, libjpeg-turbo, giflib and libwebp (`lib/image.c`); SVG goes through Radiant's own SVG renderer, and Lottie through ThorVG.
 
 | Format | `<img>`, CSS images | Notes |
 |---|---|---|
@@ -547,7 +543,7 @@ The image decoders linked into `lambda` are libpng, libjpeg-turbo and giflib (`l
 | Image feature | Status | Notes |
 |---|---|---|
 | `width`/`height` attributes, intrinsic size, CSS `aspect-ratio` | ✅ | |
-| `object-fit`, `object-position` | ✅ | In raster output; SVG and PDF output ignore them. |
+| `object-fit`, `object-position` | ✅ | Raster output and SVG-image SVG/PDF exports; raster-image vector-export fitting retains the separate §17 limits. |
 | `object-view-box`, `image-orientation` | ✅ | Resolved and laid out (WPT CSS Images suite). |
 | `image-rendering` | ❌ | Parsed; scaling is always bilinear. |
 | `srcset`, `sizes` | ❌ | |
@@ -585,13 +581,13 @@ For print-quality PDF today, render to PNG at a higher density (`-s 2`) or use t
 
 SVG-content export rows were verified on macOS on 2026-10-03 by
 `test/svg/test_svg_export.cjs` (the runner behind `make test-svg-export`):
-16 fixtures at 1×/2× cover relocated XML-valid SVG, unique resource IDs, embedded
+18 fixtures at 1×/2× cover relocated XML-valid SVG, unique resource IDs, embedded
 images/fonts, clips, visible overflow, paint servers, effects, embedded HTML and
 PDF pixels. SVG text and local/embedded font fixtures retain vector outlines in
 both exports; general HTML text retains the separate limitations above.
 Linux/Windows export smoke remains pending. Recording snapshots follow
 **D4.5.1v4**'s "pin, gen-check, copy-as-value" seam; progress and evidence are in
-[SVG Support P13](../vibe/impl/Lambda_Impl_SVG_Support.md#713--p13-resumed-export-repair).
+[SVG closeout](../vibe/impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout). Exports sample document time zero; active negative intervals contribute, while intervals already ended before zero do not. No CLI sample-time option is exposed.
 
 ## 18. Known Limitations
 
@@ -615,9 +611,8 @@ The gaps most likely to change how a real page looks, with the section that has 
 
 **SVG and images**
 
-- Gradient fills on `<path>`, `<polygon>` and `<polyline>` paint nothing with the default `objectBoundingBox` units, and gradient strokes paint black ([§15](#15-svg)).
 - Inline SVG shares the page cascade; external SVG images retain isolated styles ([§15](#15-svg)).
-- SVG filters are limited to `feGaussianBlur`, markers to `marker-end` on paths, and masks to solid-filled luminance masks ([§15](#15-svg)).
+- SVG filter component transfer/convolution, broader SVG2 vector effects and motion/discard animation remain outside the implemented inventory. Text retains the general font shaping limits. Linux/Windows SVG export runtime smoke is pending ([§15](#15-svg)).
 - AVIF, BMP, TIFF and ICO images do not load ([§16](#16-image-formats)).
 
 **Output**

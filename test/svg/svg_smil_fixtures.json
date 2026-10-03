@@ -1,10 +1,12 @@
 [
+  "svg_smil_access_wallclock",
   "svg_smil_basic",
   "svg_smil_classes",
   "svg_smil_clock_resources",
   "svg_smil_complex",
   "svg_smil_defaults",
   "svg_smil_detach",
+  "svg_smil_dom_queries",
   "svg_smil_events",
   "svg_smil_export_initial",
   "svg_smil_external",
@@ -24,6 +26,9 @@
   "svg_smil_sync_cycles",
   "svg_smil_timing",
   "svg_smil_unit_dependencies",
+  "svg_smil_use_events",
+  "svg_smil_use_events_external",
+  "svg_smil_use_events_nested",
   "svg_smil_value_errors",
   "svg_smil_values"
 ]

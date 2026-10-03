@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 
-**Status:** P7/P10 outstanding audits are closed (§7.14). P12's clock dependency, default, fragment, detach and deterministic export audits are implemented (§7.15); SMIL remains partial with its remaining timing/instance limits stated there. Linux/Windows P13 runtime smoke remains open; the whole proposal is not complete.
+**Status:** P1–P12 implementation is complete within the listed inventory, including P12 access-key/wallclock timing, use-instance events and animation DOM operations (§7.16). Final macOS implementation, aggregate and export gates pass. Linux/Windows P13 runtime smoke remains open; the whole proposal is not complete. Broad SVG2/SMIL rows retain their explicit outside-inventory limits.
 
 **Scope:** the missing behavior in §15 of [HTML, CSS and SVG Support](../../doc/HTML_CSS_SVG_Support.md#15-svg), including the limitations inside partial and supported rows; SVG-specific export limitations in §17 are a separate final phase.
 
@@ -43,9 +43,10 @@ these gaps does not require a new Lambda ruling. If work uncovers a conflict
 with an existing ruling, resolve it before implementation and update both the
 formal spec and its working design record according to rule 17.
 
-## 2. Current implementation and reusable seams
+## 2. Initial implementation and reusable seams
 
-SVG input already reaches Radiant-owned parsing and rendering through inline
+This section records the starting source snapshot; the final capability report
+is §7.16. SVG input already reaches Radiant-owned parsing and rendering through inline
 HTML, standalone documents, pictures, backgrounds, data URIs, nested images
 and local external `<use>`. Preserve that shared path. ThorVG remains the active
 vector backend; its SVG loader is not the replacement implementation.
@@ -67,10 +68,10 @@ vector backend; its SVG loader is not the replacement implementation.
 The initial source inspection identified concrete causes: polygon/polyline
 geometry left its bounds at zero, and group-opacity fallback used viewBox
 dimensions even when those dimensions were absent. Those causes are repaired
-in §7.4. Inherited paint still stores colors rather than resource references;
-text styles only carry a solid fill; the dispatcher has
-no `switch`/`foreignObject` handler; and the SVG-local stylesheet matcher is
-narrower than the shared CSS engine.
+in §7.4. At that starting checkpoint, inherited paint still stored colors rather than resource references;
+text styles only carried a solid fill at that checkpoint; the dispatcher lacked
+`switch`/`foreignObject`, and the SVG-local stylesheet matcher was narrower
+than the shared CSS engine. P2/P5–P11 subsequently repaired those paths.
 
 Do not treat every matrix observation as confirmed-current. For example, the
 file-image path now resolves URLs and translates a ThorVG picture, while the
@@ -81,9 +82,9 @@ transform/ownership handoffs before deciding whether they remain broken.
 ## 3. Coverage map
 
 The IDs below identify plan work packages, not new normative rulings or a
-second issue ledger. “Listed gap” records the original support matrix. G3–G5,
-C4, G2 and A1 have implementation evidence in §7.4; the other packages remain
-**planned / awaiting reproduction**.
+second issue ledger. “Listed gap” records the original support matrix. All 40
+packages have implementation and fixture evidence in §§7.4–7.16. Final closeout
+reconciles the historical checkpoints; Linux/Windows runtime gates remain open.
 
 | ID | Listed gap | Phase | Required acceptance case |
 |---|---|---|---|
@@ -587,19 +588,19 @@ Do not infer performance from debug-build functional runs.
 
 | Phase | Status | Evidence |
 |---|---|---|
-| P0 | Partial | Live reproductions and Chromium oracles for six packages; source/ownership/cascade audit completed. Remaining packages still need fixtures and their own oracles. |
+| P0 | Inventory complete | All 40 coverage packages map to retained source/fixture and browser/spec evidence in §§7.4–7.16; current manifest and platform gates are summarized in §7.16. |
 | P1 | Implemented | G3–G5: radius auto fallback/clamping, normal default line paint, atomic path parameter sets and valid-prefix recovery. Decimal/exponent/arc-flag grammar, zero-radius arcs, closepath termination and cross-kind smooth-curve reflection have focused unit coverage. The thin-rectangle optimization also stops at malformed command separators. |
 | P2 | Implemented | C1–C5 and A4: host/isolated CSS adapter over the shared selector and cascade engine, selector lists/combinators/importance, inherited group font CSS, visibility with visible descendants, shared colors and styled gradient stops. Invalid paint declarations preserve earlier valid declarations. Retained SVG layers track host document and font-resource generations. |
-| P3 | Implemented foundations | C6, G1, G6, R3 and A7: shared viewport/font length resolver and shape contours, CSS/attribute transform precedence with view/fill reference boxes and origins, shared viewBox/PAR mapping for paint/hits, conditional root/nested overflow, link container state and preserved zero/percentage dashes. Text/resource-specific unit consumers and complete stroke boxes remain in their later phases. G2 also includes visible-overflow opacity bounds. |
+| P3 | Implemented and integrated | C6, G1, G6, R3 and A7: shared viewport/font length resolver and shape contours, CSS/attribute transform precedence with view/fill reference boxes and origins, shared viewBox/PAR mapping for paint/hits, conditional root/nested overflow, link container state and preserved zero/percentage dashes. Text/resource units and stroke geometry were completed by P5–P10 and the §7.14 audit. G2 also includes visible-overflow opacity bounds. |
 | P4 | Implemented | Shared PNG/JPEG/GIF/static-WebP images, placement/aspect fitting, isolated SVG resources, relative URIs, retained ownership/promotion and GIF-frame invalidation. |
-| P5 | Implemented; T2 paint servers finish in P6 | UTF-16 positioning lists, repeated rotation, logical glyph metrics, inherited spacing/baselines, nested textLength, outline/bitmap coverage paint, decoration and shared character-cell targeting. Font/image documents own isolated font descriptors. |
+| P5 | Implemented; integrated with P6–P10 | UTF-16 positioning lists, repeated rotation, logical glyph metrics, inherited spacing/baselines, nested textLength, outline/bitmap coverage paint, decoration and shared character-cell targeting. Font/image documents own isolated font descriptors. |
 | P6 | Implemented; aggregate Radiant validation passed | Typed inherited fill/stroke/currentColor/resource/context paints; gradient transforms, spread, focal circles, dynamic styled stops and local/external templates; resource-style font metrics; clipped pattern tiles with units/viewBox/templates and bounded sampling. Recursive use context paint preserves source bounds/frame/document. Marker context paint finishes in P7. |
 | P7 | Implemented and validated within advertised vector-effect subset | Stroke/marker pixels, every paint-order permutation and live instance/pointer geometry pass at 1×/2× with cache off/eager. The five density-specific edge expectations now have independent browser evidence. Broader SVG2 vector effects remain explicitly unsupported (§7.14). |
-| P8 | Implemented; focused validation passed | Common premultiplied effect capture for shapes, containers, text/tspan, image, use, symbol and SVG viewports; clip unions/rules/units/transforms; alpha/luminance/linear masks; exact clipped pointer targeting and mutation invalidation. Final aggregate gates remain required. |
+| P8 | Implemented; focused validation passed | Common premultiplied effect capture for shapes, containers, text/tspan, image, use, symbol and SVG viewports; clip unions/rules/units/transforms; alpha/luminance/linear masks; exact clipped pointer targeting and mutation invalidation. Final macOS gates are recorded in §7.16. |
 | P9 | Implemented with focused validation | Shared path metrics, local/external path references, SVG2 basic shapes/inline paths, calibrated offsets, anchoring, reversed and closed paths, nested positioning, textLength, warped outlines/color glyphs and live pointer/mutation behavior. |
 | P10 | Implemented and validated for F1–F4 | Final coordinate/resource audit fixes declaration-font region units and validates shared viewport/bounding-box bases, isolated external images, live resource recovery, graph reclamation and retained output ownership. Focused, aggregate and macOS export gates pass (§7.14). |
-| P11 | Implemented; export gate pending P13 | Switch selection and inline/isolated foreignObject layout, paint, input, mutation and image restrictions have focused gates. |
-| P12 | Implemented core; partial SMIL | Typed interpolation, controlled/running clocks, event/syncbase timing, resource cache scope, fragment/image clocks and deterministic initial exports are validated in §7.15. Access-key/wallclock timing and per-use event retargeting remain open. |
+| P11 | Implemented; included in macOS P13 exports | Switch selection and inline/isolated foreignObject layout, paint, input, mutation and image restrictions have focused gates. |
+| P12 | N1 implemented; broad SMIL remains partial | Typed classes/clocks/resources are validated in §7.15; access-key/wallclock values, local/external/nested use event state, clone notifications and animation DOM operations are implemented in §7.16. Motion/discard and general SVG DOM expansion remain outside N1. |
 | P13 | Resumed; macOS export and aggregate gates validated | All twelve export structure/metadata regressions are fixed. Sixteen fixtures pass at 1×/2×; Lambda, Radiant and Test262 gates pass with the classifications recorded in §7.13. Linux/Windows runtime smoke remains open. |
 
 **Implementation record, 2026-10-02.** Radiant continues to emit PaintIR and
@@ -1688,8 +1689,9 @@ cached surface. Both native and Chromium captures contradicted it, and the
 specification required correcting the expectation. Detached pinned roots cannot
 restart drivers; reattachment and rewind preserve base attributes.
 
-The CLI export contract is **initial document time, zero**. Negative begins
-and intervals already frozen at zero contribute sampled values. Delayed
+The CLI export contract is **initial document time, zero**. Negative begins that remain active at zero contribute sampled values. The
+expired-before-zero interval behavior recorded at this checkpoint was incorrect
+and is corrected by the independent reference and interval repair in §7.16. Delayed
 animations keep base paint; external use samples host zero, and SVG images
 sample private zero. `svg_smil_export_initial` exercises PNG/SVG/PDF at 1×/2×.
 No CLI sample-time option is exposed.
@@ -1708,8 +1710,9 @@ The executable inventory is `svg_animation_attribute_applies()` and
 | Timing | Clock/list begin/end, positive or indefinite duration, min/max, repeatCount/repeatDur, restart, freeze/remove, event/syncbase offsets, qualified repeats, anchored cycles, keyTimes/keySplines and calcMode. |
 | Controls and lifetime | Pause/unpause/get/set time, begin/end methods, independent fragments, detached pinned state, document/resource teardown and cache invalidation. |
 
-**Remaining limits:** access-key/wallclock timing, per-use instance event
-retargeting and the full SVG animation DOM interface. Motion animation/discard
+**Remaining limits at this checkpoint (closed in §7.16):** access-key/wallclock
+timing, per-use instance events and the N1 animation DOM queries/TimeEvents.
+Motion animation/discard
 are outside N1's three-element inventory. Animation does not supply unavailable
 renderer features such as component-transfer/convolution or general text shaping.
 Resource documents retain secure processing restrictions. Existing explicit
@@ -1768,3 +1771,133 @@ Logs, before/after reproductions, UI results and final-validation.json are under
 separate subdirectories. The copied export report is export-release-report.json;
 portable artifacts remain under `temp/svg-p13/export-matrix/`. The local helper
 server was stopped. Linux/Windows P13 runtime smoke remains open.
+
+
+### 7.16 P12 remaining timing, instance, DOM and final closeout
+
+**2026-10-03.** This closes the published P12 residue from §7.15 for N1's
+`animate`/`animateTransform`/`set` inventory. It does not enlarge N1 to motion,
+discard, every SVG DOM interface or unavailable renderer features. The broad
+SMIL/filter/vector-effect matrix rows retain their explicit limits.
+
+**Timing.** Access-key values resolve trusted UTF-8 character input independently
+of focus, including offsets, restart sensitivity and end values. Wallclock
+DateTime/Date/WallTime forms validate Gregorian calendar, fractions and zones;
+absent zones use presentation-local time. One fragment wallclock origin is
+captured and retained across pause/seek, following
+[SVG 1.1 §19.2.8](https://www.w3.org/TR/SVG11/animate.html#TimingAttributes)
+and [SMIL wallclock timing](https://www.w3.org/TR/SMIL/smil-timing.html).
+Units cover explicit zones, leap errors, fractional seconds, time-only/local
+midnight and the year-9999 UTC boundary.
+
+The independent wallclock reference exposed a preexisting interval error:
+animations ending before parent zero were retained as frozen paint and syncbases.
+The evaluator now filters those intervals while preserving intervals spanning
+zero and later valid intervals. The old time-zero filter export expected blue
+from `begin=-3s dur=2s`; Chromium and
+[SMIL's first-interval algorithm](https://www.w3.org/TR/2001/REC-smil-animation-20010904/#Timing-EvaluationOfBeginEndTimeLists)
+require base red. The root evaluator was repaired, a syncbase unit added, and
+only that incorrect pixel expectation/static reference corrected. Its original
+failure is retained in `browser-expired-export-repro.log` and
+`native-final-debug.log`; no visual baseline was changed.
+
+**Use instances.** Every animated local/external use has host-owned private
+controls/samples, with nested use contexts owned by their parent instance.
+The real geometric hit preserves the use chain; timing dispatch replays it
+before resolving the implicit target. ID-qualified events broadcast to the
+original and matching instances. Access keys also initialize later instances;
+replacing a use drops private implicit controls while inheriting qualified/key
+state. Host scheduler ticks resolve private begin/repeat/end events for timing
+dependents. A reproduced clone-repeat gap has a scheduler regression.
+This follows [SVG 2 §5.6.5](https://www.w3.org/TR/SVG2/struct.html#UseAnimations).
+
+External source DOM/style/font contexts previously disappeared at the end of
+each paint walk. The host now retains their parsed picture owner and shares
+source controls across matching references. Generation-checked instance refs
+are released before the source document. **D4.2.6/D4.5.1v4** require the seam
+contract **“pin, gen-check, copy-as-value.”** Sample/frozen/control/instance-time,
+use/timeline and work budgets are shared by the entire host, including nested
+instances; cloning does not multiply the limits.
+
+**Animation DOM.** Added targetElement, getStartTime and getSimpleDuration;
+getCurrentTime also works on animation elements. The evaluator resolves future
+start intervals, and throws actual InvalidStateError/NotSupportedError
+DOMExceptions when appropriate. Timing controls return JS undefined and convert
+finite float arguments; the shared publication boundary preserves Lambda null.
+TimeEvent create/init uses readonly view/detail, IDL long conversion, trusted
+native events, nonbubbling/noncancelable flags and the dispatch initialization
+guard. A throwing detail conversion leaves the previous event intact; conversion
+finishes before initialization and its arguments remain rooted through JS calls.
+The reproduced 5/6 query fixture now passes 6/6 natively and in the independent
+UIEvent-based reference (`time-event-conversion-{repro,fixed,reference}.log`).
+Interface hooks follow **D7.4.4**, “Declared interfaces + record-owned
+hooks are the ONLY host-object protocol”; event/exception construction uses
+**D5.3.3** precise roots. No Lambda ruling or vendor source changed.
+
+Five new fixtures cover queries/TimeEvent, access-key/wallclock, local use,
+external use and nested use. Native tests execute real pointer/key input at both
+densities with layers off/eager. Three new independent reference pages use
+native SVG DOM/SMIL operations and direct DOM instances to supply semantic
+oracles for Chromium's missing TimeEvent/access-key/wallclock/use behavior.
+The wallclock reference converts absolute times into relative offsets and seeks
+back to zero after Chromium initializes its first paint frame. This reference
+mode is separate from raw original-input captures, which retain failures.
+
+The inventory is now 32 SMIL fixtures, 11 reference fixture entries (nine unique
+pages), three stroke/filter audit fixtures and 18 export fixtures. Baseline UI
+manifest globs own each new fixture once. Historical progress tables above are
+checkpoints, superseded by this current inventory and final gates.
+
+| Coverage packages | Durable acceptance fixtures / evidence |
+|---|---|
+| C1–C5, A4 | `svg_cascade`, `svg_cascade_priorities`, `svg_cascade_mutation`, `svg_css_colors`; §§7.4–7.6. |
+| C6, G1–G6, R3, A7 | `svg_geometry_defaults`, `svg_context_units`, `svg_overflow_dashes`, link/hit fixtures; §§7.4–7.6. |
+| R1–R2 | `svg_images`, `svg_image_mutation`, standalone/data/GIF resources; P4 record. |
+| A1–A6, T2 | `svg_gradient_paints`, `svg_radial_cones`, `svg_pattern_paints`, `svg_context_paints`, `svg_external_paints`, `svg_text_paint`; P5/P6 records. |
+| A8, M1 | `svg_stroke_markers`, `svg_marker_geometry`, `svg_stroke_instances`, `svg_stroke_interaction`; §7.14. |
+| K1–K3 | `svg_clip_masks`, `svg_clip_sources`, `svg_clip_interaction`, `svg_mask_content` and effect scopes; §7.7. |
+| T1, T3–T4 | Position/UTF-16/metrics/length/decoration/textPath geometry/stretch/interaction/mutation fixtures; P5 and §7.8. |
+| E1–E4 | Filter graph/operators/textures/lighting/coordinates/input/resource-lifetime fixtures; §§7.9/7.14. |
+| S1–S2 | Switch/mutation and foreignObject CSS/namespaces/prefixes/geometry/input/images/restrictions; §7.10. |
+| N1 | `test/svg/svg_smil_fixtures.json`; §§7.11/7.15/7.16. |
+| X1–X2 | `test/svg/svg_export_fixtures.json`; §7.13 and final export matrix below. |
+
+Final verification uses the retained release executable
+`temp/svg-p12-closeout/lambda-release.exe`, SHA-256
+`56a2941a696a1dca74c4b1f96d9bb13e638fce17a938b008a5e93585aa6e96a7`.
+Every native SMIL/paint/export report records that same binary hash. Retained
+reports, logs and reproductions are under `temp/svg-p12-closeout/`.
+
+| Final gate | Result |
+|---|---|
+| Vector units | **78/78**, including 23 animation lifetime/timing units. |
+| Native SMIL | **3,864/3,864** assertions, **128/128** runs: 32 fixtures × 1×/2× × layers off/eager. |
+| Independent Chromium references | **482/482** assertions, **22/22** runs: 11 reference entries × 1×/2×, Chromium **146.0.7680.153**. |
+| Raw Chromium SMIL | **1,758/1,932** assertions, **174 differences**; **32/64** runs satisfy every assertion. Original inputs remain separately captured with exit 1; this is diagnostic evidence, not a passing native/reference gate. |
+| P7/P10 paint audit | **680/680** native and **340/340** independent-reference pixels across three fixtures, both densities and native layers off/eager. |
+| Complete Radiant baseline | **4,341** counted entries: **3,991 passed**, **350 accepted partials**, **0 failed**. UI **318/318** fixtures (320 GTests), DOM **126/126**, view command **66/66**, view fixtures **10/10**, vector **78/78** and all **211** required visual cases; explicit debug runtime and loopback access. |
+| Complete Lambda baseline | **6,194/6,194**, including **2,104/2,104** input/format checks; zero failures. |
+| Test262 baseline | **40,261/40,261** required, **2,652 skipped**, zero failures or regressions. |
+| macOS release exports | **108/108** format cases, **2,394/2,394** pixels: 18 fixtures × PNG/SVG/PDF × 1×/2×. Relocated SVG XML/IDs/references/assets and PDF transparency/vector checks pass. |
+| Source checks | Radiant float-cast lint, four Node syntax checks and git diff --check pass. |
+
+`final-validation.json` indexes the gates, report counts, exact binary and scope
+limits. Native/reference/raw SMIL reports are copied separately as
+`smil-native-report.json`, `smil-references-report.json` and
+`smil-browser-raw-report.json`; the portable matrix is `export-report.json`.
+Raw browser differences include Chromium's missing TimeEvent, wallclock/access-key
+and use-instance behavior as well as the value/fragment policies documented in
+§7.15. Independent references do not overwrite those original-input results.
+
+The page snapshot passes its aggregate ratchet while retaining per-file fidelity
+warnings (`bootstrap-5-kitchen-sink_`, `examples_multi-step-form_` and a batch
+`page_facatology` outlier). The isolated Facatology diagnostic reproduces the
+saved **86.8% element / 94.5% text** scores, so the batch outlier is not a
+reproducible isolated regression. Its detailed report is
+`facatology-focused.json`; no page or visual baseline was changed.
+
+**Outstanding proposal gate:** Linux/Windows P13 runtime smoke has no execution
+evidence in this macOS checkout and remains open. The larger SVG2 resource/API
+redesign, motion/discard, broad SVG DOM, component transfer/convolution and
+broader vector effects remain separately stated scope limits. The whole proposal
+cannot be called complete until its platform gate is satisfied.

@@ -179,8 +179,28 @@ the image time. HTML image copies sharing a cached URL share the surface clock,
 following [HTML §15.4.2](https://html.spec.whatwg.org/multipage/rendering.html#images).
 
 The supported value classes, explicit work/storage bounds, raw Chromium
-differences, remaining access-key/wallclock and per-use event limitations are in
-[the implementation record §7.15](../../../vibe/impl/Lambda_Impl_SVG_Support.md#715-p12-smil-clock-dependency-default-and-lifetime-audit).
+differences and final gates are in
+[the implementation record §7.16](../../../vibe/impl/Lambda_Impl_SVG_Support.md#716-p12-remaining-timing-instance-dom-and-final-closeout).
+Access keys observe trusted character input independently of focus. Wallclock
+calendar/time/zone values resolve against one captured fragment origin, preserved
+across pause/seek; expired pre-zero intervals cannot freeze or feed syncbases.
+
+Use instances own private controls, samples and nested instance registries under
+the host document. Hit testing replays the actual use chain before resolving
+implicit event timing; qualified ID events and access keys also reach subsequent
+instances. Host clock ticks deliver private begin/repeat/end timing to dependent
+animations. External use source DOM/style/font documents retain their parsed
+picture owner until the host releases private controls (**D4.2.6/D4.5.1v4**).
+All instances share the host's work/storage limits.
+
+The animation DOM surface includes targetElement, getStartTime, getCurrentTime,
+getSimpleDuration and void begin/end methods, with finite float argument
+conversion and InvalidStateError/NotSupportedError DOMExceptions. TimeEvent
+creation and initialization preserve readonly view/detail, IDL long conversion,
+nonbubbling/noncancelable dispatch and initialization guards. These extend the
+record-owned host protocol (**D7.4.4**); exception/event construction uses precise
+roots (**D5.3.3**). Motion/discard and general SVG DOM reflection/prototypes are
+outside N1, and the broad SMIL matrix row remains partial.
 `make test-svg-smil` exercises controlled/running clocks through real UI input
 at 1×/2× with layers disabled/eager; its browser mode keeps independent reference
 pages distinguishable from the raw SVG captures.
@@ -321,4 +341,4 @@ and preserve suspended clip ownership. Focused scale/cache validation passes
 936/936, vector 24/24, DisplayList 77/77 and retained storage 24/24. Chromium
 normative differences and the running aggregate gate are recorded in
 [vibe SVG implementation plan](../../../vibe/impl/Lambda_Impl_SVG_Support.md) §7.4.
-Markers/effects/textPath/embedded HTML/animation/export remain outstanding.
+This was the initial geometry checkpoint. Markers/effects/textPath/embedded HTML/animation and macOS exports are implemented in §§4–5 and the SVG closeout record; Linux/Windows P13 runtime smoke remains outstanding.
