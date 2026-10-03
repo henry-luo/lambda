@@ -6537,13 +6537,17 @@ static void js_interp_p2_scan_node(JsAstNode* node,
     }
 }
 
+// D8.1.3v22: a definition is compiled only on a hot hit; the default is
+// provisional until release profiling.
+#define JS_JIT_THRESHOLD_DEFAULT 1000
+
 static int js_interp_p2_threshold(void) {
     const char* text = getenv("JS_JIT_THRESHOLD");
-    if (!text || !text[0]) return 5;
+    if (!text || !text[0]) return JS_JIT_THRESHOLD_DEFAULT;
     char* end = NULL;
     long threshold = strtol(text, &end, 10);
     return end && !*end && threshold > 0 && threshold <= INT_MAX
-        ? (int)threshold : 5;
+        ? (int)threshold : JS_JIT_THRESHOLD_DEFAULT;
 }
 
 static const char* js_interp_p2_admission_reason(JsFunction* function,

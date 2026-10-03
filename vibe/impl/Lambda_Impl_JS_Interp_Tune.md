@@ -1,8 +1,9 @@
 # LambdaJS Implementation Plan: AST Interpreter Tuning, Hot-Loop Elevation, and Alignment with Lambda T0
 
 **Date:** 2026-10-03
-**Status:** PROPOSED — analysis and plan only; nothing here is implemented.
-Three points need a user ruling before work starts (§8).
+**Status:** PROPOSED — analysis and plan; only the call-threshold default is
+implemented. The three policy points were ruled by the user on 2026-10-03
+(§8) and are recorded as **D8.1.3v22** and JSI18v2.
 **Source baseline:** `72cc6de76` (source reading); release executable built
 from `551d9cd3e` (`temp/bench_auto/lambda-fix-rel`) for timings and profiles.
 **Scope:** the LambdaJS boxed AST walker (`lambda/js/js_interp.cpp`), its P2
@@ -11,8 +12,8 @@ promotion edge, and the parts of Lambda's T0 (`lambda/runtime/interp.cpp`,
 (`lambda/js/mvp/`) is out of scope.
 
 **Formal authority:** [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)
-**D8.1.3v21** (LambdaJS tiers; v13 clause: P2 at call entry, "no active AST
-frame … transfers to MIR"), **D8.1.1v14** (Lambda loop-head handoff),
+**D8.1.3v22** (LambdaJS tiers; hotness-only promotion and loop-head handoff,
+*v22*), **D8.1.1v14** (Lambda loop-head handoff),
 **D8.4.1v2** (no inline caches), **D8.2.3** (extract after two working
 clients), **D8.2.4v2–D8.2.5v3** (fact placement, pass manager), **D8.5.1v6–v7**
 (satellite work keying, bounded workers), **D5.3.3** (precise roots),
@@ -50,8 +51,8 @@ This is an informative plan, not a ruling. Item letters are work sequencing.
    builder exist once per language or only for Lambda (§6).
 
 The plan has three tracks: tune the walker (§4, items J1–J8, no ruling
-needed); make P2 useful and add loop-head handoff (§5, items E1–E4, E3 needs
-a ruling); and move the tiering machinery into one kernel both walkers call
+needed); make P2 useful and add loop-head handoff (§5, items E1–E4, ruled in
+§8); and move the tiering machinery into one kernel both walkers call
 (§6, items A1–A6).
 
 ## 2. Evidence
@@ -273,7 +274,7 @@ execution overlay, as Lambda's satellites do under **D8.5.1v6**). This is the
 largest item in the plan. Until it lands, an interim step is to cache one
 clone per script generation rather than re-parsing per function.
 
-**E3 — Loop-head handoff for JS (needs a ruling, §8 R1).** Carry
+**E3 — Loop-head handoff for JS (ruled, §8 R1).** Carry
 **D8.1.1v14** over unchanged in shape: a loop that is a direct statement of
 a function body counts back-edges in the definition's `FnPromotionCell`; at
 the threshold, the statements from that loop to the end of the body are
@@ -296,8 +297,8 @@ Script top-level loops are a separate, later case: their `var`s are global
 properties, so there are no live-ins, but the continuation must return the
 script's completion value and the rest of the script must not run twice.
 
-**E4 — Threshold.** Start with the same knob and value as Lambda
-(`LAMBDA_JIT_BACKEDGE`, 10,000) and re-derive it for JS after E2. Today's
+**E4 — Threshold.** Start with `JS_JIT_BACKEDGE` at 10,000 and
+`JS_JIT_THRESHOLD` at 1000 (§8) and re-derive both for JS after E2. Today's
 break-even is `promotion cost ÷ (T0 − T1 cost per iteration)`, about
 6,000 iterations for a tiny file and about 90,000 at 87 KB, because the cost
 scales with source size. That dependence disappears with E2; the JS value
@@ -339,12 +340,12 @@ entry on its function representation). JS gets asynchronous compilation and
 script-teardown cancellation without writing them again. **D8.2.3** is
 satisfied: both clients exist and work.
 
-**A2 — One selector.** One cached tier decision per runtime with one set of
-knobs (§8 R2). Call-count threshold, back-edge threshold, synchronous
-publication and census then mean the same thing in both languages, and the
-stress differential that found every round-2 defect
-(`LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1` against forced
-interpretation) runs unchanged over `test/js/`.
+**A2 — One policy record, two sets of names.** One cached policy record per
+runtime and profile: tier, call threshold, back-edge threshold, synchronous
+publication, census. Each profile fills it from its own knobs (§8 R2), so the
+kernel never reads the environment. The stress differential that found every
+round-2 defect (back-edge 1 with synchronous publication, against forced
+interpretation) then runs over `test/js/` with the JS knob names.
 
 **A3 — JS plan pass under the pass manager.** Give the JS walker a plan pass
 registered like Lambda's (**D8.2.5v3**) that writes J1, J2, J5, J6 facts and
@@ -386,25 +387,35 @@ A4–A6 follow J6 and E3.
 | 7 | E2 | promotion cost independent of source size |
 | 8 | E4, J8 | quiet-machine suite sweep; record as Tune2 §12.6 did |
 
-## 8. Rulings needed
+## 8. Rulings (USER, 2026-10-03)
 
-**R1 — Loop-head handoff for JS.** **D8.1.3v21** (v13 clause) and JSI18 say
-promotion happens only at call entry and no active AST frame transfers to
-MIR. E3 transfers one, in the restricted whole-function-continuation shape
-ruled for Lambda in **D8.1.1v14**. Adopting it needs a D8.1.3 revision and a
-JSI18 revision. Without it, E1 and track J still stand, but once-called loop
-owners stay in T0.
+Recorded as **D8.1.3v22** (formal design, spec 19.0.0) and JSI18v2 / §9.3 of
+the JS interpreter design.
 
-**R2 — Selector and knob names.** Either JS keeps its own names
-(`JS_EXECUTION_BACKEND`, `JS_JIT_THRESHOLD`) and the kernel maps both sets,
-or the JS lane also honours `LAMBDA_TIER=interp|auto|jit` and the
-`LAMBDA_JIT_*` knobs, with the JS names kept as aliases. The second makes one
-differential harness and one benchmark-runner pin serve both languages.
+**R1 — Loop-head handoff for JS: allowed.** A running AST activation may hand
+off at a loop-head test in the **D8.1.1v14** shape. This replaces the v13
+sentence that no active AST frame transfers to MIR, and JSI18's entry-only
+rule. E3 is unblocked; it still depends on E1 to be useful.
 
-**R3 — JS call-count threshold.** Lambda retired the first-entry trigger in
-favour of the loop trigger (Tune2 §4.4) but keeps the call count of five. JS
-has the same default. Keep five for JS until E2 lands and the sweep in E4
-says otherwise — recommended, but it is a policy value in **D8.1.3**.
+**R2 — JS keeps its own names.** `JS_EXECUTION_BACKEND` and
+`JS_JIT_THRESHOLD` stay. The loop threshold is `JS_JIT_BACKEDGE`. The shared
+kernel of A1/A2 takes its policy values from the profile, so each language
+reads its own knobs; the stress differential for JS is
+`JS_JIT_THRESHOLD=1 JS_JIT_BACKEDGE=1` with synchronous publication.
+
+**R3 — Hotness-only promotion; call threshold 1000.** A JS definition is
+compiled only on a hot hit: 1000 calls (five before) or a loop reaching the
+back-edge threshold. Nothing is compiled at first entry or because a
+definition owns a loop. Both thresholds are provisional and are to be revised
+from release profiling (E4). The default is changed in
+`js_interp_p2_threshold`; the P2 tests set the threshold explicitly and are
+unaffected.
+
+Consequence for §2: with 1000, the two rows where AUTO beat AST
+(`args_ctl`, `args_fp`) still promote, about 1000 interpreted calls later.
+With today's narrow admission the higher threshold costs little, and it
+avoids paying a whole-source re-parse (§2.5) for functions called a handful
+of times.
 
 ## 9. Reproducing the evidence
 
