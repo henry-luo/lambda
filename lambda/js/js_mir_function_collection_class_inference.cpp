@@ -6,7 +6,7 @@
 // Phase 4: Native call resolution
 // ============================================================================
 
-JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
+JsFunctionNode* jm_resolve_direct_call_target(JsMirTranspiler* mt,
         JsCallNode* call, bool stable) {
     if (!call->callee || call->callee->node_type != AST_NODE_IDENT) return NULL;
     JsIdentifierNode* id = (JsIdentifierNode*)call->callee;
@@ -29,7 +29,6 @@ JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
             fn = (JsFunctionNode*)decl->init;
         }
     }
-    if (fn && mt->p2_satellite_node && fn != mt->p2_satellite_node) return NULL;
     if (stable && ntype == AST_NODE_FUNC &&
             !jm_function_decl_is_direct_binding((JsFunctionNode*)definition, false)) return NULL;
     if (stable && ntype == AST_NODE_VARIABLE_DECLARATOR &&
@@ -37,6 +36,17 @@ JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
              ((JsVariableDeclaratorNode*)definition)->init->source_span.end_byte >
                 call->source_span.start_byte)) return NULL;
     return fn;
+}
+
+// A P2 satellite defines only its own function, so it may not call, construct
+// or take a result fact from any other definition directly: that callee may be
+// interpreted. Facts that flow from a call site into the callee's parameters
+// and are rechecked at runtime use jm_resolve_direct_call_target instead.
+JsFunctionNode* jm_resolve_direct_call_function(JsMirTranspiler* mt,
+        JsCallNode* call, bool stable) {
+    JsFunctionNode* fn = jm_resolve_direct_call_target(mt, call, stable);
+    return fn && mt && mt->p2_satellite_node && fn != mt->p2_satellite_node
+        ? NULL : fn;
 }
 
 // Phase 3.5: find the collected entry for a direct call without checking native eligibility.

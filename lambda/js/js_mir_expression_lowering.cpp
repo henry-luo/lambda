@@ -2691,7 +2691,9 @@ static int jm_typed_array_parameter_kind_impl(JsMirTranspiler* mt,
         JsAstNode* node = (JsAstNode*)index->nodes[call_ids[call_index]];
         if (!node || node->node_type != AST_NODE_CALL_EXPR) continue;
         JsCallNode* call = (JsCallNode*)node;
-        if (jm_resolve_direct_call_function(mt, call, true) != function->node) continue;
+        // a caller's argument kind is a parameter fact the runtime kind guard
+        // rechecks, so it holds in a satellite whose callers are not defined
+        if (jm_resolve_direct_call_target(mt, call, true) != function->node) continue;
         int candidate = jm_typed_array_argument_kind(mt, call,
             jm_call_argument_at(call, parameter_index), next_active, active_count);
         if (candidate == JM_TYPED_ARRAY_KIND_CYCLE) continue;
