@@ -3,6 +3,7 @@
 
 #include "priority_queue.h"
 #include "grow_capacity.h"
+#include "math_checked.hpp"
 #include <stdlib.h>
 #include <string.h>
 
@@ -20,7 +21,12 @@ PriorityQueue* priority_queue_create(size_t initial_capacity) {
         initial_capacity = INITIAL_CAPACITY;
     }
     
-    pq->entries = (PriorityQueueEntry*)malloc(initial_capacity * sizeof(PriorityQueueEntry));
+    size_t allocation_size = 0;
+    if (!math_checked_mul(initial_capacity, sizeof(PriorityQueueEntry), &allocation_size)) {
+        free(pq);
+        return NULL;
+    }
+    pq->entries = (PriorityQueueEntry*)malloc(allocation_size);
     if (!pq->entries) {
         free(pq);
         return NULL;
@@ -96,8 +102,10 @@ bool priority_queue_push(PriorityQueue* pq, void* data, int priority) {
     
     // Resize if needed
     if (pq->size >= pq->capacity) {
+        size_t required_capacity = 0;
         size_t new_capacity = 0;
-        if (!lib_grow_capacity(pq->capacity, pq->size + 1, INITIAL_CAPACITY,
+        if (!math_checked_add(pq->size, 1, &required_capacity) ||
+            !lib_grow_capacity(pq->capacity, required_capacity, INITIAL_CAPACITY,
                                &new_capacity) ||
             new_capacity > SIZE_MAX / sizeof(PriorityQueueEntry)) return false;
         PriorityQueueEntry* new_entries = (PriorityQueueEntry*)realloc(

@@ -19,6 +19,7 @@
 #include "font_cbdt.h"
 #include "font_tables.h"
 #include "../log.h"
+#include "../math_checked.hpp"
 
 #include <string.h>
 #include <stdlib.h>
@@ -92,7 +93,9 @@ static const uint8_t* find_best_strike(const uint8_t* cblc, uint32_t cblc_len,
     // CBLC header: majorVersion (2), minorVersion (2), numSizes (4)
     uint32_t num_sizes = rd32(cblc + 4);
     if (num_sizes == 0) return NULL;
-    if (8 + (uint64_t)num_sizes * BITMAP_SIZE_RECORD_LEN > cblc_len) return NULL;
+    size_t records_bytes = 0;
+    if (!math_checked_mul((size_t)num_sizes, BITMAP_SIZE_RECORD_LEN, &records_bytes) ||
+        !font_data_range_valid(cblc_len, 8, records_bytes)) return NULL;
 
     // find strike with smallest ppem >= target, or the largest available
     const uint8_t* best = NULL;
@@ -129,14 +132,16 @@ static bool find_glyph_in_strike(const uint8_t* cblc, uint32_t cblc_len,
     if (glyph_id < strike->start_glyph_index || glyph_id > strike->end_glyph_index)
         return false;
 
-    uint32_t array_offset = strike->index_subtable_array_offset;
+    size_t array_offset = strike->index_subtable_array_offset;
     uint32_t num_subtables = strike->number_of_index_subtables;
 
-    if (array_offset + (uint64_t)num_subtables * 8 > cblc_len) return false;
+    size_t array_bytes = 0;
+    if (!math_checked_mul((size_t)num_subtables, 8, &array_bytes) ||
+        !font_data_range_valid(cblc_len, array_offset, array_bytes)) return false;
 
     // scan IndexSubtableArray entries
     for (uint32_t i = 0; i < num_subtables; i++) {
-        const uint8_t* entry_ptr = cblc + array_offset + i * 8;
+        const uint8_t* entry_ptr = cblc + array_offset + (size_t)i * 8;
         uint16_t first = rd16(entry_ptr + 0);
         uint16_t last  = rd16(entry_ptr + 2);
         uint32_t additional_offset = rd32(entry_ptr + 4);
@@ -144,8 +149,9 @@ static bool find_glyph_in_strike(const uint8_t* cblc, uint32_t cblc_len,
         if (glyph_id < first || glyph_id > last) continue;
 
         // found the right subtable — parse its header
-        uint32_t subtable_offset = array_offset + additional_offset;
-        if (subtable_offset + 8 > cblc_len) return false;
+        size_t subtable_offset = 0;
+        if (!math_checked_add(array_offset, (size_t)additional_offset, &subtable_offset) ||
+            !font_data_range_valid(cblc_len, subtable_offset, 8)) return false;
 
         const uint8_t* subtable = cblc + subtable_offset;
         uint16_t index_format = rd16(subtable + 0);
@@ -156,51 +162,68 @@ static bool find_glyph_in_strike(const uint8_t* cblc, uint32_t cblc_len,
         if (image_format != 17 && image_format != 18 && image_format != 19)
             return false;
 
-        uint32_t cbdt_glyph_offset = 0;
-        uint32_t cbdt_glyph_len = 0;
+        size_t cbdt_glyph_offset = 0;
+        size_t cbdt_glyph_len = 0;
 
         if (index_format == 1) {
             // format 1: array of uint32 offsets, one per glyph in [first..last+1]
             uint32_t idx = (uint32_t)(glyph_id - first);
-            uint32_t offsets_start = subtable_offset + 8;
-            if (offsets_start + (idx + 2) * 4 > cblc_len) return false;
-            uint32_t off1 = rd32(cblc + offsets_start + idx * 4);
-            uint32_t off2 = rd32(cblc + offsets_start + (idx + 1) * 4);
-            cbdt_glyph_offset = image_data_offset + off1;
+            size_t offsets_start = subtable_offset + 8;
+            size_t offsets_bytes = 0;
+            if (!math_checked_mul((size_t)idx + 2, 4, &offsets_bytes) ||
+                !font_data_range_valid(cblc_len, offsets_start, offsets_bytes)) return false;
+            uint32_t off1 = rd32(cblc + offsets_start + (size_t)idx * 4);
+            uint32_t off2 = rd32(cblc + offsets_start + ((size_t)idx + 1) * 4);
+            if (off2 < off1 ||
+                !math_checked_add((size_t)image_data_offset, (size_t)off1,
+                                  &cbdt_glyph_offset)) return false;
             cbdt_glyph_len = off2 - off1;
         } else if (index_format == 2) {
             // format 2: all glyphs have the same image size
+            if (!font_data_range_valid(cblc_len, subtable_offset, 20)) return false;
             uint32_t image_size = rd32(cblc + subtable_offset + 8);
             // bigGlyphMetrics at offset 12 (8 bytes) — skipped for now
             uint32_t idx = (uint32_t)(glyph_id - first);
-            cbdt_glyph_offset = image_data_offset + idx * image_size;
+            size_t relative_offset = 0;
+            if (!math_checked_mul((size_t)idx, (size_t)image_size, &relative_offset) ||
+                !math_checked_add((size_t)image_data_offset, relative_offset,
+                                  &cbdt_glyph_offset)) return false;
             cbdt_glyph_len = image_size;
         } else if (index_format == 3) {
             // format 3: array of uint16 offsets
             uint32_t idx = (uint32_t)(glyph_id - first);
-            uint32_t offsets_start = subtable_offset + 8;
-            if (offsets_start + (idx + 2) * 2 > cblc_len) return false;
-            uint32_t off1 = (uint32_t)rd16(cblc + offsets_start + idx * 2);
-            uint32_t off2 = (uint32_t)rd16(cblc + offsets_start + (idx + 1) * 2);
-            cbdt_glyph_offset = image_data_offset + off1;
+            size_t offsets_start = subtable_offset + 8;
+            size_t offsets_bytes = 0;
+            if (!math_checked_mul((size_t)idx + 2, 2, &offsets_bytes) ||
+                !font_data_range_valid(cblc_len, offsets_start, offsets_bytes)) return false;
+            uint32_t off1 = (uint32_t)rd16(cblc + offsets_start + (size_t)idx * 2);
+            uint32_t off2 = (uint32_t)rd16(cblc + offsets_start + ((size_t)idx + 1) * 2);
+            if (off2 < off1 ||
+                !math_checked_add((size_t)image_data_offset, (size_t)off1,
+                                  &cbdt_glyph_offset)) return false;
             cbdt_glyph_len = off2 - off1;
         } else if (index_format == 4) {
             // format 4: array of (glyphID, offset) pairs — sparse
+            if (!font_data_range_valid(cblc_len, subtable_offset, 12)) return false;
             uint32_t num_glyphs = rd32(cblc + subtable_offset + 8);
-            uint32_t pairs_start = subtable_offset + 12;
-            if (pairs_start + (uint64_t)(num_glyphs + 1) * 4 > cblc_len) return false;
+            size_t pairs_start = subtable_offset + 12;
+            size_t pair_bytes = 0;
+            if (!math_checked_mul((size_t)num_glyphs + 1, 4, &pair_bytes) ||
+                !font_data_range_valid(cblc_len, pairs_start, pair_bytes)) return false;
             // each pair is (uint16 glyphID, uint16 offset) — 4 bytes
             // actually format 4 is: numGlyphs (uint32) followed by
             // (numGlyphs+1) GlyphIdOffsetPair records {uint16 glyphID, uint16 sbitOffset}
             bool found = false;
             for (uint32_t j = 0; j < num_glyphs; j++) {
-                const uint8_t* pair = cblc + pairs_start + j * 4;
+                const uint8_t* pair = cblc + pairs_start + (size_t)j * 4;
                 uint16_t gid = rd16(pair);
                 uint16_t sbit_off = rd16(pair + 2);
                 if (gid == glyph_id) {
-                    const uint8_t* next_pair = cblc + pairs_start + (j + 1) * 4;
+                    const uint8_t* next_pair = cblc + pairs_start + ((size_t)j + 1) * 4;
                     uint16_t next_off = rd16(next_pair + 2);
-                    cbdt_glyph_offset = image_data_offset + sbit_off;
+                    if (next_off < sbit_off ||
+                        !math_checked_add((size_t)image_data_offset, (size_t)sbit_off,
+                                          &cbdt_glyph_offset)) return false;
                     cbdt_glyph_len = next_off - sbit_off;
                     found = true;
                     break;
@@ -209,16 +232,22 @@ static bool find_glyph_in_strike(const uint8_t* cblc, uint32_t cblc_len,
             if (!found) return false;
         } else if (index_format == 5) {
             // format 5: constant image size + sparse glyph array
+            if (!font_data_range_valid(cblc_len, subtable_offset, 24)) return false;
             uint32_t image_size = rd32(cblc + subtable_offset + 8);
             // bigGlyphMetrics at offset 12 (8 bytes)
             uint32_t num_glyphs = rd32(cblc + subtable_offset + 20);
-            uint32_t gids_start = subtable_offset + 24;
-            if (gids_start + (uint64_t)num_glyphs * 2 > cblc_len) return false;
+            size_t gids_start = subtable_offset + 24;
+            size_t gids_bytes = 0;
+            if (!math_checked_mul((size_t)num_glyphs, 2, &gids_bytes) ||
+                !font_data_range_valid(cblc_len, gids_start, gids_bytes)) return false;
             bool found = false;
             for (uint32_t j = 0; j < num_glyphs; j++) {
-                uint16_t gid = rd16(cblc + gids_start + j * 2);
+                uint16_t gid = rd16(cblc + gids_start + (size_t)j * 2);
                 if (gid == glyph_id) {
-                    cbdt_glyph_offset = image_data_offset + j * image_size;
+                    size_t relative_offset = 0;
+                    if (!math_checked_mul((size_t)j, (size_t)image_size, &relative_offset) ||
+                        !math_checked_add((size_t)image_data_offset, relative_offset,
+                                          &cbdt_glyph_offset)) return false;
                     cbdt_glyph_len = image_size;
                     found = true;
                     break;
@@ -230,7 +259,7 @@ static bool find_glyph_in_strike(const uint8_t* cblc, uint32_t cblc_len,
         }
 
         if (cbdt_glyph_len == 0) return false;
-        if (cbdt_glyph_offset + cbdt_glyph_len > cbdt_len) return false;
+        if (!font_data_range_valid(cbdt_len, cbdt_glyph_offset, cbdt_glyph_len)) return false;
 
         const uint8_t* glyph_data = cbdt + cbdt_glyph_offset;
 
@@ -243,7 +272,7 @@ static bool find_glyph_in_strike(const uint8_t* cblc, uint32_t cblc_len,
             out->bearing_y = (int16_t)(int8_t)glyph_data[3];
             out->advance   = glyph_data[4];
             uint32_t data_len = rd32(glyph_data + 5);
-            if (9 + data_len > cbdt_glyph_len) return false;
+            if (!font_data_range_valid(cbdt_glyph_len, 9, data_len)) return false;
             out->png_data = glyph_data + 9;
             out->png_len  = data_len;
         } else if (image_format == 18) {
@@ -255,14 +284,14 @@ static bool find_glyph_in_strike(const uint8_t* cblc, uint32_t cblc_len,
             out->bearing_y = (int16_t)(int8_t)glyph_data[3];
             out->advance   = glyph_data[4];
             uint32_t data_len = rd32(glyph_data + 8);
-            if (12 + data_len > cbdt_glyph_len) return false;
+            if (!font_data_range_valid(cbdt_glyph_len, 12, data_len)) return false;
             out->png_data = glyph_data + 12;
             out->png_len  = data_len;
         } else if (image_format == 19) {
             // format 19: no metrics (uses strike-level metrics) + uint32 dataLen + PNG data
             if (cbdt_glyph_len < 4) return false;
             uint32_t data_len = rd32(glyph_data);
-            if (4 + data_len > cbdt_glyph_len) return false;
+            if (!font_data_range_valid(cbdt_glyph_len, 4, data_len)) return false;
             out->png_data = glyph_data + 4;
             out->png_len  = data_len;
             out->bearing_x = 0;

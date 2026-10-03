@@ -12,6 +12,156 @@
 #include "log.h"
 #include "str.h"
 #include "memtrack.h"
+#include "math_checked.hpp"
+
+// A single decoded image or animation may consume at most this much owned
+// pixel storage. This is an input quota, independent of allocator pressure.
+#define IMAGE_MAX_DECODED_BYTES ((size_t)512 * 1024 * 1024)
+#define IMAGE_MAX_ENCODED_BYTES ((size_t)128 * 1024 * 1024)
+#define IMAGE_MAX_GIF_FRAMES 4096
+
+static bool image_rgba_layout(int width, int height,
+                              size_t* pixel_count, size_t* byte_count) {
+    size_t pixels = 0;
+    size_t bytes = 0;
+    if (width <= 0 || height <= 0 || width > INT_MAX / 4 ||
+        !math_checked_mul((size_t)width, (size_t)height, &pixels) ||
+        !math_checked_mul(pixels, 4, &bytes) || bytes > IMAGE_MAX_DECODED_BYTES) {
+        return false;
+    }
+    if (pixel_count) *pixel_count = pixels;
+    if (byte_count) *byte_count = bytes;
+    return true;
+}
+
+static bool image_pointer_array_size(int count, size_t* byte_count) {
+    return count > 0 && math_checked_mul((size_t)count, sizeof(png_bytep), byte_count);
+}
+
+static bool image_data_range_valid(size_t total, size_t offset, size_t length) {
+    return offset <= total && length <= total - offset;
+}
+
+static uint16_t image_read_le16(const unsigned char* data) {
+    return (uint16_t)((uint16_t)data[0] | ((uint16_t)data[1] << 8));
+}
+
+static bool gif_skip_sub_blocks(const unsigned char* data, size_t length,
+                                size_t* position) {
+    while (*position < length) {
+        size_t block_length = data[(*position)++];
+        if (block_length == 0) return true;
+        if (!image_data_range_valid(length, *position, block_length)) return false;
+        *position += block_length;
+    }
+    return false;
+}
+
+// Validate the complete container before giflib expands any raster data.  The
+// estimate includes giflib's indexed frames and our retained RGBA canvases.
+static bool gif_preflight(const unsigned char* data, size_t length,
+                          int* out_frame_count) {
+    if (out_frame_count) *out_frame_count = 0;
+    if (!data || length < 14 || length > IMAGE_MAX_ENCODED_BYTES ||
+        (memcmp(data, "GIF87a", 6) != 0 && memcmp(data, "GIF89a", 6) != 0)) {
+        return false;
+    }
+
+    int screen_width = image_read_le16(data + 6);
+    int screen_height = image_read_le16(data + 8);
+    size_t screen_bytes = 0;
+    if (!image_rgba_layout(screen_width, screen_height, NULL, &screen_bytes)) return false;
+
+    size_t position = 13;
+    unsigned char screen_flags = data[10];
+    if (screen_flags & 0x80) {
+        size_t color_bytes = (size_t)3 << ((screen_flags & 0x07) + 1);
+        if (!image_data_range_valid(length, position, color_bytes)) return false;
+        position += color_bytes;
+    }
+
+    int frame_count = 0;
+    size_t raster_bytes = 0;
+    bool saw_trailer = false;
+    while (position < length) {
+        unsigned char marker = data[position++];
+        if (marker == 0x3b) {
+            saw_trailer = true;
+            break;
+        }
+        if (marker == 0x21) {
+            if (position >= length) return false;
+            position++;  // extension label
+            if (!gif_skip_sub_blocks(data, length, &position)) return false;
+            continue;
+        }
+        if (marker != 0x2c || !image_data_range_valid(length, position, 9)) return false;
+
+        int frame_width = image_read_le16(data + position + 4);
+        int frame_height = image_read_le16(data + position + 6);
+        unsigned char frame_flags = data[position + 8];
+        position += 9;
+        size_t frame_pixels = 0;
+        if (frame_width <= 0 || frame_height <= 0 ||
+            !math_checked_mul((size_t)frame_width, (size_t)frame_height,
+                              &frame_pixels) ||
+            !math_checked_add(raster_bytes, frame_pixels, &raster_bytes) ||
+            raster_bytes > IMAGE_MAX_DECODED_BYTES ||
+            ++frame_count > IMAGE_MAX_GIF_FRAMES) {
+            return false;
+        }
+        if (frame_flags & 0x80) {
+            size_t color_bytes = (size_t)3 << ((frame_flags & 0x07) + 1);
+            if (!image_data_range_valid(length, position, color_bytes)) return false;
+            position += color_bytes;
+        }
+        if (position >= length) return false;
+        position++;  // LZW minimum code size
+        if (!gif_skip_sub_blocks(data, length, &position)) return false;
+    }
+
+    size_t retained_buffers = 0;
+    size_t retained_bytes = 0;
+    size_t peak_bytes = 0;
+    if (!saw_trailer || frame_count == 0 ||
+        !math_checked_add((size_t)frame_count, 2, &retained_buffers) ||
+        !math_checked_mul(screen_bytes, retained_buffers, &retained_bytes) ||
+        !math_checked_add(retained_bytes, raster_bytes, &peak_bytes) ||
+        peak_bytes > IMAGE_MAX_DECODED_BYTES) {
+        return false;
+    }
+    if (out_frame_count) *out_frame_count = frame_count;
+    return true;
+}
+
+static unsigned char* image_read_bounded_gif(const char* filename, size_t* out_length) {
+    if (out_length) *out_length = 0;
+    FILE* file = filename ? fopen(filename, "rb") : NULL;
+    if (!file || fseek(file, 0, SEEK_END) != 0) {
+        if (file) fclose(file);
+        return NULL;
+    }
+    long file_length = ftell(file);
+    if (file_length <= 0 || (uintmax_t)file_length > IMAGE_MAX_ENCODED_BYTES ||
+        fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return NULL;
+    }
+    size_t length = (size_t)file_length;
+    unsigned char* data = (unsigned char*)mem_alloc(length, MEM_CAT_IMAGE);
+    if (!data) {
+        fclose(file);
+        return NULL;
+    }
+    bool read_ok = fread(data, 1, length, file) == length && !ferror(file);
+    if (fclose(file) != 0) read_ok = false;
+    if (!read_ok || !gif_preflight(data, length, NULL)) {
+        mem_free(data);
+        return NULL;
+    }
+    if (out_length) *out_length = length;
+    return data;
+}
 
 // Helper function to determine image format from file extension
 typedef enum {
@@ -146,8 +296,17 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
     png_set_sig_bytes(png_ptr, 8);
     png_read_info(png_ptr, info_ptr);
 
-    *width = png_get_image_width(png_ptr, info_ptr);
-    *height = png_get_image_height(png_ptr, info_ptr);
+    png_uint_32 png_width = png_get_image_width(png_ptr, info_ptr);
+    png_uint_32 png_height = png_get_image_height(png_ptr, info_ptr);
+    if (png_width > INT_MAX || png_height > INT_MAX ||
+        !image_rgba_layout((int)png_width, (int)png_height, NULL, NULL)) {
+        log_error("[image] rejected PNG dimensions %ux%u", png_width, png_height);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    *width = (int)png_width;
+    *height = (int)png_height;
     png_byte color_type = png_get_color_type(png_ptr, info_ptr);
     png_byte bit_depth = png_get_bit_depth(png_ptr, info_ptr);
 
@@ -180,7 +339,9 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
 
     // Allocate memory for image data
     *channels = 4; // Always return RGBA
-    image_data = mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
+    size_t image_bytes = 0;
+    image_rgba_layout(*width, *height, NULL, &image_bytes);
+    image_data = mem_alloc(image_bytes, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for PNG image data");
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -189,9 +350,22 @@ static unsigned char* load_png(const char* filename, int* width, int* height, in
     }
 
     // Read the image data
-    row_pointers = mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
+    size_t row_pointer_bytes = 0;
+    if (!image_pointer_array_size(*height, &row_pointer_bytes)) {
+        png_free_decode_buffers(NULL, (unsigned char*)image_data);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    row_pointers = mem_alloc(row_pointer_bytes, MEM_CAT_IMAGE);
+    if (!row_pointers) {
+        png_free_decode_buffers(NULL, (unsigned char*)image_data);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
     for (int y = 0; y < *height; y++) {
-        row_pointers[y] = image_data + y * *width * 4;
+        row_pointers[y] = image_data + (size_t)y * (size_t)*width * 4;
     }
 
     png_read_image(png_ptr, (png_bytep*)row_pointers);
@@ -213,6 +387,14 @@ int image_save_png(const char* filename, const unsigned char* data,
         log_error("image_save_png: invalid parameters");
         return 0;
     }
+    size_t pixel_count = 0;
+    size_t row_pointer_bytes = 0;
+    if (!image_rgba_layout(width, height, &pixel_count, NULL) ||
+        !image_pointer_array_size(height, &row_pointer_bytes)) {
+        log_error("[image] rejected PNG output dimensions %dx%d", width, height);
+        return 0;
+    }
+    (void)pixel_count;
     int color_type;
     switch (channels) {
         case 1:  color_type = PNG_COLOR_TYPE_GRAY; break;
@@ -244,13 +426,19 @@ int image_save_png(const char* filename, const unsigned char* data,
                  PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png_ptr, info_ptr);
 
-    row_pointers = mem_alloc(sizeof(png_bytep) * height, MEM_CAT_IMAGE);
+    row_pointers = mem_alloc(row_pointer_bytes, MEM_CAT_IMAGE);
     if (!row_pointers) {
         png_destroy_write_struct(&png_ptr, &info_ptr);
         fclose(fp);
         return 0;
     }
-    size_t row_bytes = (size_t)width * channels;
+    size_t row_bytes = 0;
+    if (!math_checked_mul((size_t)width, (size_t)channels, &row_bytes)) {
+        mem_free((png_bytep*)row_pointers);
+        png_destroy_write_struct(&png_ptr, &info_ptr);
+        fclose(fp);
+        return 0;
+    }
     for (int y = 0; y < height; y++) {
         // libpng does not write through these pointers, so dropping const is safe
         row_pointers[y] = (png_bytep)(data + (size_t)y * row_bytes);
@@ -277,6 +465,11 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
     fseek(fp, 0, SEEK_END);
     long file_size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
+    if (file_size <= 0 || (uintmax_t)file_size > IMAGE_MAX_ENCODED_BYTES ||
+        (uintmax_t)file_size > (uintmax_t)ULONG_MAX) {
+        fclose(fp);
+        return NULL;
+    }
 
     unsigned char* jpeg_buffer = mem_alloc(file_size, MEM_CAT_IMAGE);
     if (!jpeg_buffer) {
@@ -310,12 +503,19 @@ static unsigned char* load_jpeg(const char* filename, int* width, int* height, i
         return NULL;
     }
 
+    size_t image_bytes = 0;
+    if (!image_rgba_layout(jpeg_width, jpeg_height, NULL, &image_bytes)) {
+        log_error("[image] rejected JPEG dimensions %dx%d", jpeg_width, jpeg_height);
+        tjDestroy(tj_instance);
+        mem_free(jpeg_buffer);
+        return NULL;
+    }
     *width = jpeg_width;
     *height = jpeg_height;
     *channels = 4; // Always return RGBA
 
     // Allocate memory for decompressed image
-    unsigned char* image_data = mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
+    unsigned char* image_data = mem_alloc(image_bytes, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for JPEG image data");
         tjDestroy(tj_instance);
@@ -346,8 +546,14 @@ static unsigned char* decode_gif(GifFileType* gif, int* width, int* height, int*
     *height = gif->SHeight;
     *channels = 4; // Always return RGBA
 
+    size_t image_bytes = 0;
+    if (!image_rgba_layout(*width, *height, NULL, &image_bytes)) {
+        log_error("[image] rejected GIF dimensions %dx%d", *width, *height);
+        return NULL;
+    }
+
     // Allocate memory for RGBA image
-    unsigned char* image_data = mem_calloc(*width * *height * 4, 1, MEM_CAT_IMAGE);
+    unsigned char* image_data = mem_calloc(image_bytes, 1, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for GIF image data");
         return NULL;
@@ -393,8 +599,8 @@ static unsigned char* decode_gif(GifFileType* gif, int* width, int* height, int*
                 int dst_x = left + x;
 
                 if (dst_x >= 0 && dst_x < *width && dst_y >= 0 && dst_y < *height) {
-                    int dst_idx = (dst_y * *width + dst_x) * 4;
-                    int src_idx = y * frame_width + x;
+                    size_t dst_idx = ((size_t)dst_y * (size_t)*width + (size_t)dst_x) * 4;
+                    size_t src_idx = (size_t)y * (size_t)frame_width + (size_t)x;
                     int color_index = raster[src_idx];
 
                     if (color_index == transparent_color) {
@@ -418,30 +624,22 @@ static unsigned char* decode_gif(GifFileType* gif, int* width, int* height, int*
 }
 
 // Load GIF image using giflib
+static unsigned char* load_gif_from_memory(const unsigned char* data, size_t length,
+                                           int* width, int* height, int* channels);
+
 static unsigned char* load_gif(const char* filename, int* width, int* height, int* channels, int req_channels) {
     (void)req_channels; // Mark as unused for compatibility
-
-    int error_code;
-    GifFileType* gif = DGifOpenFileName(filename, &error_code);
-    if (!gif) {
-        log_error("Failed to open GIF file: %s (error: %d)", filename, error_code);
-        return NULL;
-    }
-
-    if (DGifSlurp(gif) == GIF_ERROR) {
-        log_error("Failed to read GIF file: %s (error: %d)", filename, gif->Error);
-        DGifCloseFile(gif, &error_code);
-        return NULL;
-    }
-
-    unsigned char* image_data = decode_gif(gif, width, height, channels);
-    DGifCloseFile(gif, &error_code);
+    size_t length = 0;
+    unsigned char* data = image_read_bounded_gif(filename, &length);
+    if (!data) return NULL;
+    unsigned char* image_data = load_gif_from_memory(data, length, width, height, channels);
+    mem_free(data);
     return image_data;
 }
 
 static unsigned char* load_gif_from_memory(const unsigned char* data, size_t length,
                                            int* width, int* height, int* channels) {
-    if (!data || length == 0) return NULL;
+    if (!gif_preflight(data, length, NULL)) return NULL;
 
     GifMemoryReader reader = { data, length, 0 };
     int error_code;
@@ -465,9 +663,9 @@ static unsigned char* load_gif_from_memory(const unsigned char* data, size_t len
 static unsigned char* load_webp_from_memory(const unsigned char* data, size_t length,
                                             int* width, int* height, int* channels) {
     int w, h;
-    if (!WebPGetInfo(data, length, &w, &h) || w <= 0 || h <= 0 ||
-        w > INT_MAX / 4 || (size_t)h > SIZE_MAX / ((size_t)w * 4)) return NULL;
-    size_t size = (size_t)w * (size_t)h * 4;
+    size_t size = 0;
+    if (length > IMAGE_MAX_ENCODED_BYTES || !WebPGetInfo(data, length, &w, &h) ||
+        !image_rgba_layout(w, h, NULL, &size)) return NULL;
     unsigned char* pixels = mem_alloc(size, MEM_CAT_IMAGE);
     if (!pixels) return NULL;
     // decode into the shared image allocator so all codecs have the same owner.
@@ -612,8 +810,17 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     // Read PNG info
     png_read_info(png_ptr, info_ptr);
 
-    *width = png_get_image_width(png_ptr, info_ptr);
-    *height = png_get_image_height(png_ptr, info_ptr);
+    png_uint_32 png_width = png_get_image_width(png_ptr, info_ptr);
+    png_uint_32 png_height = png_get_image_height(png_ptr, info_ptr);
+    size_t image_bytes = 0;
+    if (png_width > INT_MAX || png_height > INT_MAX ||
+        !image_rgba_layout((int)png_width, (int)png_height, NULL, &image_bytes)) {
+        log_error("[image] rejected memory PNG dimensions %ux%u", png_width, png_height);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return NULL;
+    }
+    *width = (int)png_width;
+    *height = (int)png_height;
     png_byte color_type = png_get_color_type(png_ptr, info_ptr);
     png_byte bit_depth = png_get_bit_depth(png_ptr, info_ptr);
 
@@ -632,7 +839,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     *channels = 4;
 
     // Allocate memory for image
-    err_ctx.image_data = (unsigned char*)mem_calloc(1, *width * *height * 4, MEM_CAT_IMAGE);
+    err_ctx.image_data = (unsigned char*)mem_calloc(1, image_bytes, MEM_CAT_IMAGE);
     if (!err_ctx.image_data) {
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         log_error("Failed to allocate memory for PNG image");
@@ -640,7 +847,13 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
     }
 
     // Create row pointers
-    err_ctx.row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * *height, MEM_CAT_IMAGE);
+    size_t row_pointer_bytes = 0;
+    if (!image_pointer_array_size(*height, &row_pointer_bytes)) {
+        mem_free(err_ctx.image_data);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        return NULL;
+    }
+    err_ctx.row_pointers = (png_bytep*)mem_alloc(row_pointer_bytes, MEM_CAT_IMAGE);
     if (!err_ctx.row_pointers) {
         mem_free(err_ctx.image_data);
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -648,7 +861,8 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
         return NULL;
     }
     for (int y = 0; y < *height; y++) {
-        err_ctx.row_pointers[y] = err_ctx.image_data + y * (*width) * 4;
+        err_ctx.row_pointers[y] = err_ctx.image_data +
+            (size_t)y * (size_t)*width * 4;
     }
 
     // Read image data
@@ -663,6 +877,7 @@ static unsigned char* load_png_from_memory(const unsigned char* data, size_t len
 
 // Load JPEG from memory using TurboJPEG
 static unsigned char* load_jpeg_from_memory(const unsigned char* data, size_t length, int* width, int* height, int* channels) {
+    if (length > IMAGE_MAX_ENCODED_BYTES || length > ULONG_MAX) return NULL;
     // Initialize TurboJPEG decompressor
     tjhandle tj_instance = tjInitDecompress();
     if (!tj_instance) {
@@ -678,12 +893,18 @@ static unsigned char* load_jpeg_from_memory(const unsigned char* data, size_t le
         return NULL;
     }
 
+    size_t image_bytes = 0;
+    if (!image_rgba_layout(jpeg_width, jpeg_height, NULL, &image_bytes)) {
+        log_error("[image] rejected memory JPEG dimensions %dx%d", jpeg_width, jpeg_height);
+        tjDestroy(tj_instance);
+        return NULL;
+    }
     *width = jpeg_width;
     *height = jpeg_height;
     *channels = 4; // Always return RGBA
 
     // Allocate memory for decompressed image
-    unsigned char* image_data = (unsigned char*)mem_alloc(*width * *height * 4, MEM_CAT_IMAGE);
+    unsigned char* image_data = (unsigned char*)mem_alloc(image_bytes, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate memory for JPEG image data");
         tjDestroy(tj_instance);
@@ -704,7 +925,8 @@ static unsigned char* load_jpeg_from_memory(const unsigned char* data, size_t le
 
 // Load image from memory buffer
 unsigned char* image_load_from_memory(const unsigned char* data, size_t length, int* width, int* height, int* channels) {
-    if (!data || length == 0 || !width || !height || !channels) {
+    if (!data || length == 0 || length > IMAGE_MAX_ENCODED_BYTES ||
+        !width || !height || !channels) {
         log_error("Invalid parameters passed to image_load_from_memory");
         return NULL;
     }
@@ -836,8 +1058,17 @@ static unsigned char* load_png_scaled(const char* filename,
     png_set_sig_bytes(png_ptr, 8);
     png_read_info(png_ptr, info_ptr);
 
-    int natural_w = png_get_image_width(png_ptr, info_ptr);
-    int natural_h = png_get_image_height(png_ptr, info_ptr);
+    png_uint_32 png_width = png_get_image_width(png_ptr, info_ptr);
+    png_uint_32 png_height = png_get_image_height(png_ptr, info_ptr);
+    if (png_width > INT_MAX || png_height > INT_MAX ||
+        !image_rgba_layout((int)png_width, (int)png_height, NULL, NULL)) {
+        log_error("[image] rejected scaled PNG dimensions %ux%u", png_width, png_height);
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    int natural_w = (int)png_width;
+    int natural_h = (int)png_height;
     png_byte color_type = png_get_color_type(png_ptr, info_ptr);
     png_byte bit_depth = png_get_bit_depth(png_ptr, info_ptr);
 
@@ -863,7 +1094,13 @@ static unsigned char* load_png_scaled(const char* filename,
     *height = out_h;
     *channels = 4;
 
-    image_data = (unsigned char*)mem_alloc((size_t)out_w * out_h * 4, MEM_CAT_IMAGE);
+    size_t output_bytes = 0;
+    if (!image_rgba_layout(out_w, out_h, NULL, &output_bytes)) {
+        png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+        fclose(fp);
+        return NULL;
+    }
+    image_data = (unsigned char*)mem_alloc(output_bytes, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate PNG output buffer");
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
@@ -873,7 +1110,20 @@ static unsigned char* load_png_scaled(const char* filename,
 
     if (step == 1) {
         // No downsample requested — read all rows directly into output.
-        row_pointers = (png_bytep*)mem_alloc(sizeof(png_bytep) * natural_h, MEM_CAT_IMAGE);
+        size_t row_pointer_bytes = 0;
+        if (!image_pointer_array_size(natural_h, &row_pointer_bytes)) {
+            mem_free((unsigned char*)image_data);
+            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+            fclose(fp);
+            return NULL;
+        }
+        row_pointers = (png_bytep*)mem_alloc(row_pointer_bytes, MEM_CAT_IMAGE);
+        if (!row_pointers) {
+            mem_free((unsigned char*)image_data);
+            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+            fclose(fp);
+            return NULL;
+        }
         for (int y = 0; y < natural_h; y++) {
             row_pointers[y] = image_data + (size_t)y * natural_w * 4;
         }
@@ -883,8 +1133,25 @@ static unsigned char* load_png_scaled(const char* filename,
         row_pointers = NULL;
     } else {
         // Box-average downsample: read step rows at a time, accumulate, write one row.
-        row_buf = (unsigned char*)mem_alloc((size_t)natural_w * 4, MEM_CAT_IMAGE);
-        accum = (uint32_t*)mem_alloc((size_t)out_w * 4 * sizeof(uint32_t), MEM_CAT_IMAGE);
+        size_t row_bytes = 0;
+        size_t accum_bytes = 0;
+        if (!math_checked_mul((size_t)natural_w, 4, &row_bytes) ||
+            !math_checked_mul((size_t)out_w, 4 * sizeof(uint32_t), &accum_bytes)) {
+            mem_free((unsigned char*)image_data);
+            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+            fclose(fp);
+            return NULL;
+        }
+        row_buf = (unsigned char*)mem_alloc(row_bytes, MEM_CAT_IMAGE);
+        accum = (uint32_t*)mem_alloc(accum_bytes, MEM_CAT_IMAGE);
+        if (!row_buf || !accum) {
+            if (accum) mem_free((uint32_t*)accum);
+            if (row_buf) mem_free((unsigned char*)row_buf);
+            mem_free((unsigned char*)image_data);
+            png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+            fclose(fp);
+            return NULL;
+        }
         int divisor = step * step;
         for (int oy = 0; oy < out_h; oy++) {
             memset(accum, 0, (size_t)out_w * 4 * sizeof(uint32_t));
@@ -935,6 +1202,7 @@ static unsigned char* load_png_scaled(const char* filename,
 static unsigned char* load_jpeg_scaled_buffer(const unsigned char* jpeg_buffer, size_t buf_len,
                                               int target_w, int target_h,
                                               int* width, int* height, int* channels) {
+    if (buf_len > IMAGE_MAX_ENCODED_BYTES || buf_len > ULONG_MAX) return NULL;
     tjhandle tj = tjInitDecompress();
     if (!tj) {
         log_error("Failed to initialize TurboJPEG decompressor: %s", tjGetErrorStr());
@@ -950,8 +1218,13 @@ static unsigned char* load_jpeg_scaled_buffer(const unsigned char* jpeg_buffer, 
 
     int out_w = natural_w;
     int out_h = natural_h;
+    if (!image_rgba_layout(natural_w, natural_h, NULL, NULL)) {
+        log_error("[image] rejected scaled JPEG dimensions %dx%d", natural_w, natural_h);
+        tjDestroy(tj);
+        return NULL;
+    }
     if (target_w > 0 && target_h > 0 &&
-        natural_w > target_w * 2 && natural_h > target_h * 2) {
+        natural_w / 2 > target_w && natural_h / 2 > target_h) {
         int n_factors = 0;
         tjscalingfactor* factors = tjGetScalingFactors(&n_factors);
         if (factors && n_factors > 0) {
@@ -978,7 +1251,12 @@ static unsigned char* load_jpeg_scaled_buffer(const unsigned char* jpeg_buffer, 
     *height = out_h;
     *channels = 4;
 
-    unsigned char* image_data = (unsigned char*)mem_alloc((size_t)out_w * out_h * 4, MEM_CAT_IMAGE);
+    size_t output_bytes = 0;
+    if (!image_rgba_layout(out_w, out_h, NULL, &output_bytes)) {
+        tjDestroy(tj);
+        return NULL;
+    }
+    unsigned char* image_data = (unsigned char*)mem_alloc(output_bytes, MEM_CAT_IMAGE);
     if (!image_data) {
         log_error("Failed to allocate JPEG output buffer (%dx%d)", out_w, out_h);
         tjDestroy(tj);
@@ -1007,7 +1285,11 @@ static unsigned char* load_jpeg_scaled(const char* filename,
     fseek(fp, 0, SEEK_END);
     long file_size = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    if (file_size <= 0) { fclose(fp); return NULL; }
+    if (file_size <= 0 || (uintmax_t)file_size > IMAGE_MAX_ENCODED_BYTES ||
+        (uintmax_t)file_size > (uintmax_t)ULONG_MAX) {
+        fclose(fp);
+        return NULL;
+    }
 
     unsigned char* jpeg_buffer = (unsigned char*)mem_alloc((size_t)file_size, MEM_CAT_IMAGE);
     if (!jpeg_buffer) { fclose(fp); return NULL; }
@@ -1044,7 +1326,8 @@ unsigned char* image_load_scaled(const char* filename,
 unsigned char* image_load_from_memory_scaled(const unsigned char* data, size_t length,
                                              int target_w, int target_h,
                                              int* width, int* height, int* channels) {
-    if (!data || length == 0 || !width || !height || !channels) return NULL;
+    if (!data || length == 0 || length > IMAGE_MAX_ENCODED_BYTES ||
+        !width || !height || !channels) return NULL;
 
     ImageType type = get_image_type_from_memory(data, length);
     if (type == IMAGE_TYPE_JPEG) {
@@ -1075,8 +1358,13 @@ static int get_png_dimensions(const char* filename, int* width, int* height) {
     if (png_sig_cmp(header, 0, 8)) return 0;
 
     // Width and height are big-endian uint32 at offsets 16 and 20
-    *width  = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
-    *height = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+    uint32_t raw_width = ((uint32_t)header[16] << 24) | ((uint32_t)header[17] << 16) |
+                         ((uint32_t)header[18] << 8) | (uint32_t)header[19];
+    uint32_t raw_height = ((uint32_t)header[20] << 24) | ((uint32_t)header[21] << 16) |
+                          ((uint32_t)header[22] << 8) | (uint32_t)header[23];
+    if (raw_width > INT_MAX || raw_height > INT_MAX) return 0;
+    *width = (int)raw_width;
+    *height = (int)raw_height;
     return (*width > 0 && *height > 0) ? 1 : 0;
 }
 
@@ -1154,14 +1442,19 @@ int image_get_dimensions(const char* filename, int* width, int* height) {
 static int get_png_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height) {
     if (length < 24) return 0;
     if (png_sig_cmp((png_const_bytep)data, 0, 8)) return 0;
-    *width  = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
-    *height = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
+    uint32_t raw_width = ((uint32_t)data[16] << 24) | ((uint32_t)data[17] << 16) |
+                         ((uint32_t)data[18] << 8) | (uint32_t)data[19];
+    uint32_t raw_height = ((uint32_t)data[20] << 24) | ((uint32_t)data[21] << 16) |
+                          ((uint32_t)data[22] << 8) | (uint32_t)data[23];
+    if (raw_width > INT_MAX || raw_height > INT_MAX) return 0;
+    *width = (int)raw_width;
+    *height = (int)raw_height;
     return (*width > 0 && *height > 0) ? 1 : 0;
 }
 
 // Get JPEG dimensions from memory
 static int get_jpeg_dimensions_from_memory(const unsigned char* data, size_t length, int* width, int* height) {
-    if (length < 3) return 0;
+    if (length < 3 || length > ULONG_MAX) return 0;
     tjhandle tj = tjInitDecompress();
     if (!tj) return 0;
     int w, h, subsamp, colorspace;
@@ -1226,13 +1519,13 @@ static void gif_composite_frame(uint32_t* canvas, int canvas_w, int canvas_h,
         for (int x = 0; x < fw; x++) {
             int dx = left + x;
             if (dx < 0 || dx >= canvas_w) continue;
-            int ci = raster[y * fw + x];
+            int ci = raster[(size_t)y * (size_t)fw + (size_t)x];
             if (ci == transparent_color) continue;
             if (ci >= cmap->ColorCount) continue;
             GifColorType* c = &cmap->Colors[ci];
             uint32_t pixel = ((uint32_t)c->Red) | ((uint32_t)c->Green << 8) |
                              ((uint32_t)c->Blue << 16) | (0xFFu << 24);
-            canvas[dy * canvas_w + dx] = pixel;
+            canvas[(size_t)dy * (size_t)canvas_w + (size_t)dx] = pixel;
         }
     }
 }
@@ -1246,10 +1539,23 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
     int h = gif->SHeight;
     int n = gif->ImageCount;
 
+    size_t pixel_count = 0;
+    size_t canvas_bytes = 0;
+    size_t retained_bytes = 0;
+    size_t retained_buffers = 0;
+    if (n <= 1 || n > IMAGE_MAX_GIF_FRAMES ||
+        !image_rgba_layout(w, h, &pixel_count, &canvas_bytes) ||
+        !math_checked_add((size_t)n, 2, &retained_buffers) ||
+        !math_checked_mul(canvas_bytes, retained_buffers, &retained_bytes) ||
+        retained_bytes > IMAGE_MAX_DECODED_BYTES) {
+        log_error("[image] rejected animated GIF dimensions/frames %dx%d x %d", w, h, n);
+        return NULL;
+    }
+
     GifFrames* result = (GifFrames*)mem_calloc(1, sizeof(GifFrames), MEM_CAT_IMAGE);
+    if (!result) return NULL;
     result->width = w;
     result->height = h;
-    result->frame_count = n;
     result->loop_count = 0;  // default: infinite
 
     // Check for NETSCAPE 2.0 loop extension
@@ -1265,7 +1571,12 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
         }
     }
 
-    result->frames = (GifFrameData*)mem_calloc(n, sizeof(GifFrameData), MEM_CAT_IMAGE);
+    result->frames = (GifFrameData*)mem_calloc((size_t)n, sizeof(GifFrameData), MEM_CAT_IMAGE);
+    if (!result->frames) {
+        mem_free(result);
+        return NULL;
+    }
+    result->frame_count = n;
 
     // Background color for disposal
     uint32_t bg_pixel = 0;  // transparent black
@@ -1276,8 +1587,11 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
     }
 
     // Canvas for progressive compositing
-    size_t canvas_bytes = (size_t)w * h * sizeof(uint32_t);
-    uint32_t* canvas = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_IMAGE);
+    uint32_t* canvas = (uint32_t*)mem_calloc(pixel_count, sizeof(uint32_t), MEM_CAT_IMAGE);
+    if (!canvas) {
+        image_gif_free(result);
+        return NULL;
+    }
     uint32_t* prev_canvas = NULL;  // for disposal method 3 (restore previous)
 
     for (int i = 0; i < n; i++) {
@@ -1294,7 +1608,12 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
         // Save canvas before compositing for disposal method 3
         if (disposal == DISPOSE_PREVIOUS) {
             if (!prev_canvas) {
-                prev_canvas = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_IMAGE);
+                prev_canvas = (uint32_t*)mem_calloc(pixel_count, sizeof(uint32_t), MEM_CAT_IMAGE);
+                if (!prev_canvas) {
+                    mem_free(canvas);
+                    image_gif_free(result);
+                    return NULL;
+                }
             }
             memcpy(prev_canvas, canvas, canvas_bytes);
         }
@@ -1303,7 +1622,13 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
         gif_composite_frame(canvas, w, h, gif, i);
 
         // Snapshot the composited canvas as this frame's pixels
-        result->frames[i].pixels = (uint32_t*)mem_calloc(w * h, sizeof(uint32_t), MEM_CAT_IMAGE);
+        result->frames[i].pixels = (uint32_t*)mem_calloc(pixel_count, sizeof(uint32_t), MEM_CAT_IMAGE);
+        if (!result->frames[i].pixels) {
+            mem_free(canvas);
+            if (prev_canvas) mem_free(prev_canvas);
+            image_gif_free(result);
+            return NULL;
+        }
         memcpy(result->frames[i].pixels, canvas, canvas_bytes);
         result->frames[i].delay_ms = delay_ms;
         result->frames[i].disposal = disposal;
@@ -1316,7 +1641,7 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
                 GifImageDesc* desc = &frame->ImageDesc;
                 for (int y = desc->Top; y < desc->Top + desc->Height && y < h; y++) {
                     for (int x = desc->Left; x < desc->Left + desc->Width && x < w; x++) {
-                        canvas[y * w + x] = bg_pixel;
+                        canvas[(size_t)y * (size_t)w + (size_t)x] = bg_pixel;
                     }
                 }
                 break;
@@ -1340,24 +1665,16 @@ static GifFrames* gif_decode_all_frames(GifFileType* gif) {
 }
 
 GifFrames* image_gif_load(const char* filename) {
-    int error_code;
-    GifFileType* gif = DGifOpenFileName(filename, &error_code);
-    if (!gif) {
-        log_error("gif multi-frame: failed to open %s (error %d)", filename, error_code);
-        return NULL;
-    }
-    if (DGifSlurp(gif) == GIF_ERROR) {
-        log_error("gif multi-frame: failed to slurp %s (error %d)", filename, gif->Error);
-        DGifCloseFile(gif, &error_code);
-        return NULL;
-    }
-    GifFrames* result = gif_decode_all_frames(gif);
-    DGifCloseFile(gif, &error_code);
+    size_t length = 0;
+    unsigned char* data = image_read_bounded_gif(filename, &length);
+    if (!data) return NULL;
+    GifFrames* result = image_gif_load_from_memory(data, length);
+    mem_free(data);
     return result;
 }
 
 GifFrames* image_gif_load_from_memory(const unsigned char* data, size_t length) {
-    if (!data || length == 0) return NULL;
+    if (!gif_preflight(data, length, NULL)) return NULL;
 
     GifMemoryReader reader = { data, length, 0 };
     int error_code;
@@ -1378,28 +1695,27 @@ GifFrames* image_gif_load_from_memory(const unsigned char* data, size_t length) 
 
 void image_gif_free(GifFrames* gif) {
     if (!gif) return;
-    for (int i = 0; i < gif->frame_count; i++) {
-        if (gif->frames[i].pixels) mem_free(gif->frames[i].pixels);
+    if (gif->frames) {
+        for (int i = 0; i < gif->frame_count; i++) {
+            if (gif->frames[i].pixels) mem_free(gif->frames[i].pixels);
+        }
+        mem_free(gif->frames);
     }
-    mem_free(gif->frames);
     mem_free(gif);
 }
 
 int image_gif_frame_count(const char* filename) {
-    int error_code;
-    GifFileType* gif = DGifOpenFileName(filename, &error_code);
-    if (!gif) return 0;
-    if (DGifSlurp(gif) == GIF_ERROR) {
-        DGifCloseFile(gif, &error_code);
-        return 0;
-    }
-    int count = gif->ImageCount;
-    DGifCloseFile(gif, &error_code);
+    size_t length = 0;
+    unsigned char* data = image_read_bounded_gif(filename, &length);
+    if (!data) return 0;
+    int count = 0;
+    gif_preflight(data, length, &count);
+    mem_free(data);
     return count;
 }
 
 int image_gif_frame_count_from_memory(const unsigned char* data, size_t length) {
-    if (!data || length == 0) return 0;
+    if (!gif_preflight(data, length, NULL)) return 0;
     GifMemoryReader reader = { data, length, 0 };
     int error_code;
     GifFileType* gif = DGifOpen(&reader, gif_memory_read_func, &error_code);

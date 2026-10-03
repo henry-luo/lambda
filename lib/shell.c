@@ -57,22 +57,42 @@
 
 extern char* strdup(const char* s);
 
-typedef ByteBuilder ShellCapture;
+typedef struct ShellCapture {
+    ByteBuilder bytes;
+    size_t max_bytes;
+    bool limit_hit;
+} ShellCapture;
 
-static bool shell_capture_init(ShellCapture* capture) {
-    return byte_builder_init(capture, 4096, MEM_CAT_TEMP, true);
+static size_t shell_output_limit(const ShellOptions* opts) {
+    return opts && opts->max_output_bytes
+        ? opts->max_output_bytes : SHELL_DEFAULT_MAX_OUTPUT_BYTES;
+}
+
+static bool shell_capture_init(ShellCapture* capture, size_t max_bytes) {
+    memset(capture, 0, sizeof(*capture));
+    capture->max_bytes = max_bytes;
+    size_t initial_capacity = max_bytes < 4096 ? max_bytes : 4096;
+    return byte_builder_init(&capture->bytes, initial_capacity, MEM_CAT_TEMP, true);
 }
 
 static bool shell_capture_append(ShellCapture* capture, const char* data, size_t len) {
-    return byte_builder_append(capture, data, len);
+    if (capture->bytes.length >= capture->max_bytes) {
+        capture->limit_hit = capture->limit_hit || len > 0;
+        return true;
+    }
+    size_t available = capture->max_bytes - capture->bytes.length;
+    size_t retained = len < available ? len : available;
+    if (retained > 0 && !byte_builder_append(&capture->bytes, data, retained)) return false;
+    if (retained < len) capture->limit_hit = true;
+    return true;
 }
 
 static char* shell_capture_take(ShellCapture* capture, size_t* out_len) {
-    return (char*)byte_builder_take(capture, out_len);
+    return (char*)byte_builder_take(&capture->bytes, out_len);
 }
 
 static void shell_capture_discard(ShellCapture* capture) {
-    byte_builder_destroy(capture);
+    byte_builder_destroy(&capture->bytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -99,27 +119,62 @@ static bool win_create_pipe(WinPipe* p) {
     return true;
 }
 
-static char* win_read_pipe(HANDLE pipe, size_t* out_len) {
-    size_t cap = 4096;
-    size_t len = 0;
-    char* buf = (char*)mem_alloc(cap, MEM_CAT_TEMP);
-    if (!buf) return NULL;
+static bool win_cmdline_append_repeat(ByteBuilder* command, char value, size_t count) {
+    if (!byte_builder_reserve(command, count)) return false;
+    uint8_t* tail = byte_builder_writable_tail(command, NULL);
+    if (count > 0) memset(tail, value, count);
+    return byte_builder_commit(command, count);
+}
 
-    for (;;) {
-        DWORD n = 0;
-        if (len + 1024 > cap) {
-            cap *= 2;
-            char* nb = (char*)mem_realloc(buf, cap, MEM_CAT_TEMP);
-            if (!nb) { mem_free(buf); return NULL; }
-            buf = nb;
+static bool win_cmdline_append_quoted(ByteBuilder* command, const char* argument) {
+    const char quote = '"';
+    if (!byte_builder_append(command, &quote, 1)) return false;
+    size_t backslashes = 0;
+    for (const char* p = argument ? argument : ""; ; p++) {
+        if (*p == '\\') {
+            backslashes++;
+            continue;
         }
-        BOOL ok = ReadFile(pipe, buf + len, (DWORD)(cap - len - 1), &n, NULL);
-        if (!ok || n == 0) break;
-        len += n;
+        if (*p == '"') {
+            if (backslashes > (SIZE_MAX - 1) / 2) return false;
+            if (!win_cmdline_append_repeat(command, '\\', backslashes * 2 + 1) ||
+                !byte_builder_append(command, p, 1)) return false;
+            backslashes = 0;
+            continue;
+        }
+        if (*p == '\0') {
+            if (backslashes > SIZE_MAX / 2) return false;
+            if (!win_cmdline_append_repeat(command, '\\', backslashes * 2) ||
+                !byte_builder_append(command, &quote, 1)) return false;
+            return true;
+        }
+        if (!win_cmdline_append_repeat(command, '\\', backslashes) ||
+            !byte_builder_append(command, p, 1)) return false;
+        backslashes = 0;
     }
-    buf[len] = '\0';
-    if (out_len) *out_len = len;
-    return buf;
+}
+
+static char* win_build_command_line(const char* program, const char** args) {
+    ByteBuilder command = {0};
+    if (!byte_builder_init(&command, 256, MEM_CAT_TEMP, true) ||
+        !win_cmdline_append_quoted(&command, program)) {
+        byte_builder_destroy(&command);
+        return NULL;
+    }
+    bool raw_shell_command = (_stricmp(program, "cmd") == 0 ||
+                              _stricmp(program, "cmd.exe") == 0) &&
+                             args && args[1] && _stricmp(args[1], "/c") == 0;
+    for (int i = 1; args && args[i]; i++) {
+        const char space = ' ';
+        if (!byte_builder_append(&command, &space, 1) ||
+            (raw_shell_command && i >= 2
+                ? !byte_builder_append(&command, args[i], strlen(args[i]))
+                : !win_cmdline_append_quoted(&command, args[i]))) {
+            byte_builder_destroy(&command);
+            return NULL;
+        }
+    }
+    return (char*)byte_builder_take(&command, NULL);
 }
 
 static bool win_env_key_matches(const char* assignment, const char* key) {
@@ -185,6 +240,70 @@ typedef struct {
     bool ok;
 } WinCaptureThread;
 
+typedef struct {
+    STARTUPINFOEXA info;
+    LPPROC_THREAD_ATTRIBUTE_LIST attributes;
+    HANDLE stdin_copy;
+} WinRestrictedStartup;
+
+static bool win_restricted_startup_init(WinRestrictedStartup* startup,
+                                        HANDLE stdout_handle, HANDLE stderr_handle,
+                                        HANDLE stdin_source) {
+    memset(startup, 0, sizeof(*startup));
+    startup->stdin_copy = INVALID_HANDLE_VALUE;
+    HANDLE process = GetCurrentProcess();
+    if (stdin_source == NULL || stdin_source == INVALID_HANDLE_VALUE ||
+        !DuplicateHandle(process, stdin_source, process, &startup->stdin_copy,
+                         0, TRUE, DUPLICATE_SAME_ACCESS)) {
+        startup->stdin_copy = CreateFileA("NUL", GENERIC_READ, FILE_SHARE_READ,
+                                          NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (startup->stdin_copy == INVALID_HANDLE_VALUE) return false;
+        SetHandleInformation(startup->stdin_copy, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+    }
+
+    SIZE_T attribute_bytes = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &attribute_bytes);
+    startup->attributes = (LPPROC_THREAD_ATTRIBUTE_LIST)mem_alloc(
+        (size_t)attribute_bytes, MEM_CAT_TEMP);
+    if (!startup->attributes ||
+        !InitializeProcThreadAttributeList(startup->attributes, 1, 0, &attribute_bytes)) {
+        if (startup->attributes) mem_free(startup->attributes);
+        CloseHandle(startup->stdin_copy);
+        return false;
+    }
+
+    HANDLE inherited[3];
+    SIZE_T inherited_count = 0;
+    inherited[inherited_count++] = stdout_handle;
+    if (stderr_handle != stdout_handle) inherited[inherited_count++] = stderr_handle;
+    inherited[inherited_count++] = startup->stdin_copy;
+    if (!UpdateProcThreadAttribute(startup->attributes, 0,
+            PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
+            inherited_count * sizeof(HANDLE), NULL, NULL)) {
+        DeleteProcThreadAttributeList(startup->attributes);
+        mem_free(startup->attributes);
+        CloseHandle(startup->stdin_copy);
+        return false;
+    }
+
+    startup->info.StartupInfo.cb = sizeof(startup->info);
+    startup->info.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    startup->info.StartupInfo.hStdOutput = stdout_handle;
+    startup->info.StartupInfo.hStdError = stderr_handle;
+    startup->info.StartupInfo.hStdInput = startup->stdin_copy;
+    startup->info.lpAttributeList = startup->attributes;
+    return true;
+}
+
+static void win_restricted_startup_destroy(WinRestrictedStartup* startup) {
+    if (startup->attributes) {
+        DeleteProcThreadAttributeList(startup->attributes);
+        mem_free(startup->attributes);
+    }
+    if (startup->stdin_copy != INVALID_HANDLE_VALUE) CloseHandle(startup->stdin_copy);
+    memset(startup, 0, sizeof(*startup));
+}
+
 static DWORD WINAPI win_capture_thread_main(LPVOID data) {
     WinCaptureThread* context = (WinCaptureThread*)data;
     context->ok = true;
@@ -201,28 +320,36 @@ static DWORD WINAPI win_capture_thread_main(LPVOID data) {
     return 0;
 }
 
+#define SHELL_READER_SHUTDOWN_MS 1000
+
+static void win_finish_capture_thread(HANDLE thread, HANDLE pipe) {
+    if (!thread) return;
+    if (WaitForSingleObject(thread, SHELL_READER_SHUTDOWN_MS) == WAIT_TIMEOUT) {
+        // A descendant outside our job may still own the write end. Cancel the
+        // blocking read so a failed job assignment cannot hang the caller.
+        CancelSynchronousIo(thread);
+        CancelIoEx(pipe, NULL);
+    }
+    WaitForSingleObject(thread, INFINITE);
+}
+
 #else // POSIX
 
-static char* posix_read_fd(int fd, size_t* out_len) {
-    size_t cap = 4096;
-    size_t len = 0;
-    char* buf = (char*)mem_alloc(cap, MEM_CAT_TEMP);
-    if (!buf) return NULL;
-
-    for (;;) {
-        if (len + 1024 > cap) {
-            cap *= 2;
-            char* nb = (char*)mem_realloc(buf, cap, MEM_CAT_TEMP);
-            if (!nb) { mem_free(buf); return NULL; }
-            buf = nb;
-        }
-        ssize_t n = read(fd, buf + len, cap - len - 1);
-        if (n <= 0) break;
-        len += (size_t)n;
+static bool posix_pipe_cloexec(int descriptors[2]) {
+    if (pipe(descriptors) != 0) return false;
+    if (fcntl(descriptors[0], F_SETFD, FD_CLOEXEC) != 0 ||
+        fcntl(descriptors[1], F_SETFD, FD_CLOEXEC) != 0) {
+        close(descriptors[0]);
+        close(descriptors[1]);
+        descriptors[0] = descriptors[1] = -1;
+        return false;
     }
-    buf[len] = '\0';
-    if (out_len) *out_len = len;
-    return buf;
+    return true;
+}
+
+static bool posix_set_nonblocking(int descriptor) {
+    int flags = fcntl(descriptor, F_GETFL, 0);
+    return flags >= 0 && fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0;
 }
 
 static bool shell_env_key_matches(const char* assignment, const char* key) {
@@ -282,10 +409,18 @@ static void shell_free_env(char** env) {
     mem_free(env);
 }
 
-static void shell_kill_process_group(pid_t pid, int signal_number) {
-    if (kill(-pid, signal_number) != 0 && errno == ESRCH) {
-        kill(pid, signal_number);
-    }
+static void shell_signal_process(pid_t pid, bool private_group, int signal_number) {
+    if (private_group && kill(-pid, signal_number) == 0) return;
+    kill(pid, signal_number);
+}
+
+#define SHELL_PROCESS_GROUP_GRACE_MS 100
+
+static int64_t shell_elapsed_ms(const struct timespec* started) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (int64_t)(now.tv_sec - started->tv_sec) * 1000 +
+           (now.tv_nsec - started->tv_nsec) / 1000000;
 }
 
 #endif
@@ -319,30 +454,10 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
     ShellResult result = {0};
     result.exit_code = -1;
 
-    // build command line string from args
-    size_t cmdlen = 0;
-    for (int i = 0; args && args[i]; i++) {
-        cmdlen += strlen(args[i]) + 3; // quotes + space
-    }
-    char* cmdline = (char*)mem_alloc(cmdlen + 1, MEM_CAT_TEMP);
+    char* cmdline = win_build_command_line(program, args);
     if (!cmdline) {
         log_error("shell: malloc failed for cmdline");
         return result;
-    }
-    cmdline[0] = '\0';
-    size_t cmdcap = cmdlen + 1;
-    for (int i = 0; args && args[i]; i++) {
-        size_t dlen = strlen(cmdline);
-        if (i > 0) { snprintf(cmdline + dlen, cmdcap - dlen, " "); dlen = strlen(cmdline); }
-        if (i == 2 && args[0] && args[1] &&
-            strcmp(args[0], "cmd") == 0 && strcmp(args[1], "/c") == 0) {
-            snprintf(cmdline + dlen, cmdcap - dlen, "%s", args[i]);
-            continue;
-        }
-        // simple quoting — wrap each arg in double quotes
-        snprintf(cmdline + dlen, cmdcap - dlen, "\""); dlen = strlen(cmdline);
-        snprintf(cmdline + dlen, cmdcap - dlen, "%s", args[i]); dlen = strlen(cmdline);
-        snprintf(cmdline + dlen, cmdcap - dlen, "\"");
     }
 
     WinPipe stdout_pipe = {0}, stderr_pipe = {0};
@@ -386,8 +501,9 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
         }
     }
 
-    if (!shell_capture_init(&stdout_context.capture) ||
-        (!merge && !shell_capture_init(&stderr_context.capture))) {
+    size_t output_limit = shell_output_limit(opts);
+    if (!shell_capture_init(&stdout_context.capture, output_limit) ||
+        (!merge && !shell_capture_init(&stderr_context.capture, output_limit))) {
         log_error("shell: capture buffer allocation failed");
         shell_capture_discard(&stdout_context.capture);
         shell_capture_discard(&stderr_context.capture);
@@ -402,22 +518,30 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
         return result;
     }
 
-    STARTUPINFOA si;
+    WinRestrictedStartup startup;
     PROCESS_INFORMATION pi;
-    memset(&si, 0, sizeof(si));
     memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = stdout_pipe.write;
-    si.hStdError = merge ? stdout_pipe.write : stderr_pipe.write;
-    si.hStdInput = stdin_handle != INVALID_HANDLE_VALUE
+    HANDLE child_stdin = stdin_handle != INVALID_HANDLE_VALUE
         ? stdin_handle : GetStdHandle(STD_INPUT_HANDLE);
+    if (!win_restricted_startup_init(&startup, stdout_pipe.write,
+            merge ? stdout_pipe.write : stderr_pipe.write, child_stdin)) {
+        log_error("shell: restricted startup initialization failed: %lu", GetLastError());
+        shell_capture_discard(&stdout_context.capture);
+        shell_capture_discard(&stderr_context.capture);
+        CloseHandle(stdout_pipe.read);
+        CloseHandle(stdout_pipe.write);
+        if (!merge) { CloseHandle(stderr_pipe.read); CloseHandle(stderr_pipe.write); }
+        if (stdin_handle != INVALID_HANDLE_VALUE) CloseHandle(stdin_handle);
+        mem_free(cmdline);
+        return result;
+    }
 
     // set working directory
     const char* cwd = (opts && opts->cwd) ? opts->cwd : NULL;
     char* child_env = win_build_env_block(opts ? opts->env : NULL);
     if (opts && opts->env && !child_env) {
         log_error("shell: child environment allocation failed");
+        win_restricted_startup_destroy(&startup);
         shell_capture_discard(&stdout_context.capture);
         shell_capture_discard(&stderr_context.capture);
         CloseHandle(stdout_pipe.read);
@@ -438,9 +562,12 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
         SetInformationJobObject(job, JobObjectExtendedLimitInformation,
                                 &limit, sizeof(limit));
     }
-    DWORD creation_flags = CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP;
-    BOOL created = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE,
-                                  creation_flags, child_env, cwd, &si, &pi);
+    DWORD creation_flags = CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP |
+                           EXTENDED_STARTUPINFO_PRESENT;
+    BOOL created = CreateProcessA(program, cmdline, NULL, NULL, TRUE,
+                                  creation_flags, child_env, cwd,
+                                  &startup.info.StartupInfo, &pi);
+    win_restricted_startup_destroy(&startup);
     mem_free(child_env);
     // close write ends in parent
     CloseHandle(stdout_pipe.write);
@@ -462,7 +589,11 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
         CloseHandle(job);
         job = NULL;
     }
-    ResumeThread(pi.hThread);
+    if (ResumeThread(pi.hThread) == (DWORD)-1) {
+        log_error("SHELL-RESUME-WIN32: failed to resume child: %lu", GetLastError());
+        if (job) TerminateJobObject(job, 1);
+        else TerminateProcess(pi.hProcess, 1);
+    }
 
     stdout_context.pipe = stdout_pipe.read;
     HANDLE stdout_thread = CreateThread(NULL, 0, win_capture_thread_main,
@@ -490,18 +621,31 @@ static ShellResult shell_exec_win32(const char* program, const char** args,
         else TerminateProcess(pi.hProcess, 1);
         WaitForSingleObject(pi.hProcess, 1000);
         result.timed_out = true;
+    } else if (wait_result == WAIT_FAILED) {
+        log_error("SHELL-WAIT-WIN32: process wait failed: %lu", GetLastError());
+        if (job) TerminateJobObject(job, 1);
+        else TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 1000);
     }
 
     DWORD exit_code = 0;
     GetExitCodeProcess(pi.hProcess, &exit_code);
     result.exit_code = (int)exit_code;
 
-    if (stdout_thread) WaitForSingleObject(stdout_thread, INFINITE);
-    if (stderr_thread) WaitForSingleObject(stderr_thread, INFINITE);
+    // Closing a kill-on-close job after the root exits prevents descendants
+    // from retaining capture handles and blocking the reader threads forever.
+    if (job) {
+        CloseHandle(job);
+        job = NULL;
+    }
+    win_finish_capture_thread(stdout_thread, stdout_pipe.read);
+    win_finish_capture_thread(stderr_thread, stderr_pipe.read);
     result.stdout_buf = shell_capture_take(&stdout_context.capture, &result.stdout_len);
     if (!merge) {
         result.stderr_buf = shell_capture_take(&stderr_context.capture, &result.stderr_len);
     }
+    result.output_limit_exceeded = stdout_context.capture.limit_hit ||
+                                   stderr_context.capture.limit_hit;
 
     if (stdout_thread) CloseHandle(stdout_thread);
     if (stderr_thread) CloseHandle(stderr_thread);
@@ -529,15 +673,27 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
     ShellCapture stderr_capture = {0};
 
     pthread_mutex_lock(&shell_spawn_mutex);
-    if (pipe(stdout_pipe) < 0) {
+    if (!posix_pipe_cloexec(stdout_pipe)) {
         log_error("shell: pipe() failed: %s", strerror(errno));
         pthread_mutex_unlock(&shell_spawn_mutex);
         return result;
     }
-    if (!merge && pipe(stderr_pipe) < 0) {
+    if (!merge && !posix_pipe_cloexec(stderr_pipe)) {
         log_error("shell: pipe() failed: %s", strerror(errno));
         close(stdout_pipe[0]);
         close(stdout_pipe[1]);
+        pthread_mutex_unlock(&shell_spawn_mutex);
+        return result;
+    }
+    if (!posix_set_nonblocking(stdout_pipe[0]) ||
+        (!merge && !posix_set_nonblocking(stderr_pipe[0]))) {
+        log_error("SHELL-NONBLOCKING-PIPE: fcntl failed: %s", strerror(errno));
+        close(stdout_pipe[0]);
+        close(stdout_pipe[1]);
+        if (!merge) {
+            close(stderr_pipe[0]);
+            close(stderr_pipe[1]);
+        }
         pthread_mutex_unlock(&shell_spawn_mutex);
         return result;
     }
@@ -555,8 +711,9 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
             return result;
         }
     }
-    if (!shell_capture_init(&stdout_capture) ||
-        (!merge && !shell_capture_init(&stderr_capture))) {
+    size_t output_limit = shell_output_limit(opts);
+    if (!shell_capture_init(&stdout_capture, output_limit) ||
+        (!merge && !shell_capture_init(&stderr_capture, output_limit))) {
         log_error("shell: capture buffer allocation failed");
         shell_capture_discard(&stdout_capture);
         shell_capture_discard(&stderr_capture);
@@ -600,11 +757,13 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
     short spawn_flags = 0;
+    bool private_group = false;
 #ifdef POSIX_SPAWN_SETPGROUP
-    // Give each launch a private group so timeout cleanup cannot leave descendants running.
-    posix_spawnattr_setpgroup(&attr, 0);
-    spawn_flags |= POSIX_SPAWN_SETPGROUP;
-    posix_spawnattr_setflags(&attr, spawn_flags);
+    // Give each launch a private group so cleanup cannot leave descendants running.
+    if (posix_spawnattr_setpgroup(&attr, 0) == 0) {
+        spawn_flags |= POSIX_SPAWN_SETPGROUP;
+        private_group = posix_spawnattr_setflags(&attr, spawn_flags) == 0;
+    }
 #endif
 
     char** child_env = shell_build_env(opts ? opts->env : NULL);
@@ -650,15 +809,12 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
     }
 
     // Drain both pipes while the child runs; waiting first can deadlock once a pipe fills.
-    fcntl(stdout_pipe[0], F_SETFL, fcntl(stdout_pipe[0], F_GETFL, 0) | O_NONBLOCK);
-    if (!merge) {
-        fcntl(stderr_pipe[0], F_SETFL, fcntl(stderr_pipe[0], F_GETFL, 0) | O_NONBLOCK);
-    }
-
     bool stdout_open = true;
     bool stderr_open = !merge;
     bool child_done = false;
+    bool wait_failed = false;
     bool terminate_sent = false;
+    int64_t termination_started_ms = -1;
     int status = 0;
     struct timespec started;
     clock_gettime(CLOCK_MONOTONIC, &started);
@@ -716,32 +872,34 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
             else if (waited < 0 && errno != EINTR) {
                 log_error("shell: waitpid failed: %s", strerror(errno));
                 child_done = true;
-                status = 0;
+                wait_failed = true;
             }
         }
 
-        if (!child_done && opts && opts->timeout_ms > 0) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            int64_t elapsed_ms = (int64_t)(now.tv_sec - started.tv_sec) * 1000 +
-                (now.tv_nsec - started.tv_nsec) / 1000000;
-            if (elapsed_ms >= opts->timeout_ms) {
-                // The private process group is the invariant that makes timeout cleanup complete.
-                if (!terminate_sent) {
-                    shell_kill_process_group(pid, SIGTERM);
-                    terminate_sent = true;
-                } else if (elapsed_ms >= opts->timeout_ms + 100) {
-                    shell_kill_process_group(pid, SIGKILL);
-                }
-                result.timed_out = true;
-            }
+        int64_t elapsed_ms = shell_elapsed_ms(&started);
+        bool pipes_open = stdout_open || stderr_open;
+        bool timed_out = opts && opts->timeout_ms > 0 &&
+                         elapsed_ms >= opts->timeout_ms;
+        if ((timed_out || (child_done && pipes_open)) && !terminate_sent) {
+            // The private group owns descendants that could otherwise keep a
+            // capture pipe open after the launched process has completed.
+            shell_signal_process(pid, private_group, SIGTERM);
+            terminate_sent = true;
+            termination_started_ms = elapsed_ms;
         }
+        if (terminate_sent && pipes_open &&
+            elapsed_ms >= termination_started_ms + SHELL_PROCESS_GROUP_GRACE_MS) {
+            shell_signal_process(pid, private_group, SIGKILL);
+        }
+        if (timed_out) result.timed_out = true;
     }
 
     if (!child_done) {
         while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {}
     }
-    if (WIFEXITED(status)) {
+    if (wait_failed) {
+        result.exit_code = -1;
+    } else if (WIFEXITED(status)) {
         result.exit_code = WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
         result.exit_code = 128 + WTERMSIG(status);
@@ -753,6 +911,7 @@ static ShellResult shell_exec_posix(const char* program, const char** args,
     if (!merge) {
         result.stderr_buf = shell_capture_take(&stderr_capture, &result.stderr_len);
     }
+    result.output_limit_exceeded = stdout_capture.limit_hit || stderr_capture.limit_hit;
 
     return result;
 }
@@ -820,16 +979,19 @@ struct ShellProcess {
 #ifdef _WIN32
     HANDLE hProcess;
     HANDLE hThread;
+    HANDLE job;
     HANDLE stdout_read;
     HANDLE stderr_read;
 #else
     pid_t pid;
     int stdout_fd;
     int stderr_fd;
+    bool private_group;
 #endif
     bool finished;
     int exit_code;
     bool merge_stderr;
+    size_t output_limit;
 };
 
 #ifdef _WIN32
@@ -843,21 +1005,10 @@ ShellProcess* shell_spawn(const char* program, const char** args,
 
     bool merge = opts && opts->merge_stderr;
     proc->merge_stderr = merge;
+    proc->output_limit = shell_output_limit(opts);
 
-    // build command line
-    size_t cmdlen = 0;
-    for (int i = 0; args[i]; i++) cmdlen += strlen(args[i]) + 3;
-    char* cmdline = (char*)mem_alloc(cmdlen + 1, MEM_CAT_TEMP);
+    char* cmdline = win_build_command_line(program, args);
     if (!cmdline) { mem_free(proc); return NULL; }
-    cmdline[0] = '\0';
-    size_t cmdcap = cmdlen + 1;
-    for (int i = 0; args[i]; i++) {
-        size_t dlen = strlen(cmdline);
-        if (i > 0) { snprintf(cmdline + dlen, cmdcap - dlen, " "); dlen = strlen(cmdline); }
-        snprintf(cmdline + dlen, cmdcap - dlen, "\""); dlen = strlen(cmdline);
-        snprintf(cmdline + dlen, cmdcap - dlen, "%s", args[i]); dlen = strlen(cmdline);
-        snprintf(cmdline + dlen, cmdcap - dlen, "\"");
-    }
 
     WinPipe stdout_pipe = {0}, stderr_pipe = {0};
     if (!win_create_pipe(&stdout_pipe)) { mem_free(cmdline); mem_free(proc); return NULL; }
@@ -868,18 +1019,35 @@ ShellProcess* shell_spawn(const char* program, const char** args,
     SetHandleInformation(stdout_pipe.read, HANDLE_FLAG_INHERIT, 0);
     if (!merge) SetHandleInformation(stderr_pipe.read, HANDLE_FLAG_INHERIT, 0);
 
-    STARTUPINFOA si;
+    WinRestrictedStartup startup;
     PROCESS_INFORMATION pi;
-    memset(&si, 0, sizeof(si));
     memset(&pi, 0, sizeof(pi));
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = stdout_pipe.write;
-    si.hStdError = merge ? stdout_pipe.write : stderr_pipe.write;
-    si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    if (!win_restricted_startup_init(&startup, stdout_pipe.write,
+            merge ? stdout_pipe.write : stderr_pipe.write,
+            GetStdHandle(STD_INPUT_HANDLE))) {
+        CloseHandle(stdout_pipe.read); CloseHandle(stdout_pipe.write);
+        if (!merge) { CloseHandle(stderr_pipe.read); CloseHandle(stderr_pipe.write); }
+        mem_free(cmdline); mem_free(proc);
+        return NULL;
+    }
+
+    HANDLE job = CreateJobObjectA(NULL, NULL);
+    if (job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit = {0};
+        limit.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+                                     &limit, sizeof(limit))) {
+            CloseHandle(job);
+            job = NULL;
+        }
+    }
 
     const char* cwd = (opts && opts->cwd) ? opts->cwd : NULL;
-    BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, TRUE, 0, NULL, cwd, &si, &pi);
+    BOOL ok = CreateProcessA(program, cmdline, NULL, NULL, TRUE,
+                             CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP |
+                             EXTENDED_STARTUPINFO_PRESENT, NULL, cwd,
+                             &startup.info.StartupInfo, &pi);
+    win_restricted_startup_destroy(&startup);
     CloseHandle(stdout_pipe.write);
     if (!merge) CloseHandle(stderr_pipe.write);
     mem_free(cmdline);
@@ -888,11 +1056,28 @@ ShellProcess* shell_spawn(const char* program, const char** args,
         log_error("shell_spawn: CreateProcess failed: %lu", GetLastError());
         CloseHandle(stdout_pipe.read);
         if (!merge) CloseHandle(stderr_pipe.read);
+        if (job) CloseHandle(job);
+        mem_free(proc);
+        return NULL;
+    }
+    if (job && !AssignProcessToJobObject(job, pi.hProcess)) {
+        CloseHandle(job);
+        job = NULL;
+    }
+    if (ResumeThread(pi.hThread) == (DWORD)-1) {
+        if (job) TerminateJobObject(job, 1);
+        else TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        CloseHandle(stdout_pipe.read);
+        if (!merge) CloseHandle(stderr_pipe.read);
+        if (job) CloseHandle(job);
         mem_free(proc);
         return NULL;
     }
     proc->hProcess = pi.hProcess;
     proc->hThread = pi.hThread;
+    proc->job = job;
     proc->stdout_read = stdout_pipe.read;
     proc->stderr_read = merge ? INVALID_HANDLE_VALUE : stderr_pipe.read;
     return proc;
@@ -916,12 +1101,41 @@ ShellResult shell_process_wait(ShellProcess* proc, int timeout_ms) {
     result.exit_code = -1;
     if (!proc) return result;
 
+    WinCaptureThread stdout_context = {0};
+    WinCaptureThread stderr_context = {0};
+    if (!shell_capture_init(&stdout_context.capture, proc->output_limit) ||
+        (!proc->merge_stderr &&
+         !shell_capture_init(&stderr_context.capture, proc->output_limit))) {
+        shell_capture_discard(&stdout_context.capture);
+        shell_capture_discard(&stderr_context.capture);
+        return result;
+    }
+    stdout_context.pipe = proc->stdout_read;
+    HANDLE stdout_thread = CreateThread(NULL, 0, win_capture_thread_main,
+                                        &stdout_context, 0, NULL);
+    HANDLE stderr_thread = NULL;
+    if (!proc->merge_stderr) {
+        stderr_context.pipe = proc->stderr_read;
+        stderr_thread = CreateThread(NULL, 0, win_capture_thread_main,
+                                     &stderr_context, 0, NULL);
+    }
+    if (!stdout_thread || (!proc->merge_stderr && !stderr_thread)) {
+        if (proc->job) TerminateJobObject(proc->job, 1);
+        else TerminateProcess(proc->hProcess, 1);
+    }
+
     DWORD wait_ms = (timeout_ms > 0) ? (DWORD)timeout_ms : INFINITE;
     DWORD wr = WaitForSingleObject(proc->hProcess, wait_ms);
     if (wr == WAIT_TIMEOUT) {
-        TerminateProcess(proc->hProcess, 1);
+        if (proc->job) TerminateJobObject(proc->job, 1);
+        else TerminateProcess(proc->hProcess, 1);
         WaitForSingleObject(proc->hProcess, 1000);
         result.timed_out = true;
+    } else if (wr == WAIT_FAILED) {
+        log_error("SHELL-BACKGROUND-WAIT-WIN32: process wait failed: %lu", GetLastError());
+        if (proc->job) TerminateJobObject(proc->job, 1);
+        else TerminateProcess(proc->hProcess, 1);
+        WaitForSingleObject(proc->hProcess, 1000);
     }
     DWORD code;
     GetExitCodeProcess(proc->hProcess, &code);
@@ -929,15 +1143,26 @@ ShellResult shell_process_wait(ShellProcess* proc, int timeout_ms) {
     proc->finished = true;
     proc->exit_code = result.exit_code;
 
-    result.stdout_buf = win_read_pipe(proc->stdout_read, &result.stdout_len);
-    if (!proc->merge_stderr && proc->stderr_read != INVALID_HANDLE_VALUE) {
-        result.stderr_buf = win_read_pipe(proc->stderr_read, &result.stderr_len);
+    if (proc->job) {
+        CloseHandle(proc->job);
+        proc->job = NULL;
     }
+    win_finish_capture_thread(stdout_thread, proc->stdout_read);
+    win_finish_capture_thread(stderr_thread, proc->stderr_read);
+    result.stdout_buf = shell_capture_take(&stdout_context.capture, &result.stdout_len);
+    if (!proc->merge_stderr) {
+        result.stderr_buf = shell_capture_take(&stderr_context.capture, &result.stderr_len);
+    }
+    result.output_limit_exceeded = stdout_context.capture.limit_hit ||
+                                   stderr_context.capture.limit_hit;
+    if (stdout_thread) CloseHandle(stdout_thread);
+    if (stderr_thread) CloseHandle(stderr_thread);
     return result;
 }
 
 bool shell_process_kill(ShellProcess* proc) {
     if (!proc || proc->finished) return false;
+    if (proc->job) return TerminateJobObject(proc->job, 1) != 0;
     return TerminateProcess(proc->hProcess, 1) != 0;
 }
 
@@ -945,6 +1170,7 @@ void shell_process_free(ShellProcess* proc) {
     if (!proc) return;
     CloseHandle(proc->hProcess);
     CloseHandle(proc->hThread);
+    if (proc->job) CloseHandle(proc->job);
     CloseHandle(proc->stdout_read);
     if (!proc->merge_stderr && proc->stderr_read != INVALID_HANDLE_VALUE)
         CloseHandle(proc->stderr_read);
@@ -962,18 +1188,31 @@ ShellProcess* shell_spawn(const char* program, const char** args,
 
     bool merge = opts && opts->merge_stderr;
     proc->merge_stderr = merge;
+    proc->output_limit = shell_output_limit(opts);
 
     int stdout_pipe[2] = {-1, -1};
     int stderr_pipe[2] = {-1, -1};
 
-    if (pipe(stdout_pipe) < 0) {
+    pthread_mutex_lock(&shell_spawn_mutex);
+    if (!posix_pipe_cloexec(stdout_pipe)) {
         log_error("shell_spawn: pipe() failed: %s", strerror(errno));
+        pthread_mutex_unlock(&shell_spawn_mutex);
         mem_free(proc);
         return NULL;
     }
-    if (!merge && pipe(stderr_pipe) < 0) {
+    if (!merge && !posix_pipe_cloexec(stderr_pipe)) {
         log_error("shell_spawn: pipe() failed: %s", strerror(errno));
         close(stdout_pipe[0]); close(stdout_pipe[1]);
+        pthread_mutex_unlock(&shell_spawn_mutex);
+        mem_free(proc);
+        return NULL;
+    }
+    if (!posix_set_nonblocking(stdout_pipe[0]) ||
+        (!merge && !posix_set_nonblocking(stderr_pipe[0]))) {
+        log_error("SHELL-BACKGROUND-NONBLOCKING-PIPE: fcntl failed: %s", strerror(errno));
+        close(stdout_pipe[0]); close(stdout_pipe[1]);
+        if (!merge) { close(stderr_pipe[0]); close(stderr_pipe[1]); }
+        pthread_mutex_unlock(&shell_spawn_mutex);
         mem_free(proc);
         return NULL;
     }
@@ -997,6 +1236,14 @@ ShellProcess* shell_spawn(const char* program, const char** args,
 
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
+    short spawn_flags = 0;
+    bool private_group = false;
+#ifdef POSIX_SPAWN_SETPGROUP
+    if (posix_spawnattr_setpgroup(&attr, 0) == 0) {
+        spawn_flags |= POSIX_SPAWN_SETPGROUP;
+        private_group = posix_spawnattr_setflags(&attr, spawn_flags) == 0;
+    }
+#endif
     pid_t pid;
     int err = posix_spawnp(&pid, program, &actions, &attr,
                            (char* const*)args, environ);
@@ -1006,6 +1253,7 @@ ShellProcess* shell_spawn(const char* program, const char** args,
 
     close(stdout_pipe[1]);
     if (!merge) close(stderr_pipe[1]);
+    pthread_mutex_unlock(&shell_spawn_mutex);
 
     if (err != 0) {
         log_error("shell_spawn: posix_spawnp failed for '%s': %s", program, strerror(err));
@@ -1015,11 +1263,8 @@ ShellProcess* shell_spawn(const char* program, const char** args,
         return NULL;
     }
 
-    // set read ends as non-blocking
-    fcntl(stdout_pipe[0], F_SETFL, O_NONBLOCK);
-    if (!merge) fcntl(stderr_pipe[0], F_SETFL, O_NONBLOCK);
-
     proc->pid = pid;
+    proc->private_group = private_group;
     proc->stdout_fd = stdout_pipe[0];
     proc->stderr_fd = merge ? -1 : stderr_pipe[0];
     return proc;
@@ -1035,6 +1280,12 @@ bool shell_process_poll(ShellProcess* proc) {
                         : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1);
         return true;
     }
+    if (wr < 0 && errno != EINTR) {
+        log_error("SHELL-BACKGROUND-POLL: waitpid failed: %s", strerror(errno));
+        proc->finished = true;
+        proc->exit_code = -1;
+        return true;
+    }
     return false;
 }
 
@@ -1043,53 +1294,102 @@ ShellResult shell_process_wait(ShellProcess* proc, int timeout_ms) {
     result.exit_code = -1;
     if (!proc) return result;
 
-    if (timeout_ms > 0) {
-        int elapsed = 0;
-        int interval = 10;
-        while (elapsed < timeout_ms) {
-            if (shell_process_poll(proc)) break;
-            struct timespec ts = {0, interval * 1000000L};
-            nanosleep(&ts, NULL);
-            elapsed += interval;
-        }
-        if (!proc->finished) {
-            kill(proc->pid, SIGTERM);
-            struct timespec grace = {0, 100000000L};
-            nanosleep(&grace, NULL);
-            if (!shell_process_poll(proc)) {
-                kill(proc->pid, SIGKILL);
-                int status;
-                waitpid(proc->pid, &status, 0);
-                proc->finished = true;
+    ShellCapture stdout_capture = {0};
+    ShellCapture stderr_capture = {0};
+    if (!shell_capture_init(&stdout_capture, proc->output_limit) ||
+        (!proc->merge_stderr &&
+         !shell_capture_init(&stderr_capture, proc->output_limit))) {
+        shell_capture_discard(&stdout_capture);
+        shell_capture_discard(&stderr_capture);
+        return result;
+    }
+
+    bool stdout_open = proc->stdout_fd >= 0;
+    bool stderr_open = proc->stderr_fd >= 0;
+    bool child_done = proc->finished;
+    bool terminate_sent = false;
+    int64_t termination_started_ms = -1;
+    struct timespec started;
+    clock_gettime(CLOCK_MONOTONIC, &started);
+
+    while (!child_done || stdout_open || stderr_open) {
+        struct pollfd fds[2];
+        nfds_t nfds = 0;
+        if (stdout_open) fds[nfds++] = (struct pollfd){proc->stdout_fd, POLLIN | POLLHUP, 0};
+        if (stderr_open) fds[nfds++] = (struct pollfd){proc->stderr_fd, POLLIN | POLLHUP, 0};
+        if (nfds > 0) poll(fds, nfds, 10);
+
+        for (nfds_t i = 0; i < nfds; i++) {
+            if (!(fds[i].revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL))) continue;
+            bool is_stdout = fds[i].fd == proc->stdout_fd;
+            ShellCapture* capture = is_stdout ? &stdout_capture : &stderr_capture;
+            bool* open_flag = is_stdout ? &stdout_open : &stderr_open;
+            for (;;) {
+                char buffer[4096];
+                ssize_t count = read(fds[i].fd, buffer, sizeof(buffer));
+                if (count > 0) {
+                    if (!shell_capture_append(capture, buffer, (size_t)count)) {
+                        log_error("SHELL-BACKGROUND-CAPTURE: allocation failed");
+                        close(fds[i].fd);
+                        *open_flag = false;
+                    }
+                    if (*open_flag) continue;
+                } else if (count == 0 || (count < 0 && errno != EAGAIN && errno != EINTR)) {
+                    close(fds[i].fd);
+                    *open_flag = false;
+                }
+                break;
             }
-            result.timed_out = true;
         }
-    } else {
-        int status;
-        waitpid(proc->pid, &status, 0);
-        proc->finished = true;
-        proc->exit_code = WIFEXITED(status) ? WEXITSTATUS(status)
-                        : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1);
+
+        if (!child_done) {
+            int status = 0;
+            int waited = waitpid(proc->pid, &status, WNOHANG);
+            if (waited == proc->pid) {
+                child_done = true;
+                proc->finished = true;
+                proc->exit_code = WIFEXITED(status) ? WEXITSTATUS(status)
+                                : (WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1);
+            } else if (waited < 0 && errno != EINTR) {
+                // A failed reap cannot become ready later; keep draining any inherited pipe data.
+                log_error("SHELL-BACKGROUND-WAIT: waitpid failed: %s", strerror(errno));
+                child_done = true;
+                proc->finished = true;
+                proc->exit_code = -1;
+            }
+        }
+
+        int64_t elapsed_ms = shell_elapsed_ms(&started);
+        bool pipes_open = stdout_open || stderr_open;
+        bool timed_out = timeout_ms > 0 && elapsed_ms >= timeout_ms;
+        if ((timed_out || (child_done && pipes_open)) && !terminate_sent) {
+            shell_signal_process(proc->pid, proc->private_group, SIGTERM);
+            terminate_sent = true;
+            termination_started_ms = elapsed_ms;
+        }
+        if (terminate_sent && pipes_open &&
+            elapsed_ms >= termination_started_ms + SHELL_PROCESS_GROUP_GRACE_MS) {
+            shell_signal_process(proc->pid, proc->private_group, SIGKILL);
+        }
+        if (timed_out) result.timed_out = true;
     }
 
+    proc->stdout_fd = -1;
+    proc->stderr_fd = -1;
     result.exit_code = proc->exit_code;
-
-    // set fds back to blocking for final read
-    if (proc->stdout_fd >= 0) {
-        fcntl(proc->stdout_fd, F_SETFL, 0);
-        result.stdout_buf = posix_read_fd(proc->stdout_fd, &result.stdout_len);
+    result.stdout_buf = shell_capture_take(&stdout_capture, &result.stdout_len);
+    if (!proc->merge_stderr) {
+        result.stderr_buf = shell_capture_take(&stderr_capture, &result.stderr_len);
     }
-    if (proc->stderr_fd >= 0) {
-        fcntl(proc->stderr_fd, F_SETFL, 0);
-        result.stderr_buf = posix_read_fd(proc->stderr_fd, &result.stderr_len);
-    }
+    result.output_limit_exceeded = stdout_capture.limit_hit || stderr_capture.limit_hit;
 
     return result;
 }
 
 bool shell_process_kill(ShellProcess* proc) {
     if (!proc || proc->finished) return false;
-    return kill(proc->pid, SIGTERM) == 0;
+    if (proc->private_group && kill(-proc->pid, SIGTERM) == 0) return true;
+    return (!proc->private_group || errno == ESRCH) && kill(proc->pid, SIGTERM) == 0;
 }
 
 void shell_process_free(ShellProcess* proc) {

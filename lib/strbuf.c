@@ -1,12 +1,14 @@
 #include "strbuf.h"
 #include "str.h"
 #include "grow_capacity.h"
+#include "math_checked.hpp"
 #include <string.h>
 #include <stdint.h>
 
 #define INITIAL_CAPACITY 32
 
 StrBuf* _strbuf_new_cap(size_t size) {
+    if (size == 0) size = 1;
     StrBuf *sb = (StrBuf*) malloc(sizeof(StrBuf));
     if (!sb) return NULL;
     sb->str = (char*) malloc(size);
@@ -26,8 +28,11 @@ StrBuf* strbuf_new() {
 
 
 StrBuf* strbuf_create(const char *str) {
+    if (!str) return NULL;
     size_t str_len = strlen(str);
-    StrBuf *sbuf = strbuf_new_cap(str_len + 1);
+    size_t capacity = 0;
+    if (!math_checked_add(str_len, 1, &capacity)) return NULL;
+    StrBuf *sbuf = strbuf_new_cap(capacity);
     if (!sbuf) return NULL;
     str_copy(sbuf->str, str_len + 1, str, str_len);
     sbuf->length = str_len;
@@ -35,11 +40,13 @@ StrBuf* strbuf_create(const char *str) {
 }
 
 void strbuf_free(StrBuf *sb) {
+    if (!sb) return;
     if (sb->str) free(sb->str);
     free(sb);
 }
 
 void strbuf_reset(StrBuf *sb) {
+    if (!sb) return;
     if (sb->str) {
         sb->str[0] = '\0';
         sb->length = 0;
@@ -47,12 +54,14 @@ void strbuf_reset(StrBuf *sb) {
 }
 
 void strbuf_full_reset(StrBuf *sb) {
+    if (!sb) return;
     sb->str = NULL;
     sb->length = 0;
     sb->capacity = 0;
 }
 
 bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
+    if (!sb) return false;
     if (min_capacity <= sb->capacity) return true;
 
     // Check for unreasonable allocation sizes to prevent overflow
@@ -69,10 +78,19 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
     return true;
 }
 
+static bool strbuf_required_capacity(const StrBuf* sb, size_t append_length,
+                                     size_t* required) {
+    size_t content_length = 0;
+    return sb && math_checked_add(sb->length, append_length, &content_length) &&
+           math_checked_add(content_length, 1, required);
+}
+
 void strbuf_append_str(StrBuf *sb, const char *str) {
     if (!str) return;
     size_t str_len = strlen(str);
-    if (!strbuf_ensure_cap(sb, sb->length + str_len + 1)) return;
+    size_t required = 0;
+    if (!strbuf_required_capacity(sb, str_len, &required) ||
+        !strbuf_ensure_cap(sb, required)) return;
     str_copy(sb->str + sb->length, str_len + 1, str, str_len);
     sb->length += str_len;
 }
@@ -81,12 +99,16 @@ void strbuf_append_str(StrBuf *sb, const char *str) {
 // strlen(__str) must be >= __n
 void strbuf_append_str_n(StrBuf *sb, const char *str, size_t len) {
     if (!str) return;
-    if (!strbuf_ensure_cap(sb, sb->length + len + 1)) return;
+    size_t required = 0;
+    if (!strbuf_required_capacity(sb, len, &required) ||
+        !strbuf_ensure_cap(sb, required)) return;
     str_copy(sb->str + sb->length, len + 1, str, len);
     sb->length += len;
 }
 void strbuf_append_char(StrBuf *sb, char c) {
-    if (!strbuf_ensure_cap(sb, sb->length + 2)) return;
+    size_t required = 0;
+    if (!strbuf_required_capacity(sb, 1, &required) ||
+        !strbuf_ensure_cap(sb, required)) return;
     sb->str[sb->length] = c;
     sb->str[sb->length + 1] = '\0';
     sb->length++;
@@ -102,7 +124,9 @@ bool strbuf_append_utf8(StrBuf *sb, uint32_t codepoint) {
 
 // append char `c` `n` times
 void strbuf_append_char_n(StrBuf *buf, char c, size_t n) {
-    if (!strbuf_ensure_cap(buf, buf->length + n + 1)) return;
+    size_t required = 0;
+    if (!strbuf_required_capacity(buf, n, &required) ||
+        !strbuf_ensure_cap(buf, required)) return;
     str_fill(buf->str + buf->length, n, c);
     buf->length += n;
     buf->str[buf->length] = '\0';
@@ -165,7 +189,7 @@ void strbuf_append_format(StrBuf *sb, const char *format, ...) {
 }
 
 void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args) {
-    if (!format) return;
+    if (!sb || !format) return;
     va_list args_copy;
     va_copy(args_copy, args);
 
@@ -173,24 +197,36 @@ void strbuf_vappend_format(StrBuf *sb, const char *format, va_list args) {
     va_end(args_copy);
 
     if (size < 0) return;
-    if (!strbuf_ensure_cap(sb, sb->length + size + 1)) return;
+    size_t required = 0;
+    if (!strbuf_required_capacity(sb, (size_t)size, &required) ||
+        !strbuf_ensure_cap(sb, required)) return;
 
-    size = vsnprintf(sb->str + sb->length, sb->capacity - sb->length, format, args);
-    if (size < 0) return;
-    sb->length += size;
+    int written = vsnprintf(sb->str + sb->length, sb->capacity - sb->length,
+                            format, args);
+    if (written < 0 || written > size) {
+        sb->str[sb->length] = '\0';
+        return;
+    }
+    sb->length += (size_t)written;
     sb->str[sb->length] = '\0';  // Ensure null termination
 }
 
 void strbuf_copy(StrBuf *dst, const StrBuf *src) {
     if (!dst || !src) return;
+    if (dst == src) return;
     strbuf_reset(dst);
-    if (!strbuf_ensure_cap(dst, src->length + 1)) return;
+    size_t required = 0;
+    if (!math_checked_add(src->length, 1, &required) ||
+        !strbuf_ensure_cap(dst, required)) return;
     str_copy(dst->str, src->length + 1, src->str, src->length);
     dst->length = src->length;
 }
 
 StrBuf* strbuf_dup(const StrBuf *sb) {
-    StrBuf *new_sb = strbuf_new_cap(sb->length + 1);
+    if (!sb) return NULL;
+    size_t capacity = 0;
+    if (!math_checked_add(sb->length, 1, &capacity)) return NULL;
+    StrBuf *new_sb = strbuf_new_cap(capacity);
     if (!new_sb) return NULL;
     strbuf_copy(new_sb, sb);
     return new_sb;
@@ -199,7 +235,9 @@ StrBuf* strbuf_dup(const StrBuf *sb) {
 void strbuf_append_uint64(StrBuf *buf, uint64_t value) {
     if (!buf) return;
     size_t length = str_uint64_decimal_len(value);
-    if (!strbuf_ensure_cap(buf, buf->length + length + 1)) return;
+    size_t required = 0;
+    if (!strbuf_required_capacity(buf, length, &required) ||
+        !strbuf_ensure_cap(buf, required)) return;
     str_uint64_decimal_write(buf->str + buf->length, value);
     buf->length += length;
     buf->str[buf->length] = '\0';
@@ -224,28 +262,32 @@ void strbuf_append_int64(StrBuf *buf, int64_t value) {
 }
 
 bool strbuf_append_file(StrBuf *sb, FILE *file) {
-    if (!file) return false;
-    fseek(file, 0, SEEK_END);
+    if (!sb || !file) return false;
+    if (fseek(file, 0, SEEK_END) != 0) return false;
     long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
+    if (fseek(file, 0, SEEK_SET) != 0) return false;
 
     if (size < 0) return false;
-    if (!strbuf_ensure_cap(sb, sb->length + size + 1)) return false;
+    size_t required = 0;
+    if (!strbuf_required_capacity(sb, (size_t)size, &required) ||
+        !strbuf_ensure_cap(sb, required)) return false;
 
-    size_t read = fread(sb->str + sb->length, 1, size, file);
+    size_t read = fread(sb->str + sb->length, 1, (size_t)size, file);
     sb->length += read;
     sb->str[sb->length] = '\0';
-    return (read >= 0);
+    return read == (size_t)size && !ferror(file);
 }
 
 bool strbuf_append_file_head(StrBuf *sb, FILE *file, size_t n) {
-    if (!file) return false;
-    if (!strbuf_ensure_cap(sb, sb->length + n + 1)) return false;
+    if (!sb || !file) return false;
+    size_t required = 0;
+    if (!strbuf_required_capacity(sb, n, &required) ||
+        !strbuf_ensure_cap(sb, required)) return false;
 
     size_t read = fread(sb->str + sb->length, 1, n, file);
     sb->length += read;
     sb->str[sb->length] = '\0';
-    return (read >= 0);
+    return !ferror(file);
 }
 
 bool strbuf_starts_with(const StrBuf *sb, const char *prefix) {
@@ -276,17 +318,20 @@ bool strbuf_replace_all(StrBuf *sb, const char *needle, const char *replacement)
     }
     if (count == 0) return true;
 
-    if (repl_len > needle_len) {
-        size_t growth = repl_len - needle_len;
-        if (count > (SIZE_MAX - sb->length - 1) / growth) return false;
-    }
-    size_t new_len;
+    size_t new_len = 0;
     if (repl_len >= needle_len) {
-        new_len = sb->length + count * (repl_len - needle_len);
+        size_t growth = 0;
+        if (!math_checked_mul(count, repl_len - needle_len, &growth) ||
+            !math_checked_add(sb->length, growth, &new_len)) return false;
     } else {
-        new_len = sb->length - count * (needle_len - repl_len);
+        size_t shrink = 0;
+        if (!math_checked_mul(count, needle_len - repl_len, &shrink) ||
+            shrink > sb->length) return false;
+        new_len = sb->length - shrink;
     }
-    char *new_str = (char*)malloc(new_len + 1);
+    size_t allocation_size = 0;
+    if (!math_checked_add(new_len, 1, &allocation_size)) return false;
+    char *new_str = (char*)malloc(allocation_size);
     if (!new_str) return false;
 
     size_t src_pos = 0;
@@ -314,6 +359,6 @@ bool strbuf_replace_all(StrBuf *sb, const char *needle, const char *replacement)
     free(sb->str);
     sb->str = new_str;
     sb->length = dst_pos;
-    sb->capacity = new_len + 1;
+    sb->capacity = allocation_size;
     return true;
 }

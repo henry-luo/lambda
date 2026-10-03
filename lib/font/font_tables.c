@@ -170,7 +170,7 @@ const uint8_t* font_tables_find(FontTables* tables, uint32_t tag, uint32_t* out_
         if (tables->dirs[i].tag == tag) {
             uint32_t offset = tables->dirs[i].offset;
             uint32_t length = tables->dirs[i].length;
-            if ((size_t)(offset + length) > tables->data_len) {
+            if (!font_data_range_valid(tables->data_len, (size_t)offset, (size_t)length)) {
                 log_error("font_tables_find: table '%c%c%c%c' extends past data",
                           (char)(tag >> 24), (char)(tag >> 16), (char)(tag >> 8), (char)tag);
                 return NULL;
@@ -450,7 +450,7 @@ CmapTable* font_tables_get_cmap(FontTables* tables) {
         uint16_t encoding_id = rd16(rec + 2);
         uint32_t offset = rd32(rec + 4);
 
-        if (offset + 2 > len) continue;
+        if (!font_data_range_valid((size_t)len, (size_t)offset, 2)) continue;
 
         uint16_t format = rd16(raw + offset);
         int score = 0;
@@ -961,22 +961,22 @@ bool font_tables_get_glyph_bbox(FontTables* tables, uint16_t glyph_id,
     if (head->index_to_loc_format == 0) {
         // short format: uint16 values, actual byte offset = value * 2
         uint32_t idx = (uint32_t)glyph_id * 2;
-        if (idx + 4 > loca_len) return false;
+        if (!font_data_range_valid(loca_len, idx, 4)) return false;
         offset      = (uint32_t)rd16(loca + idx) * 2;
         next_offset = (uint32_t)rd16(loca + idx + 2) * 2;
     } else {
         // long format: uint32 byte offsets
         uint32_t idx = (uint32_t)glyph_id * 4;
-        if (idx + 8 > loca_len) return false;
+        if (!font_data_range_valid(loca_len, idx, 8)) return false;
         offset      = rd32(loca + idx);
         next_offset = rd32(loca + idx + 4);
     }
 
     // empty glyph (e.g. space): offset == next_offset
-    if (offset == next_offset) return false;
+    if (offset >= next_offset || next_offset > glyf_len) return false;
 
     // glyph header: numberOfContours(2) + xMin(2) + yMin(2) + xMax(2) + yMax(2) = 10 bytes
-    if (offset + 10 > glyf_len) return false;
+    if (!font_data_range_valid(glyf_len, offset, 10)) return false;
 
     const uint8_t* g = glyf + offset;
     if (out_x_min) *out_x_min = rd16s(g + 2);

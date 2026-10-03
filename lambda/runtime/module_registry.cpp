@@ -99,14 +99,25 @@ static char* module_registry_key_dup(const char* path) {
     if (!path || !*path) return NULL;
 
     char lexical[4096];
-    path_str_normalize_lexical_posix(path, lexical, (int)sizeof(lexical), false);
-    if (!lexical[0]) path_str_copy(lexical, (int)sizeof(lexical), path);
+    if (path_str_normalize_lexical_posix(path, lexical, (int)sizeof(lexical), false) < 0) {
+        log_error("MODULE-REGISTRY-PATH: path exceeds lexical normalization limits");
+        return NULL;
+    }
+    if (!lexical[0] && path_str_copy(lexical, (int)sizeof(lexical), path) < 0) return NULL;
 
     char* resolved = file_realpath(lexical);
     const char* source = resolved ? resolved : lexical;
     char normalized[4096];
-    path_str_normalize_lexical_posix(source, normalized, (int)sizeof(normalized), false);
-    if (!normalized[0]) path_str_copy(normalized, (int)sizeof(normalized), source);
+    if (path_str_normalize_lexical_posix(source, normalized,
+            (int)sizeof(normalized), false) < 0) {
+        if (resolved) mem_free(resolved);
+        log_error("MODULE-REGISTRY-RESOLVED-PATH: path exceeds lexical normalization limits");
+        return NULL;
+    }
+    if (!normalized[0] && path_str_copy(normalized, (int)sizeof(normalized), source) < 0) {
+        if (resolved) mem_free(resolved);
+        return NULL;
+    }
 
     char* key = mem_strdup(normalized, MEM_CAT_SYSTEM);
     if (resolved) mem_free(resolved);

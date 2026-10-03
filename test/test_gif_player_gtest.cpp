@@ -138,6 +138,19 @@ TEST(GifDetection, MemoryNonGifMagicReturnsNull) {
     EXPECT_EQ(gif_detect_animated_from_memory(png_header, sizeof(png_header)), nullptr);
 }
 
+TEST(GifDetection, OversizedLogicalScreenIsRejectedBeforeDecode) {
+    const unsigned char oversized_gif[] = {
+        'G', 'I', 'F', '8', '9', 'a',
+        0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00,
+        0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+        0x02, 0x02, 0x44, 0x01, 0x00, 0x3b
+    };
+    EXPECT_EQ(image_gif_frame_count_from_memory(oversized_gif,
+                                                 sizeof(oversized_gif)), 0);
+    EXPECT_EQ(image_gif_load_from_memory(oversized_gif,
+                                         sizeof(oversized_gif)), nullptr);
+}
+
 TEST(GifDetection, StaticGifReturnsNull) {
     // Single-frame GIF → image_gif_load_from_memory returns NULL (< 2 frames)
     GifFrames* frames = gif_detect_animated_from_memory(STATIC_GIF, STATIC_GIF_LEN);

@@ -709,7 +709,7 @@ size_t url_decode_lenient_write(const char* str, size_t len, bool form, char* ou
 }
 
 // URL decode a string (decode percent-encoded characters)
-static char* url_decode(const char* str) {
+static char* url_decode(const char* str, size_t* out_len) {
     if (!str) return NULL;
 
     size_t len = strlen(str);
@@ -717,6 +717,7 @@ static char* url_decode(const char* str) {
     if (!decoded) return NULL;
     size_t decoded_len = url_decode_lenient_write(str, len, false, decoded);
     decoded[decoded_len] = '\0';
+    if (out_len) *out_len = decoded_len;
     return decoded;
 }
 
@@ -744,9 +745,15 @@ char* url_to_local_path(const Url* url) {
     }
 
     // Decode percent-encoded characters
-    char* decoded_path = url_decode(pathname);
+    size_t decoded_len = 0;
+    char* decoded_path = url_decode(pathname, &decoded_len);
     if (!decoded_path) {
         log_error("Failed to decode URL path");
+        return NULL;
+    }
+    if (memchr(decoded_path, '\0', decoded_len) != NULL) {
+        log_error("URL-LOCAL-PATH-NUL: percent-decoded path contains NUL");
+        mem_free(decoded_path);
         return NULL;
     }
 

@@ -4,6 +4,8 @@
 
 Extend the existing file I/O modules (`lib/file.c` and `lib/file_utils.c`) into a comprehensive, cross-platform C file operations library serving all Lambda runtime backends: **Lambda Script**, **JavaScript**, **Python**, and **Bash** transpilation.
 
+Security-sensitive opens, temporary-object reservation, and copy/delete operations stay in this shared boundary, including no-follow checks and allocation quotas, as required by **D7.5.2**.
+
 ### Current State
 
 **All functions are implemented.** The module is fully operational with 37+ public functions across `lib/file.c` and 8 functions in `lib/file_utils.c`. The entire codebase (`lambda/`, `radiant/`) has been migrated to use these modules instead of direct POSIX headers.
@@ -187,8 +189,8 @@ typedef struct {
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `file_temp_path` | `char* file_temp_path(const char* prefix, const char* suffix)` | Generate unique temp file path under `./temp/` (caller must free) |
-| `file_temp_create` | `char* file_temp_create(const char* prefix, const char* suffix)` | Create temp file, return path (caller must free) |
+| `file_temp_path` | `char* file_temp_path(const char* prefix, const char* suffix)` | Atomically reserve a unique empty file under `./temp/`; caller removes the file and frees the path |
+| `file_temp_create` | `char* file_temp_create(const char* prefix, const char* suffix)` | Atomically create a unique temp file and return its path (caller removes and frees) |
 | `dir_temp_create` | `char* dir_temp_create(const char* prefix)` | Create temp directory, return path (caller must free) |
 
 ### New: Path Utilities

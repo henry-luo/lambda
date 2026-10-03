@@ -6,13 +6,15 @@
 
 The module has been adopted across the codebase — all files under `lambda/` and `radiant/` use `shell_getenv()` instead of raw `getenv()`, and `shell_exec_line()` instead of `popen()`/`posix_spawn()`.
 
+Process launch is part of the central I/O boundary in **D7.5.2**: descriptors/handles are explicitly inherited, process trees are owned for timeout cleanup, and captured output is quota-bounded.
+
 ## Design Principles
 
 1. **Cross-platform** — abstracts POSIX (`posix_spawn`, `fork/exec`, `pipe`) and Win32 (`CreateProcess`) behind a single API
 2. **Zero std:: dependency** — pure C with Lambda `lib/` types (`StrBuf`, `ArrayList`)
 3. **Capture-first** — every execution function returns structured results (exit code + stdout + stderr)
 4. **Safe by default** — no shell injection; command + args passed as arrays, not interpolated strings
-5. **Streaming support** — large output can be consumed line-by-line via callbacks
+5. **Bounded capture** — each stream has a byte quota; optional callbacks receive captured lines after completion
 6. **Non-blocking option** — background process launch with handle-based status polling
 7. **Consistent error reporting** — all functions return a result struct; errors logged via `log_error()`
 
@@ -40,13 +42,14 @@ typedef struct {
     char* stderr_buf;       // captured stderr (caller must free)
     size_t stderr_len;      // length of stderr
     bool timed_out;         // true if killed by timeout
+    bool output_limit_exceeded; // true if either captured stream was truncated
 } ShellResult;
 
 // --- Handle for a background process ---
 typedef struct ShellProcess ShellProcess;
 
 // --- Callback for streaming line-by-line output ---
-// Return false to abort the process early.
+// Delivered after completion; return false to stop further line delivery.
 typedef bool (*ShellLineCallback)(const char* line, size_t len, void* user_data);
 
 // --- Environment variable pair ---
@@ -64,6 +67,7 @@ typedef struct {
     ShellLineCallback on_stdout;    // streaming stdout callback (NULL = buffer all)
     ShellLineCallback on_stderr;    // streaming stderr callback (NULL = buffer all)
     void* user_data;                // passed to callbacks
+    size_t max_output_bytes;        // per stream; 0 selects the default quota
 } ShellOptions;
 
 #ifdef __cplusplus
@@ -90,7 +94,7 @@ typedef struct {
 | `shell_spawn` | `ShellProcess* shell_spawn(const char* program, const char** args, const ShellOptions* opts)` | Launch async process, return handle |
 | `shell_process_poll` | `bool shell_process_poll(ShellProcess* proc)` | Check if process has exited |
 | `shell_process_wait` | `ShellResult shell_process_wait(ShellProcess* proc, int timeout_ms)` | Block until exit or timeout |
-| `shell_process_kill` | `bool shell_process_kill(ShellProcess* proc)` | Send SIGTERM (POSIX) / TerminateProcess (Win32) |
+| `shell_process_kill` | `bool shell_process_kill(ShellProcess* proc)` | Terminate the owned process group/job so descendants are not leaked |
 | `shell_process_free` | `void shell_process_free(ShellProcess* proc)` | Release handle and buffers |
 
 ### Environment Variables

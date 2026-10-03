@@ -2090,9 +2090,24 @@ FontDatabase* font_database_get_global() {
             g_global_font_db = font_database_create(global_pool, global_font_arena);
             if (g_global_font_db) {
                 // Set cache path for persistence
-                char cache_path[512];
-                snprintf(cache_path, sizeof(cache_path), "%s/.lambda_font_cache", getenv("HOME") ?: "/tmp");  // TMP_PATH_OK: cross-platform fallback when $HOME unset
-                font_database_set_cache_path(g_global_font_db, cache_path);
+                const char* home = getenv("HOME");
+                if (home && home[0]) {
+                    StrBuf* cache_path = strbuf_create(home);
+                    if (cache_path) {
+                        const char* cache_suffix = "/.lambda_font_cache";
+                        size_t home_length = cache_path->length;
+                        strbuf_append_str(cache_path, cache_suffix);
+                        if (cache_path->length >= home_length &&
+                            cache_path->length - home_length == strlen(cache_suffix)) {
+                            font_database_set_cache_path(g_global_font_db, cache_path->str);
+                        }
+                        strbuf_free(cache_path);
+                    }
+                } else {
+                    create_dir("temp");
+                    font_database_set_cache_path(g_global_font_db,
+                                                 "temp/.lambda_font_cache");
+                }
 
                 // Try to load from cache first
                 if (!font_database_load_cache(g_global_font_db)) {

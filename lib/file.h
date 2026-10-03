@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <time.h>
 #include "memtrack.h"
 
@@ -26,6 +27,11 @@ char* read_binary_file(const char *filename, size_t *out_size);
 // the returned buffer must be released with mem_free().
 bool file_read_all(const char* filename, MemCategory category,
                    char** out_data, size_t* out_size);
+
+// Open a regular file without following a final-component symlink/reparse point.
+// The caller owns the returned stream and must fclose() it.
+FILE* file_open_regular_read(const char* filename);
+FILE* file_open_regular_write(const char* filename, bool overwrite);
 
 // Write string content to a text file.
 void write_text_file(const char *filename, const char *content);
@@ -142,7 +148,8 @@ int file_read_lines(const char* filename, FileLineCallback cb, void* user_data);
 // Temporary files (always under ./temp/ per project rules)
 // ---------------------------------------------------------------------------
 
-// Generate unique temp file path. Caller must free().
+// Reserve a unique empty temp file and return its path. Caller removes the file
+// and frees the returned path.
 char* file_temp_path(const char* prefix, const char* suffix);
 
 // Create temp file, return path. Caller must free().

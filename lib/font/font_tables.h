@@ -21,6 +21,11 @@
 extern "C" {
 #endif
 
+// Validate an offset/length pair without forming an overflowing end offset.
+static inline bool font_data_range_valid(size_t total, size_t offset, size_t length) {
+    return offset <= total && length <= total - offset;
+}
+
 // forward declaration for GPOS parsed data
 typedef struct GposTable GposTable;
 
