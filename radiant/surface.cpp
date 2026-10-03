@@ -940,14 +940,14 @@ ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void*
 
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                        ClipShape** clip_shapes, int clip_depth) {
-    RasterPaintContext ctx = {surface, clip, clip_shapes, clip_depth};
+    RasterPaintContext ctx = raster_paint_context(surface, clip, clip_shapes, clip_depth);
     raster_fill_rect(&ctx, rect, color);
 }
 
 // Enhanced blit function with support for different scaling modes
 void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
                          ClipShape** clip_shapes, int clip_depth) {
-    RasterPaintContext ctx = {dst, clip, clip_shapes, clip_depth};
+    RasterPaintContext ctx = raster_paint_context(dst, clip, clip_shapes, clip_depth);
     raster_blit_surface_scaled(&ctx, src, src_rect, dst_rect, scale_mode, 255);
 }
 

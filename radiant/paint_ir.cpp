@@ -144,7 +144,7 @@ static void paint_ir_validation_set(PaintIrValidationResult* result, bool valid,
     if (!result) return;
     result->valid = valid;
     result->first_error_index = first_error_index;
-    result->message = message;
+    result->message = lam::up(message);
     result->clip_depth = clip_depth;
     result->backdrop_depth = backdrop_depth;
     result->shadow_clip_depth = shadow_clip_depth;
@@ -584,7 +584,7 @@ void paint_fill_path(PaintList* pl, RdtPath* path, Color color,
                      RdtFillRule rule, const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_PATH);
     if (!cmd) return;
-    cmd->fill_path.path = path;
+    cmd->fill_path.path = lam::up(path);
     cmd->fill_path.color = color;
     cmd->fill_path.rule = rule;
     paint_assign_optional_transform(&cmd->fill_path.has_transform,
@@ -597,12 +597,12 @@ void paint_stroke_path(PaintList* pl, RdtPath* path, Color color, float width,
                        const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_STROKE_PATH);
     if (!cmd) return;
-    cmd->stroke_path.path = path;
+    cmd->stroke_path.path = lam::up(path);
     cmd->stroke_path.color = color;
     cmd->stroke_path.width = width;
     cmd->stroke_path.cap = cap;
     cmd->stroke_path.join = join;
-    cmd->stroke_path.dash_array = dash_array;
+    cmd->stroke_path.dash_array = lam::up(dash_array);
     cmd->stroke_path.dash_count = dash_count;
     cmd->stroke_path.dash_phase = dash_phase;
     paint_assign_optional_transform(&cmd->stroke_path.has_transform,
@@ -616,12 +616,12 @@ void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,
                                 const RdtMatrix* gradient_transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_LINEAR_GRADIENT);
     if (!cmd) return;
-    cmd->fill_linear_gradient.path = path;
+    cmd->fill_linear_gradient.path = lam::up(path);
     cmd->fill_linear_gradient.x1 = x1;
     cmd->fill_linear_gradient.y1 = y1;
     cmd->fill_linear_gradient.x2 = x2;
     cmd->fill_linear_gradient.y2 = y2;
-    cmd->fill_linear_gradient.stops = stops;
+    cmd->fill_linear_gradient.stops = lam::up(stops);
     cmd->fill_linear_gradient.stop_count = stop_count;
     cmd->fill_linear_gradient.rule = rule;
     paint_assign_optional_transform(&cmd->fill_linear_gradient.has_transform,
@@ -637,11 +637,11 @@ void paint_fill_radial_gradient(PaintList* pl, RdtPath* path,
                                 const RdtMatrix* gradient_transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_FILL_RADIAL_GRADIENT);
     if (!cmd) return;
-    cmd->fill_radial_gradient.path = path;
+    cmd->fill_radial_gradient.path = lam::up(path);
     cmd->fill_radial_gradient.cx = cx;
     cmd->fill_radial_gradient.cy = cy;
     cmd->fill_radial_gradient.r = r;
-    cmd->fill_radial_gradient.stops = stops;
+    cmd->fill_radial_gradient.stops = lam::up(stops);
     cmd->fill_radial_gradient.stop_count = stop_count;
     cmd->fill_radial_gradient.rule = rule;
     paint_assign_optional_transform(&cmd->fill_radial_gradient.has_transform,
@@ -657,7 +657,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
                       ImageSurface* resource_owner) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_IMAGE);
     if (!cmd) return;
-    cmd->draw_image.pixels = pixels;
+    cmd->draw_image.pixels = lam::up(pixels);
     cmd->draw_image.src_w = src_w;
     cmd->draw_image.src_h = src_h;
     cmd->draw_image.src_stride = src_stride;
@@ -668,7 +668,7 @@ void paint_draw_image(PaintList* pl, const uint32_t* pixels,
     cmd->draw_image.opacity = opacity;
     paint_assign_optional_transform(&cmd->draw_image.has_transform,
                                     &cmd->draw_image.transform, transform);
-    cmd->draw_image.resource_owner = resource_owner;
+    cmd->draw_image.resource_owner = lam::up(resource_owner);
 }
 
 void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
@@ -678,7 +678,7 @@ void paint_draw_image_resource(PaintList* pl, ImageSurface* image,
                                const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_IMAGE_RESOURCE);
     if (!cmd) return;
-    cmd->draw_image_resource.image = image;
+    cmd->draw_image_resource.image = lam::up(image);
     cmd->draw_image_resource.dst_x = dst_x;
     cmd->draw_image_resource.dst_y = dst_y;
     cmd->draw_image_resource.dst_w = dst_w;
@@ -709,13 +709,13 @@ void paint_draw_picture(PaintList* pl, RdtPicture* picture,
                         uint8_t opacity, const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_DRAW_PICTURE);
     if (!cmd) return;
-    cmd->draw_picture.picture = picture;
+    cmd->draw_picture.picture = lam::own(picture);
     cmd->draw_picture.opacity = opacity;
     paint_assign_optional_transform(&cmd->draw_picture.has_transform,
                                     &cmd->draw_picture.transform, transform);
 }
 
-void paint_video_placeholder(PaintList* pl, void* video,
+void paint_video_placeholder(PaintList* pl, struct RdtVideo* video,
                              float dst_x, float dst_y, float dst_w, float dst_h,
                              int object_fit, const Bound* clip,
                              uint64_t video_generation) {
@@ -738,7 +738,7 @@ void paint_webview_layer_placeholder(PaintList* pl, ImageSurface* surface,
                                      uint64_t surface_generation) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_WEBVIEW_LAYER_PLACEHOLDER);
     if (!cmd) return;
-    cmd->webview_layer_placeholder.surface = surface;
+    cmd->webview_layer_placeholder.surface = lam::up(surface);
     cmd->webview_layer_placeholder.dst_x = dst_x;
     cmd->webview_layer_placeholder.dst_y = dst_y;
     cmd->webview_layer_placeholder.dst_w = dst_w;
@@ -751,7 +751,7 @@ void paint_webview_layer_placeholder(PaintList* pl, ImageSurface* surface,
 void paint_push_clip(PaintList* pl, RdtPath* clip_path, const RdtMatrix* transform) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_PUSH_CLIP);
     if (!cmd) return;
-    cmd->push_clip.clip_path = clip_path;
+    cmd->push_clip.clip_path = lam::up(clip_path);
     paint_assign_optional_transform(&cmd->push_clip.has_transform,
                                     &cmd->push_clip.transform, transform);
 }
@@ -791,14 +791,14 @@ void paint_apply_blend_mode(PaintList* pl, int x0, int y0, int w, int h, int ble
 }
 
 void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
-                        void* filter, const Bound* clip) {
+                        FilterProp* filter, const Bound* clip) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_APPLY_FILTER);
     if (!cmd) return;
     cmd->apply_filter.x = x;
     cmd->apply_filter.y = y;
     cmd->apply_filter.w = w;
     cmd->apply_filter.h = h;
-    cmd->apply_filter.filter = filter;
+    cmd->apply_filter.filter = lam::up(filter);
     paint_assign_optional_clip(&cmd->apply_filter.has_clip, &cmd->apply_filter.clip, clip);
 }
 
@@ -886,7 +886,7 @@ void paint_fill_surface_rect(PaintList* pl, float x, float y, float w, float h,
     cmd->fill_surface_rect.color = color;
     paint_assign_optional_clip(&cmd->fill_surface_rect.has_clip,
                                &cmd->fill_surface_rect.clip, clip);
-    cmd->fill_surface_rect.clip_shapes = clip_shapes;
+    cmd->fill_surface_rect.clip_shapes = lam::up(clip_shapes);
     cmd->fill_surface_rect.clip_depth = clip_depth;
 }
 
@@ -897,7 +897,7 @@ void paint_blit_surface_scaled(PaintList* pl, ImageSurface* src_surface,
                                uint8_t opacity, uint64_t src_generation) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_BLIT_SURFACE_SCALED);
     if (!cmd) return;
-    cmd->blit_surface_scaled.src_surface = src_surface;
+    cmd->blit_surface_scaled.src_surface = lam::up(src_surface);
     cmd->blit_surface_scaled.src_generation = src_generation;
     cmd->blit_surface_scaled.dst_x = dst_x;
     cmd->blit_surface_scaled.dst_y = dst_y;
@@ -907,7 +907,7 @@ void paint_blit_surface_scaled(PaintList* pl, ImageSurface* src_surface,
     cmd->blit_surface_scaled.opacity = opacity;
     paint_assign_optional_clip(&cmd->blit_surface_scaled.has_clip,
                                &cmd->blit_surface_scaled.clip, clip);
-    cmd->blit_surface_scaled.clip_shapes = clip_shapes;
+    cmd->blit_surface_scaled.clip_shapes = lam::up(clip_shapes);
     cmd->blit_surface_scaled.clip_depth = clip_depth;
 }
 

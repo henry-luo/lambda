@@ -32,8 +32,8 @@ GridTrackList* create_grid_track_list(int initial_capacity) {
     track_list->allocated_tracks = initial_capacity;
     // These arrays are children of the persistent track-list heap root and are
     // released together by destroy_grid_track_list during view teardown.
-    track_list->tracks = (GridTrackSize**)mem_calloc(initial_capacity, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
-    track_list->line_names = (char**)mem_calloc(initial_capacity + 1, sizeof(char*), MEM_CAT_LAYOUT); // +1 for end line
+    track_list->tracks = lam::own_arr((GridTrackSize**)mem_calloc(initial_capacity, sizeof(GridTrackSize*), MEM_CAT_LAYOUT));
+    track_list->line_names = lam::own_arr((char**)mem_calloc(initial_capacity + 1, sizeof(char*), MEM_CAT_LAYOUT)); // +1 for end line
     track_list->track_count = 0;
     track_list->line_name_count = 0;
     track_list->is_repeat = false;
@@ -83,16 +83,16 @@ GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size) {
     if (!copy) return nullptr;
 
     *copy = *track_size;
-    copy->min_size = clone_grid_track_size(track_size->min_size);
-    copy->max_size = clone_grid_track_size(track_size->max_size);
+    copy->min_size = lam::own(clone_grid_track_size(track_size->min_size));
+    copy->max_size = lam::own(clone_grid_track_size(track_size->max_size));
     copy->repeat_tracks = nullptr;
     copy->repeat_track_count = 0;
 
     if (track_size->repeat_tracks && track_size->repeat_track_count > 0) {
         // Repeat children are part of the cloned persistent GridProp graph, not
         // layout-pass scratch; destroy_grid_track_size recursively owns them.
-        copy->repeat_tracks = (GridTrackSize**)mem_calloc(
-            track_size->repeat_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT);
+        copy->repeat_tracks = lam::own_arr((GridTrackSize**)mem_calloc(
+            track_size->repeat_track_count, sizeof(GridTrackSize*), MEM_CAT_LAYOUT));
         if (!copy->repeat_tracks) {
             destroy_grid_track_size(copy);
             return nullptr;
@@ -154,7 +154,7 @@ void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_nu
     GridLineName* line_name = &grid->line_names[grid->line_name_count];
     // Layout line-name projections share the grid pass mark; heap strings here
     // previously required a separate cleanup loop on every early-exit path.
-    line_name->name = grid_scratch_strdup(&grid->lycon->scratch, name);
+    line_name->name = lam::up(grid_scratch_strdup(&grid->lycon->scratch, name));
     if (!line_name->name) return;
     line_name->line_number = line_number;
     line_name->is_row = is_row;
@@ -339,7 +339,7 @@ void parse_grid_template_areas(GridProp* grid, const char* areas_string, Scratch
         if (is_rectangle && min_row <= max_row && min_col <= max_col) {
             GridArea* area = &grid->grid_areas[grid->area_count];
             // Allocate and copy name (GridArea.name is char*)
-            area->name = mem_strdup(area_name, MEM_CAT_LAYOUT);
+            area->name = lam::own(mem_strdup(area_name, MEM_CAT_LAYOUT));
             // Convert to 1-based CSS grid line numbers
             area->row_start = min_row + 1;
             area->row_end = max_row + 2;      // +2 because end line is exclusive

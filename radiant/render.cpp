@@ -211,9 +211,9 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
             view_span->bound->border = nullptr;
         }
         render_bound(rdcon, lam::unsafe_view_block_api_span(view_span));
-        view_span->bound->background = saved_bg;
+        view_span->bound->background = lam::own(saved_bg);
         if (border_is_fragment_painted) {
-            view_span->bound->border = saved_border;
+            view_span->bound->border = lam::own(saved_border);
         }
     }
 

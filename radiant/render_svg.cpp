@@ -82,7 +82,7 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
 
     PaintSvgLoweringOptions options = {};
     options.indent_level = ctx->indent_level;
-    options.caps = render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG);
+    options.caps = lam::up(render_export_target_get_caps(RENDER_EXPORT_TARGET_SVG));
     options.resource_id_base = ctx->paint_resource_id;
     ctx->paint_svg_state.indent_level = ctx->indent_level;
     PaintSvgLoweringStats stats = {};
@@ -266,16 +266,16 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     if (!has_text_deco && !has_text_shadow) {
         PaintGlyphRun run = {};
-        run.font = &ctx->font;
+        run.font = lam::up(&ctx->font);
         run.color = ctx->color;
-        run.text = text_content;
+        run.text = lam::up(text_content);
         run.text_len = (int)strlen(text_content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.
         run.owns_text = ctx->effect_fallback.active;
-        run.font_family = font_box_handle(&ctx->font)
+        run.font_family = lam::up(font_box_handle(&ctx->font)
             ? font_handle_get_family_name(font_box_handle(&ctx->font))
-            : "Arial";
+            : "Arial");
         run.font_size = font_size;
         run.x = x;
         run.baseline_y = baseline_y;
@@ -986,7 +986,7 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
                               initial_paint.stroke_width);
-    subscene.id_scope = render_svg_reference_scope(dom_elem);
+    subscene.id_scope = lam::up(render_svg_reference_scope(dom_elem));
     paint_svg_subscene(svg_active_paint_list(ctx), &subscene);
     svg_lower_paint_list(ctx);
     if (font) ctx->font = *font;
@@ -1378,7 +1378,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     walk_state.y = 0;
     walk_state.font = ctx.font;
     walk_state.color = ctx.color;
-    walk_state.ui_context = uicon;
+    walk_state.ui_context = lam::up(uicon);
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
         render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
@@ -1395,9 +1395,9 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     strbuf_append_str(ctx.svg_content, "</svg>\n");
 
     RenderPathTrace trace = {};
-    trace.target = "svg";
-    trace.replay_mode = "paint_ir_svg";
-    trace.backend_name = "svg_export";
+    trace.target = lam::up("svg");
+    trace.replay_mode = lam::up("paint_ir_svg");
+    trace.backend_name = lam::up("svg_export");
     trace.display_list_recorded = false;
     trace.paint_ir_enabled = true;
     trace.surface_width = width;

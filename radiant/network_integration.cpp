@@ -112,7 +112,7 @@ int radiant_init_network_support(DomDocument* doc,
     log_debug("network: initializing network support for document");
 
     // Create resource manager
-    doc->resource_manager = resource_manager_create(doc, thread_pool, file_cache);
+    doc->resource_manager = lam::own(resource_manager_create(doc, thread_pool, file_cache));
     if (!doc->resource_manager) {
         log_error("network: failed to create resource manager");
         return -1;

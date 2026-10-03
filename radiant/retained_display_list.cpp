@@ -73,17 +73,17 @@ static void retained_dl_copy_clip_shape_stack(DisplayList* dst,
     }
 }
 
-static bool retained_dl_clone_path(RdtPath** out, RdtPath* in) {
-    if (!out) return false; *out = in ? rdt_path_clone(in) : nullptr; return !in || *out;
+static bool retained_dl_clone_path(lam::Own<RdtPath>* out, RdtPath* in) {
+    if (!out) return false; *out = lam::own(in ? rdt_path_clone(in) : nullptr); return !in || *out;
 }
 
-static bool retained_dl_copy_gradient_stops(DisplayList* dst, RdtGradientStop** out,
+static bool retained_dl_copy_gradient_stops(DisplayList* dst, lam::OwnArr<RdtGradientStop>* out,
                                             const RdtGradientStop* stops, int count) {
-    if (!out) return false; *out = dl_copy_stops(dst, stops, count); return !stops || count <= 0 || *out;
+    if (!out) return false; *out = lam::own_arr(dl_copy_stops(dst, stops, count)); return !stops || count <= 0 || *out;
 }
 
-static bool retained_dl_copy_dashes(DisplayList* dst, float** out, const float* dashes, int count) {
-    if (!out) return false; *out = dl_copy_dashes(dst, dashes, count); return !dashes || count <= 0 || *out;
+static bool retained_dl_copy_dashes(DisplayList* dst, lam::OwnArr<float>* out, const float* dashes, int count) {
+    if (!out) return false; *out = lam::own_arr(dl_copy_dashes(dst, dashes, count)); return !dashes || count <= 0 || *out;
 }
 
 static bool retained_dl_clone_item_payload(DisplayList* dst,
@@ -115,8 +115,8 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                     in->fill_radial_gradient.stops, in->fill_radial_gradient.stop_count)) return false;
             break;
         case DL_DRAW_PICTURE:
-            out->draw_picture.picture = in->draw_picture.picture ?
-                rdt_picture_dup(in->draw_picture.picture) : nullptr;
+            out->draw_picture.picture = lam::own(in->draw_picture.picture ?
+                rdt_picture_dup(in->draw_picture.picture) : nullptr);
             if (in->draw_picture.picture && !out->draw_picture.picture) return false;
             break;
         case DL_PUSH_CLIP:

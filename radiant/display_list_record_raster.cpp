@@ -40,7 +40,7 @@ void dl_blit_surface_scaled(DisplayList* dl, ImageSurface* src_surface,
     dl_store_clip_shapes(dl, &item->blit_surface_scaled.clip_shapes, clip_shapes, clip_depth);
 }
 
-void dl_video_placeholder(DisplayList* dl, void* video,
+void dl_video_placeholder(DisplayList* dl, struct RdtVideo* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation) {

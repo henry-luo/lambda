@@ -20,6 +20,11 @@ holder or target has no declared level are reported as unchecked, so the
 coverage grows as headers are converted. The debug heap tracer checks actual
 placements; this lint checks the declarations.
 
+It also ratchets raw pointer fields: every pointer field in a struct defined in
+one of HEADERS must carry a kind, unless it is listed in RAW_ALLOWLIST (fields
+whose kind is still open, each with a reason). A new raw field fails; a listed
+field that gained a kind must be dropped from the list.
+
 Exit status: 0 clean, 1 violations, 2 setup failure.
 """
 
@@ -46,6 +51,8 @@ HEADERS = [
 ]
 STACK_LEVEL = "lam::NodeStack"
 TU_NAME = "temp/check_mem_kind_nodes_tu.cpp"
+RAW_ALLOWLIST = ROOT / "utils" / "lint" / "mem_kind_raw_fields.txt"
+RAW_HEADERS = HEADERS + ["lambda/input/css/dom_node.hpp"]
 
 
 def bare(spelling: str) -> str:
@@ -70,6 +77,7 @@ def collect(tu, ci, cfg):
     levels = {}      # level -> parent level (None at a root)
     homes = {}       # struct -> level
     claims = []      # (holder, field, target, file, line)
+    raw = {}         # "Holder::field" -> "file:line" for raw pointer fields in RAW_HEADERS
     seen = set()
     for c in tu.cursor.walk_preorder():
         if c.kind in (ci.CursorKind.STRUCT_DECL, ci.CursorKind.CLASS_DECL) and c.is_definition():
@@ -95,6 +103,14 @@ def collect(tu, ci, cfg):
         if rel is None:
             continue
         t = c.type.get_canonical()
+        if rel in RAW_HEADERS:
+            elem = t
+            while elem.kind == ci.TypeKind.CONSTANTARRAY:
+                elem = elem.element_type
+            if elem.kind == ci.TypeKind.POINTER and elem.get_pointee().kind != ci.TypeKind.FUNCTIONPROTO:
+                owner = enclosing_record(c, ci)
+                if owner is not None:
+                    raw[f"{bare(owner.type.get_canonical().spelling)}::{c.spelling}"] = f"{rel}:{c.location.line}"
         kind = bare(t.spelling).split("<", 1)[0]
         if kind not in ("lam::Up", "lam::Shared"):
             continue
@@ -108,7 +124,7 @@ def collect(tu, ci, cfg):
         target = bare(t.get_template_argument_type(0).get_canonical().spelling)
         claims.append((bare(holder.type.get_canonical().spelling), c.spelling, target,
                        rel, c.location.line, kind[len("lam::"):]))
-    return levels, homes, claims
+    return levels, homes, claims, raw
 
 
 def ancestors_or_self(level, levels):
@@ -122,6 +138,8 @@ def ancestors_or_self(level, levels):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--verbose", action="store_true", help="list unchecked fields")
+    ap.add_argument("--write-allowlist", action="store_true",
+                    help="rewrite the raw-field allowlist from the current headers")
     args = ap.parse_args()
 
     cfg = json.loads(census.DEFAULT_CONFIG.read_text())
@@ -150,7 +168,7 @@ def main() -> int:
             print(f"mem-kind-nodes: parse error: {d}", file=sys.stderr)
         return 2
 
-    levels, homes, claims = collect(tu, ci, cfg)
+    levels, homes, claims, raw = collect(tu, ci, cfg)
     violations, unchecked = [], defaultdict(list)
     for holder, field, target, rel, line, kind in claims:
         hl, tl = homes.get(holder), homes.get(target)
@@ -164,12 +182,29 @@ def main() -> int:
             violations.append(f"{rel}:{line}: error: {holder}::{field} is {kind}<{target}>, "
                               f"but {target} lives in {tl}, which is not {hl} or its ancestor")
 
+    allowed = {}
+    if RAW_ALLOWLIST.exists():
+        for line in RAW_ALLOWLIST.read_text().splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                allowed[line.split()[0]] = line
+    if args.write_allowlist:
+        RAW_ALLOWLIST.write_text("".join(f"{k}  # {raw[k]}\n" for k in sorted(raw)))
+        print(f"mem-kind-nodes: wrote {len(raw)} raw fields to {RAW_ALLOWLIST.relative_to(ROOT)}")
+        return 0
+    for key in sorted(set(raw) - set(allowed)):
+        violations.append(f"{raw[key]}: error: raw pointer field {key} has no kind "
+                          f"(give it lam::Own/Up/OwnArr/Counted/Shared/Foreign/Handle)")
+    for key in sorted(set(allowed) - set(raw)):
+        violations.append(f"{RAW_ALLOWLIST.relative_to(ROOT)}: error: {key} is no longer a raw "
+                          f"pointer field; drop it from the list")
+
     for v in violations:
         print(v)
     n_unchecked = sum(len(v) for v in unchecked.values())
     print(f"mem-kind-nodes: {len(claims)} Up/Shared fields, {len(violations)} violations, "
           f"{n_unchecked} unchecked ({len(unchecked['holder'])} undeclared holder level, "
-          f"{len(unchecked['target'])} undeclared target level)")
+          f"{len(unchecked['target'])} undeclared target level); {len(raw)} raw pointer fields allowed")
     if args.verbose:
         for what, rows in unchecked.items():
             for r in rows:

@@ -95,7 +95,7 @@ static bool canonical_inline_resize(ViewTree* tree, size_t bucket_count) {
             tree->prop_pool, tree->inline_canonical_buckets);
         pool_free(tree->prop_pool, tree->inline_canonical_buckets);
     }
-    tree->inline_canonical_buckets = buckets;
+    tree->inline_canonical_buckets = lam::own_arr(buckets);
     tree->inline_canonical_bucket_count = bucket_count;
     tree->canonical_stats.index_bytes += pool_allocation_size(tree->prop_pool, buckets);
     return true;
@@ -158,8 +158,8 @@ static InlineProp* canonical_inline_find_or_create(ViewTree* tree,
 
 void view_tree_canonical_init(ViewTree* tree) {
     if (!tree || !tree->prop_pool) return;
-    tree->canonical_prop_arena = mem_arena_create(
-        tree->mem_ctx, MEM_ROLE_VIEW, "view_tree.canonical_prop_arena");
+    tree->canonical_prop_arena = lam::own(mem_arena_create(
+        tree->mem_ctx, MEM_ROLE_VIEW, "view_tree.canonical_prop_arena"));
     tree->inline_canonical_buckets = nullptr;
     tree->inline_canonical_bucket_count = 0;
     tree->inline_canonical_count = 0;
@@ -199,7 +199,7 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
         canonical = canonical_inline_find_or_create(tree, parent->in_line);
         if (!canonical) return; // Capacity/index pressure deliberately falls back to owned storage.
         InlineProp* parent_owned = parent->in_line;
-        parent->in_line = canonical;
+        parent->in_line = lam::shared(canonical);
         parent->mark_inline_prop_shared();
         pool_free(tree->prop_pool, parent_owned);
         tree->canonical_stats.inline_promotions++;
@@ -209,7 +209,7 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
         if (!element->inline_prop_shared()) {
             pool_free(tree->prop_pool, element->in_line);
         }
-        element->in_line = canonical;
+        element->in_line = lam::shared(canonical);
         element->mark_inline_prop_shared();
         tree->canonical_stats.inline_promotions++;
     }

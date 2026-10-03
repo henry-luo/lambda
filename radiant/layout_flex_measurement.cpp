@@ -481,7 +481,7 @@ void store_in_measurement_cache(DomNode* node, float width, float height,
     }
 
     int cache_count = tree->measurement_cache_count;
-    tree->measurement_cache[cache_count].node = node;
+    tree->measurement_cache[cache_count].node = lam::up(node);
     tree->measurement_cache[cache_count].measured_width = width;
     tree->measurement_cache[cache_count].measured_height = height;
     tree->measurement_cache[cache_count].content_width = content_width;

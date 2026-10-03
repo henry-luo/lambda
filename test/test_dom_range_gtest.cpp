@@ -74,8 +74,8 @@ protected:
         state = reinterpret_cast<DocState*>(&fake_state);
         // generated nodes require canonical ownership fields and the lifecycle
         // registry after the legacy document aliases were removed.
-        doc_storage.document_pool = pool;
-        doc_storage.node_arena = arena;
+        doc_storage.document_pool = lam::own(pool);
+        doc_storage.node_arena = lam::own(arena);
         ASSERT_TRUE(dom_lifecycle_init(&doc_storage));
 
         div   = make_element();

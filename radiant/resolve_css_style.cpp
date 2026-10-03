@@ -169,7 +169,7 @@ static void append_filter_function(FilterFunction** head, FilterFunction** tail,
                                    FilterFunction* function) {
     if (!function) return;
     if (!*head) *head = function;
-    else (*tail)->next = function;
+    else (*tail)->next = lam::own(function);
     *tail = function;
 }
 
@@ -403,7 +403,7 @@ static void append_transform_function(TransformFunction** head,
                                        TransformFunction* function) {
     if (!function) return;
     if (!*head) *head = function;
-    else (*tail)->next = function;
+    else (*tail)->next = lam::own(function);
     *tail = function;
 }
 
@@ -1611,7 +1611,7 @@ static bool resolve_linear_gradient_value(LayoutContext* lycon, const CssValue* 
     int color_count = func->arg_count - arg_idx;
     if (color_count < 2) return false;
     lg->stop_count = color_count * 2;
-    lg->stops = (GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count);
+    lg->stops = lam::own_arr((GradientStop*)alloc_prop(lycon, sizeof(GradientStop) * lg->stop_count));
     if (!lg->stops) return false;
     bool stops_in_px = false;
     lg->stop_count = resolve_gradient_stops(
@@ -1758,8 +1758,8 @@ static bool resolve_radial_gradient_value(LayoutContext* lycon, const CssValue* 
 
     int capacity = func->arg_count - first_stop;
     if (capacity < 2) capacity = 2;
-    gradient->stops = (GradientStop*)alloc_prop(
-        lycon, sizeof(GradientStop) * capacity);
+    gradient->stops = lam::own_arr((GradientStop*)alloc_prop(
+        lycon, sizeof(GradientStop) * capacity));
     if (!gradient->stops) return false;
     gradient->stop_count = resolve_gradient_stops(
         lycon, func, first_stop, gradient->stops, capacity, false, false, nullptr);
@@ -1815,8 +1815,8 @@ static bool resolve_conic_gradient_value(LayoutContext* lycon, const CssValue* v
 
     int capacity = func->arg_count - first_stop;
     if (capacity < 2) capacity = 2;
-    gradient->stops = (GradientStop*)alloc_prop(
-        lycon, sizeof(GradientStop) * capacity);
+    gradient->stops = lam::own_arr((GradientStop*)alloc_prop(
+        lycon, sizeof(GradientStop) * capacity));
     if (!gradient->stops) return false;
     gradient->stop_count = resolve_gradient_stops(
         lycon, func, first_stop, gradient->stops, capacity, false, false, nullptr);
@@ -2230,9 +2230,9 @@ static bool resolve_background_gradient_value(LayoutContext* lycon, ViewSpan* sp
     layout_ensure_background(lycon, span);
     BackgroundProp* background = span->boundary_mut()->background;
     background->gradient_type = type;
-    if (type == GRADIENT_LINEAR) background->linear_gradient = linear;
-    else if (type == GRADIENT_RADIAL) background->radial_gradient = radial;
-    else background->conic_gradient = conic;
+    if (type == GRADIENT_LINEAR) background->linear_gradient = lam::own(linear);
+    else if (type == GRADIENT_RADIAL) background->radial_gradient = lam::own(radial);
+    else background->conic_gradient = lam::own(conic);
     return true;
 }
 
@@ -2288,7 +2288,7 @@ static void resolve_css_mask_image(LayoutContext* lycon, ViewSpan* span,
     if (!lycon || !span || !value) return;
     span->ensure_boundary(lycon);
     if (!span->boundary()->mask) {
-        span->bound->mask = (MaskProp*)alloc_prop(lycon, sizeof(MaskProp));
+        span->bound->mask = lam::own((MaskProp*)alloc_prop(lycon, sizeof(MaskProp)));
     }
     MaskProp* mask = span->boundary()->mask;
     memset(mask, 0, sizeof(MaskProp));
@@ -4005,8 +4005,8 @@ static GridTrackSize* parse_minmax_function(const CssValue* val) {
     if (!min_size && !max_size) return NULL;
     GridTrackSize* track_size = create_grid_track_size(GRID_TRACK_SIZE_MINMAX, 0);
     if (track_size) {
-        track_size->min_size = min_size;
-        track_size->max_size = max_size;
+        track_size->min_size = lam::own(min_size);
+        track_size->max_size = lam::own(max_size);
     }
     return track_size;
 }
@@ -4055,7 +4055,7 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
     }
     track_size->type = GRID_TRACK_SIZE_REPEAT;
     track_size->repeat_count = repeat_count;
-    track_size->repeat_tracks = repeat_tracks.release();
+    track_size->repeat_tracks = lam::own_arr(repeat_tracks.release());
     track_size->repeat_track_count = actual_track_count;
     track_size->is_auto_fill = is_auto_fill;
     track_size->is_auto_fit = is_auto_fit;
@@ -4116,12 +4116,12 @@ static GridTrackSize* parse_css_value_to_track_size(const CssValue* val) {
     return track_size;
 }
 
-static GridTrackList* replace_grid_track_list(GridTrackList** track_list_ptr, int initial_capacity) {
+static GridTrackList* replace_grid_track_list(lam::Own<GridTrackList>* track_list_ptr, int initial_capacity) {
     if (!track_list_ptr) return NULL;
     if (*track_list_ptr) {
         destroy_grid_track_list(*track_list_ptr);
     }
-    *track_list_ptr = create_grid_track_list(initial_capacity);
+    *track_list_ptr = lam::own(create_grid_track_list(initial_capacity));
     return *track_list_ptr;
 }
 
@@ -4164,7 +4164,7 @@ static void append_grid_repeated_track_values(GridTrackList* track_list,
 
 // Parse grid track list from CSS value list, handling repeat() functions
 // Parse grid track list from CSS value list
-static void parse_grid_track_list(const CssValue* value, GridTrackList** track_list_ptr) {
+static void parse_grid_track_list(const CssValue* value, lam::Own<GridTrackList>* track_list_ptr) {
     if (!value || value->type != CSS_VALUE_TYPE_LIST || !track_list_ptr) return;
     int count = value->data.list.count;
     CssValue** values = value->data.list.values;
@@ -4214,7 +4214,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
         return;
     }
     // Replace previous tracks. CSS can be resolved repeatedly for the same DOM
-    *track_list_ptr = replace_grid_track_list(track_list_ptr, total_tracks);
+    *track_list_ptr = lam::own(replace_grid_track_list(track_list_ptr, total_tracks));
     GridTrackList* track_list = *track_list_ptr;
     if (!track_list) {
         return;
@@ -4322,7 +4322,7 @@ static void parse_grid_track_list(const CssValue* value, GridTrackList** track_l
 }
 
 static void apply_grid_template_track_value(const CssValue* value,
-                                            GridTrackList** track_list_ptr,
+                                            lam::Own<GridTrackList>* track_list_ptr,
                                             const char* property_name) {
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
         if (*track_list_ptr) {
@@ -4348,7 +4348,7 @@ static void apply_grid_template_track_value(const CssValue* value,
         track_size->repeat_count > 0;
     if (expand_repeat) {
         int total = track_size->repeat_count * track_size->repeat_track_count;
-        *track_list_ptr = replace_grid_track_list(track_list_ptr, total);
+        *track_list_ptr = lam::own(replace_grid_track_list(track_list_ptr, total));
         if (!*track_list_ptr) {
             destroy_grid_track_size(track_size);
             return;
@@ -4363,7 +4363,7 @@ static void apply_grid_template_track_value(const CssValue* value,
         }
         destroy_grid_track_size(track_size);
     } else {
-        *track_list_ptr = replace_grid_track_list(track_list_ptr, 1);
+        *track_list_ptr = lam::own(replace_grid_track_list(track_list_ptr, 1));
         if (!*track_list_ptr) {
             destroy_grid_track_size(track_size);
             return;
@@ -4392,7 +4392,7 @@ static bool grid_template_track_slice_is_supported(CssValue** values, int count)
     return has_track_size;
 }
 
-static void clear_grid_template_track_list(GridTrackList** track_list_ptr) {
+static void clear_grid_template_track_list(lam::Own<GridTrackList>* track_list_ptr) {
     if (!track_list_ptr || !*track_list_ptr) return;
     destroy_grid_track_list(*track_list_ptr);
     *track_list_ptr = nullptr;
@@ -5652,7 +5652,7 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
                                     const CssValue* value, bool rows) {
     GridProp* grid = resolve_grid_prop(lycon, block);
     if (!grid) return;
-    GridTrackList** tracks = rows ? &grid->grid_auto_rows : &grid->grid_auto_columns;
+    lam::Own<GridTrackList>* tracks = rows ? &grid->grid_auto_rows : &grid->grid_auto_columns;
     if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_AUTO) {
         if (*tracks) {
             destroy_grid_track_list(*tracks);
@@ -5663,7 +5663,7 @@ static void resolve_grid_auto_track(LayoutContext* lycon, ViewBlock* block,
     if (value->type == CSS_VALUE_TYPE_LENGTH) {
         GridTrackSize* track = parse_css_value_to_track_size(value);
         if (!track) return;
-        *tracks = replace_grid_track_list(tracks, 1);
+        *tracks = lam::own(replace_grid_track_list(tracks, 1));
         if (!*tracks) {
             destroy_grid_track_size(track);
             return;
@@ -6322,7 +6322,7 @@ static void resolve_border_image_property(LayoutContext* lycon, ViewSpan* span,
         LinearGradient* gradient = nullptr;
         if (resolve_linear_gradient_value(lycon, value, &gradient)) {
             border->border_image_type = GRADIENT_LINEAR;
-            border->border_image_linear_gradient = gradient;
+            border->border_image_linear_gradient = lam::own(gradient);
         } else if (value->type == CSS_VALUE_TYPE_KEYWORD &&
                    value->data.keyword == CSS_VALUE_NONE) {
             border->border_image_type = GRADIENT_NONE;
@@ -6895,7 +6895,7 @@ template <typename ShadowType>
 static void append_shadow_value(ShadowType** head, ShadowType** tail, ShadowType* shadow) {
     if (!head || !tail || !shadow) return;
     if (!*head) *head = shadow;
-    else (*tail)->next = shadow;
+    else (*tail)->next = lam::own(shadow);
     *tail = shadow;
 }
 
@@ -7052,13 +7052,13 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             new_var = (CssCustomProp*)pool_calloc(
                 lycon->doc->document_pool, sizeof(CssCustomProp));
             if (new_var) {
-                new_var->name = decl->property_name;
+                new_var->name = lam::up(decl->property_name);
                 new_var->next = element->css_variables;
-                element->css_variables = new_var;
+                element->css_variables = lam::own(new_var);
             }
         }
         if (new_var) {
-            new_var->value = value;
+            new_var->value = lam::up(value);
         }
         return;  // Custom properties don't have standard processing
     }
@@ -7571,8 +7571,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 span->bound->box_shadow = nullptr;
                 break;
             }
-            span->bound->box_shadow = resolve_css_shadow_list<BoxShadow>(
-                lycon, prop_id, value, true, store_box_shadow_values);
+            span->bound->box_shadow = lam::own(resolve_css_shadow_list<BoxShadow>(
+                lycon, prop_id, value, true, store_box_shadow_values));
             break;
         }
         case CSS_PROPERTY_TRANSFORM: {
@@ -7648,24 +7648,24 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_FILTER:
         case CSS_PROPERTY_BACKDROP_FILTER: {
             bool is_backdrop_filter = prop_id == CSS_PROPERTY_BACKDROP_FILTER;
-            FilterProp** target_filter = is_backdrop_filter
+            lam::Own<FilterProp>* target_filter = is_backdrop_filter
                 ? span->backdrop_filter_slot()
                 : span->filter_slot();
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 *target_filter = nullptr;
                 break;
             }
-            *target_filter = is_backdrop_filter
+            *target_filter = lam::own(is_backdrop_filter
                 ? (FilterProp*)alloc_prop(lycon, sizeof(FilterProp))
-                : span->ensure_filter(lycon);
+                : span->ensure_filter(lycon));
             if (!*target_filter) break;
-            (*target_filter)->functions = resolve_css_function_list<FilterFunction>(
+            (*target_filter)->functions = lam::own(resolve_css_function_list<FilterFunction>(
                 value,
                 [&](const CssValue* item) {
                     return item && item->type == CSS_VALUE_TYPE_FUNCTION
                         ? resolve_filter_function(lycon, prop_id, item->data.function)
                         : nullptr;
-                }, append_filter_function);
+                }, append_filter_function));
             break;
         }
         case CSS_PROPERTY_COLUMN_COUNT:
@@ -8045,8 +8045,8 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 span->font->text_shadow = nullptr;
                 break;
             }
-            span->font->text_shadow = resolve_css_shadow_list<TextShadow>(
-                lycon, prop_id, value, false, store_text_shadow_values);
+            span->font->text_shadow = lam::own(resolve_css_shadow_list<TextShadow>(
+                lycon, prop_id, value, false, store_text_shadow_values));
             break;
         }
         case CSS_PROPERTY_FLEX_DIRECTION:
@@ -8102,7 +8102,7 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 "grid-template-columns" : "grid-template-rows";
             GridProp* grid = resolve_grid_prop(lycon, block);
             if (!grid) break;
-            GridTrackList** track_list_ptr = columns ?
+            lam::Own<GridTrackList>* track_list_ptr = columns ?
                 &grid->grid_template_columns : &grid->grid_template_rows;
             apply_grid_template_track_value(value, track_list_ptr, property_name);
             break;
@@ -8467,11 +8467,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 if (css_find_background_gradient_layer(last_layer, GRADIENT_LINEAR)) linear_count++;
                 else if (css_find_background_gradient_layer(last_layer, GRADIENT_RADIAL)) radial_count++;
                 if (radial_count > 0) {
-                    bg->radial_layers = (RadialGradient**)alloc_prop(lycon, sizeof(RadialGradient*) * radial_count);
+                    bg->radial_layers = lam::own_arr((RadialGradient**)alloc_prop(lycon, sizeof(RadialGradient*) * radial_count));
                     bg->radial_layer_count = 0;
                 }
                 if (linear_count > 0) {
-                    bg->linear_layers = (LinearGradient**)alloc_prop(lycon, sizeof(LinearGradient*) * linear_count);
+                    bg->linear_layers = lam::own_arr((LinearGradient**)alloc_prop(lycon, sizeof(LinearGradient*) * linear_count));
                     bg->linear_layer_count = 0;
                 }
                 for (int i = count - 1; i >= 0; i--) {

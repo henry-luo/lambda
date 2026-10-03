@@ -274,13 +274,13 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     item->font = text_view->font ? text_view->font : container->font;
     item->ensure_flex_item(lycon->doc ? lycon->doc->view_tree : nullptr);
     if (!item->fi) return nullptr;
-    item->fi->anonymous_text = text;
+    item->fi->anonymous_text = lam::up(text);
     FlexAnonymousTextRun* first_run = scope
         ? (FlexAnonymousTextRun*)scratch_scope_calloc(&lycon->scratch, scope,
                                                       sizeof(FlexAnonymousTextRun))
         : (FlexAnonymousTextRun*)scratch_calloc(&lycon->scratch, sizeof(FlexAnonymousTextRun));
     if (!first_run) return nullptr;
-    first_run->text = text;
+    first_run->text = lam::up(text);
     first_run->preserve_leading_space = preserve_leading_space;
     first_run->preserve_trailing_space = preserve_trailing_space;
     first_run->is_whitespace = is_whitespace;
@@ -342,7 +342,7 @@ static bool append_anonymous_flex_text_run(LayoutContext* lycon,
     FlexAnonymousTextRun* run = (FlexAnonymousTextRun*)scratch_calloc(
         &lycon->scratch, sizeof(FlexAnonymousTextRun));
     if (!run) return false;
-    run->text = text;
+    run->text = lam::up(text);
     run->preserve_leading_space = preserve_leading_space;
     run->preserve_trailing_space = preserve_trailing_space;
     run->is_whitespace = is_whitespace;
@@ -352,7 +352,7 @@ static bool append_anonymous_flex_text_run(LayoutContext* lycon,
         item->fi->anonymous_text_runs = run;
     } else {
         while (tail->next) tail = tail->next;
-        tail->next = run;
+        tail->next = lam::own(run);
     }
 
     bool vertical = item->blk &&
@@ -402,7 +402,7 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
     if (!runs) return;
 
     LayoutContext saved_context = *lycon;
-    lycon->view = static_cast<View*>(item);
+    lycon->view = lam::up(static_cast<View*>(item));
     lycon->block.content_width = item->width;
     lycon->block.content_height = item->height;
     lycon->block.given_width = item->width;
@@ -767,16 +767,16 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
                   container->source_loc());
         return;
     }
-    lycon->flex_container = flex;
+    lycon->flex_container = lam::up(flex);
     flex->scratch_mark = mark;
-    flex->lycon = lycon;  // Store layout context for intrinsic sizing
-    flex->container = container;
+    flex->lycon = lam::up(lycon);  // Store layout context for intrinsic sizing
+    flex->container = lam::up(container);
     if (container->embed && container->embedp()->flex) {
         memcpy(flex, container->embedp()->flex, sizeof(FlexProp));
         flex->writing_mode = layout_block_writing_mode(container);
         flex->scratch_mark = mark;
-        flex->lycon = lycon;  // Restore after memcpy
-        flex->container = container;
+        flex->lycon = lam::up(lycon);  // Restore after memcpy
+        flex->container = lam::up(container);
     }
     else {
         flex->direction = DIR_ROW;
@@ -999,10 +999,10 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
     flex->allocated_items = item_capacity;
     flex->allocated_lines = item_capacity;
     if (item_capacity > 0) {
-        flex->flex_items = (View**)scratch_calloc(&lycon->scratch,
-            (size_t)item_capacity * sizeof(View*));
-        flex->lines = (FlexLineInfo*)scratch_calloc(&lycon->scratch,
-            (size_t)item_capacity * sizeof(FlexLineInfo));
+        flex->flex_items = lam::own_arr((View**)scratch_calloc(&lycon->scratch,
+            (size_t)item_capacity * sizeof(View*)));
+        flex->lines = lam::own_arr((FlexLineInfo*)scratch_calloc(&lycon->scratch,
+            (size_t)item_capacity * sizeof(FlexLineInfo)));
         if (!flex->flex_items || !flex->lines) {
             log_error("layout_flex: unable to allocate %d flex scratch slots for %s",
                       item_capacity, container->source_loc());
@@ -3064,7 +3064,7 @@ static int create_flex_lines(FlexContainerLayout* flex_layout, View** items, int
 
         FlexLineInfo* line = &flex_layout->lines[line_count];
         memset(line, 0, sizeof(FlexLineInfo));
-        line->items = &items[current_item];
+        line->items = lam::up(&items[current_item]);
         line->item_count = 0;
 
         float main_size = 0.0f;

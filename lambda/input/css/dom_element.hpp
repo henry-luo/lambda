@@ -45,6 +45,9 @@ typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
 typedef struct MarkerProp MarkerProp;  // From radiant/view.hpp
+typedef struct CssTransitionElemState CssTransitionElemState;  // From radiant/view.hpp
+typedef struct CssWebAnimationState CssWebAnimationState;  // From radiant/view.hpp
+typedef struct CustomLayoutPaintState CustomLayoutPaintState;  // From radiant/layout.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
 
@@ -244,33 +247,33 @@ enum DomScrollAlign : uint8_t {
 struct DomDocument {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
-    Pool* document_pool;         // Document-owned selectively released objects
-    Arena* node_arena;           // Stable DOM nodes and registered node-owned payloads
+    lam::Own<Pool> document_pool;   // Document-owned selectively released objects
+    lam::Own<Arena> node_arena;     // Stable DOM nodes and registered node-owned payloads
     DomDocumentServices services;
 
     // Document content
     Url* url;                    // Document URL
-    Element* html_root;          // Parsed HTML tree in Mark notation (Lambda tree)
-    DomElement* root;            // Root element of DOM tree (optional)
+    lam::Up<Element> html_root;     // Parsed HTML tree in Mark notation (Lambda tree)
+    lam::Up<DomElement> root;       // Root element of DOM tree (optional); owned by the node chain
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
     bool html_scripting_enabled; // HTML parser scripting mode for special elements
     uint32_t next_node_id;        // next DomNode id for event/state logs (0 reserved)
 
     // CSS stylesheets (for @font-face processing after UiContext init)
-    struct CssStylesheet** stylesheets;  // Array of parsed stylesheets
+    lam::OwnArr<struct CssStylesheet*> stylesheets;  // Array of parsed stylesheets
     int stylesheet_count;                // Number of stylesheets
     int stylesheet_capacity;             // Capacity of stylesheet array
     bool font_faces_processed;            // @font-face registry matches stylesheets
 
     // Layout and state
-    ViewTree* view_tree;         // View tree after layout
-    StateStore* state_store;     // Per-document state store owner
-    DocState* state;             // Compatibility pointer to state_store->doc_state
+    lam::Own<ViewTree> view_tree;   // View tree after layout
+    lam::Own<StateStore> state_store;  // Per-document state store owner
+    lam::Up<DocState> state;        // Compatibility pointer to state_store->doc_state
 
     ViewportMeta viewport;
 
     // Network support (Phase 4 integration)
-    struct NetworkResourceManager* resource_manager;  // Network resource coordinator (nullptr for local-only docs)
+    lam::Own<struct NetworkResourceManager> resource_manager;  // Network resource coordinator (nullptr for local-only docs)
     double load_start_time;                           // Document load start timestamp (for total timeout)
     bool fully_loaded;                                // True when all network resources complete
 
@@ -280,7 +283,7 @@ struct DomDocument {
     // An embedded document has one bounded upward browsing-context edge. The
     // owner reference is generation-checked so package traversal cannot keep a
     // detached iframe alive or follow a recycled node (ES31, D4.5.1v3).
-    DomDocument* embedding_document;
+    lam::Up<DomDocument> embedding_document;
     DomNodeRef embedding_element_ref;
     // The focused browsing context below this document: its iframe element that
     // the last pointer press landed in (empty when the press was in this document
@@ -291,14 +294,14 @@ struct DomDocument {
     bool embedded_evaluator_pending;
 
     // Native extensions retain runtime-backed values through document resources.
-    struct DomDocumentResource* resources;
+    lam::Own<struct DomDocumentResource> resources;
 
     // Reactive UI: cached CSS for rebuild_lambda_doc optimization
-    struct CssStylesheet** cached_inline_sheets;  // Parsed inline <style> stylesheets (cached)
+    lam::OwnArr<struct CssStylesheet*> cached_inline_sheets;  // Parsed inline <style> stylesheets (cached)
     int cached_inline_sheet_count;                // Number of cached inline stylesheets
 
     // Reactive UI: Element* → DomElement* map for incremental DOM rebuild
-    struct hashmap* element_dom_map;              // maps Lambda Element* to its DomElement wrapper
+    lam::Own<struct hashmap> element_dom_map;     // maps Lambda Element* to its DomElement wrapper
 
     // Phase 15: Skip blanket styles_resolved reset during incremental layout
     bool skip_style_reset;
@@ -372,15 +375,15 @@ struct DomDocument {
 
     // The legacy document.domain override relaxes same-origin checks without
     // mutating the document URL's hostname.
-    const char* document_domain;
+    lam::Own<const char> document_domain;
 
     // Loader-created source pools survive the DOM/JS teardown and are released
     // immediately after it. Caller-supplied pools remain external.
-    Pool* owned_loader_pool;
+    lam::Own<Pool> owned_loader_pool;
 
     // Keep this queue at the tail with the other non-JIT document state.
     // Layout records live controls here so init need not rescan the DOM.
-    ArrayList* behavior_init_controls;
+    lam::Own<ArrayList> behavior_init_controls;
 
     // Foreign documents can borrow their creator's Input. Only the document
     // assigned a fresh Input may release that Input's document context.
@@ -450,9 +453,9 @@ typedef void (*DomDocumentResourceDestroyFn)(void* data);
 
 // tier-1: doc-pool, survives relayout
 typedef struct DomDocumentResource {
-    void* data;
+    void* data;   // opaque to the document; released by `destroy`
     DomDocumentResourceDestroyFn destroy;
-    DomDocumentResource* next;
+    lam::Own<DomDocumentResource> next;
 } DomDocumentResource;
 
 bool dom_document_add_resource(DomDocument* document, void* data,
@@ -510,7 +513,7 @@ typedef struct LayoutFragmentBox {
     int fragment_index;
     int column_index;
     int row_index;
-    struct LayoutFragmentBox* next;
+    lam::Own<struct LayoutFragmentBox> next;
 } LayoutFragmentBox;
 
 // Layout cache (from radiant/layout_cache.hpp)
@@ -519,12 +522,12 @@ namespace radiant { struct LayoutCache; }
 // CSS Custom Property (CSS Variable) storage
 // tier-1: doc-pool, survives relayout
 struct CssCustomProp {
-    const char* name;       // Variable name (e.g., "--primary-color")
-    const CssValue* value;  // Variable value
-    const char* value_text; // Raw value text for faithful CSSOM serialization
-    size_t value_text_len;  // Length of value_text
-    CssDeclaration* declaration; // cascade metadata and source-owner record
-    CssCustomProp* next;    // Linked list for simple storage
+    lam::Up<const char> name;       // Variable name (e.g., "--primary-color")
+    lam::Up<const CssValue> value;  // Variable value
+    lam::Up<const char> value_text; // Raw value text for faithful CSSOM serialization
+    size_t value_text_len;          // Length of value_text
+    lam::Up<CssDeclaration> declaration; // cascade metadata and source-owner record
+    lam::Own<CssCustomProp> next;   // Linked list for simple storage
 };
 
 // Custom-property names retain their authored spelling, while var() parsing
@@ -617,8 +620,8 @@ struct FragmentUnion {
 // live in document-pool storage while retaining the same public DOM API as
 // parsed nodes.
 struct DomSyntheticAttribute {
-    const char* name;
-    const char* value;
+    lam::Own<const char> name;   // document-pool copies
+    lam::Own<const char> value;
 };
 
 // tier-1: doc-pool, survives relayout
@@ -626,30 +629,30 @@ struct DomElementExt {
     NameId name_id;
     FragmentUnion frags[FRAGMENT_UNION_COUNT];
     uint8_t fragment_presence_mask;
-    StyleTree* pseudo_styles[PSEUDO_STYLE_COUNT];
-    MultiColumnProp* multicol;
-    VectorPathProp* vpath;
-    FilterProp* filter;
-    FilterProp* backdrop_filter;
-    void* transition_state;
-    void* custom_layout_paint;
-    LayoutFragmentBox* layout_fragments;
+    lam::Own<StyleTree> pseudo_styles[PSEUDO_STYLE_COUNT];
+    lam::Own<MultiColumnProp> multicol;
+    lam::Own<VectorPathProp> vpath;
+    lam::Own<FilterProp> filter;
+    lam::Own<FilterProp> backdrop_filter;
+    lam::Own<CssTransitionElemState> transition_state;
+    lam::Up<CustomLayoutPaintState> custom_layout_paint;  // a document resource's paint state
+    lam::Own<LayoutFragmentBox> layout_fragments;  // fragment list
     int layout_fragment_count;
     float last_remembered_width;
     float last_remembered_height;
     bool has_last_remembered_width;
     bool has_last_remembered_height;
-    void* web_animation_state;
+    lam::Own<CssWebAnimationState> web_animation_state;  // head of the element's effect list
     DisplayValue animated_display;
     bool has_animated_display;
-    DomElement* shadow_host;
-    DomElement* shadow_root;
+    lam::Up<DomElement> shadow_host;
+    lam::Own<DomElement> shadow_root;
     float pending_element_scroll_x;
     float pending_element_scroll_y;
     bool has_inline_cb_edge_snapshot;
-    const char** attribute_names_cache;
+    lam::OwnArr<const char*> attribute_names_cache;
     int attribute_names_capacity;
-    DomSyntheticAttribute* synthetic_attributes;
+    lam::OwnArr<DomSyntheticAttribute> synthetic_attributes;
     int synthetic_attribute_count;
     int synthetic_attribute_capacity;
     // Layout-only ruby column geometry. This lives outside InlineProp because
@@ -666,7 +669,7 @@ struct DomElementExt {
     // Deferred text-control events are DOM task state, so their queue links
     // outlive layout-property teardown while a control is detached.
     uint8_t selectionchange_event_pending;
-    DomElement* selectionchange_event_next;
+    lam::Up<DomElement> selectionchange_event_next;
     // ::marker layout state; markers have no BlockProp
     lam::Own<MarkerProp> marker;
 };
@@ -691,9 +694,11 @@ struct DomElement : DomNode {
 
     // Resolved props point into the shorter-lived view pool by unified-tree design;
     // every relayout resets and rebuilds them before consumers may read the tree.
-    // The element owns each prop it points to (Own<T>). font, in_line, blk and
-    // specified_style stay raw: they may point at a prop shared with another
-    // element or interned in a canonical table.
+    // The element owns each prop it points to (Own<T>). in_line and
+    // specified_style are Shared<T>: a canonical value shared with other
+    // elements, or the element's private copy after copy-on-write (recorded by
+    // the inline_prop_shared flag and the style epoch). font stays raw: the
+    // pass-local anonymous flex item borrows another element's FontProp.
     // === Embedded Lambda Element (at known offset from DomNode base) ===
     // In UI mode, this IS the Lambda Element. Otherwise, data is copied from the
     // original Element during create(). MarkEditor operates on
@@ -713,9 +718,9 @@ struct DomElement : DomNode {
     // painter can tell an unchanged inline SVG (reusable raster layer) from a changed one.
     uint32_t svg_layer_generation;
     lam::Up<const char> id;      // Element ID attribute (cached)
-    const char** class_names;    // Array of class names (cached)
+    lam::OwnArr<const char*> class_names;  // Array of class names (cached)
     int class_count;             // Number of classes
-    StyleTree* specified_style;  // Specified values from CSS rules (AVL tree)
+    lam::Shared<StyleTree> specified_style;  // Specified values from CSS rules (AVL tree)
     lam::Own<DomElementExt> ext; // rare DOM/view state, allocated lazily from doc pool
     // we do not store computed_style;
     // Version tracking for cache invalidation
@@ -725,7 +730,7 @@ struct DomElement : DomNode {
     lam::Up<DomDocument> doc;    // Parent document (provides arena and input)
 
     // CSS custom properties (CSS variables)
-    struct CssCustomProp* css_variables;  // Hashmap of --var-name: value
+    lam::Own<struct CssCustomProp> css_variables;  // list of --var-name: value
 
     // view related fields
     DisplayValue display;
@@ -733,7 +738,7 @@ struct DomElement : DomNode {
     // span properties
     FontProp* font;  // font style
     lam::Own<BoundaryProp> bound;  // block boundary properties
-    InlineProp* in_line;  // inline specific style properties
+    lam::Shared<InlineProp> in_line;  // inline specific style properties
 
     // CSS Text soft hyphen fragments can contribute to an inline element's
     // border-box union without producing an additional DOM text rect.
@@ -1001,12 +1006,12 @@ struct DomElement : DomNode {
         return ext;
     }
     StyleTree* pseudo_style(PseudoStyleKind kind) const { return ext ? ext->pseudo_styles[kind] : nullptr; }
-    StyleTree** pseudo_style_slot(PseudoStyleKind kind) {
+    lam::Own<StyleTree>* pseudo_style_slot(PseudoStyleKind kind) {
         DomElementExt* value = ensure_ext();
         return value ? &value->pseudo_styles[kind] : nullptr;
     }
     void set_pseudo_style(PseudoStyleKind kind, StyleTree* style) {
-        if (style || ext) *pseudo_style_slot(kind) = style;
+        if (style || ext) *pseudo_style_slot(kind) = lam::own(style);
     }
     bool has_fragment_union(FragmentUnionKind kind) const {
         return ext && (ext->fragment_presence_mask & (1u << kind));
@@ -1027,23 +1032,23 @@ struct DomElement : DomNode {
     MultiColumnProp* multicol_prop() const { return ext ? ext->multicol : nullptr; }
     MarkerProp* marker_prop() const { return ext ? ext->marker : nullptr; }
     void set_marker_prop(MarkerProp* value) { if (value || ext) ensure_ext()->marker = lam::own(value); }
-    void set_multicol_prop(MultiColumnProp* value) { if (value || ext) ensure_ext()->multicol = value; }
+    void set_multicol_prop(MultiColumnProp* value) { if (value || ext) ensure_ext()->multicol = lam::own(value); }
     VectorPathProp* vector_path() const { return ext ? ext->vpath : nullptr; }
-    void set_vector_path(VectorPathProp* value) { if (value || ext) ensure_ext()->vpath = value; }
+    void set_vector_path(VectorPathProp* value) { if (value || ext) ensure_ext()->vpath = lam::own(value); }
     FilterProp* filter_prop() const { return ext ? ext->filter : nullptr; }
-    FilterProp** filter_slot() { return &ensure_ext()->filter; }
-    void set_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->filter = value; }
+    lam::Own<FilterProp>* filter_slot() { return &ensure_ext()->filter; }
+    void set_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->filter = lam::own(value); }
     FilterProp* backdrop_filter_prop() const { return ext ? ext->backdrop_filter : nullptr; }
-    FilterProp** backdrop_filter_slot() { return &ensure_ext()->backdrop_filter; }
-    void set_backdrop_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->backdrop_filter = value; }
-    void* transition_state_prop() const { return ext ? ext->transition_state : nullptr; }
-    void set_transition_state_prop(void* value) {
-        if (value || ext) ensure_ext()->transition_state = value;
+    lam::Own<FilterProp>* backdrop_filter_slot() { return &ensure_ext()->backdrop_filter; }
+    void set_backdrop_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->backdrop_filter = lam::own(value); }
+    CssTransitionElemState* transition_state_prop() const { return ext ? ext->transition_state : nullptr; }
+    void set_transition_state_prop(CssTransitionElemState* value) {
+        if (value || ext) ensure_ext()->transition_state = lam::own(value);
     }
-    void* custom_layout_paint_prop() const { return ext ? ext->custom_layout_paint : nullptr; }
-    void set_custom_layout_paint_prop(void* value) { if (value || ext) ensure_ext()->custom_layout_paint = value; }
+    CustomLayoutPaintState* custom_layout_paint_prop() const { return ext ? ext->custom_layout_paint : nullptr; }
+    void set_custom_layout_paint_prop(CustomLayoutPaintState* value) { if (value || ext) ensure_ext()->custom_layout_paint = lam::up(value); }
     LayoutFragmentBox* layout_fragment_list() const { return ext ? ext->layout_fragments : nullptr; }
-    void set_layout_fragment_list(LayoutFragmentBox* value) { if (value || ext) ensure_ext()->layout_fragments = value; }
+    void set_layout_fragment_list(LayoutFragmentBox* value) { if (value || ext) ensure_ext()->layout_fragments = lam::own(value); }
     int layout_fragments_count() const { return ext ? ext->layout_fragment_count : 0; }
     int& layout_fragments_count_ref() { return ensure_ext()->layout_fragment_count; }
     bool has_last_remembered_width() const { return ext && ext->has_last_remembered_width; }
@@ -1064,9 +1069,9 @@ struct DomElement : DomNode {
             data->has_last_remembered_height = true;
         }
     }
-    void* web_animation_state() const { return ext ? ext->web_animation_state : nullptr; }
-    void set_web_animation_state(void* value) {
-        if (value || ext) ensure_ext()->web_animation_state = value;
+    CssWebAnimationState* web_animation_state() const { return ext ? ext->web_animation_state : nullptr; }
+    void set_web_animation_state(CssWebAnimationState* value) {
+        if (value || ext) ensure_ext()->web_animation_state = lam::own(value);
     }
     bool has_animated_display() const { return ext && ext->has_animated_display; }
     DisplayValue animated_display() const {
@@ -1083,9 +1088,9 @@ struct DomElement : DomNode {
         if (ext) ext->has_animated_display = false;
     }
     DomElement* shadow_host_element() const { return ext ? ext->shadow_host : nullptr; }
-    void set_shadow_host_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_host = value; }
+    void set_shadow_host_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_host = lam::up(value); }
     DomElement* shadow_root_element() const { return ext ? ext->shadow_root : nullptr; }
-    void set_shadow_root_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_root = value; }
+    void set_shadow_root_element(DomElement* value) { if (value || ext) ensure_ext()->shadow_root = lam::own(value); }
     float pending_scroll_x() const { return ext ? ext->pending_element_scroll_x : 0.0f; }
     void set_pending_scroll_x(float value) { ensure_ext()->pending_element_scroll_x = value; }
     float pending_scroll_y() const { return ext ? ext->pending_element_scroll_y : 0.0f; }
@@ -1259,13 +1264,11 @@ inline void dom_element_clear_id(DomElement* element) {
 }
 
 inline void dom_element_retain_class_names(DomElement* element, lam::PoolPtr<const char*> class_names) {
-    lam::PersistentFieldRef<const char*, lam::PoolDomain> field(element->class_names);
-    field.set(class_names);
+    element->class_names = lam::own_arr(class_names.get());
 }
 
 inline void dom_element_clear_class_names(DomElement* element) {
-    lam::PersistentFieldRef<const char*, lam::PoolDomain> field(element->class_names);
-    field.clear();
+    element->class_names = nullptr;
 }
 
 // Ensure embedded Element is 8-byte aligned (required for pointer fields in Element)

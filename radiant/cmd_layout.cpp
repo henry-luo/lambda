@@ -1652,7 +1652,7 @@ static void store_document_stylesheets(DomDocument* dom_doc,
     for (int i = 0; !stylesheet_set_changed && i < count; i++) {
         stylesheet_set_changed = dom_doc->stylesheets[i] != merged[i];
     }
-    dom_doc->stylesheets = merged;
+    dom_doc->stylesheets = lam::own_arr(merged);
     dom_doc->stylesheet_count = count;
     dom_doc->stylesheet_capacity = count;
     // A new parsed sheet set invalidates the matching document-font registry.
@@ -2508,7 +2508,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     log_mem_stage("load_html: after_inline_attrs");
     auto t_inline_style = timing ? time_now_ns() : t_stylesheet_setup;
 
-    dom_doc->root = dom_root;  // set root for CSSOM and JS DOM API access
+    dom_doc->root = lam::up(dom_root);  // set root for CSSOM and JS DOM API access
 
     // Scripts read computed styles during load, so the initial cascade is the
     // single ordering invariant; the retired pre-cascade mode made that state
@@ -2530,7 +2530,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     }
 
     if (execute_scripts) {
-        dom_doc->html_root = html_root;
+        dom_doc->html_root = lam::up(html_root);
         run_html_document_scripts(dom_doc, pool, timing, script_timing,
                                   profile_recascade_completed, script_prefetch_count,
                                   script_prefetch_start_ns, t_initial_cascade,
@@ -3010,8 +3010,8 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
                                       Element* html_root, HtmlVersion version,
                                       Url* url, Runtime* runtime) {
     if (!doc) return;
-    doc->root = root;
-    doc->html_root = html_root;
+    doc->root = lam::up(root);
+    doc->html_root = lam::up(html_root);
     doc->html_version = version;
     doc->url = url;
     // Load-time geometry reads may already have committed a ViewTree.
@@ -3203,7 +3203,7 @@ static DomDocument* create_layout_dom(Input* input, Element* root,
     log_debug("[page-kind] %s document -> %s", document_kind,
               dom_page_kind_name(page_kind));
     if (page_kind == DOM_PAGE_KIND_LAMBDA_SCRIPT) {
-        document->element_dom_map = element_dom_map_create();
+        document->element_dom_map = lam::own(element_dom_map_create());
         if (!document->element_dom_map) {
             log_error("[LAYOUT DOC INIT] failed to create Lambda element map");
             dom_document_destroy(document);
@@ -3697,8 +3697,8 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     xml_dom->parent = lam::up(static_cast<DomNode*>(body_elem));
 
 
-    dom_doc->root = html_elem;
-    dom_doc->html_root = xml_root;
+    dom_doc->root = lam::up(html_elem);
+    dom_doc->html_root = lam::up(xml_root);
 
     auto t_cascade = time_now_ns();
     log_info("[TIMING] load: build DOM: %.1fms",
@@ -4026,7 +4026,7 @@ static DomDocument* load_lambda_document_doc(Url* script_url,
                                script_stylesheet ? 1 : 0,
                                inline_stylesheets, inline_stylesheet_count, pool);
     if (dom_doc->stylesheet_count > 0) {
-        dom_doc->cached_inline_sheets = inline_stylesheets;
+        dom_doc->cached_inline_sheets = lam::own_arr(inline_stylesheets);
         dom_doc->cached_inline_sheet_count = inline_stylesheet_count;
         dom_doc->services.cached_css_engine = css_engine;
     }
@@ -4313,7 +4313,7 @@ static Element* layout_current_html_root(DomDocument* doc) {
     Item current_root = render_map_get_doc_root();
     if (current_root.item && current_root.element != html_root) {
         html_root = current_root.element;
-        doc->html_root = html_root;
+        doc->html_root = lam::up(html_root);
     }
     return html_root;
 }
@@ -4342,7 +4342,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     css_property_system_init(doc->document_pool);
 
     if (!doc->element_dom_map) {
-        doc->element_dom_map = element_dom_map_create();
+        doc->element_dom_map = lam::own(element_dom_map_create());
     } else {
         hashmap_clear(doc->element_dom_map, false);
     }
@@ -4354,7 +4354,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
     }
     auto t_dom = time_now_ns();
 
-    doc->root = new_root;
+    doc->root = lam::up(new_root);
 
     CssStylesheet** inline_sheets = doc->cached_inline_sheets;
     int inline_count = doc->cached_inline_sheet_count;
@@ -4365,7 +4365,7 @@ void rebuild_lambda_doc(UiContext* uicon) {
         if (css_engine) {
             inline_sheets = extract_and_collect_css(
                 html_elem, new_root, css_engine, nullptr, doc->document_pool, &inline_count);
-            doc->cached_inline_sheets = inline_sheets;
+            doc->cached_inline_sheets = lam::own_arr(inline_sheets);
             doc->cached_inline_sheet_count = inline_count;
             doc->services.cached_css_engine = css_engine;
         }

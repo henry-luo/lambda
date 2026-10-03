@@ -135,11 +135,11 @@ typedef struct RdtPath RdtPath;
 typedef struct RdtVectorImpl RdtVectorImpl;
 
 typedef struct RdtVector {
-    RdtVectorImpl* impl;
+    lam::Own<RdtVectorImpl> impl;
 } RdtVector;
 
 typedef struct RdtVectorTarget {
-    uint32_t* pixels;
+    lam::Up<uint32_t> pixels;
     int width;
     int height;
     int stride;
@@ -155,7 +155,7 @@ typedef enum {
 
 typedef struct RdtVectorCaps {
     RdtVectorBackend backend;
-    const char* backend_name;
+    lam::Up<const char> backend_name;
     bool vector_paths;
     bool rounded_rects;
     bool gradients;
@@ -460,7 +460,7 @@ typedef struct {
 } DlFillRoundedRect;
 
 typedef struct {
-    RdtPath* path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // cloned path, owned by display list
     Color color;
     RdtFillRule rule;
     bool has_transform;
@@ -468,12 +468,12 @@ typedef struct {
 } DlFillPath;
 
 typedef struct {
-    RdtPath* path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // cloned path, owned by display list
     Color color;
     float width;
     RdtStrokeCap cap;
     RdtStrokeJoin join;
-    float* dash_array;   // arena-allocated copy, NULL if no dashes
+    lam::OwnArr<float> dash_array;   // arena-allocated copy, NULL if no dashes
     int dash_count;
     float dash_phase;
     bool has_transform;
@@ -481,9 +481,9 @@ typedef struct {
 } DlStrokePath;
 
 typedef struct {
-    RdtPath* path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // cloned path, owned by display list
     float x1, y1, x2, y2;
-    RdtGradientStop* stops;  // arena-allocated copy
+    lam::OwnArr<RdtGradientStop> stops;  // arena-allocated copy
     int stop_count;
     RdtFillRule rule;
     bool has_transform;
@@ -493,9 +493,9 @@ typedef struct {
 } DlFillLinearGradient;
 
 typedef struct {
-    RdtPath* path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // cloned path, owned by display list
     float cx, cy, r;
-    RdtGradientStop* stops;  // arena-allocated copy
+    lam::OwnArr<RdtGradientStop> stops;  // arena-allocated copy
     int stop_count;
     RdtFillRule rule;
     bool has_transform;
@@ -530,14 +530,14 @@ typedef struct {
 } DlDrawGlyph;
 
 typedef struct {
-    RdtPicture* picture;     // owned — display list frees on clear
+    lam::Own<RdtPicture> picture;     // owned — display list frees on clear
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
 } DlDrawPicture;
 
 typedef struct {
-    RdtPath* path;       // cloned path, owned by display list
+    lam::Own<RdtPath> path;       // cloned path, owned by display list
     bool has_transform;
     RdtMatrix transform;
 } DlPushClip;
@@ -594,7 +594,7 @@ typedef struct {
 // Post-processing: apply CSS filter chain
 typedef struct {
     float x, y, w, h;
-    void* filter;            // FilterProp* — borrowed
+    lam::Up<FilterProp> filter;  // borrowed from the element's filter prop
     Bound clip;              // rectangular clip bounds at recording time
 } DlApplyFilter;
 
@@ -655,7 +655,7 @@ typedef struct {
 // Video frame placeholder: records the layout rect and clip for post-composite blit.
 // The actual video frame pixels are blitted after tile compositing in the render loop.
 typedef struct {
-    void* video;             // RdtVideo* — borrowed, lifetime managed by view tree
+    struct RdtVideo* video;  // borrowed; checked by video_generation when retained (handle in M6)
     uint64_t video_generation;
     float dst_x, dst_y, dst_w, dst_h;  // physical pixel coordinates
     Bound clip;              // rectangular clip bounds at recording time
@@ -734,7 +734,7 @@ struct DisplayList : lam::ArrayList<DisplayItem> {
 typedef struct DisplayListValidationResult {
     bool valid;
     int first_error_index;
-    const char* message;
+    lam::Up<const char> message;
     int clip_depth;
     int backdrop_depth;
     int shadow_clip_depth;
@@ -866,7 +866,7 @@ void dl_apply_blend_mode(DisplayList* dl, int x0, int y0, int w, int h,
                          int blend_mode);
 
 void dl_apply_filter(DisplayList* dl, float x, float y, float w, float h,
-                     void* filter, const Bound* clip);
+                     FilterProp* filter, const Bound* clip);
 
 void dl_box_blur_region(DisplayList* dl, int rx, int ry, int rw, int rh, float blur_radius,
                         int clip_type, const float* clip_params,
@@ -890,7 +890,7 @@ void dl_outer_shadow(DisplayList* dl,
                      int clip_type, const float* clip_params);
 
 // Video placeholder (rect + clip only; actual blit is post-composite)
-void dl_video_placeholder(DisplayList* dl, void* video,
+void dl_video_placeholder(DisplayList* dl, struct RdtVideo* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation = 0);
@@ -933,7 +933,7 @@ typedef enum RenderExportTargetKind {
 
 typedef struct RenderExportTargetCaps {
     RenderExportTargetKind target;
-    const char* target_name;
+    lam::Up<const char> target_name;
     bool rects;
     bool rounded_rects;
     bool paths;
@@ -956,7 +956,7 @@ bool render_backend_supports_filter_chain(const RenderBackendCaps* caps,
 static inline const RenderExportTargetCaps* render_export_target_get_caps(RenderExportTargetKind target) {
     static const RenderExportTargetCaps svg_caps = {
         RENDER_EXPORT_TARGET_SVG,
-        "svg",
+        lam::up("svg"),
         true,   // rects
         true,   // rounded_rects
         true,   // paths
@@ -974,7 +974,7 @@ static inline const RenderExportTargetCaps* render_export_target_get_caps(Render
 
     static const RenderExportTargetCaps pdf_caps = {
         RENDER_EXPORT_TARGET_PDF,
-        "pdf",
+        lam::up("pdf"),
         true,   // rects
         true,   // rounded_rects
         true,   // paths
@@ -1121,7 +1121,7 @@ typedef struct {
     float width;
     RdtStrokeCap cap;
     RdtStrokeJoin join;
-    const float* dash_array; // borrowed
+    lam::Up<const float> dash_array; // borrowed
     int dash_count;
     float dash_phase;
     bool has_transform;
@@ -1157,17 +1157,17 @@ typedef struct {
 } PaintFillRadialGradient;
 
 typedef struct {
-    const uint32_t* pixels; // borrowed
+    lam::Up<const uint32_t> pixels; // borrowed
     int src_w, src_h, src_stride;
     float dst_x, dst_y, dst_w, dst_h;
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
-    ImageSurface* resource_owner;   // optional owner for generation checks
+    lam::Up<ImageSurface> resource_owner;   // optional owner for generation checks
 } PaintDrawImage;
 
 typedef struct {
-    ImageSurface* image;     // borrowed; lowerers decode or reference URL as needed
+    lam::Up<ImageSurface> image;     // borrowed; lowerers decode or reference URL as needed
     float dst_x, dst_y, dst_w, dst_h;
     uint8_t opacity;
     bool has_transform;
@@ -1187,14 +1187,14 @@ typedef struct {
 } PaintDrawGlyph;
 
 typedef struct {
-    RdtPicture* picture;    // borrowed
+    lam::Own<RdtPicture> picture;    // borrowed
     uint8_t opacity;
     bool has_transform;
     RdtMatrix transform;
 } PaintDrawPicture;
 
 typedef struct {
-    void* video;             // borrowed video handle
+    struct RdtVideo* video;  // borrowed; checked by video_generation when retained (handle in M6)
     float dst_x, dst_y, dst_w, dst_h;
     int object_fit;
     bool has_clip;
@@ -1203,7 +1203,7 @@ typedef struct {
 } PaintVideoPlaceholder;
 
 typedef struct {
-    ImageSurface* surface;   // borrowed
+    lam::Up<ImageSurface> surface;   // borrowed
     float dst_x, dst_y, dst_w, dst_h;
     bool has_clip;
     Bound clip;
@@ -1211,7 +1211,7 @@ typedef struct {
 } PaintWebviewLayerPlaceholder;
 
 typedef struct {
-    RdtPath* clip_path;     // borrowed
+    lam::Up<RdtPath> clip_path;     // borrowed
     bool has_transform;
     RdtMatrix transform;
 } PaintPushClip;
@@ -1239,7 +1239,7 @@ typedef struct {
 
 typedef struct {
     float x, y, w, h;
-    void* filter;            // FilterProp* — borrowed
+    lam::Up<FilterProp> filter;  // borrowed from the element's filter prop
     bool has_clip;
     Bound clip;              // rectangular clip bounds at recording time
 } PaintApplyFilter;
@@ -1290,19 +1290,19 @@ typedef struct {
     uint32_t color;          // ABGR8888
     bool has_clip;
     Bound clip;
-    ClipShape** clip_shapes; // borrowed; raster lowering clones into DisplayList
+    lam::Up<ClipShape*> clip_shapes; // borrowed; raster lowering clones into DisplayList
     int clip_depth;
 } PaintFillSurfaceRect;
 
 typedef struct {
-    ImageSurface* src_surface;   // borrowed
+    lam::Up<ImageSurface> src_surface;   // borrowed
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
     uint8_t opacity;
     bool has_clip;
     Bound clip;
-    ClipShape** clip_shapes; // borrowed; raster lowering clones into DisplayList
+    lam::Up<ClipShape*> clip_shapes; // borrowed; raster lowering clones into DisplayList
     int clip_depth;
 } PaintBlitSurfaceScaled;
 
@@ -1317,9 +1317,9 @@ typedef struct PaintEffectGroup {
     RdtMatrix transform;
     float opacity;           // 1.0 = none
     int blend_mode;          // CssEnum; 0 = normal
-    void* filter;            // FilterProp*; null = none
+    lam::Up<FilterProp> filter;           // null = none
     bool backdrop;           // backdrop-filter present
-    void* backdrop_filter;   // FilterProp* for backdrop-filter; null = none
+    lam::Up<FilterProp> backdrop_filter;  // backdrop-filter; null = none
     bool shadow;             // box-shadow present
     bool isolation;          // forced isolation
 } PaintEffectGroup;
@@ -1327,10 +1327,10 @@ typedef struct PaintEffectGroup {
 // A nested SVG subscene (Phase F). Carries the inheritance + geometry that
 // must survive lowering so inline SVG renders identically on every target.
 typedef struct PaintSvgSubscene {
-    void* svg_root;          // Element* SVG DOM root (inline native or picture)
-    void* id_scope;          // Element* tree for <use href="#id">; null = svg_root
-    void* pool;              // Pool* used by the owning document when available
-    void* font_context;      // FontContext* for SVG text resolution
+    lam::Up<Element> svg_root;       // SVG DOM root (inline native or picture)
+    lam::Up<Element> id_scope;       // tree for <use href="#id">; null = svg_root
+    lam::Up<Pool> pool;              // used by the owning document when available
+    lam::Up<FontContext> font_context;  // for SVG text resolution
     float viewport_width;
     float viewport_height;
     float raster_scale;
@@ -1346,7 +1346,7 @@ typedef struct PaintSvgSubscene {
     float stroke_width;
     RdtMatrix transform;     // base transform; SVG lowering composes viewBox/PAR
     Bound content_clip;      // clip established for the SVG box
-    const char* source_path; // for resolving nested refs + recursion guard
+    lam::Up<const char> source_path; // for resolving nested refs + recursion guard
     uint64_t resource_generation; // immutable parsed DOM generation (retain-safe)
 } PaintSvgSubscene;
 
@@ -1360,20 +1360,20 @@ void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raste
 
 // A semantic glyph run. Positions/text/font, not rasterised bitmaps.
 typedef struct {
-    void* font;              // FontBox* / font handle
+    lam::Up<FontBox> font;
     Color color;
-    const char* text;        // optional native text payload; UTF-8, borrowed unless owns_text
+    const char* text;               // optional native text payload; UTF-8, borrowed unless owns_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
     bool owns_text;          // text must be freed by the owning PaintList cleanup
-    const char* font_family; // borrowed; optional for vector text lowering
+    lam::Up<const char> font_family; // borrowed; optional for vector text lowering
     float font_size;
     float x, baseline_y;
     float word_spacing;
     int font_weight;         // CSS numeric weight; 0 = omit
     bool italic;
-    const uint32_t* glyph_ids;   // borrowed
-    const float* xs;             // borrowed pen positions
-    const float* ys;
+    lam::Up<const uint32_t> glyph_ids;   // borrowed
+    lam::Up<const float> xs;             // borrowed pen positions
+    lam::Up<const float> ys;
     int count;
     bool has_transform;
     RdtMatrix transform;
@@ -1439,7 +1439,7 @@ struct PaintList : lam::ArrayList<PaintCmd> {
 typedef struct PaintIrValidationResult {
     bool valid;
     int first_error_index;
-    const char* message;
+    lam::Up<const char> message;
     int clip_depth;
     int backdrop_depth;
     int shadow_clip_depth;
@@ -1498,7 +1498,7 @@ void paint_draw_glyph(PaintList* pl, GlyphBitmap* bitmap, int x, int y,
                       const RdtMatrix* transform, uint64_t resource_generation);
 void paint_draw_picture(PaintList* pl, RdtPicture* picture,
                         uint8_t opacity, const RdtMatrix* transform);
-void paint_video_placeholder(PaintList* pl, void* video,
+void paint_video_placeholder(PaintList* pl, struct RdtVideo* video,
                              float dst_x, float dst_y, float dst_w, float dst_h,
                              int object_fit, const Bound* clip,
                              uint64_t video_generation);
@@ -1517,7 +1517,7 @@ void paint_composite_opacity(PaintList* pl, int x0, int y0, int w, int h,
                              float opacity, bool premultiplied_source);
 void paint_apply_blend_mode(PaintList* pl, int x0, int y0, int w, int h, int blend_mode);
 void paint_apply_filter(PaintList* pl, float x, float y, float w, float h,
-                        void* filter, const Bound* clip);
+                        FilterProp* filter, const Bound* clip);
 void paint_box_blur_region(PaintList* pl, int rx, int ry, int rw, int rh,
                            float blur_radius, int clip_type, const float* clip_params,
                            int exclude_type, const float* exclude_params,
@@ -1573,7 +1573,7 @@ void paint_ir_lower_raster_fragment(const PaintList* pl, DisplayList* dl);
 typedef struct {
     int indent_level;
     bool emit_unsupported_comments;
-    const RenderExportTargetCaps* caps;
+    lam::Up<const RenderExportTargetCaps> caps;
     int resource_id_base;
 } PaintSvgLoweringOptions;
 
@@ -1677,16 +1677,16 @@ typedef struct RenderContext {
     Color color;
     RdtVector vec;      // platform-agnostic vector renderer
 
-    UiContext* ui_context;
+    lam::Up<UiContext> ui_context;
 
     // Display list for deferred rendering (Phase 1)
     // When non-NULL, render functions record to dl instead of drawing directly.
-    DisplayList* dl;
+    lam::Up<DisplayList> dl;
     // Semantic paint IR recording target (Phase C). Must be non-NULL alongside
     // dl for painter commands; the rc_* gateway records primitives through the
     // PaintBuilder and lowers them to dl (byte-identical to direct dl_*).
-    PaintList* paint_list;
-    RetainedDisplayListCache* retained_dl_cache;
+    lam::Up<PaintList> paint_list;
+    lam::Up<RetainedDisplayListCache> retained_dl_cache;
 
     // Transform state
     RdtMatrix transform;           // Current combined transform matrix
@@ -1699,7 +1699,7 @@ typedef struct RenderContext {
     float raster_scale;
     
     // Phase 18: Dirty-region tracking for render tree clipping
-    DirtyTracker* dirty_tracker;   // NULL = full repaint (no clipping)
+    lam::Up<DirtyTracker> dirty_tracker;   // NULL = full repaint (no clipping)
     Bound dirty_union;             // union bbox of all dirty rects (CSS pixels, valid when dirty_tracker != NULL)
     bool has_dirty_union;          // true when dirty_union is valid
 
@@ -1708,13 +1708,13 @@ typedef struct RenderContext {
 
     // per-frame memoization of immutable post-layout descendant bounds used by
     // viewport and dirty-region culling.
-    HashMap* content_bounds_cache;
+    lam::Up<HashMap> content_bounds_cache;
 
     // Per-render profiling counters and timers.
-    RenderProfiler* profiler;
+    lam::Up<RenderProfiler> profiler;
 
     // Vector clip shape stack for overflow:hidden with border-radius and CSS clip-path
-    ClipShape* clip_shapes[RDT_MAX_CLIP_SHAPES];
+    ClipShape* clip_shapes[RDT_MAX_CLIP_SHAPES];  // fixed stack of borrowed clip shapes
     int clip_shape_depth;
 
     // Suppresses automatic per-block display-list markers while a caller records
@@ -1723,7 +1723,7 @@ typedef struct RenderContext {
 } RenderContext;
 
 struct RenderFrameScope {
-    RenderContext* rdcon;
+    lam::Up<RenderContext> rdcon;
     DisplayList display_list;
     bool context_active;
     bool display_list_active;
@@ -1797,15 +1797,15 @@ typedef struct PaintEffectGroup PaintEffectGroup;
 typedef struct CustomLayoutPaintLayer CustomLayoutPaintLayer;
 
 typedef struct RadiantStackPaintEntry {
-    View* view;
-    CustomLayoutPaintLayer* layer;
+    lam::Up<View> view;
+    lam::Up<CustomLayoutPaintLayer> layer;
     int z;
     int order;
     bool is_generated_layer;
 } RadiantStackPaintEntry;
 
 typedef struct RadiantStackPaintList {
-    RadiantStackPaintEntry* entries;
+    lam::Up<RadiantStackPaintEntry> entries;
     int count;
 } RadiantStackPaintList;
 
@@ -1880,7 +1880,7 @@ typedef struct {
     float x, y;           // accumulated absolute position (CSS logical px)
     FontBox font;          // inherited font
     Color color;           // inherited color
-    UiContext* ui_context;
+    lam::Up<UiContext> ui_context;
 } RenderWalkState;
 
 // ── Shared tree walker API ────────────────────────────────────────────
@@ -2056,7 +2056,7 @@ static inline void surface_region_restore_masked(ImageSurface* surface,
 // ===== display_list_replay_state.hpp =====
 typedef struct DisplayReplayDirtyClip {
     Bound bounds;
-    RdtPath* path;
+    lam::Up<RdtPath> path;
     bool active;
 } DisplayReplayDirtyClip;
 
@@ -2106,7 +2106,7 @@ void dl_replay_webview_layer_placeholder_at_offset(ImageSurface* surface,
 #define DL_REPLAY_MAX_BACKDROP_DEPTH 16
 
 typedef struct DisplayReplayBackdropStack {
-    uint32_t* stack[DL_REPLAY_MAX_BACKDROP_DEPTH];
+    lam::OwnArr<uint32_t> stack[DL_REPLAY_MAX_BACKDROP_DEPTH];
     IRect region[DL_REPLAY_MAX_BACKDROP_DEPTH];
     ScratchMark scope[DL_REPLAY_MAX_BACKDROP_DEPTH];  // owns stack[i]; ended when popped
     int sp;
@@ -2140,9 +2140,9 @@ bool dl_replay_backdrop_skip_item(DisplayReplayBackdropStack* stack,
 
 // ===== display_list_replay_shadow.hpp =====
 typedef struct DisplayReplayShadowClip {
-    uint32_t* saved;
+    lam::OwnArr<uint32_t> saved;
     IRect region;
-    ScratchArena* scratch;  // arena holding `saved`
+    lam::Up<ScratchArena> scratch;  // arena holding `saved`
     ScratchMark scope;      // owns `saved`; ended on restore or discard
 } DisplayReplayShadowClip;
 
@@ -2242,7 +2242,7 @@ extern "C" {
 typedef struct Tile {
     int col, row;               // grid position
     float x, y, w, h;          // bounds in physical pixels (scaled)
-    uint32_t* pixels;           // tile pixel buffer (owned, ABGR8888)
+    lam::Up<uint32_t> pixels;           // tile pixel buffer (owned, ABGR8888)
     int pixel_w, pixel_h;      // physical pixel dimensions
     int stride;                 // row stride in pixels (== pixel_w)
 } Tile;
@@ -2252,8 +2252,8 @@ typedef struct Tile {
 // ---------------------------------------------------------------------------
 
 typedef struct TileGrid {
-    Tile* tiles;
-    uint32_t* pixel_slab;
+    lam::OwnArr<Tile> tiles;
+    lam::OwnArr<uint32_t> pixel_slab;
     int cols, rows;
     int total;
     size_t pixel_slab_count;
@@ -2284,8 +2284,8 @@ void tile_grid_composite(TileGrid* grid, ImageSurface* surface);
 // ---------------------------------------------------------------------------
 
 typedef struct TileJob {
-    Tile* tile;
-    DisplayList* display_list;  // shared, read-only
+    lam::Up<Tile> tile;
+    lam::Up<DisplayList> display_list;  // shared, read-only
     float raster_scale;
     uint32_t bg_color;          // tile background clear color (ABGR8888)
 } TileJob;
@@ -2294,7 +2294,7 @@ typedef struct TileJob {
 typedef struct WorkerState {
     RdtVector vec;              // thread-local ThorVG canvas
     ScratchArena scratch;       // thread-local scratch allocator
-    Arena* arena;               // thread-local arena (backing for scratch)
+    lam::Own<Arena> arena;               // thread-local arena (backing for scratch)
     bool initialized;
 
     void init(Tile* tile);
@@ -2302,11 +2302,11 @@ typedef struct WorkerState {
 } WorkerState;
 
 typedef struct RenderPool {
-    pthread_t* threads;
+    lam::OwnArr<pthread_t> threads;
     int thread_count;
 
     // job queue (simple array — all jobs submitted before workers start)
-    TileJob* jobs;
+    lam::OwnArr<TileJob> jobs;
     int job_count;
 
     // synchronisation: barrier-style — main thread signals start, waits for all done
@@ -2352,18 +2352,15 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
 
 // ===== retained_fields.hpp =====
 inline void radiant_retain_font_family(FontProp* font, lam::PoolPtr<char> family) {
-    lam::PersistentFieldRef<char, lam::PoolDomain> field(font->family);
-    field.set(family);
+    font->family = lam::up(family.get());
 }
 
 inline void radiant_retain_font_family(FontProp* font, lam::GcPtr<char> family) {
-    lam::PersistentFieldRef<char, lam::PoolDomain> field(font->family);
-    field.set(family);
+    font->family = lam::up(family.get());
 }
 
 inline void radiant_clear_font_family(FontProp* font) {
-    lam::PersistentFieldRef<char, lam::PoolDomain> field(font->family);
-    field.clear();
+    font->family = nullptr;
 }
 
 inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
@@ -2532,8 +2529,8 @@ struct DirtyTracker;
 // ============================================================================
 
 typedef struct LottiePlayer {
-    void* tvg_animation;        // Tvg_Animation (opaque, managed by ThorVG)
-    void* tvg_canvas;           // Tvg_Canvas for rasterization (opaque)
+    lam::Foreign<struct _Tvg_Animation> tvg_animation;  // owned by this player, released through ThorVG
+    lam::Foreign<struct _Tvg_Canvas> tvg_canvas;        // owned by this player, released through ThorVG
 
     float total_frames;
     float frame_rate;
@@ -2597,6 +2594,7 @@ static void animation_player_finish(AnimationInstance* anim) {
     Player* player = anim ? static_cast<Player*>(anim->state) : nullptr;
     if (player) player->finish(anim);
 }
+
 #endif
 
 // ===== video frame wake declarations =====
@@ -2646,21 +2644,21 @@ bool render_paint_boundary_emit_outer_shadows(PaintList* paint_list, ViewBlock* 
                                               float x, float y);
 
 typedef struct BoundaryLinearGradientPaint {
-    RdtPath* path;
+    lam::Up<RdtPath> path;
     float x1;
     float y1;
     float x2;
     float y2;
-    RdtGradientStop* stops;
+    lam::Up<RdtGradientStop> stops;
     int stop_count;
 } BoundaryLinearGradientPaint;
 
 typedef struct BoundaryRadialGradientPaint {
-    RdtPath* path;
+    lam::Up<RdtPath> path;
     float cx;
     float cy;
     float r;
-    RdtGradientStop* stops;
+    lam::Up<RdtGradientStop> stops;
     int stop_count;
 } BoundaryRadialGradientPaint;
 
@@ -2675,9 +2673,9 @@ bool render_paint_boundary_build_radial_gradient(ViewBlock* view, float x, float
 
 // ===== render_paint_gateway.hpp =====
 typedef struct PaintRecordTarget {
-    PaintList* paint_list;
-    DisplayList* display_list;
-    const char* log_prefix;
+    lam::Up<PaintList> paint_list;
+    lam::Up<DisplayList> display_list;
+    lam::Up<const char> log_prefix;
 } PaintRecordTarget;
 
 static inline bool paint_record_ready(PaintRecordTarget* target) {
@@ -2816,7 +2814,7 @@ static inline void paint_record_draw_picture(PaintRecordTarget* target, const ch
 }
 
 static inline void paint_record_video_placeholder(PaintRecordTarget* target, const char* op,
-                                                  void* video,
+                                                  struct RdtVideo* video,
                                                   float dst_x, float dst_y,
                                                   float dst_w, float dst_h,
                                                   int object_fit, const Bound* clip,
@@ -2900,7 +2898,7 @@ static inline void paint_record_apply_blend_mode(PaintRecordTarget* target, cons
 
 static inline void paint_record_apply_filter(PaintRecordTarget* target, const char* op,
                                              float x, float y, float w, float h,
-                                             void* filter, const Bound* clip) {
+                                             FilterProp* filter, const Bound* clip) {
     if (!paint_record_ready(target)) {
         paint_record_missing(target, op);
         return;
@@ -3055,7 +3053,7 @@ void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
                    const RdtMatrix* transform, uint64_t resource_generation);
 void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
-void rc_video_placeholder(RenderContext* rdcon, void* video,
+void rc_video_placeholder(RenderContext* rdcon, struct RdtVideo* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation);
@@ -3071,7 +3069,7 @@ void rc_composite_opacity(RenderContext* rdcon, int x0, int y0, int w, int h,
 void rc_apply_blend_mode(RenderContext* rdcon, int x0, int y0, int w, int h,
                          int blend_mode);
 void rc_apply_filter(RenderContext* rdcon, float x, float y, float w, float h,
-                     void* filter, const Bound* clip);
+                     FilterProp* filter, const Bound* clip);
 void rc_box_blur_region(RenderContext* rdcon, int rx, int ry, int rw, int rh,
                         float blur_radius, int clip_type, const float* clip_params,
                         int exclude_type = 0, const float* exclude_params = nullptr,
@@ -3178,9 +3176,9 @@ typedef struct RenderProfiler {
 } RenderProfiler;
 
 typedef struct RenderPathTrace {
-    const char* target;
-    const char* replay_mode;
-    const char* backend_name;
+    lam::Up<const char> target;
+    lam::Up<const char> replay_mode;
+    lam::Up<const char> backend_name;
     bool display_list_recorded;
     bool paint_ir_enabled;
     bool selective;
@@ -3252,7 +3250,7 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, struct UiContext*
 struct RenderContext;
 
 typedef struct RenderTransformScope {
-    RenderContext* context;
+    lam::Up<RenderContext> context;
     RdtMatrix previous_transform;
     bool previous_has_transform;
     float previous_perspective_distance;
@@ -3285,7 +3283,7 @@ struct ViewBlock;
 typedef struct Bound Bound;
 
 typedef struct RenderClipScope {
-    ClipShape* shape;
+    lam::Up<ClipShape> shape;
     bool active;
     bool pushed_shape;
     bool owns_shape;
@@ -3431,8 +3429,8 @@ void render_column_rules(struct RenderContext* rdcon, ViewBlock* block);
 
 // ===== render_effects.hpp =====
 typedef struct RenderEffectBackdrop {
-    RenderContext* context;
-    uint32_t* pixels;
+    lam::Up<RenderContext> context;
+    lam::Up<uint32_t> pixels;
     int x;
     int y;
     int width;
@@ -3441,7 +3439,7 @@ typedef struct RenderEffectBackdrop {
 } RenderEffectBackdrop;
 
 typedef struct RenderEffectGroup {
-    RenderContext* context;
+    lam::Up<RenderContext> context;
     RenderEffectBackdrop mix_blend_backdrop;
     RenderEffectBackdrop opacity_backdrop;
     RenderEffectBackdrop filter_backdrop;
@@ -3550,8 +3548,8 @@ typedef enum RenderOutputKind {
 
 typedef struct RenderOutputTarget {
     RenderOutputKind kind;
-    const char* output_file;
-    ImageSurface* surface;
+    lam::Up<const char> output_file;
+    lam::Up<ImageSurface> surface;
     int width;
     int height;
     int viewport_width;
@@ -3562,9 +3560,9 @@ typedef struct RenderOutputTarget {
 } RenderOutputTarget;
 
 typedef struct RenderExportSession {
-    UiContext* ui_context;
-    Url* base_url;
-    DomDocument* document;
+    lam::Up<UiContext> ui_context;
+    lam::Up<Url> base_url;
+    lam::Up<DomDocument> document;
     float output_scale;
     float device_scale;
     float raster_scale;
@@ -3626,11 +3624,16 @@ int render_document_transform_to_pdf(const char* document_file,
 
 // ===== render_raster.hpp =====
 typedef struct RasterPaintContext {
-    ImageSurface* surface;
-    Bound* clip;
-    ClipShape** clip_shapes;
+    lam::Up<ImageSurface> surface;
+    lam::Up<Bound> clip;
+    lam::Up<ClipShape*> clip_shapes;
     int clip_depth;
 } RasterPaintContext;
+
+inline RasterPaintContext raster_paint_context(ImageSurface* surface, Bound* clip,
+                                               ClipShape** clip_shapes, int clip_depth) {
+    return RasterPaintContext{lam::up(surface), lam::up(clip), lam::up(clip_shapes), clip_depth};
+}
 
 void raster_fill_rect(RasterPaintContext* ctx, Rect* rect, uint32_t color);
 void raster_blit_surface_scaled(RasterPaintContext* ctx, ImageSurface* src, Rect* src_rect,
@@ -3696,13 +3699,13 @@ struct SvgIntrinsicSize {
 #define SVG_USE_DEPTH_MAX 16     // nested <use> instantiations per render
 
 struct SvgInlineRenderContext {
-    Element* svg_root;           // root <svg> element
-    Pool* pool;                  // memory pool
-    FontContext* font_ctx;       // font context for font resolution (may be nullptr)
-    DisplayList* dl;             // required display list target for deferred rendering
-    PaintList* paint_list;       // required PaintIR gateway used before lowering to dl
-    ScratchArena* resource_scratch; // per-render defs/style tables
-    const char* source_path;      // source SVG path for resolving nested resources
+    lam::Up<Element> svg_root;           // root <svg> element
+    lam::Up<Pool> pool;                  // memory pool
+    lam::Up<FontContext> font_ctx;       // font context for font resolution (may be nullptr)
+    lam::Up<DisplayList> dl;             // required display list target for deferred rendering
+    lam::Up<PaintList> paint_list;       // required PaintIR gateway used before lowering to dl
+    lam::Up<ScratchArena> resource_scratch; // per-render defs/style tables
+    lam::Up<const char> source_path;      // source SVG path for resolving nested resources
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
     void* image_resolver_context;
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
@@ -3729,10 +3732,10 @@ struct SvgInlineRenderContext {
     bool stroke_none;
 
     // inherited text properties (used by <text>/<tspan> when not on element itself)
-    const char* inherited_font_family;   // pointer into Element attribute string memory (lifetime of SVG element tree)
+    lam::Up<const char> inherited_font_family;   // pointer into Element attribute string memory (lifetime of SVG element tree)
     float inherited_font_size;            // 0 means not set
     int inherited_font_weight;            // 0 means not set
-    const char* inherited_text_anchor;
+    lam::Up<const char> inherited_text_anchor;
 
     // current viewport size in user-coordinate units (parent for nested <svg>).
     // Used to resolve omitted width/height on a nested <svg> element ("100%").
@@ -3740,10 +3743,10 @@ struct SvgInlineRenderContext {
     float current_viewport_h;
 
     // gradient/pattern definitions from <defs>
-    HashMap* defs;               // id → SvgDefTable*
+    lam::Up<HashMap> defs;               // id → SvgDefTable*
 
     // lightweight SVG-document stylesheet cache from embedded <style> nodes
-    void* style_rules;           // SvgStyleRule* (private to render_svg_inline.cpp)
+    struct SvgStyleRule* style_rules;  // private to render_svg_inline.cpp; Stack struct borrow
     int style_rule_count;
     int style_rule_capacity;
 
@@ -3753,9 +3756,9 @@ struct SvgInlineRenderContext {
 
     // Tree searched for same-document references (<use href="#id">): the DOM
     // tree root for inline SVG, otherwise the SVG root.
-    Element* id_scope;
+    lam::Up<Element> id_scope;
     // <use> targets being instantiated; a repeat is a circular reference.
-    Element* use_chain[SVG_USE_DEPTH_MAX];
+    lam::Up<Element> use_chain[SVG_USE_DEPTH_MAX];
     int use_depth;
 };
 
@@ -3879,3 +3882,43 @@ struct UiContext;
 
 void render_video_frames(DisplayList* dl, ImageSurface* surface, DocState* rstate, UiContext* uicon);
 void render_video_frames_cached(DocState* rstate, ImageSurface* surface, UiContext* uicon);
+
+// Frame-local render and paint structs live on the Stack: their fields borrow
+// (Up) or hold scope-owned buffers (OwnArr); they may point at any Heap level.
+LAM_NODE_OF(RdtVectorTarget, NodeStack);
+LAM_NODE_OF(RdtVectorCaps, NodeStack);
+LAM_NODE_OF(DisplayListValidationResult, NodeStack);
+LAM_NODE_OF(RenderExportTargetCaps, NodeStack);
+LAM_NODE_OF(PaintFillPath, NodeStack);
+LAM_NODE_OF(PaintStrokePath, NodeStack);
+LAM_NODE_OF(PaintFillLinearGradient, NodeStack);
+LAM_NODE_OF(PaintFillRadialGradient, NodeStack);
+LAM_NODE_OF(PaintDrawImage, NodeStack);
+LAM_NODE_OF(PaintDrawImageResource, NodeStack);
+LAM_NODE_OF(PaintWebviewLayerPlaceholder, NodeStack);
+LAM_NODE_OF(PaintPushClip, NodeStack);
+LAM_NODE_OF(PaintFillSurfaceRect, NodeStack);
+LAM_NODE_OF(PaintBlitSurfaceScaled, NodeStack);
+LAM_NODE_OF(PaintGlyphRun, NodeStack);
+LAM_NODE_OF(PaintIrValidationResult, NodeStack);
+LAM_NODE_OF(PaintSvgLoweringOptions, NodeStack);
+LAM_NODE_OF(RenderFrameScope, NodeStack);
+LAM_NODE_OF(RadiantStackPaintEntry, NodeStack);
+LAM_NODE_OF(RadiantStackPaintList, NodeStack);
+LAM_NODE_OF(RenderWalkState, NodeStack);
+LAM_NODE_OF(DisplayReplayDirtyClip, NodeStack);
+LAM_NODE_OF(DisplayReplayBackdropStack, NodeStack);
+LAM_NODE_OF(DisplayReplayShadowClip, NodeStack);
+LAM_NODE_OF(BoundaryLinearGradientPaint, NodeStack);
+LAM_NODE_OF(BoundaryRadialGradientPaint, NodeStack);
+LAM_NODE_OF(PaintRecordTarget, NodeStack);
+LAM_NODE_OF(RenderPathTrace, NodeStack);
+LAM_NODE_OF(RenderTransformScope, NodeStack);
+LAM_NODE_OF(RenderClipScope, NodeStack);
+LAM_NODE_OF(RenderEffectBackdrop, NodeStack);
+LAM_NODE_OF(RenderEffectGroup, NodeStack);
+LAM_NODE_OF(RenderOutputTarget, NodeStack);
+LAM_NODE_OF(RenderExportSession, NodeStack);
+LAM_NODE_OF(RasterPaintContext, NodeStack);
+LAM_NODE_OF(RenderContext, NodeStack);
+LAM_NODE_OF(SvgInlineRenderContext, NodeStack);

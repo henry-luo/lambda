@@ -147,8 +147,8 @@ View* set_view(LayoutContext* lycon, ViewType type, DomNode* node) {
         type, node->node_name(), node, node->parent, node->parent ? node->parent->node_name() : "null");
 
     // link the view
-    if (!lycon->line.start_view) lycon->line.start_view = view;
-    lycon->view = view;
+    if (!lycon->line.start_view) lycon->line.start_view = lam::up(view);
+    lycon->view = lam::up(view);
     return view;
 }
 
@@ -464,7 +464,7 @@ static void reset_embed_prop(DomElement* elem, ViewTree* tree) {
     DomDocument* embedded_doc = elem->embedp()->doc;
     free_embed_payload(elem, tree);
     memcpy(elem->embed, &EMBED_PROP_DEFAULT, sizeof(EmbedProp));
-    elem->embed->doc = embedded_doc;
+    elem->embed->doc = lam::own(embedded_doc);
 }
 
 static void free_scroll_payload(DomElement* elem, ViewTree* tree) {
@@ -846,7 +846,7 @@ void ViewTree::recycle_text_rects(TextRect* first) {
         TextRect* next = rect->next;
         memset(rect, 0, sizeof(TextRect));
         rect->next = free_text_rects;
-        free_text_rects = rect;
+        free_text_rects = lam::own(rect);
         rect = next;
     }
 }
@@ -876,7 +876,7 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
         // Writing-mode resolves independently of display order; preserve the
         // block axis already resolved before flex properties allocate this prop.
         prop->writing_mode = block->blk ? block->block()->writing_mode : WM_HORIZONTAL_TB;
-        block->embed->flex = prop;
+        block->embed->flex = lam::own(prop);
     }
 }
 
@@ -933,7 +933,7 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
         // Initialize gaps
         grid->row_gap = 0;
         grid->column_gap = 0;
-        block->embed->grid = grid;
+        block->embed->grid = lam::own(grid);
     }
 }
 
@@ -1003,17 +1003,17 @@ void ViewTree::init(MemContext* owner) {
     log_debug("init view pool");
     // The document context outlives the view tree: free_document destroys the
     // tree before it releases the document's Input context.
-    mem_ctx = owner;
-    prop_pool = mem_pool_create(owner, MEM_ROLE_VIEW, "view_tree.prop_pool");
+    mem_ctx = lam::up(owner);
+    prop_pool = lam::own(mem_pool_create(owner, MEM_ROLE_VIEW, "view_tree.prop_pool"));
     if (!prop_pool) {
         log_error("Failed to initialize view pool");
     }
     else {
         view_tree_canonical_init(this);
-        scratch_arena = mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.scratch_arena");
-        layout_pass_arena = mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.layout_pass_arena");
-        render_scratch_arena = mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.render_scratch_arena");
-        display_list_arena = mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.display_list_arena");
+        scratch_arena = lam::own(mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.scratch_arena"));
+        layout_pass_arena = lam::own(mem_arena_create(owner, MEM_ROLE_LAYOUT, "view_tree.layout_pass_arena"));
+        render_scratch_arena = lam::own(mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.render_scratch_arena"));
+        display_list_arena = lam::own(mem_arena_create(owner, MEM_ROLE_RENDER, "view_tree.display_list_arena"));
         free_text_rects = nullptr;
         if (layout_generation == 0) layout_generation = 1;
         log_debug("view pool initialized");

@@ -2301,10 +2301,10 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->line.parent_font_ascender = saved_parent_ascender;
             lycon->line.parent_font_descender = saved_parent_descender;
             lycon->line.parent_font_size = saved_parent_font_size;
-            lycon->line.parent_font_style = saved_parent_font_style;
+            lycon->line.parent_font_style = lam::up(saved_parent_font_style);
         }
     };
-    lycon->elmt = elmt;
+    lycon->elmt = lam::up(elmt);
 
     DomElement* elmt_elem = elmt->is_element() ? lam::dom_as<DOM_NODE_ELEMENT>(elmt) : nullptr;
     if (elmt_elem && layout_noscript_content_suppressed(elmt_elem)) {
@@ -2321,7 +2321,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         dom_node_resolve_style(elmt, lycon);
         span->display = display;
         elmt_elem->display = display;
-        lycon->line.start_view = saved_line_start;
+        lycon->line.start_view = lam::up(saved_line_start);
         restore_parent_state(true);
         return;
     }
@@ -2409,7 +2409,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.parent_font_descender = pa_font.style->descender;
         lycon->line.parent_font_size = pa_font.current_font_size > 0.0f
             ? pa_font.current_font_size : pa_font.style->font_size;
-        lycon->line.parent_font_style = pa_font.style;
+        lycon->line.parent_font_style = lam::up(pa_font.style);
     }
     if (span->font) {
         span->font->used_zoom = layout_effective_zoom((View*)span);
@@ -2678,7 +2678,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         inline_has_axis_edge_decoration(span, false, true, false) ||
         inline_has_axis_edge_decoration(span, false, false, false);
     if (has_inline_axis_decoration && !lycon->line.start_view) {
-        lycon->line.start_view = static_cast<View*>(span);
+        lycon->line.start_view = lam::up(static_cast<View*>(span));
     }
     if (has_inline_axis_decoration) {
         lycon->line.is_line_start = false;
@@ -2768,7 +2768,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->block = saved_base_block;
             lycon->line = saved_base_line;
             lycon->font = saved_base_font;
-            lycon->elmt = saved_base_element;
+            lycon->elmt = lam::up(saved_base_element);
             lycon->line.advance_x += simple_ruby_inline_advance_extra;
             if (ruby_position == CSS_VALUE_UNDER) {
                 if (!ruby_has_text_box_trim_ancestor(span, TEXT_BOX_TRIM_END)) {
@@ -2853,7 +2853,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (lycon->line.is_line_start && !lycon->line.has_phantom_inline_fragment) {
             // CSS 2.1 §16.2: descendants outside normal flow leave a zero-width
             // inline static position which still participates in text alignment.
-            lycon->line.start_view = layout_inline_fragment_root(static_cast<View*>(span));
+            lycon->line.start_view = lam::up(layout_inline_fragment_root(static_cast<View*>(span)));
             lycon->line.has_phantom_inline_fragment = true;
         }
         // An empty undecorated inline supplies no line box by itself, but its
@@ -3023,7 +3023,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         span->y = lycon->block.advance_y;
         if (has_float && lycon->line.is_line_start &&
             !lycon->line.has_phantom_inline_fragment) {
-            lycon->line.start_view = layout_inline_fragment_root(static_cast<View*>(span));
+            lycon->line.start_view = lam::up(layout_inline_fragment_root(static_cast<View*>(span)));
             lycon->line.has_phantom_inline_fragment = true;
         }
         if (has_float && lycon->line.is_line_start) {

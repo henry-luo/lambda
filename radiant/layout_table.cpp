@@ -4572,7 +4572,7 @@ static ViewElement* mark_table_box(LayoutContext* lycon, DomNode* node,
     ViewElement* element = lam::view_require_element(view);
     if (!element) return nullptr;
     element->display = display;
-    lycon->view = view;
+    lycon->view = lam::up(view);
     dom_node_resolve_style(node, lycon);
     if (element->font) setup_font(lycon->ui_context, &lycon->font, element->font);
     return element;
@@ -4641,12 +4641,12 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
     }
     LayoutViewScope view_scope(lycon);
     LayoutFontScope font_scope(lycon);
-    lycon->elmt = node;
+    lycon->elmt = lam::up(node);
     if (tag == MARKUP_NAME_CAPTION || display.inner == CSS_VALUE_TABLE_CAPTION) {
         ViewBlock* caption = lam::view_require_block(set_view(lycon, RDT_VIEW_BLOCK, node));
         if (caption) {
             caption->display.inner = CSS_VALUE_TABLE_CAPTION;
-            lycon->view = static_cast<View*>(caption);
+            lycon->view = lam::up(static_cast<View*>(caption));
             dom_node_resolve_style(node, lycon);
             DomElement* dom_elem = lam::dom_require_element(node);
             if (dom_elem->specified_style && parent && parent->view_type == RDT_VIEW_TABLE) {
@@ -6076,8 +6076,8 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
         ? 0.0f : content_height;
     cell->content_width = content_width;
     cell->content_height = content_height;
-    lycon->block.parent = &context_scope.saved_block;
-    lycon->block.establishing_element = cell;
+    lycon->block.parent = lam::up(&context_scope.saved_block);
+    lycon->block.establishing_element = lam::up(cell);
     lycon->block.is_bfc_root = true;
     lycon->block.origin_x = cell->x + content_start_x;
     lycon->block.origin_y = cell->y + content_start_y;
@@ -6128,7 +6128,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell, Vie
     lycon->line.advance_x = content_start_x;   // Start advancing from padding offset
     lycon->line.is_line_start = true;
     lycon->line.start_view = NULL;  // Reset start_view so new text nodes become start of line
-    lycon->elmt = tcell;
+    lycon->elmt = lam::up(tcell);
     if (tcell->blk && tcell->block_mut()->text_align) {
         lycon->block.text_align = tcell->block()->text_align;
     }
@@ -6419,9 +6419,9 @@ static CellIntrinsicWidths measure_cell_widths(LayoutContext* lycon, ViewTableCe
                 radiant::LayoutRunModeScope run_mode_scope(
                     lycon, radiant::RunMode::ComputeSize);
                 View* saved_view = lycon->view;
-                lycon->view = static_cast<View*>(child_elem);
+                lycon->view = lam::up(static_cast<View*>(child_elem));
                 dom_node_resolve_style(child_elem, lycon);
-                lycon->view = saved_view;
+                lycon->view = lam::up(saved_view);
             }
             IntrinsicSizes child_sizes = layout_measure_intrinsic_widths(lycon, child_elem);
             float child_max = child_sizes.max_content;
@@ -7855,7 +7855,7 @@ void layout_table_content(LayoutContext* lycon, DomNode* tableNode, DisplayValue
             vtable->tb->is_annoy_colgroup = 0;
             vtable->view_type = RDT_VIEW_TABLE;
         }
-        lycon->view = static_cast<View*>(vtable);
+        lycon->view = lam::up(static_cast<View*>(vtable));
     }
     ViewTable* table = build_table_tree(lycon, tableNode);
     if (!table) {

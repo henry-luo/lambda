@@ -38,7 +38,7 @@ TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
     element.set_synthetic(true);
     element.doc = lam::up(&doc);
     element.set_styles_resolved(true);
-    doc.root = &element;
+    doc.root = lam::up(&element);
     for (size_t i = 0; i < count; i++) {
         EXPECT_EQ(css_prop_accessor(rows[i].id), &rows[i]);
         EXPECT_GT(rows[i].id, CSS_PROPERTY_UNKNOWN);
@@ -60,9 +60,9 @@ TEST(CssPropTable, DirtyMutationDoesNotConsumePendingLayout) {
     InlineProp in_line = INLINE_PROP_DEFAULT;
     in_line.opacity = 1.0f;
     element.doc = lam::up(&doc);
-    element.in_line = &in_line;
+    element.in_line = lam::shared(&in_line);
     element.set_styles_resolved(true);
-    doc.root = &element;
+    doc.root = lam::up(&element);
     doc.js.mutation_count = 1;
     char value[64];
     // A dirty computed-style read cannot consume the pending layout merely to
@@ -80,9 +80,9 @@ TEST(CssPropTable, VisibilityUsesRenderEnumNames) {
     element.set_synthetic(true);
     InlineProp in_line = INLINE_PROP_DEFAULT;
     element.doc = lam::up(&doc);
-    element.in_line = &in_line;
+    element.in_line = lam::shared(&in_line);
     element.set_styles_resolved(true);
-    doc.root = &element;
+    doc.root = lam::up(&element);
 
     struct VisibilityCase {
         Visibility value;
@@ -121,7 +121,7 @@ static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,
     sheet->rule_count = 1;
 
     *sheet_ptr = sheet;
-    doc->stylesheets = sheet_ptr;
+    doc->stylesheets = lam::own_arr(sheet_ptr);
     doc->stylesheet_count = 1;
 }
 
@@ -215,8 +215,8 @@ protected:
     void SetUp() override {
         pool = pool_create();
         memset(&doc, 0, sizeof(doc));
-        doc.document_pool = pool;
-        doc.node_arena = arena_create_default();
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena_create_default());
     }
     void TearDown() override {
         if (doc.node_arena) arena_destroy(doc.node_arena);
@@ -361,8 +361,8 @@ protected:
         pool = pool_create();
         scheduler = animation_scheduler_create(pool);
         memset(&doc, 0, sizeof(doc));
-        doc.document_pool = pool;
-        doc.node_arena = arena_create_default();
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena_create_default());
     }
     void TearDown() override {
         animation_scheduler_destroy(scheduler);
@@ -380,7 +380,7 @@ protected:
         DomElement* element = (DomElement*)mock->buf;
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
-        ((ViewSpan*)element)->in_line = &mock->in_line;
+        ((ViewSpan*)element)->in_line = lam::shared(&mock->in_line);
         return element;
     }
 

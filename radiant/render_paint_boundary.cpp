@@ -296,12 +296,12 @@ bool render_paint_boundary_build_linear_gradient(ViewBlock* view, float x, float
         ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
         : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
 
-    out->path = path;
+    out->path = lam::up(path);
     out->x1 = center_x - dx * dist;
     out->y1 = center_y - dy * dist;
     out->x2 = center_x + dx * dist;
     out->y2 = center_y + dy * dist;
-    out->stops = stops;
+    out->stops = lam::up(stops);
     out->stop_count = stop_count;
     return true;
 }
@@ -320,11 +320,11 @@ bool render_paint_boundary_build_radial_gradient(ViewBlock* view, float x, float
     if (!boundary_prepare_gradient(view, x, y, gradient->stops, gradient->stop_count,
                                    stops, stop_capacity, &path, &stop_count)) return false;
 
-    out->path = path;
+    out->path = lam::up(path);
     out->cx = x + (gradient->cx_set ? gradient->cx * view->width : view->width * 0.5f);
     out->cy = y + (gradient->cy_set ? gradient->cy * view->height : view->height * 0.5f);
     out->r = (view->width < view->height ? view->width : view->height) * 0.5f;
-    out->stops = stops;
+    out->stops = lam::up(stops);
     out->stop_count = stop_count;
     return true;
 }

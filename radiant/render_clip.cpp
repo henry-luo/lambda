@@ -387,10 +387,10 @@ static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* 
     rc_push_clip(rdcon, clip_path, nullptr);
     rdt_path_free(clip_path);
 
-    scope->shape = shape;
+    scope->shape = lam::up(shape);
     scope->active = true;
     if (rdcon->clip_shape_depth < RDT_MAX_CLIP_SHAPES) {
-        rdcon->clip_shapes[rdcon->clip_shape_depth++] = shape;
+        rdcon->clip_shapes[rdcon->clip_shape_depth++] = lam::up(shape);
         scope->pushed_shape = true;
     } else {
         log_warn("[RAD_CAP_RENDER_CLIP_SHAPES] dropping retained clip shape beyond depth %d",

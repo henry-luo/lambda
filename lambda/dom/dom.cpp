@@ -2887,7 +2887,7 @@ static Item dom_document_set_domain(DomDocument* document, Item value) {
     }
 
     const char* normalized = requested[0] == '.' ? requested + 1 : requested;
-    document->document_domain = pool_strdup(document->document_pool, normalized);
+    document->document_domain = lam::own(pool_strdup(document->document_pool, normalized));
     if (!document->document_domain) {
         return js_throw_named_error_text("InvalidStateError",
             "document.domain allocation failed");
@@ -3414,7 +3414,7 @@ static DomDocument* create_foreign_html_doc(const char* title) {
     }
     if (html_dom && head_dom) html_dom->append_child(head_dom);
     if (html_dom && body_dom) html_dom->append_child(body_dom);
-    fd->root = html_dom;
+    fd->root = lam::up(html_dom);
     return fd;
 }
 
@@ -3541,7 +3541,7 @@ static Item dom_parser_parse_xml(const char* source) {
         free_document(xml_document);
         return dom_parser_error_document();
     }
-    xml_document->root = dom_root;
+    xml_document->root = lam::up(dom_root);
     return wrap_foreign_doc(xml_document);
 }
 
@@ -3998,7 +3998,7 @@ extern "C" Item js_create_foreign_xml_doc(const char* qualified_name) {
         Item item = builder.element(qualified_name).final();
         Element* e = item.element;
         DomElement* root = dom_element_create(fd, qualified_name, e);
-        fd->root = root;
+        fd->root = lam::up(root);
     }
     return wrap_foreign_doc(fd);
 }
@@ -14724,8 +14724,8 @@ static bool dom_replace_document_element(DomElement* old_root,
     old_root->prev_sibling = nullptr;
     old_root->next_sibling = nullptr;
 
-    doc->root = replacement;
-    doc->html_root = replacement_backing;
+    doc->root = lam::up(replacement);
+    doc->html_root = lam::up(replacement_backing);
     dom_node_schedule_detached(doc, (DomNode*)old_root);
     dom_mutation_notify(DOM_JS_MUTATION_TREE_REPLACE,
                            (DomNode*)replacement, old_parent);
@@ -14751,7 +14751,7 @@ static void dom_document_refresh_root(DomElement* parent) {
     parent->doc->root = nullptr;
     for (DomNode* node = parent->first_child; node; node = node->next_sibling) {
         if (dom_is_document_element_child(node)) {
-            parent->doc->root = node->as_element();
+            parent->doc->root = lam::up(node->as_element());
             return;
         }
     }
@@ -15134,7 +15134,7 @@ extern "C" Item dom_clone_document_bridge(Item document_item, Item deep_arg) {
     // A shallow Document clone has no children, including the implicit doctype.
     clone->js.implicit_doctype = deep && source->js.implicit_doctype;
     if (deep && source->root) {
-        clone->root = dom_clone_element_into_document(source->root, clone, true);
+        clone->root = lam::up(dom_clone_element_into_document(source->root, clone, true));
         if (!clone->root) {
             free_document(clone);
             return ItemNull;

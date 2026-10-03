@@ -116,7 +116,7 @@ void dl_fill_path(DisplayList* dl, RdtPath* path, Color color,
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_PATH;
     dl_record_set_path_bounds(item, path, transform, 1.0f);
-    item->fill_path.path = rdt_path_clone(path);
+    item->fill_path.path = lam::own(rdt_path_clone(path));
     item->fill_path.color = color;
     item->fill_path.rule = rule;
     item->fill_path.has_transform = (transform != nullptr);
@@ -131,12 +131,12 @@ void dl_stroke_path(DisplayList* dl, RdtPath* path, Color color, float width,
     item->op = DL_STROKE_PATH;
     float stroke_pad = width > 0.0f ? width * 4.0f + 2.0f : 2.0f;
     dl_record_set_path_bounds(item, path, transform, stroke_pad);
-    item->stroke_path.path = rdt_path_clone(path);
+    item->stroke_path.path = lam::own(rdt_path_clone(path));
     item->stroke_path.color = color;
     item->stroke_path.width = width;
     item->stroke_path.cap = cap;
     item->stroke_path.join = join;
-    item->stroke_path.dash_array = dl_copy_dashes(dl, dash_array, dash_count);
+    item->stroke_path.dash_array = lam::own_arr(dl_copy_dashes(dl, dash_array, dash_count));
     item->stroke_path.dash_count = dash_count;
     item->stroke_path.dash_phase = dash_phase;
     item->stroke_path.has_transform = (transform != nullptr);
@@ -151,12 +151,12 @@ void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_LINEAR_GRADIENT;
     dl_record_set_path_bounds(item, path, transform, 1.0f);
-    item->fill_linear_gradient.path = rdt_path_clone(path);
+    item->fill_linear_gradient.path = lam::own(rdt_path_clone(path));
     item->fill_linear_gradient.x1 = x1;
     item->fill_linear_gradient.y1 = y1;
     item->fill_linear_gradient.x2 = x2;
     item->fill_linear_gradient.y2 = y2;
-    item->fill_linear_gradient.stops = dl_copy_stops(dl, stops, stop_count);
+    item->fill_linear_gradient.stops = lam::own_arr(dl_copy_stops(dl, stops, stop_count));
     item->fill_linear_gradient.stop_count = stop_count;
     item->fill_linear_gradient.rule = rule;
     item->fill_linear_gradient.has_transform = (transform != nullptr);
@@ -173,11 +173,11 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_FILL_RADIAL_GRADIENT;
     dl_record_set_path_bounds(item, path, transform, 1.0f);
-    item->fill_radial_gradient.path = rdt_path_clone(path);
+    item->fill_radial_gradient.path = lam::own(rdt_path_clone(path));
     item->fill_radial_gradient.cx = cx;
     item->fill_radial_gradient.cy = cy;
     item->fill_radial_gradient.r = r;
-    item->fill_radial_gradient.stops = dl_copy_stops(dl, stops, stop_count);
+    item->fill_radial_gradient.stops = lam::own_arr(dl_copy_stops(dl, stops, stop_count));
     item->fill_radial_gradient.stop_count = stop_count;
     item->fill_radial_gradient.rule = rule;
     item->fill_radial_gradient.has_transform = (transform != nullptr);
@@ -254,7 +254,7 @@ void dl_draw_picture(DisplayList* dl, RdtPicture* picture,
     } else {
         dl_record_set_unbounded(item);
     }
-    item->draw_picture.picture = picture;  // ownership transferred to display list
+    item->draw_picture.picture = lam::own(picture);  // ownership transferred to display list
     item->draw_picture.opacity = opacity;
     item->draw_picture.has_transform = (transform != nullptr);
     if (transform) item->draw_picture.transform = *transform;
@@ -264,7 +264,7 @@ void dl_push_clip(DisplayList* dl, RdtPath* clip_path, const RdtMatrix* transfor
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_PUSH_CLIP;
     dl_record_set_path_bounds(item, clip_path, transform, 1.0f);
-    item->push_clip.path = rdt_path_clone(clip_path);
+    item->push_clip.path = lam::own(rdt_path_clone(clip_path));
     item->push_clip.has_transform = (transform != nullptr);
     if (transform) item->push_clip.transform = *transform;
 }

@@ -268,7 +268,7 @@ static TransformFunction* parse_transform_value(const char* val, Pool* pool) {
         TransformFunction* tf = parse_transform_func(&p, pool);
         if (tf) {
             tf->next = NULL;
-            if (tail) { tail->next = tf; tail = tf; }
+            if (tail) { tail->next = lam::own(tf); tail = tf; }
             else { head = tail = tf; }
         } else {
             // skip unknown token
@@ -787,7 +787,7 @@ static TransformFunction* interpolate_transform_list(TransformFunction* a, Trans
         TransformFunction* interp = interpolate_transform_func(a, b, t, pool);
         if (interp) {
             interp->next = NULL;
-            if (tail) { tail->next = interp; tail = interp; }
+            if (tail) { tail->next = lam::own(interp); tail = interp; }
             else { head = tail = interp; }
         }
         if (a) a = a->next;
@@ -816,7 +816,7 @@ static BackgroundProp* ensure_background_prop(ViewSpan* span) {
     if (!pool) return NULL;
     if (!span->bound) span->ensure_boundary(el->doc->view_tree);
     if (span->bound && !span->boundary()->background) {
-        span->bound->background = (BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp));
+        span->bound->background = lam::own((BackgroundProp*)pool_calloc(pool, sizeof(BackgroundProp)));
     }
     return span->bound ? span->boundary()->background : NULL;
 }

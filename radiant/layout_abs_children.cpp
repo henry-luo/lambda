@@ -55,8 +55,8 @@ void layout_absolute_children_in_context(LayoutContext* lycon, ViewBlock* contai
         }
 
         AbsChildLayoutState state = {};
-        state.child = child;
-        state.child_block = child_block;
+        state.child = lam::up(child);
+        state.child_block = lam::up(child_block);
         state.containing_block = ctx->containing_block.view
             ? ctx->containing_block
             : layout_containing_block_for_view(container);

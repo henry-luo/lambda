@@ -523,7 +523,7 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     {
         if (element->has_attribute("loop")) rdt_video_set_loop(media, true);
         if (element->has_attribute("muted")) rdt_video_set_muted(media, true);
-        block->embed->video = media;
+        block->embed->video = lam::own(media);
 
         if (is_video) {
             block->embed->has_controls = element->has_attribute("controls");
@@ -850,9 +850,9 @@ static void apply_html_q_quote_defaults(LayoutContext* lycon, DomElement* elemen
     for (int i = 0; i < 2; i++) {
         if (dom_element_get_pseudo_element_value(
                 element, CSS_PROPERTY_CONTENT, i + 1)) continue;
-        StyleTree** style_slot = element->pseudo_style_slot(kinds[i]);
+        lam::Own<StyleTree>* style_slot = element->pseudo_style_slot(kinds[i]);
         if (!style_slot) continue;
-        if (!*style_slot) *style_slot = style_tree_create(pool);
+        if (!*style_slot) *style_slot = lam::own(style_tree_create(pool));
         if (!*style_slot) continue;
         CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
         if (!value) continue;

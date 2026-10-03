@@ -36,11 +36,11 @@ static InlineProp* ensure_inline_prop(DomElement* element, Pool* pool,
         memcpy(owned, element->in_line, sizeof(InlineProp));
         // Canonical values are immutable; crossing ensure_inline is the single
         // mutation gate that restores element-owned writable storage.
-        element->in_line = owned;
+        element->in_line = lam::shared(owned);
         element->mark_inline_prop_owned();
         if (tree) tree->canonical_stats.inline_cows++;
     } else if (!element->in_line) {
-        element->in_line = (InlineProp*)pool_calloc(pool, sizeof(InlineProp));
+        element->in_line = lam::shared((InlineProp*)pool_calloc(pool, sizeof(InlineProp)));
         if (element->in_line) {
             memcpy(element->in_line, &INLINE_PROP_DEFAULT, sizeof(InlineProp));
             element->mark_inline_prop_owned();
@@ -58,7 +58,7 @@ static TextShadow* clone_text_shadows(Pool* pool, const TextShadow* source) {
         *copy = *source;
         copy->next = nullptr;
         if (!first) first = copy;
-        else last->next = copy;
+        else last->next = lam::own(copy);
         last = copy;
         source = source->next;
     }
@@ -76,7 +76,7 @@ static ScrollProp* ensure_scroll_prop(DomElement* element, Pool* pool) {
     ScrollProp* value = ensure_view_prop(pool, element->scroller, SCROLL_PROP_DEFAULT);
     if (value && !value->pane) {
         // Every allocated scroll group owns a pane; canonical defaults remain allocation-free.
-        value->pane = (ScrollPane*)pool_calloc(pool, sizeof(ScrollPane));
+        value->pane = lam::own((ScrollPane*)pool_calloc(pool, sizeof(ScrollPane)));
     }
     return value;
 }
@@ -186,7 +186,7 @@ FontProp* DomElement::ensure_font(LayoutContext* lycon) {
             font_prop_copy(value, lycon->font.style);
             // The inherited FontProp snapshot owns its mutable text-shadow chain;
             // sharing the parent's list would make retained reset double-free it.
-            value->text_shadow = clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow);
+            value->text_shadow = lam::own(clone_text_shadows(prop_pool(lycon), lycon->font.style->text_shadow));
         }
         if (!value->family && lycon->ui_context) {
             // Rendering falls back to this face already; materialize the CSS initial

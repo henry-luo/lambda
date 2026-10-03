@@ -733,7 +733,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             marker_font_handle, image);
 
         if (marker_elem) {
-            block->pseudo->marker = marker_elem;
+            block->pseudo->marker = lam::up(marker_elem);
             block->pseudo->marker_generated = true;
             MarkerProp* marker_prop = marker_elem->marker_prop();
             if (marker_prop && !is_outside_position &&

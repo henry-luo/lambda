@@ -155,8 +155,8 @@ static LottiePlayer* lottie_player_init(ImageSurface* surface,
     tvg_canvas_push(canvas, pic);
 
     LottiePlayer* lp = (LottiePlayer*)mem_calloc(1, sizeof(LottiePlayer), MEM_CAT_RENDER); // OBJ_HEAP_OK: media player handle outlives a single render pass and has explicit destroy.
-    lp->tvg_animation = tvg_anim;
-    lp->tvg_canvas = canvas;
+    lp->tvg_animation = lam::foreign(tvg_anim);
+    lp->tvg_canvas = lam::foreign(canvas);
     lp->total_frames = total_frames;
     lp->frame_rate = total_frames / duration;
     lp->duration = duration;

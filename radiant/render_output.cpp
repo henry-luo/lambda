@@ -160,7 +160,7 @@ void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind
     }
     memset(target, 0, sizeof(RenderOutputTarget));
     target->kind = kind;
-    target->output_file = output_file;
+    target->output_file = lam::up(output_file);
     target->jpeg_quality = 85;
     target->output_scale = 1.0f;
     target->device_scale = 1.0f;
@@ -249,7 +249,7 @@ static bool render_export_session_begin_internal(
     session->auto_width = auto_width;
     session->auto_height = auto_height;
 
-    session->ui_context = (UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER); // OBJ_HEAP_OK: export session owns the headless UI context shell.
+    session->ui_context = lam::up((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
         return false;
@@ -272,7 +272,7 @@ static bool render_export_session_begin_internal(
     session->ui_context->viewport_width = layout_width;
     session->ui_context->viewport_height = layout_height;
 
-    session->base_url = get_current_dir();
+    session->base_url = lam::up(get_current_dir());
     if (!session->base_url) {
         log_error("[EXPORT_SESSION] Could not resolve the current directory");
         ui_context_cleanup(session->ui_context);
@@ -281,7 +281,7 @@ static bool render_export_session_begin_internal(
         return false;
     }
 
-    session->document = loader(session, layout_width, layout_height, request);
+    session->document = lam::up(loader(session, layout_width, layout_height, request));
     if (!session->document) {
         log_error("[EXPORT_SESSION] Could not load export document");
         render_export_session_end(session);
@@ -406,17 +406,17 @@ static void render_output_trace_retained_stats(RenderPathTrace* trace,
 static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
                                        RenderProfiler* profiler) {
     memset(rdcon, 0, sizeof(RenderContext));
-    rdcon->ui_context = uicon;
-    rdcon->profiler = profiler;
+    rdcon->ui_context = lam::up(uicon);
+    rdcon->profiler = lam::up(profiler);
     if (uicon && uicon->document && uicon->document->state) {
-        rdcon->retained_dl_cache = uicon->document->state->retained_dl_cache;
+        rdcon->retained_dl_cache = lam::up(uicon->document->state->retained_dl_cache);
     }
 
     mem_scratch_init(NULL, &rdcon->scratch, view_tree->render_scratch_arena, MEM_ROLE_RENDER, "render.scratch");
-    rdcon->content_bounds_cache = layout_content_bounds_cache_create();
+    rdcon->content_bounds_cache = lam::up(layout_content_bounds_cache_create());
     // Semantic paint IR target: routes the rc_* primitive gateway through the
     // PaintBuilder during recording (Phase C). Reused (cleared) per primitive.
-    rdcon->paint_list = (PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER);
+    rdcon->paint_list = lam::up((PaintList*)mem_calloc(1, sizeof(PaintList), MEM_CAT_RENDER));
     if (rdcon->paint_list) new (rdcon->paint_list) PaintList();
     paint_list_init(rdcon->paint_list, nullptr);
     rdt_vector_init(&rdcon->vec, (uint32_t*)uicon->surface->pixels,
@@ -452,7 +452,7 @@ RenderFrameScope::RenderFrameScope(RenderContext* r, UiContext* uicon, ViewTree*
     context_active = true;
     dl_init(&display_list, view_tree->display_list_arena);
     display_list_active = true;
-    rdcon->dl = &display_list;
+    rdcon->dl = lam::up(&display_list);
 }
 
 RenderFrameScope::~RenderFrameScope() {
@@ -479,12 +479,12 @@ static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon,
         float scale = rdcon->raster_scale;
         while (dr) {
             Rect dirty_rect = {dr->x * scale, dr->y * scale, dr->width * scale, dr->height * scale};
-            RasterPaintContext raster = {rdcon->ui_context->surface, &rdcon->block.clip, nullptr, 0};
+            RasterPaintContext raster = raster_paint_context(rdcon->ui_context->surface, &rdcon->block.clip, nullptr, 0);
             raster_fill_rect(&raster, &dirty_rect, canvas_bg);
             dr = dr->next;
         }
 
-        rdcon->dirty_tracker = &state->dirty_tracker;
+        rdcon->dirty_tracker = lam::up(&state->dirty_tracker);
         Bound dirty_bounds = {};
         dirty_tracker_bounds(&state->dirty_tracker, &dirty_bounds, 1.0f);
         rdcon->dirty_union = dirty_bounds;
@@ -494,7 +494,7 @@ static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon,
         return result;
     }
 
-    RasterPaintContext raster = {rdcon->ui_context->surface, &rdcon->block.clip, nullptr, 0};
+    RasterPaintContext raster = raster_paint_context(rdcon->ui_context->surface, &rdcon->block.clip, nullptr, 0);
     raster_fill_rect(&raster, NULL, canvas_bg);
     return result;
 }
@@ -548,8 +548,8 @@ static RenderOutputReplayResult render_output_replay_display_list(RenderContext*
             return result;
         }
         for (int i = 0; i < grid.total; i++) {
-            jobs[i].tile = &grid.tiles[i];
-            jobs[i].display_list = display_list;
+            jobs[i].tile = lam::up(&grid.tiles[i]);
+            jobs[i].display_list = lam::up(display_list);
             jobs[i].raster_scale = rdcon->raster_scale;
             jobs[i].bg_color = canvas_bg;
         }
@@ -658,8 +658,8 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
         time_elapsed_ms_f(t_start, t_sync), item_count, selective,
         replay_result.tiled, replay_result.tile_count, replay_result.thread_count);
     RenderPathTrace trace = {};
-    trace.target = render_output_path_trace_target(target->kind);
-    trace.replay_mode = replay_result.tiled ? "display_list_tiled" : "display_list_single";
+    trace.target = lam::up(render_output_path_trace_target(target->kind));
+    trace.replay_mode = lam::up(replay_result.tiled ? "display_list_tiled" : "display_list_single");
     trace.display_list_recorded = true;
     trace.paint_ir_enabled = rdcon.paint_list != nullptr;
     trace.selective = selective;
@@ -741,8 +741,8 @@ static int render_output_render_html_file_to_target(const char* html_file,
         RenderProfiler profiler;
         render_profiler_reset(&profiler);
         RenderPathTrace trace = {};
-        trace.target = render_output_path_trace_target(target->kind);
-        trace.replay_mode = "file_export";
+        trace.target = lam::up(render_output_path_trace_target(target->kind));
+        trace.replay_mode = lam::up("file_export");
         trace.backend_name = trace.target;
         trace.display_list_recorded = false;
         trace.paint_ir_enabled = false;
@@ -847,7 +847,7 @@ int render_document_transform_to_output_target(const char* document_file,
 static void render_output_render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
     RenderOutputTarget target;
     render_output_target_init(&target, render_output_kind_from_file(output_file), output_file);
-    target.surface = uicon ? uicon->surface : nullptr;
+    target.surface = lam::up(uicon ? uicon->surface : nullptr);
     if (target.kind == RENDER_OUTPUT_PDF || target.kind == RENDER_OUTPUT_SVG) {
         log_error("render_output_render_html_doc: PDF/SVG require render_output_render_html_file_to_target");
         return;
@@ -964,7 +964,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
         {
             Bound tile_clip = {0, 0, (float)total_width, (float)tile_h};
-            RasterPaintContext raster = {tile_surf, &tile_clip, nullptr, 0};
+            RasterPaintContext raster = raster_paint_context(tile_surf, &tile_clip, nullptr, 0);
             raster_fill_rect(&raster, NULL, canvas_bg);
         }
         // dl_replay_tile uses tile-local coordinates and translates via tile_y,
@@ -992,8 +992,8 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
     DocState* rstate = uicon->document ? uicon->document->state : nullptr;
     RenderPathTrace trace = {};
-    trace.target = "tiled_png";
-    trace.replay_mode = "display_list_strip";
+    trace.target = lam::up("tiled_png");
+    trace.replay_mode = lam::up("display_list_strip");
     trace.display_list_recorded = true;
     trace.paint_ir_enabled = rdcon.paint_list != nullptr;
     trace.selective = false;

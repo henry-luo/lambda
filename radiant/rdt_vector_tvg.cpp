@@ -1087,7 +1087,7 @@ static Tvg_Paint create_clip_mask(RdtPath* clip_path, const RdtMatrix* transform
 
 static const RdtVectorCaps g_tvg_caps = {
     RDT_VECTOR_BACKEND_THORVG,
-    "ThorVG",
+    lam::up("ThorVG"),
     true,   // vector_paths
     true,   // rounded_rects
     true,   // gradients
@@ -1125,7 +1125,7 @@ void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride)
         log_error("rdt_vector_init: tvg_swcanvas_set_target failed result=%d", result);
     }
 
-    vec->impl = impl;
+    vec->impl = lam::own(impl);
     log_debug("rdt_vector_init: ThorVG backend ready %dx%d stride=%d", w, h, stride);
 }
 
@@ -1166,7 +1166,7 @@ const RdtVectorCaps* rdt_vector_get_caps(const RdtVector* vec) {
 
 bool rdt_vector_get_target(const RdtVector* vec, RdtVectorTarget* out) {
     if (!vec || !vec->impl || !out) return false;
-    out->pixels = vec->impl->pixels;
+    out->pixels = lam::up(vec->impl->pixels);
     out->width = vec->impl->width;
     out->height = vec->impl->height;
     out->stride = vec->impl->stride;

@@ -192,7 +192,7 @@ bool DomDocument::init(Input* source_input) {
     services.mem_ctx = dctx;
 
     // Keep selectively released document records separate from the node region.
-    document_pool = mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document.pool");
+    document_pool = lam::own(mem_pool_create(dctx, MEM_ROLE_NODE, "dom.document.pool"));
     if (!document_pool) {
         log_error("dom_document_create: failed to create pool");
         return false;
@@ -211,7 +211,7 @@ bool DomDocument::init(Input* source_input) {
     }
 
     // Create arena for all DOM node allocations
-    node_arena = mem_arena_create(dctx, MEM_ROLE_NODE, "dom.node.arena");
+    node_arena = lam::own(mem_arena_create(dctx, MEM_ROLE_NODE, "dom.node.arena"));
     if (!node_arena) {
         log_error("dom_document_create: failed to create arena");
         // Factory-created DOM roots must unregister their memory-context nodes on teardown.
@@ -247,7 +247,7 @@ void dom_document_borrow_input_resources(DomDocument* document) {
 bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool) {
     if (!document || !pool) return false;
     if (!document->owned_loader_pool) {
-        document->owned_loader_pool = pool;
+        document->owned_loader_pool = lam::own(pool);
         return true;
     }
     if (document->owned_loader_pool != pool) {
@@ -361,7 +361,7 @@ bool dom_document_add_resource(DomDocument* document, void* data,
     resource->data = data;
     resource->destroy = destroy;
     resource->next = document->resources;
-    document->resources = resource;
+    document->resources = lam::own(resource);
     return true;
 }
 
@@ -374,7 +374,7 @@ bool dom_document_set_embedding(DomDocument* embedded, DomDocument* parent,
         return false;
     }
     dom_document_clear_embedding(embedded);
-    embedded->embedding_document = parent;
+    embedded->embedding_document = lam::up(parent);
     embedded->embedding_element_ref = ref;
     parent->embedded_evaluator_pending = true;
     return true;
@@ -522,7 +522,7 @@ DomElement* DomElement::create_in(DomElement* element, DomDocument* doc,
     element->tag_id = DomNode::tag_name_to_id(tag_name);
 
     // Create style trees (still use pool for AVL nodes)
-    element->specified_style = style_tree_create(doc->document_pool);
+    element->specified_style = lam::shared(style_tree_create(doc->document_pool));
     if (!element->specified_style) {
         return nullptr;
     }
@@ -596,20 +596,20 @@ void dom_element_clear(DomElement* element) {
 
     if (element->specified_style_shared()) {
         style_epoch_unbind_element(element);
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     } else if (element->specified_style_borrowed()) {
         // A generated pseudo box may discard its view of the source tree, but
         // it must never clear declarations owned by the originating element.
         style_tree_release_borrow(element->specified_style);
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     } else if (element->specified_style) {
         // Recascade runs inside the document pool's active lifetime; returning
         // its live style allocations here corrupts subsequent CSS allocations.
         style_tree_clear(element->specified_style);
     } else {
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     }
     // Reset version tracking
@@ -624,7 +624,7 @@ static bool dom_element_clear_custom_properties(DomElement* element,
                                                 bool remove_inline) {
     if (!element || !element->doc) return false;
     bool removed = false;
-    CssCustomProp** slot = &element->css_variables;
+    lam::Own<CssCustomProp>* slot = &element->css_variables;
     while (*slot) {
         CssCustomProp* prop = *slot;
         bool is_inline = prop->declaration &&
@@ -660,7 +660,7 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
         // Canonical trees never contain inline declarations, so detaching is
         // sufficient and avoids materializing declarations that are discarded.
         style_epoch_unbind_element(element);
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
         changed = true;
     } else if (element->specified_style_borrowed()) {
@@ -680,12 +680,12 @@ void dom_element_clear_cascaded_styles(DomElement* element) {
             StyleTree* replacement = style_tree_create(element->doc->document_pool);
             if (!replacement) return;
             style_tree_destroy_owned(element->specified_style);
-            element->specified_style = replacement;
+            element->specified_style = lam::shared(replacement);
             element->mark_specified_style_owned();
             changed = true;
         }
     } else {
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         element->mark_specified_style_owned();
     }
     if (changed) {
@@ -713,7 +713,7 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style) {
     }
     // Generated pseudo elements are views over their source declarations; the
     // source element remains the sole owner across view retirement and rebuild.
-    element->specified_style = style;
+    element->specified_style = lam::shared(style);
     if (style) {
         style_tree_acquire_borrow(style);
         element->mark_specified_style_borrowed();
@@ -852,7 +852,7 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
         if (!next_value) return false;
         pool_free(element->doc->document_pool,
                   (void*)data->synthetic_attributes[index].value);
-        data->synthetic_attributes[index].value = next_value;
+        data->synthetic_attributes[index].value = lam::own((const char*)next_value);
         return true;
     }
     if (data->synthetic_attribute_count == data->synthetic_attribute_capacity) {
@@ -869,7 +869,7 @@ static bool dom_element_set_synthetic_attribute(DomElement* element,
         return false;
     }
     data->synthetic_attributes[data->synthetic_attribute_count++] = {
-        name_copy, value_copy
+        lam::own((const char*)name_copy), lam::own((const char*)value_copy)
     };
     return true;
 }
@@ -1557,13 +1557,13 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
             return false;
         }
 
-        prop->name = declaration->property_name;
-        prop->value = declaration->value;
-        prop->value_text = declaration->value_text;
+        prop->name = lam::up(declaration->property_name);
+        prop->value = lam::up(declaration->value);
+        prop->value_text = lam::up(declaration->value_text);
         prop->value_text_len = declaration->value_text_len;
-        prop->declaration = declaration;
+        prop->declaration = lam::up(declaration);
         prop->next = element->css_variables;
-        element->css_variables = prop;
+        element->css_variables = lam::own(prop);
 
         // Increment style version to invalidate caches
         element->style_version++;
@@ -1647,7 +1647,7 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
 
     bool cleared = false;
     for (int kind = 0; kind < PSEUDO_STYLE_COUNT; kind++) {
-        StyleTree** slot = &element->ext->pseudo_styles[kind];
+        lam::Own<StyleTree>* slot = &element->ext->pseudo_styles[kind];
         StyleTree* style = *slot;
         if (!style) continue;
         StyleTree* replacement = style_tree_create(element->doc->document_pool);
@@ -1658,7 +1658,7 @@ bool dom_element_clear_pseudo_styles(DomElement* element) {
             cleared = true;
             continue;
         }
-        *slot = replacement;
+        *slot = lam::own(replacement);
         // Retained generated boxes still borrow `style`.  Its declaration graph
         // becomes reclaimable as each box rebinds or leaves the view tree.
         style_tree_retire_borrow_source(style);
@@ -1682,7 +1682,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
     }
 
     // Get the appropriate style tree for the pseudo-element
-    StyleTree** target_style = nullptr;
+    lam::Own<StyleTree>* target_style = nullptr;
     const char* pseudo_name = nullptr;
 
     if (pseudo_element == 1) {  // PSEUDO_ELEMENT_BEFORE
@@ -1713,7 +1713,7 @@ int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
 
     // Create style tree if needed
     if (!*target_style) {
-        *target_style = style_tree_create(element->doc->document_pool);
+        *target_style = lam::own(style_tree_create(element->doc->document_pool));
         if (!*target_style) {
             log_error("[CSS] Failed to create style tree for %s", pseudo_name);
             return 0;
@@ -2663,7 +2663,7 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     // The source document must outlive this clone. A true deep copy independent of
     // the source pool is not yet available.
     if (source->specified_style) {
-        clone->specified_style = style_tree_clone(source->specified_style, pool);
+        clone->specified_style = lam::shared(style_tree_clone(source->specified_style, pool));
     }
 
     // Note: Children are not cloned - caller should handle that if needed

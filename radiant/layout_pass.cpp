@@ -161,12 +161,12 @@ LayoutMeasureScope::LayoutMeasureScope(::LayoutContext* l, ::DomNode* measure_el
     saved_run_mode = lycon->run_mode;
     saved_sizing_mode = lycon->sizing_mode;
     saved_available_space = lycon->available_space;
-    saved_views = arraylist_new(8);
+    saved_views = lam::up(arraylist_new(8));
     snapshot_scope = scratch_scope_begin(&lycon->scratch);
     layout_measure_snapshot_append(lycon, &snapshot_scope, saved_views, measure_elmt);
 
     lycon->run_mode = RunMode::ComputeSize;
-    lycon->elmt = measure_elmt;
+    lycon->elmt = lam::up(measure_elmt);
 }
 
 LayoutMeasureScope::~LayoutMeasureScope() {
@@ -175,7 +175,7 @@ LayoutMeasureScope::~LayoutMeasureScope() {
     lycon->block = saved_block;
     lycon->line = saved_line;
     lycon->font = saved_font;
-    lycon->elmt = saved_elmt;
+    lycon->elmt = lam::up(saved_elmt);
     lycon->run_mode = saved_run_mode;
     lycon->sizing_mode = saved_sizing_mode;
     lycon->available_space = saved_available_space;

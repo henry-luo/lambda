@@ -132,7 +132,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, FontProp *fprop) {
     // database lookup, platform fallback, and fallback font chain — all with caching.
     FontHandle* handle = family ? font_resolve(uicon->font_ctx, &style) : NULL;
     if (handle) {
-        fprop->font_handle = handle;
+        fprop->font_handle = lam::counted(handle);
         // Transfer font_resolve's caller ref into the cache-managed alias.
         font_cache_adopt_handle_alias(handle);
 

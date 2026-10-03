@@ -474,12 +474,12 @@ static bool style_builder_materialize_owned(StyleEpochManager* manager,
             element->specified_style, element->doc->document_pool);
         if (!clone) return false;
         style_epoch_unbind_element(element);
-        element->specified_style = clone;
+        element->specified_style = lam::shared(clone);
         element->mark_specified_style_owned();
         manager->totals.cow_count++;
     }
     if (!element->specified_style) {
-        element->specified_style = style_tree_create(element->doc->document_pool);
+        element->specified_style = lam::shared(style_tree_create(element->doc->document_pool));
         if (!element->specified_style) return false;
         element->mark_specified_style_owned();
     }
@@ -748,7 +748,7 @@ bool style_epoch_ensure_owned(DomElement* element) {
             borrowed, element->doc->document_pool);
         if (!clone) return false;
         style_tree_release_borrow(borrowed);
-        element->specified_style = clone;
+        element->specified_style = lam::shared(clone);
         element->mark_specified_style_owned();
     }
     StyleEpochManager* manager = style_manager(element->doc);
@@ -759,8 +759,8 @@ bool style_epoch_ensure_owned(DomElement* element) {
     }
     if (!element->specified_style_shared()) {
         if (!element->specified_style) {
-            element->specified_style = style_tree_create(
-                element->doc->document_pool);
+            element->specified_style = lam::shared(style_tree_create(
+                element->doc->document_pool));
         }
         return element->specified_style != nullptr;
     }
@@ -768,7 +768,7 @@ bool style_epoch_ensure_owned(DomElement* element) {
         element->specified_style, element->doc->document_pool);
     if (!clone) return false;
     style_epoch_unbind_element(element);
-    element->specified_style = clone;
+    element->specified_style = lam::shared(clone);
     element->mark_specified_style_owned();
     if (manager) manager->totals.cow_count++;
     return true;
@@ -790,7 +790,7 @@ static void style_epoch_bind(StyleEpochManager* manager,
         element->specified_style = nullptr;
     }
     style_epoch_cold_remove(entry->epoch, entry);
-    element->specified_style = entry->tree;
+    element->specified_style = lam::shared(entry->tree);
     element->mark_specified_style_shared();
     entry->bound_refs++;
     entry->epoch->bound_refs++;

@@ -11,7 +11,9 @@
 //   Counted<T>  the target is owned elsewhere and pinned by a count
 //   Shared<T>   the target is a value shared by several holders (an ancestor's
 //               prop, an interned canonical entry); its owner keeps it alive
-//               for every holder, and no holder writes through this pointer
+//               for every holder. A holder writes through it only after a
+//               copy-on-write gate has replaced it with the holder's private
+//               copy, and the holder records that it owns that copy
 //   Handle<T>   index + generation into a slot table; not dereferenceable
 //   Foreign<T>  an opaque vendor resource (ThorVG, FreeType, platform objects)
 //
@@ -105,9 +107,14 @@ template<class T> struct Foreign {
 // Kind constructors with the target type deduced, for write sites:
 // child->parent = lam::up(element) declares the store as an outliving link.
 template<class T> constexpr Up<T> up(T* p) { return Up<T>(p); }
+// borrowing an owned or outliving field keeps the outlives claim
+template<class T> constexpr Up<T> up(const Own<T>& o) { return Up<T>(o.p_); }
+template<class T> constexpr Up<T> up(const Up<T>& u) { return u; }
 template<class T> constexpr Own<T> own(T* p) { return Own<T>(p); }
+template<class T> constexpr OwnArr<T> own_arr(T* p) { return OwnArr<T>(p); }
 template<class T> constexpr Counted<T> counted(T* p) { return Counted<T>(p); }
 template<class T> constexpr Shared<T> shared(T* p) { return Shared<T>(p); }
+template<class T> constexpr Foreign<T> foreign(T* p) { return Foreign<T>(p); }
 
 // Slot reference: valid only through lookup in the owning slot table, which
 // compares generations and returns null for a recycled slot.

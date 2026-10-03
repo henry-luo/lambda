@@ -1601,12 +1601,12 @@ PseudoContentProp* alloc_pseudo_content_prop(LayoutContext* lycon, ViewBlock* bl
     if (has_before && !pseudo->before_generated) {
         log_info("%s [PSEUDO] Getting before content for <%s>", block->source_loc(), elem->tag_name ? elem->tag_name : "?");
         const char* before_content = resolve_pseudo_generated_content(lycon, elem, true);
-        pseudo->before = create_pseudo_element(lycon, elem, before_content ? before_content : "", true, block->font);
+        pseudo->before = lam::up(create_pseudo_element(lycon, elem, before_content ? before_content : "", true, block->font));
         pseudo->before_generated = true;
     }
     if (has_after && !pseudo->after_generated) {
         const char* after_content = resolve_pseudo_generated_content(lycon, elem, false);
-        pseudo->after = create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font);
+        pseudo->after = lam::up(create_pseudo_element(lycon, elem, after_content ? after_content : "", false, block->font));
         pseudo->after_generated = true;
     }
     return pseudo;
@@ -1943,7 +1943,7 @@ bool layout_classify_vertical_flow_child(ViewBlock* parent, View* child,
     if (!parent || !child || !result || !child->is_block()) return false;
     ViewBlock* block = lam::view_require_block(child);
     if (!block) return false;
-    result->block = block;
+    result->block = lam::up(block);
     result->atomic_inline = is_inline_level_atomic_block(child, block);
     result->normal_block = block->display.outer == CSS_VALUE_BLOCK ||
         block->display.outer == CSS_VALUE_LIST_ITEM ||
@@ -3622,7 +3622,7 @@ static bool layout_resolve_percentage_width_constraints(
     containing_context.content_width = containing_width;
     containing_context.given_width = containing_width;
     LayoutContext resolve_context = *lycon;
-    resolve_context.block.parent = &containing_context;
+    resolve_context.block.parent = lam::up(&containing_context);
     bool resolved_any = false;
     DomElement* element = block->as_element();
     for (int i = 0; i < 2; i++) {
@@ -5039,7 +5039,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
             } else {
                 radiant_document_ensure_state(doc, "layout_iframe");
                 if (!(block->embed)) block->ensure_embed(lycon);
-                block->embed->doc = doc; // assign loaded document to embed property
+                block->embed->doc = lam::own(doc); // assign loaded document to embed property
                 dom_document_set_embedding(doc, lycon->ui_context->document,
                                            (DomElement*)block);
                 layout_iframe_embedded_doc(lycon, doc, iframe_width, iframe_height);
@@ -5756,7 +5756,7 @@ void prescan_and_layout_floats(LayoutContext* lycon, DomNode* first_child, ViewB
     // CSS 2.1 §9.5: Floats belong to their nearest BFC ancestor, not to non-BFC
     if (!lycon->block.establishing_element && parent_block) {
         if (block_context_establishes_bfc(parent_block)) {
-            lycon->block.establishing_element = parent_block;
+            lycon->block.establishing_element = lam::up(parent_block);
             lycon->block.float_right_edge = parent_block->content_width > 0 ? parent_block->content_width : parent_block->width;
         }
     }
@@ -6633,7 +6633,7 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         setup_font(lycon->ui_context, &lycon->font, block->font);
     }
     // CSS Text 3 §4.2: save the block container's font for tab-size calculation.
-    lycon->block.block_container_font = lycon->font.style;
+    lycon->block.block_container_font = lam::up(lycon->font.style);
     // CSS 2.1 §10.8.1: Update line_start_font to the block's own font, since
     lycon->line.line_start_font = lycon->font;
     setup_line_height(lycon, block);
@@ -6652,8 +6652,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
     }
     if (block->is_element() && lycon->font.style) {
         DomElement* block_element = lam::dom_require<DOM_NODE_ELEMENT>(block);
-        lycon->block.first_line_font = layout_resolve_first_line_font(
-            lycon, block_element, lycon->font.style);
+        lycon->block.first_line_font = lam::up(layout_resolve_first_line_font(
+            lycon, block_element, lycon->font.style));
         lycon->block.first_line_style_active =
             lycon->block.first_line_font != nullptr;
     }
@@ -7800,7 +7800,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, BlockContext *
     }
     if (establishes_bfc) {
         lycon->block.is_bfc_root = true;
-        lycon->block.establishing_element = block;
+        lycon->block.establishing_element = lam::up(block);
         block_context_reset_floats(&lycon->block);
         block_context_reset_initial_letters(&lycon->block);
     } else {
@@ -9694,7 +9694,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     BlockContext pa_block = lycon->block;  Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
-    lycon->block.parent = &pa_block;  lycon->elmt = elmt;
+    lycon->block.parent = lam::up(&pa_block);  lycon->elmt = lam::up(elmt);
     lycon->block.content_width = lycon->block.content_height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
     lycon->block.saved_clear_y = -1;
@@ -9972,7 +9972,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
         // CSS 2.1 §9.7: Floats are blockified — a floated element that was
         if (is_inline_atomic && !is_float_element) {
-            if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(block);
+            if (!lycon->line.start_view) lycon->line.start_view = lam::up(static_cast<View*>(block));
             // CSS 2.1 §9.5.1: inline-blocks must account for floats across their
             float inline_block_height = block->height;
             update_line_for_bfc_floats(lycon, inline_block_height);
@@ -10084,7 +10084,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                             line_start = static_cast<View*>(pe);
                             p = p->parent;
                         }
-                        lycon->line.start_view = line_start;
+                        lycon->line.start_view = lam::up(line_start);
                     }
                 } else if (lycon->line.has_float_intrusion) {
                     // CSS 2.1 §9.5: First item on line doesn't fit due to float —

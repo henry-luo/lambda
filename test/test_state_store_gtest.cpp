@@ -29,14 +29,14 @@ protected:
         arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
 
-        doc.document_pool = pool;
-        doc.node_arena = arena;
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena);
 
         root = make_element();
         live = make_element();
         orphan = make_element();
         drop = make_element();
-        doc.root = root;
+        doc.root = lam::up(root);
 
         ASSERT_TRUE(root->append_child(live));
         ASSERT_TRUE(root->append_child(orphan));

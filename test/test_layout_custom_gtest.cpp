@@ -58,9 +58,9 @@ protected:
         ASSERT_NE(pool, nullptr);
         arena = arena_create_default();
         ASSERT_NE(arena, nullptr);
-        doc.document_pool = pool;
-        doc.node_arena = arena;
-        lycon.pool = pool;
+        doc.document_pool = lam::own(pool);
+        doc.node_arena = lam::own(arena);
+        lycon.pool = lam::up(pool);
         scratch_init(&lycon.scratch, arena);
         lycon.block.direction = CSS_VALUE_LTR;
         lycon.available_space = AvailableSpace::make_indefinite();

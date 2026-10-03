@@ -8,14 +8,14 @@ extern "C" {
 #include "../lib/memtrack.h"
 }
 
-static void initialize_grid_axis(radiant::grid::TrackArray** destination, int track_count,
+static void initialize_grid_axis(lam::Up<radiant::grid::TrackArray>* destination, int track_count,
                                  int explicit_count, int negative_implicit_count,
                                  GridTrackList* template_tracks,
                                  GridTrackList* automatic_tracks,
                                  ScratchArena* scratch,
                                  const char* axis_name) {
     void* storage = scratch_alloc(scratch, sizeof(radiant::grid::TrackArray));
-    *destination = storage ? new (storage) radiant::grid::TrackArray() : nullptr; // NEW_DELETE_OK: scratch-owned pass state.
+    *destination = lam::up(storage ? new (storage) radiant::grid::TrackArray() : nullptr); // NEW_DELETE_OK: scratch-owned pass state.
     if (!*destination) {
         log_error("grid_sizing: unable to allocate %d %s scratch tracks", track_count, axis_name);
         return;

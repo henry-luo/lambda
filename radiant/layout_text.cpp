@@ -1956,7 +1956,7 @@ static void reset_line_parent_font(LayoutContext* lycon) {
     lycon->line.parent_font_descender = lycon->block.init_descender;
     lycon->line.parent_font_size = lycon->font.style ? lycon->font.style->font_size
         : (lycon->block.init_ascender + lycon->block.init_descender);
-    lycon->line.parent_font_style = lycon->font.style;
+    lycon->line.parent_font_style = lam::up(lycon->font.style);
 }
 
 static float line_strut_font_size(const LayoutContext* lycon) {
@@ -2755,7 +2755,7 @@ void line_break(LayoutContext* lycon) {
         // css 2.1 §10.8.1: preserve a complete block strut for the next line.
         setup_font(lycon->ui_context, &lycon->line.line_start_font, block_font);
         lycon->line.parent_font_size = block_font->font_size;
-        lycon->line.parent_font_style = block_font;
+        lycon->line.parent_font_style = lam::up(block_font);
     }
 }
 // CSS Text 3 §5.2: Measure the width of the first word starting from `str`.
@@ -3227,7 +3227,7 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     if (is_initial_letter && !is_raised_initial_letter) {
         lycon->line.has_drop_initial_letter = true;
     }
-    if (!lycon->line.start_view) lycon->line.start_view = static_cast<View*>(text);
+    if (!lycon->line.start_view) lycon->line.start_view = lam::up(static_cast<View*>(text));
     ViewElement* text_parent = text->parent_view();
     if (!lycon->line.has_direct_block_text && text_parent && text_parent->is_block() &&
         text_range_has_non_collapsed_content(text, rect, text_length)) {
@@ -3254,16 +3254,16 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     }
     // CSS 2.1 §16.6.1: Commit trailing space info for cross-node line break trimming.
     if (lycon->line.trailing_space_width > 0) {
-        lycon->line.committed_trailing_rect = rect;
-        lycon->line.committed_trailing_view = text;
+        lycon->line.committed_trailing_rect = lam::up(rect);
+        lycon->line.committed_trailing_view = lam::up(text);
         lycon->line.committed_trailing_space = lycon->line.trailing_space_width;
     } else if (lycon->line.committed_trailing_rect != rect) {
         lycon->line.committed_trailing_rect = NULL;
         lycon->line.committed_trailing_view = NULL;
         lycon->line.committed_trailing_space = 0;
     }
-    lycon->line.last_text_rect = rect;  // track for trailing whitespace trimming
-    lycon->line.last_text_view = text;  // ViewText owner for bounds update after trimming
+    lycon->line.last_text_rect = lam::up(rect);  // track for trailing whitespace trimming
+    lycon->line.last_text_view = lam::up(text);  // ViewText owner for bounds update after trimming
     // css fragmentation: clone decorations reapply their inline-start edge on
     // every line fragment; sliced decorations consume it after the first line.
     bool clone_inline_start_edge = text->parent && text->parent->is_element() &&
@@ -3729,8 +3729,8 @@ static bool output_break_at_last_space(LayoutContext* lycon, DomNode* text_node,
         rect->length = 2;
         rect->width = 0.0f;
         rect->line_number = lycon->block.line_number;
-        lycon->line.last_text_rect = rect;
-        lycon->line.last_text_view = text_view;
+        lycon->line.last_text_rect = lam::up(rect);
+        lycon->line.last_text_view = lam::up(text_view);
     }
     if (generated_hyphen) {
         rect->has_trailing_hyphen = true;
@@ -4057,7 +4057,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     } else {
         TextRect* last_rect = text_view->rect;
         while (last_rect && last_rect->next) { last_rect = last_rect->next; }
-        last_rect->next = rect;
+        last_rect->next = lam::own(rect);
     }
 
     if (lycon->font.style && lycon->font.style->font_size <= 0.0f) {

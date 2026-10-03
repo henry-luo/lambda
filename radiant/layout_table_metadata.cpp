@@ -17,23 +17,23 @@ TableMetadata::TableMetadata(ScratchScope* scope, int cols, int rows)
       col_has_explicit_width(nullptr), collapsed_border_top(0),
       collapsed_border_right(0), collapsed_border_bottom(0),
       collapsed_border_left(0) {
-    grid_occupied = scope->array_zero<bool>((size_t)rows * (size_t)cols);
-    col_widths = scope->array_zero<float>(cols);
-    col_single_min_widths = scope->array_zero<float>(cols);
-    col_min_widths = scope->array_zero<float>(cols);
-    col_max_widths = scope->array_zero<float>(cols);
-    col_percent_widths = scope->array_zero<float>(cols);
-    row_heights = scope->array_zero<float>(rows);
-    row_base_heights = scope->array_zero<float>(rows);
-    row_reference_heights = scope->array_zero<float>(rows);
-    row_y_positions = scope->array_zero<float>(rows);
-    row_collapsed = scope->array_zero<bool>(rows);
-    col_collapsed = scope->array_zero<bool>(cols);
-    col_original_widths = scope->array_zero<float>(cols);
-    row_has_percent_height = scope->array_zero<bool>(rows);
-    row_has_specified_height = scope->array_zero<bool>(rows);
-    col_edge_max_border = scope->array_zero<float>((size_t)cols + 1);
-    col_has_explicit_width = scope->array_zero<bool>(cols);
+    grid_occupied = lam::own_arr(scope->array_zero<bool>((size_t)rows * (size_t)cols));
+    col_widths = lam::own_arr(scope->array_zero<float>(cols));
+    col_single_min_widths = lam::own_arr(scope->array_zero<float>(cols));
+    col_min_widths = lam::own_arr(scope->array_zero<float>(cols));
+    col_max_widths = lam::own_arr(scope->array_zero<float>(cols));
+    col_percent_widths = lam::own_arr(scope->array_zero<float>(cols));
+    row_heights = lam::own_arr(scope->array_zero<float>(rows));
+    row_base_heights = lam::own_arr(scope->array_zero<float>(rows));
+    row_reference_heights = lam::own_arr(scope->array_zero<float>(rows));
+    row_y_positions = lam::own_arr(scope->array_zero<float>(rows));
+    row_collapsed = lam::own_arr(scope->array_zero<bool>(rows));
+    col_collapsed = lam::own_arr(scope->array_zero<bool>(cols));
+    col_original_widths = lam::own_arr(scope->array_zero<float>(cols));
+    row_has_percent_height = lam::own_arr(scope->array_zero<bool>(rows));
+    row_has_specified_height = lam::own_arr(scope->array_zero<bool>(rows));
+    col_edge_max_border = lam::own_arr(scope->array_zero<float>((size_t)cols + 1));
+    col_has_explicit_width = lam::own_arr(scope->array_zero<bool>(cols));
 }
 
 //------------------------------------------------------------------------------

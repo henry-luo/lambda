@@ -1378,9 +1378,9 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     float baseline_offset = font_size * 0.8f;
     float baseline_y = y + baseline_offset;
     PaintGlyphRun run = {};
-    run.font = &ctx->font;
+    run.font = lam::up(&ctx->font);
     run.color = ctx->color;
-    run.text = text_content;
+    run.text = lam::up(text_content);
     run.text_len = (int)strlen(text_content); // INT_CAST_OK: text run byte length is bounded by TextRect input.
     run.owns_text = ctx && ctx->effect_fallback.active;
     run.font_family = ctx->font.style ? ctx->font.style->family : nullptr;
@@ -1574,7 +1574,7 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
                               initial_paint.has_stroke_color ? &initial_paint.stroke_color : nullptr,
                               initial_paint.stroke_none,
                               initial_paint.stroke_width);
-    subscene.id_scope = render_svg_reference_scope(dom_elem);
+    subscene.id_scope = lam::up(render_svg_reference_scope(dom_elem));
     paint_svg_subscene(pdf_active_paint_list(ctx), &subscene);
     pdf_lower_paint_list(ctx);
     (void)font;
@@ -1840,7 +1840,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     walk_state.y = 0;
     walk_state.font = ctx.font;
     walk_state.color = ctx.color;
-    walk_state.ui_context = uicon;
+    walk_state.ui_context = lam::up(uicon);
 
     if (root_view->view_type == RDT_VIEW_BLOCK) {
         render_walk_block(&backend, &walk_state, lam::view_require_block(root_view));
@@ -1849,9 +1849,9 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     }
 
     RenderPathTrace trace = {};
-    trace.target = "pdf";
-    trace.replay_mode = "paint_ir_pdf";
-    trace.backend_name = "pdf_export";
+    trace.target = lam::up("pdf");
+    trace.replay_mode = lam::up("paint_ir_pdf");
+    trace.backend_name = lam::up("pdf_export");
     trace.display_list_recorded = false;
     trace.paint_ir_enabled = true;
     trace.surface_width = (int)width; // INT_CAST_OK: PDF trace width is logged as whole document units.

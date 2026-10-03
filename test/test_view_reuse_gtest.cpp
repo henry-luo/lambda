@@ -15,7 +15,7 @@ protected:
     ViewTree tree = {};
 
     void SetUp() override {
-        tree.prop_pool = pool_create();
+        tree.prop_pool = lam::own(pool_create());
         ASSERT_NE(tree.prop_pool, nullptr);
         view_tree_canonical_init(&tree);
         ASSERT_NE(tree.canonical_prop_arena, nullptr);
@@ -132,7 +132,7 @@ protected:
 
     DomElement* root() {
         DomElement* value = element("root");
-        doc.root = value;
+        doc.root = lam::up(value);
         return value;
     }
 
@@ -341,10 +341,10 @@ TEST_F(DomRetirementTest, DestroyDiscardsQueuedArenaRecycling) {
 TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
     // the view tree owns the layout props a retirement sweep returns
     ViewTree tree = {};
-    tree.prop_pool = pool_create();
+    tree.prop_pool = lam::own(pool_create());
     ASSERT_NE(tree.prop_pool, nullptr);
     view_tree_canonical_init(&tree);
-    doc.view_tree = &tree;
+    doc.view_tree = lam::own(&tree);
 
     // layout_text points a text node at the FontProp of its nearest
     // font-owning ancestor; an unstyled span owns none, so its text borrows
@@ -462,7 +462,7 @@ TEST(DomRetirementOwnerArenaTest, FatLambdaNodeReturnsToItsInputArena) {
 
     DomElement* root = DomElement::create(&doc, "root", nullptr);
     ASSERT_NE(root, nullptr);
-    doc.root = root;
+    doc.root = lam::up(root);
     DomElement* storage = DomElement::create_in(input_arena);
     ASSERT_NE(storage, nullptr);
     Element* backing = elmt_arena(input_arena);
@@ -501,7 +501,7 @@ TEST(DomRetirementOwnerArenaTest, FlattenedArrayTextIsRegisteredAndRetired) {
     Item children = builder.array().append(first).append(nested).final();
     Item branch_source = builder.element("branch").child(children).final();
     Item root_source = builder.element("root").child(branch_source).final();
-    doc.root = build_dom_tree_from_element(root_source.element, &doc, nullptr);
+    doc.root = lam::up(build_dom_tree_from_element(root_source.element, &doc, nullptr));
     ASSERT_NE(doc.root, nullptr);
     DomElement* branch = doc.root->first_child->as_element();
     DomNode* first_node = branch->first_child;
@@ -534,7 +534,7 @@ protected:
         engine.context.device_pixel_ratio = 2.0;
         document_root = DomElement::create(&doc, "root", nullptr);
         ASSERT_NE(document_root, nullptr);
-        doc.root = document_root;
+        doc.root = lam::up(document_root);
     }
 
     void TearDown() override {

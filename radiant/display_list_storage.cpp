@@ -244,7 +244,7 @@ static void dl_validation_set(DisplayListValidationResult* result, bool valid,
     if (!result) return;
     result->valid = valid;
     result->first_error_index = index;
-    result->message = message;
+    result->message = lam::up(message);
     result->clip_depth = clip_depth;
     result->backdrop_depth = backdrop_depth;
     result->shadow_clip_depth = shadow_clip_depth;

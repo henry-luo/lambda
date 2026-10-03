@@ -239,7 +239,7 @@ static inline PaintRecordTarget svg_record_target(SvgInlineRenderContext* ctx) {
     PaintRecordTarget target = {
         ctx ? ctx->paint_list : nullptr,
         ctx ? ctx->dl : nullptr,
-        "SVG"
+        lam::up("SVG")
     };
     return target;
 }
@@ -1024,7 +1024,7 @@ static SvgDefTable* ensure_svg_def_table(SvgInlineRenderContext* ctx) {
         SvgDefTable* table = (SvgDefTable*)scratch_calloc(
             ctx->resource_scratch, sizeof(SvgDefTable));
         if (!table) return nullptr;
-        ctx->defs = (HashMap*)table;
+        ctx->defs = lam::up((HashMap*)table);
     }
     return (SvgDefTable*)ctx->defs;
 }
@@ -4281,7 +4281,7 @@ static void svg_group_enter(SvgInlineRenderContext* ctx, Element* elem, SvgGroup
 
     // inherited text properties from group attributes
     const char* g_font_family = get_svg_attr(elem, "font-family");
-    if (g_font_family) ctx->inherited_font_family = g_font_family;
+    if (g_font_family) ctx->inherited_font_family = lam::up(g_font_family);
     float parent_font_size = ctx->inherited_font_size > 0 ? ctx->inherited_font_size : 16.0f;
     const char* g_font_size = get_svg_attr(elem, "font-size");
     if (g_font_size) ctx->inherited_font_size = svg_font_size_value(g_font_size, parent_font_size);
@@ -4289,7 +4289,7 @@ static void svg_group_enter(SvgInlineRenderContext* ctx, Element* elem, SvgGroup
     const char* g_font_weight = get_svg_attr(elem, "font-weight");
     if (g_font_weight) ctx->inherited_font_weight = svg_font_weight_value(g_font_weight, parent_font_weight);
     const char* g_text_anchor = get_svg_attr(elem, "text-anchor");
-    if (g_text_anchor) ctx->inherited_text_anchor = g_text_anchor;
+    if (g_text_anchor) ctx->inherited_text_anchor = lam::up(g_text_anchor);
 
     // apply group transform to accumulated transform
     ctx->transform = compose_element_transform(ctx, elem);
@@ -4311,10 +4311,10 @@ static void svg_group_leave(SvgInlineRenderContext* ctx, const SvgGroupScope* sc
     ctx->fill_none = scope->fill_none;
     ctx->stroke_none = scope->stroke_none;
     ctx->transform = scope->transform;
-    ctx->inherited_font_family = scope->font_family;
+    ctx->inherited_font_family = lam::up(scope->font_family);
     ctx->inherited_font_size = scope->font_size;
     ctx->inherited_font_weight = scope->font_weight;
-    ctx->inherited_text_anchor = scope->text_anchor;
+    ctx->inherited_text_anchor = lam::up(scope->text_anchor);
 }
 
 static void render_svg_group(SvgInlineRenderContext* ctx, Element* elem) {
@@ -4395,7 +4395,7 @@ static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem
         log_debug("[SVG] <use> href='%s' exceeds nesting depth %d", href ? href : "", SVG_USE_DEPTH_MAX);
         return;
     }
-    ctx->use_chain[ctx->use_depth++] = ref;
+    ctx->use_chain[ctx->use_depth++] = lam::up(ref);
 
     // The instance renders like a <g> carrying the <use>'s transform and
     // presentation attributes, then translate(x, y); the referenced content
@@ -4480,7 +4480,7 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
 
     ScratchMark nested_resource_mark = scratch_mark(ctx->resource_scratch);
     HashMap* saved_defs = ctx->defs;
-    void* saved_rules = ctx->style_rules;
+    SvgStyleRule* saved_rules = ctx->style_rules;
     int saved_rule_count = ctx->style_rule_count;
     int saved_rule_capacity = ctx->style_rule_capacity;
     const char* saved_source_path = ctx->source_path;
@@ -4489,20 +4489,20 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     ctx->style_rules = nullptr;
     ctx->style_rule_count = 0;
     ctx->style_rule_capacity = 0;
-    ctx->source_path = rdt_picture_get_source_path(pic);  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
+    ctx->source_path = lam::up(rdt_picture_get_source_path(pic));  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
     // fragment references inside the external document name its own elements
-    ctx->id_scope = root;
+    ctx->id_scope = lam::up(root);
     process_svg_root_resources(ctx, root);
     render_svg_use_target(ctx, use_elem, ref, href);
     // Nested resource tables are pass scratch; restoring their mark leaves the
     // outer SVG tables intact without maintaining a parallel heap free chain.
     scratch_restore(ctx->resource_scratch, nested_resource_mark);
-    ctx->defs = saved_defs;
+    ctx->defs = lam::up(saved_defs);
     ctx->style_rules = saved_rules;
     ctx->style_rule_count = saved_rule_count;
     ctx->style_rule_capacity = saved_rule_capacity;
-    ctx->source_path = saved_source_path;  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
-    ctx->id_scope = saved_id_scope;
+    ctx->source_path = lam::up(saved_source_path);  // RETAINED_FIELD_OK: render-context field, not a retained DOM field
+    ctx->id_scope = lam::up(saved_id_scope);
 
     rdt_picture_free(pic);
     if (pushed_resource) svg_resource_stack_pop(resolved_href);
@@ -4776,14 +4776,14 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
 
     // initialize render context
     SvgInlineRenderContext ctx = {};
-    ctx.svg_root = svg_element;
-    ctx.id_scope = id_scope ? id_scope : svg_element;
-    ctx.pool = pool;
-    ctx.font_ctx = font_ctx;
-    ctx.dl = dl;
-    ctx.paint_list = paint_list;
-    ctx.resource_scratch = resource_scratch;
-    ctx.source_path = source_path;
+    ctx.svg_root = lam::up(svg_element);
+    ctx.id_scope = lam::up(id_scope ? id_scope : svg_element);
+    ctx.pool = lam::up(pool);
+    ctx.font_ctx = lam::up(font_ctx);
+    ctx.dl = lam::up(dl);
+    ctx.paint_list = lam::up(paint_list);
+    ctx.resource_scratch = lam::up(resource_scratch);
+    ctx.source_path = lam::up(source_path);
     svg_get_registered_image_resolver(svg_element, &ctx.image_resolver, &ctx.image_resolver_context);
     ctx.raster_scale = raster_scale > 0.0f ? raster_scale : 1.0f;
     ctx.fill_color.r = 0; ctx.fill_color.g = 0; ctx.fill_color.b = 0; ctx.fill_color.a = 255;  // default black
@@ -4915,9 +4915,9 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
                       float initial_stroke_width) {
     if (!subscene) return;
     memset(subscene, 0, sizeof(PaintSvgSubscene));
-    subscene->svg_root = svg_element;
-    subscene->pool = pool;
-    subscene->font_context = font_ctx;
+    subscene->svg_root = lam::up(svg_element);
+    subscene->pool = lam::up(pool);
+    subscene->font_context = lam::up(font_ctx);
     subscene->viewport_width = viewport_width;
     subscene->viewport_height = viewport_height;
     subscene->raster_scale = raster_scale > 0.0f ? raster_scale : 1.0f;
@@ -4936,7 +4936,7 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
     if (initial_stroke_color) subscene->stroke = *initial_stroke_color;
     subscene->stroke_none = initial_stroke_none;
     subscene->stroke_width = initial_stroke_width;
-    subscene->source_path = source_path;  // RETAINED_FIELD_OK: subscene-local field, not a retained DOM field
+    subscene->source_path = lam::up(source_path);  // RETAINED_FIELD_OK: subscene-local field, not a retained DOM field
     initial_opacity = clamp_unit(initial_opacity);
     subscene->opacity = initial_opacity;
     subscene->resource_generation = (uint64_t)(uintptr_t)svg_element;
@@ -5426,8 +5426,8 @@ static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomEl
     bool saved_has_transform = rdcon->has_transform;
     DirtyTracker* saved_dirty_tracker = rdcon->dirty_tracker;
     bool saved_has_dirty_union = rdcon->has_dirty_union;
-    rdcon->dl = &dl;
-    rdcon->paint_list = &paint_list;
+    rdcon->dl = lam::up(&dl);
+    rdcon->paint_list = lam::up(&paint_list);
     rdcon->block.clip = {0.0f, 0.0f, (float)width, (float)height};
     rdcon->has_transform = false;
     rdcon->dirty_tracker = nullptr;
@@ -5444,12 +5444,12 @@ static bool svg_layer_render_pass(RenderContext* rdcon, Element* svg_elem, DomEl
                                paint->stroke_none, paint->stroke_width,
                                &paint_list, &scratch, render_svg_reference_scope(dom_elem));
 
-    rdcon->dl = saved_dl;
-    rdcon->paint_list = saved_paint_list;
+    rdcon->dl = lam::up(saved_dl);
+    rdcon->paint_list = lam::up(saved_paint_list);
     rdcon->block.clip = saved_clip;
     rdcon->transform = saved_transform;
     rdcon->has_transform = saved_has_transform;
-    rdcon->dirty_tracker = saved_dirty_tracker;
+    rdcon->dirty_tracker = lam::up(saved_dirty_tracker);
     rdcon->has_dirty_union = saved_has_dirty_union;
 
     bool ok = dl_validate_or_log(&dl, "render_svg_layer_capture");
