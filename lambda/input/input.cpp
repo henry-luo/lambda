@@ -1312,6 +1312,17 @@ const char* input_detect_graph_flavor(const char* pathname,
     return input_detect_structurizr_flavor(pathname, source, source_len);
 }
 
+bool graph_path_is_graph(const char* graph_file) {
+    if (!graph_file) return false;
+    if (input_detect_graph_flavor(graph_file, NULL, 0)) return true;
+    // extension-less sources are recognized by content sniffing
+    char* source = read_text_file(graph_file);
+    if (!source) return false;
+    bool is_graph = input_detect_graph_flavor(graph_file, source, strlen(source)) != NULL;
+    mem_free(source);
+    return is_graph;
+}
+
 static bool markup_flavor_to_format(const char* flavor, MarkupFormat* format) {
     for (size_t i = 0; i < sizeof(MARKUP_FLAVOR_MAPPINGS) / sizeof(MARKUP_FLAVOR_MAPPINGS[0]); i++) {
         if (strcmp(flavor, MARKUP_FLAVOR_MAPPINGS[i].flavor) == 0) {

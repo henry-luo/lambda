@@ -2008,7 +2008,9 @@ JitImport jit_runtime_imports[] = {
     {"fn_not_u", FPTR(fn_not_u), JIT_IMPORT_PURE_SCALAR},
     {"fn_sign_i", FPTR(fn_sign_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_sign_f", FPTR(fn_sign_f), JIT_IMPORT_PURE_SCALAR},
+#ifndef LAMBDA_NO_JS
     {"js_math_pow_d", FPTR(js_math_pow_d), JIT_IMPORT_PURE_SCALAR},
+#endif // LAMBDA_NO_JS
     {"fn_floor_i", FPTR(fn_floor_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_ceil_i", FPTR(fn_ceil_i), JIT_IMPORT_PURE_SCALAR},
     {"fn_round_i", FPTR(fn_round_i), JIT_IMPORT_PURE_SCALAR},
@@ -2268,6 +2270,7 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // JavaScript runtime functions
     // ========================================================================
+#ifndef LAMBDA_NO_JS
     {"js_to_number", FPTR(js_to_number)},
     {"js_to_numeric", FPTR(js_to_numeric)},
     {"js_to_string", FPTR(js_to_string),
@@ -2329,6 +2332,7 @@ JitImport jit_runtime_imports[] = {
     {"js_bigint_constructor", FPTR(js_bigint_constructor)},
     {"js_bigint_as_int_n", FPTR(js_bigint_as_int_n)},
     {"js_bigint_as_uint_n", FPTR(js_bigint_as_uint_n)},
+#endif // LAMBDA_NO_JS
     // BigInt constructors return immutable decimal objects on the GC heap;
     // they are not transient scalar homes and must not reserve one in JS MIR.
     {"bigint_from_int64", FPTR(bigint_from_int64),
@@ -2339,6 +2343,7 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES}},
+#ifndef LAMBDA_NO_JS
     {"js_typeof", FPTR(js_typeof), JIT_IMPORT_STABLE_ITEM},
     {"js_typeof_is", FPTR(js_typeof_is), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_eq_raw", FPTR(js_eq_raw), JIT_IMPORT_RAW_SCALAR_PRESERVES},
@@ -2918,6 +2923,7 @@ JitImport jit_runtime_imports[] = {
     {"js_dataview_new", FPTR(js_dataview_new)},
     // SharedArrayBuffer
     {"js_sharedarraybuffer_construct_with_options", FPTR(js_sharedarraybuffer_construct_with_options)},
+#endif // LAMBDA_NO_JS
     {"lambda_active_module_var_store", FPTR(lambda_active_module_var_store),
      {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
       JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
@@ -2939,6 +2945,7 @@ JitImport jit_runtime_imports[] = {
       JIT_IMPORT_RESULT_SCALAR_STABLE | JIT_IMPORT_NUMBER_STACK_PRESERVES,
       JIT_EXCEPTION_PRESERVES,
       JIT_ARG_EFFECT(0, JIT_ARG_BORROWED) | JIT_ARG_EFFECT(1, JIT_ARG_BORROWED)}},
+#ifndef LAMBDA_NO_JS
     {"js_register_global_var_module_binding", FPTR(js_register_global_var_module_binding), JIT_IMPORT_VOID_PRESERVES},
     {"js_init_module_vars_undefined_bulk", FPTR(js_init_module_vars_undefined_bulk), JIT_IMPORT_VOID_PRESERVES},
     // v12: Language features
@@ -3142,6 +3149,7 @@ JitImport jit_runtime_imports[] = {
     {"js_new_number_checked", FPTR(js_new_number_checked)},
     {"js_new_boolean_wrapper", FPTR(js_new_boolean_wrapper)},
     {"js_new_string_wrapper", FPTR(js_new_string_wrapper)},
+#endif // LAMBDA_NO_JS
 
 
 #ifdef LAMBDA_BASH
@@ -3597,6 +3605,7 @@ JitImport jit_runtime_imports[] = {
     {"fn_call_boxed_14_into", FPTR(fn_call_boxed_14_into)},
     {"fn_call_boxed_15_into", FPTR(fn_call_boxed_15_into)},
     {"fn_call_boxed_16_into", FPTR(fn_call_boxed_16_into)},
+#ifndef LAMBDA_NO_JS
     {"js_call_export_0_into", FPTR(js_call_export_0_into)},
     {"js_call_export_1_into", FPTR(js_call_export_1_into)},
     {"js_call_export_2_into", FPTR(js_call_export_2_into)},
@@ -3606,6 +3615,7 @@ JitImport jit_runtime_imports[] = {
     {"js_call_export_6_into", FPTR(js_call_export_6_into)},
     {"js_call_export_7_into", FPTR(js_call_export_7_into)},
     {"js_call_export_8_into", FPTR(js_call_export_8_into)},
+#endif // LAMBDA_NO_JS
     {"fn_call_into", FPTR(fn_call_into)},
     {"fn_call_borrowed_into", FPTR(fn_call_borrowed_into)},
     {"fn_call0_into", FPTR(fn_call0_into)},
@@ -3670,7 +3680,9 @@ JitImport jit_runtime_imports[] = {
     // ========================================================================
     // TS runtime
     // ========================================================================
+#ifndef LAMBDA_NO_JS
     {"ts_type_info", FPTR(ts_type_info)},
+#endif // LAMBDA_NO_JS
 
 #ifdef LAMBDA_RUBY
     // Ruby runtime functions
@@ -3860,6 +3872,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_double_to_int_lane_c", "lambda_item_to_int_lane_c",
         "lambda_int_lane_add_slow", "lambda_int_lane_sub_slow", "lambda_int_lane_mul_slow",
         "lambda_int_lane_divmod_slow", "int2it_lane",
+#ifndef LAMBDA_NO_JS
         "js_is_truthy", "js_is_nullish", "js_is_object_value",
         // Typed-array element kind is fixed by construction. This leaf only
         // reads the rooted receiver's immutable view descriptor; detached or
@@ -3881,6 +3894,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "js_try_ascii_string_builtin_no_gc",
         "js_builtin_callable_is_id",
         "js_async_iterator_close_needs_await",
+#endif // LAMBDA_NO_JS
         JIT_LIBM_LEAVES(JIT_LIBM_AUDIT_NAME)
         "fn_min2_u",
         "fn_max2_u",
@@ -3895,6 +3909,7 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "fn_floor_i",
         "fn_ceil_i",
         "fn_round_i",
+#ifndef LAMBDA_NO_JS
         "js_math_pow_d",
         "js_double_to_int32",
 #ifdef LAMBDA_JS_EXEC_PROFILE
@@ -3905,10 +3920,13 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "js_error_lane_payload",
         "js_set_this", "js_get_new_target",
         "js_set_direct_new_target", "js_set_function_source_known_code",
+#endif // LAMBDA_NO_JS
         "lambda_active_module_var_store",
         "lambda_active_module_var_at",
         "lambda_unit_const_at",
+#ifndef LAMBDA_NO_JS
         "js_with_save_depth",
+#endif // LAMBDA_NO_JS
         // LR07-7 root-honesty probe. Reads one machine word, compares it
         // against the GC zone (`gc_is_managed`, a pure range query) and may
         // log; it allocates no GC object, never calls gc_collect, and never

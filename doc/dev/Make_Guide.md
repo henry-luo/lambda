@@ -18,7 +18,7 @@ Run `make help` for a quick summary, or see below for full details.
 | `rebuild`       | Force complete rebuild (`clean-all` + `build`).                                                                                                                                      |
 | `lambda`        | Alias for `build`.                                                                                                                                                                   |
 | `all`           | Alias for `lambda`.                                                                                                                                                                  |
-| `lambda-cli`    | Headless CLI-only release build. Excludes Radiant layout engine, GUI, font rendering, image codecs. Output: `lambda-cli.exe`.                                                        |
+| `lambda-cli`    | Runtime-only CLI release build. Excludes Radiant and GUI, the JS runtime and DOM, Jube host modules, and `serve`. Output: `lambda-cli.exe`.                                          |
 | `build-wasm`    | Build WebAssembly version via `compile-wasm.sh`.                                                                                                                                     |
 
 ### Options

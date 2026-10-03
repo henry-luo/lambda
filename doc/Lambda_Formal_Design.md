@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 18.0.1 (2026-10-03)
+**Spec version:** 18.1.0 (2026-10-03)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1325,6 +1325,14 @@ loosely across the corpus — context disambiguates, and we live with it.
   `MarkEditor` are io (they take `Input*`) — ownership resolves the
   layering, not callback abstractions; forwarding shims are deleted once
   call sites migrate. [SM §9.4]
+- **D7.1.6** **`lambda-cli` is the runtime-only host**: it carries only
+  the Lambda runtime — core, io, the Lambda engine and validator, and the
+  third-party libraries they need — and excludes **Radiant, the JS/TS
+  runtime and DOM, Jube host modules, and the HTTP server (`serve`)**. It is
+  a reduced build profile beside the one `lambda.exe` (D1.1), not a bundle
+  of it. An excluded command fails with an explicit "excluded from this
+  build" diagnostic; importing a `.js`/`.ts` or Jube module is an ordinary
+  import error. Nothing degrades silently. [SM15]
 
 ### D7.2 Script packages
 
@@ -2602,7 +2610,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D6.2 | C8.7; Function_Arg; DF7/DF11; SF18; JC1–JC12; JSI5 | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Function_Arg.md`, `vibe/jube/JS_Runtime_Callable.md`, `Lambda_Design_JS_Interpreter.md` |
 | D6.3 | K11–K32 (runtime side); ER-D1/D11 | `Lambda_Design_Concurrency.md`, `Lambda_Design_Exec_Recovery.md` |
 | D6.4 | Sys_Func §7–§8 | `Lambda_Design_Sys_Func.md` |
-| D7.1 | SM1–SM14 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
+| D7.1 | SM1–SM15 | `Lambda_Design_Static_Modules.md`, `Lambda_Design_Script_Cache.md` |
 | D7.2 | RG14; DF15; ER-D2; MC1; UA editing | `Lambda_Design_Runtime_Globals.md`, `Lambda_Design_Compiling_Dual_Func.md`, `Lambda_Design_Exec_Recovery.md`, `vibe/radiant/Radiant_Design_Editable.md` §20 |
 | D7.3–D7.5 | JA1–JA16; Native_Module §6–§10; Lang_Hosting P/C + §5–§13; ES48 | `Lambda_Design_Jube_Architecture.md`, `Lambda_Design_Native_Module.md`, `Lambda_Design_Jube_Lang_Hosting.md`, `Lambda_Design_DOM_Host_API.md` |
 | D8.1–D8.2 | U1–U36; AI1–AI23, AIO1–AIO13; JSI1–JSI13, JSI16v2, JSI35–JSI36; CGP1–CGP21 | `Lambda_Design_Unified_AST.md`, `Lambda_Grammar_Parser.md`, `Lambda_Test_Fuzzy.md`, `Lambda_Design_JS_Unified.md`, `vibe/impl/Lambda_Impl_Tune_Ast (retired).md`, `Lambda_Design_Ast_Interpreter.md`, `Lambda_Design_JS_Interpreter.md`, `vibe/jube/JS_Tune13.md` |
