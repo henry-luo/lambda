@@ -53,6 +53,9 @@ static const char* kExtraJsScripts[] = {
 };
 
 static const char* kExtraLambdaScripts[] = {
+    // typed fill/store/record plans retain owners through checked cold arms
+    "test/lambda/proc/typed_tuning_boundary_guards.ls",
+    "test/lambda/proc/typed_call_argument_layout.ls",
     // COW spine detachment allocates between every retained owner write.
     "test/lambda/proc/cow_alias.ls",
     // A map field carried in the packed `any` lane is the only reference to

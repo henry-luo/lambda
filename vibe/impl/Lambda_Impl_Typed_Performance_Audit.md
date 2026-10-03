@@ -1,6 +1,8 @@
 # Typed Lambda performance audit — 2026-10-03
 
-**Status:** all six tuning proposals are implemented (§10), and final release measurements and validation are complete (§11). Typed/untyped performance parity remains unmet (§12). Strict interpreter selection and untyped Queens support were fixed before this tuning change (§6/§9). The performance comparison uses **pinned MIR (`LAMBDA_TIER=jit`)**, with a separate pure-T0 diagnostic. No AUTO timings enter these comparisons.
+**Status:** the first tuning round (§10–§12) is complete. The follow-up P0–P5 scope (§13) is implemented; final validation is in progress (§14). Strict interpreter selection and untyped Queens support were fixed before these tuning rounds (§6/§9). Performance comparisons use **pinned MIR (`LAMBDA_TIER=jit`)**, with separate strict pure-T0 evidence. No AUTO timings enter these comparisons.
+
+**Follow-up implementation, 2026-10-03:** the P0–P5 changes proposed in §13 are implemented in source (§14). Final correctness and repeated release performance validation are in progress. §13 also corrects the earlier interpretation of MIR root counters: the old counter instrumentation introduced extra safepoints (§13.1). The uninstrumented timings remain valid.
 
 **Authority:** D8.1.1v15 (execution selection), D2.4.1–D2.4.3 (contract and representation), D3.2.4v4/D3.3.4 (record admission and full inferred contracts), D5.3.3 (precise roots), S7.7.2–S7.7.4 (boundary failures), S9.1.2–S9.1.3 (snapshots and borrows).
 
@@ -69,18 +71,22 @@ The apparent untyped/typed Queens gap was **not T0 versus T0**. Untyped Queens r
 
 ### MIR
 
-These are executed counter differences, not inferred timing percentages:
+These are executed counter differences, not inferred timing percentages.
+**Correction (§13.1):** root-store/reload counts include work introduced by
+the profiler itself. Their original implications below are superseded; they
+cannot establish production root traffic. Ordinary helper-call counts still
+identify the executed lowering paths.
 
 | Workload/function | Untyped | Typed | Implication |
 |---|---:|---:|---|
-| bounce benchmark root reloads | 36,815 | 192,627 | Much more boxed state crosses helper calls |
-| bounce benchmark root stores | 6,091 | 15,606 | Extra precise-root traffic |
+| bounce benchmark root reloads | 36,815 | 192,627 | Instrumented code only; see §13.1 |
+| bounce benchmark root stores | 6,091 | 15,606 | Instrumented code only; see §13.1 |
 | bounce `is_truthy` calls | 0 | 20,000 | Typed conditions lose native boolean lowering |
-| fannkuch hot-body root reloads | 40,349 | 346,690 | Same pattern, larger ratio |
+| fannkuch hot-body root reloads | 40,349 | 346,690 | Instrumented code only; see §13.1 |
 | fannkuch `is_truthy` calls | 0 | 8,659 | Investigate condition descriptor/proof loss |
-| nqueens solve root reloads | 812,501 | 998,885 | Extra boundary/root work |
+| nqueens solve root reloads | 812,501 | 998,885 | Instrumented code only; see §13.1 |
 | nqueens numeric-array admissions | 0 | 13,075 | Repeated contract crossings in recursion |
-| fasta random-body root reloads | 812,848 | 1,198,838 | More live boxed values around calls |
+| fasta random-body root reloads | 812,848 | 1,198,838 | Instrumented code only; see §13.1 |
 | fasta type checks | 0 | 8,007 | Typed numeric path retains runtime admission |
 | fasta `fn_float` / `fn_div` calls | 0 / 0 | 8,000 / 8,000 | Native numeric path is missed |
 
@@ -375,6 +381,10 @@ not establish parity with their untyped ports or annotation-erased controls.
 ### 11.2 Executed counters
 
 These counts come from separate profile runs of the archived binaries.
+**Correction (§13.1):** the MIR root counts measure instrumented programs
+whose added calls change safepoint placement. Keep this table as historical
+evidence, not as a measurement of uninstrumented root traffic or its reduction.
+The T0 admission/copy counters below do not have this MIR instrumentation issue.
 
 | MIR hot function | Old root stores → new | Old root reloads → new |
 |---|---:|---:|
@@ -484,11 +494,11 @@ The counter evidence narrows the residual work: it is no longer fresh-record
 reification in the four record targets, or nqueens's repeated array admission.
 T0 still checks live carriers/certificates at boundaries and keys/values/COW
 ownership at checked stores; preplanning removes classification and path
-construction, not those semantics. MIR fannkuch still has 312,042 hot-body root
-reloads versus the untyped port's 40,349, and fasta 958,838 versus 812,848.
-Those remaining roots surround the helpers that still exist. These are useful
-profiling targets, not sufficient evidence to assign timing percentages or to
-remove checks/roots (D3.3.4, D5.3.3).
+construction, not those semantics. The previously reported MIR root-reload
+gaps (fannkuch 312,042 versus 40,349; fasta 958,838 versus 812,848) include
+profiler-induced safepoints. They cannot justify a production root-traffic
+diagnosis. Repair the measurement first; retain precise ownership and live
+representation checks (D3.3.4, D5.3.3).
 
 Further tuning should isolate those remaining checked kernels and boxed joins
 with annotation-only repeated workloads and native samples. Every new reduction
@@ -496,3 +506,352 @@ must keep nullable/OOB behavior, error joins, exact index validation and
 snapshot/borrow semantics (S7.1.1v3, S7.1.3v2, S7.7.2–S7.7.4,
 S9.1.2–S9.1.3). The current implementation reports its residual penalties
 instead of redefining unequal work or permitting fallback as a speed result.
+
+## 13. Further tuning proposal — 2026-10-03
+
+**Status: implemented in source; final validation in progress (§14).** The target is per-workload typed/untyped
+parity for equal work in each pinned tier. Implementing §5 delivered large
+gains, but completion of those changes is not completion of that target.
+
+This follow-up inspected source at `90decfa0e` and sampled the existing
+optimized `lambda.exe`. Its SHA-256 remains
+`588cb2af85181a9cca3e9b0e1dcff701de936c18a06d923e80e01f5dcad86da5`,
+identical to §11's final candidate. No new timing campaign is substituted for
+§11: native sampling and MIR dumps here diagnose those results.
+
+The largest established gains are MIR bounce (35%) and fasta (15%), and T0
+gcbench (67%), binarytrees (61%) and deriv (59%), measured against the same
+typed source on the previous release. Residual medians from the 15-pair port
+comparison are MIR nqueens +17.3%, fasta +17.6%, bounce +5.2%, fannkuch +3.7%;
+T0 Queens +35.7%, deriv +21.1%, towers +18.3%, nqueens +16.5%, quicksort +15.5%.
+The broader five-pair scan also flags T0 prettier_ast (+38.4%) and
+three_way_merge (+27.8%); confirm these with longer paired runs before making
+them hard regression gates. A good corpus geometric mean does not discharge
+an individual regression.
+
+Port differences still matter. Fasta's typed PRNG adds an explicit `int(...)`
+cast absent from the untyped source. Establish its contribution with the
+typed source and its annotation-erased twin, keeping the cast, then a separate
+pair varying only the cast. Preserve `var` borrows and identical outputs.
+The existing annotation-only controls already show T0 overhead of 8.9% for
+bounce and 4.7% for fannkuch; MIR bounce is faster by 18.9%, while fannkuch's
+3.2% median penalty remains too uncertain to declare parity or a firm regression.
+
+### 13.1 P0 — repair MIR profiling before tuning root traffic
+
+**Confirmed root cause:** `em_profile_before_call` in
+`lambda/runtime/mir_emitter_shared.hpp` directly inserts a call to
+`lambda_exec_profile_note_call` without registering its call-site effects.
+The registry already declares that hook `JIT_EFFECT_NO_GC`, non-reentrant,
+and number-stack preserving. However, `em_root_call_may_collect` consults
+recorded call sites, not import names, and correctly treats a missing record
+as potentially collecting. Markers inserted before root finalization therefore
+create extra stores/reloads. Typed and untyped programs have different marker
+placement, so this also distorts their relative root counts.
+
+The same release's fannkuch main function shows this directly:
+
+| Emitted root operations in main | Untyped, profiling off | Typed, profiling off | Untyped, profiling on | Typed, profiling on |
+|---|---:|---:|---:|---:|
+| Stores | 81 | 119 | 142 | 157 |
+| Loads | 44 | 48 | 250 | 705 |
+
+These are **static MIR instruction counts**, not executed counts or timing
+estimates. In particular, 48 versus 44 does not prove equal hot-loop traffic,
+but it invalidates using the historical 312,042/40,349 executed-counter ratio
+as an uninstrumented cost ratio.
+
+Route inserted diagnostic calls through the shared call-site effect recording
+mechanism. Do not special-case profiler names in GC liveness, or relax the
+conservative treatment of genuinely unknown calls. Add an emission regression
+that compares production safepoints and root operations with profiling on/off,
+ignoring diagnostic calls themselves; include dense-loop markers as well as
+helper markers. Recollect executed root counts only after that test passes.
+This repairs measurement; it should not be credited as a speedup of ordinary
+unprofiled execution. Precise rooting remains required by D5.3.3.
+
+### 13.2 P1 — resolve array proof identity once
+
+**Evidence:** a three-second native sample of typed T0 Queens records 220
+exclusive observations in `lambda_array_contract_compatible`, 65 in
+`lambda_array_contract_canonical`, and 26 in `lambda_array_contract_info`.
+The untyped sample has none of those symbols in its top-of-stack table, whose
+reporting threshold is five observations. This identifies repeated contract
+analysis as real executed work, independently of MIR counters.
+
+`runtime_array_rep_cert_intern` already shares certificates for structurally
+equivalent contract spellings. But `lambda_array_rep_proves(value, Type*)`
+compares the certificate's first contract pointer with each boundary's target
+pointer. Equal types spelled at different declarations can miss identity and
+re-enter structural compatibility on every crossing/store. The existing
+`lambda_array_contract_canonical` only unwraps the type; it does not intern
+structurally equal declarations. `lambda_array_rep_proves_cert` already offers
+the certificate-identity fast arm needed here.
+
+Resolve each immutable boundary/store plan's contract to a shared proof
+identity in the owning execution context, then reuse the certificate-based
+helper. Keep live carrier, rank and counted-axis validation; keep structural
+compatibility as the cold path. Avoid embedding heap-local certificates into
+an AST reused across contexts: persistent plans carry stable type metadata,
+with context-owned resolution/activation. This is shared contract metadata,
+not mutable dispatch feedback (D8.4.1v2).
+
+Acceptance: equivalent declarations no longer trigger a structural type walk
+on every warm operation. Test named versus structural types, distinct contract
+spellings, context reuse, counted axes after resize, and representation-changing
+mutations. Certificate identity alone never authorizes a stale carrier
+(D3.3.3v3/D3.3.4). Primary targets: Queens, towers, nqueens and typed stores.
+
+### 13.3 P2 — finish fusing typed numeric fill
+
+**Evidence:** MIR nqueens has already eliminated separate array-admission and
+type-check calls. Native sampling nevertheless records 228 exclusive samples
+in `lambda_fill_for_contract`, in addition to 253 in `fn_fill`. The active
+main thread has 2,548 observations: the wrapper alone occupies about 9% of this
+short sample. This does not establish that it explains the entire 17.3% port
+penalty. The untyped path calls `fn_fill` directly.
+
+The current wrapper still normalizes/count-checks, resolves a certificate,
+calls generic `fn_fill`, then verifies the fresh carrier and publishes its
+proof. `fn_fill` repeats count conversion and dispatches on the value type.
+
+Use P1's resolved contract and a shared primitive fill kernel extracted from
+`lambda/runtime/lambda-vector.cpp`. Both generic fill and typed construction
+should reuse that kernel. The typed arm performs required count/value checks
+once, allocates the promised carrier, fills it, and attaches the certificate
+without rediscovering the representation it just built. Retain the generic
+route for dynamic or incompatible inputs; do not create separate copied loops
+for each lane. Resolve float and other supported scalar producers as well as
+the current immediate int/bool case where static facts allow it.
+
+Acceptance: nqueens no longer pays a generic-fill-plus-admission wrapper on
+its exact path, and the same-source untyped fill does not regress. Cover zero
+length, count overflow/allocation limits, exact integral and fractional counts,
+negative/null/error inputs, list splicing, numeric conversions and counted
+contracts. Any allocating path keeps non-immediate arguments and results
+precisely rooted; preserve boundary failure order (D5.3.3, S7.7.2–S7.7.4).
+
+### 13.4 P3 — make an already-proved scalar store cheap
+
+The previous tuning already retains a certificate after a successful bounded
+store. It does **not** remove the work before that store:
+`lambda_array_set_checked_impl` still validates the value, proves the owner's
+contract, checks its physical representation, opens three root slots, and
+prepares a candidate before reaching its direct-store arm. T0 preplanning
+currently supplies lane and element hints, not a complete successful action.
+
+Add a shared nonallocating arm before candidate/root-frame setup for an exact
+key and value, a matching live certificate, and ordinary writable rank-one
+numeric storage whose ownership permits an in-place write. Reuse
+`array_num_store_admitted` and existing ownership predicates. An exact scalar
+operation that cannot allocate needs no extra helper-owned root frame; any
+conversion, detach, admission or diagnostic continues through the rooted path.
+Do not mark the whole checked setter `NO_GC` merely because its fast arm is.
+
+Precompute immutable scalar boundary actions too: use the existing
+`lambda_static_boundary_relation` where it proves a producer already satisfies
+the full destination contract. Keep dynamic/error-capable producers checked.
+This makes the plan describe the remaining work, instead of only classifying
+the type before running the same generic checks.
+
+Acceptance: unique admitted arrays perform constant guarded store work without
+structural type walks or root-frame setup on the nonallocating arm. Preserve
+mask/N-D dispatch, list splicing, bounds/key errors, views/static storage,
+conversion, COW snapshots and `var` borrowing; do not turn an unproved store
+into an unchecked one (S7.1.3v2, S7.7.4, S9.1.2–S9.1.3). Targets: Queens,
+sieve, primes, quicksort and the annotation-only bounce/fannkuch T0 controls.
+
+### 13.5 P4 — use known record layouts throughout T0 execution
+
+**Evidence:** deriv's old reifications and admitted bytes are zero, but native
+sampling still finds `lambda_value_rep_proves_contract` (61 exclusive samples),
+`lambda_type_nonnull_map_contract` (43) and `lambda_array_contract_info` (23).
+`plan_destination` records a destination map; `eval_map` still reclassifies
+each field's contract at construction. Ordinary `AST_NODE_MEMBER_EXPR` also
+uses `fn_member` and map lookup even when the declared record layout is known.
+
+Extend the existing construction plan with immutable per-field boundary actions.
+Reuse boundary classification and static producer proofs rather than adding
+a second contract analyzer. Evaluate the original field expressions in their
+required order, then admit only fields whose runtime values need it. Preserve
+conversion/error behavior and transactional publication (S7.7.1–S7.7.4).
+
+For statically known fields, plan a shape-guarded access using existing field
+metadata and the shared field decoder (`map_shape_field_to_item` or its common
+kernel). On an exact compatible live shape, avoid repeated name hashing and
+field lookup; on a miss, call `fn_member`. Keep nullable receivers, named
+identity, symbol keys and packed field representations correct. Use compile-
+predicted guards, not observed-shape inline caches (D3.2.4v4, D8.4.1v2).
+
+Acceptance: repeated construction no longer invokes general contract
+classification for statically proved fields, and known-field reads avoid name
+lookup. Test recursive/nullable records, shape misses, mixed numeric fields,
+errors, snapshot aliases and forced GC. Targets: deriv, gcbench, binarytrees,
+Richards and prettier_ast. The existing exact trusted-map fast return already
+exists in `runtime_map_contract_relation_cached`; adding it again is not work.
+
+### 13.6 P5 — finish MIR proof propagation after P0
+
+The native fannkuch samples spend their time in anonymous JIT PCs; they do not
+identify a remaining runtime helper as the cause of its small median gap.
+Uninstrumented MIR still contains repeated bounds/null/value guards in the
+typed shrinking two-index reversal loop. Audit those guards against the
+existing range and dense-loop facts before proposing any deletion.
+
+Where the existing planner can establish `0 <= lo <= hi < len`, carry that
+proof through both array reads/stores and loop joins. Where it cannot, retain
+the checks. Preserve invalidation across resize, mutation and re-entry; an
+element annotation is not a bounds or non-error proof. Maintain the same
+native value descriptors for inferred and declared expressions using the
+existing MIR planners (D8.2.4v2–D8.2.6, D3.3.4).
+
+For fasta, first isolate the explicit cast. Both ports still execute 23,796
+`fn_index` calls and 23,796 `fn_lt` calls in the profiled random-generation
+body, so improving that common path may help both without explaining the
+typed gap. Trace the complete array/result contracts before selecting a native
+read/comparison; do not attribute common work to annotations.
+
+After P0, measure production safepoints and roots again. Reduce boxing and
+root traffic only where eliminated helpers or proven native lanes justify it.
+Retain precise owners for pointers and null/OOB/error joins (D5.3.3,
+S7.1.1v3, S7.7.2–S7.7.4). Acceptance requires annotation-only timing evidence,
+not simply fewer instructions in one MIR dump.
+
+### 13.7 Completion gate and evidence
+
+Implement P0 first, then P1/P2 for the principal MIR target, P3/P4 for broad
+T0 parity, and P5 against corrected measurements. Recheck both tiers after
+each shared-runtime change. No formal ruling changes are proposed.
+
+- Keep separate tables for existing ports, annotation-only pairs and
+  same-source old/new comparisons. Extend annotation controls to nqueens,
+  Queens, fasta and representative record/traversal cases; preserve casts,
+  algorithms, inputs and borrowing. Include golden files with new scripts.
+- Require equal normalized outputs and pure-T0 eligibility, including both
+  Queens ports. Exclusions/timeouts remain visible. Explicit interp cannot
+  fall back to JIT (D8.1.1v15); AUTO is outside the comparison.
+- Run at least 15 alternating pairs per target, preferably 21, in two
+  independent release campaigns. Repeat small workloads identically until
+  timed execution is roughly 100 ms–1 s; profile separately from timing.
+  Extend the existing paired runner to report a two-sided uncertainty interval.
+- Aim for typed median no greater than untyped **on every annotation-only
+  target**, with the paired 95% upper bound at most 1.02 as a measurement
+  tolerance. A reproducible positive penalty still fails the goal, even below
+  2%; an interval too wide to decide remains inconclusive. Report practical
+  equivalence within tolerance separately from demonstrated speedup. Never
+  pass an individual regression using the corpus geometric mean.
+- Check same-source untyped performance as well: slowing the control is not
+  parity. Reconfirm puzzle and microdiff, which have visible old/new watchlist
+  deltas. Run focused boundary/store/GC tests and the required Lambda baseline;
+  retain the existing documented failures rather than hiding them.
+
+New evidence is in `temp/typed_followup/`: `native_profiles.json`,
+`native_summary.json`, `*.sample.txt`, uninstrumented `*.mir`, instrumented
+fannkuch dumps and `profiler_perturbation.json`. Native sampling ran with
+`LAMBDA_TIER=jit` or `interp`, with execution/COW counters disabled. All ten
+profiled executions completed successfully and all five typed/untyped output
+pairs agreed. Queens/deriv/nqueens were repeated identically to obtain useful
+samples; the annotation-only fannkuch pair repeats 20,000 times. Sampled
+execution times are not benchmark results. Some release symbols and JIT PCs
+remain unresolved, and idle worker/main threads must not enter CPU-cost
+denominators; these samples locate work, not exact savings promised by a patch.
+
+## 14. P0–P5 implementation and validation
+
+The second implementation preserves the §13 acceptance gate. Code completion
+alone does not demonstrate performance parity. Measurements below must use a
+release host with pinned MIR or strict interp, and compare equal normalized
+outputs; no AUTO timings enter the audit (D8.1.1v15).
+
+### 14.1 Implemented work
+
+| Scope | Result |
+|---|---|
+| P0 | Diagnostic call markers now record their existing nonallocating, nonreentrant effects through the shared emitter. The new profiler parity regression compares output, static root slots, root stores, safepoints and MIR memory operations with profiling enabled and disabled. Unknown call effects remain conservative (D5.3.3). |
+| P1 | A heap-owned pointer-key table retains every contract spelling and resolves structurally equivalent spellings to one certificate. Warm boundaries use certificate identity and live carrier/count checks. Immutable AST plans retain Type metadata, with no heap-local certificate embedded in them (D3.3.3v3, D3.3.4, D8.4.1v2). Native sampling identified SipHash overhead on these trusted internal addresses; the table uses the existing pointer mixer through a parameterized shared hashmap helper. |
+| P2 | Generic and typed fill share one primitive construction kernel. The typed exact arm normalizes the count once, captures source scalar bits before allocation, constructs the promised lane and publishes its certificate. T0 destination plans reach this same arm. Certificates resolve primitive-value proof once. Zero/count-limit, incompatible, list, counted and literal-element cases retain checked admission (S7.7.2–S7.7.4, D5.3.3). |
+| P3 | Unique, writable ordinary numeric arrays take a bounded, nonallocating admitted scalar-store arm before helper-owned roots/candidate setup. T0's immutable primitive destination action avoids another contract lookup there. Detach, conversion, views, masks, N-D and list paths retain the existing rooted setter. Scalar declaration/assignment plans skip a boundary only when shared static proofs cover the producer and exclude defects (S9.1.2–S9.1.3, D3.3.3v3). |
+| P4 | Known record construction carries immutable per-field boundary actions. Known member reads guard the predicted live shape and use the shared packed-field decoder, falling back to ordinary lookup on a miss. T0 also plans numeric-index decoding from a declared array contract, with live lane/rank/view and bounds guards (D3.2.4v4, D8.4.1v2, S7.1.1v3). |
+| P5 | The existing finite/dense-loop planners now cover a shrinking two-index tail, retaining invalidation across mutation/reentry. Total explicitly contracted array producers can supply guarded result witnesses across erased locals, with rebind checks. OOB/null and defect joins keep their actual carriers; inferred float returns cannot erase absence (D8.2.4v2–D8.2.6, D2.8.2–D2.8.3). The runner includes a fasta cast/annotation factorial control. |
+
+The residual T0 nqueens penalty justified two additional scalar actions within
+this scope. Call entry tests whether an argument is an error before classifying
+its error contract. Inferred or declared int arithmetic uses the existing
+checked integer kernel after live Item-kind guards, with generic fallback for
+out-of-band results, poison, absence and errors. No copied arithmetic kernel
+or observed-value specialization was added (D3.3.2v2, D8.4.1v2).
+
+The same-source MIR control exposed duplicate admission after an implicit
+untyped parameter's error guard. Once that guard excludes error, the remaining
+`any \\ error` boundary is identity; direct calls now retain the guard and omit
+the second runtime check (S11.4.3, D8.3.2). Typed fill also lacked import value
+classes: its metadata/site pointers are non-GC metadata and its result is always
+a container or defect, with no scalar home. Its registry rows now state those
+facts while retaining allocating, conservative fallbacks (D5.3.3).
+
+For a statically proved nonnullable, nondefecting int count and plain uncounted
+primitive numeric destination, MIR preserves the native count lane into the
+shared fill action. This removes count boxing and repeated numeric/contract
+classification. Negative counts and poison still use the original diagnostic
+path; certificate resolution stays in the owning execution context, and the
+primitive construction loop remains shared (D2.4.1, D3.3.3v3).
+
+The expanded annotation controls identified another P4 construction miss in
+prettier_ast: fresh two-field record arguments did not inherit a known callee's
+parameter layout. Release T0 profiling counted 877,312 reifications, 1,754,624
+visited fields and 42,988,288 copied bytes per original workload; its peak RSS
+was 533 MB, versus 54 MB after annotation erasure. Destination planning now
+resolves known positional/named arguments with the shared argument resolver
+and reuses the existing record-construction action. It does not turn an
+argument fill into an early checked boundary: failed construction still falls
+back to ordinary admission at call entry (S7.7.2–S7.7.4). The diagnostic rerun
+has zero reifications, field visits or copied admission bytes and 49 MB peak
+RSS, with equal output and 405,560,741 interpreted nodes in both variants.
+These counters and memory figures locate the repair; paired release timing
+remains the acceptance gate (D3.2.4v4, D8.4.1v2).
+
+### 14.2 Correctness findings and regression coverage
+
+Fill's intrinsic invalid-count/allocation-size error was missing from effect
+metadata. The registry and shared AST/MIR defect-origination classifier now
+record it. This intentionally preserves checked error joins that the old
+lowering could erase (D6.1.3, S7.7.2). Emission review of
+`tune4_typed_array_guard` found 67 additional module instructions; its instruction
+budget is 1301 rather than 1234. Guarded-load/store and root-frame budgets are
+unchanged. `gc_effect_forward_allocating` now expects the five live roots of its
+checked caller join rather than the old one-root unchecked return.
+
+An arithmetic boundary regression exposed a second MIR proof defect: the
+float return-lane predicate accepted an int success type without rejecting its
+carried error. It now rejects defect-capable arithmetic joins before choosing
+a native return lane (D2.8.3). The regression covers the actual returned error,
+not just an emission count.
+
+Adding immutable call metadata enlarged AstCallNode. Postfix propagation can
+morph its unary allocation into a call, so that allocation now reserves the
+larger of the two actual node sizes. Parameter binder-site plans also retain
+the binder stored on TypeParam; a generic type-graph walk must never inspect
+that compact wrapper as a complete contract (S11.4.8v2).
+
+`typed_tuning_boundary_guards.ls` and its golden cover exact/fractional/negative,
+null/error and huge fill counts, numeric conversion, bool and empty fills,
+counted/literal contracts, list splicing, scalar OOB rejection, COW snapshots,
+recursive/nullable records, shape misses, arithmetic overflow/poison/defects and
+absent arithmetic. Constrained declaration tests preserve the current
+**base-only** interim rule of S11.4.6; this performance change does not implement
+predicate enforcement at those boundaries.
+
+New MIR fixtures and goldens cover shrinking-loop bounds, resize invalidation,
+array-result witnesses, OOB absence, rebinding, native fill count poison and
+implicit untyped argument defects. The item representation test
+retains 80 equivalent contract spellings, checks warm reverse lookup and verifies
+that a separate execution heap has a separate identity. The boundary fixture
+also runs in the forced-GC suite. Python controls test annotation erasure and
+the paired two-sided uncertainty interval.
+
+### 14.3 Final evidence
+
+Validation is in progress. Artifacts are under `temp/typed_tuning2/`. Preflight
+and interrupted campaigns are diagnostic evidence, not the final acceptance
+results. The prior release control is `lambda-before.exe`; source revisions and
+binary hashes are recorded by each completed paired campaign.

@@ -11347,21 +11347,30 @@ static Type* runtime_array_contract_element(Type* expected) {
     return runtime_boundary_unwrap_type(lambda_array_contract_element(expected));
 }
 
-static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
+HASHMAP_DEFINE_PTRKEY_HASH(array_rep_contract, LambdaArrayRepCertCacheEntry, contract,
+    hashmap_hash_pointer_fast_identity)
+
+ArrayRepCert* lambda_array_rep_cert_resolve(Type* contract) {
     Pool* pool = eval_context_get_pool();
     if (!pool || !contract) return NULL;
     Heap* heap = context ? context->heap : NULL;
     if (!heap) return lambda_array_rep_cert_create(pool, contract);
 
-    // Remember each spelling as well as the canonical certificate: warm
-    // boundaries must not compare every preceding contract's type graph.
-    for (uint32_t i = 0; i < LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY; i++) {
-        LambdaArrayRepCertCacheEntry* entry = &heap->array_rep_cert_cache[i];
-        if (entry->contract == contract) return entry->cert;
-    }
+    // every spelling stays resolved for this heap lifetime, including modules
+    // with more contracts than the old bounded cache could retain
+    if (!heap->array_rep_cert_by_contract)
+        heap->array_rep_cert_by_contract = array_rep_contract_new(0);
+    HashMap* contracts = heap->array_rep_cert_by_contract;
+    if (!contracts) return lambda_array_rep_cert_create(pool, contract);
+    LambdaArrayRepCertCacheEntry key = {contract, NULL};
+    const LambdaArrayRepCertCacheEntry* existing =
+        (const LambdaArrayRepCertCacheEntry*)hashmap_get(contracts, &key);
+    if (existing) return existing->cert;
     ArrayRepCert* cert = NULL;
-    for (uint32_t i = 0; i < LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY; i++) {
-        LambdaArrayRepCertCacheEntry* entry = &heap->array_rep_cert_cache[i];
+    size_t cursor = 0;
+    void* item = NULL;
+    while (hashmap_iter(contracts, &cursor, &item)) {
+        const LambdaArrayRepCertCacheEntry* entry = (const LambdaArrayRepCertCacheEntry*)item;
         if (entry->cert && entry->contract &&
                 lambda_array_contract_compatible(entry->contract, contract, true)) {
             cert = entry->cert;
@@ -11371,11 +11380,14 @@ static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
 
     if (!cert) cert = lambda_array_rep_cert_create(pool, contract);
     if (!cert) return NULL;
-    uint32_t slot = heap->array_rep_cert_cache_next++ %
-        LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY;
-    heap->array_rep_cert_cache[slot].contract = contract;
-    heap->array_rep_cert_cache[slot].cert = cert;
+    key.cert = cert;
+    hashmap_set(contracts, &key);
     return cert;
+}
+
+static bool runtime_array_cert_proves_primitive_values(const ArrayRepCert* cert) {
+    // a scalar carrier alone cannot prove a literal element value (D3.3.3v3)
+    return cert && (cert->flags & ARRAY_REP_CERT_PRIMITIVE_VALUES);
 }
 
 // A packed primitive lane plus an owned exact-rank shape is an exact decoder
@@ -11384,12 +11396,14 @@ static ArrayRepCert* runtime_array_rep_cert_intern(Type* contract) {
 // ArrayNum to later borrowed-write boundaries (D3.3.3v3, S9.2.2).
 static bool runtime_array_admit_primitive_contract(Item value, Type* expected,
         Item* converted) {
+    if (!lambda_array_contract_is_plain(expected)) return false;
     if (get_type_id(value) != LMD_TYPE_ARRAY_NUM || !value.array_num) return false;
     // T29-5: intern first -- a warm boundary hits the pointer cache -- and let
     // the certificate's resolved lane and rank decide, instead of re-deriving
     // them from the contract on every fill (nqueens2's per-call admissions)
-    ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
-    if (!cert || !lambda_array_num_matches_cert(value, cert)) return false;
+    ArrayRepCert* cert = lambda_array_rep_cert_resolve(expected);
+    if (!runtime_array_cert_proves_primitive_values(cert) ||
+            !lambda_array_num_matches_cert(value, cert)) return false;
     lambda_array_install_rep_cert(value, cert);
     *converted = value;
     return true;
@@ -11424,6 +11438,8 @@ static bool runtime_array_new_empty_numeric(Type* expected, Item* admitted,
 Item lambda_array_admit_numeric_contract(Item value, Type* expected,
         const char* boundary) {
     if (get_type_id(value) == LMD_TYPE_ERROR) return value;
+    if (!lambda_array_contract_is_plain(expected))
+        return lambda_type_check(value, expected, boundary);
 
     Item admitted = ItemNull;
     if (runtime_array_admit_primitive_contract(value, expected, &admitted)) {
@@ -11440,25 +11456,54 @@ Item lambda_array_admit_numeric_contract(Item value, Type* expected,
     return lambda_type_check(value, expected, boundary);
 }
 
+static bool runtime_try_primitive_fill_length(int64_t length, Item value,
+        ArrayRepCert* cert, Item* result) {
+    TypeId value_type = get_type_id(value);
+    if (runtime_array_cert_proves_primitive_values(cert) && cert->rank == 1 &&
+            !(cert->flags & ARRAY_REP_CERT_COUNTED) &&
+            ((cert->array_num_elem == ELEM_INT && value_type == LMD_TYPE_INT) ||
+             (cert->array_num_elem == ELEM_BOOL && value_type == LMD_TYPE_BOOL) ||
+             (cert->array_num_elem == ELEM_FLOAT64 && value_type == LMD_TYPE_FLOAT) ||
+             (cert->array_num_elem == ELEM_UINT64 && value_type == LMD_TYPE_UINT64))) {
+        // metadata resolution cannot collect; the kernel copies scalar bits before
+        // allocation and never reads the source again, so no argument roots are needed
+        Item built = lambda_fill_primitive(length, value, cert->array_num_elem);
+        if (get_type_id(built) != LMD_TYPE_ERROR) lambda_array_install_rep_cert(built, cert);
+        *result = built;
+        return true;
+    }
+    return false;
+}
+
+static bool runtime_try_primitive_fill_contract(Item count, Item value, Type* expected,
+        ArrayRepCert** resolved, Item* result) {
+    if (!lambda_array_contract_is_plain(expected)) { *resolved = NULL; return false; }
+    int64_t length = -1;
+    ArrayRepCert* cert = get_type_id(value) != LMD_TYPE_ERROR && !item_is_list(value) &&
+            lambda_item_to_int64_exact(count, &length) && length >= 0
+        ? lambda_array_rep_cert_resolve(expected) : NULL;
+    *resolved = cert;
+    return runtime_try_primitive_fill_length(length, value, cert, result);
+}
+
+bool lambda_try_fill_for_contract(Item count, Item value, Type* expected, Item* result) {
+    ArrayRepCert* cert = NULL;
+    return runtime_try_primitive_fill_contract(count, value, expected, &cert, result);
+}
+
 // A fresh fill can establish its destination certificate before returning;
 // the existing admission owns empty, counted and incompatible carrier cases.
 Item lambda_fill_for_contract(Item count, Item value, Type* expected, const char* boundary) {
-    TypeId count_type = get_type_id(count), value_type = get_type_id(value);
-    bool immediate_arguments = count_type == LMD_TYPE_INT &&
-        (value_type == LMD_TYPE_INT || value_type == LMD_TYPE_BOOL);
-    // immediate scalars have no GC owner; other arguments stay rooted while
-    // certificate allocation and fill consume them (D5.3.3)
-    RootSpan argument_roots(immediate_arguments ? 0 : 2);
-    if (!immediate_arguments && !argument_roots.valid()) return ItemError;
-    Item local_arguments[2] = {count, value};
-    Item* arguments = argument_roots.valid() ? argument_roots.items() : local_arguments;
+    ArrayRepCert* cert = NULL;
+    Item exact = ItemNull;
+    if (runtime_try_primitive_fill_contract(count, value, expected, &cert, &exact)) return exact;
+    RootSpan argument_roots(2);
+    if (!argument_roots.valid()) return ItemError;
+    Item* arguments = argument_roots.items();
     arguments[0] = count;
     arguments[1] = value;
     int64_t length = -1;
-    ArrayRepCert* cert = immediate_arguments &&
-            lambda_item_to_int64_exact(arguments[0], &length) && length >= 0
-        ? runtime_array_rep_cert_intern(expected) : NULL;
-    if (cert && length == 0) {
+    if (cert && lambda_item_to_int64_exact(count, &length) && length == 0) {
         Item empty = ItemNull;
         if (runtime_array_new_empty_numeric(expected, &empty, cert) &&
                 empty.item != ITEM_NULL) return empty;
@@ -11466,13 +11511,26 @@ Item lambda_fill_for_contract(Item count, Item value, Type* expected, const char
     Item filled = fn_fill(arguments[0], arguments[1]);
     // the matching carrier check and publication cannot allocate; only the
     // dynamic admission below needs a live result root
-    if (cert && lambda_array_num_matches_cert(filled, cert)) {
+    if (runtime_array_cert_proves_primitive_values(cert) &&
+            lambda_array_num_matches_cert(filled, cert)) {
         lambda_array_install_rep_cert(filled, cert);
         return filled;
     }
     RootFrame roots(1);
     Rooted<Item> built(roots, filled);
     return lambda_array_admit_numeric_contract(built.get(), expected, boundary);
+}
+
+Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
+        const char* boundary) {
+    // the compiler proved a plain primitive T[] destination and an int lane;
+    // poison, negative counts and metadata misses retain the full diagnostic path
+    if (count >= 0 && count <= INT53_MAX) {
+        ArrayRepCert* cert = lambda_array_rep_cert_resolve(expected);
+        Item exact = ItemNull;
+        if (runtime_try_primitive_fill_length(count, value, cert, &exact)) return exact;
+    }
+    return lambda_fill_for_contract({.item = i2it(count)}, value, expected, boundary);
 }
 
 // Tune29 §19.1 item 2: `[]` crossing a primitive T[] boundary (`return []`
@@ -11507,10 +11565,28 @@ static Item runtime_admit_list_items(Item list, Type* element_type, const char* 
 
 static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value, Type* expected,
         const char* boundary, bool publish_in_place, const LaneStorageDesc* lane_hint,
-        Type* element_hint = NULL) {
+        Type* element_hint = NULL, bool uncounted_primitive = false) {
     if (cow_profile_enabled()) {
         g_cow_profile.array_checked_store_calls++;
         if (publish_in_place) g_cow_profile.array_checked_store_unique_inplace++;
+    }
+    ArrayNum* direct = get_type_id(owner) == LMD_TYPE_ARRAY_NUM ? owner.array_num : NULL;
+    if (direct && direct->rep_cert && !direct->is_ndim && !direct->is_view &&
+            !direct->is_static && !direct->is_immortal &&
+            !(direct->cow_state & COW_STATE_SHARED) && index >= 0 && index < direct->length) {
+        Type* leaf = direct->rep_cert->leaf_element;
+        // a bounded scalar write preserves rank/count; refined leaves retain admission
+        if ((leaf == &TYPE_INT || leaf == &TYPE_BOOL || leaf == &TYPE_FLOAT) &&
+                get_type_id(value) == leaf->type_id &&
+                (uncounted_primitive
+                    ? lambda_array_rep_proves_uncounted_primitive(owner, element_hint)
+                    : lambda_array_rep_proves(owner, expected, true))) {
+            if (!publish_in_place) (void)cow_prepare_write(owner); // unique; diagnostic accounting only
+            if (array_num_store_admitted(direct, index, value)) {
+                if (cow_profile_enabled()) g_cow_profile.array_checked_store_direct++;
+                return owner;
+            }
+        }
     }
     // An annotated array owns a clean element contract. Create the candidate
     // before touching the original so a bad dynamic value cannot trigger
@@ -11624,7 +11700,7 @@ static Item lambda_array_set_checked_impl(Item owner, int64_t index, Item value,
     ArrayRepCert* cert = prior_cert && prior_cert->array_contract &&
             (prior_cert->array_contract == lambda_array_contract_canonical(expected) ||
              lambda_array_contract_compatible(prior_cert->array_contract, expected, true))
-        ? prior_cert : runtime_array_rep_cert_intern(expected);
+        ? prior_cert : lambda_array_rep_cert_resolve(expected);
     if (!cert) return lambda_type_error(rooted_candidate.get(), expected, boundary);
     lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     return rooted_candidate.get();
@@ -11637,7 +11713,7 @@ Item lambda_array_set_checked(Item owner, int64_t index, Item value, Type* expec
 
 Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
         Type* expected, Type* element, const LaneStorageDesc* lane,
-        const char* boundary, bool inplace) {
+        const char* boundary, bool inplace, bool uncounted_primitive) {
     if (get_type_id(key) == LMD_TYPE_ARRAY_NUM) {
         return inplace
             ? lambda_array_mask_assign_checked_inplace(owner, key, value, expected)
@@ -11650,7 +11726,7 @@ Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
         return ItemError;
     }
     return lambda_array_set_checked_impl(owner, index, value, expected, boundary,
-        inplace, lane, element);
+        inplace, lane, element, uncounted_primitive);
 }
 
 Item lambda_array_set_checked_item(Item owner, Item key, Item value, Type* expected,
@@ -11851,7 +11927,7 @@ static Item lambda_array_set_nd_checked_impl(Item owner, int ndim, int64_t* indi
     if (prior_cert) {
         lambda_array_install_rep_cert(rooted_candidate.get(), prior_cert);
     } else {
-        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+        ArrayRepCert* cert = lambda_array_rep_cert_resolve(expected);
         if (!cert) return lambda_type_error(rooted_candidate.get(), expected, boundary);
         lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     }
@@ -11972,7 +12048,7 @@ static Item lambda_array_push_checked_impl(Item owner, Item value, Type* expecte
     }
 
     if (!lambda_array_rep_proves(rooted_candidate.get(), expected, true)) {
-        ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+        ArrayRepCert* cert = lambda_array_rep_cert_resolve(expected);
         if (!cert) return lambda_type_error(rooted_candidate.get(), expected, boundary);
         lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     }
@@ -12876,7 +12952,7 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
 // every nested element graph (T27-1). Missing the
 // TypeArray spelling sent every empty `[]` bound to a declared `int[]` or
 // `Node[]` field through a full validator setup.
-static bool runtime_array_contract_is_plain(Type* expected) {
+bool lambda_array_contract_is_plain(Type* expected) {
     Type* outer = runtime_boundary_unwrap_type(expected);
     if (!outer) return false;
     if (outer->type_id == LMD_TYPE_TYPE && outer->kind == TYPE_KIND_UNARY) {
@@ -13008,7 +13084,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     // elements only, so each counted axis is checked here, once, and the flag
     // spares an uncounted contract the walk. A range or an `any[]` packed
     // source re-enters admission, reaching this.
-    ArrayRepCert* cert = runtime_array_rep_cert_intern(expected);
+    ArrayRepCert* cert = lambda_array_rep_cert_resolve(expected);
     if (!cert) return false;
     if ((cert->flags & ARRAY_REP_CERT_COUNTED) &&
             !lambda_array_value_meets_counts(value, expected)) return false;
@@ -13069,7 +13145,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
             // proof -- deeply, through every nested element graph. prettier_ast
             // rebuilt uncertified `Doc[]` accumulators per step and paid the
             // walk each time (T27-1, D3.2.2 "on first crossing").
-            if (!runtime_array_contract_is_plain(expected) &&
+            if (!lambda_array_contract_is_plain(expected) &&
                     !lambda_type_matches(rooted_value.get(), expected)) {
                 return false;
             }
@@ -13184,7 +13260,7 @@ static bool runtime_type_admit_array_env_impl(Item value, Type* expected, Type**
     }
     // every element was admitted above; only a non-plain contract adds a
     // whole-array constraint for the validator to check (T27-1)
-    if (!runtime_array_contract_is_plain(expected) &&
+    if (!lambda_array_contract_is_plain(expected) &&
             !lambda_type_matches(rooted_candidate.get(), expected)) return false;
     lambda_array_install_rep_cert(rooted_candidate.get(), cert);
     *converted = rooted_candidate.get();

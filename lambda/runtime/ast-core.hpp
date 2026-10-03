@@ -11,6 +11,8 @@ typedef struct AstNode AstNode;
 typedef struct AstImportNode AstImportNode;
 typedef struct NameEntry NameEntry;
 typedef struct InterpBoundaryPlan InterpBoundaryPlan;
+typedef struct InterpMapFieldPlan InterpMapFieldPlan;
+typedef struct InterpFieldPlan InterpFieldPlan;
 typedef struct InterpPlacePlan InterpPlacePlan;
 typedef struct NameScope NameScope;
 typedef struct TypeBinder TypeBinder;
@@ -778,6 +780,7 @@ typedef struct AstFieldNode : AstNode {
     uint8_t handle_role;       // AstPlaceHandleRole
     uint16_t handle_slot;      // 1-based, unique within the function
     bool handle_rooted;        // a read handle retained across a pure call
+    InterpFieldPlan* interp_field; // fits the identifier-to-member morph allocation
 } AstFieldNode;
 
 typedef struct AstCallNode : AstNode {
@@ -805,6 +808,7 @@ typedef struct AstCallNode : AstNode {
     bool interp_has_named_args;
     bool interp_has_spread_args;
     bool interp_call_shape_planned;
+    Type* interp_array_destination; // stable destination metadata; certificates are context-owned
     // S11.4.3 (LR12-25, LR12-36): a system call that rejects an error operand
     // yields that error as its value; set when an argument may be one (its
     // type admits error, or it may carry a defect), so the call is lowered as
@@ -920,6 +924,7 @@ typedef struct AstBinaryNode : AstNode {
     AstNode *left, *right;
     StrView op_str;
     Operator op;
+    bool interp_int_arithmetic; // predicted operands; runtime tags still guard the kernel
 } AstBinaryNode;
 
 typedef AstBinaryNode AstPipeNode;
@@ -1070,6 +1075,7 @@ typedef struct AstMapNode : AstNode {
     // literals retain their precomputed ShapeEntry chain.
     bool has_computed_key;
     TypeMap* interp_destination;  // fresh literal layout; fields admitted before publish
+    InterpMapFieldPlan* interp_fields;
 } AstMapNode;
 
 typedef struct AstPropertyNode : AstNode {
@@ -1105,6 +1111,7 @@ typedef struct AstAssignNode : AstNode {
     // before this store runs; detach a shared root before writing
     // (lambda_ast_note_var_root_sharing)
     bool var_root_unshare;
+    bool interp_boundary_proven;
     InterpPlacePlan* interp_place;
 } AstAssignNode;
 
@@ -1349,6 +1356,7 @@ typedef struct AstDeclaratorNode : AstNode {
     NameEntry* entry;
     bool is_type_definition;
     Type* declared_type;
+    bool interp_boundary_proven;
 } AstDeclaratorNode;
 
 typedef struct AstSpreadNode : AstNode {

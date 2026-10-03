@@ -409,6 +409,20 @@ struct InterpBoundaryPlan {
     bool uses_binder;
     bool optional_open_array;
     bool has_store_lane;
+    bool accepts_null;
+    bool uncounted_primitive_array;
+};
+
+struct InterpMapFieldPlan {
+    InterpBoundaryPlan* boundary;
+    bool statically_proven;
+};
+
+struct InterpFieldPlan {
+    TypeMap* shape;
+    ShapeEntry* field;
+    ArrayNumElemType numeric_element;
+    bool numeric_index;
 };
 
 struct InterpPlacePlan {

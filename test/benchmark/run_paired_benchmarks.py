@@ -157,7 +157,7 @@ def summarize_side(samples):
 
 
 def paired_ratio_bootstrap(valid_pairs, resamples, seed):
-    """One-sided 95% paired-bootstrap bound for the ratio of medians."""
+    """Paired-bootstrap bounds; retain the historical one-sided upper gate."""
     observations = [
         (pair["control"]["exec_ms"], pair["candidate"]["exec_ms"])
         for pair in valid_pairs
@@ -185,6 +185,9 @@ def paired_ratio_bootstrap(valid_pairs, resamples, seed):
         "resamples_requested": resamples,
         "resamples_valid": len(ratios),
         "upper_bound": ratios[upper_index],
+        "two_sided_confidence": 0.95,
+        "two_sided_lower_bound": ratios[max(0, math.ceil(0.025 * len(ratios)) - 1)],
+        "two_sided_upper_bound": ratios[max(0, math.ceil(0.975 * len(ratios)) - 1)],
     }
 
 
@@ -357,6 +360,7 @@ def finalize_provenance(metadata, control, candidate):
         metadata["c2mir_source_corpus_stable"] = (
             metadata["c2mir_source_corpus"]["sha256"] == final_c["sha256"]
         )
+    if "lambda_build_manifest" in metadata:
         metadata["lambda_build_manifest_stable"] = (
             metadata["lambda_build_manifest"] == lambda_build_manifest()
         )

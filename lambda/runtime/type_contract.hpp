@@ -78,6 +78,7 @@ Type* lambda_array_contract_element(Type* contract);
 // Return the resolver's canonical outer array node for an exact certificate
 // comparison, or NULL when the contract is not a homogeneous value array.
 Type* lambda_array_contract_canonical(Type* contract);
+bool lambda_array_contract_is_plain(Type* contract);
 bool lambda_array_contract_compatible(Type* candidate, Type* expected,
     bool invariant);
 // Return ArrayNum's exact scalar lane for a non-nullable, rank-one element
@@ -94,9 +95,13 @@ bool lambda_array_num_matches_cert(Item value, const ArrayRepCert* cert);
 bool lambda_array_num_representation_proves_primitive_contract(Item value,
     Type* contract);
 ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract);
+// heap-owned semantic interning; reusable AST plans retain only their Type metadata
+ArrayRepCert* lambda_array_rep_cert_resolve(Type* contract);
 bool lambda_array_rep_proves(Item value, Type* target_contract, bool invariant);
 bool lambda_array_rep_proves_cert(Item value, const ArrayRepCert* target,
     bool invariant);
+// caller's immutable plan proves a plain, uncounted rank-one primitive destination
+bool lambda_array_rep_proves_uncounted_primitive(Item value, Type* element);
 void lambda_array_install_rep_cert(Item value, ArrayRepCert* cert);
 void lambda_array_clear_rep_cert(Item value);
 
@@ -219,7 +224,7 @@ static inline Type* lambda_type_remove_error_and_null(Pool* pool, Type* type) {
 // Dynamic keys still pass the exact-integer gate and the checked setter.
 Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
     Type* expected, Type* element, const LaneStorageDesc* lane,
-    const char* boundary, bool inplace);
+    const char* boundary, bool inplace, bool uncounted_primitive = false);
 
 Item lambda_container_path_set_checked_keys(Item owner, Item value, const Item* keys,
     int64_t shape, Type* expected, Type* leaf_contract, const char* boundary);

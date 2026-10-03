@@ -1458,6 +1458,8 @@ ArrayRepCert* lambda_array_rep_cert_create(Pool* pool, Type* contract) {
     cert->has_array_num_lane =
         lambda_array_num_elem_type_for_contract(info.leaf_element, &element);
     cert->array_num_elem = element;
+    if (cert->has_array_num_lane && lambda_type_layout_proves_contract(info.leaf_element))
+        cert->flags |= ARRAY_REP_CERT_PRIMITIVE_VALUES;
     if (info.leaf_element && (info.leaf_element->type_id == LMD_TYPE_MAP ||
             info.leaf_element->type_id == LMD_TYPE_ELEMENT)) {
         cert->flags |= ARRAY_REP_CERT_REIFIED;
@@ -1528,9 +1530,12 @@ bool lambda_array_rep_proves(Item value, Type* target_contract, bool invariant) 
     if (!cert || !(cert->flags & ARRAY_REP_CERT_EXACT) || !cert->array_contract) {
         return false;
     }
-    return array_representation_matches_cert(value, cert) &&
-        (cert->array_contract == target_contract ||
-         lambda_array_contract_compatible(cert->array_contract, target_contract, invariant));
+    if (!array_representation_matches_cert(value, cert)) return false;
+    if (cert->array_contract == target_contract) return true;
+    // equivalent declarations share a context-owned identity, never an AST-local cache
+    ArrayRepCert* target = lambda_array_rep_cert_resolve(target_contract);
+    return (target && cert == target) ||
+        lambda_array_contract_compatible(cert->array_contract, target_contract, invariant);
 }
 
 bool lambda_array_rep_proves_cert(Item value, const ArrayRepCert* target, bool invariant) {
@@ -1539,6 +1544,15 @@ bool lambda_array_rep_proves_cert(Item value, const ArrayRepCert* target, bool i
     return array_representation_matches_cert(value, cert) &&
         (cert == target || lambda_array_contract_compatible(cert->array_contract,
             target->array_contract, invariant));
+}
+
+bool lambda_array_rep_proves_uncounted_primitive(Item value, Type* element) {
+    if (element != &TYPE_INT && element != &TYPE_BOOL &&
+            element != &TYPE_FLOAT && element != &TYPE_STRING) return false;
+    ArrayRepCert* cert = array_rep_cert_for_value(value);
+    return cert && cert->rank == 1 && !(cert->flags & ARRAY_REP_CERT_COUNTED) &&
+        (cert->flags & ARRAY_REP_CERT_EXACT) && cert->leaf_element == element &&
+        array_representation_matches_cert(value, cert);
 }
 
 void lambda_array_install_rep_cert(Item value, ArrayRepCert* cert) {

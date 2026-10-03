@@ -1357,6 +1357,8 @@ void heap_destroy() {
             gc_heap_destroy(context->heap->gc);
         }
         lambda_region_destroy_caches(context->heap);
+        if (context->heap->array_rep_cert_by_contract)
+            hashmap_free(context->heap->array_rep_cert_by_contract);
         // sys.* Mark data and its Input belong to this heap generation.
         sysinfo_shutdown();
         if (context->heap->pool) {
@@ -1381,8 +1383,8 @@ void heap_discard_unfinalized() {
         mem_pool_destroy(context->heap->pool);
         context->heap->pool = NULL;
     }
-    // The Heap record itself is mem_alloc-owned. Do not re-enter that allocator
-    // after siglongjmp; it is a tiny process-lifetime recovery leak.
+    // The Heap and certificate map have external allocations. Do not re-enter
+    // their allocators after siglongjmp; the short-lived worker reclaims them.
     context->heap = NULL;
 }
 

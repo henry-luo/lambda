@@ -31,7 +31,6 @@ typedef struct LambdaMapContractCacheEntry {
 // interning table beside the map-relation cache gives every equivalent T[]
 // boundary in one EvalContext the same proof without retaining Type objects
 // after that context's pool is released (D3.3.3).
-#define LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY 32
 typedef struct LambdaArrayRepCertCacheEntry {
     Type* contract;
     ArrayRepCert* cert;
@@ -51,8 +50,7 @@ typedef struct Heap {
     LambdaRegionBlock* region_free_blocks;
     LambdaMapContractCacheEntry map_contract_cache[LAMBDA_MAP_CONTRACT_CACHE_CAPACITY];
     uint32_t map_contract_cache_next;
-    LambdaArrayRepCertCacheEntry array_rep_cert_cache[LAMBDA_ARRAY_REP_CERT_CACHE_CAPACITY];
-    uint32_t array_rep_cert_cache_next;
+    struct hashmap* array_rep_cert_by_contract;
     // Identity of this heap incarnation, assigned once at heap_init from a
     // process-wide counter and never reused. Root registrations die with the
     // heap; a RootVector compares this to know its blocks must re-register

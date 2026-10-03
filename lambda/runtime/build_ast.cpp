@@ -1766,14 +1766,14 @@ static bool ast_boundary_cannot_fail(Type* source, Type* target) {
 
 static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self);
 static AstNode* boundary_unwrap_primary(AstNode* node);
-static bool ast_expr_may_defect(AstNode* node, int depth);
+bool ast_expr_may_defect(AstNode* node, int depth);
 
 static bool ast_call_defect_pred(AstCallNode* call, void* ctx) {
     (void)ctx;
     return ast_call_may_defect(call, NULL);
 }
 
-static bool ast_expr_may_defect(AstNode* node, int depth) {
+bool ast_expr_may_defect(AstNode* node, int depth) {
     return ast_value_may_carry_defect(node, ast_call_defect_pred, NULL, depth);
 }
 
@@ -1787,14 +1787,7 @@ static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
         if (!info) return false;
-        if (sysfunc_returns_optional_int(info)) return true;
-        switch (info->fn) {
-        case SYSFUNC_SHL: case SYSFUNC_SHR: case SYSFUNC_USHR:
-        case SYSFUNC_VMAP_NEW: case SYSPROC_PUSH: case SYSPROC_SPLICE:
-            return true;
-        default:
-            break;
-        }
+        if (sysfunc_originates_defect(info)) return true;
         // S11.4.3: a rejected error operand is the call's value (resolved with
         // the call); any other row passes an operand's error through (S7.9.3)
         if (call->rejected_error_flows) return true;
@@ -13633,8 +13626,9 @@ static void resolve_address_of(Transpiler* tp, AstUnaryNode* node) {
     node->type = set_type_any(tp, ANY_ADDRESS_OF);
 }
 
-static_assert(sizeof(AstCallNode) <= sizeof(AstUnaryNode),
-    "a propagate node must be able to hold the call it marks");
+// a postfix propagate node can become a call with its immutable call plan
+static constexpr size_t propagate_node_size = sizeof(AstCallNode) > sizeof(AstUnaryNode)
+    ? sizeof(AstCallNode) : sizeof(AstUnaryNode);
 
 // `expr^`. On a call the `^` is a flag of that call, so the call takes the
 // propagate node's place: its fields move into this node (the sibling link
@@ -14663,7 +14657,7 @@ static AstNode* syntax_postfix(LambdaSyntaxSink* sink,
     case LAMBDA_REDUCTION_FORM_PROPAGATE:
         if (reduction->child_count != 1) return NULL;
         return build_operand_syntax(tp, span, AST_NODE_UNARY,
-            sizeof(AstUnaryNode), LSF_PROPAGATE, object);
+            propagate_node_size, LSF_PROPAGATE, object);
     case LAMBDA_REDUCTION_FORM_CALL: {
         AstNode* args = NULL;
         for (uint32_t i = 1; i < reduction->child_count; i++) {

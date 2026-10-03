@@ -12,6 +12,8 @@ pn call_fill(count) {
     return take(fill(count, 0))
 }
 
+pn native_fill(count: int) int[] { return fill(count, 4) }
+
 pn main() {
     print([len(build(0)), len(build(0.0)), build(-1) is error,
         build(0.5) is error, build(null) is error])
@@ -22,5 +24,8 @@ pn main() {
     // a failing producer is the call value; subsequent expressions still run.
     var failed = take(fill(-1, 0))
     print([failed is error, 7])
+    print("\n")
+    print([native_fill(0), native_fill(2), native_fill(-1) is error,
+        native_fill(int(inf)) is error, native_fill(int(nan)) is error])
     print("\n")
 }

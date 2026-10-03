@@ -6959,12 +6959,16 @@ static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node) {
     AstNode* base = ast_unwrap_primary(node);
     if (!base) return false;
     if (base->node_type == AST_NODE_INDEX_EXPR) {
-        // T21-1c: a bool element read publishes the nullable native bool lane
-        // (null is 2) for its out-of-bounds and slow arms, so unless the
-        // dense guard above proved the index, conditions and boxing must fold
-        // that null (D2.5.1). Other lanes keep their own sentinels and rules.
+        // guarded reads of erased producers still carry the lane's OOB null;
+        // their Any AST type cannot erase that absence at boxing (S7.1.1v3)
         AstFieldNode* field = (AstFieldNode*)base;
-        return mir_known_index_element_type(mt, field->object) == LMD_TYPE_BOOL;
+        TypeId element = mir_known_index_element_type(mt, field->object);
+        return element == LMD_TYPE_BOOL || element == LMD_TYPE_INT ||
+            element == LMD_TYPE_FLOAT;
+    }
+    if (base->node_type == AST_NODE_MEMBER_EXPR) {
+        // a non-null field on an optional record still reads null on absence
+        return mir_expr_may_be_null(mt, ((AstFieldNode*)base)->object);
     }
     if (base->node_type == AST_NODE_BINARY) {
         AstBinaryNode* binary = (AstBinaryNode*)base;
@@ -7026,10 +7030,15 @@ static bool mir_expr_may_be_null(MirTranspiler* mt, AstNode* node) {
     // A binding's compact TypeId intentionally omits optionality so its native
     // carrier is reusable. Its full contract is the authoritative source when
     // deciding whether a native lane must preserve an absent value.
-    if (!var || !var->full_type) return false;
+    Type* full_contract = var ? var->full_type : ident->entry ? ident->entry->declared_type : NULL;
+    if (!full_contract && ident->entry && ident->entry->node &&
+            ident->entry->node->node_type == AST_NODE_PARAM)
+        full_contract = mir_named_contract((AstNamedNode*)ident->entry->node);
+    Type* full_plain = mir_unwrap_decl_contract(full_contract);
+    if (!full_plain || full_plain->type_id == LMD_TYPE_ANY) return false;
     LaneStorageDesc lane = {};
-    return lambda_type_accepts_null(var->full_type) ||
-        (lambda_type_lane_storage_desc(var->full_type, &lane) && lane.nullable);
+    return lambda_type_accepts_null(full_contract) ||
+        (lambda_type_lane_storage_desc(full_contract, &lane) && lane.nullable);
 }
 
 // G7/E4: `int` and `float` share ONE native lane. Both are MIR_T_D and an int's
@@ -7519,22 +7528,27 @@ static bool mir_member_read_proves_contract(MirTranspiler* mt, AstNode* primary,
         !mir_expr_may_be_null(mt, ((AstFieldNode*)primary)->object);
 }
 
-static bool mir_call_result_proves_contract(AstNode* primary, Type* target) {
-    if (!primary || primary->node_type != AST_NODE_CALL_EXPR) return false;
+static Type* mir_call_result_contract(AstNode* primary) {
+    if (!primary || primary->node_type != AST_NODE_CALL_EXPR) return NULL;
     AstFuncNode* callee = mir_ident_local_func(((AstCallNode*)primary)->function);
     AstNode* callee_as = callee ? (AstNode*)callee : NULL;
     TypeFunc* callee_type = callee_as && callee_as->type &&
         callee_as->type->type_id == LMD_TYPE_FUNC ? (TypeFunc*)callee_as->type : NULL;
     if (!callee_type || !callee_type->has_explicit_return_contract ||
-            !callee_type->return_contract || callee_type->can_raise) return false;
-    Type* produced = mir_unwrap_decl_type(callee_type->return_contract);
+            !callee_type->return_contract || callee_type->can_raise) return NULL;
+    return callee_type->return_contract;
+}
+
+static bool mir_call_result_proves_contract(AstNode* primary, Type* target) {
+    Type* contract = mir_call_result_contract(primary);
+    Type* produced = mir_unwrap_decl_type(contract);
     Type* wanted = mir_unwrap_decl_type(target);
     // Only container contracts are worth this: scalar lanes already have
     // their own cheaper native boundary, and `any` proves nothing.
     return produced && wanted && wanted->type_id != LMD_TYPE_ANY &&
         (produced == wanted ||
          lambda_array_contract_compatible(produced, wanted, true) ||
-         mir_contract_structurally_equal(callee_type->return_contract, target));
+         mir_contract_structurally_equal(contract, target));
 }
 
 // a definition proves `target` when it is a call whose declared return is
@@ -11621,12 +11635,23 @@ static TypeId mir_guarded_array_num_witness(MirTranspiler* mt, AstNode* object) 
         return mir_guarded_elem_admits(
             mir_array_occurrence_element(mir_unwrap_decl_type(contract)));
     }
+    if (base->node_type == AST_NODE_CALL_EXPR &&
+            !mir_call_may_defect(mt, (AstCallNode*)base)) {
+        // an explicit success contract does not cover a defect join (D2.8.2)
+        Type* contract = mir_call_result_contract(base);
+        return mir_guarded_elem_admits(mir_array_occurrence_element(
+            mir_unwrap_decl_type(contract)));
+    }
     return LMD_TYPE_ANY;
 }
 
 static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
     // TE-17 I3: an object that may be an error proves no element lane
     if (mir_expr_may_carry_defect(mt, object)) return LMD_TYPE_ANY;
+    // a guarded witness remains valid on an erased mutable Item carrier;
+    // ask it before rejecting unguarded hints on that same carrier (D2.4.1)
+    TypeId guarded = mir_guarded_array_num_witness(mt, object);
+    if (guarded != LMD_TYPE_ANY) return guarded;
     AstNode* unwrapped = ast_unwrap_primary(object);
     if (unwrapped && unwrapped->node_type == AST_NODE_IDENT) {
         AstIdentNode* ident = (AstIdentNode*)unwrapped;
@@ -11677,13 +11702,6 @@ static TypeId mir_known_index_element_type(MirTranspiler* mt, AstNode* object) {
                 return element->type_id;
             }
         }
-    }
-    {
-        // T20-3 #1/#4: guarded witnesses for receivers no local lane proof
-        // covers -- see mir_guarded_array_num_witness. Consulted here so the
-        // carrier oracle and transpile_index's gate answer identically.
-        TypeId guarded = mir_guarded_array_num_witness(mt, object);
-        if (guarded != LMD_TYPE_ANY) return guarded;
     }
     Type* object_type = object ? object->type : NULL;
     if (object_type && (object_type->type_id == LMD_TYPE_ARRAY_NUM ||
@@ -11916,6 +11934,13 @@ static TypeId mir_expr_carrier_type(MirTranspiler* mt, AstNode* node) {
         // emitter; otherwise it boxes the raw recursive result before the
         // arithmetic consumer gets a chance to use it.
         TypeId direct_native_return = mir_direct_native_return_type(mt, call);
+        NativeFuncInfo* direct_native_info = mir_direct_native_info(mt, call);
+        if (direct_signature && !direct_signature->has_explicit_return_contract &&
+                direct_native_info && direct_native_info->has_native &&
+                direct_native_return == LMD_TYPE_ANY) {
+            // inferred payload types do not prove a boxed fn result is non-null
+            return LMD_TYPE_ANY;
+        }
         if (direct_native_return == LMD_TYPE_INT ||
                 direct_native_return == LMD_TYPE_FLOAT) {
             return direct_native_return;
@@ -19101,6 +19126,7 @@ struct MirFiniteLoopPlan {
     int64_t scale_factor;
     bool square_counter;
     bool unit_step;
+    bool shrinking_bound;
 };
 
 static bool mir_finite_loop_native_int_binding(MirTranspiler* mt,
@@ -19109,6 +19135,36 @@ static bool mir_finite_loop_native_int_binding(MirTranspiler* mt,
     return var && var->type_id == LMD_TYPE_INT && var->mir_type == MIR_T_I64 &&
         !var->is_var_param && var->env_offset < 0 && !var->from_env &&
         !var->in_scope_env;
+}
+
+static bool mir_unit_binding_update(MirTranspiler* mt, AstNode* node,
+        NameEntry* binding, Operator op) {
+    if (!node || node->node_type != AST_NODE_ASSIGN_STAM) return false;
+    AstAssignStamNode* assignment = (AstAssignStamNode*)node;
+    AstNode* value = ast_unwrap_primary(assignment->value);
+    return assignment->target_entry == binding && value &&
+        value->node_type == AST_NODE_BINARY && ((AstBinaryNode*)value)->op == op &&
+        mir_node_is_ident_binding(((AstBinaryNode*)value)->left, binding) &&
+        mir_is_one_int_literal(mt, ((AstBinaryNode*)value)->right);
+}
+
+static bool mir_shrinking_loop_tail(MirTranspiler* mt, AstWhileNode* loop,
+        NameEntry* lower, NameEntry* upper) {
+    if (!lower || !upper || lower == upper || !loop || !loop->body ||
+            loop->body->node_type != AST_NODE_CONTENT ||
+            !mir_finite_loop_native_int_binding(mt, lower) ||
+            !mir_finite_loop_native_int_binding(mt, upper)) return false;
+    AstNode* first = ((AstListNode*)loop->body)->item;
+    AstNode* previous = NULL;
+    AstNode* last = first;
+    if (!last) return false;
+    while (last->next) { previous = last; last = last->next; }
+    if (!mir_unit_binding_update(mt, previous, lower, OPERATOR_ADD) ||
+            !mir_unit_binding_update(mt, last, upper, OPERATOR_SUB)) return false;
+    // all accesses precede the two tail updates; no borrowed or nested write
+    // may change either index before its dominated read/store (D3.3.4)
+    return !ast_body_may_write_entry(first, lower, true, previous) &&
+        !ast_body_may_write_entry(first, upper, true, previous);
 }
 
 static bool mir_length_bound_rhs_read_only(AstNode* node, int depth) {
@@ -19171,13 +19227,7 @@ static bool mir_length_bound_loop_plan(MirTranspiler* mt,
     AstNode* tail = item;
     while (tail->next) tail = tail->next;
     if (tail->node_type != AST_NODE_ASSIGN_STAM) return false;
-    AstAssignStamNode* increment = (AstAssignStamNode*)tail;
-    AstNode* update = ast_unwrap_primary(increment->value);
-    if (increment->target_entry != counter || !update ||
-            update->node_type != AST_NODE_BINARY ||
-            ((AstBinaryNode*)update)->op != OPERATOR_ADD ||
-            !mir_node_is_ident_binding(((AstBinaryNode*)update)->left, counter) ||
-            !mir_is_one_int_literal(mt, ((AstBinaryNode*)update)->right)) return false;
+    if (!mir_unit_binding_update(mt, tail, counter, OPERATOR_ADD)) return false;
     if (short_circuit && item != tail) return false;
     if (!short_circuit && mt->inline_frame) return false;
     MirVarEntry* index = mir_var_for_binding(mt, counter);
@@ -19384,6 +19434,17 @@ static bool mir_finite_loop_plan(MirTranspiler* mt, AstWhileNode* while_node,
         return false;
     }
     NameEntry* bound = literal_bound ? NULL : ((AstIdentNode*)right)->entry;
+    NameEntry* lower = mir_ident_binding(comparison->left);
+    if (comparison->op == OPERATOR_LT && !literal_bound &&
+            mir_shrinking_loop_tail(mt, while_node, lower, bound)) {
+        *plan = {};
+        plan->counter = lower;
+        plan->bound = bound;
+        plan->step_headroom = 1;
+        plan->unit_step = true;
+        plan->shrinking_bound = true;
+        return true;
+    }
     // the entry guard range-checks the bound's register as an int lane; a
     // `float` bound (`while (i < limit: float)`) would emit an integer
     // compare on a double register
@@ -19519,7 +19580,8 @@ static bool mir_finite_loop_can_install_facts(MirTranspiler* mt,
             mir_finite_loop_counter_max(plan))) {
         additions++;
     }
-    if (plan->bound && !mir_finite_int_fact_covers(mt, plan->bound, INT32_MIN,
+    if (plan->bound && !mir_finite_int_fact_covers(mt, plan->bound,
+            plan->shrinking_bound ? 0 : INT32_MIN,
             MIR_FINITE_LOOP_BOUND_MAX)) {
         additions++;
     }
@@ -19559,7 +19621,7 @@ static MIR_reg_t mir_emit_finite_loop_entry_guard(MirTranspiler* mt,
     mir_emit_finite_int_range_guard(mt, counter->reg, 0,
         mir_finite_loop_counter_max(plan), guard);
     if (bound) {
-        mir_emit_finite_int_range_guard(mt, bound->reg, INT32_MIN,
+        mir_emit_finite_int_range_guard(mt, bound->reg, plan->shrinking_bound ? 0 : INT32_MIN,
             MIR_FINITE_LOOP_BOUND_MAX, guard);
     }
     for (int i = 0; i < plan->step_count; i++) {
@@ -19586,7 +19648,7 @@ static void mir_install_finite_loop_facts(MirTranspiler* mt,
     mir_install_finite_loop_fact(mt, plan->counter, 0,
         mir_finite_loop_counter_max(plan));
     if (plan->bound) {
-        mir_install_finite_loop_fact(mt, plan->bound, INT32_MIN,
+        mir_install_finite_loop_fact(mt, plan->bound, plan->shrinking_bound ? 0 : INT32_MIN,
             MIR_FINITE_LOOP_BOUND_MAX);
     }
     for (int i = 0; i < plan->step_count; i++) {
@@ -20121,6 +20183,7 @@ struct MirDenseLoopScan {
     MirVarEntry* extent_var;
     int64_t extent_literal;
     bool inclusive;
+    bool shrinking_bound;
     int eligible_root_count;
 };
 
@@ -20172,10 +20235,13 @@ static bool mir_dense_loop_scan(MirTranspiler* mt, AstWhileNode* while_node,
         return false;
     }
 
-    NameEntry* carried_index = mir_dense_tail_carried_index(mt, while_node,
-        compact_counter, extent);
+    out->shrinking_bound = comparison->op == OPERATOR_LT &&
+        mir_shrinking_loop_tail(mt, while_node, compact_counter, extent);
+    NameEntry* carried_index = out->shrinking_bound ? extent :
+        mir_dense_tail_carried_index(mt, while_node, compact_counter, extent);
     return mir_dense_scan_loop_body(mt, while_node->body, compact_counter,
-        extent, extent_var, extent_literal, inclusive, carried_index, out);
+        extent, extent_var, extent_literal, inclusive || out->shrinking_bound,
+        carried_index, out);
 }
 
 // The body half of the dense scan: collect the typed-array roots this loop
@@ -20195,6 +20261,10 @@ static bool mir_dense_scan_loop_body(MirTranspiler* mt, AstNode* body,
         counter_var->compact_int_known_positive ? compact_counter : NULL;
     scan.counter_count = 1;
     scan.complete = true;
+    if (out->shrinking_bound) {
+        // both indices remain within the entry upper bound, including hi itself
+        scan.bounded_indices[scan.bounded_index_count++] = compact_counter;
+    }
     if (carried_index) {
         scan.bounded_indices[scan.bounded_index_count++] = carried_index;
     }
@@ -23162,7 +23232,12 @@ static void transpile_let_stam(MirTranspiler* mt, AstLetNode* let_node) {
                     // boxed arm on drift. This is what lets hashmap's
                     // field-to-local copies keep their element lane.
                     AstNode* init = ast_unwrap_primary(asn->init);
-                    if (init && init->node_type == AST_NODE_MEMBER_EXPR) {
+                    Type* result_contract = mir_call_result_contract(init);
+                    if (init && (init->node_type == AST_NODE_MEMBER_EXPR ||
+                            (result_contract &&
+                             !mir_call_may_defect(mt, (AstCallNode*)init) &&
+                             mir_binding_definitions_prove_contract(mt, asn->entry,
+                                 result_contract)))) {
                         TypeId member_elem = mir_guarded_array_num_witness(mt, asn->init);
                         if (member_elem != LMD_TYPE_ANY) {
                             declared_var->elem_type = member_elem;
@@ -24207,7 +24282,7 @@ static MirValue transpile_content_finish(MirTranspiler* mt, AstListNode* content
     // keeps its exact lane through this boundary.
     result.semantic_contract = ((AstNode*)content)->type;
     result.semantic_type = mir_decl_type_id(result.semantic_contract);
-    result.provenance_node = (AstNode*)content;
+    // the block changes the contract, but its tail still owns lane-null facts
     return result;
 }
 
@@ -29560,6 +29635,10 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
         }
         return publish(result, VALUE_REP_ITEM);
     };
+    if (mir_expr_may_carry_defect(mt, field_node->object)) {
+        // a success-only element witness cannot unbox the defect receiver arm
+        return publish(emit_boxed_index_call(mt, field_node), VALUE_REP_ITEM);
+    }
     MirLastIndexScope last_scope(mt, field_node->object);
     // Index paths mix direct scalar loads with generic runtime reads.  The
     // descriptor must record the actual producer carrier, not the indexed
@@ -31927,12 +32006,28 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         if (info->fn == SYSFUNC_FILL && arg_count == 2 &&
                 mt->array_contract_hint_node == (AstNode*)call_node &&
                 mt->array_contract_hint) {
-            MIR_reg_t count = transpile_box_item(mt, call_node->argument);
-            int count_root = create_gc_root_slot(mt, count);
+            AstNode* count_node = call_node->argument;
+            LambdaArrayContractInfo array = {};
+            ArrayNumElemType numeric_lane = ELEM_INT;
+            bool native_count = lambda_array_contract_is_plain(mt->array_contract_hint) &&
+                lambda_array_contract_info(mt->array_contract_hint, &array) &&
+                array.rank == 1 && !array.counted_axes &&
+                lambda_array_num_elem_type_for_contract(array.leaf_element, &numeric_lane) &&
+                lambda_type_layout_proves_contract(array.leaf_element) &&
+                mir_expr_proves_native_return_lane(mt, count_node, LMD_TYPE_INT) &&
+                !mir_expr_may_be_null(mt, count_node) &&
+                !mir_expr_may_carry_defect(mt, count_node);
+            // a proven count lane needs no Item boxing or second numeric admission
+            // before the shared primitive kernel (D2.4.1, D3.3.3v3)
+            MIR_reg_t count = native_count ? transpile_native_int_expr(mt, count_node)
+                : transpile_box_item(mt, count_node);
+            int count_root = native_count ? -1 : create_gc_root_slot(mt, count);
             MIR_reg_t fill = transpile_box_item(mt, call_node->argument->next);
             int fill_root = create_gc_root_slot(mt, fill);
-            MIR_reg_t built = emit_call_4(mt, "lambda_fill_for_contract", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, count_root, "fill_count")),
+            MIR_reg_t built = emit_call_4(mt, native_count
+                    ? "lambda_fill_for_contract_int_lane" : "lambda_fill_for_contract", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, native_count ? count
+                    : load_gc_root_slot(mt, count_root, "fill_count")),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, load_gc_root_slot(mt, fill_root, "fill_value")),
                 MIR_T_P, MIR_new_int_op(mt->ctx, (int64_t)(uintptr_t)mt->array_contract_hint),
                 MIR_T_P, MIR_new_reg_op(mt->ctx,
@@ -33251,8 +33346,12 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 // success its callee's return already proved needs no admission
                 const bool join_success_admitted = short_circuit_error &&
                     parameter_contract &&
-                    mir_boundary_join_success_redundant(mt, resolved_args[i],
-                        parameter_contract);
+                    // the implicit untyped contract admits every non-error
+                    // Item; its argument guard already discharged the boundary
+                    // (S11.4.3, D8.3.2).
+                    (parameter_contract == &TYPE_ANY_NO_ERROR ||
+                     mir_boundary_join_success_redundant(mt, resolved_args[i],
+                        parameter_contract));
                 bool inferred_native_argument = native_call && call_nfi &&
                     mir_inferred_native_argument_proven(mt, call_nfi, i,
                         resolved_args[i]);
@@ -40628,14 +40727,7 @@ static bool mir_call_originates_defect(MirTranspiler* mt, AstCallNode* call,
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
         if (!info) return false;
-        if (sysfunc_returns_optional_int(info)) return true;
-        switch (info->fn) {
-        case SYSFUNC_SHL: case SYSFUNC_SHR: case SYSFUNC_USHR:
-        case SYSFUNC_VMAP_NEW: case SYSPROC_PUSH: case SYSPROC_SPLICE:
-            return true;
-        default:
-            break;
-        }
+        if (sysfunc_originates_defect(info)) return true;
         // as for an implicit parameter: only an operand that can be an error
         return mir_sys_call_error_flows(mt, call);
     }
@@ -41415,6 +41507,8 @@ static bool mir_expr_proves_native_return_lane(MirTranspiler* mt,
     TypeId node_tid = mir_decl_type_id(node->type);
     if (node->node_type != AST_NODE_BINARY) return node_tid == expected;
     AstBinaryNode* binary = (AstBinaryNode*)node;
+    // a scalar success type cannot certify the error arm of an arithmetic join
+    if (mir_arith_operand_may_defect(mt, binary)) return false;
     if (binary->op != OPERATOR_ADD && binary->op != OPERATOR_SUB &&
             binary->op != OPERATOR_MUL && binary->op != OPERATOR_DIV &&
             binary->op != OPERATOR_IDIV && binary->op != OPERATOR_MOD) return false;
@@ -41784,6 +41878,12 @@ static bool function_return_may_defer(MirTranspiler* mt, AstFuncNode* fn_node) {
         (void)mir_contract_native_scalar_type(
             signature->return_contract ? signature->return_contract : signature->returned,
             &return_tid);
+    }
+    if (return_tid == LMD_TYPE_FLOAT && signature &&
+            !signature->has_explicit_return_contract && mir_expr_may_be_null(mt, body)) {
+        // an inferred plain float signature cannot describe the raw null sentinel
+        may_defer = true;
+        goto done;
     }
 
     // A declared `int` body is not enough evidence: an error-propagating local

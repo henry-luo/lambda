@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.4/S7.1.3v2: shrinking indices use the shared inclusive dense extent guard, with checked stores on a miss and invalidation across growth.",
+  "checks": [
+    {
+      "in_func": "_reverse_span_#",
+      "expect": [
+        "addo\t{{r}}, {{r}}, 1",
+        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+      ]
+    },
+    {
+      "in_func": "_reverse_span_#",
+      "in_range": {
+        "from": "lsh\t{{r}}, {{r}}, 3",
+        "to": "bt\tL"
+      },
+      "expect_seq": [
+        {
+          "pattern": "mov\t{{r}}, i64:({{r}})"
+        },
+        {
+          "pattern": "lsh\t{{r}}, {{r}}, 3"
+        },
+        {
+          "pattern": "mov\t{{r}}, i64:({{r}})"
+        }
+      ],
+      "forbid": [
+        "ge\t",
+        "lt\t",
+        "call\tfn_index"
+      ]
+    },
+    {
+      "in_func": "_reverse_growing_#",
+      "expect": [
+        "call\tlambda_array_push_checked_p, lambda_array_push_checked",
+        "call\tlambda_array_set_checked_inplace_lane_p, lambda_array_set_checked_inplace_lane"
+      ]
+    }
+  ]
+}

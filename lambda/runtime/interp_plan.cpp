@@ -1035,42 +1035,77 @@ static void plan_mark_cow_owned(NameEntry* entry) {
 
 // A destination is a written contract, never the current value's inferred tag.
 // Only fresh result positions adopt it; argument evaluation keeps its own order.
-static void plan_destination(AstNode* node, Type* contract, int depth = 0) {
+static bool plan_scalar_boundary_proven(AstNode* producer, Type* contract) {
+    Type* plain = type_field_unwrap_simple_decl(contract);
+    if (!producer || (plain != &TYPE_INT && plain != &TYPE_BOOL &&
+            plain != &TYPE_FLOAT && plain != &TYPE_STRING)) return false;
+    return lambda_static_boundary_relation(producer->type, contract, false) ==
+            STATIC_BOUNDARY_PROVEN &&
+        lambda_boundary_is_redundant(producer->type, contract) &&
+        !ast_expr_may_defect(producer, 0);
+}
+
+static void plan_destination(Pool* pool, AstNode* node, Type* contract, int depth = 0,
+        bool construction_only = false) {
     node = ast_unwrap_primary(node);
     if (!node || !contract || depth > 64 ||
             lambda_type_contract_has_binder(contract, true)) return;
     switch (node->node_type) {
+    case AST_NODE_CALL_EXPR: {
+        // argument hints may construct layouts, but admission failures stay at call entry
+        if (construction_only) return;
+        AstCallNode* call = (AstCallNode*)node;
+        AstNode* callee = ast_unwrap_primary(call->function);
+        LambdaArrayContractInfo array = {};
+        if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
+                ((AstSysFuncNode*)callee)->fn_info &&
+                ((AstSysFuncNode*)callee)->fn_info->fn == SYSFUNC_FILL &&
+                lambda_array_contract_info(contract, &array))
+            call->interp_array_destination = contract;
+        return;
+    }
     case AST_NODE_MAP: {
         AstMapNode* literal = (AstMapNode*)node;
         TypeMap* target = (TypeMap*)lambda_type_nonnull_map_contract(contract);
-        if (!target || !target->is_trusted_contract || literal->has_computed_key ||
+        // a structural literal cannot manufacture nominal identity at admission
+        if (!target || type_nominal_record((Type*)target) ||
+                !target->is_trusted_contract || literal->has_computed_key ||
                 !ast_map_contract_storage_valid(target) ||
                 !ast_map_literal_keys_follow_contract(literal, target)) return;
         literal->interp_destination = target;
+        literal->interp_fields = (InterpMapFieldPlan*)pool_calloc(pool,
+            (size_t)target->length * sizeof(InterpMapFieldPlan));
         ShapeEntry* field = target->shape;
+        int index = 0;
         for (AstNode* item = literal->item; item;
-                item = item->next, field = typemap_next_field(target, field)) {
-            plan_destination(((AstNamedNode*)item)->as, field->type, depth + 1);
+                item = item->next, field = typemap_next_field(target, field), index++) {
+            AstNode* producer = ((AstNamedNode*)item)->as;
+            if (literal->interp_fields) {
+                literal->interp_fields[index].boundary = interp_boundary_plan_create(pool, field->type);
+                literal->interp_fields[index].statically_proven =
+                    plan_scalar_boundary_proven(producer, field->type);
+            }
+            plan_destination(pool, producer, field->type, depth + 1, construction_only);
         }
         return;
     }
     case AST_NODE_IF_EXPR: {
         AstIfNode* branch = (AstIfNode*)node;
-        plan_destination(branch->then, contract, depth + 1);
-        plan_destination(branch->otherwise, contract, depth + 1);
+        plan_destination(pool, branch->then, contract, depth + 1, construction_only);
+        plan_destination(pool, branch->otherwise, contract, depth + 1, construction_only);
         return;
     }
     case AST_NODE_MATCH_EXPR:
         for (AstMatchArm* arm = ((AstMatchNode*)node)->first_arm; arm;
                 arm = (AstMatchArm*)arm->next)
-            plan_destination(arm->body, contract, depth + 1);
+            plan_destination(pool, arm->body, contract, depth + 1, construction_only);
         return;
     case AST_NODE_CONTENT:
     case AST_NODE_LIST: {
         int values = 0, declarations = 0, statements = 0;
         AstNode* result = interp_proc_block_last_value((AstListNode*)node,
             &values, &declarations, &statements);
-        if (values == 1) plan_destination(result, contract, depth + 1);
+        if (values == 1) plan_destination(pool, result, contract, depth + 1, construction_only);
         return;
     }
     default:
@@ -1102,6 +1137,11 @@ static void plan_assign_entry(PlanCtx* pc, NameEntry* entry) {
     plan_mark_cow_owned(entry);
     entry->interp_boundary = interp_boundary_plan_create(pc->script->pool,
         entry->declared_type);
+    if (entry->interp_boundary && entry->node && entry->node->node_type == AST_NODE_PARAM) {
+        // a type parameter's binder lives on TypeParam, outside its declared contract
+        TypeParam* parameter = lambda_type_param(entry->node->type);
+        entry->interp_boundary->uses_binder |= parameter && parameter->binder;
+    }
     if (pc->next_slot > UINT16_MAX) { pc->failed = true; return; }
     entry->slot = (int32_t)pc->next_slot++;
     entry->binding_storage = pc->storage;
@@ -1200,10 +1240,23 @@ static void plan_link_capture_identifier(PlanCtx* pc, AstIdentNode* ident) {
         !entry->is_binder && !entry->import && !special_decl && entry->slot >= 0;
 }
 
-static void plan_link_call_shape(AstCallNode* call) {
+static void plan_link_call_shape(Pool* pool, AstCallNode* call) {
     // An oversized list retains the existing walker-side scan and runtime
     // diagnostic instead of narrowing its source count into the shared plan.
     (void)ast_plan_call_shape(call);
+    AstFuncNode* target = ast_direct_call_function(call);
+    if (!target || !call->interp_call_shape_planned ||
+            call->interp_source_argc > LAMBDA_MAX_FUNCTION_ARGS) return;
+    AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
+    ast_resolve_call_args(call->argument, target, call->interp_source_argc, resolved);
+    int index = 0;
+    for (AstNamedNode* parameter = target->param; parameter && index < LAMBDA_MAX_FUNCTION_ARGS;
+            parameter = (AstNamedNode*)parameter->next, index++) {
+        TypeParam* type = lambda_type_param(parameter->type);
+        if (type && (type->binder || type->is_var_param)) continue;
+        // fresh argument records can adopt their admitted layout without rebuilding at entry
+        plan_destination(pool, resolved[index], parameter->declared_type, 0, true);
+    }
 }
 
 // Scratch need: the maximum number of Items that must stay live in frame slots
@@ -1887,7 +1940,7 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     if (signature && signature->has_explicit_return_contract) {
         pc.plan->return_boundary = interp_boundary_plan_create(pc.script->pool,
             signature->return_contract);
-        plan_destination(fn->body, signature->return_contract);
+        plan_destination(pc.script->pool, fn->body, signature->return_contract);
     }
     plan_walk(fn->body, &pc);
     plan_mark_handoff_loops(fn);
@@ -1922,7 +1975,7 @@ static void plan_walk(AstNode* node, void* ctx) {
         break;
     case AST_NODE_CALL_EXPR:
     case AST_NODE_NEW_EXPR:
-        plan_link_call_shape((AstCallNode*)node);
+        plan_link_call_shape(pc->script->pool, (AstCallNode*)node);
         break;
     case AST_NODE_FUNC:
     case AST_NODE_FUNC_EXPR:
@@ -1941,17 +1994,69 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_VARIABLE_DECLARATOR: {
         AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
         plan_assign_entry(pc, declaration->entry);
-        plan_destination(declaration->init, declaration->declared_type);
+        declaration->interp_boundary_proven =
+            plan_scalar_boundary_proven(declaration->init, declaration->declared_type);
+        plan_destination(pc->script->pool, declaration->init, declaration->declared_type);
+        break;
+    }
+    case AST_NODE_MEMBER_EXPR: {
+        AstFieldNode* access = (AstFieldNode*)node;
+        TypeMap* shape = (TypeMap*)lambda_type_nonnull_map_contract(
+            access->object ? access->object->type : NULL);
+        if (shape && shape->is_trusted_contract && !access->computed && access->field &&
+                access->field->node_type == AST_NODE_IDENT) {
+            String* name = ((AstIdentNode*)access->field)->name;
+            ShapeEntry* field = name ? typemap_shape_lookup_last(shape, name->chars, (int)name->len) : NULL;
+            if (field && field->name && !(field->flags & JSPD_IS_ACCESSOR)) {
+                access->interp_field = (InterpFieldPlan*)pool_calloc(pc->script->pool,
+                    sizeof(InterpFieldPlan));
+                if (access->interp_field) {
+                    access->interp_field->shape = shape;
+                    access->interp_field->field = field;
+                }
+            }
+        }
+        break;
+    }
+    case AST_NODE_INDEX_EXPR: {
+        AstFieldNode* access = (AstFieldNode*)node;
+        AstNode* object = ast_unwrap_primary(access->object);
+        NameEntry* entry = object && object->node_type == AST_NODE_IDENT
+            ? ((AstIdentNode*)object)->entry : NULL;
+        InterpBoundaryPlan* boundary = entry ? entry->interp_boundary : NULL;
+        ArrayNumElemType element;
+        if (boundary && boundary->array.rank == 1 && access->field &&
+                !access->field->next && lambda_array_num_elem_type_for_contract(
+                    boundary->array.leaf_element, &element)) {
+            // the declared lane predicts a decoder; the live carrier still guards it
+            access->interp_field = (InterpFieldPlan*)pool_calloc(pc->script->pool,
+                sizeof(InterpFieldPlan));
+            if (access->interp_field) {
+                access->interp_field->numeric_index = true;
+                access->interp_field->numeric_element = element;
+            }
+        }
+        break;
+    }
+    case AST_NODE_BINARY: {
+        AstBinaryNode* binary = (AstBinaryNode*)node;
+        binary->interp_int_arithmetic =
+            (binary->op == OPERATOR_ADD || binary->op == OPERATOR_SUB ||
+             binary->op == OPERATOR_MUL) &&
+            binary->left && binary->left->type && binary->left->type->type_id == LMD_TYPE_INT &&
+            binary->right && binary->right->type && binary->right->type->type_id == LMD_TYPE_INT;
         break;
     }
     case AST_NODE_ASSIGN_STAM: {
         AstAssignStamNode* assignment = (AstAssignStamNode*)node;
-        plan_destination(assignment->value, assignment->target_entry
+        assignment->interp_boundary_proven = plan_scalar_boundary_proven(assignment->value,
+            assignment->target_entry ? assignment->target_entry->declared_type : NULL);
+        plan_destination(pc->script->pool, assignment->value, assignment->target_entry
             ? assignment->target_entry->declared_type : NULL);
         break;
     }
     case AST_NODE_RETURN_STAM:
-        plan_destination(((AstReturnNode*)node)->value, pc->plan->return_boundary
+        plan_destination(pc->script->pool, ((AstReturnNode*)node)->value, pc->plan->return_boundary
             ? pc->plan->return_boundary->contract : NULL);
         break;
     case AST_NODE_INDEX_ASSIGN_STAM:

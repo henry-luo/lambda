@@ -53,6 +53,13 @@ TEST(LambdaMirEmissionCorpus, IsNotEmpty) {
         << "no .ls fixtures found in " << kLambdaMirDir;
 }
 
+TEST(LambdaMirProfiling, DiagnosticCallsPreserveProductionRootsAndSafepoints) {
+    const char* args[] = {"python3", "test/benchmark/check_profile_root_parity.py", nullptr};
+    ShellResult result = shell_exec_simple("python3", args);
+    EXPECT_EQ(result.exit_code, 0) << (result.stderr_buf ? result.stderr_buf : "");
+    shell_result_free(&result);
+}
+
 TEST(MirOptimizer, UnreachableSelfPhiKeepsItsDefinitionUntilCleanup) {
     // a value-numbered load removes the loop's entry edges after SSA is built.
     const char* program =
