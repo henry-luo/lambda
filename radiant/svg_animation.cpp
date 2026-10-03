@@ -239,9 +239,16 @@ static bool svg_animation_connected(DomDocument* doc, DomNodeRef ref) {
 
 static DomElement* svg_animation_root(DomElement* element) {
     DomElement* root = nullptr;
-    for (DomNode* node = element; node; node = node->parent)
-        if (node->is_element() && node->as_element()->tag() == MARKUP_NAME_SVG) root = node->as_element();
+    for (DomNode* node = element; node && node->is_element(); node = node->parent) {
+        // SVG 2 §5.1.3: an HTML integration point ends the current SVG fragment.
+        if (!dom_element_is_svg(node->as_element())) break;
+        if (node->as_element()->tag() == MARKUP_NAME_SVG) root = node->as_element();
+    }
     return root;
+}
+
+static bool svg_animation_separate_fragment(DomElement* element, DomNode* root) {
+    return element != root && element->tag() == MARKUP_NAME_SVG && svg_animation_root(element) == element;
 }
 
 static void svg_animation_driver_released(AnimationInstance* instance) {
@@ -284,6 +291,8 @@ static void svg_animation_tick(AnimationInstance* instance, float) {
 static void svg_animation_start_driver(SvgTimeline* timeline) {
     if (timeline->paused || timeline->driver) return;
     DomDocument* doc = timeline->registry->document;
+    // pinned detached DOM can request preparation without becoming a live scheduling root.
+    if (!svg_animation_connected(doc, timeline->root)) return;
     if (!doc->state && !state_store_create(doc)) return;
     AnimationScheduler* scheduler = doc->state->animation_scheduler;
     AnimationInstance* driver = animation_instance_create(scheduler);
@@ -459,8 +468,9 @@ struct SvgAnimationScan {
 };
 
 static void svg_animation_scan(DomElement* element, DomElement* root,
-    SvgAnimationScan* scan, unsigned depth) {
+    SvgAnimationScan* scan, unsigned depth, bool all_fragments = false) {
     if (!element || depth >= 256 || !scan->remaining) return;
+    if (!all_fragments && svg_animation_separate_fragment(element, root)) return;
     scan->remaining--;
     if (svg_animation_is_element(element)) {
         scan->has_elements = true;
@@ -475,21 +485,19 @@ static void svg_animation_scan(DomElement* element, DomElement* root,
     // embedded HTML can inherit animated SVG fonts and has viewport-dependent containing blocks.
     if (element->tag() == MARKUP_NAME_FOREIGNOBJECT) scan->layout_affects = true;
     for (DomNode* node = element->first_child; node; node = node->next_sibling)
-        if (node->is_element()) svg_animation_scan(node->as_element(), root, scan, depth + 1);
+        if (node->is_element()) svg_animation_scan(node->as_element(), root, scan, depth + 1, all_fragments);
 }
 
 static void svg_animation_prepare_tree(DomElement* element, unsigned depth, size_t* remaining) {
     if (!element || depth >= 256 || !*remaining) return;
     (*remaining)--;
-    if (element->tag() == MARKUP_NAME_SVG && dom_element_is_svg(element)) {
+    if (element->tag() == MARKUP_NAME_SVG && svg_animation_root(element) == element) {
         SvgAnimationScan scan = {false, false, 65536};
         svg_animation_scan(element, element, &scan, 0);
-        if (!scan.has_elements) return;
-        SvgTimeline* timeline = svg_animation_timeline(element, true);
+        SvgTimeline* timeline = scan.has_elements ? svg_animation_timeline(element, true) : nullptr;
         if (timeline) timeline->layout_affects = scan.layout_affects;
         if (timeline && element->doc->js.host_ui_context && !element->doc->services.svg_image_document)
             svg_animation_start_driver(timeline);
-        return;
     }
     // HTML documents can contain several independent outer SVG fragments.
     for (DomNode* child = element->first_child; child; child = child->next_sibling)
@@ -505,7 +513,8 @@ void svg_animation_prepare(DomElement* element) {
 
 bool svg_animation_has_elements(DomElement* element) {
     SvgAnimationScan scan = {false, false, 65536};
-    svg_animation_scan(element, element, &scan, 0);
+    // picture detection includes every fragment even though each evaluator owns only one clock.
+    svg_animation_scan(element, element, &scan, 0, true);
     return scan.has_elements;
 }
 
@@ -522,7 +531,7 @@ void svg_animation_prepare_instance(DomElement* host, DomElement* source_root) {
     if (host->doc->js.host_ui_context && !host->doc->services.svg_image_document)
         svg_animation_start_driver(timeline);
     svg_animation_prepare(source_root);
-    svg_animation_set_time(source_root, timeline->time);
+    svg_animation_set_document_time(source_root->doc, timeline->time);
 }
 
 struct SvgImageAnimation {
@@ -582,6 +591,8 @@ void svg_image_animation_register(UiContext* ui, ImageSurface* image) {
 }
 
 void svg_animation_pause(DomElement* element, bool paused) {
+    // SVG Animations §5.8: nested svg controls cannot change their outer fragment's clock.
+    if (!element || svg_animation_root(element) != element) return;
     SvgTimeline* timeline = svg_animation_timeline(element, true);
     if (!timeline) return;
     timeline->paused = paused;
@@ -609,7 +620,7 @@ static bool svg_animation_rewind_control(const void* data, void* context) {
 }
 
 void svg_animation_set_time(DomElement* element, double seconds) {
-    if (!isfinite(seconds)) return;
+    if (!isfinite(seconds) || !element || svg_animation_root(element) != element) return;
     SvgTimeline* timeline = svg_animation_timeline(element, true);
     if (!timeline) return;
     if (seconds < timeline->time) hashmap_scan(timeline->registry->controls, svg_animation_rewind_control, timeline);
@@ -621,6 +632,15 @@ void svg_animation_set_time(DomElement* element, double seconds) {
 double svg_animation_current_time(DomElement* element) {
     SvgTimeline* timeline = svg_animation_timeline(element, false);
     return timeline ? timeline->time : 0.0;
+}
+
+void svg_animation_set_document_time(DomDocument* document, double seconds) {
+    SvgAnimationRegistry* registry = svg_animation_registry(document, false);
+    // private picture/use source documents have no script-controlled fragment clocks.
+    for (SvgTimeline* timeline = registry ? registry->timelines : nullptr; timeline; timeline = timeline->next) {
+        DomNode* root = dom_node_ref_validate(document, timeline->root);
+        if (root && root->is_element()) svg_animation_set_time(root->as_element(), seconds);
+    }
 }
 
 uint64_t svg_animation_generation(DomDocument* document) {
@@ -669,6 +689,18 @@ static const char* svg_animation_base(SvgAnimationRegistry* registry, DomElement
             : target->get_attribute(name);
         if (authored) return authored;
         const char* tag = target->local_name();
+        if (svg_animation_name_in("href xlink:href", name)) {
+            const char* legacy = strcmp(name, "href") == 0
+                ? dom_element_attribute_ns(target, "http://www.w3.org/1999/xlink", "href") : nullptr;
+            return legacy ? legacy : "";
+        }
+        if (strcmp(tag, "feColorMatrix") == 0 && strcmp(name, "values") == 0) {
+            const char* type = svg_animation_attribute(target, "type");
+            if (svg_animation_keyword(type, "saturate")) return "1";
+            if (svg_animation_keyword(type, "hueRotate")) return "0";
+            if (!type || svg_animation_keyword(type, "matrix"))
+                return "1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0";
+        }
         if (strcmp(tag, "rect") == 0 && svg_animation_name_in("rx ry", name)) {
             const char* paired = svg_animation_attribute(target, strcmp(name, "rx") == 0 ? "ry" : "rx");
             if (paired) return paired;
@@ -687,6 +719,23 @@ static const char* svg_animation_base(SvgAnimationRegistry* registry, DomElement
         }
         struct InitialValue { const char* tags; const char* name; const char* value; };
         static const InitialValue initial_values[] = {
+            {"stop", "offset", "0"},
+            // XML enums need their initial value as the underlying discrete-to sample (SVG 1.1 §19.2.9).
+            {"linearGradient radialGradient", "gradientUnits", "objectBoundingBox"},
+            {"linearGradient radialGradient", "spreadMethod", "pad"},
+            {"pattern", "patternUnits", "objectBoundingBox"},
+            {"pattern", "patternContentUnits", "userSpaceOnUse"},
+            {"marker", "markerUnits", "strokeWidth"}, {"clipPath", "clipPathUnits", "userSpaceOnUse"},
+            {"mask", "maskUnits", "objectBoundingBox"}, {"mask", "maskContentUnits", "userSpaceOnUse"},
+            {"filter", "filterUnits", "objectBoundingBox"}, {"filter", "primitiveUnits", "userSpaceOnUse"},
+            {"svg symbol image marker pattern view feImage", "preserveAspectRatio", "xMidYMid meet"},
+            {"text tspan textPath", "lengthAdjust", "spacing"}, {"textPath", "method", "align"},
+            {"textPath", "spacing", "exact"}, {"feComposite", "operator", "over"},
+            {"feMorphology", "operator", "erode"}, {"feBlend", "mode", "normal"},
+            {"feColorMatrix", "type", "matrix"}, {"feTurbulence", "type", "turbulence"},
+            {"feTurbulence", "stitchTiles", "noStitch"},
+            {"feFuncR feFuncG feFuncB feFuncA", "type", "identity"},
+            {"feConvolveMatrix", "edgeMode", "duplicate"}, {"feConvolveMatrix", "preserveAlpha", "false"},
             {"marker", "orient", "0"}, {"marker", "markerWidth", "3"}, {"marker", "markerHeight", "3"},
             {"marker", "refX", "0"}, {"marker", "refY", "0"}, {"radialGradient", "fr", "0"},
             {"feTurbulence", "numOctaves", "1"}, {"feTurbulence", "baseFrequency", "0 0"},
@@ -732,6 +781,7 @@ static const char* svg_animation_base(SvgAnimationRegistry* registry, DomElement
 
 struct SvgAnimationVector {
     double* components;
+    CssUnit* units;
     unsigned count;
     bool color;
     bool linear_color;
@@ -910,6 +960,7 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
     if (kind == SVG_ANIMATION_PATH) return svg_animation_path_vector(registry, value, vector);
     if (kind == SVG_ANIMATION_NUMBER_LIST || kind == SVG_ANIMATION_LENGTH_LIST) {
         float components[2048]; const char* end = nullptr;
+        CssUnit units[2048] = {};
         size_t count = 0;
         if (kind == SVG_ANIMATION_NUMBER_LIST) count = str_parse_float_list(value, ", \t\n\r", components, 2048, &end);
         else {
@@ -918,15 +969,14 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
             while (*end && count < 2048) {
                 const char* start = end;
                 char* number_end = nullptr;
-                strtod(start, &number_end);
+                double number = strtod(start, &number_end);
                 if (number_end == start) return false;
                 end = number_end;
                 while (str_is_alpha(*end) || *end == '%') end++;
-                size_t length = end - start;
-                if (length >= 128) return false;
-                char token[128]; memcpy(token, start, length); token[length] = 0;
-                components[count++] = svg_resolve_length(token, &lengths, dom_svg_length_axis(name), NAN);
-                if (!isfinite(components[count-1])) return false;
+                CssUnit unit = css_unit_from_string(number_end, end - number_end);
+                if (end != number_end && unit == CSS_UNIT_NONE) return false;
+                if (!isfinite(svg_resolve_length_unit(number, unit, &lengths, dom_svg_length_axis(name), NAN))) return false;
+                components[count] = number; units[count++] = unit;
                 const char* separator = end;
                 end = str_skip_chars(end, ", \t\n\r");
                 if (*end && separator == end && *end != '+' && *end != '-') return false;
@@ -946,6 +996,11 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
             vector->components[i] = components[i];
         }
         vector->list = true;
+        if (kind == SVG_ANIMATION_LENGTH_LIST) {
+            vector->units = (CssUnit*)svg_animation_alloc(registry, count * sizeof(CssUnit));
+            if (!vector->units) return false;
+            memcpy(vector->units, units, count * sizeof(CssUnit));
+        }
         vector->integer = strcmp(name, "order") == 0;
         return true;
     }
@@ -978,6 +1033,16 @@ static bool svg_animation_vector(SvgAnimationRegistry* registry, DomElement* tar
     if (!svg_animation_vector_storage(registry, vector, 1)) return false;
     vector->integer = kind == SVG_ANIMATION_INTEGER;
     vector->components[0] = scalar;
+    if (kind == SVG_ANIMATION_LENGTH && end != value) {
+        const char* unit_text = str_skip_ascii_space(end);
+        size_t unit_length = strlen(unit_text); str_trim(&unit_text, &unit_length);
+        CssUnit unit = css_unit_from_string(unit_text, unit_length);
+        if (unit != CSS_UNIT_NONE) {
+            vector->units = (CssUnit*)svg_animation_alloc(registry, sizeof(CssUnit));
+            if (!vector->units) return false;
+            vector->units[0] = unit; vector->components[0] = number;
+        }
+    }
     return true;
 }
 
@@ -1016,12 +1081,39 @@ static const char* svg_animation_vector_text(SvgAnimationRegistry* registry,
             if (i) strbuf_append_char(text, ' ');
             strbuf_append_format(text, "%g", vector->integer ? round(vector->components[i]) : vector->components[i]);
             if (vector->percentage) strbuf_append_char(text, '%');
+            else if (vector->units) strbuf_append_str(text, css_unit_to_string(vector->units[i]));
         }
         if (transform_type) strbuf_append_char(text, ')');
     }
     const char* result = svg_animation_copy(registry, text->str);
     strbuf_free(text);
     return result;
+}
+
+static bool svg_animation_align_lengths(DomElement* target, const char* name,
+    SvgAnimationVector* a, SvgAnimationVector* b, bool absolute = false) {
+    if (a->percentage == b->percentage && !a->units && !b->units && !absolute) return true;
+    SvgLengthContext lengths = dom_svg_length_context(target);
+    if (a->percentage != b->percentage || (absolute && a->percentage)) {
+        // opacity/offset percentages are dimensionless; length percentages use the SVG viewport.
+        float basis = svg_animation_value_class(target, name) == SVG_ANIMATION_LENGTH
+            ? svg_resolve_length("100%", &lengths, dom_svg_length_axis(name), NAN) / 100 : .01f;
+        if (!isfinite(basis)) return false;
+        if (a->percentage) a->components[0] *= basis;
+        if (b->percentage) b->components[0] *= basis;
+        a->percentage = b->percentage = false;
+    }
+    for (unsigned i = 0; i < a->count; i++) {
+        CssUnit left = a->units ? a->units[i] : CSS_UNIT_NONE;
+        CssUnit right = b->units ? b->units[i] : CSS_UNIT_NONE;
+        if (left == right && (!absolute || left == CSS_UNIT_NONE)) continue;
+        a->components[i] = svg_resolve_length_unit(a->components[i], left, &lengths, dom_svg_length_axis(name), NAN);
+        b->components[i] = svg_resolve_length_unit(b->components[i], right, &lengths, dom_svg_length_axis(name), NAN);
+        if (!isfinite(a->components[i]) || !isfinite(b->components[i])) return false;
+        if (a->units) a->units[i] = CSS_UNIT_NONE;
+        if (b->units) b->units[i] = CSS_UNIT_NONE;
+    }
+    return true;
 }
 
 static const char* svg_animation_combine(SvgAnimationRegistry* registry, DomElement* target,
@@ -1031,14 +1123,8 @@ static const char* svg_animation_combine(SvgAnimationRegistry* registry, DomElem
     if (!svg_animation_vector(registry, target, name, left, transform_type, &a, linear_color) ||
         !svg_animation_vector(registry, target, name, right, transform_type, &b, linear_color) ||
         !svg_animation_vectors_compatible(&a, &b)) return nullptr;
-    if (a.percentage != b.percentage) {
-        SvgLengthContext lengths = dom_svg_length_context(target);
-        float basis = svg_resolve_length("100%", &lengths, dom_svg_length_axis(name), NAN) / 100;
-        if (!isfinite(basis)) return nullptr;
-        if (a.percentage) a.components[0] *= basis;
-        if (b.percentage) b.components[0] *= basis;
-        a.percentage = false;
-    }
+    // retain equal units so later font/viewport samples determine the target's used value.
+    if (!svg_animation_align_lengths(target, name, &a, &b)) return nullptr;
     for (unsigned i = 0; i < a.count; i++) {
         a.components[i] = a.components[i] * left_weight + b.components[i] * right_weight;
         if (!isfinite(a.components[i])) return nullptr;
@@ -1102,7 +1188,9 @@ static const char* svg_animation_underlying(SvgAnimationRegistry* registry,
 static bool svg_animation_value_valid(DomElement* target, const char* name,
     const char* value, bool numeric) {
     if (numeric) return true;
-    if (!value || !*value) return false;
+    if (!value) return false;
+    // an absent IRI has an empty underlying value; it still transitions to a discrete resource link.
+    if (!*value) return svg_animation_name_in("href xlink:href", name);
     SvgAnimationValueClass kind = svg_animation_value_class(target, name);
     if (kind == SVG_ANIMATION_UNSUPPORTED) return false;
     if (svg_animation_keyword(value, "inherit") || svg_animation_keyword(value, "initial") ||
@@ -1139,7 +1227,7 @@ static bool svg_animation_value_valid(DomElement* target, const char* name,
 }
 
 static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement* animation,
-    DomElement* target, const char* name, bool css, float progress, double iteration) {
+    DomElement* target, const char* name, bool css, float progress, double iteration, double duration) {
     SvgAnimationRegistry* registry = timeline->registry;
     const char* transform_type = strcmp(animation->local_name(), "animateTransform") == 0
         ? svg_animation_token(registry, animation->get_attribute("type")) : nullptr;
@@ -1195,6 +1283,7 @@ static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement
             return nullptr; // SVG 1.1 §8.2 requires matching path command structures.
         if (!valid || !numeric || !svg_animation_vectors_compatible(&first, &next)) numeric = false;
         if (numeric) {
+            if (paced && !svg_animation_align_lengths(target, name, &first, &next, true)) return nullptr;
             unsigned components = transform_type && first.count == 3 ? 1 : first.color ? 3 : first.count;
             double squared = 0;
             for (unsigned c = 0; c < components; c++) {
@@ -1206,11 +1295,11 @@ static const char* svg_animation_sample_values(SvgTimeline* timeline, DomElement
     }
     if (numeric && first.list && paced) paced = false;
     if (!numeric) { discrete = true; paced = spline = false; }
-    // SMIL discrete to-animations hold the to value throughout their active interval.
-    if (to_only && discrete && !transform_type) return svg_animation_copy(registry, to);
+    // SVG 1.1 §19.2.9 makes discrete to-animations use the same boundary as from-to.
     double times[256] = {};
     const char* key_times = animation->get_attribute("keyTimes");
-    if (key_times && !paced) {
+    // SMIL §3.2.3 ignores keyTimes when the simple duration is indefinite.
+    if (key_times && !paced && isfinite(duration)) {
         const char* authored[256];
         if (svg_animation_list(registry, key_times, authored, 256) != count) return nullptr;
         for (unsigned i = 0; i < count; i++) {
@@ -1592,6 +1681,7 @@ static unsigned svg_animation_event_offsets(DomElement* animation, const char* t
 static void svg_animation_event_tree(SvgTimeline* timeline, DomElement* node,
     DomElement* source, const char* type, bool bubbles, double detail, unsigned depth, size_t* remaining) {
     if (!node || depth >= 256 || !*remaining) return;
+    if (svg_animation_separate_fragment(node, timeline->root.address)) return;
     (*remaining)--;
     if (svg_animation_is_element(node)) {
         double begin_offsets[256], end_offsets[256];
@@ -1653,6 +1743,7 @@ static void svg_animation_queue_notification(DomElement* animation,
 static void svg_animation_collect_notifications(SvgTimeline* timeline, DomElement* node,
     double previous, SvgAnimationNotifications* events, unsigned depth, size_t* remaining) {
     if (!node || depth >= 256 || !*remaining) return;
+    if (svg_animation_separate_fragment(node, timeline->root.address)) return;
     (*remaining)--;
     if (svg_animation_is_element(node) && dom_svg_element_is_eligible(node)) {
         SvgAnimationInterval intervals[256];
@@ -1766,7 +1857,8 @@ static void svg_animation_sample_node(SvgTimeline* timeline, DomElement* animati
     float progress = cycles - iteration;
     double integral = round(cycles);
     // decimal durations can leave a tiny fmod remainder at an exact repeat-count end.
-    if (terminal && elapsed > 0 && fabs(cycles - integral) <= 8 * DBL_EPSILON * fmax(1, fabs(cycles))) {
+    if (terminal && isfinite(duration) && elapsed > 0 &&
+        fabs(cycles - integral) <= 8 * DBL_EPSILON * fmax(1, fabs(cycles))) {
         progress = 1.0f; iteration = fmax(0, integral - 1);
     }
     const char* attribute_type = animation->get_attribute("attributeType");
@@ -1813,7 +1905,7 @@ static void svg_animation_sample_node(SvgTimeline* timeline, DomElement* animati
                 }
             }
         }
-    } else result = svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration);
+    } else result = svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration, duration);
     if (result) svg_animation_store(registry, target, name, result, css);
 }
 
@@ -1821,20 +1913,42 @@ struct SvgAnimationCandidate {
     DomElement* animation;
     SvgAnimationInterval interval;
     size_t order;
+    DomElement* target;
+    unsigned dependency_phase;
+    unsigned target_depth;
 };
 
 typedef lam::ArrayList<SvgAnimationCandidate> SvgAnimationCandidates;
 
+static void svg_animation_candidate_dependencies(SvgAnimationCandidate* candidate) {
+    candidate->target = svg_animation_target_element(candidate->animation);
+    const char* name = svg_animation_attribute_name(candidate->animation);
+    candidate->dependency_phase = name && svg_animation_name_in("font-family font-size font-weight font-style", name) ? 0 :
+        name && candidate->target && candidate->target->tag() == MARKUP_NAME_SVG &&
+            svg_animation_name_in("viewBox width height", name) ? 1 : name && strcmp(name, "color") == 0 ? 2 :
+        name && strcmp(name, "type") == 0 ? 3 : 4;
+    if (candidate->dependency_phase < 3)
+        for (DomNode* parent = candidate->target; parent; parent = parent->parent) candidate->target_depth++;
+}
+
+static int svg_animation_priority_compare(const SvgAnimationCandidate* a, const SvgAnimationCandidate* b) {
+    if (a->interval.begin != b->interval.begin) return a->interval.begin < b->interval.begin ? -1 : 1;
+    return a->order == b->order ? 0 : a->order < b->order ? -1 : 1;
+}
+
 static int svg_animation_candidate_compare(const void* left, const void* right) {
     const SvgAnimationCandidate* a = (const SvgAnimationCandidate*)left;
     const SvgAnimationCandidate* b = (const SvgAnimationCandidate*)right;
-    if (a->interval.begin != b->interval.begin) return a->interval.begin < b->interval.begin ? -1 : 1;
-    return a->order == b->order ? 0 : a->order < b->order ? -1 : 1;
+    // font, viewport, currentColor and filter type samples are inputs to other attribute functions.
+    if (a->dependency_phase != b->dependency_phase) return a->dependency_phase < b->dependency_phase ? -1 : 1;
+    if (a->target_depth != b->target_depth) return a->target_depth < b->target_depth ? -1 : 1;
+    return svg_animation_priority_compare(a, b);
 }
 
 static void svg_animation_sample_tree(SvgTimeline* timeline, DomElement* node,
     SvgAnimationCandidates* candidates, unsigned depth, size_t* remaining) {
     if (!node || timeline->registry->sample_failed) return;
+    if (svg_animation_separate_fragment(node, timeline->root.address)) return;
     if (depth >= 256 || !*remaining) {
         log_error("SVG_ANIMATION_LIMIT: sample traversal exceeds 65536 nodes or 256 levels");
         timeline->registry->sample_failed = true; return;
@@ -1843,6 +1957,7 @@ static void svg_animation_sample_tree(SvgTimeline* timeline, DomElement* node,
     if (svg_animation_is_element(node)) {
         SvgAnimationCandidate candidate = {};
         candidate.animation = node; candidate.order = 65536 - *remaining;
+        svg_animation_candidate_dependencies(&candidate);
         if (svg_animation_interval(timeline, node, &candidate.interval) && !candidates->append(candidate))
             timeline->registry->sample_failed = true;
     }
@@ -1872,14 +1987,16 @@ static const char* svg_animation_frozen_sample(SvgTimeline* timeline, DomElement
     svg_animation_sample_tree(timeline, root->as_element(), &candidates, 0, &remaining);
     if (candidates.size() > 1) qsort(candidates.data(), candidates.size(),
         sizeof(SvgAnimationCandidate), svg_animation_candidate_compare);
-    SvgAnimationCandidate ceiling = {animation, *interval, order};
+    SvgAnimationCandidate ceiling = {animation, *interval, order, target, 0, 0};
+    svg_animation_candidate_dependencies(&ceiling);
     for (size_t i = 0; i < candidates.size() && !registry->sample_failed; i++) {
+        // dependency order includes inherited inputs while keeping frozen sandwiches acyclic.
         if (svg_animation_candidate_compare(&candidates[i], &ceiling) >= 0) break;
         svg_animation_sample_node(timeline, candidates[i].animation, &candidates[i].interval, candidates[i].order);
     }
     // SMIL freezes the complete to-function at the active end, including its underlying sandwich.
     const char* result = registry->sample_failed ? nullptr :
-        svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration);
+        svg_animation_sample_values(timeline, animation, target, name, css, progress, iteration, interval->duration);
     timeline->time = saved_time; registry->targets = saved_targets;
     SvgAnimatedTargetMap::destroy(temporary); registry->frozen_depth--;
     return result;
@@ -1916,15 +2033,27 @@ static void svg_animation_sample(SvgAnimationRegistry* registry) {
     registry->sampling = false;
 }
 
-static bool svg_animation_target_visible(SvgAnimationRegistry* registry, const SvgAnimatedTarget* entry) {
-    if (!entry || !dom_node_ref_validate(registry->document, entry->element)) return false;
+static bool svg_animation_node_visible(SvgAnimationRegistry* registry, DomNode* node) {
+    if (!node) return false;
     if (registry->reference_document) {
         if (svg_animation_source_document != registry->document || !svg_animation_source_instance) return false;
-        DomNode* node = entry->element.address;
         while (node && node != svg_animation_source_instance) node = node->parent;
         if (!node) return false;
     }
     return true;
+}
+
+uint64_t svg_animation_source_generation(DomDocument* document, Element* root, DomElement* node) {
+    SvgAnimationRegistry* registry = svg_animation_registry(document, false);
+    if (!registry) return 0;
+    if (!registry->reference_document) return registry->generation;
+    // shared external resources stay static outside the active use subtree (SVG 2 §5.6.5).
+    if (!node) node = dom_find_element_for_source(document->root, root);
+    return svg_animation_node_visible(registry, node) ? registry->generation : 0;
+}
+
+static bool svg_animation_target_visible(SvgAnimationRegistry* registry, const SvgAnimatedTarget* entry) {
+    return entry && svg_animation_node_visible(registry, dom_node_ref_validate(registry->document, entry->element));
 }
 
 static const char* svg_animation_target_value(SvgAnimationRegistry* registry, Element* source,

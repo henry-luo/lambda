@@ -174,6 +174,7 @@ typedef struct {
     int shadow_clip_depth;
     int effect_depth;
     int transform_depth;
+    int semantic_depth;
 } PaintIrValidationStack;
 
 typedef struct PaintOpDescriptor {
@@ -514,6 +515,20 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
                 return fail("glyph run payload is invalid");
             }
             break;
+        case PAINT_BEGIN_SEMANTIC_GROUP: {
+            const RenderSemanticGroup* group = &cmd->semantic_group;
+            if (group->attribute_count < 0 || (group->attribute_count && !group->attributes))
+                return fail("semantic group attributes are invalid");
+            for (int attr = 0; attr < group->attribute_count; attr++)
+                if (!group->attributes[attr].name || !group->attributes[attr].value)
+                    return fail("semantic group attribute is null");
+            stack.semantic_depth++;
+            break;
+        }
+        case PAINT_END_SEMANTIC_GROUP:
+            if (stack.semantic_depth <= 0) return fail("semantic group end without begin");
+            stack.semantic_depth--;
+            break;
         case PAINT_SVG_SUBSCENE:
             if (!cmd->svg_subscene.svg_root ||
                 cmd->svg_subscene.viewport_width <= 0.0f ||
@@ -534,6 +549,7 @@ bool paint_ir_validate(const PaintList* pl, PaintIrValidationResult* result) {
     if (!require_balanced(stack.shadow_clip_depth, "shadow clip stack is unbalanced")) return false;
     if (!require_balanced(stack.effect_depth, "effect group stack is unbalanced")) return false;
     if (!require_balanced(stack.transform_depth, "transform stack is unbalanced")) return false;
+    if (!require_balanced(stack.semantic_depth, "semantic group stack is unbalanced")) return false;
 
     paint_ir_validation_set(result, true, -1, "ok", 0, 0, 0, 0);
     return true;
@@ -985,6 +1001,16 @@ void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run) {
     PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_GLYPH_RUN);
     if (!cmd) return;
     cmd->glyph_run = *glyph_run;
+}
+
+void paint_begin_semantic_group(PaintList* pl, const RenderSemanticGroup* group) {
+    if (!group) return;
+    PaintCmd* cmd = paint_alloc_cmd(pl, PAINT_BEGIN_SEMANTIC_GROUP);
+    if (cmd) cmd->semantic_group = *group;
+}
+
+void paint_end_semantic_group(PaintList* pl) {
+    paint_alloc_cmd(pl, PAINT_END_SEMANTIC_GROUP);
 }
 
 // ---------------------------------------------------------------------------
@@ -1702,6 +1728,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
     int skipped_transform_depth = state->skipped_transform_depth;
     int open_effect_depth = state->open_effect_depth;
     int skipped_effect_depth = state->skipped_effect_depth;
+    int open_semantic_depth = state->open_semantic_depth;
     auto note_unsupported = [&](PaintOp op) {
         paint_svg_note_unsupported(out, indent_level, op,
                                    emit_unsupported_comments, active_stats);
@@ -2007,6 +2034,31 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             active_stats->emitted_count++;
             break;
         }
+        case PAINT_BEGIN_SEMANTIC_GROUP: {
+            const RenderSemanticGroup* group = &cmd->semantic_group;
+            paint_svg_indent(out, indent_level);
+            strbuf_append_str(out, "<g");
+            for (int attr = 0; attr < group->attribute_count; attr++) {
+                const RenderSemanticAttribute* value = &group->attributes[attr];
+                strbuf_append_format(out, " %s=\"", value->name);
+                escape_append_xml_attr(out, value->value, strlen(value->value));
+                strbuf_append_char(out, '"');
+            }
+            strbuf_append_str(out, ">\n");
+            indent_level++;
+            open_semantic_depth++;
+            if (group->title) {
+                paint_svg_indent(out, indent_level);
+                strbuf_append_str(out, "<title>");
+                paint_svg_append_text_escaped(out, group->title, -1);
+                strbuf_append_str(out, "</title>\n");
+            }
+            active_stats->emitted_count++;
+            break;
+        }
+        case PAINT_END_SEMANTIC_GROUP:
+            close_svg_group(&open_semantic_depth, cmd->op);
+            break;
         case PAINT_SVG_SUBSCENE: {
             const PaintSvgSubscene* p = &cmd->svg_subscene;
             if (!g_svg_subscene_svg_lowerer ||
@@ -2066,6 +2118,7 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
     state->skipped_transform_depth = skipped_transform_depth;
     state->open_effect_depth = open_effect_depth;
     state->skipped_effect_depth = skipped_effect_depth;
+    state->open_semantic_depth = open_semantic_depth;
 }
 
 void paint_ir_lower_svg(const PaintList* pl, StrBuf* out,

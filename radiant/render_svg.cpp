@@ -1349,12 +1349,9 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     ctx.indent_level++;
 
     // Add background
-    Color white = {};
-    white.r = 255;
-    white.g = 255;
-    white.b = 255;
-    white.a = 255;
-    paint_fill_rect(&ctx.paint_list, 0.0f, 0.0f, width, height, white);
+    // the document canvas includes propagated root/body paint even when its layout box is empty.
+    Color background = render_document_output_background(root_view);
+    paint_fill_rect(&ctx.paint_list, 0.0f, 0.0f, width, height, background);
     svg_lower_paint_list(&ctx);
 
     // Render the root view via shared tree walker

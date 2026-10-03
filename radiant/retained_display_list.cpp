@@ -139,6 +139,9 @@ static bool retained_dl_clone_item_payload(DisplayList* dst,
                                               &in->blit_surface_scaled.clip_shapes);
             break;
         case DL_BEGIN_ELEMENT:
+            if (!dl_copy_semantic_group(dst, &out->element_marker.semantics,
+                &in->element_marker.semantics)) return false;
+            [[fallthrough]];
         case DL_END_ELEMENT:
             if (in->element_marker.matching_index >= source_start) {
                 out->element_marker.matching_index =

@@ -1,0 +1,10 @@
+<!doctype html><html><head><style>html,body{margin:0}button{position:absolute;top:140px;width:60px;height:30px}</style></head><body>
+<svg id="scene" width="400" height="130">
+ <g transform="translate(10 10)"><rect width="50" height="30" filter="url(svg_image_assets/smil-instance-filter.svg#tone)"/></g>
+ <use href="svg_image_assets/smil-instance-filter.svg#shape" x="100" y="10"/>
+ <g transform="translate(190 10)"><rect width="50" height="30" filter="url(svg_image_assets/smil-instance-filter.svg#tone)"/></g>
+ <use href="svg_image_assets/smil-instance-filter.svg#shape" x="280" y="10"/>
+</svg>
+<svg id="other" width="60" height="40" style="position:absolute;left:10px;top:70px"><use href="svg_image_assets/smil-instance-filter.svg#shape"/></svg>
+<button id="zero" style="left:10px">0</button><button id="one" style="left:80px">1</button><button id="two" style="left:150px">2</button><button id="rewind" style="left:220px">rewind</button>
+<script>var scene=document.getElementById("scene"),other=document.getElementById("other");scene.pauseAnimations();other.pauseAnimations();scene.setCurrentTime(0);other.setCurrentTime(2);function wire(id,t){document.getElementById(id).onclick=function(){scene.setCurrentTime(t);};}wire("zero",0);wire("one",1);wire("two",2);wire("rewind",0);</script></body></html>

@@ -1,4 +1,5 @@
 #include "render.hpp"
+#include "svg_animation.hpp"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lib/memtrack.h"
 #include <limits.h>
@@ -174,8 +175,10 @@ RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, El
             svg_filter_registry_reclaim, registry, 0);
         document->services.svg_filter_registry = registry;
     }
+    uint64_t animation_generation = svg_animation_source_generation(document, element);
     for (RdtSvgFilterProgram* program = registry->programs; program; program = program->next)
-        if (program->element == element && program->epoch == document->mutation_epoch && !program->allocation_failed) {
+        if (program->element == element && program->epoch == document->mutation_epoch &&
+            program->animation_generation == animation_generation && !program->allocation_failed) {
             program->active_users++; return program;
         }
     if (!render_memory_allow_allocation(registry->memory, sizeof(RdtSvgFilterProgram) + ARENA_INITIAL_CHUNK_SIZE)) return nullptr;
@@ -185,12 +188,15 @@ RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, El
     if (!program->arena) { mem_free(program); return nullptr; }
     arena_set_mem_category(program->arena, MEM_CAT_RENDER);
     program->element = element; program->epoch = document->mutation_epoch; program->active_users = 1;
+    // clock-only SMIL changes alter compiled resource facts without changing the DOM epoch.
+    program->animation_generation = animation_generation;
     program->next = registry->programs; registry->programs = program;
     // stale, unpinned programs are retired on mutation rather than accumulating until document teardown.
     RdtSvgFilterProgram** cursor = &registry->programs;
     while (*cursor) {
         RdtSvgFilterProgram* old = *cursor;
-        if ((old->epoch != program->epoch || old->allocation_failed) && !old->active_users) {
+        if ((old->epoch != program->epoch || old->animation_generation != animation_generation ||
+            old->allocation_failed) && !old->active_users) {
             *cursor = old->next; arena_destroy(old->arena); mem_free(old);
         } else cursor = &old->next;
     }
@@ -240,13 +246,20 @@ static Bound svg_filter_resolve_region(const char* const* tokens, const SvgLengt
     return {values[0], values[1], values[0] + values[2], values[1] + values[3]};
 }
 
+static SvgLengthContext svg_filter_resource_lengths(const RdtSvgFilterRun* run, Element* resource) {
+    SvgLengthContext lengths = run->lengths;
+    if (run->resolve_lengths && resource) run->resolve_lengths(run->length_context, resource, &lengths);
+    return lengths;
+}
+
 bool render_svg_filter_region(const RdtSvgFilterProgram* program, const RdtSvgFilterRun* run, Bound* region) {
     if (!program || !run || !region || !program->valid) return false;
     if (program->filter_bbox && !svg_filter_nonempty(run->geometry)) return false;
     Bound basis = program->filter_bbox ? run->geometry : Bound{0, 0, run->lengths.viewport_width, run->lengths.viewport_height};
     float width = basis.right - basis.left, height = basis.bottom - basis.top;
     Bound defaults = {basis.left - .1f * width, basis.top - .1f * height, basis.right + .1f * width, basis.bottom + .1f * height};
-    *region = svg_filter_resolve_region(program->region, &run->lengths, defaults, run->geometry, program->filter_bbox);
+    SvgLengthContext lengths = svg_filter_resource_lengths(run, program->element);
+    *region = svg_filter_resolve_region(program->region, &lengths, defaults, run->geometry, program->filter_bbox);
     return svg_filter_nonempty(*region);
 }
 
@@ -532,7 +545,8 @@ static Bound svg_filter_node_region(const RdtSvgFilterProgram* program, const Rd
         }
     }
     // preserve the declared region for image fitting and tile periods; the grid independently clips stored pixels.
-    return svg_filter_resolve_region(node->region, &execution->run->lengths,
+    SvgLengthContext lengths = svg_filter_resource_lengths(execution->run, node->element);
+    return svg_filter_resolve_region(node->region, &lengths,
         defaults, execution->run->geometry, program->primitive_bbox);
 }
 

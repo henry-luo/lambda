@@ -10,6 +10,7 @@
 #include "radiant.hpp"
 #include "svg_animation.hpp"
 #include "../lambda/core/mark_reader.hpp"
+#include "../lambda/format/format.h"
 #include "../lambda/input/css/dom_element.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
@@ -358,6 +359,63 @@ static const char* get_svg_attr(Element* elem, const char* name) {
     return has_uppercase ? extract_element_attribute(elem, lowercase_name, nullptr) : nullptr;
 }
 
+static bool svg_export_semantic_attribute(const char* name) {
+    if (!name || (strncmp(name, "data-", 5) != 0 && strcmp(name, "role") != 0 &&
+        strcmp(name, "aria-label") != 0 && strcmp(name, "x") != 0 && strcmp(name, "y") != 0 &&
+        strcmp(name, "width") != 0 && strcmp(name, "height") != 0)) return false;
+    // semantic names remain XML attributes; authored paint, script and resource links are resolved elsewhere.
+    for (const unsigned char* ch = (const unsigned char*)name; *ch; ch++)
+        if (!isalnum(*ch) && *ch != '-' && *ch != '_' && *ch != '.') return false;
+    return true;
+}
+
+static int svg_export_begin_element(SvgInlineRenderContext* ctx, Element* elem) {
+    if (!ctx->semantic_target || ctx->semantic_target != ctx->dl) return -1;
+    ElementReader reader(elem);
+    lam::ArrayList<RenderSemanticAttribute> attrs;
+    lam::ArrayList<StringBuf*> values;
+    auto it = reader.attrs();
+    const char* name;
+    ItemReader value;
+    while (it.next(&name, &value)) {
+        if (!svg_export_semantic_attribute(name) || value.isNull()) continue;
+        StringBuf* text = stringbuf_new(ctx->pool);
+        if (!text) continue;
+        if (value.isString()) {
+            String* string = value.asString();
+            stringbuf_append_str_n(text, string->chars, string->len);
+        } else if (value.isSymbol()) {
+            Symbol* symbol = value.asSymbol();
+            stringbuf_append_str_n(text, symbol->chars, symbol->len);
+        } else if (value.isNumber()) {
+            format_number(text, value.item());
+        } else if (value.isBool()) {
+            stringbuf_append_str(text, value.asBool() ? "true" : "false");
+        }
+        if (!values.append(text)) { stringbuf_free(text); break; }
+        attrs.append({name, text->str->chars});
+    }
+    const char* tag = get_element_tag_name(elem);
+    StringBuf* title = nullptr;
+    if (tag && strcmp(tag, "text") == 0) {
+        title = stringbuf_new(ctx->pool);
+        if (title) reader.textContent(title);
+    }
+    int begin = -1;
+    if (attrs.size() || (title && title->length)) {
+        RenderSemanticGroup group = {attrs.data(), (int)attrs.size(), // INT_CAST_OK: attribute count is bounded by the element shape.
+            title && title->length ? title->str->chars : nullptr};
+        RenderSemanticGroup snapshot = {};
+        if (dl_copy_semantic_group(ctx->dl, &snapshot, &group)) {
+            begin = dl_begin_element(ctx->dl, 0, 0, 0, 0, 0);
+            if (begin >= 0) ctx->dl->data()[begin].element_marker.semantics = snapshot;
+        }
+    }
+    for (StringBuf* text : values) stringbuf_free(text);
+    if (title) stringbuf_free(title);
+    return begin;
+}
+
 // numeric Items from Lambda-built SVGs are invisible to the string accessor.
 static bool read_svg_number_attr(Element* elem, const char* name, float* result,
     const SvgLengthContext* lengths = nullptr, SvgLengthAxis axis = SVG_LENGTH_DIAGONAL) {
@@ -410,6 +468,7 @@ static void svg_preserve_aspect_alignment(const char* value,
 struct SvgStyleProperty {
     const char* name;
     const char* value;
+    uint64_t animation_generation;
     bool from_css;
     SvgStyleProperty* next;
 };
@@ -703,12 +762,14 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
     SvgStyleContext* style = ctx ? (SvgStyleContext*)ctx->style_context : nullptr;
     SvgStyleEntry* entry = svg_style_entry(style, elem);
     if (!entry) return get_svg_attr(elem, name);
+    uint64_t generation = svg_animation_source_generation(style->document, elem, entry->node);
     for (SvgStyleProperty* prop = entry->properties; prop; prop = prop->next) {
-        if (strcmp(prop->name, name) == 0) return prop->value;
+        if (strcmp(prop->name, name) == 0 && prop->animation_generation == generation) return prop->value;
     }
     SvgStyleProperty* prop = (SvgStyleProperty*)pool_calloc(style->pool, sizeof(SvgStyleProperty));
     if (!prop) return get_svg_attr(elem, name);
     prop->name = pool_strdup(style->pool, name);
+    prop->animation_generation = generation;
     CssDeclaration declaration = {};
     DomDocument* doc = style->document;
     if (css_select_element_declaration(style->engine, style->matcher, entry->node,
@@ -740,6 +801,8 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
             ? svg_style_property_value(ctx, dom_element_to_element(parent->as_element()), name) : initial;
         if (!inherits && !prop->value) prop->value = initial;
     }
+    // D4.5.1v4: another use instance can replace the document's borrowed sample pool in this walk.
+    if (generation && prop->value) prop->value = pool_strdup(style->pool, prop->value);
     prop->next = entry->properties;
     entry->properties = prop;
     return prop->value;
@@ -900,7 +963,7 @@ RdtMatrix svg_viewbox_transform(const SvgViewBox* viewbox, float width, float he
 // SVG Length Parsing
 // ============================================================================
 
-static float svg_resolve_length_unit(float number, CssUnit unit,
+float svg_resolve_length_unit(float number, CssUnit unit,
     const SvgLengthContext* context, SvgLengthAxis axis, float fallback) {
     switch (unit) {
         case CSS_UNIT_NONE: case CSS_UNIT_PX: return number;
@@ -1800,8 +1863,9 @@ RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
 static bool svg_style_property_from_css(SvgInlineRenderContext* ctx, Element* elem, const char* name) {
     SvgStyleContext* style = (SvgStyleContext*)ctx->style_context;
     SvgStyleEntry* entry = svg_style_entry(style, elem);
+    uint64_t generation = entry ? svg_animation_source_generation(style->document, elem, entry->node) : 0;
     for (SvgStyleProperty* prop = entry ? entry->properties : nullptr; prop; prop = prop->next) {
-        if (strcmp(prop->name, name) == 0) return prop->from_css;
+        if (strcmp(prop->name, name) == 0 && prop->animation_generation == generation) return prop->from_css;
     }
     return false;
 }
@@ -1917,6 +1981,7 @@ static bool svg_replay_capture(SvgInlineRenderContext* ctx, DisplayList* dl, Ima
         if (!render_svg_filter_spend_work(ctx->filter_work, (size_t)surface->width * (size_t)surface->height)) return false;
         for (int index = first; index < dl_item_count(dl); index++) {
             const DisplayItem* item = &(*dl)[index];
+            if (item->op == DL_BEGIN_ELEMENT || item->op == DL_END_ELEMENT) continue;
             double width = fmax(0.0, fmin(bounds->right, item->bounds[0] + item->bounds[2]) - fmax(bounds->left, item->bounds[0]));
             double height = fmax(0.0, fmin(bounds->bottom, item->bounds[1] + item->bounds[3]) - fmax(bounds->top, item->bounds[1]));
             double work = ceil(width) * ceil(height) + 1.0;
@@ -1937,8 +2002,39 @@ static bool svg_replay_capture(SvgInlineRenderContext* ctx, DisplayList* dl, Ima
     return valid;
 }
 
+static bool svg_export_copy_captured_semantics(DisplayList* target, const DisplayList* capture) {
+    int first = target->item_count();
+    lam::ArrayList<int> begins;
+    bool valid = true;
+    for (int i = 0; valid && i < capture->item_count(); i++) {
+        const DisplayItem& item = capture->data()[i];
+        if (item.op == DL_BEGIN_ELEMENT) {
+            RenderSemanticGroup group = {};
+            valid = dl_copy_semantic_group(target, &group, &item.element_marker.semantics);
+            if (!valid) break;
+            int begin = dl_begin_element(target, 0, 0, 0, 0, 0);
+            valid = begin >= 0 && begins.append(begin);
+            if (valid) target->data()[begin].element_marker.semantics = group;
+        } else if (item.op == DL_END_ELEMENT) {
+            if (begins.empty()) { valid = false; break; }
+            int begin = begins.back();
+            dl_end_element(target, begin);
+            valid = target->data()[begin].element_marker.matching_index >= 0;
+            begins.remove_range(begins.size() - 1, 1);
+        }
+    }
+    valid = valid && begins.empty();
+    if (!valid) {
+        // only value-only markers were appended; rollback leaves the enclosing paint scope intact.
+        target->remove_range((size_t)first, (size_t)(target->item_count() - first));
+        log_error("SVG_EXPORT_METADATA: failed to copy captured semantic groups");
+    }
+    return valid;
+}
+
 static bool svg_rasterize_traversal(SvgInlineRenderContext* source, Element* content,
-    SvgElementDrawFn draw, void* data, ImageSurface** surface, Bound* bounds, float padding = 0.0f, bool allow_empty = false) {
+    SvgElementDrawFn draw, void* data, ImageSurface** surface, Bound* bounds, float padding = 0.0f,
+    bool allow_empty = false, bool retain_semantics = false) {
     OffscreenRenderArenas arenas;
     if (!arenas.init("render.svg.capture", "render.svg.capture.list_arena",
         "render.svg.capture.scratch_arena")) return false;
@@ -1948,6 +2044,7 @@ static bool svg_rasterize_traversal(SvgInlineRenderContext* source, Element* con
     PaintList paint;
     SvgInlineRenderContext ctx = *source;
     ctx.dl = &dl; ctx.paint_list = &paint;
+    ctx.semantic_target = retain_semantics && source->semantic_target ? &dl : nullptr;
     ctx.backdrop_start = 0; // private effect/resource captures establish an isolated transparent backdrop.
     // fallback glyphs use the active gateway; private captures must own their commands too.
     DisplayList* saved_dl = g_svg_active_rdcon ? g_svg_active_rdcon->dl : nullptr;
@@ -1969,6 +2066,8 @@ static bool svg_rasterize_traversal(SvgInlineRenderContext* source, Element* con
         }
     }
     if (valid && *surface) valid = svg_replay_capture(&ctx, &dl, *surface, bounds, &scratch);
+    // effect SourceGraphic carries its visited semantics; mask/pattern/filter resources remain private.
+    if (valid && ctx.semantic_target) valid = svg_export_copy_captured_semantics(source->semantic_target, &dl);
     paint.clear(); dl_destroy(&dl); scratch_release(&scratch); arenas.destroy();
     return valid;
 }
@@ -6347,6 +6446,15 @@ struct SvgFilterImageContext {
     Bound region;
 };
 
+static void svg_filter_resolve_lengths(void* data, Element* element, SvgLengthContext* lengths) {
+    SvgFilterImageContext* owner = (SvgFilterImageContext*)data;
+    SvgInlineRenderContext resource = svg_resource_style_context(&owner->context, element);
+    SvgLengthContext declared = svg_length_context(&resource);
+    // font-relative lengths use the declaration's current font; percentages use the referencing viewport (§9.4).
+    lengths->font_size = declared.font_size;
+    lengths->x_height = declared.x_height;
+}
+
 static void svg_filter_draw_image(SvgInlineRenderContext* ctx, Element* element, void* data) {
     SvgFilterImageContext* image = (SvgFilterImageContext*)data;
     const char* href = get_svg_attr(element, "href");
@@ -6445,7 +6553,7 @@ static bool svg_filter_render_source(void* data, const RdtSvgFilterRun* run, Bou
     SvgInlineRenderContext context = owner->context; context.filter_work = run;
     ImageSurface* source = nullptr; Bound capture = {};
     // only a reachable SourceGraphic/SourceAlpha input captures the original subtree.
-    bool valid = svg_rasterize_traversal(&context, owner->element, owner->draw, owner->data, &source, &capture, 0.0f, true);
+    bool valid = svg_rasterize_traversal(&context, owner->element, owner->draw, owner->data, &source, &capture, 0.0f, true, true);
     if (valid) render_svg_filter_resample_source(run, source, capture, grid, output);
     if (source) image_surface_destroy(source);
     return valid;
@@ -6483,7 +6591,7 @@ static bool svg_render_effect_boundary(SvgInlineRenderContext* ctx, Element* ele
     source.effect_source = elem; source.opacity = 1.0f;
     ImageSurface* image = nullptr;
     Bound capture = {};
-    if (!filtered && !svg_rasterize_traversal(&source, elem, draw, data, &image, &capture)) {
+    if (!filtered && !svg_rasterize_traversal(&source, elem, draw, data, &image, &capture, 0, false, true)) {
         if (image) image_surface_destroy(image);
         render_svg_filter_program_release(program); return true;
     }
@@ -6502,6 +6610,7 @@ static bool svg_render_effect_boundary(SvgInlineRenderContext* ctx, Element* ele
         run.draw_source = svg_filter_render_source; run.source_context = &source_context;
         SvgFilterImageContext image_context = {svg_reference_render_context(ctx, &filter_reference), program, &run, {}};
         run.draw_image = svg_filter_render_image; run.image_context = &image_context;
+        run.resolve_lengths = svg_filter_resolve_lengths; run.length_context = &image_context;
         SvgFilterPaintContext paint_context = {*ctx, elem, &run, {}, false};
         run.draw_input = svg_filter_render_input; run.input_context = &paint_context;
         memtrack_get_limits(nullptr, nullptr, &run.work_limit);
@@ -6596,8 +6705,10 @@ static void render_svg_element(SvgInlineRenderContext* ctx, Element* elem) {
         strcmp(tag, "a") == 0 || strcmp(tag, "use") == 0 || strcmp(tag, "text") == 0 ||
         strcmp(tag, "switch") == 0 || strcmp(tag, "foreignObject") == 0);
     if (!ctx->visibility_hidden || container) {
+        int semantic_begin = svg_export_begin_element(ctx, elem);
         if ((tag && strcmp(tag, "svg") == 0) ||
             !svg_render_effect_boundary(ctx, elem, svg_draw_element_content)) render_svg_element_content(ctx, elem);
+        if (semantic_begin >= 0) dl_end_element(ctx->dl, semantic_begin);
     }
     ctx->visibility_hidden = saved_hidden;
 }
@@ -6613,7 +6724,8 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
                        const Color* initial_stroke_color, bool initial_stroke_none,
                        float initial_stroke_width, PaintList* paint_list,
                        ScratchArena* resource_scratch, Element* id_scope,
-                       bool image_document = false, double image_time = 0) {
+                       bool image_document = false, double image_time = 0,
+                       bool capture_semantics = false) {
     if (!svg_element) return;
     if (!dl || !paint_list) {
         log_error("[SVG] render_svg_to_display_list requires display-list and PaintIR targets");
@@ -6637,6 +6749,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     ctx.pool = pool;
     ctx.font_ctx = font_ctx;
     ctx.dl = dl;
+    ctx.semantic_target = capture_semantics ? dl : nullptr;
     ctx.paint_list = paint_list;
     PaintRecordTarget prior = svg_record_target(&ctx);
     paint_record_lower_pending(&prior);
@@ -6689,7 +6802,7 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
     SvgAnimationSourceScope animation_sources(style.document);
     if (style.document && style.document->root) svg_animation_prepare(style.document->root);
     if (style.isolated_document && style.document->root)
-        svg_animation_set_time(style.document->root, image_time);
+        svg_animation_set_document_time(style.document, image_time);
 
     // parse viewBox
     const char* viewbox_attr = get_svg_attr(svg_element, "viewBox");
@@ -6764,8 +6877,11 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
         host_parent->in_line->visibility != VIS_VISIBLE;
 
     // the root's viewport is already established; its effects still scope all content once.
-    if (svg_element_is_eligible(&ctx, svg_element) &&
-        !svg_render_effect_boundary(&ctx, svg_element, svg_draw_children, nullptr, true)) render_svg_children(&ctx, svg_element);
+    if (svg_element_is_eligible(&ctx, svg_element)) {
+        int semantic_begin = svg_export_begin_element(&ctx, svg_element);
+        if (!svg_render_effect_boundary(&ctx, svg_element, svg_draw_children, nullptr, true)) render_svg_children(&ctx, svg_element);
+        if (semantic_begin >= 0) dl_end_element(dl, semantic_begin);
+    }
 
     svg_style_destroy(&style);
     if (isolated_fonts) font_context_destroy(isolated_fonts);
@@ -6847,21 +6963,11 @@ static bool svg_export_paint_consume(PaintList* paint, void* context) {
 static bool render_svg_subscene_to_svg(const PaintSvgSubscene* subscene, StrBuf* out, int indent) {
     if (!subscene || !out) return false;
     SvgExportOutput output = {out, indent};
-    if (render_svg_subscene_with_paint(subscene, svg_export_paint_consume, &output)) return true;
-    Bound bounds = {};
-    ImageSurface* surface = render_svg_subscene_rasterize(subscene, &bounds);
-    if (!surface) return false;
-    PaintList paint = {};
-    paint_draw_image(&paint, (const uint32_t*)surface->pixels, surface->width, surface->height,
-        surface->pitch / 4, bounds.left, bounds.top, bounds.right - bounds.left,
-        bounds.bottom - bounds.top, 255, &subscene->transform, surface);
-    bool ok = svg_export_paint_consume(&paint, &output);
-    paint_list_destroy(&paint); image_surface_destroy(surface);
-    return ok;
+    return render_svg_subscene_with_paint(subscene, svg_export_paint_consume, &output, true);
 }
 
-static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene,
-                                                DisplayList* dl) {
+static void render_svg_record_subscene(const PaintSvgSubscene* subscene,
+                                      DisplayList* dl, bool capture_semantics) {
     if (!subscene || !subscene->svg_root || !dl) return;
 
     Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
@@ -6921,7 +7027,8 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
                       subscene->stroke_width,
                       &nested_paint,
                       &resource_scratch,
-                      (Element*)subscene->id_scope, subscene->image_document, subscene->animation_time);
+                      (Element*)subscene->id_scope, subscene->image_document, subscene->animation_time,
+                      capture_semantics);
 
     if (viewport_clip) { dl_pop_clip(dl); rdt_path_free(viewport_clip); }
     g_svg_active_rdcon = previous;
@@ -6932,14 +7039,18 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
     mem_pool_destroy(temp_pool);
 }
 
+static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene, DisplayList* dl) {
+    render_svg_record_subscene(subscene, dl, false);
+}
+
 bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
-    SvgExportPaintConsumer consumer, void* context) {
+    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback) {
     if (!subscene || !subscene->svg_root || !consumer) return false;
     Arena* arena = mem_arena_create(nullptr, MEM_ROLE_RENDER, "render.svg.export.vector");
     if (!arena) return false;
     DisplayList dl = {}; dl_init(&dl, arena);
     PaintSvgSubscene logical = *subscene; logical.raster_scale = 1;
-    render_svg_subscene_to_display_list(&logical, &dl);
+    render_svg_record_subscene(&logical, &dl, true);
     PaintList paint = {};
     bool valid = dl_validate_or_log(&dl, "svg_export_vector");
     // the consumer runs before the recording owner expires (D4.2.2v2); unrepresentable pixel operations select shared replay.
@@ -6992,11 +7103,40 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
             paint_push_clip(&paint, p.path, p.has_transform ? &p.transform : nullptr); break;
         }
         case DL_POP_CLIP: paint_pop_clip(&paint); break;
-        case DL_BEGIN_ELEMENT: case DL_END_ELEMENT: break;
+        case DL_BEGIN_ELEMENT:
+            paint_begin_semantic_group(&paint, &item.element_marker.semantics); break;
+        case DL_END_ELEMENT:
+            paint_end_semantic_group(&paint); break;
         default: valid = false; break;
         }
     }
     bool ok = valid && paint_ir_validate_or_log(&paint, "svg_export_vector_paint") && consumer(&paint, context);
+    if (!ok && allow_raster_fallback) {
+        Bound bounds = {};
+        ImageSurface* surface = render_svg_subscene_rasterize(subscene, &bounds);
+        if (surface) {
+            paint_list_clear(&paint);
+            bool placed = false;
+            auto place_snapshot = [&]() {
+                paint_draw_image(&paint, (const uint32_t*)surface->pixels, surface->width, surface->height,
+                    surface->pitch / 4, bounds.left, bounds.top, bounds.right - bounds.left,
+                    bounds.bottom - bounds.top, 255, &subscene->transform, surface);
+                placed = true;
+            };
+            // flatten unrepresentable paint while retaining the recording's semantic tree and text.
+            for (int i = 0; i < dl.item_count(); i++) {
+                const DisplayItem& item = dl.data()[i];
+                if (item.op == DL_BEGIN_ELEMENT) {
+                    paint_begin_semantic_group(&paint, &item.element_marker.semantics);
+                    if (!placed) place_snapshot();
+                } else if (item.op == DL_END_ELEMENT) paint_end_semantic_group(&paint);
+            }
+            if (!placed) place_snapshot();
+            ok = paint_ir_validate_or_log(&paint, "svg_export_snapshot_paint") && consumer(&paint, context);
+            paint_list_clear(&paint);
+            image_surface_destroy(surface);
+        }
+    }
     paint_list_destroy(&paint); dl_destroy(&dl); mem_arena_destroy(arena);
     return ok;
 }

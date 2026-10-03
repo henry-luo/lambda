@@ -838,7 +838,8 @@ static bool pdf_export_paint_consume(PaintList* paint, void* context) {
         case PAINT_FILL_PATH:
             if (cmd.fill_path.color.a != 255 || cmd.fill_path.rule != RDT_FILL_WINDING) return false;
             break;
-        case PAINT_PUSH_CLIP: case PAINT_POP_CLIP: break;
+        case PAINT_PUSH_CLIP: case PAINT_POP_CLIP:
+        case PAINT_BEGIN_SEMANTIC_GROUP: case PAINT_END_SEMANTIC_GROUP: break;
         default: return false;
         }
     }
@@ -1162,6 +1163,9 @@ static void pdf_lower_paint_list(PdfRenderContext* ctx, PaintList* commands) {
             state->emitted_count++;
             break;
         }
+        case PAINT_BEGIN_SEMANTIC_GROUP:
+        case PAINT_END_SEMANTIC_GROUP:
+            break; // semantic wrappers have no paint or PDF graphics-state effect
         case PAINT_SVG_SUBSCENE: {
             PaintSvgSubscene* p = &cmd->svg_subscene;
             PaintSvgSubscene vector_scene = *p;
@@ -1750,8 +1754,9 @@ static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
 }
 
 // Main PDF rendering function
-static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width, float height) {
-    if (!root_view || !uicon) {
+static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width, float height,
+                                       float output_scale) {
+    if (!root_view || !uicon || !isfinite(output_scale) || output_scale <= 0) {
         return NULL;
     }
 
@@ -1785,6 +1790,12 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.page_height = height;
     HPDF_Page_SetWidth(ctx.current_page, width);
     HPDF_Page_SetHeight(ctx.current_page, height);
+    // the page and capture density scale physically; the tree and top-left coordinate conversion stay logical.
+    HPDF_Page_Concat(ctx.current_page, output_scale, 0, 0, output_scale, 0, 0);
+    width /= output_scale;
+    height /= output_scale;
+    ctx.page_width = width;
+    ctx.page_height = height;
 
     // Initialize context
     ctx.ui_context = uicon;
@@ -1819,6 +1830,10 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     if (ctx.current_font) {
         HPDF_Page_SetFontAndSize(ctx.current_page, ctx.current_font, 16.0f);
     }
+
+    Color background = render_document_output_background(root_view);
+    paint_fill_rect(&ctx.paint_list, 0, 0, width, height, background);
+    pdf_lower_paint_list(&ctx);
 
     // Render the root view via shared tree walker
     RenderBackend backend = pdf_make_backend(&ctx);
@@ -1888,7 +1903,7 @@ static int render_export_session_to_pdf(RenderExportSession* session, const char
         float pdf_width = session->content_width * session->output_scale;
         float pdf_height = session->content_height * session->output_scale;
         HPDF_Doc pdf_doc = render_view_tree_to_pdf(ui_context, doc->view_tree->root,
-                                                   pdf_width, pdf_height);
+                                                   pdf_width, pdf_height, session->output_scale);
         if (pdf_doc) {
             if (save_pdf_to_file(pdf_doc, pdf_file)) {
                 log_info("Successfully rendered HTML to PDF: %s", pdf_file);

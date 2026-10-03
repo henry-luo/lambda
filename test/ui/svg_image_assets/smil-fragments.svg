@@ -1,0 +1,1 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50" height="30"><foreignObject width="50" height="30"><div xmlns="http://www.w3.org/1999/xhtml"><svg xmlns="http://www.w3.org/2000/svg" width="50" height="30"><rect width="50" height="30" fill="red"><set attributeName="fill" to="blue" begin="0.2s" dur="0.2s" fill="freeze"/></rect></svg></div></foreignObject></svg>

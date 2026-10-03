@@ -56,6 +56,35 @@ float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count) {
     return copy;
 }
 
+bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
+                            const RenderSemanticGroup* source) {
+    if (!dl || !out || !source || source->attribute_count < 0 ||
+        (source->attribute_count && !source->attributes)) return false;
+    RenderSemanticGroup copy = {};
+    auto copy_string = [&](const char* value) -> const char* {
+        if (!value) return nullptr;
+        size_t bytes = strlen(value) + 1;
+        char* result = (char*)scratch_alloc(&dl->arena, bytes);
+        if (result) memcpy(result, value, bytes);
+        return result;
+    };
+    if (source->attribute_count) {
+        RenderSemanticAttribute* attrs = (RenderSemanticAttribute*)scratch_calloc(
+            &dl->arena, (size_t)source->attribute_count * sizeof(RenderSemanticAttribute));
+        if (!attrs) return false;
+        for (int i = 0; i < source->attribute_count; i++) {
+            attrs[i] = {copy_string(source->attributes[i].name), copy_string(source->attributes[i].value)};
+            if (!attrs[i].name || !attrs[i].value) return false;
+        }
+        copy.attributes = attrs;
+        copy.attribute_count = source->attribute_count;
+    }
+    copy.title = copy_string(source->title);
+    if (source->title && !copy.title) return false;
+    *out = copy;
+    return true;
+}
+
 void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
                           ClipShape** clip_shapes, int clip_depth) {
     if (!dst) return;

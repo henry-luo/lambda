@@ -426,7 +426,7 @@ Animations run on the frame clock of `lambda view` ([RAD_16](dev/radiant/RAD_16_
 | Timing functions | ◐ | See [§6.5](#65-transform-filter-easing-and-shape-functions). |
 | Transitions | ◐ | Wired for `opacity`, `color`, `background-color`, `width`, `height` and their `min-`/`max-` forms, and `aspect-ratio`. `transform` does not transition, and at most 8 properties are taken from a `transition-property` list. Of the 10 WPT transition-event tests that are run, 1 passes. |
 | Events | ◐ | `animationstart`, `animationiteration`, `animationend`, `transitionend`, `transitioncancel`. No `animationcancel`, `transitionrun` or `transitionstart`. |
-| SVG SMIL animation | ❌ | See [§15](#15-svg). |
+| SVG SMIL animation | ◐ | Live document-time animation and timeline controls; see [§15](#15-svg) for the supported classes and timing limits. |
 | Animated GIF, Lottie | ◐ | Play in `lambda view`; static output shows the first frame (GIF) or an empty box (Lottie). |
 
 ## 14. Interaction
@@ -459,6 +459,12 @@ visibility, styled stops and mutation invalidation now have fresh paint/input ch
 [SVG Support](../vibe/impl/Lambda_Impl_SVG_Support.md#74-progress-record).
 Other entries retain the 2026-09-28 evidence date.
 
+**2026-10-03 P7/P10 update:** stroke/marker paint and pointer fixtures pass at
+1×/2× with caching off/eager. Filter graphs pass the final coordinate/resource
+audit, including resource font units and live image/font replacement. The
+[audit record](../vibe/impl/Lambda_Impl_SVG_Support.md#714-p7p10-final-stroke-oracle-and-filter-resource-audit)
+identifies independent references for browser implementation differences.
+
 ### 15.1 Elements
 
 | Element | Status | Notes |
@@ -482,10 +488,14 @@ Other entries retain the 2026-09-28 evidence date.
 | `<pattern>` | ✅ | Tile/content units, x/y/width/height, affine transforms, viewBox/PAR and local/external href templates. Tiles are clipped and sampled once for fill/stroke; tiny periods have bounded traversal. |
 | `<clipPath>` | ◐ | The union of basic shapes, or only the first `<path>`. Child transforms, `clipPathUnits="objectBoundingBox"` and `style="clip-path:…"` are ignored, and the clip ignores the clipped element's own transform. |
 | `<mask>` | ◐ | Luminance of solid-filled shapes. Gradient masks are ignored (the element paints unmasked), and black shapes cannot cut holes. |
-| `<marker>` | ◐ | `marker-end` on `<path>` only, with `orient`, `refX`/`refY` and `markerUnits`. No `marker-start` or `marker-mid`, no markers on `<line>`, `<polyline>` or `<polygon>`, and the marker's `viewBox` is ignored (all verified). |
-| `<filter>` | ◐ | Only the first `<feGaussianBlur>`, and only on shapes and paths (not on `<g>`, `<text>`, `<image>` or `<use>`). |
-| Other filter primitives | ❌ | `feDropShadow`, `feOffset`, `feMerge`, `feColorMatrix` and `feFlood` are ignored (a classic drop-shadow chain blurs the source graphic instead); there is no code for `feBlend`, `feComposite`, `feMorphology`, `feTurbulence`, `feDisplacementMap`, `feImage`, `feTile` or the lighting filters. |
-| SMIL animation (`<animate>`, `<animateTransform>`, `<set>`) | ❌ | The static state is drawn. |
+| `<marker>` | ✅ | Start/mid/end on paths, lines, polylines and polygons, including closed/degenerate segment tangents; orientation, reference points, units, viewBox/aspect fitting, overflow and context paint. |
+| `<filter>` | ◐ | Named multi-primitive graphs on shapes, groups, text, images, use and viewports; standard paint/backdrop inputs, primitive/filter regions, bounding-box/user units, color spaces and bounded execution. The 15 implemented primitives are listed below; component transfer and convolution remain unsupported. |
+| `feGaussianBlur`, `feDropShadow`, `feOffset`, `feMerge`, `feColorMatrix`, `feFlood` | ✅ | Anisotropic blur and edge extension; complete chains and named intermediate results. |
+| `feBlend`, `feComposite`, `feMorphology` | ✅ | 16 blend modes, seven composite operators, arithmetic coefficients and axis-separated erosion/dilation. |
+| `feTurbulence`, `feDisplacementMap`, `feImage`, `feTile` | ✅ | Deterministic stitched noise, selected-channel bilinear displacement, local/external images and fragments, and fractional repeat periods. |
+| `feDiffuseLighting`, `feSpecularLighting` | ✅ | Distant/point/spot children, Sobel boundaries, cone edges and premultiplied output. |
+| `feComponentTransfer`, `feConvolveMatrix` | ❌ | Outside the proposal's F1–F4 primitive inventory; unavailable primitives reject the graph with a diagnostic. |
+| SMIL animation (`<animate>`, `<animateTransform>`, `<set>`) | ◐ | Document clocks, pause/seek, begin/end/restart, repeats, freeze/remove, event/syncbase timing, keyTimes/keySplines, discrete/linear/paced/spline, additive/accumulate. Numeric, integer, length/list, color/paint, matching path/point lists, discrete attributes and translate/scale/rotate/skew transforms are implemented on rendered targets. Resource caches follow samples; external use follows its host clock, SVG images run in isolated mode, and exports sample initial time. Access-key/wallclock timing and per-use instance event retargeting remain unsupported; animation does not add unavailable filter/text capabilities. [Class inventory and validation](../vibe/impl/Lambda_Impl_SVG_Support.md#715-p12-smil-clock-dependency-default-and-lifetime-audit). |
 
 ### 15.2 Attributes, styling and paint servers
 
@@ -494,7 +504,7 @@ Other entries retain the 2026-09-28 evidence date.
 | `transform` attribute | ✅ | Attribute transforms and authored CSS transforms with CSS precedence, transform origins, and view/fill reference boxes; paint and geometric hit testing share decoding. |
 | Colours | ✅ | Hex, `rgb()`/`rgba()` including percentages, `hsl()`/`hsla()` with number/degree/radian/gradian/turn hues, and CSS named colours including `rebeccapurple`. SVG uses the shared CSS color parser. |
 | `currentColor` | ✅ | Including a CSS `color` set on the `<svg>` element. |
-| `context-fill`, `context-stroke` | ◐ | Recursive use instances retain source paint, geometry bounds, coordinates and document/base. No context produces no paint. Marker context paint remains in P7. |
+| `context-fill`, `context-stroke` | ✅ | Use and marker instances retain source paint, geometry bounds, coordinates and document/base. No context produces no paint. |
 | `fill="url(#gradient)"` | ✅ | Inherited typed paints apply to basic/curved shapes and text using tight geometry bounds; text glyphs share the complete text paint domain. |
 | `stroke="url(#gradient)"` | ✅ | Gradient strokes share caps, joins, dashes and paint opacity with solid strokes. |
 | `gradientUnits` | ✅ | |
@@ -502,10 +512,11 @@ Other entries retain the 2026-09-28 evidence date.
 | `stop-color`, `stop-opacity` | ✅ | Presentation attributes and authored CSS, including inherited `currentColor` and percentage stop opacity. |
 | `fill-rule` | ✅ | |
 | `clip-rule` | ❌ | |
-| `opacity`, `fill-opacity`, `stroke-opacity` | ◐ | Shapes and text paint through shared opacity scopes; complete clip/mask/filter compositing remains in P8/P10. |
+| `opacity`, `fill-opacity`, `stroke-opacity` | ✅ | Shapes, containers, text and referenced content share source capture, filter, clip/mask and final opacity ordering. |
 | `stroke-width`, `stroke-linecap`, `stroke-linejoin`, `stroke-dashoffset` | ✅ | |
 | `stroke-dasharray` | ✅ | Preserves zero-length round-cap dots, repeats odd lists, treats all-zero/invalid negative lists as solid, and resolves percentages against the viewport diagonal. |
-| `stroke-miterlimit`, `vector-effect`, `paint-order` | ❌ | |
+| `stroke-miterlimit`, `paint-order` | ✅ | Acute miter cutoffs and every fill/stroke/marker permutation; paint and pointer geometry share stroke facts. |
+| `vector-effect` | ◐ | `none` and affine `non-scaling-stroke`. SVG2's at-risk `non-scaling-size`, `non-rotation`, `fixed-position`, combined effects and explicit `viewport`/`screen` selectors remain unsupported ([§8.13](https://www.w3.org/TR/SVG2/coords.html#VectorEffects)). |
 | `text-anchor` | ✅ | |
 | Presentation attributes vs CSS | ✅ | Shared author cascade, including inline importance and selector-list specificity; presentation attributes have specificity zero. Invalid paint declarations preserve earlier valid declarations. |
 | **Page stylesheets reaching SVG content** | ✅ | Host selectors style inline SVG descendants. Host class/style changes and stylesheet text replacement invalidate retained SVG paint; external image documents remain isolated. |
@@ -556,17 +567,27 @@ The image decoders linked into `lambda` are libpng, libjpeg-turbo and giflib (`l
 | 2D transforms | ✅ | ✅ | ✅ |
 | 3D transforms, `perspective` | ✅ | ❌ the perspective part is dropped | ❌ same |
 | `<img>` (raster) | ✅ | ◐ linked as `file://` URLs, not embedded; `data:` images dropped; `object-fit` ignored | ✅ embedded; `object-fit` ignored |
-| `<img>` (SVG) | ✅ | ◐ linked | ❌ dropped |
+| `<img>` (SVG) | ✅ | ✅ resolved paint with embedded resources and shared object-fit/object-position placement | ✅ shared SVG paint; native opaque paths or transparent raster fallback at the requested density |
 | CSS `background-image` | ✅ | ◐ a `<pattern>` referencing the original relative URL; a non-repeating image without `background-size` gets zero size | ❌ dropped |
-| Inline `<svg>` | ✅ | ◐ copied through verbatim: page CSS sizing is lost, and an undeclared `xlink:` prefix makes the file invalid XML | ◐ rasterized at 1× on an opaque white box |
+| Inline `<svg>` | ✅ | ✅ resolved viewport, CSS, sampled animation and resources; paths/gradients stay vector, unsupported paint embeds transparent PNGs; text outlines retain accessible titles and semantic metadata | ✅ resolved SVG paint, with native opaque paths and transparent density-aware fallback for other operations |
 | Hyperlinks | n/a | ❌ | ❌ no link annotations |
 | Pages | one image | one image | ❌ one page the size of the content (1 CSS px = 1 pt); `@page`, page breaks and print media are ignored |
-| Page background | white | white | transparent; the `body` background does not fill the page |
+| Page background | root/body canvas paint, with white fallback | same canvas resolution | same canvas resolution |
 | Size when no `-vw`/`-vh` is given | PNG: laid out at 1200 px wide, canvas fits the content plus 50 px. **JPEG: a fixed 1200 × 800 crop** | laid out at 1200 px, canvas fits the content plus 50 px | laid out at 800 px, page fits the content plus 50 px |
-| `-s` / `--pixel-ratio` | ✅ e.g. `-s 2` doubles the pixels | ❌ `-s` enlarges the canvas without scaling the content; `--pixel-ratio` is ignored | ❌ same |
+| `-s` / `--pixel-ratio` | ✅ e.g. `-s 2` doubles the pixels | ✅ `-s` scales physical dimensions and content together; `--pixel-ratio` is ignored | ✅ `-s` scales the page, content and SVG capture density together; `--pixel-ratio` is ignored |
 | Colour management | PNG: RGBA without colour-space chunks; JPEG: quality 85, no ICC profile | — | DeviceRGB, no ICC profile |
 
 For print-quality PDF today, render to PNG at a higher density (`-s 2`) or use the SVG output, and keep text to fonts the reader has installed.
+
+SVG-content export rows were verified on macOS on 2026-10-03 by
+`test/svg/test_svg_export.cjs` (the runner behind `make test-svg-export`):
+16 fixtures at 1×/2× cover relocated XML-valid SVG, unique resource IDs, embedded
+images/fonts, clips, visible overflow, paint servers, effects, embedded HTML and
+PDF pixels. SVG text and local/embedded font fixtures retain vector outlines in
+both exports; general HTML text retains the separate limitations above.
+Linux/Windows export smoke remains pending. Recording snapshots follow
+**D4.5.1v4**'s "pin, gen-check, copy-as-value" seam; progress and evidence are in
+[SVG Support P13](../vibe/impl/Lambda_Impl_SVG_Support.md#713--p13-resumed-export-repair).
 
 ## 18. Known Limitations
 

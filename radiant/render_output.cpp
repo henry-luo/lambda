@@ -409,8 +409,7 @@ RenderFrameScope::~RenderFrameScope() {
 }
 
 static uint32_t render_output_canvas_background(View* root_view) {
-    Color background = render_document_canvas_background(root_view);
-    return background.a > 0 ? background.c : 0xFFFFFFFF;
+    return render_document_output_background(root_view).c;
 }
 
 static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTree* view_tree,

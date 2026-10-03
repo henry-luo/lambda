@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-02
 
-**Status:** paused at user request on 2026-10-03; P1-P6 implemented with focused and aggregate Radiant validation; P7 oracle review remains open; P8-P9 have focused validation; P10 filter graphs have F1-F4 focused gates; P11 content/input gates pass with export deferred to P13; P12 animation is in progress; final filter audits and P13 portable/vector export gates remain outstanding
+**Status:** P7/P10 outstanding audits are closed (§7.14). P12's clock dependency, default, fragment, detach and deterministic export audits are implemented (§7.15); SMIL remains partial with its remaining timing/instance limits stated there. Linux/Windows P13 runtime smoke remains open; the whole proposal is not complete.
 
 **Scope:** the missing behavior in §15 of [HTML, CSS and SVG Support](../../doc/HTML_CSS_SVG_Support.md#15-svg), including the limitations inside partial and supported rows; SVG-specific export limitations in §17 are a separate final phase.
 
@@ -25,7 +25,7 @@ Lambda semantics or design ruling. Applicable formal requirements are:
 | **D4.2.2v2–D4.2.4** | Resources and allocator lifetimes belong to document contexts; published shared arenas/pools require retained ownership and exclusive reset. Deferred SVG commands cannot borrow expired render scratch. |
 | **D4.2.5v3** | Application allocations use `mem_*` or the owning Arena/Pool/GC API; no new direct libc allocation paths. |
 | **D4.2.6** | Document/pool cleanup owns decoded surfaces, references and other external resources. |
-| **D4.5.1v3** | Radiant is “never GC'd”; the seam contract is “pin, gen-check, copy-as-value.” DOM removal, asynchronous completion and retained paint must honor generation checks. |
+| **D4.5.1v4** | Radiant is never GC'd; each scratch stack owns its arena. The seam contract is pin, gen-check, copy-as-value. DOM removal, asynchronous completion and retained paint must honor generation checks. |
 | **D1.5v2, D5.3.3** | Runtime-generated SVG and script callbacks crossing the seam use precise `RootFrame`/`Rooted`/persistent ownership; conservative stack scanning remains retired. |
 
 These IDs refer to [Lambda Formal Design](../../doc/Lambda_Formal_Design.md).
@@ -594,13 +594,13 @@ Do not infer performance from debug-build functional runs.
 | P4 | Implemented | Shared PNG/JPEG/GIF/static-WebP images, placement/aspect fitting, isolated SVG resources, relative URIs, retained ownership/promotion and GIF-frame invalidation. |
 | P5 | Implemented; T2 paint servers finish in P6 | UTF-16 positioning lists, repeated rotation, logical glyph metrics, inherited spacing/baselines, nested textLength, outline/bitmap coverage paint, decoration and shared character-cell targeting. Font/image documents own isolated font descriptors. |
 | P6 | Implemented; aggregate Radiant validation passed | Typed inherited fill/stroke/currentColor/resource/context paints; gradient transforms, spread, focal circles, dynamic styled stops and local/external templates; resource-style font metrics; clipped pattern tiles with units/viewBox/templates and bounded sampling. Recursive use context paint preserves source bounds/frame/document. Marker context paint finishes in P7. |
-| P7 | Implementation present; oracle review open | Affine non-scaling strokes, complete dash/miter/order data, authored marker topology and instance paint/hit geometry. The marker geometry oracle was corrected during the requested baseline repair below; the other original stroke raster fixture still needs review. |
+| P7 | Implemented and validated within advertised vector-effect subset | Stroke/marker pixels, every paint-order permutation and live instance/pointer geometry pass at 1×/2× with cache off/eager. The five density-specific edge expectations now have independent browser evidence. Broader SVG2 vector effects remain explicitly unsupported (§7.14). |
 | P8 | Implemented; focused validation passed | Common premultiplied effect capture for shapes, containers, text/tspan, image, use, symbol and SVG viewports; clip unions/rules/units/transforms; alpha/luminance/linear masks; exact clipped pointer targeting and mutation invalidation. Final aggregate gates remain required. |
 | P9 | Implemented with focused validation | Shared path metrics, local/external path references, SVG2 basic shapes/inline paths, calibrated offsets, anchoring, reversed and closed paths, nested positioning, textLength, warped outlines/color glyphs and live pointer/mutation behavior. |
-| P10 | In progress | F1-F4 graph kernels and focused browser/specification gates are implemented. Additional filter audits and final aggregate validation remain outstanding. |
+| P10 | Implemented and validated for F1–F4 | Final coordinate/resource audit fixes declaration-font region units and validates shared viewport/bounding-box bases, isolated external images, live resource recovery, graph reclamation and retained output ownership. Focused, aggregate and macOS export gates pass (§7.14). |
 | P11 | Implemented; export gate pending P13 | Switch selection and inline/isolated foreignObject layout, paint, input, mutation and image restrictions have focused gates. |
-| P12 | In progress | Basic controlled-time SMIL passes 41/41 in Chromium and native UI; advanced value/timing gates remain open. |
-| P13 | In progress | Resolved styles, SVG pictures, embedded HTML and transparent PDF capture pass the initial snapshot gate; portable/vector and platform gates remain outstanding. |
+| P12 | Implemented core; partial SMIL | Typed interpolation, controlled/running clocks, event/syncbase timing, resource cache scope, fragment/image clocks and deterministic initial exports are validated in §7.15. Access-key/wallclock timing and per-use event retargeting remain open. |
+| P13 | Resumed; macOS export and aggregate gates validated | All twelve export structure/metadata regressions are fixed. Sixteen fixtures pass at 1×/2×; Lambda, Radiant and Test262 gates pass with the classifications recorded in §7.13. Linux/Windows runtime smoke remains open. |
 
 **Implementation record, 2026-10-02.** Radiant continues to emit PaintIR and
 DisplayList commands through the existing ThorVG adapter. No vendor source
@@ -968,8 +968,8 @@ rejected oracle corrections remain pending; this phase does not change them.
 
 ### 7.9 P10 — filter graph progress and focused F1–F4 gates
 
-**Status: in progress.** F1–F4 kernels have focused validation; remaining
-filter/export audits are not complete. No formal SVG painting ruling changed. Document resource ownership,
+**Checkpoint status: in progress; superseded by §7.14.** F1–F4 kernels had focused validation;
+coordinate/resource and aggregate audits were still open at this checkpoint. No formal SVG painting ruling changed. Document resource ownership,
 retained values and teardown follow **D4.2.2v2–D4.2.6/D4.5.1v3**; logical/physical
 coordinates and density checks follow **RSC1/RSC6/RSC11–RSC12**.
 
@@ -1110,9 +1110,10 @@ oracle, an SVG font-shorthand regression, and missing PDF page images during
 scrolling. The latter two have root-cause fixes and focused validation; the
 aggregate gate has not been rerun and is not green.
 
-Remaining before closing P10: aggregate gates and the final coordinate/resource
-audit; P13 export/platform validation remains a later gate. P7's separately rejected
-oracle corrections remain pending and have not been applied.
+At this checkpoint, aggregate gates and the final coordinate/resource audit
+remained open; P13 export/platform validation was a later gate. P7's rejected
+oracle corrections were still pending. The resumed P7/P10 audit in §7.14
+supersedes these outstanding items.
 
 ### 7.10 — Conditional content and embedded HTML (P11, in progress)
 
@@ -1266,9 +1267,11 @@ number/length lists, paths and discrete values rather than accepting a color in
 any numeric attribute. It trims enum tokens, accepts a terminal value-list
 separator, applies absent geometry defaults, normalizes optional numeric pairs,
 resolves length-list units and rounds integer interpolation. Chromium passes
-**29/40**: discrete to-only and nonadditive from/by-list assertions retain the
-normative [SMIL value rules](https://www.w3.org/TR/2001/REC-smil-animation-20010904/#AnimFuncValues)
-and [SVG list-type rules](https://www.w3.org/TR/SVG11/animate.html#Animatable).
+**29/40** in this historical capture. The discrete to-only assertions incorrectly
+used general SMIL behavior: SVG 1.1 §19.2.9 overrides it with a halfway/keyTimes
+transition. §7.15 corrects those assertions and the evaluator. The nonadditive
+from/by-list assertions retain the
+[SVG list-type rules](https://www.w3.org/TR/SVG11/animate.html#Animatable).
 The syncbase-cycle fixture passes **84/84** in Chromium, reproduces **71/84**
 natively and now passes **84/84**. Timing queries iterate anchored cycles to a
 fixed point, leave unanchored cycles unresolved, include future intervals needed
@@ -1454,3 +1457,314 @@ expected results or baseline classifications were changed to hide these failures
 Evidence is under `temp/radiant-baseline-fix/`, including `radiant-complete.log`,
 `lambda-baseline.log`, `test262-baseline.log`, `render-release.log` and
 `projection-svg-output.txt`. The proposal remains paused and incomplete.
+
+### 7.13 — P13 resumed export repair
+
+The user resumed P13 and requested the twelve SVG export failures. All twelve
+reproduced before edits. Final-paint lowering had discarded authored groups,
+geometry attributes, `data-*` values and text after glyphs became outlines.
+Custom-layout projection and graph scene readers therefore lost edges, cluster
+bounds and labels. Export now snapshots inert semantic attributes, numeric
+geometry and text titles into the recording's element markers, then lowers
+semantic PaintIR groups alongside resolved paint. Empty groups survive; null
+backing values remain absent. XML values are escaped. Source CSS, scripts and
+resource links do not re-enter the exported paint. Raster fallback retains the
+recorded semantic tree and titles alongside the flattened image.
+
+Snapshot strings belong to the display-list arena; retained marker cloning uses
+the same copy helper. Consumers run before that owner expires, under
+**D4.2.2v2–D4.2.6/D4.5.1v4** ("pin, gen-check, copy-as-value"). New regressions
+cover nested/empty metadata groups, escaped values, copied-string lifetime,
+raster no-op behavior, outlined text and transparent fallback metadata.
+Private opacity/filter SourceGraphic captures copy their visited semantic
+markers back before the temporary arena expires; resource-only mask/pattern
+captures remain private. The reproducer originally retained only the outer
+node's metadata; the repaired output retains the inner node and text title.
+The unit exercises both private capture routes and forces whole-subscene
+fallback as a separate boundary.
+
+The prepared fourteen-fixture matrix exposed two further root causes. PDF scaled
+its page dimensions without a content transform, so 2× samples failed. The
+Lambda-owned PDF writer now provides the shared affine-matrix operation and PDF
+exports keep logical tree coordinates under a scaled page CTM. SVG/PDF also
+started from white instead of native propagated canvas paint, losing root/body
+backdrops when their layout box was empty. All three outputs now use the same
+canvas-background resolver. A native regression checks the PDF matrix stream;
+the export matrix checks doubled coordinates and colored backdrops.
+
+`make test-svg-export` runs the original fourteen cases plus local font shorthand
+and isolated embedded-font cases, at 1× and 2×. It retains input PNG, relocated
+SVG, PDF, rendered PNGs, PDF image inventories and a binary-hashed report under
+`temp/svg-p13/export-matrix/`. SVG checks XML parsing, unique generated IDs,
+resolved references, embedded image links and absence of external resource
+requests. Font cases must remain vector paths in both formats; representable
+gradient paint must remain vector in SVG. The native density regression also
+checks fractional alpha-edge coverage and straight red channels.
+
+The dimension gate follows the existing export-session contract: SVG/PDF fit
+content bounds with padding, while the explicit viewport controls layout and
+the native PNG crop. It checks matching intrinsic SVG/PDF dimensions and
+proportional scaling at 2×, and captures the entire SVG canvas.
+
+PDF pixels use Poppler's Cairo backend. The first Splash run blended several
+1:1 bitmap transition samples even with interpolation disabled; extracting the
+PDF image showed the expected pixel values, and Cairo preserved those exact
+samples. The original failing samples and both captures remain under
+`temp/svg-p13/`; no fixture tolerances or expected results were changed.
+
+Final validation on 2026-10-03:
+
+| Gate | Result |
+|---|---|
+| Focused graph/projection exports | **13/13**, including the original twelve failures and one additional selected class fixture; passed again against the release binary. |
+| Release export matrix | **96/96** format/density cases: 64 SVG/PDF exports plus 32 native PNG references, with **2,118/2,118** pixel assertions. XML, relocation, resource IDs, embedding, vector fonts/gradients and intrinsic dimensions pass. |
+| Native units | Vector **63/63**, display list **77/77**, PDF writer **43/43**. |
+| `make test-lambda-baseline` | **6,182/6,182**. |
+| `make test-radiant-baseline` | Passed: **4,297** recorded entries, **3,940** passes and **357** accepted partial layout results. UI Automation **289/289**, DOM UI **126/126**, View UI **10/10**, all **211** required visual baseline cases satisfied; five expected failures and one skip retained. |
+| `make test262-baseline` | Zero failures and zero regressions; **40,256** fully passing cases and **five** slow Unicode identifier cases passing on isolated retry. The five retain the runner's non-fully-passing classification; there were no missing results, crash exits or batch kills. |
+| Hygiene | Radiant float-cast lint, Node syntax check and `git diff --check` pass. |
+
+The release matrix report records SHA-256
+`9e4d804bbac479703b72adc6f4c83770ebabd9c94d8eee4cffd32dca68a52e6a`
+and `HeadlessChrome/143.0.7499.169`. Evidence is under `temp/svg-p13/`, including
+`exports-release-final.log`, `matrix-release-final2.log`,
+`export-matrix/report.json`, `lambda-baseline.log`, `radiant-final.log` and
+`test262-baseline.log`. Established expected results and pixel tolerances are
+unchanged; no baseline was relaxed to accept these changes.
+
+At this checkpoint, Linux/Windows runtime smoke and the paused P7/P10/P12 audits
+were not claimed complete by this macOS export gate. P7/P10 resumed in §7.14.
+Linux Docker is installed but its daemon is
+unavailable. The Windows-target C PDF writer syntax check passes; a MinGW C++
+probe stops at existing C-linkage overloads in unchanged `lambda.hpp`, so it is
+not counted as a Windows export gate.
+
+### 7.14 P7/P10 final stroke oracle and filter resource audit
+
+**Status, 2026-10-03:** the requested P7/P10 outstanding items are closed for
+the advertised P7 subset and P10 F1–F4 inventory. P12 and Linux/Windows P13
+runtime smoke remain open. This record supersedes earlier pending P7/P10
+checkpoints, without claiming completion of the whole SVG proposal.
+
+**P7 oracle review.** Fresh native and Chromium captures reproduce five stale
+2× expectations: two stroke/arrow-edge samples and two marker-edge samples are
+white, while one blue dot has near-zero red/green rather than the old 1× fringe.
+Only their 2× expected colors changed. All original 1× events, coordinates and
+±8 channel tolerances remain unchanged. The independent marker reference retains
+the previously documented SVG2 §13.7.1 non-scaling marker correction. The before
+captures remain under `temp/svg-p7-p10/` in `p7-before/`, `p7-browser-before/`
+and `p7-marker-reference-before/`.
+
+[SVG2 §8.13](https://www.w3.org/TR/SVG2/coords.html#VectorEffects) inventories
+`non-scaling-size`, `non-rotation` and `fixed-position` as at-risk effects.
+They, combinations of effects and explicit `viewport`/`screen` selectors remain
+unsupported. P7's existing exit contract permits advertising `none` and
+`non-scaling-stroke` while keeping the broader matrix row partial. Marker
+topology/viewports/context paints and all six paint-order permutations have
+native paint and pointer coverage; no vendor change was needed for this review.
+
+**P10 coordinate root cause.** Filter and primitive region tokens used the
+filtered target's font metrics. A `2em` region declared at 10px therefore became
+60px on a 30px target. The isolated before fixture fails **3/34** pixels while
+Chromium confirms the declaration's 20px extent. `RdtSvgFilterRun` now supplies
+a synchronous resource-length callback using the existing resource style and
+font resolvers. Only font size/x-height come from the declaring filter/primitive;
+percentages retain the referencing viewport, and object-bounding-box values
+retain the target geometry. Resolution occurs per execution rather than caching
+font facts in a reusable program.
+
+The new `svg_filter_coordinates` fixture covers translated/anisotropic frames,
+two targets sharing bounding-box facts, a nested nonzero viewBox, bounding-box
+feImage fragments, symbol viewports, local/external declaration-font lengths,
+document-relative external images and differently sized referencing viewports.
+[Filter Effects 1 §§8, 9.4, 9.15](https://www.w3.org/TR/filter-effects-1/)
+defines the coordinate/image contracts. Chromium 143 misses eight image/viewport
+samples in the original fixture; an independently placed plain SVG reference
+checks all 34 samples at both densities. Original browser failures are retained,
+and native expectations are not changed to match those omissions.
+
+**P10 resource lifetime.** The real-click `svg_filter_resource_lifetime` fixture
+replaces one image shared by two consumers, changes resource font metrics,
+introduces a cyclic then missing reference, and restores the original file.
+All **31/31** assertions pass in each density/cache mode, including pointer
+geometry after transparent filter output. Chromium matches **29/31** directly;
+its two live `em` bounds remain stale after resource-font changes. An independent
+image/rectangle event reference passes **31/31** without changing the assertions.
+
+The ownership audit confirms that external program registries belong to their
+isolated resource document, program pins prevent reclamation during execution,
+mutation epochs retire old facts, and retained surfaces own output independently
+of source/scratch/program teardown. The existing numerical ownership test now
+reads the retained output after destroying those owners; the new font/viewport
+unit distinguishes both length bases. These seams follow **D4.2.2v2–D4.2.6 /
+D4.5.1v4** (pin, gen-check, copy-as-value). No formal ruling changed.
+
+| Final gate | Result |
+|---|---|
+| P7 static stroke/marker pixels | **544/544**, 1×/2×, cache off/eager |
+| P7 real UI stroke/instance/hit fixtures | **404/404** assertions across both densities/cache modes; Chromium stroke interaction **42/42**, instance interaction **48/48** |
+| P10 static filter pixels | **1,132/1,132** in 16 fixtures, both densities/cache modes |
+| P10 live mutation/resource fixtures | **532/532** assertions across five fixtures, both densities/cache modes |
+| Durable browser paint gate | **340/340** pixels at 1×/2×; explicit references are recorded for marker/filter implementation differences |
+| Native units | Vector **64/64**, DisplayList **77/77**, retained DisplayList **26/26** |
+| Complete Radiant baseline | **4,300** counted entries: **3,943 passed**, **357 accepted partials**, **0 failed**; UI **291/291**, DOM **126/126**, view UI **10/10**, all **211** required visual cases |
+| Complete Lambda baseline | **6,182/6,182** |
+| Test262 baseline | **40,261/40,261** required entries fully passing, **0** failures/unstable cases/regressions; **2,652** skipped entries |
+| Expanded release export matrix | **102/102** format/density cases, **2,322/2,322** pixel assertions in 17 fixtures: **68** SVG/PDF plus **34** native PNG cases; relocated SVGs have no source-file dependencies |
+| Source checks | Radiant float lint, Node syntax checks and `git diff --check` pass |
+
+The final release binary SHA-256 is
+`80b73f01cae0b45e58c37c01e4d5dba82d1e415dfe873a2bf86e10cf38347029`;
+Chromium is `HeadlessChrome/143.0.7499.169`. Earlier debug pixel/UI evidence uses
+`6038e42c59093f21659ff70d901427a65a503d5ff104f26145926625e2ede491`.
+Logs, before/after captures, `p10-accepted-results.json`, event results and the
+copied final export report are under `temp/svg-p7-p10/`. Export artifacts remain
+under `temp/svg-p13/export-matrix/`. The release executable is retained.
+
+`make test-svg-paint` runs the durable static audit;
+`ARGS='--browser --references'` uses its independently identified references.
+Fixtures with input actions use the UI event runner, since a static screenshot
+cannot validate a mutation sequence. The export manifest includes the new
+coordinate fixture. `feComponentTransfer` and `feConvolveMatrix` remain outside
+the proposal's F1–F4 inventory and are explicitly unsupported in the matrix.
+
+### 7.15 — P12 SMIL clock dependency, default and lifetime audit
+
+**2026-10-03 continuation.** This checkpoint supersedes §7.11's outstanding
+clock/default/cache claims and corrects its discrete-to interpretation. Radiant
+owns timing, parsing and interpolation; ThorVG replays resolved paint. No vendor
+source or Lambda ruling changed. Ownership remains
+**D4.2.2v2–D4.2.6/D4.5.1v4**: **“pin, gen-check, copy-as-value.”**
+
+Clock-only filter edits previously reused programs keyed solely by DOM epoch.
+Programs now include effective animation generation while pinned old programs
+retain their captured facts. Style caches include the same generation and copy
+sampled text into their own pool. External-use sampling exposes only the active
+source subtree; direct paint-resource references remain static. This fixes the
+case where a static filter user poisoned an animated use's style cache. Native
+reproductions were **31/40** for clock resources and **16/20** for instance filters
+in all four density/cache modes; they now pass **40/40** and **20/20**.
+
+Interpolation preserves equal scalar/list units until used-value resolution.
+Mixed units call the shared length resolver; opacity/offset percentages use a
+dimensionless fraction. Font, ancestor viewport and currentColor dependencies
+precede their users without changing sandwich priority for one attribute.
+Filter type precedes its dependent values default: a saturate-to-hueRotate
+test reproduces an incorrect underlying one and a 90.5-degree midpoint;
+sampling the type first supplies zero and the required 90-degree midpoint.
+Frozen-to captures sample preceding dependencies at the active end without
+introducing recursive sandwiches. A valid `begin="0.5s"` fixture reproduces
+**51/56** against the original evaluator and passes **56/56** in all four modes.
+Unit assertions also reproduce incorrect relative width, mixed-unit width and
+percentage-opacity values. The earlier `.5s` input was invalid SMIL clock syntax
+and is retained only as diagnostic history.
+
+[SVG 1.1 §19.2.9](https://www.w3.org/TR/SVG11/animate.html#ValueAttributes)
+requires discrete to-animation to keep its underlying value until the midpoint
+or second keyTime. The immediate-to implementation and two historical
+expectations in `svg_smil_value_errors` were wrong and are corrected. XML enums
+now supply omitted initial values. Empty IRI, zero stop offset and
+identity/saturate/hueRotate matrix defaults support omitted-base to-animation.
+[SMIL §3.2.3](https://www.w3.org/TR/2001/REC-smil-animation-20010904/#AnimFuncValues)
+ignores keyTimes for indefinite simple duration; its frozen function remains at
+progress zero. Defaults and implicit-value fixtures pass **48/48** and **12/12**.
+AnimateTransform to-only behavior is undefined in SVG 1.1 §19.2.16;
+general transform decomposition is not claimed.
+
+Directly nested SVG shares its outer fragment clock. SVG inside HTML below
+`foreignObject` owns an independent clock, following
+[SVG 2 §5.1.3](https://www.w3.org/TR/SVG2/struct.html#SVGElement).
+Evaluator, event and notification walks stop at that independent root.
+Nested SVG pause/seek setters are inert under
+[SVG Animations §5.8](https://svgwg.org/specs/animations/#InterfaceSVGSVGElement);
+the added click sequence reproduces **24/32** before its guard. Private
+image/reference documents advance every prepared fragment from picture/host
+time. Image animation detection includes all fragments. Picture duplicates
+retain private elapsed time; HTML image users sharing a cached URL surface share
+its clock, matching
+[HTML §15.4.2](https://html.spec.whatwg.org/multipage/rendering.html#images).
+The first image-fragment test incorrectly expected insertion to restart that
+cached surface. Both native and Chromium captures contradicted it, and the
+specification required correcting the expectation. Detached pinned roots cannot
+restart drivers; reattachment and rewind preserve base attributes.
+
+The CLI export contract is **initial document time, zero**. Negative begins
+and intervals already frozen at zero contribute sampled values. Delayed
+animations keep base paint; external use samples host zero, and SVG images
+sample private zero. `svg_smil_export_initial` exercises PNG/SVG/PDF at 1×/2×.
+No CLI sample-time option is exposed.
+
+The executable inventory is `svg_animation_attribute_applies()` and
+`svg_animation_value_class()`:
+
+| Class | Implemented behavior / boundary |
+|---|---|
+| Numbers and integers | Scalar interpolation, percentage opacity/offset, integer rounding, additive/accumulate; target applicability is checked. |
+| Lengths and length lists | Shared SVG units/axes, scalar geometry, text position/dash lists, inherited font and viewport dependencies. |
+| Colors and paints | CSS colors/currentColor, sRGB/linearRGB; non-color paint references transition discretely. |
+| Number/point/path lists | Compatible lists and optional numeric pairs; paths require matching command structures. |
+| Discrete attributes | Supported enums, resource IRIs and recognized presentation properties; omitted XML initials are explicit. |
+| Transforms | Translate/scale/rotate/skewX/skewY through animateTransform, composition, repetition and accumulation. |
+| Timing | Clock/list begin/end, positive or indefinite duration, min/max, repeatCount/repeatDur, restart, freeze/remove, event/syncbase offsets, qualified repeats, anchored cycles, keyTimes/keySplines and calcMode. |
+| Controls and lifetime | Pause/unpause/get/set time, begin/end methods, independent fragments, detached pinned state, document/resource teardown and cache invalidation. |
+
+**Remaining limits:** access-key/wallclock timing, per-use instance event
+retargeting and the full SVG animation DOM interface. Motion animation/discard
+are outside N1's three-element inventory. Animation does not supply unavailable
+renderer features such as component-transfer/convolution or general text shaping.
+Resource documents retain secure processing restrictions. Existing explicit
+limits remain: 64 MiB sample and 8 MiB frozen storage, 65,536 traversal nodes/
+256 levels, 4,096 timelines, 65,536 controls/document instance times, 256 instance
+times per control, 512 timing graph nodes, 256 intervals/passes, 32 reference
+levels, 16,384 query operations and 1,048,576 shared work operations. Limit failures
+are visible and do not publish completed samples. SMIL stays **partial**, as
+P12's original exit rule requires; the whole proposal is not complete.
+
+The durable manifest contains 27 native fixtures, including nine added here.
+`make test-svg-smil` runs real UI pointer actions/timing samples at both densities
+with SVG layers disabled/eager. `ARGS='--browser'` records raw Chromium behavior;
+`ARGS='--browser --references <fixture names>'` identifies independent reference
+pages explicitly. Six independent references cover defaults, units, implicit
+values, instance filters, fragment clocks and initial export state. Raw browser
+differences retain the normative assertions: linearRGB/by-color, nonadditive
+point-list arithmetic, legacy attributeType, frozen-to capture, external-use
+animation, indefinite freeze, SVG 2 fragment clocks and percentage opacity do
+not all match Chromium 143. Chromium also continues a detached fragment's clock;
+P12 explicitly requires detached drivers to stop, so that assertion checks the
+proposal's lifetime policy rather than claiming browser agreement.
+They are not hidden by the reference mode.
+
+| Final gate | Result |
+|---|---|
+| Native SMIL | **3,620/3,620** assertions in 27 fixtures × 1×/2× × layers off/eager; **108/108** cases. |
+| Independent Chromium references | **360/360** assertions across six identified pages at both densities. |
+| Raw Chromium SMIL | **1,684/1,810** assertions; **24/54** cases differ. Original SVG inputs and failure flags remain in the report. |
+| Vector units | **72/72**, including clock-only graph pinning, source scope, typed defaults, unit dependencies, fragment controls and detach/reclamation. |
+| Complete Radiant baseline | **4,317** counted entries: **3,960 passed**, **357 accepted partials**, **0 failed**. UI **300/300**, DOM **126/126**, view command **66/66**, view fixtures **10/10**, all **211** required visual cases. |
+| Complete Lambda baseline | **6,182/6,182**. |
+| Test262 baseline | **40,261/40,261** required entries fully passing; zero failures/regressions; **2,652** skipped. |
+| macOS release export matrix | **108/108** format/density cases and **2,394/2,394** pixels in 18 fixtures: **72** SVG/PDF and **36** native PNG cases. Relocated SVGs have no source-file dependencies. |
+| Source checks | Radiant float-cast lint, four Node syntax checks and git diff --check pass. |
+
+The final release SHA-256 is
+`c1f35d4a2951ea41de7ce31ed8172e621a407abbe4325657bbbd87eda4f02abe`.
+This exact executable passed Test262 and was restored after the Radiant gate;
+all final native/export/reference reports record the same hash. Chromium is
+`HeadlessChrome/143.0.7499.169`. The retained executable is
+`temp/svg-p12/lambda-test262-release.exe`. The implementation remained unchanged
+through Test262, the final Radiant gate and these matrices.
+
+The Radiant gate ran with the explicit debug profile and loopback access.
+A sandbox run failed to bind the HTTP-image test server; its permitted rerun
+passes. Running the log-sensitive view tests on a release runtime produced four
+missing-log assertions; the existing `make debug` profile switch resolves them,
+and the final full debug gate passes. These diagnostic failures are preserved
+in radiant-sandbox.log and radiant-profile-mismatch.log. The layout snapshot
+passes its aggregate ratchet but still reports the pre-existing
+examples_multi-step-form_ per-file warning; its baseline was not changed.
+
+Logs, before/after reproductions, UI results and final-validation.json are under
+`temp/svg-p12/`. Native, raw-browser and independent-reference reports are in
+separate subdirectories. The copied export report is export-release-report.json;
+portable artifacts remain under `temp/svg-p13/export-matrix/`. The local helper
+server was stopped. Linux/Windows P13 runtime smoke remains open.

@@ -332,6 +332,8 @@ RdtMatrix svg_viewbox_transform(const SvgViewBox* viewbox, float width, float he
 float svg_font_size_value(const char* value, float parent_size, float parent_x_height = 0.0f);
 float svg_font_x_height(FontContext* fonts, const FontStyleDesc* descriptor);
 int svg_font_weight_value(const char* value, int parent_weight);
+float svg_resolve_length_unit(float number, CssUnit unit, const SvgLengthContext* context,
+    SvgLengthAxis axis, float fallback);
 float svg_resolve_length(const char* value, const SvgLengthContext* context,
     SvgLengthAxis axis, float fallback);
 float svg_resolve_angle(const char* value, float fallback);
@@ -807,9 +809,21 @@ typedef struct {
 // Element group marker: records a matched display-list item range for subtree
 // culling and future retained display-list reuse.
 typedef struct {
+    const char* name;
+    const char* value;
+} RenderSemanticAttribute;
+
+typedef struct {
+    const RenderSemanticAttribute* attributes;
+    int attribute_count;
+    const char* title; // accessible text for glyphs lowered to resolved outlines
+} RenderSemanticGroup;
+
+typedef struct {
     uint32_t view_id;
     int matching_index;      // begin -> end, end -> begin; -1 while open
     float marker_x, marker_y, marker_w, marker_h; // original layout marker before visual-union tightening
+    RenderSemanticGroup semantics; // optional value snapshot, owned by the display-list arena
 } DlElementMarker;
 
 // ---------------------------------------------------------------------------
@@ -1217,6 +1231,8 @@ typedef enum {
     X(PAINT_GLYPH_RUN, PAINT_OP_FLAG_OWNED_PAYLOAD) \
     X(PAINT_BEGIN_EFFECT_GROUP, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_PUSH) \
     X(PAINT_END_EFFECT_GROUP, PAINT_OP_FLAG_EFFECT_STACK | PAINT_OP_FLAG_STACK_POP) \
+    X(PAINT_BEGIN_SEMANTIC_GROUP, PAINT_OP_FLAG_RASTER_NOOP | PAINT_OP_FLAG_STACK_PUSH) \
+    X(PAINT_END_SEMANTIC_GROUP, PAINT_OP_FLAG_RASTER_NOOP | PAINT_OP_FLAG_STACK_POP) \
     X(PAINT_SVG_SUBSCENE, PAINT_OP_FLAG_NONE)
 
 typedef enum {
@@ -1563,6 +1579,7 @@ typedef struct PaintCmd {
         PaintEffectGroup        effect_group;
         PaintSvgSubscene        svg_subscene;
         PaintGlyphRun           glyph_run;
+        RenderSemanticGroup     semantic_group;
     };
 } PaintCmd;
 
@@ -1697,6 +1714,9 @@ void paint_begin_effect_group(PaintList* pl, const PaintEffectGroup* group);
 void paint_end_effect_group(PaintList* pl);
 void paint_svg_subscene(PaintList* pl, const PaintSvgSubscene* subscene);
 void paint_glyph_run(PaintList* pl, const PaintGlyphRun* glyph_run);
+// the recording owner must outlive synchronous lowering, as for borrowed glyph/image payloads.
+void paint_begin_semantic_group(PaintList* pl, const RenderSemanticGroup* group);
+void paint_end_semantic_group(PaintList* pl);
 
 // ---------------------------------------------------------------------------
 // Raster lowering: PaintIR -> DisplayList
@@ -1741,6 +1761,7 @@ typedef struct {
     int skipped_transform_depth;
     int open_effect_depth;
     int skipped_effect_depth;
+    int open_semantic_depth;
 } PaintSvgLoweringState;
 
 void paint_svg_lowering_state_init(PaintSvgLoweringState* state, int indent_level);
@@ -1899,6 +1920,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 double render_block_paint_children(RenderContext* rdcon, ViewBlock* block);
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block);
 Color render_document_canvas_background(View* root_view);
+Color render_document_output_background(View* root_view);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_bound(RenderContext* rdcon, ViewBlock* view);
 void render_outline_deferred(RenderContext* rdcon, ViewBlock* view);
@@ -2119,6 +2141,8 @@ DisplayItem* dl_alloc_item(DisplayList* dl);
 Bound dl_content_bounds(const DisplayList* dl);
 RdtGradientStop* dl_copy_stops(DisplayList* dl, const RdtGradientStop* stops, int count);
 float* dl_copy_dashes(DisplayList* dl, const float* dashes, int count);
+bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
+                            const RenderSemanticGroup* source);
 void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
                           ClipShape** clip_shapes, int clip_depth);
 int dl_restore_clip_shapes(const DlClipShapeStack* src, ClipShape* shapes,
@@ -3582,6 +3606,7 @@ struct RdtSvgFilterProgram {
     Arena* arena;
     Element* element;
     uint64_t epoch;
+    uint64_t animation_generation;
     RdtSvgFilterProgram* next;
     RdtSvgFilterNode* nodes;
     size_t count, active_users;
@@ -3606,6 +3631,9 @@ struct RdtSvgFilterRun {
     void* image_context;
     bool (*draw_input)(void* context, int input, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
     void* input_context;
+    // resource font facts are resolved during the synchronous run; viewport/geometry still belong to the target.
+    void (*resolve_lengths)(void* context, Element* resource, SvgLengthContext* lengths);
+    void* length_context;
 };
 RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, Element* element);
 void render_svg_filter_program_release(RdtSvgFilterProgram* program);
@@ -4003,6 +4031,7 @@ struct SvgInlineRenderContext {
     int backdrop_start;           // display-list index at the current SVG isolation boundary
     const char* source_path;      // source SVG path for resolving nested resources
     bool image_document;         // secure static image documents allow embedded resources only
+    DisplayList* semantic_target; // export-only target; offscreen resource captures do not record wrappers
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
     void* image_resolver_context;
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
@@ -4121,7 +4150,7 @@ void render_svg_build_subscene(PaintSvgSubscene* subscene,
 
 typedef bool (*SvgExportPaintConsumer)(PaintList* paint, void* context);
 bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
-    SvgExportPaintConsumer consumer, void* context);
+    SvgExportPaintConsumer consumer, void* context, bool allow_raster_fallback = false);
 ImageSurface* render_svg_subscene_rasterize(const PaintSvgSubscene* subscene, Bound* logical_bounds);
 
 void render_svg_inline_register_paint_ir_lowerers(void);

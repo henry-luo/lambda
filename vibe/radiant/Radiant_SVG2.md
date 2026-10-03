@@ -29,7 +29,7 @@ This proposal makes the following decisions explicit:
 
 ## Implementation Status
 
-Status as of 2026-10-02: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table retains the 2026-05-07 architecture audit; the latest SVG behavior work is recorded below.
+Status as of 2026-10-03: **partially implemented**. The core parser/render unification path is in place, but the full `SvgDocument` resource/cache architecture described below is not yet complete. The table retains the 2026-05-07 architecture audit; the latest SVG behavior work is recorded below.
 
 The [SVG support implementation plan](../impl/Lambda_Impl_SVG_Support.md#74-progress-record)
 records six repaired gaps: rectangle radius fallback, default line stroke,
@@ -39,6 +39,28 @@ continue through Radiant parsing, PaintIR and the ThorVG adapter. They preserve
 the existing retained document/resource ownership (**D4.2.2v2–D4.2.4** in
 [Lambda Formal Design](../../doc/Lambda_Formal_Design.md)); the full cascade,
 typed paints, advanced effects, animation and export remain planned.
+
+**2026-10-03 P7/P10 audit.** The
+[current implementation record](../impl/Lambda_Impl_SVG_Support.md#714-p7p10-final-stroke-oracle-and-filter-resource-audit)
+supersedes the earlier behavior checkpoint above: stroke/marker geometry and
+the F1–F4 filter graph inventory pass their final coordinate/resource checks.
+Filter font-relative regions resolve from their declaration while viewport and
+bounding-box bases remain target-specific. Resource mutation, cycle/missing
+recovery, graph pin/reclamation and retained-output teardown are validated
+under **D4.2.2v2–D4.2.6/D4.5.1v4**. Radiant still records paint through the
+ThorVG adapter; no vendor source changed. Broader SVG2 vector effects, component
+transfer/convolution, remaining SMIL extensions and Linux/Windows export smoke are
+explicit residue; this does not complete the larger resource/cache proposal.
+
+**2026-10-03 P12 audit.** The
+[SMIL implementation record](../impl/Lambda_Impl_SVG_Support.md#715-p12-smil-clock-dependency-default-and-lifetime-audit)
+adds clock-aware style/filter cache keys, external-use source scope, typed unit
+dependencies, XML implicit values, fragment clocks across HTML integration,
+detach driver guards and deterministic initial exports. Sampled strings are copied
+into longer-lived caches; pinned filter snapshots survive retirement under
+**D4.2.2v2–D4.2.6/D4.5.1v4** (pin, gen-check, copy-as-value). Interpolation/timing
+continue on the Lambda side of the ThorVG adapter. Access-key/wallclock timing and
+per-use instance event retargeting remain open; the SMIL support row is partial.
 
 | Area | Status | Notes |
 |------|--------|-------|

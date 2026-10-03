@@ -457,5 +457,466 @@
       "min_b": 247,
       "max_b": 255
     }
-  ]
+  ],
+  "pixel_oracles": {
+    "2": [
+      {
+        "type": "assert_pixel",
+        "x": 20,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 100,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 140,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 180,
+        "y": 60,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 220,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 270,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 310,
+        "y": 60,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 350,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 400,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 460,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 500,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 540,
+        "y": 30,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 580,
+        "y": 60,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 25,
+        "y": 120,
+        "min_r": 52,
+        "max_r": 68,
+        "min_g": 52,
+        "max_g": 68,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 35,
+        "y": 120,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 105,
+        "y": 120,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 115,
+        "y": 120,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 165,
+        "y": 120,
+        "min_r": 52,
+        "max_r": 68,
+        "min_g": 52,
+        "max_g": 68,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 175,
+        "y": 120,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 215,
+        "y": 120,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 225,
+        "y": 120,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 275,
+        "y": 115,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 355,
+        "y": 115,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 20,
+        "y": 190,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 30,
+        "y": 190,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 40,
+        "y": 190,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 230,
+        "y": 190,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 260,
+        "y": 190,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 440,
+        "y": 190,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 480,
+        "y": 190,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 50,
+        "y": 210,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 50,
+        "y": 220,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 150,
+        "y": 210,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 150,
+        "y": 205,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 222,
+        "y": 265,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 212,
+        "y": 265,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 247,
+        "max_g": 255,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 224,
+        "y": 245,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 234,
+        "y": 245,
+        "min_r": 247,
+        "max_r": 255,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 0,
+        "max_b": 8
+      },
+      {
+        "type": "assert_pixel",
+        "x": 430,
+        "y": 265,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 420,
+        "y": 265,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      },
+      {
+        "type": "assert_pixel",
+        "x": 415,
+        "y": 245,
+        "min_r": 0,
+        "max_r": 8,
+        "min_g": 0,
+        "max_g": 8,
+        "min_b": 247,
+        "max_b": 255
+      }
+    ]
+  },
+  "oracle": {
+    "density_note": "At 2x the physical pixel center changes fractional marker/miter edge coverage. Chromium 143 and native captures agree; coordinates and +/-8 tolerance are retained."
+  },
+  "pixel_oracle_notes": {
+    "2": "Chromium 143 and native captures agree at the physical pixel center; fractional marker/miter edges retain their coordinates and +/-8 tolerance."
+  }
 }
