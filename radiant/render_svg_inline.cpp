@@ -585,11 +585,19 @@ bool render_svg_picture_has_animation(RdtPicture* picture) {
 }
 
 static FontContext* svg_style_font_context(SvgStyleContext* style, const char* source_path,
-    float raster_scale, bool image_document) {
+    float raster_scale, bool image_document, FontContext* parent_fonts) {
     if (!style || !style->document) return nullptr;
     FontContextConfig config = {}; config.pixel_ratio = raster_scale;
     FontContext* fonts = font_context_create(&config);
     if (!fonts) return nullptr;
+    // Isolated SVG images need the page's explicit font directories for authored families.
+    if (parent_fonts && parent_fonts->explicit_font_directories) {
+        ArrayList* directories = parent_fonts->explicit_font_directories;
+        for (int i = 0; i < directories->length; i++) {
+            const char* directory = (const char*)directories->data[i];
+            if (directory) font_context_add_scan_directory(fonts, directory);
+        }
+    }
     // D4: registration copies descriptors; the temporary UI bridge owns only its CSS metadata.
     UiContext bridge = {}; bridge.font_ctx = fonts;
     for (int i = 0; i < style->document->stylesheet_count; i++) {
@@ -973,8 +981,14 @@ float svg_resolve_angle(const char* value, float fallback) {
     CssUnit parsed = css_unit_from_string(unit, end - unit);
     if (*str_skip_ascii_space(end) || (end != unit && !css_unit_is_angle(parsed))) return fallback;
     CssValue angle = {};
-    angle.type = CSS_VALUE_TYPE_ANGLE;
-    angle.data.length = {number, parsed};
+    // SVG unitless angles are degrees; the shared CSS resolver represents them as numbers.
+    if (end == unit) {
+        angle.type = CSS_VALUE_TYPE_NUMBER;
+        angle.data.number.value = number;
+    } else {
+        angle.type = CSS_VALUE_TYPE_ANGLE;
+        angle.data.length = {number, parsed};
+    }
     return resolve_css_angle_value(&angle) * 180.0f / math_pi_f();
 }
 
@@ -1601,7 +1615,8 @@ static SvgResourceReference svg_resolve_reference(SvgInlineRenderContext* ctx, c
             document->path = path; path = nullptr; document->picture = picture;
             document->style.resource_owner = owner; document->style.resource_document = document;
             svg_animation_mark_reference(document->style.document->root);
-            document->fonts = svg_style_font_context(&document->style, document->path, ctx->raster_scale, ctx->image_document);
+            document->fonts = svg_style_font_context(&document->style, document->path,
+                ctx->raster_scale, ctx->image_document, ctx->font_ctx);
             document->next = owner->resources; owner->resources = document;
         } else {
             if (document) { svg_style_destroy(&document->style); mem_free(document); }
@@ -5226,7 +5241,7 @@ RdtPath* svg_text_geometry_path(DomElement* target, const SvgLengthContext* leng
     }
     if (owns_font_context) {
         char* source_path = radiant_document_resource_base(target->doc, MEM_CAT_FONT);
-        font_context = svg_style_font_context(&style_context, source_path, 1.0f, false);
+        font_context = svg_style_font_context(&style_context, source_path, 1.0f, false, nullptr);
         if (source_path) mem_free(source_path);
     }
     if (!font_context) {
@@ -6742,7 +6757,8 @@ static void render_svg_to_display_list_primitives(Element* svg_element, float vi
 
     FontContext* isolated_fonts = nullptr;
     if (style.isolated_document || !ctx.font_ctx) {
-        isolated_fonts = svg_style_font_context(&style, source_path, ctx.raster_scale, image_document);
+        isolated_fonts = svg_style_font_context(&style, source_path,
+            ctx.raster_scale, image_document, ctx.font_ctx);
         if (isolated_fonts) ctx.font_ctx = isolated_fonts;
     }
     SvgStyleEntry* root_style = svg_style_entry(&style, svg_element);
