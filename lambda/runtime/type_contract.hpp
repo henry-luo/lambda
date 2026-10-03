@@ -33,6 +33,14 @@ enum StaticBoundaryResult {
     STATIC_BOUNDARY_DEFERRED,
 };
 
+bool lambda_type_contract_has_binder(Type* type, bool include_refs, int depth = 0);
+
+// Reuse a maintained representation proof; binder-dependent contracts stay with
+// the environment-aware checker. This never changes or admits a value.
+bool lambda_value_rep_proves_contract(Item value, Type* expected);
+// Shared admission without a diagnostic, for transactional fresh construction.
+bool lambda_type_try_admit(Item value, Type* expected, Type** env, Item* converted);
+
 enum MapContractRelation {
     MAP_CONTRACT_INCOMPATIBLE,
     MAP_CONTRACT_EXACT_TRUSTED,
@@ -106,6 +114,8 @@ ValueRep lambda_canonical_rep_for_type_id(TypeId type_id);
 // become trusted merely because their current fields happen to line up.
 MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
         const TypeMap* expected);
+// Reuse a resolved destination while checking the value's current trusted shape.
+bool lambda_map_rep_proves_contract(Item value, TypeMap* expected);
 
 // The one value a value-bearing literal contract names (S11.2.1: literal types
 // are singletons). The shared LIT_* markers type literal expressions and carry
@@ -204,3 +214,13 @@ static inline Type* lambda_type_remove_error_and_null(Pool* pool, Type* type) {
     return lambda_type_remove_exclusions(pool, type,
         LAMBDA_TYPE_EXCLUDE_ERROR | LAMBDA_TYPE_EXCLUDE_NULL);
 }
+
+// The immutable T0 store plan supplies the same resolved element/lane as MIR.
+// Dynamic keys still pass the exact-integer gate and the checked setter.
+Item lambda_array_set_checked_preplanned(Item owner, Item key, Item value,
+    Type* expected, Type* element, const LaneStorageDesc* lane,
+    const char* boundary, bool inplace);
+
+Item lambda_container_path_set_checked_keys(Item owner, Item value, const Item* keys,
+    int64_t shape, Type* expected, Type* leaf_contract, const char* boundary);
+Item cow_path_set_keys(Item owner, Item value, const Item* keys, int count, bool inplace);

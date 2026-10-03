@@ -547,6 +547,13 @@ class PremakeGenerator:
                 vlog(f"DEBUG: Variant override: {key} = {variant_config[key]}")
                 self.config[key] = variant_config[key]
 
+        # Variant exclusions on top of the inherited list, so a variant that
+        # only drops a few files does not fork the whole exclusion list.
+        if 'extra_exclude_source_files' in variant_config:
+            self.config['exclude_source_files'] = (
+                self.config.get('exclude_source_files', []) +
+                variant_config['extra_exclude_source_files'])
+
         # Merge variant defines into the config (additive)
         if 'defines' in variant_config:
             existing_defines = self.config.get('defines', [])
@@ -3481,6 +3488,11 @@ class PremakeGenerator:
                 mm_files = glob_premake_paths(mm_pattern)
                 all_source_files.extend(mm_files)
 
+        # Remove excluded files first: an excluded .mm must not suppress its
+        # _stub.cpp below (the no-GUI variant drops the .mm and builds the stub)
+        if exclude_files:
+            all_source_files = [f for f in all_source_files if f not in exclude_files]
+
         # On macOS, remove _stub.cpp files when a platform-specific .mm exists
         # e.g., rdt_video_stub.cpp is excluded when rdt_video_avf.mm is present
         if self.use_macos_config:
@@ -3502,10 +3514,6 @@ class PremakeGenerator:
                         for d, base in mm_basenames
                     )
                 ]
-
-        # Remove excluded files
-        if exclude_files:
-            all_source_files = [f for f in all_source_files if f not in exclude_files]
 
         # Add additional platform-specific files
         if additional_files:
