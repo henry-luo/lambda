@@ -965,19 +965,27 @@ static void jm_emit_span_entry(JsMirTranspiler* mt, JsFuncCollected* fc,
 // JS parameter inference is a physical specialization, not a runtime type
 // contract.  The boxed entry must prove the exact Item shape before passing an
 // argument to `_n`; coercing a string or boolean here changes JavaScript `+`.
+// A Number parameter accepts both Number representations: a float Item, and
+// the int Item the AST interpreter produces for small integers (exact as a
+// double; BigInt is a separate type). Rejecting int Items sent every call from
+// T0 into a promoted body down the generic boxed path (loop continuations of
+// primes/matmul/fft2 ran 5-24x slower than the same native body).
 static MIR_reg_t jm_emit_exact_native_shape_test(JsMirTranspiler* mt,
         MIR_reg_t item, TypeId type_id) {
     if (type_id == LMD_TYPE_FLOAT) {
         MIR_reg_t inline_bits = jm_new_reg(mt, "native_guard_float_bits", MIR_T_I64);
         MIR_reg_t inline_float = jm_new_reg(mt, "native_guard_float_inline", MIR_T_I64);
         MIR_reg_t tagged_float = jm_new_reg(mt, "native_guard_float_tagged", MIR_T_I64);
+        MIR_reg_t tagged_int = jm_new_reg(mt, "native_guard_float_int", MIR_T_I64);
         MIR_reg_t result = jm_new_reg(mt, "native_guard_float", MIR_T_I64);
         MIR_reg_t tag = jm_new_reg(mt, "native_guard_float_tag", MIR_T_I64);
         jm_emit_reg_binary_op(mt, MIR_AND, inline_bits, item, MIR_new_int_op(mt->ctx, (int64_t)ITEM_DBL_MASK));
         jm_emit_reg_binary_op(mt, MIR_NE, inline_float, inline_bits, MIR_new_int_op(mt->ctx, 0));
         jm_emit_reg_binary_op(mt, MIR_URSH, tag, item, MIR_new_int_op(mt->ctx, 56));
         jm_emit_reg_binary_op(mt, MIR_EQ, tagged_float, tag, MIR_new_int_op(mt->ctx, LMD_TYPE_FLOAT));
+        jm_emit_reg_binary_op(mt, MIR_EQ, tagged_int, tag, MIR_new_int_op(mt->ctx, LMD_TYPE_INT));
         jm_emit_reg_binary(mt, MIR_OR, result, inline_float, tagged_float);
+        jm_emit_reg_binary(mt, MIR_OR, result, result, tagged_int);
         return result;
     }
 

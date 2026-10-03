@@ -6911,6 +6911,30 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     }
     if (scan.failure) return scan.failure;
 
+    // The evidence for each live-in is the value it holds at this head: a
+    // literal of its type for the never-executed call below, and a typed
+    // array of a kind lowering specializes stays a direct parameter.
+    const char* evidence[JS_LOOP_LIVE_IN_MAX];
+    bool direct[JS_LOOP_LIVE_IN_MAX];
+    for (int i = 0; i < scan.count; i++) {
+        NameEntry* live_entry = scan.live[i];
+        JsInterpEnv* env = js_interp_find_env(frame->env, live_entry->scope);
+        Item value = env && live_entry->slot >= 0 &&
+                (uint32_t)live_entry->slot < env->slot_count
+            ? js_interp_env_slot_read(env, (uint32_t)live_entry->slot, false) : ItemNull;
+        TypeId type = get_type_id(value);
+        evidence[i] = type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
+            type == LMD_TYPE_FLOAT ? "0" : type == LMD_TYPE_BOOL ? "false" :
+            type == LMD_TYPE_STRING ? "\"\"" : "undefined";
+        JsTypedArray* typed = js_is_typed_array(value)
+            ? js_get_typed_array_ptr(value.map) : NULL;
+        if (typed && typed->element_type == JS_TYPED_UINT8) evidence[i] = "new Uint8Array(0)";
+        else if (typed && typed->element_type == JS_TYPED_INT32) evidence[i] = "new Int32Array(0)";
+        else if (typed && typed->element_type == JS_TYPED_FLOAT64) evidence[i] = "new Float64Array(0)";
+        else typed = NULL;
+        direct[i] = typed != NULL;
+    }
+
     bool strict = (function->flags & JS_FUNC_FLAG_STRICT) != 0;
     char name[64];
     snprintf(name, sizeof(name), "__lambda_loop_%u_%u", (unsigned)function_id,
@@ -6924,16 +6948,25 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     // not type a reassigned parameter or a `var`, but types a block local from
     // its initializer and assignments (a 10-20x difference on a numeric loop).
     // A name the region redeclares with `var` keeps a `var` copy, since `let`
-    // and `var` cannot share a name. No live-in is captured or in its TDZ.
+    // and `var` cannot share a name. A typed array is the exception: lowering
+    // types a typed-array parameter from its call sites (behind a runtime kind
+    // guard) but not a local copied from one, so it keeps its own name as a
+    // parameter (primes, matmul, fft2: up to 24x). No live-in is captured or
+    // in its TDZ.
     strbuf_append_char(text, '(');
     for (int i = 0; i < scan.count; i++) {
         if (i) strbuf_append_char(text, ',');
-        strbuf_append_format(text, "__lambda_in%d", i);
+        if (direct[i]) {
+            strbuf_append_str_n(text, scan.live[i]->name->chars, scan.live[i]->name->len);
+        } else {
+            strbuf_append_format(text, "__lambda_in%d", i);
+        }
     }
     strbuf_append_str(text, strict ? ") {'use strict';\n" : ") {\n");
     for (int pass = 0; pass < 2; pass++) {
         bool first = true;
         for (int i = 0; i < scan.count; i++) {
+            if (direct[i]) continue;
             bool is_var = false;
             for (int k = 0; k < scan.redeclared_count; k++) {
                 if (scan.redeclared[k] == scan.live[i]) is_var = true;
@@ -6950,26 +6983,19 @@ static const char* js_interp_loop_continuation_compile(JsInterpFrame* frame,
     strbuf_append_str_n(text, script->source + start, end - start);
     strbuf_append_str(text, "\n}\n");
     // Lowering infers parameter types from the module's call sites, and the
-    // continuation has none. A never-executed call whose literals have the
-    // types of the values live at this head gives it the evidence a caller
-    // would; the body stays correct for any other value, as for any callee.
+    // continuation has none. A never-executed call with that evidence gives
+    // it what a caller would; the body stays correct for any other value.
     strbuf_append_str(text, "if (0) ");
     strbuf_append_str(text, name);
     strbuf_append_char(text, '(');
     for (int i = 0; i < scan.count; i++) {
-        NameEntry* live_entry = scan.live[i];
-        JsInterpEnv* env = js_interp_find_env(frame->env, live_entry->scope);
-        Item value = env && live_entry->slot >= 0 &&
-                (uint32_t)live_entry->slot < env->slot_count
-            ? js_interp_env_slot_read(env, (uint32_t)live_entry->slot, false) : ItemNull;
-        TypeId type = get_type_id(value);
         if (i) strbuf_append_char(text, ',');
-        strbuf_append_str(text, type == LMD_TYPE_INT || type == LMD_TYPE_INT64 ||
-            type == LMD_TYPE_FLOAT ? "0" : type == LMD_TYPE_BOOL ? "false" :
-            type == LMD_TYPE_STRING ? "\"\"" : "undefined");
+        strbuf_append_str(text, evidence[i]);
     }
     strbuf_append_str(text, ");\n");
 
+    log_debug("js-loop-handoff: continuation source: %s",
+        text->str + script->source_length);
     void* entry = NULL;
     bool compiled = js_mir_compile_loop_continuation(context ? context->runtime : NULL,
         script, text->str, text->length, name, &entry);

@@ -617,6 +617,52 @@ checkout). Geomean end-to-end wall time, lower is better:
   `havlak2.js` error or time out at every value; two text rows were not
   reached before the run's time limit.
 
+### 11.7 Slow loop continuations: typed arrays and int-tagged Numbers
+
+The §11.6 sweep showed whole-function compilation (threshold 1) up to 24×
+faster than loop handoff on rows whose hot function is called once. Two causes:
+
+1. **Typed arrays copied into `let` locals.** Lowering types a typed-array
+   *parameter* from its call sites (guarded by a runtime kind check) but not a
+   local initialized from one, so `flags[i]` in the continuation took the
+   generic element path. A live-in whose value at the head is a `Uint8Array`,
+   `Int32Array` or `Float64Array` now stays a direct parameter under its own
+   name, and the never-executed evidence call passes `new <Kind>(0)` for it.
+2. **The native-dispatch guard rejected int-tagged Numbers.** A boxed entry
+   enters its `_n` native body only when every inferred-Number argument is a
+   float Item. The AST interpreter passes small integers as `LMD_TYPE_INT`
+   Items, so every call from T0 into a promoted body — the continuation call
+   included — ran the generic boxed body. `jm_emit_exact_native_shape_test`
+   now also accepts the int tag for a Number parameter: the value is exact
+   as a double, and unboxing already converts it (`it2d`). Strings, booleans
+   and BigInt (a separate type) are still rejected.
+
+Validation: `test_js_gtest` 484/484, `test_js_script_gtest` 191/191;
+Test262 baseline 0 regressions (40,259 fully passing; the two 10.0.0 Unicode
+identifier files exceed 3 s under load 19 and pass on retry — a first run also
+lost one batch to a crash that did not reproduce); stress differential over
+`test/js/` 0 of 471 differ.
+
+Release exec ms, min of three, load ~19 (ratios only):
+
+| Row | before, threshold 5 | after, threshold 5 | whole function (threshold 1) | MIR |
+|---|---:|---:|---:|---:|
+| larceny/primes | 2,697 | 647 | 77 | 66 |
+| kostya/primes | 2,330 | 557 | 66 | 60 |
+| kostya/matmul | 764 | 343 | 269 | 252 |
+| larceny/array1 | 59.6 | 34.2 | 17.9 | 17.8 |
+| larceny/triangl | 9,105 | 7,300 | 6,671 | 7,361 |
+| r7rs/fft2 | 133 | 124 | 36 | 4.2 |
+| larceny/ray | 56.9 | 56.9 | 15.9 | 6.3 |
+
+**Remaining gap (hypothesis, not yet measured directly):** handoff happens
+only at the head of a loop that is a direct statement of the function body.
+In the sieve, the first outer iteration's inner loop (500,000 iterations for
+`i = 2`) runs entirely in T0 before the next outer head test. Closing it
+needs a handoff point at a nested loop's head, whose continuation must also
+finish the enclosing iteration and loop; that is a larger change to the
+continuation shape (D8.1.1v14 restricts Lambda the same way).
+
 ### 11.4 Not done
 
 J2 (loop facts at plan time), J4 (frame split), J6/J7 (frame-slot locals,
