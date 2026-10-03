@@ -291,6 +291,7 @@ typedef struct ScanCtx {
     bool indexed;
     const AstIndex* index;
     AstNodeId skip_end;
+    bool strict_interp;
 } ScanCtx;
 
 // An outer write to an N-D ArrayNum replaces a row slice, not one scalar leaf.
@@ -694,7 +695,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
         InterpSyncProcScan sync_scan = {.ok = true};
         bool task_backed = fn->analysis && (fn->analysis->may_await ||
             fn->analysis->needs_task_context);
-        bool async_satellite = task_backed &&
+        // forced T0 must reject a body that needs MIR's suspension transform
+        bool async_satellite = !sc->strict_interp && task_backed &&
             interp_async_proc_satellite_supported(fn);
         if (task_backed && async_satellite) {
             interp_visit_children(fn->body, interp_mark_task_entry, NULL);
@@ -939,13 +941,24 @@ static AstIndexProfileSupport interp_profile_support_node(
 
 bool interp_scan_supported(Script* script, AstNodeType* reject) {
     if (!script || !script->ast_root) return false;
-    ScanCtx sc = {true, AST_NODE_NULL};
+    ScanCtx sc = {true, script->interp_reject_kind};
     AstIndex* index = &script->ast_index;
+    sc.strict_interp = lambda_tier_selected() == LAMBDA_TIER_INTERP;
     if (index->graph_published) {
         sc.indexed = true;
         sc.index = index;
-        sc.ok = ast_index_scan_profile_support(index,
-            interp_profile_support_node, &sc);
+        // the cached profile permits AUTO satellites; enforce this run's pin
+        // on indexed definitions without changing the shared template's facts
+        if (sc.strict_interp) {
+            for (uint32_t i = 0; sc.ok && i < index->function_count; i++) {
+                interp_scan_visit(index->functions[i].node, &sc);
+            }
+        }
+        sc.strict_interp = false;
+        if (sc.ok) {
+            sc.ok = ast_index_scan_profile_support(index,
+                interp_profile_support_node, &sc);
+        }
     } else {
         interp_scan_visit(script->ast_root, &sc);
     }

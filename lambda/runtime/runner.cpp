@@ -1469,9 +1469,32 @@ static bool lambda_prepare_ast_interpreter(Transpiler* tp) {
     return false;
 }
 
+static bool interp_reject_forced_fallback(Transpiler* tp, const char* path) {
+    if (lambda_tier_selected() != LAMBDA_TIER_INTERP) return false;
+    // explicit T0 is an execution constraint, including cached import templates
+    interp_run_stats()->scripts_excluded++;
+    const char* kind = interp_node_kind_name(tp->interp_reject_kind);
+    log_error("interp: unsupported file=%s reason=node:%s",
+        path ? path : "<unknown>", kind);
+    char message[256];
+    snprintf(message, sizeof(message),
+        "LAMBDA_TIER=interp cannot execute %s; MIR fallback is disabled", kind);
+    LambdaError* error = err_create(ERR_NOT_IMPLEMENTED, message, NULL);
+    if (error) {
+        if (tp->errors) arraylist_append(tp->errors, error);
+        else { err_print(error); err_free(error); }
+    }
+    tp->error_count++;
+    return true;
+}
+
 static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
         Script* script) {
-    if (!runtime || !script || !script->ast_frontend_only) return script != NULL;
+    if (!runtime || !script) return false;
+    // an AUTO-planned cache image can contain task satellites; recheck the pin
+    if (!script->ast_frontend_only && lambda_tier_selected() != LAMBDA_TIER_INTERP) {
+        return true;
+    }
     if (runtime->ast_prebuild_only) return true;
     Transpiler transpiler = {};
     memcpy(&transpiler, script, sizeof(Script));
@@ -1486,6 +1509,7 @@ static bool lambda_finalize_ast_template_for_execution(Runtime* runtime,
             script->reference ? script->reference : "<unknown>");
         return true;
     }
+    if (interp_reject_forced_fallback(&transpiler, script->reference)) return false;
     log_info("module-ast-prebuild: execution MIR fallback path=%s reason=node:%s",
         script->reference ? script->reference : "<unknown>",
         interp_node_kind_name(transpiler.interp_reject_kind));
@@ -1680,9 +1704,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         }
     }
 
-    // T0 (D8.1.1v2): stop after the AST passes and interpret. A script whose
-    // pre-scan finds a kind the walker cannot execute falls back to the whole
-    // module JIT path below, counted and logged — never silently half-run (R4).
+    // D8.1.1v15: only AUTO may fall back when the walker rejects a script.
     if (lambda_tier_selected() == LAMBDA_TIER_INTERP ||
             lambda_tier_selected() == LAMBDA_TIER_AUTO) {
         profile_time_t plan0, plan1;
@@ -1738,6 +1760,10 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
             script_adopt_transpiler(script, tp);
             log_info("module-ast-prebuild: retained unsupported Lambda AST path=%s reason=node:%s",
                 script_path, interp_node_kind_name(tp->interp_reject_kind));
+            if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
+            return;
+        }
+        if (interp_reject_forced_fallback(tp, script_path)) {
             if (own_timing_enabled) lambda_own_timing_leave(&own_timing);
             return;
         }

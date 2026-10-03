@@ -2513,7 +2513,10 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
     // entry. T0 owns the surrounding module activation, but it must not turn
     // an async procedure into a synchronous AST call: publish the generated
     // boxed satellite before the function value escapes (D8.1.1v2 / D5.1.3).
-    if (fn_node->node_type == AST_NODE_PROC && fn_node->analysis &&
+    // the strict T0 scan admits conservatively marked procedures only when
+    // their bodies were proved synchronous; they need no generated entry
+    if (lambda_tier_selected() != LAMBDA_TIER_INTERP &&
+            fn_node->node_type == AST_NODE_PROC && fn_node->analysis &&
             (fn_node->analysis->may_await || fn_node->analysis->needs_task_context)) {
         InterpState* st = interp_current_state();
         void* entry = NULL;
