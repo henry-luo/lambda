@@ -41,6 +41,22 @@ struct RadiantGradientLine {
     float y2;
 };
 
+inline float radiant_linear_gradient_used_angle(const LinearGradient* gradient,
+                                                Rect rect) {
+    if (!gradient) return 0.0f;
+    if (!gradient->corner || rect.width <= 0.0f || rect.height <= 0.0f)
+        return gradient->angle;
+    // A corner direction is perpendicular to the line through the neighboring corners.
+    float acute = atan2f(rect.height, rect.width) * 180.0f / math_pi_f();
+    switch (gradient->corner) {
+        case 1: return acute;
+        case 2: return 180.0f - acute;
+        case 3: return 180.0f + acute;
+        case 4: return 360.0f - acute;
+        default: return gradient->angle;
+    }
+}
+
 inline RadiantGradientLine radiant_linear_gradient_line(Rect rect, float angle) {
     float angle_rad = math_degrees_to_radians(angle);
     float dx = sinf(angle_rad);
@@ -49,13 +65,9 @@ inline RadiantGradientLine radiant_linear_gradient_line(Rect rect, float angle) 
     float half_h = rect.height * 0.5f;
     float cx = rect.x + half_w;
     float cy = rect.y + half_h;
-    float abs_dx = fabsf(dx);
-    float abs_dy = fabsf(dy);
-    float dist = (abs_dx * rect.height < abs_dy * rect.width)
-        ? (abs_dy > 1e-7f ? half_h / abs_dy : half_w)
-        : (abs_dx > 1e-7f ? half_w / abs_dx : half_h);
-    return {cx - dx * dist, cy - dy * dist,
-            cx + dx * dist, cy + dy * dist};
+    float line_length = fabsf(dx * rect.width) + fabsf(dy * rect.height);
+    return {cx - dx * line_length * 0.5f, cy - dy * line_length * 0.5f,
+            cx + dx * line_length * 0.5f, cy + dy * line_length * 0.5f};
 }
 
 inline void radiant_blur_adjust(uint32_t pixel, bool add,
@@ -1513,6 +1525,7 @@ typedef struct {
     float font_size;
     float x, baseline_y;
     float word_spacing;
+    float cjk_spacing;      // extra spacing before an adjacent ideograph
     int font_weight;         // CSS numeric weight; 0 = omit
     bool italic;
     const uint32_t* glyph_ids;   // borrowed
@@ -1523,6 +1536,9 @@ typedef struct {
     RdtMatrix transform;
     Bound clip;
 } PaintGlyphRun;
+
+void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
+                             float cjk_spacing);
 
 typedef void (*PaintGlyphRunRasterLowerFn)(const PaintGlyphRun* run,
                                            DisplayList* dl);
@@ -2532,6 +2548,7 @@ inline void radiant_copy_font_values(FontProp* target, const FontProp* source) {
     target->font_kerning = source->font_kerning;
     target->font_size_from_medium = source->font_size_from_medium;
     target->text_deco = source->text_deco;
+    target->text_deco_extra = source->text_deco_extra;
     target->text_deco_color = source->text_deco_color;
     target->text_deco_style = source->text_deco_style;
     target->text_deco_thickness = source->text_deco_thickness;
@@ -2564,7 +2581,10 @@ inline void radiant_fill_missing_font_values(FontProp* target, const FontProp* s
     if (target->font_style == 0) target->font_style = source->font_style;
     if (target->font_variant == 0) target->font_variant = source->font_variant;
     if (target->font_kerning == 0) target->font_kerning = source->font_kerning;
-    if (target->text_deco == 0) target->text_deco = source->text_deco;
+    if (target->text_deco == 0) {
+        target->text_deco = source->text_deco;
+        target->text_deco_extra = source->text_deco_extra;
+    }
     if (target->text_deco_color.a == 0 && source->text_deco_color.a > 0) {
         target->text_deco_color = source->text_deco_color;
     }
@@ -3500,9 +3520,13 @@ uint32_t render_pixel_source_over_straight(uint32_t destination, uint32_t source
 uint32_t render_pixel_source_over_premultiplied(uint32_t destination, uint32_t source);
 uint32_t render_pixel_source_over_premultiplied_pair(uint32_t destination, uint32_t source);
 uint32_t render_pixel_destination_over_premultiplied(uint32_t destination, uint32_t source);
+ScaleMode render_image_scale_mode(const ViewSpan* view, bool repeating);
 uint32_t render_pixel_sample_bilinear(const uint8_t* pixels, int width, int height,
                                       int pitch, float x, float y, bool wrap,
                                       bool round_channels);
+uint32_t render_pixel_bilinear_mix(const uint8_t* p11, const uint8_t* p21,
+                                  const uint8_t* p12, const uint8_t* p22,
+                                  float fx, float fy, bool round_channels);
 void render_pixel_source_over_coverage(uint8_t* destination, Color color,
                                        uint32_t coverage);
 void render_pixel_source_over_opaque_bytes(uint8_t* destination, uint32_t source,
@@ -3833,6 +3857,7 @@ typedef struct RenderExportSession {
     int viewport_height;
     bool auto_width;
     bool auto_height;
+    bool print_media;
 } RenderExportSession;
 
 void render_output_target_init(RenderOutputTarget* target, RenderOutputKind kind,
@@ -3841,7 +3866,8 @@ void render_output_target_apply_session(RenderOutputTarget* target,
                                         const RenderExportSession* session);
 bool render_export_session_begin(RenderExportSession* session, const char* html_file,
                                  int viewport_width, int viewport_height,
-                                 int fallback_width, int fallback_height, float output_scale);
+                                 int fallback_width, int fallback_height, float output_scale,
+                                 bool print_media = false);
 bool render_export_session_begin_raster(RenderExportSession* session, const char* html_file,
                                         int viewport_width, int viewport_height,
                                         float output_scale, float device_scale);
@@ -3868,6 +3894,8 @@ struct RenderContext;
 
 void render_text_selection_rect(struct RenderContext* rdcon, ViewText* text_view,
                                 TextRect* text_rect);
+bool render_text_selection_span(struct RenderContext* rdcon, ViewText* text_view,
+                                int* start_byte, int* end_byte);
 void render_ui_overlays(struct RenderContext* rdcon, DocState* state);
 
 // ===== render_pdf.hpp =====

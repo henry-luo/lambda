@@ -93,8 +93,11 @@ static void render_caret(RenderContext* rdcon, DocState* state) {
     float caret_width = 3.0f * s;
 
 
-    Color caret_color = {0};
-    caret_color.r = 0x66; caret_color.g = 0x66; caret_color.b = 0x66; caret_color.a = 0xCC;
+    DomNode* caret_node = lam::view_dom_node(view);
+    if (caret_node && !caret_node->is_element()) caret_node = caret_node->parent;
+    ViewSpan* caret_element = caret_node && caret_node->is_element()
+        ? static_cast<ViewSpan*>(caret_node->as_element()) : nullptr;
+    Color caret_color = radiant_caret_color_for_view(caret_element);
     rc_fill_rect(rdcon, x, y, caret_width, height, caret_color);
 }
 
@@ -186,6 +189,28 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
     return scratch;
 }
 
+static DomRange* render_active_selection_range(RenderContext* rdcon,
+                                                DomRange* scratch) {
+    if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->document)
+        return nullptr;
+    DocState* state = rdcon->ui_context->document->state;
+    DomSelection* selection = state ? state->dom_selection : nullptr;
+    if (!selection || selection->range_count == 0 ||
+        dom_selection_is_collapsed(selection) || !selection->ranges[0]) return nullptr;
+    return selection_paint_range_for_current_tree(
+        rdcon, selection->ranges[0], scratch);
+}
+
+bool render_text_selection_span(RenderContext* rdcon, ViewText* text_view,
+                                int* start_byte, int* end_byte) {
+    if (!text_view || !start_byte || !end_byte) return false;
+    DomRange scratch;
+    DomRange* range = render_active_selection_range(rdcon, &scratch);
+    if (!range || render_text_control_selection(rdcon, range)) return false;
+    return dom_range_text_byte_span(range,
+        lam::dom_require_text(text_view), start_byte, end_byte);
+}
+
 void render_text_selection_rect(RenderContext* rdcon, ViewText* text_view,
                                 TextRect* text_rect) {
     if (!rdcon || !text_view || !text_rect || !rdcon->ui_context ||
@@ -194,13 +219,8 @@ void render_text_selection_rect(RenderContext* rdcon, ViewText* text_view,
     DocState* state = rdcon->ui_context->document->state;
     if (!state) return;
 
-    DomSelection* ds = state->dom_selection;
-    bool use_dom = ds && ds->range_count > 0 && !dom_selection_is_collapsed(ds);
-    if (!use_dom) {
-        return;
-    }
-
-    DomRange* r = ds->ranges[0];
+    DomRange paint_range;
+    DomRange* r = render_active_selection_range(rdcon, &paint_range);
     if (!r) return;
 
     SelectionPaintCtx ctx;
@@ -216,9 +236,13 @@ void render_text_selection_rect(RenderContext* rdcon, ViewText* text_view,
     scroll_state_resolve_view_geometry(root, &ctx.root_scroll_x, &ctx.root_scroll_y,
                                        nullptr);
     ctx.color.r = 0x00; ctx.color.g = 0x78; ctx.color.b = 0xD7; ctx.color.a = 0x80;
+    DomElement* paint_parent = text_view->parent && text_view->parent->is_element()
+        ? text_view->parent->as_element() : nullptr;
+    if (paint_parent && paint_parent->in_line &&
+        paint_parent->inl()->has_selection_background_color) {
+        ctx.color = paint_parent->inl()->selection_background_color;
+    }
 
-    DomRange paint_range;
-    r = selection_paint_range_for_current_tree(rdcon, r, &paint_range);
     if (render_text_control_selection(rdcon, r)) {
         return;
     }

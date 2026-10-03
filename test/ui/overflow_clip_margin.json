@@ -1,0 +1,26 @@
+{
+  "name": "Overflow clip margin expands the clip edge",
+  "html": "test/ui/overflow_clip_margin.html",
+  "viewport": {"width": 280, "height": 280},
+  "events": [
+    {"type": "assert_pixel", "x": 15, "y": 45,
+     "min_r": 250, "min_g": 250, "min_b": 250},
+    {"type": "assert_pixel", "x": 15, "y": 125,
+     "min_r": 250, "max_g": 5, "max_b": 5},
+    {"type": "assert_pixel", "x": 15, "y": 205,
+     "min_r": 250, "min_g": 250, "min_b": 250},
+    {"type": "assert_pixel", "x": 148, "y": 49,
+     "min_r": 215, "max_r": 225, "min_g": 215, "max_g": 225,
+     "min_b": 215, "max_b": 225},
+    {"type": "assert_pixel", "x": 148, "y": 129,
+     "min_r": 250, "max_g": 5, "max_b": 5},
+    {"type": "assert_pixel", "x": 146, "y": 209,
+     "min_r": 215, "max_r": 225, "min_g": 215, "max_g": 225,
+     "min_b": 215, "max_b": 225},
+    {"type": "assert_pixel", "x": 152, "y": 209,
+     "min_r": 250, "max_g": 5, "max_b": 5},
+    {"type": "click", "x": 15, "y": 125},
+    {"type": "assert_attribute", "target": {"selector": "body"},
+     "attribute": "data-hit", "equals": "yes"}
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3: a destination-aware fill establishes its full certificate with the original exact-count and failure semantics.",
+  "checks": [
+    {"in_func": "_build_#", "expect": ["call\tlambda_fill_for_contract_p, lambda_fill_for_contract"], "forbid": ["call\tfn_fill_p, fn_fill", "call\tlambda_array_admit_numeric_contract_p, lambda_array_admit_numeric_contract"]},
+    {"in_func": "_call_fill_#", "expect": ["call\tlambda_fill_for_contract_p, lambda_fill_for_contract"], "forbid": ["call\tfn_fill_p, fn_fill", "call\tlambda_type_check_p, lambda_type_check"]}
+  ]
+}

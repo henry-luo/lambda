@@ -12,6 +12,8 @@
 
 #include "transpiler.hpp"
 #include "side_stack.h"
+#include "type_contract.hpp"
+#include "lambda-number-types.hpp"
 
 // ---------------------------------------------------------------------------
 // Tier selection
@@ -394,3 +396,26 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
 // when the method has no AST definition or needs captures; callers then fall
 // back to the compiled-entry binding.
 Function* interp_bind_object_method(const struct TypeMethod* method, Item self);
+
+// D8.4.1v2: immutable classifications, never observations of runtime values.
+struct InterpBoundaryPlan {
+    Type* contract;
+    Type* plain;
+    Type* map_contract;
+    LambdaArrayContractInfo array;
+    LambdaNumericKind numeric_kind;
+    LaneStorageDesc store_lane;
+    Type* store_element;
+    bool uses_binder;
+    bool optional_open_array;
+    bool has_store_lane;
+};
+
+struct InterpPlacePlan {
+    AstCowPath path;
+    NameEntry* root;
+    Type* leaf_contract;
+    uint64_t key_shape;
+};
+
+InterpBoundaryPlan* interp_boundary_plan_create(Pool* pool, Type* contract);

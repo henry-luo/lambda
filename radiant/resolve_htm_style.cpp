@@ -786,7 +786,10 @@ static void apply_html_heading_default(LayoutContext* lycon, DomNode* element,
 
     FontProp* font = block->ensure_font(lycon);
     float heading_size = lycon->font.style->font_size * font_scales[level];
-    apply_html_font_size(font, heading_size, false);
+    // UA heading sizes are relative to the inherited size; preserve its
+    // medium lineage for a descendant's monospace family change.
+    apply_html_font_size(font, heading_size,
+        lycon->font.style->font_size_from_medium);
     apply_html_font_weight(font, CSS_VALUE_BOLD, 700);
     block->ensure_boundary(lycon);
     radiant_spacing_set_pair(&block->boundary_mut()->margin,

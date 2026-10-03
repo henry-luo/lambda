@@ -15,6 +15,8 @@ HTML is the native input. LaTeX, Markdown, XML, Lambda script results and diagra
 
 > **Status (alpha, 2026-09-28).** This matrix was compiled from the source (`lambda/input/css/`, `radiant/`, `lib/font/`), the conformance suites, and spot checks run with `lambda layout` and `lambda render` on 2026-09-28. Legend: ✅ supported · ◐ partial, with what is missing stated · ❌ not supported. *Parsed only* means the CSS parser accepts the syntax but nothing downstream applies it. Anything that could not be confirmed is marked *not verified*.
 
+**Implementation update (2026-10-03).** Selector, cascade, nesting, media, `@supports`, custom-property, marker, caret, text-alignment, text-emphasis, logical-border, grid-track, scrolling and image-rendering rows below include focused tests added during the CSS support work. The aggregate conformance and property counts remain the 2026-09-28 baseline until a full re-audit.
+
 To check a feature yourself, lay the page out and read the JSON, or render it and look:
 
 ```bash
@@ -82,7 +84,7 @@ Elements with special behaviour:
 | `<button>`, `<label>`, `<fieldset>`, `<legend>`, `<output>` | ✅ | |
 | `<datalist>` | ◐ | Hidden; no suggestion list. |
 | `<progress>`, `<meter>` | ❌ | Sized, but nothing is drawn. |
-| Constraint validation | ◐ | `required`, `type`, `min`, `max`, `step`, `minlength` and `maxlength` drive `:valid`/`:invalid` in `lambda view` (validation lives in the `dom` package, [Lambda_Packages.md §10.3](Lambda_Packages.md#103-dom--browser-behaviour-for-html)). `pattern` is checked only through `validity.patternMismatch` in JavaScript. |
+| Constraint validation | ◐ | `required`, `type`, `min`, `max`, and `step` feed a shared native validity calculation for static CSS, live CSS, and the DOM ValidityState object. `minlength`/`maxlength` and full HTML `pattern` syntax still need broader checks; static pattern matching currently uses the RE2 subset. See [Lambda_Packages.md §10.3](Lambda_Packages.md#103-dom--browser-behaviour-for-html). |
 | Tables | ✅ | `border`, `cellpadding`, `cellspacing`, `bgcolor`, `rowspan`/`colspan`, `<col span>`; layout in [§8](#8-layout-modes). |
 | `<ol>`, `<ul>`, `<li>` | ◐ | `start`, `reversed` and `<li value>` work; `<ol type>` is ignored (`type="a"` still numbers 1, 2, …); use `list-style-type`. |
 | `<img>` | ◐ | `width`/`height` attributes and intrinsic sizes. `srcset` uses only its first candidate, and an `<img>` with `srcset` but no `src` is not painted. A broken image reserves a box for its `alt` text but draws neither the text nor an icon. Formats in [§16](#16-image-formats). |
@@ -110,56 +112,56 @@ Selectors are parsed in `lambda/input/css/css_parser.cpp` and matched in `lambda
 | Selector | Status | Notes |
 |---|---|---|
 | Type, universal `*`, class, ID | ✅ | Type names are case-insensitive for HTML; class and ID are case-sensitive, with the quirks-mode exception. |
-| Attribute `[a]`, `[a=v]`, `[a~=v]`, `[a\|=v]`, `[a^=v]`, `[a$=v]`, `[a*=v]`, the `i` flag | ✅ | The `s` flag is accepted and has no effect. |
-| Namespaces `ns\|E`, `\|E` | ❌ | The rule is dropped. `*\|E` works. |
+| Attribute `[a]`, `[a=v]`, `[a~=v]`, `[a\|=v]`, `[a^=v]`, `[a$=v]`, `[a*=v]`, the `i` and `s` flags | ✅ | `s` forces a case-sensitive value comparison even when the matcher is in a case-insensitive mode. |
+| Namespaces `ns\|E`, `\|E`, `[ns\|a]`, `[\|a]`, `[*\|a]` | ✅ | `@namespace` resolves named and default type namespaces; attributes without a prefix stay in the null namespace. Qualified, null and wildcard attribute selectors match parsed attributes and live `setAttributeNS` state. DOM queries reject undeclared named prefixes but accept null and wildcard forms. |
 | Combinators: descendant, `>`, `+`, `~` | ✅ | |
-| Column combinator `\|\|` | ❌ | Not parsed. |
+| Column combinator `\|\|` | ◐ | HTML `<col>`/`<colgroup>` membership selects `<td>`/`<th>` through the table slot model, including column and cell spans; queries and live stylesheet restyling are tested. Other host-language grids remain open ([Selectors 5 §9.1](https://drafts.csswg.org/selectors-5/#the-column-combinator), [HTML table model](https://html.spec.whatwg.org/multipage/tables.html#forming-a-table)). Temporary occupancy follows **D4.5.1v4**. |
 | `:root`, `:first-child`, `:last-child`, `:only-child`, `:nth-child()`, `:nth-last-child()`, `:first-of-type`, `:last-of-type`, `:only-of-type` | ✅ | An+B syntax including `odd`/`even`. |
-| `:nth-of-type()`, `:nth-last-of-type()` | ❌ | Evaluated as `:nth-child()` / `:nth-last-child()`, so they count siblings of every type. |
-| `:nth-child(An+B of S)` | ❌ | The `of S` form is not understood. The pseudo-class is ignored and the rest of the selector matches more elements than it should. |
-| `:empty` | ◐ | An element containing only a comment is not treated as empty. |
+| `:nth-of-type()`, `:nth-last-of-type()` | ✅ | Count same-type element siblings. |
+| `:nth-child(An+B of S)`, `:nth-last-child(An+B of S)` | ✅ | Filter element siblings through `S` before applying An+B, including negative steps. |
+| `:empty` | ✅ | Comments do not make an element nonempty. |
 | `:is()`, `:where()`, `:not()` with selector lists and complex selectors | ✅ | `:where()` contributes zero specificity. |
-| `:has()` | ◐ | Descendant arguments only (`:has(.x)`). Relative arguments such as `:has(> .x)` and `:has(+ .x)` never match. |
+| `:has()` | ✅ | Descendant, child, adjacent-sibling and following-sibling arguments match. DOM tests cover attach/remove; child insertion and sibling class changes restyle stylesheet matches (`RenderOutputParity.HasSelectorRestylesAfterChildAndSiblingMutation`). |
 | `:link` | ✅ | Any element with an `href`. |
 | `:visited` | ❌ | Never matches (there is no history). |
-| `:any-link`, `:local-link` | ❌ | Never match. |
+| `:any-link`, `:local-link` | ✅ | `:any-link` uses link state. `:local-link` compares a resolved link URL with the document URL, ignoring fragments. |
 | `:hover`, `:active`, `:focus`, `:focus-within`, `:focus-visible`, `:target` | ◐ | Live in `lambda view` (`:focus-visible` follows keyboard focus; `:target` follows fragment navigation). A static `layout` or `render` has no pointer or focus, so they never match there. |
 | `:checked`, `:disabled`, `:enabled`, `:required`, `:optional`, `:read-only`, `:read-write`, `:open` | ✅ | From the element's attributes in static output, and from live state in `lambda view`. |
-| `:placeholder-shown`, `:valid`, `:invalid` | ◐ | Live in `lambda view` only (validity comes from the `dom` package's validation); never match in static output. |
-| `:default`, `:indeterminate`, `:in-range`, `:out-of-range`, `:user-invalid` | ❌ | Parsed, never match. |
-| `:lang()`, `:dir()` | ❌ | Parsed, never match. |
-| `:scope` | ◐ | Works in DOM query APIs; never matches in a stylesheet. |
-| `:defined`, `:modal`, `:popover-open`, `:fullscreen`, `:autofill`, `:playing`, `:paused` | ❌ | Unknown pseudo-classes: they never match, so `:not(:defined)` matches every element. |
+| `:placeholder-shown`, `:valid`, `:invalid` | ◐ | Initial stylesheet matching now reads native control values and shared validity, including invalid form/fieldset descendants; static render and live submit/value tests pass (`RenderOutputParity.StaticValidityAndPlaceholderSelectorsPaint`, `RenderOutputParity.ValiditySelectorsUseInitialAndLiveConstraints`). `pattern` and less common controls remain partial. |
+| `:default` | ✅ | Uses default checked/selected attributes and the form's first submit button, including a disabled first button (`RenderOutputParity.DefaultSelectorUsesFormDefaults`). |
+| `:indeterminate` | ✅ | Uses the checkbox IDL state, unchecked radio groups, and progress without a value; checkbox state changes restyle the document (`RenderOutputParity.IndeterminateSelectorTracksFormState`). |
+| `:in-range`, `:out-of-range` | ✅ | Numeric/date/time controls with valid range limits use the shared input value codec. Live value changes invalidate value-sensitive stylesheet selectors (`RenderOutputParity.RangeSelectorsTrackLiveNumericValue`). |
+| `:user-invalid`, `:user-valid` | ◐ | User validity starts false, changes on committed control edits or `requestSubmit()`, and clears on reset. The selectors follow subsequent value changes; submit/reset/query/render are covered by `RenderOutputParity.ValiditySelectorsUseInitialAndLiveConstraints`. Other interaction paths need broader checks. |
+| `:lang()`, `:dir()` | ◐ | `:lang()` uses inherited language. `:dir()` uses inherited HTML direction and first-strong detection for `dir=auto`; form-control direction and live invalidation need broader checks. |
+| `:scope` | ✅ | Uses the query root in DOM APIs and the document root in stylesheets. |
+| `:modal`, `:popover-open` | ✅ | Match dialog/popover DOM state. Opening and removal/hiding restyle sibling selectors in live output (`RenderOutputParity.DialogAndPopoverStateSelectorsRestyle`). |
+| `:defined` | ✅ | Built-in elements match; autonomous custom elements match after `customElements.define()`. A definition triggers stylesheet recascade, and DOM queries see the new state (`RenderOutputParity.DefinedSelectorRestylesAfterCustomElementRegistration`). |
+| `:fullscreen`, `:autofill`, `:playing`, `:paused` | ❌ | No matching state source yet. |
 | `::before`, `::after`, `::first-line`, `::first-letter`, and the legacy single-colon spellings | ✅ | |
-| `::marker` | ◐ | Matched, but not every property reaches the marker: `color` was ignored in a spot check. |
+| `::marker` | ◐ | `color` paints on the marker without recoloring list text; pseudo font size, family, weight and style feed marker measurement and raster/SVG text paint. `RenderOutputParity.MarkerColorPaintsSeparatelyFromListText` and `MarkerPseudoFontSizesMeasuredAndPaintedGlyphs` check color and a live font restyle. Other allowed marker properties need broader checks. |
 | `::placeholder` (and the `-webkit-`/`-moz-` spellings) | ✅ | |
-| `::selection` | *parsed only* | Selection colours are not styleable. |
+| `::selection` | ◐ | `background-color` and the color part of `background` paint in contenteditable text and text controls; `color` paints selected ordinary-text, input, and textarea glyphs. The highlight cascade keeps these declarations off the host and survives recascade (`DomIntegrationTest.SelectionColorsCascadeWithoutHostDeclarations`, `RenderOutputParity.SelectionBackgroundUsesPseudoStyle`). Other allowed highlight properties remain unsupported. |
 | `::backdrop` | *parsed only* | Stored; nothing lays it out or paints it. |
-| `::file-selector-button` | ❌ | Its declarations are applied to the `<input>` element itself. |
+| `::file-selector-button` | ◐ | File inputs paint a separate raster button with pseudo font, text color, background color, border shorthand and padding shorthand; its label retains the host color after live restyling (`DomIntegrationTest.FileSelectorButtonKeepsStyleOffHost`, `RenderOutputParity.FileSelectorButtonPaintsSeparateFromHostAfterRestyle`). Other button properties, SVG/PDF output, and styled intrinsic height remain unsupported. |
 | `::slotted()` | ◐ | Shadow-DOM slots; not verified on real pages. |
 | `::part()`, `::cue`, `::highlight()`, `::-webkit-*` | ❌ | Never match. |
 
-Specificity and selector-list handling have known gaps:
-
-- Only `:hover`, `:active`, `:focus`, `:visited`, `:link`, `:first-child`, `:last-child`, `:nth-child()` and `:nth-last-child()` add pseudo-class specificity; every other pseudo-class and every pseudo-element counts as zero. `:is()`, `:not()` and `:has()` correctly take their most specific argument.
-- For a selector list such as `div.a, #i.a`, the rule takes the specificity of the first selector in the list that matches, not the most specific one, so it can lose to a rule that should rank below it.
-- A list containing an invalid selector, such as `.a, .a:bogus`, is kept rather than dropped.
-- Pseudo-class, at-rule and property names are matched case-sensitively: `:FIRST-CHILD`, `@MEDIA` and `WIDTH:` are ignored.
+Specificity and selector-list handling now count supported pseudo-classes, pseudo-elements, and `:nth-child(... of S)` arguments. A stylesheet rule uses the greatest specificity among its matching list branches. Invalid ordinary selector lists are rejected; only `:is()` and `:where()` use forgiving-list recovery, including undeclared namespace prefixes. CSS pseudo-class, at-rule and property names are normalized without changing case-sensitive IDs, classes or custom-property names. Logical and physical side declarations now honor layer order, including its reversal for `!important` (`RenderOutputParity.LogicalAndPhysicalBordersRespectLayerOrder`). The column combinator handles HTML table slots; other host-language grids remain open.
 
 ## 4. At-Rules
 
 | At-rule | Status | Notes |
 |---|---|---|
-| `@media` | ◐ | Supported: the media types `all` and `screen`; `width` and `height` with `min-`/`max-` (px, em, rem, with em fixed at 16 px); `orientation`; `prefers-color-scheme` (always `light`); `prefers-reduced-motion` (always `no-preference`); `and`, `not`, `only` and comma lists. Not supported: range syntax such as `(width >= 600px)`, which **always matches**; boolean features such as `(color)`, which always match; `aspect-ratio`, `resolution`, `hover` and `pointer`, which never match; `or`, which evaluates only its first term. `print` and `speech` never match, even for PDF output, while an unknown type such as `tv` matches. |
-| `@import` | ◐ | Local files and http(s), nested up to 5 levels. Media, `supports()` and `layer()` conditions are ignored. Imported rules are ordered *after* the sheet that imports them, so they override it instead of the reverse. |
+| `@media` | ◐ | Supported: `all`, `screen`, and `print` when exporting HTML to PDF; `width` and `height` with `min-`/`max-`, exact, and one/two-sided range comparisons (px, em, rem, with em fixed at the 16 px initial font size); `aspect-ratio` with ratio values; `resolution` with dppx/x, dpi and dpcm, using the engine's configured device-pixel ratio (currently 1 for normal page loads); `orientation`; `prefers-color-scheme` (defaults to `light`); `prefers-reduced-motion` (defaults to `no-preference`); `and`, `or`, `not`, `only` and comma lists. Boolean `width`, `height`, `aspect-ratio`, `resolution`, `color`, `monochrome` and `orientation` are evaluated; unknown features and media types do not match. Other features such as `hover` and `pointer` remain unsupported; `speech` never matches. `CssEngineTest.MediaQueryRangeBooleanAndOrUseFeatureValues`, `MediaRatioAndResolutionUseTypedRangeValues`, `MediaQueryPrintContextInvalidatesCachedResults`, `RenderOutputParity.MediaRangeAndOrSelectVisibleRules`, and `PdfPrintMediaSelectsRulesAndLinkedStylesheet` check evaluation and paint. The temporary condition parser follows **D4.5.1v4**. |
+| `@import` | ◐ | Local files and http(s), nested up to 5 levels. Imported rules apply at the import rule's source position. `layer()`/anonymous `layer`, `supports()` and media conditions use the corresponding layer/supports/media evaluators; imports after ordinary rules are ignored. Media feature coverage remains partial. |
 | `@font-face` | ◐ | `font-family`; `src` with `url()` plus `format()` (woff2, woff, truetype, opentype) and the first `local()`; `font-style` normal, italic or oblique (no angle); `font-weight` as a single value (no ranges); `unicode-range`. `font-display` is parsed and ignored. Top-level rules only. Remote (http/https) font URLs are skipped by the synchronous loader (see [§11](#11-text-and-fonts)). |
 | `@keyframes` | ✅ | Top-level rules only; `@-webkit-keyframes` is dropped. |
-| `@supports` | ◐ | `not`, `and`, `or` and parentheses work, but a declaration test only checks that the property is known: `(display: bogus)` is true, so `not (display: bogus)` is false. `selector()` is always false. |
-| `@layer` | ❌ | Layer blocks apply as ordinary unlayered CSS in source order: no layer ordering, unlayered rules do not beat layered ones, and there is no `!important` inversion. The statement form `@layer a, b;` also swallows the rule that follows it. |
+| `@supports` | ◐ | `not`, `and`, `or`, parentheses, `selector()` and property-value checks work for validated properties. `(display: bogus)` is false. Value validation is still incomplete across the full property registry. |
+| `@layer` | ◐ | Named, nested, anonymous and order-statement layers rank declarations across stylesheets and layered imports; `!important` reverses that order, and `revert-layer` rolls back longhands and `all` across layers. |
 | `@container` | *parsed only* | Rules inside never apply; `container-type` and `container-name` have no effect. |
-| CSS nesting (`&`, nested rules) | *parsed only* | Nested rules are parsed but never applied. |
+| CSS nesting (`&`, nested rules) | ◐ | Nested style rules apply at multiple depths, including implicit descendants, `&` in compounds or elsewhere in the selector, parent selector lists with `:is()` specificity, and declarations interleaved with child rules. Nested `@media`/`@supports` conditions apply relative selectors and direct declarations. Standalone `&` uses `:scope` in stylesheets and DOM selector parsing. CSSOM serializes nested rules and declaration runs in source order, reflects declaration edits, and rebinds descendants when an outer `selectorText` changes (`RenderOutputParity.NestedCssomSerializesAndRebindsAfterSelectorMutation`). Focused parser, query, paint, live restyling and CSS Syntax WPT ambiguity/error-recovery cases pass. Nested `@container` still has no effect; CSSOM insertion and deletion need broader checks. The parsed rule source follows **D4.5.1v4** ownership. |
 | `@page` | *parsed only* | Visible to CSSOM; margin boxes are not parsed, and PDF output takes neither page size nor margins from it. |
-| `@namespace` | ❌ | Ignored; namespaced selectors are dropped. |
+| `@namespace` | ✅ | Named declarations bind type, universal and attribute selectors; the default declaration binds only type and universal selectors. Quoted and `url(...)` forms work; declarations after ordinary rules are ignored. DOM queries have no stylesheet namespace context. |
 | `@property`, `@counter-style`, `@scope`, `@starting-style`, `@font-feature-values`, `@view-transition` | ❌ | Skipped with their block; rules inside `@scope` and `@starting-style` are lost. |
 | `@charset` | ✅ | Used to decode external stylesheets. |
 
@@ -182,24 +184,24 @@ Stylesheets are collected in document order, each rule is matched against every 
 |---|---|---|
 | `<style>`, `<link rel="stylesheet">`, the `media` attribute | ✅ | Local files and http(s); alternate stylesheets are ignored; `lambda layout -c file.css` adds an extra sheet. |
 | Inline `style` attribute | ✅ | Beats stylesheet rules of normal importance. |
-| `!important` | ◐ | Beats normal declarations. Stylesheet declarations are internally tagged with the user-agent origin, so a stylesheet `!important` wins over an inline `style="… !important"`, which is the reverse of the standard. |
+| `!important` | ◐ | Beats normal declarations; an inline author `!important` wins over an author stylesheet `!important`, including layered declarations. User stylesheets remain unavailable. |
 | Origins | ◐ | Built-in UA styles and author styles only; there are no user stylesheets. |
-| Specificity and source order | ◐ | See the specificity gaps in [§3](#3-css-selectors). |
+| Specificity and source order | ◐ | Supported selectors and matching list branches are ranked correctly; layer order precedes specificity. Some selector and CSS-wide value cases remain partial ([§3](#3-css-selectors)). |
 | Inheritance, `inherit` | ✅ | |
-| `initial`, `unset` | ◐ | Resolved per property; on `width` and `height` they produce 0 instead of `auto`. |
+| `initial`, `unset` | ◐ | `width` and `height` now resolve to `auto`. Other properties still need a complete computed-value audit. |
 | `revert` | ◐ | Falls back to the built-in UA default. |
-| `revert-layer` | ❌ | Not a recognized keyword. |
-| `all` | ◐ | `all: initial` resets only the font properties. |
-| Custom properties and `var()` | ◐ | Fallbacks, nested `var()`, `var()` inside shorthands and inside `calc()` all work. Three gaps: a `var()` cycle ignores the fallback and yields the property's initial value; a custom property defined as `var(--other)` is resolved where it is used rather than where it is declared, so an inherited value can change; an unresolvable `var()` in `width` or `height` gives 0. |
+| `revert-layer` | ◐ | Resolves an ordinary property's or `all` shorthand's earlier layer or origin. Computed-value coverage across all property consumers still needs an audit. |
+| `all` | ◐ | `initial`, `unset`, `inherit`, `revert` and `revert-layer` participate in the property cascade beyond fonts. Visual fixtures check inherited display, dimensions, padding, border, background, color and opacity, plus `revert` clearing author background and color; other property consumers need an audit. `direction`, `unicode-bidi` and custom properties remain excluded. |
+| Custom properties and `var()` | ◐ | Focused layout checks cover declaration-site inheritance, a cycle with fallback, `var()` in `calc()`, and invalid substitutions falling back from `width` to `auto`. Matching space-separated tokens now expand inside `margin` and `padding` shorthands, with invalid substitution resetting the shorthand at computed-value time. Comma-separated and function-token substitution plus other property consumers still need a broader audit. |
 | `@property` registration | ❌ | See [§4](#4-at-rules). |
-| Cascade layers | ❌ | See [§4](#4-at-rules). |
+| Cascade layers | ◐ | Named, nested, anonymous, cross-sheet and `!important` ordering are active; see [§4](#4-at-rules) for remaining gaps. |
 | HTML presentational attributes | ✅ | `body` `bgcolor`/`marginwidth`/`marginheight`/`leftmargin`/`topmargin`; `table` `bgcolor`/`border`/`align`/`cellpadding`/`cellspacing`/`rules`/`width`/`height`; `tr`/`td`/`th` `bgcolor`/`align`/`valign`/`nowrap`/`width`/`height`; `font` `color`/`size`/`face`; `width`/`height` on `img`, `iframe`, `video`, `canvas`, `embed` and `object`; `align` on `hr`/`div`/`p`; `dir`; `hidden`; `ol` `start`/`reversed` and `li` `value`; `size` on `input`/`select`; `cols`/`rows` on `textarea`. |
 
 In `lambda view`, a change of interaction state (hover, focus, checked, …) re-runs the cascade when a stylesheet uses the affected pseudo-class, then reflows the page. Static `layout` and `render` run the cascade once, before layout.
 
 ## 6. Values, Units and Functions
 
-Unsupported functions and units are the most common source of silent differences from a browser. An unknown math function or unit does not invalidate the declaration: it evaluates to 0 or to a raw pixel number and can override a valid earlier value.
+Unsupported functions and units remain a source of differences from a browser. The length parser rejects unknown unit tokens, but registered units and math functions still need a property-by-property computed-value audit; some unsupported consumers produce an unresolved value or zero.
 
 ### 6.1 Units
 
@@ -210,9 +212,10 @@ Unsupported functions and units are the most common source of silent differences
 | `%` | ✅ | Resolved against the right reference per property, including deferred resolution for absolutely positioned boxes. |
 | `vw`, `vh`, `vmin`, `vmax` | ✅ | Against the layout viewport ([§4](#4-at-rules)). |
 | `lh` | ◐ | Uses only the element's own `line-height`, otherwise `normal`. |
-| `rlh`, `cap`, `ic`, `vi`, `vb`, `svw`/`svh`, `lvw`/`lvh`, `dvw`/`dvh` | ❌ | Parsed, then read as `px` (`2cap` is 2 px). |
-| Other `sv*`/`lv*`/`dv*` variants, `cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax` | ❌ | Read as `px`. |
-| `deg`, `rad`, `grad`, `turn` | ◐ | Converted in transforms. Gradient angles, `hue-rotate()` and the `hsl()` hue read the number as degrees, so `0.25turn` is 0.25°. |
+| `rlh`, `cap`, `ic` | ◐ | Used widths resolve against root line-height, font cap height, and the CJK water ideograph's advance, respectively (`RenderOutputParity.FontAndViewportRelativeUnitsResolveUsedWidths`). Other property consumers and font-affecting self-reference cases need checks. |
+| `vi`, `vb`, `sv*`, `lv*`, `dv*` | ◐ | Widths resolve against the viewport's physical or writing-mode logical axes; viewport-relative font sizes also resolve. The headless engine has no retractable viewport UI, so small, large, and dynamic variants share its current viewport. Other property consumers and live UI changes need checks. |
+| `cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax` | ❌ | Parsed; container-relative resolution is not implemented. |
+| `deg`, `rad`, `grad`, `turn` | ✅ | A shared angle converter feeds transforms, linear and conic gradients, `hue-rotate()` and `hsl()` hue (`RenderOutputParity.AngleUnitsAgreeAcrossColorGradientAndFilter`). |
 | `s`, `ms` | ✅ | |
 | `fr` | ✅ | Grid tracks. |
 | `dpi`, `dpcm`, `dppx`, `x` | ◐ | Only inside `image-set()` in `content`. |
@@ -223,12 +226,12 @@ Unsupported functions and units are the most common source of silent differences
 |---|---|---|
 | `calc()` | ✅ | Mixed units, precedence, nesting, `var()` inside. A percentage inside `calc()` on an absolutely positioned box is resolved against the parent element instead of the containing block. |
 | `min()`, `max()`, `clamp()` | ✅ | |
-| `round()`, `mod()`, `rem()`, `abs()`, `sign()`, `sin()`/`cos()`/`tan()`/`asin()`/`acos()`/`atan()`/`atan2()`, `pow()`, `sqrt()`, `hypot()`, `log()`, `exp()`, `pi`, `e`, `infinity` | ❌ | Evaluate to 0 (verified: `calc(100px * sin(30deg))` gives width 0). |
-| `var()` | ◐ | As a whole value, inside `calc()`/`min()`/`max()`, in colours and in `border`. There is no token-level substitution, so `margin: var(--m)` with `--m: 7px 9px` gives 7 px on every side, and `var()` inside `rgb()` or as a `display` or `grid-template-columns` value fails. See also [§5](#5-cascade-inheritance-and-custom-properties). |
+| `round()`, `mod()`, `rem()`, `abs()`, `sign()`, `sin()`/`cos()`/`tan()`/`asin()`/`acos()`/`atan()`/`atan2()`, `pow()`, `sqrt()`, `hypot()`, `log()`, `exp()`, `pi`, `e`, `infinity` | ◐ | Typed length expressions reject unknown identifiers/functions and incompatible dimensions before cascade. Numeric math now reaches used widths, including `calc(100px * sin(30deg))` at 50px, rounding strategies, modulus, and nested expressions (`RenderOutputParity.MathFunctionsAndInvalidCalcResolveUsedWidths`). Angle-valued results in transforms, non-length property consumers, full infinity handling, and computed-style serialization remain open. |
+| `var()` | ◐ | As a whole value, inside `calc()`/`min()`/`max()`, in colours and in `border`; a space-separated variable also expands into surrounding `margin`/`padding` shorthand and modern `rgb()` tokens. `display: var(--mode)` controls box generation, and separately substituted outside/inside keywords form a flex display value. A variable track list works as the whole `grid-template-columns` value and inside fixed or `auto-fill` `repeat()`; other grid forms and the wider function inventory need verification. See also [§5](#5-cascade-inheritance-and-custom-properties). |
 | `env()` | ❌ | Evaluates to 0; the fallback is ignored. |
 | `attr()` | ◐ | In `content` only; typed `attr()` elsewhere gives 0. |
 | `counter()`, `counters()` | ✅ | With a list-style argument. |
-| `url()` | ◐ | `background-image`, `list-style-image`, `content`, `@font-face`, `@import`. Not for `cursor`, `border-image`, `mask-image`, `filter` or `clip-path`. |
+| `url()` | ◐ | `background-image`, `list-style-image`, `content`, `@font-face`, `@import`, and raster `border-image` sources. Not for `cursor`, `mask-image`, `filter` or `clip-path`; vector `border-image` sources remain unsupported. |
 | `image-set()` | ◐ | In `content` only; takes the first candidate. |
 | `cross-fade()`, `element()` | ❌ | |
 
@@ -238,9 +241,10 @@ Unsupported functions and units are the most common source of silent differences
 |---|---|---|
 | Hex: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa` | ✅ | |
 | Named colours, `transparent`, `currentColor` | ✅ | All 148 CSS named colours. |
-| `rgb()`, `rgba()` | ◐ | Comma and space/slash syntax. A percentage alpha (`rgb(255 0 0 / 50%)`) paints nothing; a numeric alpha works. |
-| `hsl()`, `hsla()` | ✅ | Hue in degrees only (see [§6.1](#61-units)). |
-| `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`, `color()`, `color-mix()`, `light-dark()`, relative colours (`rgb(from …)`) | ❌ | Render black or not at all (verified for text and backgrounds). |
+| `rgb()`, `rgba()` | ✅ | Comma and space/slash syntax; number and percentage alpha both paint (`RenderOutputParity.RgbPercentageAlphaPaintsLikeNumericAlpha`). |
+| `hsl()`, `hsla()` | ✅ | Hue numbers and all four CSS angle units. |
+| `hwb()` | ◐ | Hue numbers and CSS angle units, whiteness/blackness normalization, `none` components and number/percentage alpha paint (`RenderOutputParity.HwbColorsNormalizeWhitenessBlacknessAndAlpha`). Full computed-style serialization and interpolation with missing components are not covered. |
+| `lab()`, `lch()`, `oklab()`, `oklch()`, `color()`, `color-mix()`, `light-dark()`, relative colours (`rgb(from …)`) | ❌ | Render black or not at all (verified for text and backgrounds). |
 | System colours (`Canvas`, `ButtonText`, …) | ❌ | Recognized but have no value; render black. |
 
 Colours are sRGB throughout; there is no wide-gamut output.
@@ -249,56 +253,56 @@ Colours are sRGB throughout; there is no wide-gamut output.
 
 | Function | Status | Notes |
 |---|---|---|
-| `linear-gradient()` | ◐ | Angles in `deg`, `to` sides and corners (corners as fixed 45° steps), several stops, two-position stops. Colour hints and `in <colorspace>` are ignored. |
+| `linear-gradient()` | ◐ | All CSS angle units, `to` sides and corners (corner angles use the painted box's aspect ratio), several stops, two-position stops. Colour hints and `in <colorspace>` are ignored. `RenderOutputParity.GradientCornerDirectionUsesPaintedBoxAspectRatio` checks a non-square box. |
 | `repeating-linear-gradient()` | ◐ | Correct in raster output; wrong offsets in SVG output. |
-| `radial-gradient()` | ◐ | `circle`/`ellipse` and `at <position>` with keywords. Size keywords (`closest-side`, `farthest-corner`, …) are not parsed. |
-| `repeating-radial-gradient()` | ◐ | Paints without repeating. |
-| `conic-gradient()` | ◐ | `from <angle>`; `at <position>` is ignored. Raster output only ([§17](#17-output-targets)). |
-| `repeating-conic-gradient()` | ◐ | Paints without repeating, and only through the `background` shorthand. |
+| `radial-gradient()` | ◐ | `circle`/`ellipse` and `at <position>` with side/center keywords, percentages and lengths; a positioned first color stop is preserved. Size keywords (`closest-side`, `farthest-corner`, …) are not parsed. `RenderOutputParity.GradientCentersResolveKeywordsPercentagesAndLengths` and `ConicAngleStopsSetRepeatPeriod` check paint. |
+| `repeating-radial-gradient()` | ◐ | Circle gradients repeat by the first-to-last stop span in raster output (`RenderOutputParity.RepeatingRadialGradientUsesColorStopPeriod`). Ellipse geometry and vector output remain incomplete. |
+| `conic-gradient()` | ◐ | `from <angle>` and `at <position>` with side/center keywords, percentages and lengths. Stops accept angles, percentages and two-position forms, with ordered stop fixup. `RenderOutputParity.GradientCentersResolveKeywordsPercentagesAndLengths` and `ConicAngleStopsSetRepeatPeriod` check raster paint; vector output is still absent ([§17](#17-output-targets)). |
+| `repeating-conic-gradient()` | ◐ | Repeats by the span from its first to last color stop in raster output, through both `background` and `background-image` (`RenderOutputParity.ConicAngleStopsSetRepeatPeriod`). Vector output remains absent. |
 
 ### 6.5 Transform, filter, easing and shape functions
 
 | Family | Status | Notes |
 |---|---|---|
-| Transform functions | ◐ | `translate()`/`X`/`Y`/`Z`/`3d`, `rotate()`/`X`/`Y`/`Z`/`3d`, `skew()`/`X`/`Y`, `matrix()`, `matrix3d()`, `perspective()`, all angle units. `scale()` with a percentage is ignored. The individual `translate`, `rotate` and `scale` properties are not supported. |
-| Filter functions | ◐ | `blur()`, `brightness()`, `contrast()`, `grayscale()`, `invert()`, `opacity()`, `saturate()` and `sepia()` work. `hue-rotate()` takes degrees only; `drop-shadow()` ignores a named colour and draws black; `url()` filters are not supported. |
+| Transform functions | ◐ | `translate()`/`X`/`Y`/`Z`/`3d`, `rotate()`/`X`/`Y`/`Z`/`3d`, `skew()`/`X`/`Y`, `matrix()`, `matrix3d()`, `perspective()`, all angle units. Percentage `scale()` and axis/3D variants resolve to numeric factors (`RenderOutputParity.PercentageScaleMatchesNumericTransform`). The individual `translate`, `rotate` and `scale` properties are not supported. |
+| Filter functions | ◐ | `blur()`, `brightness()`, `contrast()`, `grayscale()`, `invert()`, `opacity()`, `saturate()` and `sepia()` work. `hue-rotate()` accepts all CSS angle units; `drop-shadow()` paints named, functional and `currentColor` values (`RenderOutputParity.DropShadowUsesNamedAndCurrentColor`). `url()` filters are not supported. |
 | Easing | ◐ | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier()`, `step-start`, `step-end`. `steps()` supports only start and end jumps (`jump-both`/`jump-none` behave as end); `linear()` with stops falls back to `ease`. |
-| Grid functions | ◐ | `repeat()` with `auto-fill`/`auto-fit`, `minmax()`, `fit-content()`, named lines, `grid-template-areas`. Track lengths in units other than `px`, `%` and `fr` are read as pixels, `calc()` tracks are dropped, and `subgrid` and `masonry` are not supported. |
+| Grid functions | ◐ | `repeat()` with `auto-fill`/`auto-fit`, `minmax()`, `fit-content()`, named lines, `grid-template-areas`. Fixed `repeat()` now expands a space-separated track list supplied literally or through `var()` (`RenderOutputParity.GridRepeatExpandsLiteralAndVariableTrackLists`). Font-relative and other supported length units resolve to CSS pixels, including within fixed `repeat()` and `minmax()`; pure-length `calc()` tracks also reach layout (`RenderOutputParity.GridTracksResolveFontUnitsAndLengthCalc`). Mixed percentage/length `calc()`, `subgrid` and `masonry` are not supported. |
 | Basic shapes for `clip-path` | ◐ | `inset()`, `circle()`, `ellipse()` and `polygon()` clip in raster output, with lengths in `px` and `%` only (`circle(2em)` is 2 px). `path()` is parsed but does not clip; `rect()`, `xywh()`, `shape()`, `url(#svg-clip)` and geometry boxes are not supported. |
 
 ## 7. CSS Property Coverage
 
-The parser's property table (`lambda/input/css/css_properties.cpp`) knows **342 properties**. Classified by what the resolver (`radiant/resolve_css_style.cpp`) stores and what layout or paint then reads: **244 have an effect** (196 longhands and 48 shorthands), **43 work only for some values**, and **55 are parsed only**, with no effect. A property the table does not know is dropped silently. A vendor-prefixed name such as `-webkit-transform` or `-moz-border-radius` maps to the standard property when that property is known. Shorthands marked `*` are resolved directly rather than expanded into longhands at parse time.
+At the 2026-09-28 assessment, the parser's property table (`lambda/input/css/css_properties.cpp`) knew **342 properties**. The historical classification was **244 with an effect** (196 longhands and 48 shorthands), **43 working for some values**, and **55 parsed only**, with no effect. These totals have not been recounted since the 2026-10-03 focused fixes. A property the table does not know is dropped silently. A vendor-prefixed name such as `-webkit-transform` or `-moz-border-radius` maps to the standard property when that property is known. Shorthands marked `*` are resolved directly rather than expanded into longhands at parse time.
 
 | Area | Applied | Partial (what is missing) | Parsed only (no effect) |
 |---|---|---|---|
 | Box model | `display`, `box-sizing`, `margin`\*, `padding`\* and their physical and logical (`-block`, `-inline`, `-start`, `-end`) longhands | | `margin-trim` |
 | Sizing | `width`, `height`, `min-`/`max-` of both, `block-size`, `inline-size` and their `min-`/`max-` forms | | |
 | Positioning | `position`, `top`, `right`, `bottom`, `left`, `inset`\*, `inset-block`\*, `inset-inline`\* and their longhands, `z-index` | | |
-| Floats | | `float`, `clear` (no `inline-start`/`inline-end`) | `float-reference`, `float-defer`, `float-offset`, `wrap-flow`, `wrap-through` |
-| Overflow and scrolling | `overflow`\*, `overflow-x`, `overflow-y`, `scrollbar-gutter` | | `overflow-block`, `overflow-inline`, `overflow-clip-margin`, `overscroll-behavior`, `scroll-margin`, `scroll-padding`, `scroll-behavior`, `scroll-snap-type`, `scroll-snap-align` |
+| Floats | | `float`, `clear` (physical values and horizontal `inline-start`/`inline-end`; vertical logical float placement remains open) | `float-reference`, `float-defer`, `float-offset`, `wrap-flow`, `wrap-through` |
+| Overflow and scrolling | `overflow`\*, `overflow-x`, `overflow-y`, `scrollbar-gutter` | `overflow-block`, `overflow-inline` (logical axis values reach raster clipping and compete with physical properties and the shorthand; computed-style serialization and axis-specific clipping need more work); `overscroll-behavior` and physical `-x`/`-y` (wheel chaining obeys `contain`/`none` and later longhands in nested panes; keyboard/touch paths and CSSOM reads during dirty host callbacks need an audit); `scroll-margin`, `scroll-padding` and their physical/logical longhands (`scrollIntoView()` uses lengths, percentages and mixed math in nested panes and the viewport; CSSOM computed serialization and other scrolling operations need work); `overflow-clip-margin` (raster clip geometry handles visual boxes and signed offsets, with scroll-container clamping; rounded corners, vector/PDF output and CSSOM serialization need verification); `scroll-snap-type`, `scroll-snap-align` (mandatory/proximity positions, paired-axis selection, oversized-area interior scrolling and mixed scroll-padding math apply to live scrolling; paired-axis oversized areas, relayout resnapping and CSSOM reads during dirty host callbacks remain open); `scroll-behavior` (`auto`/`smooth` affects CSSOM element writes and `scrollIntoView()` in panes and the viewport; anchor navigation follows root smooth scrolling; other scroll producers need verification) | |
 | Flexbox | `flex`\*, `flex-flow`\*, `flex-direction`, `flex-wrap`, `flex-grow`, `flex-shrink`, `flex-basis`, `order` | | |
-| Grid | `grid`\*, `grid-template`\*, `grid-template-areas`, `grid-area`\*, `grid-row`\*, `grid-column`\* and their start/end longhands, `grid-gap`\*, `grid-row-gap`, `grid-column-gap` | `grid-template-columns`, `grid-template-rows`, `grid-auto-rows`, `grid-auto-columns` (non-`px` lengths read as px, no `calc()`), `grid-auto-flow` (no `dense`) | |
+| Grid | `grid`\*, `grid-template`\*, `grid-template-areas`, `grid-area`\*, `grid-row`\*, `grid-column`\* and their start/end longhands, `grid-gap`\*, `grid-row-gap`, `grid-column-gap`, `grid-auto-flow` (`row`/`column` and `dense` backfill, including both axes; `RenderOutputParity.GridAutoFlowDenseBackfillsEarlierHole`) | `grid-template-columns`, `grid-template-rows`, `grid-auto-rows`, `grid-auto-columns` (supported non-`px` length units and pure-length `calc()` now resolve; mixed percentage/length `calc()` and other value forms remain partial) | |
 | Box alignment | `justify-content`, `justify-items`, `justify-self`, `align-content`, `align-items`, `align-self`, `place-content`\*, `place-items`\*, `place-self`\*, `gap`\*, `row-gap`, `column-gap` | | |
 | Tables | `border-collapse`, `border-spacing`, `caption-side`, `empty-cells`, `table-layout` | | |
-| Multi-column | `columns`\*, `column-count`, `column-width`, `column-fill`, `column-span`, `column-rule`\*, `column-rule-width`, `column-rule-style`, `column-height`, `column-wrap` | `column-rule-color` (named colours and `rgb()` ignored) | |
+| Multi-column | `columns`\*, `column-count`, `column-width`, `column-fill`, `column-span`, `column-rule`\*, `column-rule-width`, `column-rule-style`, `column-rule-color`, `column-height`, `column-wrap` | | |
 | Fragmentation | `box-decoration-break` | `break-before`, `break-after`, `break-inside`, `page-break-*`, `orphans`, `widows` (inside multi-column only; no pagination) | |
 | Lists and generated content | `list-style`\*, `list-style-type`, `list-style-position`, `list-style-image`, `counter-reset`, `counter-increment`, `counter-set`, `content`, `quotes` | | `marker-offset` |
-| Text | `white-space`, `text-wrap`\*, `text-wrap-mode`, `word-break`, `line-break`, `overflow-wrap`, `word-wrap`, `hyphens`, `hyphenate-character`, `text-align`, `text-align-last`, `letter-spacing`, `word-spacing`, `text-transform`, `text-decoration-style`, `text-decoration-color`, `text-overflow`, `line-height`, `vertical-align`, `text-spacing-trim`, `text-autospace`, `initial-letter`, `text-box`\*, `text-box-trim`, `text-box-edge`, `line-clamp`, `-webkit-line-clamp`, `dominant-baseline`, `baseline-source`, `ruby-position` | `text-decoration`, `text-decoration-line` (one line keyword: `underline overline` paints only the overline), `text-decoration-thickness` (lengths only), `text-shadow` (dropped unless the element also sets a font property), `text-indent` (no `hanging`/`each-line`), `tab-size` (numbers only), `text-wrap-style` (`balance` only), `text-justify` (`none` only), `text-emphasis`, `text-emphasis-style`, `text-emphasis-position` (space reserved, marks not painted) | `text-align-all`, `text-emphasis-color`, `hanging-punctuation`, `alignment-baseline`, `baseline-shift`, `ruby-align` |
+| Text | `white-space`, `text-wrap`\*, `text-wrap-mode`, `word-break`, `line-break`, `overflow-wrap`, `word-wrap`, `hyphens`, `hyphenate-character`, `text-align`, `text-align-all`, `text-align-last`, `letter-spacing`, `word-spacing`, `text-transform`, `text-decoration-style`, `text-decoration-color`, `text-overflow`, `line-height`, `vertical-align`, `text-spacing-trim`, `text-autospace`, `initial-letter`, `text-box`\*, `text-box-trim`, `text-box-edge`, `line-clamp`, `-webkit-line-clamp`, `dominant-baseline`, `baseline-source`, `ruby-position`, `text-shadow`, `tab-size`, `text-indent`, `text-decoration-line`, `text-decoration-thickness` | `text-decoration` (multiple line, color, and thickness components paint; skip controls remain incomplete), `text-underline-offset` (lengths and inherited percentages paint in raster and serialize in SVG; PDF remains unverified), `text-underline-position` (`under` uses font descent in horizontal raster, `auto`/`from-font` use the font metric, and SVG serializes the value; vertical placement remains open), `text-decoration-skip-ink` (`auto` and `all` skip solid decoration strokes at glyph ink in raster; `none` paints continuously; SVG serializes the value), `text-wrap-style` (`balance` only), `text-justify` (`none` prevents paint-time spacing, `inter-word` distributes only at spaces, and raster/SVG `auto` expands CJK gaps; PDF CJK and general `inter-character` remain incomplete), `text-emphasis`, `text-emphasis-style`, `text-emphasis-color`, `text-emphasis-position` (marks paint in horizontal raster/SVG; vertical and PDF remain open) | `hanging-punctuation`, `alignment-baseline`, `baseline-shift`, `ruby-align` |
 | Fonts | `font`\*, `font-family`, `font-size`, `font-weight`, `font-style`, `font-kerning` | `font-variant` (`small-caps` only) | `font-stretch`, `font-size-adjust`, `font-variant-ligatures`, `-caps`, `-numeric`, `-alternates`, `-east-asian`, `font-feature-settings`, `font-variation-settings`, `font-language-override`, `font-optical-sizing`, `font-display` |
 | Writing modes | `writing-mode`, `direction`, `unicode-bidi`, `text-combine-upright` | `text-orientation` (no `sideways`) | |
-| Colour and background | `color`, `background-color`, `background-position`, `-position-x`, `-position-y`, `background-size`, `background-repeat`, `background-origin`, `background-clip` | `background`\* (an image `url()` is not painted), `background-image` (one image layer; no `image-set()`/`cross-fade()`), `background-blend-mode` (image over the background colour only) | `background-attachment` |
-| Borders and outline | `border`\* and every physical and logical side, width, style and colour longhand the table knows, `border-radius`\* and the four corner radii, `outline`\*, `outline-width`, `outline-style`, `outline-color`, `outline-offset` | `border-image-source` (linear gradients only), `border-image-width` (one value) | `border-image`\*, `border-image-slice`, `border-image-outset`, `border-image-repeat` |
+| Colour and background | `color`, `background-color`, `background-position`, `-position-x`, `-position-y`, `background-size`, `background-repeat`, `background-origin`, `background-clip` | `background`\* (a single `url()` image now paints in raster and SVG; multilayer images and broader shorthand components remain partial), `background-image` (one image layer; no `image-set()`/`cross-fade()`), `background-blend-mode` (image over the background colour only), `background-attachment` (`fixed` and `local` position single raster image/gradient layers to the viewport and scrollable content respectively; vector and multilayer output remain open) | |
+| Borders and outline | `border`\* and physical and logical side/axis width, style and colour properties, including one/two-value `border-inline-width`/`-style`/`-color` and `border-block-style` (`RenderOutputParity.LogicalBorderPairsMapByDirectionAndWritingMode`), `border-radius`\* and physical/logical corner radii (`RenderOutputParity.LogicalCornerRadiiMapAndCompeteWithPhysicalCorners`), `outline`\*, `outline-width`, `outline-style`, `outline-color`, `outline-offset` | `border-image`\* and its source, slice, width, outset and repeat longhands paint linear gradients and raster URL sources through the nine-slice raster path; vector output and other image functions remain partial. Logical corner radii do not yet support `calc()`. | |
 | Effects | `box-shadow`, `opacity`, `visibility`, `mix-blend-mode` | `filter`, `backdrop-filter` (see [§6.5](#65-transform-filter-easing-and-shape-functions)), `clip-path` (basic shapes, raster output only), `mask-image` (a radial gradient becomes a hard circular clip; no `url()` or linear masks) | `isolation`, `clip`, `mask-type` |
-| Transforms | `transform`, `transform-origin`, `transform-style`, `perspective`, `perspective-origin` | | `backface-visibility` |
+| Transforms | `transform`, `transform-origin` (including unitless-zero length components), `transform-style`, `perspective`, `perspective-origin` | | `backface-visibility` |
 | Transitions and animations | `transition`\* and its longhands, `animation-name`, `-duration`, `-delay`, `-iteration-count`, `-direction`, `-fill-mode`, `-play-state`, `-timing-function` | | `animation`\* (the shorthand is not expanded: use the longhands) |
-| UI | `cursor`, `pointer-events`, `user-select`, `accent-color`, `caret-shape`, `field-sizing` | `appearance` (`none` and `base-select` only) | `caret-color`, `resize`, `nav-index`, `nav-up`, `nav-right`, `nav-down`, `nav-left` |
-| Replaced elements | `object-fit`, `object-position`, `object-view-box`, `image-orientation`, `aspect-ratio` | | `image-rendering` |
+| UI | `cursor`, `pointer-events`, `user-select`, `accent-color`, `caret-color`, `caret-shape`, `field-sizing` | `appearance` (`none` suppresses native checkbox, radio, range, button, text-control and select chrome in raster; `base-select` has a select consumer; `base` and full compatibility behavior remain open) | `resize`, `nav-index`, `nav-up`, `nav-right`, `nav-down`, `nav-left` |
+| Replaced elements | `object-fit`, `object-position`, `object-view-box`, `image-orientation`, `aspect-ratio` | `image-rendering` (`crisp-edges`/`optimizeSpeed` select nearest sampling; `pixelated` scales to the closest integer multiple with nearest sampling, then smooths to the raster target; `<img>` and background images, including inherited values, are tested by `RenderOutputParity.ImageRenderingCrispEdgesUsesSourcePixels` and `ImageRenderingPixelatedBlendsAtNonintegerScale`. Transformed/display-list images and other image consumers remain partial.) | |
 | Containment | `contain-intrinsic-size`\* and its longhands | `contain` (size containment only), `container-type`, `content-visibility` (`hidden` only) | `container`\*, `container-name` |
 | SVG | `fill`, `stroke`, `stroke-width` (on the root `<svg>` only; see [§15](#15-svg)) | | |
-| Other | `zoom` | `all` (`initial` and `unset` only) | |
+| Other | `zoom` | `all` (tested `initial`, `unset`, `inherit`, `revert` and `revert-layer` behavior; full property coverage remains open) | |
 
-**Not recognized at all** (dropped): the individual transform properties `translate`, `rotate` and `scale`; `will-change`; `touch-action`; `text-underline-offset`; the `mask` shorthand and the other `mask-*` properties; `shape-outside` and the other `shape-*` properties; `offset-*`; `color-scheme`; `font-synthesis`; `font-palette`; the logical border properties `border-inline-width`/`-style`/`-color` and `border-block-style`; the logical corner radii; anchor positioning; scroll-driven animation timelines; `transition-behavior`; and SVG properties other than `fill`, `stroke` and `stroke-width` (`stroke-dasharray`, `fill-opacity`, … are read only as attributes or from a `<style>` inside the SVG).
+**Not recognized at all** (dropped): the individual transform properties `translate`, `rotate` and `scale`; `will-change`; `touch-action`; the `mask` shorthand and the other `mask-*` properties; `shape-outside` and the other `shape-*` properties; `offset-*`; `color-scheme`; `font-synthesis`; `font-palette`; anchor positioning; scroll-driven animation timelines; `transition-behavior`; and SVG properties other than `fill`, `stroke` and `stroke-width` (`stroke-dasharray`, `fill-opacity`, … are read only as attributes or from a `<style>` inside the SVG).
 
 ## 8. Layout Modes
 
@@ -310,11 +314,11 @@ Every mode below lays out the same tree, and all positions and sizes are fractio
 | Inline formatting | ✅ | Line boxes, `vertical-align`, `line-height`, `inline-block`, `inline-flex`, `inline-grid`, replaced elements on the line; text details in [§11](#11-text-and-fonts). |
 | `display` values | ✅ | `block`, `inline`, `inline-block`, `flex`, `inline-flex`, `grid`, `inline-grid`, `flow-root`, `list-item`, `contents`, `none`, the `table-*` family and `ruby` (annotation placed above the base) were checked. |
 | Flexbox | ◐ | Direction, wrapping, `gap`, `flex-grow`/`-shrink`/`-basis`, `order`, `justify-content` (including `space-evenly`), `align-items`/`-self`/`-content`, auto margins and baseline alignment. `align-items: last baseline` is not fully spec-correct, and flex containers nested more than 16 deep are not laid out further ([RAD_08 §9](dev/radiant/RAD_08_Flexbox_Layout.md)). |
-| Grid | ◐ | Track lists with `px`, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()` and `fit-content()`; `repeat()` with `auto-fill` and `auto-fit`; named lines and areas; line-number placement and spans; implicit tracks; gaps; box alignment. **Gaps:** track sizes in `em`, `rem` and other non-`px` units are read as pixels (`5em` becomes 5 px, verified); `grid-auto-flow: dense` behaves like sparse placement (verified); a single `minmax()` or `fit-content()` in `grid-auto-rows`/`-columns` is ignored; a grid holds at most 64 tracks per axis, where later columns collapse onto the 64th line, and 256 items, where later items are not placed (both verified). Named-line resolution is simplified ([RAD_09 §8](dev/radiant/RAD_09_Grid_Layout.md)). |
+| Grid | ◐ | Track lists with `px`, `%`, `fr`, `auto`, `min-content`, `max-content`, `minmax()` and `fit-content()`; `repeat()` with `auto-fill` and `auto-fit`; named lines and areas; line-number placement and spans; implicit tracks; gaps; box alignment. Font-relative track lengths and pure-length `calc()` now resolve through the common unit resolver, including in fixed `repeat()`, `minmax()` and implicit rows (`RenderOutputParity.GridTracksResolveFontUnitsAndLengthCalc`); `grid-auto-flow: dense` backfills earlier holes (`RenderOutputParity.GridAutoFlowDenseBackfillsEarlierHole`). **Gaps:** mixed percentage/length `calc()` needs the grid track's reference box; a grid holds at most 64 tracks per axis, where later columns collapse onto the 64th line, and 256 items, where later items are not placed (both verified). Named-line resolution is simplified ([RAD_09 §8](dev/radiant/RAD_09_Grid_Layout.md)). |
 | Tables | ✅ | Automatic and fixed layout (CSS 2.1 §17), `border-collapse` with conflict resolution, `border-spacing`, row and column spans, captions, row groups, anonymous table boxes, `display: table*` on any element. |
-| Floats and `clear` | ◐ | `left`, `right`, `none` and `both`, line shortening around floats and clearance work. The logical values `inline-start`/`inline-end` are not mapped, and `shape-outside` is not applied: text wraps around the float's margin box (verified). |
+| Floats and `clear` | ◐ | `left`, `right`, `none` and `both`, line shortening around floats and clearance work. Horizontal `inline-start`/`inline-end` use the containing block's direction; vertical logical float placement remains open. `shape-outside` is not applied: text wraps around the float's margin box (verified). |
 | Positioning | ◐ | `relative`, `absolute` and `sticky` (re-resolved as the page scrolls), `inset` and its longhands, `z-index`. `fixed` boxes use the initial containing block (or a transformed or contained ancestor); RAD_11 lists that they scroll with the page in `lambda view` instead of staying pinned, which was not verified here. |
-| Multi-column | ◐ | `column-count`, `column-width`, `columns`, `column-gap`, `column-rule`, `column-fill`, balancing, `column-span: all`, and `break-before`/`-after`/`-inside`, `orphans` and `widows` inside columns. `column-rule-color` accepts only hex colours. Fragmentation is simplified ([RAD_11 §7](dev/radiant/RAD_11_Positioned_Float_Multicol_Lists.md)); the multi-column WPT suite records 144 full and 218 partial passes of 362. |
+| Multi-column | ◐ | `column-count`, `column-width`, `columns`, `column-gap`, `column-rule`, `column-fill`, balancing, `column-span: all`, and `break-before`/`-after`/`-inside`, `orphans` and `widows` inside columns. Named, `rgb()` and default `currentColor` column rules paint in SVG. Fragmentation is simplified ([RAD_11 §7](dev/radiant/RAD_11_Positioned_Float_Multicol_Lists.md)); the multi-column WPT suite records 144 full and 218 partial passes of 362. |
 | Lists and counters | ◐ | Markers inside and outside, `list-style-type` (decimal, roman, alpha and bullet styles checked), `list-style-image`, `<ol start>`, `<ol reversed>`, `<li value>`, `counter-reset`/`-increment`/`-set`, `counter()` and `counters()` with a style argument. `::marker` styling is partial (see [§3](#3-css-selectors)); `@counter-style` is not supported. |
 | Writing modes and bidi | ◐ | `writing-mode: vertical-rl` and `vertical-lr` swap the block and inline axes, so box geometry is correct, but glyphs are painted horizontally. `direction` and `unicode-bidi` apply; reordering of mixed-direction text needs the optional FriBidi library. Details in [§11](#11-text-and-fonts). |
 
@@ -322,13 +326,13 @@ Every mode below lays out the same tree, and all positions and sizes are fractio
 
 | Feature | Status | Notes |
 |---|---|---|
-| `margin`, `padding`, `border-width`, percentages against the containing block's width | ✅ | Checked: `padding-top: 10%` resolves against the width. |
+| `margin`, `padding`, `border-width`, percentages against the containing block's width | ✅ | Checked: `padding-top: 10%` resolves against the width. Spacing shorthands reject unsupported values before cascade; in quirks-mode HTML, unitless numbers in `margin`/`padding` are parsed as px, while standards-mode declarations reject them. |
 | `box-sizing: content-box \| border-box` | ✅ | |
-| `width`, `height`, `min-*`, `max-*` | ◐ | Lengths, percentages, `auto`, `min-content`, `max-content`, `fit-content`, `fit-content()` and `stretch`. `initial`/`unset` give 0 instead of `auto` ([§5](#5-cascade-inheritance-and-custom-properties)). |
+| `width`, `height`, `min-*`, `max-*` | ◐ | Lengths, percentages, `auto`, `min-content`, `max-content`, `fit-content`, `fit-content()` and `stretch`. `initial`/`unset` now give `auto` for width and height; other sizing cases need broader checks ([§5](#5-cascade-inheritance-and-custom-properties)). |
 | `aspect-ratio` | ✅ | Checked: `160px` wide at `16/9` gives 90 px. |
 | Margin collapsing | ✅ | |
 | `overflow: visible \| hidden \| clip \| scroll \| auto` | ✅ | Establishes a block formatting context, clips painting (including rounded corners), and creates a scroll container in `lambda view`. |
-| Logical properties (`margin-inline`, `inset-block`, …) | ◐ | Margins, paddings, insets, `inline-size`/`block-size` and `border-inline-start`/`-end` map to physical sides by `direction` and `writing-mode` (checked: `padding-inline-end` lands on the left under `rtl`, and `inline-size` becomes the height under `vertical-rl`). The logical border shorthands `border-inline-width`/`-style`/`-color` and `border-block-style` and the logical corner radii are not recognized ([§7](#7-css-property-coverage)). |
+| Logical properties (`margin-inline`, `inset-block`, …) | ◐ | Margins, paddings, insets, `inline-size`/`block-size`, logical border sides/axis pairs and the four logical corner radii map by `direction` and `writing-mode` (checked: `padding-inline-end` lands on the left under `rtl`, `inline-size` becomes the height under `vertical-rl`, and logical border colors/widths and radii map to physical edges/corners). Logical corner `calc()` values remain unsupported ([§7](#7-css-property-coverage)). |
 
 ## 10. Backgrounds and Borders
 
@@ -339,14 +343,14 @@ Status is for the raster painter (PNG, JPEG and the `lambda view` window); SVG a
 | `background-color` | ✅ | |
 | `background-image: url()`, one layer | ✅ | Local files, relative paths and `data:` URIs, with `background-repeat`, `background-position`, `background-size` (lengths, `cover`, `contain`) and `background-origin`. |
 | Several background layers | ◐ | Gradient layers stack, but an image `url()` inside a multi-layer list is not painted (checked with two images, and with an image over a gradient). |
-| `background` shorthand with an image | ❌ | `background: url(x.png) no-repeat` paints no image, with or without other components (checked with relative, absolute and `data:` URLs). Colours and gradients in the shorthand work. Use `background-image` and the other longhands. |
+| `background` shorthand with an image | ◐ | A single relative `url()` with `no-repeat` now paints in raster and SVG (`RenderOutputParity.BackgroundShorthandUrlPaintsImage`). Multilayer URL images and combined size/position grammar still need broader checks. |
 | `linear-gradient()`, `radial-gradient()`, `conic-gradient()`, `repeating-*` | ✅ | SVG and PDF output drop conic gradients. |
 | `background-clip`, including `text` | ✅ | SVG output renders `background-clip: text` as invisible text. |
 | `background-blend-mode` | ❌ | `multiply` over two gradient layers did not blend in a spot check. |
-| `background-attachment` | ❌ | Parsed and stored, but no painter reads it: `fixed` and `local` paint like `scroll`. |
+| `background-attachment` | ◐ | `scroll`, `fixed` and `local` validate before cascade. Raster `fixed` uses the viewport positioning area while keeping the element's background clip; `local` sizes the positioning area to scrollable overflow and follows its live scroll position. Both work through the longhand and a single-layer `background` shorthand. `inherit` copies the parent's computed attachment. `RenderOutputParity.FixedBackgroundAttachmentUsesViewportPosition`, `LocalBackgroundAttachmentSizesToScrollableContent` and `LocalBackgroundAttachmentMovesWithScrollContent` compare pixels. Multilayer backgrounds, SVG/PDF and transformed containing blocks remain open. The computed state follows **D4.5.1v4**. |
 | `border-style` | ✅ | `solid`, `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, mixed per side. SVG and PDF output draw `dashed` and `dotted` borders as solid. |
 | `border-radius` | ✅ | Per-corner and elliptical radii; backgrounds, borders and overflow clipping follow the curve. |
-| `border-image` | ◐ | Gradient sources set through the longhands paint. An image `url()` source did not paint, and neither did the `border-image` shorthand: the ordinary border was drawn instead. |
+| `border-image` | ◐ | Linear-gradient and raster `url()` sources paint from longhands or the shorthand with nine-slice source cuts, one-to-four slice/width/outset values, `fill`, and two-axis `stretch`/`repeat`/`round`/`space` tiling. The shorthand competes with explicit longhands by cascade order (`RenderOutputParity.BorderImageShorthandCompetesWithLonghandsInCascade`). The `enhance5_spec_border_image_gradient_01` browser reference matches exactly; focused raster cases check used areas, repeat tiles, URL crops, intrinsic `auto` width and center fill. HTML SVG/PDF output currently drops these border-image slices; SVG URL/vector sources and other image functions are still unsupported. |
 | `box-shadow` | ✅ | Outer and `inset`, spread, blur, several shadows, rounded corners. SVG and PDF output embed it as a raster image. |
 | `outline`, `outline-offset` | ✅ | SVG output approximates `dotted` with dashes. |
 
@@ -361,7 +365,7 @@ Radiant uses Lambda's own font engine (`lib/font/`) for font loading, glyph metr
 | TrueType, OpenType, collections (`.ttc`) | ✅ | CFF-flavoured OpenType outside macOS was not verified. |
 | WOFF, WOFF2 | ✅ | Checked: a WOFF2 face loaded through `@font-face` changes the measured text. |
 | `@font-face` | ◐ | `url()`, `local()`, `format()` and `unicode-range` (per glyph). Remote fonts are fetched asynchronously by the network loader, so they may not be ready for a one-shot `layout` or `render` (not verified). `font-display` and weight ranges are ignored; see [§4](#4-at-rules). |
-| System fonts and fallback | ✅ | Per-character fallback through the platform font service; `serif`, `sans-serif` and `monospace` were checked. The generic families `emoji`, `math` and `fangsong` are not mapped. |
+| System fonts and fallback | ✅ | Per-character fallback through the platform font service; `serif`, `sans-serif` and `monospace` were checked. HTML UA `pre` and relative heading code now preserve Chromium's 13/16 fixed-font scaling (`RenderOutputParity.UaMonospaceKeepsRelativeHeadingAndPreSizes`). The generic families `emoji`, `math` and `fangsong` are not mapped. |
 | Kerning | ✅ | Pair kerning from `GPOS`/`kern`; `font-kerning` is honoured. |
 | Ligatures, OpenType features | ❌ | No `GSUB`: no ligatures, and `font-feature-settings` and `font-variant-*` are parsed only. `font-variant: small-caps` is synthesized. |
 | Variable fonts | ◐ | Only the `wght` axis, driven by `font-weight`, on macOS. `font-variation-settings` is parsed only. |
@@ -377,15 +381,15 @@ Radiant uses Lambda's own font engine (`lib/font/`) for font loading, glyph metr
 | `white-space` (all values, including `break-spaces`), `text-wrap` (`wrap`, `nowrap`, `balance`) | ✅ | WPT white-space: 223 of 291 tests match fully. |
 | Line breaking | ◐ | A subset of the Unicode line-breaking rules (UAX #14) covering ideographs, small kana, break-after and glue classes, and ZWJ; `word-break`, `overflow-wrap` and `line-break` values. CJK wraps correctly (the `pretext` suite). No dictionary-based breaking for Thai, Lao, Khmer or Myanmar. |
 | Hyphenation | ◐ | `hyphens: auto` for English only (`lang="en"`, `en-US`). Soft hyphens and `hyphenate-character` work. |
-| `text-align` (including `justify`), `text-align-last`, `letter-spacing`, `word-spacing`, `text-transform` | ✅ | `text-transform: full-width` is not supported. |
-| `text-indent` | ◐ | Lengths, percentages and `calc()`; the `hanging` and `each-line` keywords are rejected. |
+| `text-align` (including `justify`), `text-align-all`, `text-align-last`, `letter-spacing`, `word-spacing`, `text-transform` | ✅ | `text-align-all` wins against the shorthand by cascade priority; `text-align-last` inherits and can override the shorthand's last-line reset. `text-transform: full-width` is not supported. |
+| `text-indent` | ✅ | Lengths, percentages, `calc()`, `hanging` and `each-line`; the modifier WPT browser comparison matches all boxes and text runs. |
 | `line-height`, `vertical-align` | ✅ | |
-| `text-decoration` | ◐ | Style (including `wavy`), colour and thickness work, but only one line keyword applies at a time: `underline overline` paints only the overline. `text-underline-offset`, `text-underline-position` and `text-decoration-skip-ink` are not recognized; underlines always skip descenders. |
-| `text-shadow` | ◐ | Paints correctly, but is dropped unless the same element also sets a font property such as `font-size`. |
+| `text-decoration` | ◐ | Multiple line keywords paint in raster and serialize in SVG; colour, style and length/percentage/`from-font` thickness forms are accepted. `text-underline-offset` moves raster underlines and serializes in SVG. `text-underline-position` accepts `auto`, `from-font`, `under`, `left`, `right` and valid pairs; `under` moves horizontal raster strokes below the font descent while `auto`/`from-font` use the font underline metric, and SVG serializes non-default values. Vertical side placement remains open. `text-decoration-skip-ink` accepts `auto`, `none`, and `all`: raster solid underlines skip glyph ink by default, `none` paints continuously, and `all` also applies gap detection to overlines; SVG serializes authored `none`/`all`. Non-solid skip-ink strokes and PDF still need verification. `RenderOutputParity.TextDecorationListPaintsBothLines`, `TextUnderlineOffsetMovesRasterLineAndSurvivesSvg`, `TextUnderlinePositionUnderMovesStrokeAndInherits`, and `TextDecorationSkipInkControlsRasterGapsAndSvgStyle` cover these paths. The computed properties follow **D4.5.1v4**. |
+| `text-shadow` | ✅ | Paints without an explicit font declaration; verified in SVG output. |
 | `text-overflow: ellipsis` | ◐ | The text is clipped, but no "…" is painted (verified). |
 | `line-clamp`, `-webkit-line-clamp` | ◐ | Lines are clamped, but the "…" is appended without shortening the last line, so it is clipped away. |
-| `text-emphasis` | ◐ | Line space is reserved; the marks are not painted. |
-| `tab-size` | ◐ | Integer values only. |
+| `text-emphasis` | ◐ | Horizontal text paints half-size marks in raster and SVG. The shorthand and its style/color/position longhands validate values and respect cascade order; spaces and punctuation do not receive marks. `RenderOutputParity.TextEmphasisPaintsMarksAndRespectsLonghandOrder` checks colored dot/circle glyphs and a style reset. Vertical placement, ruby collision, PDF output and effect-group fallback remain open. |
+| `tab-size` | ✅ | Non-negative numbers, including fractions, and lengths. Lengths inherit as computed pixels; line layout and intrinsic sizing both use the chosen tab period. |
 | Complex scripts | ❌ | Arabic is drawn as isolated letter forms in logical order, and Indic reordering is not done (WPT css-text shaping: 1 of 29 tests match). |
 | Bidirectional text | ◐ | `direction` sets alignment and the inline base direction, and every `unicode-bidi` value resolves. Reordering of mixed-direction runs uses FriBidi when the build found it (an optional dependency); otherwise a simplified fallback is used, under which a right-to-left paragraph keeps its runs in left-to-right order. Mirrored brackets are not substituted. The macOS build checked for this document had no FriBidi. |
 | `writing-mode: vertical-rl`, `vertical-lr`, `sideways-*` | ◐ | Box geometry is correct, but glyphs are painted horizontally (verified). `text-orientation: sideways` is treated as `mixed`. |
@@ -439,7 +443,7 @@ Animations run on the frame clock of `lambda view` ([RAD_16](dev/radiant/RAD_16_
 | Mouse, keyboard, wheel, drag and drop, context menu | ✅ | The context menu has five fixed items. |
 | Focus | ✅ | Tab order follows `tabindex`, plus `autofocus`; `:focus-visible` follows keyboard focus. Focus behaviour is written in Lambda in the `dom` package ([Lambda_Packages.md §10.3](Lambda_Packages.md#103-dom--browser-behaviour-for-html)). |
 | Interaction pseudo-classes | ✅ | `:hover`, `:active`, `:focus`, `:focus-within`, `:focus-visible`, `:target`, `:checked`, `:valid`/`:invalid` and `:placeholder-shown` restyle live; see [§3](#3-css-selectors). |
-| Scrolling | ◐ | Mouse wheel and scrollbar dragging, overlay scrollbars (shown on hover or drag for `overflow: auto`, always for `scroll`), `scrollbar-gutter`, and sticky positioning that follows the scroll. `scroll-behavior`, `scroll-snap-*` and `overscroll-behavior` are parsed only. RAD_11 lists `position: fixed` boxes as scrolling with the page instead of staying pinned (not verified here). |
+| Scrolling | ◐ | Mouse wheel and scrollbar dragging, overlay scrollbars (shown on hover or drag for `overflow: auto`, always for `scroll`), `scrollbar-gutter`, and sticky positioning that follows the scroll. `scroll-snap-type`/`scroll-snap-align` affect wheel and programmatic scroll positions in live view; `overscroll-behavior` controls wheel chaining. `scroll-behavior: smooth` animates CSSOM scroll writes and `scrollIntoView()` in live panes and the viewport; anchor navigation also follows the root smooth scrolling value. RAD_11 lists `position: fixed` boxes as scrolling with the page instead of staying pinned (not verified here). |
 | `contenteditable` (rich and `plaintext-only`) | ✅ | Radiant fires `beforeinput` and the `dom` package performs the edit, per ruling D7.2.5 in [Lambda_Formal_Design.md](Lambda_Formal_Design.md): editing policy belongs to the Lambda DOM behaviour package, not to native code. 50+ `inputType`s; WPT input-events: 20 files pass. |
 | Form text controls | ✅ | Native caret, selection, undo and IME; see [§2](#2-html). |
 | Text selection, `Selection` and `Range` | ◐ | Implemented ([RAD_18](dev/radiant/RAD_18_Editing_Selection_Ranges.md)); word and sentence movement in `Selection.modify()` is approximate. Not exercised for this document. |
@@ -560,7 +564,7 @@ The image decoders linked into `lambda` are libpng, libjpeg-turbo and giflib (`l
 | CSS `background-image` | ✅ | ◐ a `<pattern>` referencing the original relative URL; a non-repeating image without `background-size` gets zero size | ❌ dropped |
 | Inline `<svg>` | ✅ | ◐ copied through verbatim: page CSS sizing is lost, and an undeclared `xlink:` prefix makes the file invalid XML | ◐ rasterized at 1× on an opaque white box |
 | Hyperlinks | n/a | ❌ | ❌ no link annotations |
-| Pages | one image | one image | ❌ one page the size of the content (1 CSS px = 1 pt); `@page`, page breaks and print media are ignored |
+| Pages | one image | one image | ◐ one page the size of the content (1 CSS px = 1 pt); HTML PDF export applies `@media print`, `<style media="print">` and `<link media="print">`, but `@page` and page breaks are ignored |
 | Page background | white | white | transparent; the `body` background does not fill the page |
 | Size when no `-vw`/`-vh` is given | PNG: laid out at 1200 px wide, canvas fits the content plus 50 px. **JPEG: a fixed 1200 × 800 crop** | laid out at 1200 px, canvas fits the content plus 50 px | laid out at 800 px, page fits the content plus 50 px |
 | `-s` / `--pixel-ratio` | ✅ e.g. `-s 2` doubles the pixels | ❌ `-s` enlarges the canvas without scaling the content; `--pixel-ratio` is ignored | ❌ same |
@@ -577,16 +581,16 @@ The gaps most likely to change how a real page looks, with the section that has 
 - No text shaping: no ligatures, and Arabic, Indic and other complex scripts render incorrectly ([§11](#11-text-and-fonts)).
 - Bidirectional reordering depends on the optional FriBidi library; without it, right-to-left paragraphs keep their runs in left-to-right order ([§11](#11-text-and-fonts)).
 - Vertical writing modes lay out correctly but paint their text horizontally ([§11](#11-text-and-fonts)).
-- `text-overflow: ellipsis` draws no ellipsis, and `text-shadow` is dropped unless the element also sets a font property ([§11](#11-text-and-fonts)).
+- `text-overflow: ellipsis` draws no ellipsis ([§11](#11-text-and-fonts)).
 
 **CSS**
 
-- Cascade layers, `@container`, CSS nesting, `@scope` and `@property` have no effect, and media-query range syntax such as `(width >= 600px)` always matches ([§4](#4-at-rules)).
-- A stylesheet `!important` beats an inline `!important`, a selector list takes the specificity of its first matching selector, and `:nth-of-type()` counts siblings of every type ([§3](#3-css-selectors), [§5](#5-cascade-inheritance-and-custom-properties)).
-- `lab()`, `lch()`, `oklab()`, `oklch()`, `hwb()`, `color()`, `color-mix()` and `light-dark()` render black; math functions other than `calc()`, `min()`, `max()` and `clamp()` evaluate to 0; newer units such as `dvh`, `cqw` and `cap` are read as pixels ([§6](#6-values-units-and-functions)).
-- Some shorthands are not applied: `background` with an image `url()`, `animation`, and `border-image`. Use the longhands ([§7](#7-css-property-coverage)).
-- `width: initial` and `width: unset` (and the same on `height`) give 0 instead of `auto` ([§5](#5-cascade-inheritance-and-custom-properties)).
-- Grid track sizes in `em`, `rem` and other non-pixel units are read as pixels, and `grid-auto-flow: dense` is not supported ([§8](#8-layout-modes)).
+- `@container`, `@scope` and `@property` have no effect; nesting applies style rules and supported nested group conditions but still lacks container-dependent rules and broader live invalidation. Cascade layers remain partial, and many media features are unsupported. HTML PDF export applies print media without `@page` or page breaks ([§4](#4-at-rules)).
+- Column matching outside HTML tables and some selector-backed live invalidation still have gaps ([§3](#3-css-selectors)).
+- `lab()`, `lch()`, `oklab()`, `oklch()`, `color()`, `color-mix()` and `light-dark()` render black; `hwb()` paints but missing-component interpolation and computed-style serialization remain open. Math functions other than `calc()`, `min()`, `max()` and `clamp()` evaluate to 0; newer units such as `dvh`, `cqw` and `cap` are read as pixels ([§6](#6-values-units-and-functions)).
+- The `animation` shorthand is not applied. The `border-image` shorthand paints linear gradients and raster URL sources in raster output, while HTML SVG/PDF export omits its slices. The `background` shorthand paints one URL image, while its multilayer forms remain partial ([§7](#7-css-property-coverage)).
+- `all: inherit` and `all: revert` are verified for common box and text properties, while other consumers still need complete visual resolution; custom-property substitution needs full token-stream and shorthand validation ([§5](#5-cascade-inheritance-and-custom-properties)).
+- Grid track lengths in supported CSS units and pure-length `calc()` reach layout; mixed percentage/length `calc()` and grid caps remain open ([§8](#8-layout-modes)).
 
 **SVG and images**
 

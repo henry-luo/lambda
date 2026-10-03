@@ -186,6 +186,8 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     }
 
     // parse the stylesheet
+    engine->context.quirks_mode =
+        is_quirks_mode((HtmlVersion)doc->html_version);
     CssStylesheet* sheet = css_parse_stylesheet(engine, css_content, res->url);
     mem_free(css_content);  // content was copied by parser
 

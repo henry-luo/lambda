@@ -1,0 +1,18 @@
+{
+  "name": "Root scroll behavior animates viewport scrollIntoView",
+  "html": "test/ui/scroll_behavior_viewport.html",
+  "viewport": {"width": 240, "height": 240},
+  "events": [
+    {"type": "click", "target": {"selector": "#go"}},
+    {"type": "render_pending"},
+    {"type": "advance_time", "ms": 150, "steps": 10},
+    {"type": "assert_text", "target": {"selector": "#sample"}, "equals": "in-flight"},
+    {"type": "advance_time", "ms": 250, "steps": 16},
+    {"type": "assert_state_store", "target": {"selector": "html"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 500, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#body-only"}},
+    {"type": "render_pending"},
+    {"type": "assert_state_store", "target": {"selector": "html"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 500, "tolerance": 1}
+  ]
+}

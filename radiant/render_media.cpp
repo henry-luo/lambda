@@ -212,8 +212,15 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
         if (!drew_svg) {
         }
     } else {
+        ScaleMode image_scale_mode = render_image_scale_mode(view, false);
         // ensure raster image pixels are decoded (lazy loading) at the displayed size
-        image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height); // INT_CAST_OK: image decoder target dimensions are integer pixels
+        if (image_scale_mode == SCALE_MODE_NEAREST ||
+            image_scale_mode == SCALE_MODE_PIXELATED) {
+            // Pixel-preserving sampling needs source pixels even when shrinking.
+            image_surface_ensure_decoded(img, img->width, img->height);
+        } else {
+            image_surface_ensure_decoded(img, (int)img_rect.width, (int)img_rect.height); // INT_CAST_OK: image decoder target dimensions are integer pixels
+        }
         if (rdcon->has_transform) {
             // scaled image decodes may replace pixels with a smaller buffer;
             // display-list image commands store decoded dimensions and uint32_t row stride.
@@ -225,7 +232,7 @@ static void render_image_content(RenderContext* rdcon, ViewBlock* view) {
                                             content_opacity, img);
         } else {
             render_painter_blit_surface_scaled(rdcon, img, NULL, rdcon->ui_context->surface,
-                &img_rect, &image_clip, SCALE_MODE_LINEAR,
+                &img_rect, &image_clip, image_scale_mode,
                 rdcon->clip_shapes, rdcon->clip_shape_depth, content_opacity);
         }
     }

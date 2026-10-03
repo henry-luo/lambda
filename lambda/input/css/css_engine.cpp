@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
+#include <math.h>
 #include "../../../lib/mem_grow.hpp"
 #include "../../../lib/mem_factory.h"
 #include "../../../lib/str.h"
@@ -133,6 +134,7 @@ static uint64_t css_condition_environment_key(const CssEngine* engine,
     memcpy(&height, &engine->context.viewport_height, sizeof(height));
     memcpy(&ratio, &engine->context.device_pixel_ratio, sizeof(ratio));
     uint64_t key = width ^ (height << 1u) ^ (ratio << 7u);
+    key ^= engine->context.print_media ? UINT64_C(0x6a09e667f3bcc909) : 0;
     key ^= engine->context.reduced_motion ? UINT64_C(0x9e3779b97f4a7c15) : 0;
     key ^= engine->context.high_contrast ? UINT64_C(0xbf58476d1ce4e5b9) : 0;
     const char* scheme = engine->context.color_scheme ? engine->context.color_scheme : "";
@@ -233,6 +235,8 @@ CssEngine* css_engine_create(Pool* pool) {
     engine->context.viewport_height = 1080.0;
     engine->context.device_pixel_ratio = 1.0;
     engine->context.root_font_size = 16.0;
+    engine->context.print_media = false;
+    engine->context.quirks_mode = false;
     engine->context.reduced_motion = false;
     engine->context.high_contrast = false;
 
@@ -316,6 +320,58 @@ void css_engine_set_root_font_size(CssEngine* engine, double size) {
 }
 
 // Enhanced CSS parsing
+static const char* css_stylesheet_namespace_lookup(void* context,
+                                                    const char* prefix) {
+    CssStylesheet* stylesheet = (CssStylesheet*)context;
+    if (!stylesheet) return NULL;
+    for (size_t i = stylesheet->namespace_count; i > 0; i--) {
+        const char* declared = stylesheet->namespaces[i - 1].prefix;
+        if ((!prefix && !declared) ||
+            (prefix && declared && strcmp(prefix, declared) == 0)) {
+            return stylesheet->namespaces[i - 1].url;
+        }
+    }
+    return NULL;
+}
+
+static bool css_bind_rule_namespaces(CssRule* rule, CssStylesheet* stylesheet) {
+    if (!rule) return true;
+    if (rule->type == CSS_RULE_STYLE || rule->type == CSS_RULE_NESTING ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS) {
+        CssSelectorGroup* group = rule->data.style_rule.selector_group;
+        if (group) {
+            for (size_t i = 0; i < group->selector_count; i++) {
+                if (!css_resolve_selector_namespaces(group->selectors[i],
+                        css_stylesheet_namespace_lookup, stylesheet)) {
+                    return false;
+                }
+            }
+        } else if (!css_resolve_selector_namespaces(rule->data.style_rule.selector,
+                       css_stylesheet_namespace_lookup, stylesheet)) {
+            return false;
+        }
+        size_t write = 0;
+        for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
+            CssRule* nested = rule->data.style_rule.nested_rules[i];
+            if (css_bind_rule_namespaces(nested, stylesheet)) {
+                rule->data.style_rule.nested_rules[write++] = nested;
+            }
+        }
+        rule->data.style_rule.nested_rule_count = write;
+    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+        size_t write = 0;
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            CssRule* nested = rule->data.conditional_rule.rules[i];
+            if (css_bind_rule_namespaces(nested, stylesheet)) {
+                rule->data.conditional_rule.rules[write++] = nested;
+            }
+        }
+        rule->data.conditional_rule.rule_count = write;
+    }
+    return true;
+}
+
 CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     const char* css_text, const char* base_url) {
     if (!engine || !css_text) return NULL;
@@ -373,6 +429,10 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     log_debug("Parsing CSS rules from %d tokens", token_count);
 
     int token_index = 0;
+    int namespace_capacity = 0;
+    bool namespace_allowed = true;
+    bool import_allowed = true;
+    bool saw_import = false;
     while (token_index < token_count) {
         // Skip whitespace between rules
         while (token_index < token_count &&
@@ -417,13 +477,54 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
         // Parse a rule
         CssRule* rule = NULL;
-        int tokens_consumed = css_parse_rule_from_tokens_internal(
-            tokens + token_index, token_count - token_index, engine->pool, &rule);
+        int tokens_consumed = css_parse_rule_from_tokens_internal_mode(
+            tokens + token_index, token_count - token_index, engine->pool,
+            &rule, engine->context.quirks_mode);
 
         if (tokens_consumed > 0) {
             token_index += tokens_consumed;
 
             if (rule) {
+                if (rule->type == CSS_RULE_LAYER &&
+                    rule->data.conditional_rule.invalid_layer) continue;
+                if (rule->type == CSS_RULE_IMPORT) {
+                    if (!import_allowed || rule->data.import_rule.invalid) continue;
+                    saw_import = true;
+                } else if (rule->type == CSS_RULE_LAYER &&
+                           rule->data.conditional_rule.layer_statement &&
+                           !rule->data.conditional_rule.invalid_layer) {
+                    // A layer order statement may precede imports, but one
+                    // between imports ends their consecutive prelude.
+                    if (saw_import) {
+                        import_allowed = false;
+                        namespace_allowed = false;
+                    }
+                } else if (rule->type != CSS_RULE_CHARSET) {
+                    import_allowed = false;
+                }
+                if (rule->type == CSS_RULE_NAMESPACE) {
+                    if (!namespace_allowed) continue;
+                    if (stylesheet->namespace_count >= (size_t)namespace_capacity &&
+                        !lam::pool_copy_grow_array(engine->pool,
+                            &stylesheet->namespaces, &namespace_capacity,
+                            (int)stylesheet->namespace_count,
+                            (int)stylesheet->namespace_count + 1, 4, false)) {
+                        continue;
+                    }
+                    stylesheet->namespaces[stylesheet->namespace_count].prefix =
+                        rule->data.namespace_rule.prefix;
+                    stylesheet->namespaces[stylesheet->namespace_count].url =
+                        rule->data.namespace_rule.namespace_url;
+                    stylesheet->namespace_count++;
+                } else {
+                    if (rule->type != CSS_RULE_IMPORT &&
+                        rule->type != CSS_RULE_CHARSET &&
+                        !(rule->type == CSS_RULE_LAYER &&
+                          rule->data.conditional_rule.layer_statement &&
+                          !rule->data.conditional_rule.invalid_layer &&
+                          !saw_import)) namespace_allowed = false;
+                    if (!css_bind_rule_namespaces(rule, stylesheet)) continue;
+                }
                 // Add rule to stylesheet
                 if (stylesheet->rule_count >= stylesheet->rule_capacity) {
                     (void)lam::pool_copy_grow_array(engine->pool, &stylesheet->rules,
@@ -569,23 +670,68 @@ static double parse_media_length(const char* value) {
     // Skip whitespace before unit
     while (*end && (*end == ' ' || *end == '\t')) end++;
 
-    // Parse unit
-    if (strncmp(end, "px", 2) == 0) {
-        return num;
-    } else if (strncmp(end, "em", 2) == 0) {
-        return num * 16.0;  // Assume 16px root font size
-    } else if (strncmp(end, "rem", 3) == 0) {
-        return num * 16.0;  // Assume 16px root font size
-    } else if (strncmp(end, "vw", 2) == 0) {
-        return -1;  // Would need viewport context
-    } else if (strncmp(end, "vh", 2) == 0) {
-        return -1;  // Would need viewport context
-    } else if (*end == '\0' || *end == ')') {
-        // Unitless - treat as pixels
-        return num;
-    }
+    double pixels = -1;
+    if (str_ieq_cstr(end, "px")) pixels = num;
+    else if (str_ieq_cstr(end, "em") || str_ieq_cstr(end, "rem"))
+        pixels = num * 16.0;  // media relative units use the initial font size.
+    else if (*end == '\0' && num == 0.0) pixels = 0.0;
+    return pixels >= 0.0 && isfinite(pixels) ? pixels : -1;
+}
 
-    return -1;
+typedef enum CssMediaNumericKind {
+    CSS_MEDIA_NUMERIC_UNKNOWN = 0,
+    CSS_MEDIA_NUMERIC_LENGTH,
+    CSS_MEDIA_NUMERIC_RATIO,
+    CSS_MEDIA_NUMERIC_RESOLUTION
+} CssMediaNumericKind;
+
+static bool css_media_numeric_feature(CssEngine* engine, const char* name,
+                                      CssMediaNumericKind* kind, double* value) {
+    if (strcmp(name, "width") == 0 || strcmp(name, "height") == 0) {
+        *kind = CSS_MEDIA_NUMERIC_LENGTH;
+        *value = strcmp(name, "width") == 0
+            ? engine->context.viewport_width : engine->context.viewport_height;
+        return true;
+    }
+    if (strcmp(name, "aspect-ratio") == 0) {
+        *kind = CSS_MEDIA_NUMERIC_RATIO;
+        *value = engine->context.viewport_height > 0.0
+            ? engine->context.viewport_width / engine->context.viewport_height : 0.0;
+        return true;
+    }
+    if (strcmp(name, "resolution") == 0) {
+        *kind = CSS_MEDIA_NUMERIC_RESOLUTION;
+        *value = engine->context.device_pixel_ratio;
+        return true;
+    }
+    return false;
+}
+
+static double css_media_numeric_value(CssMediaNumericKind kind, const char* text) {
+    if (kind == CSS_MEDIA_NUMERIC_LENGTH) return parse_media_length(text);
+    if (!text || !*text) return -1.0;
+    char* end = nullptr;
+    double numerator = strtod(text, &end);
+    if (end == text || numerator < 0.0 || !isfinite(numerator)) return -1.0;
+    if (kind == CSS_MEDIA_NUMERIC_RATIO) {
+        while (*end == ' ' || *end == '\t') end++;
+        if (*end == '\0') return numerator;
+        if (*end != '/') return -1.0;
+        char* denominator_end = nullptr;
+        double denominator = strtod(end + 1, &denominator_end);
+        while (*denominator_end == ' ' || *denominator_end == '\t')
+            denominator_end++;
+        return denominator_end != end + 1 && *denominator_end == '\0' &&
+            denominator > 0.0 && isfinite(denominator)
+            ? numerator / denominator : -1.0;
+    }
+    if (kind == CSS_MEDIA_NUMERIC_RESOLUTION && numerator > 0.0) {
+        if (strcmp(end, "dppx") == 0 || strcmp(end, "x") == 0)
+            return numerator;
+        if (strcmp(end, "dpi") == 0) return numerator / 96.0;
+        if (strcmp(end, "dpcm") == 0) return numerator * 2.54 / 96.0;
+    }
+    return -1.0;
 }
 
 /**
@@ -603,66 +749,23 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
     double viewport_width = engine->context.viewport_width;
     double viewport_height = engine->context.viewport_height;
 
-    // min-width
-    if (strcmp(feature, "min-width") == 0) {
-        double min_w = parse_media_length(value);
-        if (min_w < 0) return false;
-        bool result = viewport_width >= min_w;
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        log_debug("[Media Query] min-width: viewport=%f >= min=%f -> %s",
-                  viewport_width, min_w, result ? "true" : "false");
-#endif
-        return result;
+    const char* numeric_name = feature;
+    int numeric_comparison = 0;
+    if (strncmp(feature, "min-", 4) == 0) {
+        numeric_name += 4;
+        numeric_comparison = 1;
+    } else if (strncmp(feature, "max-", 4) == 0) {
+        numeric_name += 4;
+        numeric_comparison = -1;
     }
-
-    // max-width
-    if (strcmp(feature, "max-width") == 0) {
-        double max_w = parse_media_length(value);
-        if (max_w < 0) return false;
-        bool result = viewport_width <= max_w;
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        log_debug("[Media Query] max-width: viewport=%f <= max=%f -> %s",
-                  viewport_width, max_w, result ? "true" : "false");
-#endif
-        return result;
-    }
-
-    // min-height
-    if (strcmp(feature, "min-height") == 0) {
-        double min_h = parse_media_length(value);
-        if (min_h < 0) return false;
-        bool result = viewport_height >= min_h;
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        log_debug("[Media Query] min-height: viewport=%f >= min=%f -> %s",
-                  viewport_height, min_h, result ? "true" : "false");
-#endif
-        return result;
-    }
-
-    // max-height
-    if (strcmp(feature, "max-height") == 0) {
-        double max_h = parse_media_length(value);
-        if (max_h < 0) return false;
-        bool result = viewport_height <= max_h;
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        log_debug("[Media Query] max-height: viewport=%f <= max=%f -> %s",
-                  viewport_height, max_h, result ? "true" : "false");
-#endif
-        return result;
-    }
-
-    // width (exact match)
-    if (strcmp(feature, "width") == 0) {
-        double w = parse_media_length(value);
-        if (w < 0) return false;
-        return viewport_width == w;
-    }
-
-    // height (exact match)
-    if (strcmp(feature, "height") == 0) {
-        double h = parse_media_length(value);
-        if (h < 0) return false;
-        return viewport_height == h;
+    CssMediaNumericKind numeric_kind = CSS_MEDIA_NUMERIC_UNKNOWN;
+    double actual = 0.0;
+    if (css_media_numeric_feature(engine, numeric_name, &numeric_kind, &actual)) {
+        double requested = css_media_numeric_value(numeric_kind, value);
+        if (requested < 0.0 || !isfinite(requested)) return false;
+        if (numeric_comparison > 0) return actual >= requested;
+        if (numeric_comparison < 0) return actual <= requested;
+        return actual == requested;
     }
 
     // orientation
@@ -706,20 +809,20 @@ static bool evaluate_media_feature(CssEngine* engine, const char* feature, const
 /**
  * Evaluate a media type like "screen", "print", "all"
  */
-static bool evaluate_media_type(const char* type) {
+static bool evaluate_media_type(const CssEngine* engine, const char* type) {
     if (!type) return true;  // No type specified = matches all
 
     // Skip leading whitespace
     while (*type && (*type == ' ' || *type == '\t')) type++;
 
     // Check known media types
-    if (strcmp(type, "all") == 0) return true;
-    if (strcmp(type, "screen") == 0) return true;  // Assume screen media
-    if (strcmp(type, "print") == 0) return false;  // Not print media
-    if (strcmp(type, "speech") == 0) return false;
+    if (str_ieq_cstr(type, "all")) return true;
+    if (str_ieq_cstr(type, "screen")) return !engine->context.print_media;
+    if (str_ieq_cstr(type, "print")) return engine->context.print_media;
+    if (str_ieq_cstr(type, "speech")) return false;
 
-    // Unknown type - assume it matches (forward compatibility)
-    return true;
+    // Unknown media types cannot match a screen device.
+    return false;
 }
 
 /**
@@ -838,6 +941,17 @@ static bool css_evaluate_supports_span(CssEngine* engine, CssConditionSpan span,
     css_condition_outer_parens(&span);
     span = css_condition_trim(span);
     if (span.length == 0) return false;
+    if (span.length >= 10 &&
+        str_istarts_with(span.start, span.length, "selector(", 9)) {
+        CssConditionSpan argument = {span.start + 8, span.length - 8};
+        if (!css_condition_outer_parens(&argument) || argument.length == 0) {
+            return false;
+        }
+        char* selector_text = pool_dup_n(scratch, argument.start,
+                                         argument.length);
+        return selector_text && css_parse_selector_group_text(
+            selector_text, argument.length, scratch) != nullptr;
+    }
     char* declaration = pool_dup_n(scratch, span.start, span.length);
     if (!declaration) return false;
     CssDeclaration* parsed = css_parse_declaration_text(
@@ -857,159 +971,183 @@ static bool css_evaluate_supports_condition_uncached(CssEngine* engine,
     return result;
 }
 
+static char* css_media_trim_mutable(char* text) {
+    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+    size_t length = strlen(text);
+    while (length > 0 && (text[length - 1] == ' ' || text[length - 1] == '\t' ||
+                          text[length - 1] == '\n' || text[length - 1] == '\r')) {
+        text[--length] = '\0';
+    }
+    return text;
+}
+
+static bool css_media_range_operand(CssEngine* engine, char* text,
+                                    double* value, bool* feature,
+                                    CssMediaNumericKind* kind) {
+    text = css_media_trim_mutable(text);
+    *feature = css_media_numeric_feature(engine, text, kind, value);
+    return *feature || *text != '\0';
+}
+
+static bool css_media_compare(double left, double right, const char* op) {
+    if (strcmp(op, "<") == 0) return left < right;
+    if (strcmp(op, "<=") == 0) return left <= right;
+    if (strcmp(op, ">") == 0) return left > right;
+    if (strcmp(op, ">=") == 0) return left >= right;
+    return strcmp(op, "=") == 0 && left == right;
+}
+
+static bool css_media_evaluate_range(CssEngine* engine, char* text) {
+    char* operands[3] = {text, nullptr, nullptr};
+    char operators[2][3] = {};
+    int operator_count = 0;
+    for (char* cursor = text; *cursor; cursor++) {
+        if (*cursor != '<' && *cursor != '>' && *cursor != '=') continue;
+        if (operator_count >= 2) return false;
+        char op = *cursor;
+        *cursor = '\0';
+        operators[operator_count][0] = op;
+        if (cursor[1] == '=') {
+            if (op == '=') return false;
+            operators[operator_count][1] = '=';
+            cursor++;
+        } else if (op == '=' && (cursor[1] == '<' || cursor[1] == '>')) {
+            return false;
+        }
+        operands[++operator_count] = cursor + 1;
+    }
+    if (operator_count == 0) return false;
+    double values[3] = {};
+    bool features[3] = {};
+    CssMediaNumericKind kind = CSS_MEDIA_NUMERIC_UNKNOWN;
+    for (int i = 0; i <= operator_count; i++) {
+        CssMediaNumericKind operand_kind = CSS_MEDIA_NUMERIC_UNKNOWN;
+        if (!css_media_range_operand(engine, operands[i], &values[i],
+                                     &features[i], &operand_kind))
+            return false;
+        if (features[i]) {
+            if (kind != CSS_MEDIA_NUMERIC_UNKNOWN) return false;
+            kind = operand_kind;
+        }
+    }
+    if (kind == CSS_MEDIA_NUMERIC_UNKNOWN) return false;
+    for (int i = 0; i <= operator_count; i++) {
+        if (features[i]) continue;
+        values[i] = css_media_numeric_value(
+            kind, css_media_trim_mutable(operands[i]));
+        if (values[i] < 0.0 || !isfinite(values[i])) return false;
+    }
+    if (operator_count == 1) {
+        if (features[0] == features[1]) return false;
+    } else if (features[0] || !features[1] || features[2]) {
+        return false;
+    }
+    for (int i = 0; i < operator_count; i++) {
+        if (!css_media_compare(values[i], values[i + 1], operators[i]))
+            return false;
+    }
+    return true;
+}
+
+static bool css_media_evaluate_atom(CssEngine* engine, CssConditionSpan span,
+                                    Pool* scratch) {
+    char* content = pool_dup_n(scratch, span.start, span.length);
+    if (!content) return false;
+    // Media feature names and their keywords are ASCII case-insensitive.
+    for (char* cursor = content; *cursor; cursor++) {
+        if (*cursor >= 'A' && *cursor <= 'Z') *cursor += 'a' - 'A';
+    }
+    char* colon = strchr(content, ':');
+    if (colon) {
+        *colon = '\0';
+        char* name = css_media_trim_mutable(content);
+        char* value = css_media_trim_mutable(colon + 1);
+        return *name && *value && evaluate_media_feature(engine, name, value);
+    }
+    if (strpbrk(content, "<=>")) return css_media_evaluate_range(engine, content);
+    char* name = css_media_trim_mutable(content);
+    if (strcmp(name, "width") == 0) return engine->context.viewport_width > 0.0;
+    if (strcmp(name, "height") == 0) return engine->context.viewport_height > 0.0;
+    if (strcmp(name, "aspect-ratio") == 0)
+        return engine->context.viewport_width > 0.0 &&
+            engine->context.viewport_height > 0.0;
+    if (strcmp(name, "resolution") == 0)
+        return engine->context.device_pixel_ratio > 0.0;
+    if (strcmp(name, "color") == 0) return true;
+    if (strcmp(name, "monochrome") == 0) return false;
+    if (strcmp(name, "orientation") == 0) return true;
+    return false;
+}
+
+static bool css_evaluate_media_span(CssEngine* engine, CssConditionSpan span,
+                                    Pool* scratch, int depth) {
+    if (!engine || !scratch || depth > 32) return false;
+    span = css_condition_trim(span);
+    if (span.length == 0) return false;
+    if (str_istarts_with(span.start, span.length, "not ", 4)) {
+        CssConditionSpan operand = {span.start + 4, span.length - 4};
+        return !css_evaluate_media_span(engine, operand, scratch, depth + 1);
+    }
+    if (str_istarts_with(span.start, span.length, "only ", 5)) {
+        CssConditionSpan operand = {span.start + 5, span.length - 5};
+        return css_evaluate_media_span(engine, operand, scratch, depth + 1);
+    }
+    size_t op_pos = 0, op_len = 0;
+    if (css_condition_find_operator(span, "or", &op_pos, &op_len)) {
+        CssConditionSpan left = {span.start, op_pos};
+        CssConditionSpan right = {span.start + op_pos + op_len,
+                                  span.length - op_pos - op_len};
+        return css_evaluate_media_span(engine, left, scratch, depth + 1) ||
+            css_evaluate_media_span(engine, right, scratch, depth + 1);
+    }
+    if (css_condition_find_operator(span, "and", &op_pos, &op_len)) {
+        CssConditionSpan left = {span.start, op_pos};
+        CssConditionSpan right = {span.start + op_pos + op_len,
+                                  span.length - op_pos - op_len};
+        return css_evaluate_media_span(engine, left, scratch, depth + 1) &&
+            css_evaluate_media_span(engine, right, scratch, depth + 1);
+    }
+    if (css_condition_outer_parens(&span)) {
+        if (span.length == 0) return false;
+        if (span.start[0] == '(' ||
+            str_istarts_with(span.start, span.length, "not ", 4) ||
+            css_condition_find_operator(span, "or", &op_pos, &op_len) ||
+            css_condition_find_operator(span, "and", &op_pos, &op_len)) {
+            return css_evaluate_media_span(engine, span, scratch, depth + 1);
+        }
+        return css_media_evaluate_atom(engine, span, scratch);
+    }
+    if (span.start[0] == '(' || span.start[0] == ')') return false;
+    char* type = pool_dup_n(scratch, span.start, span.length);
+    return type && evaluate_media_type(engine, css_media_trim_mutable(type));
+}
+
 static bool css_evaluate_media_query_uncached(CssEngine* engine,
                                               const char* media_query) {
-    if (!engine || !media_query) return true;  // Empty query matches all
-
+    if (!engine || !media_query || !*media_query) return true;
     Pool* scratch = mem_pool_create(NULL, MEM_ROLE_TEMP,
                                     "css.media_query.scratch");
     if (!scratch) return false;
-
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-    log_debug("[Media Query] Evaluating: '%s'", media_query);
-    log_debug("[Media Query] Viewport: %f x %f",
-              engine->context.viewport_width, engine->context.viewport_height);
-#endif
-
-    // Make a copy we can modify
-    char* query = pool_strdup(scratch, media_query);
-    if (!query) {
-        mem_pool_destroy(scratch);
-        return false;
+    CssConditionSpan whole = {media_query, strlen(media_query)};
+    size_t start = 0;
+    int depth = 0;
+    bool result = false;
+    for (size_t i = 0; i <= whole.length; i++) {
+        char c = i < whole.length ? whole.start[i] : ',';
+        if (c == '(') depth++;
+        else if (c == ')') {
+            if (--depth < 0) break;
+        }
+        if (c != ',' || depth != 0) continue;
+        CssConditionSpan part = {whole.start + start, i - start};
+        if (css_evaluate_media_span(engine, part, scratch, 0)) {
+            result = true;
+            break;
+        }
+        start = i + 1;
     }
-
-    // Handle comma-separated queries (OR logic)
-    char* saveptr1;
-    char* query_part = strtok_r(query, ",", &saveptr1);
-
-    while (query_part) {
-        // Trim whitespace
-        while (*query_part && (*query_part == ' ' || *query_part == '\t')) query_part++;
-        char* end = query_part + strlen(query_part) - 1;
-        while (end > query_part && (*end == ' ' || *end == '\t')) *end-- = '\0';
-
-        if (strlen(query_part) == 0) {
-            query_part = strtok_r(NULL, ",", &saveptr1);
-            continue;
-        }
-
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        log_debug("[Media Query] Processing part: '%s'", query_part);
-#endif
-
-        // Check for 'not' prefix
-        bool negated = false;
-        if (strncmp(query_part, "not ", 4) == 0) {
-            negated = true;
-            query_part += 4;
-            while (*query_part == ' ') query_part++;
-        }
-
-        // Check for 'only' prefix (ignore it, just for compatibility)
-        if (strncmp(query_part, "only ", 5) == 0) {
-            query_part += 5;
-            while (*query_part == ' ') query_part++;
-        }
-
-        bool part_result = true;
-
-        // Split by 'and' (AND logic within a query)
-        // Make another copy for tokenizing by 'and'
-        char* and_copy = pool_strdup(scratch, query_part);
-        if (!and_copy) {
-            mem_pool_destroy(scratch);
-            return false;
-        }
-
-        // Replace " and " with null terminators to split
-        char* condition = and_copy;
-        while (*condition && part_result) {
-            // Find next " and " or end
-            char* and_pos = strstr(condition, " and ");
-            if (and_pos) {
-                *and_pos = '\0';  // Terminate current condition
-            }
-
-            // Trim the condition
-            while (*condition && (*condition == ' ' || *condition == '\t')) condition++;
-            char* cond_end = condition + strlen(condition) - 1;
-            while (cond_end > condition && (*cond_end == ' ' || *cond_end == '\t')) *cond_end-- = '\0';
-
-            if (strlen(condition) > 0) {
-                // Check if this is a parenthesized feature
-                if (condition[0] == '(') {
-                    // Parse feature condition: (feature: value) or (feature)
-                    char* paren_end = strchr(condition, ')');
-                    if (paren_end) {
-                        *paren_end = '\0';
-                        char* feature_start = condition + 1;
-
-                        // Find colon separator
-                        char* colon = strchr(feature_start, ':');
-                        if (colon) {
-                            *colon = '\0';
-                            char* feature_name = feature_start;
-                            char* feature_value = colon + 1;
-
-                            // Trim feature name and value
-                            while (*feature_name == ' ') feature_name++;
-                            char* name_end = feature_name + strlen(feature_name) - 1;
-                            while (name_end > feature_name && *name_end == ' ') *name_end-- = '\0';
-
-                            while (*feature_value == ' ') feature_value++;
-                            char* val_end = feature_value + strlen(feature_value) - 1;
-                            while (val_end > feature_value && *val_end == ' ') *val_end-- = '\0';
-
-                            part_result = evaluate_media_feature(engine, feature_name, feature_value);
-                        } else {
-                            // Boolean feature like (color)
-                            while (*feature_start == ' ') feature_start++;
-                            char* feat_end = feature_start + strlen(feature_start) - 1;
-                            while (feat_end > feature_start && *feat_end == ' ') *feat_end-- = '\0';
-
-                            // For now, assume all boolean features are supported
-                            part_result = true;
-                        }
-                    }
-                } else {
-                    // Media type
-                    part_result = evaluate_media_type(condition);
-                }
-            }
-
-            if (and_pos) {
-                condition = and_pos + 5;  // Move past " and "
-            } else {
-                break;
-            }
-        }
-
-        // Apply negation
-        if (negated) {
-            part_result = !part_result;
-        }
-
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-        log_debug("[Media Query] Part result: %s", part_result ? "true" : "false");
-#endif
-
-        // If any comma-separated part matches, the whole query matches
-        if (part_result) {
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-            log_debug("[Media Query] MATCHES: '%s'", media_query);
-#endif
-            mem_pool_destroy(scratch);
-            return true;
-        }
-
-        query_part = strtok_r(NULL, ",", &saveptr1);
-    }
-
-#ifdef RADIANT_TRACE_MEDIA_QUERY
-    log_debug("[Media Query] DOES NOT MATCH: '%s'", media_query);
-#endif
     mem_pool_destroy(scratch);
-    return false;
+    return result;
 }
 
 bool css_evaluate_supports_condition(CssEngine* engine, const char* condition) {

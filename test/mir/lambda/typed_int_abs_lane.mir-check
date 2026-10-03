@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "description": "S7.10.5v3/D2.2.2: integer abs preserves null and poison directly in the native lane.",
+  "checks": [{"in_func": "_magnitude_#", "expect": ["neg\t"], "forbid": ["call\tfn_abs_p, fn_abs"]}]
+}

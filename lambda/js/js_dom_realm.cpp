@@ -299,6 +299,7 @@ static Item _custom_elements_define(Item /*callee*/, Item registry, Item* args,
     }
     js_set_key_default(record_root.get(), js_name_item("constructor"),
         constructor_root.get());
+    dom_custom_elements_registry_changed();
     if (class_data) {
         // The HTMLElement constructor resolves its local name from this
         // internal class association during derived `super()` construction.

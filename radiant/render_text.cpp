@@ -33,6 +33,7 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
+                                              float cjk_spacing,
                                               float x, float y);
 static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon,
                                                      uint32_t codepoint,
@@ -185,10 +186,9 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         return;
     }
 
-    // Legacy glyph-by-glyph selection code remains disabled.
     int sel_start = 0, sel_end = 0;
-
-    bool has_selection = false;
+    bool has_selection = render_text_selection_span(
+        rdcon, text_view, &sel_start, &sel_end);
 
     // Apply text color from text_view if set (PDF text uses this for fill color)
     Color saved_color = rdcon->color;
@@ -206,9 +206,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         return;
     }
 
+    FontHandle* emphasis_handle = nullptr;
+    FontStyleDesc emphasis_style = {};
+    if (rdcon->font.style && rdcon->font.style->text_emphasis_enabled &&
+        rdcon->ui_context && rdcon->ui_context->font_ctx) {
+        emphasis_style = font_style_desc_from_prop(rdcon->font.style);
+        emphasis_style.size_px *= 0.5f;
+        if (!emphasis_style.family)
+            emphasis_style.family = font_handle_get_family_name(font_box_handle(&rdcon->font));
+        emphasis_handle = font_resolve(rdcon->ui_context->font_ctx, &emphasis_style);
+    }
+
     // Get the white-space property for this text node
     CssEnum white_space = get_white_space_value(text_view);
     bool preserve_spaces = render_text_preserve_spaces(white_space);
+    CssEnum text_justify = text_justify_computed_value(text_view->parent);
 
     // Get text-transform from parent elements
     CssEnum text_transform = get_text_transform_from_node(text_view->parent);
@@ -232,6 +244,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     }
 
     DomElement* parent_elem = text_view->parent ? text_view->parent->as_element() : nullptr;
+    bool has_selection_foreground = parent_elem && parent_elem->in_line &&
+        parent_elem->inl()->has_selection_color;
 
     // Get text-shadow from parent element's font property
     TextShadow* text_shadow = nullptr;
@@ -250,6 +264,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         }
 
         render_text_inline_background(rdcon, text_view, text_rect, parent_elem, x, y);
+        render_text_selection_rect(rdcon, text_view, text_rect);
 
         unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
         if (render_text_trace_enabled()) {
@@ -301,10 +316,17 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
 
         // Calculate adjusted space width for justified text (in physical pixels)
         float space_width = scaled_space_width;
-        if (text_align == CSS_VALUE_JUSTIFY && space_count > 0 && natural_width > 0 && text_rect->width * s > natural_width) {
-            // This text is explicitly justified - distribute extra space across spaces
+        float justification_per_gap = 0.0f;
+        int justification_gaps = count_rendered_justify_opportunities(
+            text_view, text_rect, false);
+        // Layout may widen a sole run even for `none`; only the paint spacing
+        // must stay at its natural advance in that case.
+        if (text_align == CSS_VALUE_JUSTIFY && text_justify != CSS_VALUE_NONE &&
+            justification_gaps > 0 && natural_width > 0 &&
+            text_rect->width * s > natural_width) {
             float extra_space = (text_rect->width * s) - natural_width;
-            space_width += (extra_space / space_count);
+            justification_per_gap = extra_space / justification_gaps;
+            if (space_count > 0) space_width += justification_per_gap;
             if (render_text_trace_enabled()) {
             }
         }
@@ -313,31 +335,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
         bool has_space = false;  uint32_t codepoint;
         bool is_word_start = true;  // Track word boundaries for capitalize
         int char_index = text_rect->start_index;  // Track character offset for selection
-
-        // Selection background color - standard blue for text selection
-        uint32_t sel_bg_color = 0x80FF9933;  // ABGR format: semi-transparent blue (like browser selection)
+        uint32_t previous_codepoint = 0;
 
         bool shadow_needs_blur = render_text_paint_blurred_shadows(rdcon, str, text_rect,
-            text_shadow, text_transform, preserve_spaces, space_width, scaled_space_width, x, y);
+            text_shadow, text_transform, preserve_spaces, space_width,
+            scaled_space_width, text_justify == CSS_VALUE_INTER_WORD
+                ? 0.0f : justification_per_gap, x, y);
 
         while (p < end) {
             // Check if current character is in selection range
             bool is_selected = has_selection && char_index >= sel_start && char_index < sel_end;
 
-            // Debug first selected character
-            if (is_selected && char_index == sel_start) {
-            }
-
             // log_debug("draw character '%c'", *p);
             if (is_space(*p)) {
                 if (preserve_spaces || !has_space) {  // preserve all spaces or add single whitespace
                     has_space = true;
-
-                    // Draw selection background for selected space
-                    if (is_selected) {
-                        Rect sel_rect = {x, y, space_width, text_rect->height * s};
-                        rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-                    }
 
                     // Render space by advancing x position
                     // All spaces are rendered (not just non-trailing) because layout has
@@ -346,6 +358,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 }
                 // else  // skip consecutive spaces
                 is_word_start = true;  // Next non-space is word start
+                previous_codepoint = 0;
                 p++;
                 char_index++;
             }
@@ -353,7 +366,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                 has_space = false;
                 int bytes = str_utf8_decode((const char*)p, (size_t)(end - p), &codepoint);
                 if (bytes <= 0) { p++;  codepoint = 0;  char_index++; }
-                else { p += bytes;  char_index++; }
+                else { p += bytes;  char_index += bytes; }
 
                 // Variation selectors are consumed by the preceding glyph; asking
                 // CoreText to paint them standalone triggers hidden UI-font lookup.
@@ -369,6 +382,12 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                     uint32_t render_cp = render_text_resolve_mathlive_fallback_glyph(tt_out[tti]);
                     if (render_cp == 0) continue;
                     if (text_codepoint_has_zero_advance(render_cp)) continue;
+                    if (justification_per_gap > 0.0f &&
+                        text_justify != CSS_VALUE_INTER_WORD &&
+                        text_justify_cjk_gap(previous_codepoint, render_cp)) {
+                        x += justification_per_gap;
+                    }
+                    previous_codepoint = render_cp;
 
                     static int glyph_debug_count = 0;
                     if (render_text_trace_enabled() && glyph_debug_count < 500) {
@@ -401,16 +420,6 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                             render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_FONT_METRICS,
                                 time_elapsed_ms_f(tfm1, tfm2));
                         }
-                        if (has_selection && char_index <= 15) {
-                        }
-
-                        // Draw selection background BEFORE glyph (so text appears on top)
-                        if (is_selected) {
-                            float glyph_width = glyph->advance_x;
-                            Rect sel_rect = {x, y, glyph_width, text_rect->height * s};
-                            rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &sel_rect, sel_bg_color, &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
-                        }
-
                         // Debug: Check bitmap data for Monaco (capped to avoid log spam)
                         static int bitmap_debug_count = 0;
                         const char* _dbg_fname = font_box_handle(&rdcon->font) ? font_handle_get_family_name(font_box_handle(&rdcon->font)) : NULL;
@@ -434,34 +443,52 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
                             rdcon->block.x + text_rect->x * s, y,
                             &text_gradient, &text_gradient_rect);
                         Color glyph_saved_color = rdcon->color;
-                        if (has_text_gradient) {
+                        if (is_selected && has_selection_foreground) {
+                            rdcon->color = parent_elem->inl()->selection_color;
+                        } else if (has_text_gradient) {
                             float gx_center = x + glyph->bitmap.bearing_x + glyph->bitmap.width * 0.5f;
                             float gy_center = y + ascend - glyph->bitmap.bearing_y + glyph->bitmap.height * 0.5f;
                             rdcon->color = render_text_sample_linear_gradient(
                                 text_gradient, text_gradient_rect, gx_center, gy_center);
                         }
                         draw_glyph(rdcon, &glyph->bitmap, lroundf(x + glyph->bitmap.bearing_x), lroundf(y + ascend - glyph->bitmap.bearing_y));
-                        if (has_text_gradient) {
-                            rdcon->color = glyph_saved_color;
+                        rdcon->color = glyph_saved_color;
+                        float glyph_advance = glyph->advance_x;
+                        if (emphasis_handle && text_emphasis_marks_codepoint(render_cp)) {
+                            LoadedGlyph* mark = font_load_glyph(emphasis_handle,
+                                &emphasis_style, rdcon->font.style->text_emphasis_mark, true);
+                            if (mark) {
+                                Color text_color = rdcon->color;
+                                if (!rdcon->font.style->text_emphasis_color_current)
+                                    rdcon->color = rdcon->font.style->text_emphasis_color;
+                                float mark_baseline = y +
+                                    (rdcon->font.style->text_emphasis_under
+                                        ? rdcon->font.style->font_size * 1.35f * s : 0.0f);
+                                draw_glyph(rdcon, &mark->bitmap,
+                                    lroundf(x + (glyph_advance - mark->advance_x) * 0.5f +
+                                            mark->bitmap.bearing_x),
+                                    lroundf(mark_baseline - mark->bitmap.bearing_y));
+                                rdcon->color = text_color;
+                            }
                         }
                         uint64_t t4 = time_now_ns();
                         render_profiler_add_sample(rdcon->profiler, RENDER_PROFILE_GLYPH_DRAW,
                             time_elapsed_ms_f(t3, t4));
                         // advance to the next position (include letter-spacing)
-                        x += glyph->advance_x + rdcon->font.style->letter_spacing * s;
+                        x += glyph_advance + rdcon->font.style->letter_spacing * s;
                     }
                 } // end for tti (full case mapping expansion)
             }
         }
         x = render_text_trailing_marks(rdcon, text_rect, x, y);
         render_text_decorations(rdcon, str, text_rect);
-        render_text_selection_rect(rdcon, text_view, text_rect);
         text_rect = text_rect->next;
     }
 
     // Restore color and font (in case they were changed for PDF text)
     rdcon->font = saved_font;
     rdcon->color = saved_color;
+    if (emphasis_handle) font_handle_release(emphasis_handle);
 }
 
 static void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
@@ -565,6 +592,7 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
+                                              float cjk_spacing,
                                               float x, float y) {
     if (!rdcon || !str || !text_rect || !text_shadow ||
         !font_box_handle(&rdcon->font) || !rdcon->font.style) {
@@ -592,6 +620,7 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
     bool s_has_space = false;
     FontStyleDesc sd = font_style_desc_from_prop(rdcon->font.style);
     bool s_word_start = true;
+    uint32_t previous_codepoint = 0;
 
     while (sp < s_end) {
         if (is_space(*sp)) {
@@ -600,6 +629,7 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
                 sx_pos += space_width;
             }
             s_word_start = true;
+            previous_codepoint = 0;
             sp++;
             continue;
         }
@@ -626,6 +656,11 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
             if (s_tt_cp == 0) {
                 continue;
             }
+            if (text_codepoint_has_zero_advance(s_tt_cp)) continue;
+            if (cjk_spacing > 0.0f &&
+                text_justify_cjk_gap(previous_codepoint, s_tt_cp))
+                sx_pos += cjk_spacing;
+            previous_codepoint = s_tt_cp;
 
             LoadedGlyph* s_glyph = font_load_glyph(font_box_handle(&rdcon->font), &sd, s_tt_cp, true);
             if (!s_glyph) {
@@ -802,7 +837,8 @@ static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect r
         return gradient->stops[0].color;
     }
 
-    RadiantGradientLine line = radiant_linear_gradient_line(rect, gradient->angle);
+    RadiantGradientLine line = radiant_linear_gradient_line(
+        rect, radiant_linear_gradient_used_angle(gradient, rect));
     float vx = line.x2 - line.x1;
     float vy = line.y2 - line.y1;
     float len2 = vx * vx + vy * vy;
@@ -979,12 +1015,13 @@ static void draw_deco_with_gaps(RenderContext* rdcon, Rect rect, uint32_t color,
     }
 }
 
-static void render_text_decorations(RenderContext* rdcon, unsigned char* str, TextRect* text_rect) {
+static void render_single_text_decoration(RenderContext* rdcon, unsigned char* str,
+                                          TextRect* text_rect, CssEnum line) {
     if (!rdcon || !rdcon->font.style || !text_rect) {
         return;
     }
-    if (rdcon->font.style->text_deco == CSS_VALUE_NONE ||
-        rdcon->font.style->text_deco == CSS_VALUE__UNDEF) {
+    if (line == CSS_VALUE_NONE || line == CSS_VALUE__UNDEF ||
+        line == CSS_VALUE_BLINK) {
         return;
     }
 
@@ -1006,18 +1043,27 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
     Rect rect = {0, 0, 0, 0};
     bool draw_deco = true;
     float deco_ascend = font_get_rendering_ascender(font_box_handle(&rdcon->font)) * s;
-    if (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE) {
+    if (line == CSS_VALUE_UNDERLINE) {
         float underline_pos = deco_m ? deco_m->underline_position : 0;
         float offset = rdcon->font.style->text_underline_offset;
+        if (rdcon->font.style->text_underline_offset_mode == 2) {
+            offset *= rdcon->font.style->font_size / 100.0f;
+        }
         rect.x = rdcon->block.x + text_rect->x * s;
-        rect.y = roundf(rdcon->block.y + text_rect->y * s + deco_ascend - underline_pos * s + offset);
+        float baseline_y = rdcon->block.y + text_rect->y * s + deco_ascend;
+        float underline_depth = -underline_pos;
+        if (rdcon->font.style->text_underline_position == CSS_VALUE_UNDER && deco_m) {
+            // under places the stroke below the font descent; auto/from-font use its underline metric.
+            underline_depth = fmaxf(underline_depth, -deco_m->descender);
+        }
+        rect.y = roundf(baseline_y + (underline_depth + offset) * s);
     }
-    else if (rdcon->font.style->text_deco == CSS_VALUE_OVERLINE) {
+    else if (line == CSS_VALUE_OVERLINE) {
         rect.x = rdcon->block.x + text_rect->x * s;
         // overline sits on the text-over edge; starting inside the fragment pushed it below browser output.
         rect.y = floorf(rdcon->block.y + text_rect->y * s - thickness);
     }
-    else if (rdcon->font.style->text_deco == CSS_VALUE_LINE_THROUGH) {
+    else if (line == CSS_VALUE_LINE_THROUGH) {
         rect.x = rdcon->block.x + text_rect->x * s;
         float strike_y;
         if (deco_m && deco_m->strikeout_position > 0) {
@@ -1028,7 +1074,8 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
         } else {
             strike_y = deco_ascend * 0.3f / s;
         }
-        if (deco_m && deco_m->strikeout_size > 0)
+        if (rdcon->font.style->text_deco_thickness <= 0 &&
+            deco_m && deco_m->strikeout_size > 0)
             thickness = fmaxf(ceilf(deco_m->strikeout_size), 1.0f);
         // browser treats the strikeout metric as the stroke position; using it as the top edge paints too low.
         rect.y = floorf(rdcon->block.y + text_rect->y * s + deco_ascend - strike_y * s - thickness);
@@ -1053,7 +1100,10 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
             rdt_path_free(path);
         }
     } else {
-        bool apply_skip_ink = (rdcon->font.style->text_deco == CSS_VALUE_UNDERLINE);
+        bool apply_skip_ink = rdcon->font.style->text_deco_skip_ink == CSS_VALUE_ALL
+            ? line == CSS_VALUE_UNDERLINE || line == CSS_VALUE_OVERLINE
+            : rdcon->font.style->text_deco_skip_ink != CSS_VALUE_NONE &&
+              line == CSS_VALUE_UNDERLINE;
         if (apply_skip_ink) {
             SkipInkGap gaps[64];
             int gap_count = collect_skip_ink_gaps(rdcon, str, text_rect,
@@ -1063,5 +1113,21 @@ static void render_text_decorations(RenderContext* rdcon, unsigned char* str, Te
             rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, deco_color.c,
                 &rdcon->block.clip, rdcon->clip_shapes, rdcon->clip_shape_depth);
         }
+    }
+}
+
+static void render_text_decorations(RenderContext* rdcon, unsigned char* str,
+                                    TextRect* text_rect) {
+    if (!rdcon || !rdcon->font.style) return;
+    const FontProp* font = rdcon->font.style;
+    render_single_text_decoration(rdcon, str, text_rect, font->text_deco);
+    if (font->text_deco_extra & CSS_TEXT_DECO_UNDERLINE) {
+        render_single_text_decoration(rdcon, str, text_rect, CSS_VALUE_UNDERLINE);
+    }
+    if (font->text_deco_extra & CSS_TEXT_DECO_OVERLINE) {
+        render_single_text_decoration(rdcon, str, text_rect, CSS_VALUE_OVERLINE);
+    }
+    if (font->text_deco_extra & CSS_TEXT_DECO_LINE_THROUGH) {
+        render_single_text_decoration(rdcon, str, text_rect, CSS_VALUE_LINE_THROUGH);
     }
 }

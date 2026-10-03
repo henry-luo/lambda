@@ -1,0 +1,31 @@
+{
+  "name": "CSS scroll behavior animates programmatic scroll writes",
+  "html": "test/ui/scroll_behavior_smooth.html",
+  "viewport": {"width": 240, "height": 320},
+  "events": [
+    {"type": "click", "target": {"selector": "#start"}},
+    {"type": "assert_text", "target": {"selector": "#computed"}, "equals": "smooth"},
+    {"type": "assert_text", "target": {"selector": "#immediate"}, "equals": "0"},
+    {"type": "advance_time", "ms": 150, "steps": 10},
+    {"type": "assert_text", "target": {"selector": "#midpoint"}, "equals": "in-flight"},
+    {"type": "advance_time", "ms": 250, "steps": 16},
+    {"type": "assert_state_store", "target": {"selector": "#smooth"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 300, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#instant"}},
+    {"type": "assert_state_store", "target": {"selector": "#smooth"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 0, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#plain-set"}},
+    {"type": "assert_state_store", "target": {"selector": "#plain"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 300, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#forced"}},
+    {"type": "assert_text", "target": {"selector": "#forced-immediate"}, "equals": "0,300"},
+    {"type": "advance_time", "ms": 400, "steps": 25},
+    {"type": "assert_state_store", "target": {"selector": "#plain"},
+     "view_state": true, "kind": "scroll", "view_scroll_x": 120,
+     "view_scroll_y": 120, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#top-only"}},
+    {"type": "assert_state_store", "target": {"selector": "#plain"},
+     "view_state": true, "kind": "scroll", "view_scroll_x": 120,
+     "view_scroll_y": 0, "tolerance": 1}
+  ]
+}

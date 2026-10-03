@@ -1,0 +1,19 @@
+<!doctype html>
+<style>
+  body { margin: 0; }
+  #pane { width: 160px; height: 100px; overflow: auto;
+          scroll-snap-type: y mandatory; }
+  #large { height: 300px; scroll-snap-align: start; background: #afa; }
+  #next { height: 100px; scroll-snap-align: start; background: #aaf; }
+</style>
+<button id="inside">Scroll within oversized area</button>
+<button id="edge">Scroll beyond oversized area's full-cover range</button>
+<div id="pane"><div id="large"></div><div id="next"></div></div>
+<script>
+  document.getElementById('inside').addEventListener('click', () => {
+    document.getElementById('pane').scrollTop = 150;
+  });
+  document.getElementById('edge').addEventListener('click', () => {
+    document.getElementById('pane').scrollTop = 260;
+  });
+</script>

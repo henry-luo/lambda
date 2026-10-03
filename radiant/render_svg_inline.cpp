@@ -652,7 +652,8 @@ static const char* svg_resolve_property_declaration(SvgStyleContext* style, DomE
     const char* name, CssDeclaration* declaration, const SvgDomStyleScope* scope = nullptr) {
     SvgVariableContext variables = {style, element, scope};
     const CssValue* authored = declaration->value;
-    declaration->value = (CssValue*)css_resolve_var_value(authored, svg_lookup_variable, &variables);
+    declaration->value = (CssValue*)css_resolve_var_value(
+        style->pool, authored, svg_lookup_variable, &variables);
     // layout, DOM geometry and painting must all project the same resolved CSS tokens.
     if (declaration->value != authored) {
         declaration->value_text = nullptr; declaration->value_text_len = 0;

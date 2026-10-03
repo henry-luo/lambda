@@ -81,6 +81,7 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_INHERIT,
     CSS_VALUE_UNSET,
     CSS_VALUE_REVERT,
+    CSS_VALUE_REVERT_LAYER,
     CSS_VALUE_FLEX_START,
     CSS_VALUE_FLEX_END,
     CSS_VALUE_CENTER,
@@ -518,6 +519,13 @@ typedef enum CssEnum : int16_t {
     // object-fit values
     CSS_VALUE_FILL,
     CSS_VALUE_SCALE_DOWN,
+    // image-rendering values
+    CSS_VALUE_SMOOTH,
+    CSS_VALUE_HIGH_QUALITY,
+    CSS_VALUE_PIXELATED,
+    CSS_VALUE_CRISP_EDGES,
+    CSS_VALUE_OPTIMIZE_SPEED,
+    CSS_VALUE_OPTIMIZE_QUALITY,
     // text-box-trim values
     CSS_VALUE_TRIM_START,
     CSS_VALUE_TRIM_END,
@@ -575,6 +583,8 @@ typedef enum CssEnum : int16_t {
     // CSS Transforms 2 transform-style keywords
     CSS_VALUE_FLAT,
     CSS_VALUE_PRESERVE_3D,
+    CSS_VALUE_FROM_FONT,
+    CSS_VALUE_CHAIN,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY

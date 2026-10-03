@@ -11,6 +11,7 @@
 #include "../js/js_runtime.h"
 #include "../js/js_class.h"
 #include "../js/js_object_meta.h"
+#include "../js/js_property_attrs.h"
 #include "../runtime/lambda-root-frame.hpp"
 #include "../runtime/gc/gc_heap.h"
 #include "../lambda-data.hpp"
@@ -29,6 +30,7 @@
 #include "../input/css/css_formatter.hpp"
 
 #include <cstring>
+#include <ctype.h>
 #include "../../lib/mem_grow.hpp"
 
 extern String* heap_create_name(const char* name, size_t len);
@@ -244,15 +246,25 @@ static Item wrap_rule_decl(CssRule* rule, Pool* pool) {
     return wrapper;
 }
 
+static Item cssom_nested_css_text_getter(Item callee, Item receiver,
+                                         Item* args, int argc,
+                                         uint64_t* result_home);
+
 static Item wrap_nested_declarations(CssRule* rule, Pool* pool) {
-    RootFrame roots(5);
+    RootFrame roots(7);
     Rooted<Item> result_root(roots,
         dom_realm_new_object_of_class(JS_CLASS_CSS_NESTED_DECLARATIONS));
     Rooted<Item> style_root(roots, wrap_rule_decl(rule, pool));
+    Rooted<Item> getter_root(roots, js_new_native_payload_function(
+        cssom_nested_css_text_getter, 0, 0));
     // Class metadata does not participate in ordinary instanceof; CSSOM
     // wrappers must inherit the realm's exposed interface prototype.
     dom_realm_apply_prototype(result_root.get(), "CSSNestedDeclarations");
     dom_realm_set_cstr(result_root.get(), "style", style_root.get());
+    // Read the retained rule on access, since CSSStyleDeclaration edits can
+    // change this serialization after the wrapper has been created.
+    dom_realm_install_accessor(result_root.get(), js_name_item("cssText"),
+        getter_root.get(), ItemNull, JSPD_NON_ENUMERABLE);
     return result_root.get();
 }
 
@@ -292,6 +304,8 @@ static Pool* get_document_pool() {
 static const char* serialize_selector_text(CssRule* rule, Pool* pool) {
     if (!rule || rule->type != CSS_RULE_STYLE) return "";
     if (!pool) return "";
+    if (rule->data.style_rule.authored_selector_text)
+        return rule->data.style_rule.authored_selector_text;
 
     CssSelectorGroup* group = rule->data.style_rule.selector_group;
     CssSelector* single = rule->data.style_rule.selector;
@@ -335,24 +349,92 @@ static void append_rule_declaration_text(StringBuf* buf, CssDeclaration* decl, P
     }
 }
 
-static const char* serialize_style_rule_css_text(CssRule* rule, Pool* pool) {
-    if (!rule || !pool || rule->type != CSS_RULE_STYLE) return "";
-
+static const char* serialize_cssom_rule_css_text(CssRule* rule, Pool* pool,
+                                                 int depth) {
+    if (!rule || !pool || depth > 128) return "";
     StringBuf* buf = stringbuf_new(pool);
     if (!buf) return "";
-
-    stringbuf_append_all(buf, 2, serialize_selector_text(rule, pool), "{");
-    for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
-        CssDeclaration* decl = rule->data.style_rule.declarations[i];
-        if (!decl) continue;
-        if (i > 0) stringbuf_append_str(buf, " ");
-        append_rule_declaration_text(buf, decl, pool);
-        stringbuf_append_str(buf, ";");
+    if (rule->type == CSS_RULE_STYLE ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS) {
+        bool nested_declarations = rule->type == CSS_RULE_NESTED_DECLARATIONS;
+        size_t child_count = nested_declarations ? 0
+            : rule->data.style_rule.nested_rule_count;
+        if (!nested_declarations) {
+            stringbuf_append_all(buf, 2, serialize_selector_text(rule, pool), " {");
+            stringbuf_append_str(buf, child_count ? "\n" : " ");
+        }
+        bool appended = false;
+        for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
+            CssDeclaration* decl = rule->data.style_rule.declarations[i];
+            if (!decl) continue;
+            if (appended) stringbuf_append_str(buf, " ");
+            else if (child_count) stringbuf_append_str(buf, "  ");
+            append_rule_declaration_text(buf, decl, pool);
+            stringbuf_append_str(buf, ";");
+            appended = true;
+        }
+        if (child_count && appended) stringbuf_append_str(buf, "\n");
+        else if (!nested_declarations && !child_count && appended)
+            stringbuf_append_str(buf, " ");
+        for (size_t i = 0; i < child_count; i++) {
+            CssRule* child = rule->data.style_rule.nested_rules[i];
+            if (!child) continue;
+            stringbuf_append_str(buf, "  ");
+            stringbuf_append_str(buf,
+                serialize_cssom_rule_css_text(child, pool, depth + 1));
+            stringbuf_append_str(buf, "\n");
+        }
+        if (!nested_declarations) stringbuf_append_str(buf, "}");
+    } else if (rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+               rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+        const char* name = rule->type == CSS_RULE_MEDIA ? "media"
+            : rule->type == CSS_RULE_SUPPORTS ? "supports"
+            : rule->type == CSS_RULE_CONTAINER ? "container" : "layer";
+        stringbuf_append_all(buf, 2, "@", name);
+        if (rule->data.conditional_rule.condition) {
+            const char* start = rule->data.conditional_rule.condition;
+            while (*start && isspace((unsigned char)*start)) start++;
+            const char* end = start + strlen(start);
+            while (end > start && isspace((unsigned char)end[-1])) end--;
+            if (end > start) {
+                stringbuf_append_str(buf, " ");
+                stringbuf_append_str_n(buf, start, (size_t)(end - start));
+            }
+        }
+        if (rule->type == CSS_RULE_LAYER &&
+            rule->data.conditional_rule.layer_statement) {
+            stringbuf_append_str(buf, ";");
+            String* result = stringbuf_to_string(buf);
+            return result ? result->chars : "";
+        }
+        stringbuf_append_str(buf, " {\n");
+        for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
+            CssRule* child = rule->data.conditional_rule.rules[i];
+            if (!child) continue;
+            stringbuf_append_str(buf, "  ");
+            stringbuf_append_str(buf,
+                serialize_cssom_rule_css_text(child, pool, depth + 1));
+            stringbuf_append_str(buf, "\n");
+        }
+        stringbuf_append_str(buf, "}");
+    } else {
+        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        if (!fmt) return "";
+        return css_format_rule(fmt, rule);
     }
-    stringbuf_append_str(buf, "}");
-
     String* result = stringbuf_to_string(buf);
     return result ? result->chars : "";
+}
+
+static Item cssom_nested_css_text_getter(Item /*callee*/, Item receiver,
+                                         Item* /*args*/, int /*argc*/,
+                                         uint64_t* /*result_home*/) {
+    Item style = js_get_key_cstr(receiver, "style");
+    CssRule* rule = unwrap_rule_decl(style);
+    if (!rule || rule->type != CSS_RULE_NESTED_DECLARATIONS)
+        return js_throw_type_error("CSSNestedDeclarations.cssText called on incompatible receiver");
+    Pool* pool = rule->pool ? rule->pool : get_document_pool();
+    return make_string_item(serialize_cssom_rule_css_text(rule, pool, 0));
 }
 
 // =============================================================================
@@ -608,13 +690,6 @@ extern "C" Item dom_cssom_rule_get_selector_text(Item rule_item) {
     (void)pool;
     if (rule->type != CSS_RULE_STYLE) return make_string_item("");
     const char* sel_text = serialize_selector_text(rule, pool);
-    // CSS Nesting: nested rules get '& ' prefix
-    if (rule->parent && sel_text && sel_text[0] != '\0') {
-        // Always prepend '& ' for nested selectors
-        size_t len = strlen(sel_text);
-        char* nested_text = pool_join2(pool, "& ", 2, sel_text, len);
-        return make_string_item(nested_text);
-    }
     return make_string_item(sel_text);
 }
 
@@ -668,8 +743,11 @@ extern "C" Item dom_cssom_rule_get_css_text(Item rule_item) {
     Pool* pool = (rule->pool) ? rule->pool : get_document_pool();
     (void)pool;
     if (!pool) return make_string_item("");
-    if (rule->type == CSS_RULE_STYLE) {
-        return make_string_item(serialize_style_rule_css_text(rule, pool));
+    if (rule->type == CSS_RULE_STYLE ||
+        rule->type == CSS_RULE_NESTED_DECLARATIONS ||
+        rule->type == CSS_RULE_MEDIA || rule->type == CSS_RULE_SUPPORTS ||
+        rule->type == CSS_RULE_CONTAINER || rule->type == CSS_RULE_LAYER) {
+        return make_string_item(serialize_cssom_rule_css_text(rule, pool, 0));
     }
     CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
     if (!fmt) return make_string_item("");
@@ -712,6 +790,54 @@ extern "C" Item dom_cssom_rule_get_parent_rule(Item rule_item) {
     return ItemNull;
 }
 
+static void cssom_rebind_nested_children(CssRule* container,
+                                         const char* parent_text,
+                                         CssSelectorGroup* parent_group,
+                                         Pool* pool, int depth) {
+    if (!container || !parent_text || !parent_group || !pool || depth > 128)
+        return;
+    CssRule** children = nullptr;
+    size_t count = 0;
+    if (container->type == CSS_RULE_STYLE) {
+        children = container->data.style_rule.nested_rules;
+        count = container->data.style_rule.nested_rule_count;
+    } else if (container->type == CSS_RULE_MEDIA ||
+               container->type == CSS_RULE_SUPPORTS ||
+               container->type == CSS_RULE_CONTAINER ||
+               container->type == CSS_RULE_LAYER) {
+        children = container->data.conditional_rule.rules;
+        count = container->data.conditional_rule.rule_count;
+    }
+    for (size_t i = 0; i < count; i++) {
+        CssRule* child = children[i];
+        if (!child) continue;
+        if (child->type == CSS_RULE_NESTED_DECLARATIONS) {
+            child->data.style_rule.selector_group = parent_group;
+            child->data.style_rule.selector = parent_group->selector_count
+                ? parent_group->selectors[0] : nullptr;
+        } else if (child->type == CSS_RULE_STYLE) {
+            const char* authored = child->data.style_rule.authored_selector_text;
+            if (!authored) continue;
+            char* canonical = nullptr;
+            CssSelectorGroup* group = css_parse_nested_selector_group_text(
+                authored, strlen(authored), parent_text, pool, &canonical);
+            if (!group) continue;
+            child->data.style_rule.selector_group = group;
+            child->data.style_rule.selector = group->selector_count == 1
+                ? group->selectors[0] : nullptr;
+            child->data.style_rule.authored_selector_text = canonical;
+            CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+            const char* child_text = fmt
+                ? css_format_selector_group(fmt, group) : nullptr;
+            if (child_text) cssom_rebind_nested_children(
+                child, child_text, group, pool, depth + 1);
+        } else {
+            cssom_rebind_nested_children(
+                child, parent_text, parent_group, pool, depth + 1);
+        }
+    }
+}
+
 extern "C" Item dom_cssom_rule_set_selector_text(Item rule_item, Item value) {
     CssRule* rule = unwrap_rule(rule_item);
     if (!rule) return ItemNull;
@@ -726,7 +852,21 @@ extern "C" Item dom_cssom_rule_set_selector_text(Item rule_item, Item value) {
         Pool* pool = (rule && rule->pool) ? rule->pool : get_document_pool();
         if (!pool) return value;
 
-        CssSelectorGroup* new_group = css_parse_selector_group_text(new_text, new_text_len, pool);
+        CssRule* ancestor = rule->parent;
+        while (ancestor && ancestor->type != CSS_RULE_STYLE)
+            ancestor = ancestor->parent;
+        char* authored = nullptr;
+        CssSelectorGroup* new_group = nullptr;
+        if (ancestor && ancestor->data.style_rule.selector_group) {
+            CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+            const char* parent_text = fmt ? css_format_selector_group(
+                fmt, ancestor->data.style_rule.selector_group) : nullptr;
+            if (parent_text) new_group = css_parse_nested_selector_group_text(
+                new_text, new_text_len, parent_text, pool, &authored);
+        } else {
+            new_group = css_parse_selector_group_text(
+                new_text, new_text_len, pool);
+        }
         if (!new_group || new_group->selector_count == 0) {
             log_debug("js_cssom_rule_set_property: failed to parse selectorText '%s'", new_text);
             return value;  // silently ignore
@@ -739,8 +879,15 @@ extern "C" Item dom_cssom_rule_set_selector_text(Item rule_item, Item value) {
         } else {
             rule->data.style_rule.selector = nullptr;
         }
+        rule->data.style_rule.authored_selector_text = authored;
+        CssFormatter* fmt = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+        const char* expanded_text = fmt
+            ? css_format_selector_group(fmt, new_group) : nullptr;
+        if (expanded_text) cssom_rebind_nested_children(
+            rule, expanded_text, new_group, pool, 0);
 
         log_debug("js_cssom_rule_set_property: updated selectorText to '%s'", new_text);
+        js_cssom_notify_stylesheet_mutation();
         return value;
     }
 

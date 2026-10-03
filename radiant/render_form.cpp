@@ -251,6 +251,7 @@ static bool form_control_has_focus(const FormControlBox* box, ViewBlock* block) 
 static void paint_default_text_control_box(RenderContext* rdcon, ViewBlock* block,
                                            const FormControlBox* box) {
     if (!rdcon || !block || !box) return;
+    if (block->form && block->form->appearance_none) return;
 
     // Author backgrounds and borders are painted by render_block_view; the
     // fallback chrome only fills the content area so it does not cover them.
@@ -327,9 +328,10 @@ static bool form_glyph_run_next(FormGlyphRun* run, FormGlyphStep* step) {
     return false;
 }
 
-void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
-                          FontProp* font, Color color) {
-    if (!text || !*text || !font || !rdcon->ui_context) return;
+static void render_simple_string_range(RenderContext* rdcon, const char* text,
+                                       size_t text_len, float x, float y,
+                                       FontProp* font, Color color) {
+    if (!text || text_len == 0 || !font || !rdcon->ui_context) return;
 
     // Setup font for rendering
     FontBox fbox = {0};
@@ -347,7 +349,7 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
     float ascender = _fm ? (_fm->hhea_ascender * ui_context_raster_scale(rdcon->ui_context)) : 12.0f;
 
     FormGlyphRun run;
-    form_glyph_run_init(&run, font_box_handle(&fbox), font, text, strlen(text), true);
+    form_glyph_run_init(&run, font_box_handle(&fbox), font, text, text_len, true);
     FormGlyphStep step;
     float pen_x = x;
     while (form_glyph_run_next(&run, &step)) {
@@ -367,6 +369,12 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
 
     // Restore color
     rdcon->color = saved_color;
+}
+
+void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
+                          FontProp* font, Color color) {
+    render_simple_string_range(rdcon, text, text ? strlen(text) : 0,
+                               x, y, font, color);
 }
 
 /**
@@ -600,7 +608,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     float w = fc.w;
     float h = fc.h;
     bool has_css_border = fc.has_css_border;
-    bool use_default_border = fc.use_default_border;
+    bool use_default_border = fc.use_default_border && !form->appearance_none;
 
     paint_default_text_control_box(rdcon, block, &fc);
 
@@ -700,24 +708,29 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     }
     float scroll_px = (form ? form->scroll_x : 0.0f) * s;
 
+    uint32_t selection_start_byte = 0;
+    uint32_t selection_end_byte = 0;
+    bool paint_selection = focused_here && !has_preedit && !is_placeholder &&
+        form->tc_initialized && selection_start != selection_end && text && *text;
+    if (paint_selection) {
+        const char* value = form->current_value ? form->current_value : src_text;
+        uint32_t value_len = form->current_value
+            ? form->current_value_len : (uint32_t)strlen(src_text);
+        selection_start_byte = tc_utf16_to_utf8_offset(
+            value, value_len, selection_start);
+        selection_end_byte = tc_utf16_to_utf8_offset(
+            value, value_len, selection_end);
+    }
+
     // Draw selection highlight BEFORE the text so glyphs render on top
     // of the highlight (matches native widgets and CSS ::selection).
-    if (focused_here && !has_preedit && !is_placeholder && form->tc_initialized
-        && selection_start != selection_end
-        && text && *text) {
-        uint32_t a8_src = tc_utf16_to_utf8_offset(form->current_value
-                                                      ? form->current_value : src_text,
-                                                  form->current_value
-                                                      ? form->current_value_len
-                                                      : (uint32_t)strlen(src_text),
-                                                  selection_start);
-        uint32_t b8_src = tc_utf16_to_utf8_offset(form->current_value
-                                                      ? form->current_value : src_text,
-                                                  form->current_value
-                                                      ? form->current_value_len
-                                                      : (uint32_t)strlen(src_text),
-                                                  selection_end);
+    if (paint_selection) {
+        uint32_t a8_src = selection_start_byte;
+        uint32_t b8_src = selection_end_byte;
         Color sel_color = make_color(0xB4, 0xD5, 0xFE, 0xFF); // CSS ::selection default
+        if (block->in_line && block->inl()->has_selection_background_color) {
+            sel_color = block->inl()->selection_background_color;
+        }
         bool used_shared_selection = false;
         if (!is_password) {
             TextControlSelectionPaint paint;
@@ -763,6 +776,27 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
         // (mask_buf substitutes glyphs), with scroll_x applied uniformly.
         render_simple_string(rdcon, text, text_origin_x - scroll_px, text_y,
                              render_font, text_color);
+        if (paint_selection && block->in_line &&
+            block->inl()->has_selection_color) {
+            int start_byte = is_password
+                ? password_display_byte_offset(src_text, (int)selection_start_byte,
+                    password_reveal_start, password_reveal_end)
+                : (int)selection_start_byte;
+            int end_byte = is_password
+                ? password_display_byte_offset(src_text, (int)selection_end_byte,
+                    password_reveal_start, password_reveal_end)
+                : (int)selection_end_byte;
+            size_t text_len = strlen(text);
+            if (start_byte >= 0 && end_byte > start_byte &&
+                (size_t)end_byte <= text_len) {
+                float selected_x = text_origin_x - scroll_px +
+                    measure_input_text_width(rdcon, render_font, text,
+                                             start_byte) * s;
+                render_simple_string_range(rdcon, text + start_byte,
+                    (size_t)(end_byte - start_byte), selected_x, text_y,
+                    render_font, block->inl()->selection_color);
+            }
+        }
     }
 
     if (has_preedit && preedit_display && render_font && preedit_end > preedit_start) {
@@ -788,7 +822,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
             float caret_h = font_size_scaled;
             float caret_w = 2.0f * s;
             // The auto caret follows the control's text color on light and dark backgrounds.
-            Color caret_color = form_text_color(block, form, false);
+            Color caret_color = radiant_caret_color_for_view(block);
             rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, caret_color);
         }
     }
@@ -930,13 +964,13 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
     bool use_default_border = fc.use_default_border;
     bool disabled = fc.disabled;
 
-    if (!has_css_background) {
+    if (!has_css_background && !form->appearance_none) {
         // No CSS background - render default button appearance
         // Background (light gray)
         Color bg = disabled ? make_color(200, 200, 200) : make_color(224, 224, 224);
         fill_rect(rdcon, x, y, w, h, bg);
     }
-    if (!has_css_background && use_default_border) {
+    if (!has_css_background && use_default_border && !form->appearance_none) {
         // 3D outset border (raised button appearance) - skip when author CSS
         // already specifies a border (rendered by render_block_view).
         draw_3d_border(rdcon, x, y, w, h, false, 1 * s);
@@ -965,6 +999,57 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
         draw_rect_focus_ring(rdcon, x, y, w, h, s);
     }
 
+}
+
+static void render_file_input(RenderContext* rdcon, ViewBlock* block,
+                              FormControlProp* form) {
+    FormControlBox fc = form_control_box(rdcon, block);
+    FontProp* button_font = form->file_button_font
+        ? form->file_button_font : block->font;
+    const char* button_label = "Choose File";
+    const char* file_label = form->value && *form->value
+        ? form->value : "No file chosen";
+    if (!button_font) return;
+
+    // The button is the file input's own paint target, not the host box.
+    float label_width = measure_input_text_width(rdcon, button_font,
+        button_label, (int)strlen(button_label)) * fc.s; // INT_CAST_OK: glyph API uses byte-count ints.
+    float border_width = form->file_button_draw_border
+        ? form->file_button_border_width * fc.s : 0.0f;
+    float button_width = label_width +
+        (form->file_button_padding_left + form->file_button_padding_right) * fc.s +
+        2.0f * border_width;
+    if (button_width > fc.w) button_width = fc.w;
+    Color background = form->file_button_has_background_color
+        ? form->file_button_background_color
+        : make_color(239, 239, 239);
+    fill_rect(rdcon, fc.x, fc.y, button_width, fc.h, background);
+    if (border_width > 0.0f) {
+        Color border_color = form->file_button_border_color;
+        fill_rect(rdcon, fc.x, fc.y, button_width, border_width, border_color);
+        fill_rect(rdcon, fc.x, fc.y + fc.h - border_width,
+                  button_width, border_width, border_color);
+        fill_rect(rdcon, fc.x, fc.y, border_width, fc.h, border_color);
+        fill_rect(rdcon, fc.x + button_width - border_width, fc.y,
+                  border_width, fc.h, border_color);
+    }
+
+    Color button_color = form->file_button_has_color
+        ? form->file_button_color
+        : form_text_color(block, form, false);
+    float button_text_y = fc.y + (fc.h - button_font->font_size * fc.s) * 0.5f;
+    render_simple_string(rdcon, button_label,
+        fc.x + border_width + form->file_button_padding_left * fc.s,
+        button_text_y, button_font, button_color);
+    if (block->font && fc.w > button_width + 4.0f * fc.s) {
+        render_simple_string(rdcon, file_label,
+            fc.x + button_width + 4.0f * fc.s,
+            fc.y + (fc.h - block->font->font_size * fc.s) * 0.5f,
+            block->font, form_text_color(block, form, false));
+    }
+    if (form_control_has_focus(&fc, block)) {
+        draw_rect_focus_ring(rdcon, fc.x, fc.y, fc.w, fc.h, fc.s);
+    }
 }
 
 /**
@@ -1056,13 +1141,13 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
     // weren't set for some reason (e.g., author CSS removed them).
     bool has_css_background = fc.has_css_background;
     bool has_css_border = fc.has_css_border;
-    bool use_default_border = fc.use_default_border;
+    bool use_default_border = fc.use_default_border && !form->appearance_none;
     DocState* state = fc.state;
     bool disabled = fc.disabled;
     int selected_index = form_control_get_selected_index(state, static_cast<View*>(block));
 
     float bw = 1 * s;
-    if (!has_css_background) {
+    if (!has_css_background && !form->appearance_none) {
         Color bg = disabled ? make_color(235, 235, 228) : make_color(255, 255, 255);
         fill_rect(rdcon, x, y, w, h, bg);
     }
@@ -1298,7 +1383,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     float w = fc.w;
     float h = fc.h;
     bool has_css_border = fc.has_css_border;
-    bool use_default_border = fc.use_default_border;
+    bool use_default_border = fc.use_default_border && !form->appearance_none;
 
     paint_default_text_control_box(rdcon, block, &fc);
 
@@ -1345,6 +1430,9 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     // draw selection highlight before textarea text, matching native text-control paint order
     if (has_active_selection && block->font) {
         Color sel_color = make_color(0x33, 0x99, 0xFF, 0x60);
+        if (block->in_line && block->inl()->has_selection_background_color) {
+            sel_color = block->inl()->selection_background_color;
+        }
         TextControlSelectionPaint paint;
         memset(&paint, 0, sizeof(paint));
         paint.rdcon = rdcon;
@@ -1366,6 +1454,9 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     if (text && *text && render_font) {
         Color text_color = form_text_color(block, form, is_placeholder);
         Color selected_text_color = make_color(255, 255, 255);
+        if (block->in_line && block->inl()->has_selection_color) {
+            selected_text_color = block->inl()->selection_color;
+        }
 
         // Setup font
         FontBox fbox = {0};
@@ -1530,7 +1621,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
             float caret_w = 2.0f * s;
 
             // draw textarea caret via RdtVector
-            Color ta_caret_color = form_text_color(block, form, false);
+            Color ta_caret_color = radiant_caret_color_for_view(block);
             rc_fill_rect(rdcon, caret_x, caret_y_pos, caret_w, caret_h, ta_caret_color);
         }
     }
@@ -1581,9 +1672,25 @@ void render_form_control(RenderContext* rdcon, ViewBlock* block) {
 
     FormControlProp* form = block->form;
 
+    // Primitive controls keep their CSS box and focus indicator; native
+    // glyphs, tracks and thumbs must not cover author-painted contents.
+    if (form->appearance_none &&
+        (form->control_type == FORM_CONTROL_CHECKBOX ||
+         form->control_type == FORM_CONTROL_RADIO ||
+         form->control_type == FORM_CONTROL_RANGE)) {
+        FormControlBox fc = form_control_box(rdcon, block);
+        if (form_control_has_focus(&fc, block))
+            draw_rect_focus_ring(rdcon, fc.x, fc.y, fc.w, fc.h, fc.s);
+        return;
+    }
+
     switch (form->control_type) {
     case FORM_CONTROL_TEXT:
-        render_text_input(rdcon, block, form);
+        if (form_input_kind_is(form->input_type, FORM_INPUT_KIND_FILE)) {
+            render_file_input(rdcon, block, form);
+        } else {
+            render_text_input(rdcon, block, form);
+        }
         break;
 
     case FORM_CONTROL_CHECKBOX:

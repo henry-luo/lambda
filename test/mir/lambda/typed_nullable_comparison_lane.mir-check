@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "S6.1.2/D2.4.1-D2.4.3: nullable numeric comparisons retain the native bool null marker for branch consumers and box only at Item boundaries; out-of-bounds and negative reads still produce null.",
+  "checks": [
+    {
+      "in_func": "_classify_#",
+      "forbid": ["call\tis_truthy_p, is_truthy"]
+    },
+    {
+      "in_func": "_read_arithmetic_#",
+      "expect": ["add\t"],
+      "count": {"call\tlambda_type_check_p, lambda_type_check": 2}
+    }
+  ]
+}

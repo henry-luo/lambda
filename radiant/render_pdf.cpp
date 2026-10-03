@@ -1352,7 +1352,9 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     }
 
     // If text_rect width is larger than natural width and there are spaces, apply justify
-    if (space_count > 0 && natural_width > 0 && text_rect->width > natural_width + 0.5f) {
+    if (text_justify_computed_value(text->parent) != CSS_VALUE_NONE &&
+        space_count > 0 && natural_width > 0 &&
+        text_rect->width > natural_width + 0.5f) {
         float extra_space = text_rect->width - natural_width;
         adjusted_space_width = space_width + (extra_space / space_count);
     }
@@ -1910,7 +1912,8 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file, int viewport
         int viewport_height, float scale) {
     RenderExportSession session;
     if (!render_export_session_begin(
-            &session, html_file, viewport_width, viewport_height, 800, 1200, scale)) {
+            &session, html_file, viewport_width, viewport_height, 800, 1200, scale,
+            true)) {
         return 1;
     }
     int result = render_export_session_to_pdf(&session, pdf_file);

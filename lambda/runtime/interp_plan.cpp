@@ -1033,9 +1033,75 @@ static void plan_mark_cow_owned(NameEntry* entry) {
     entry->cow_owned = ast_expr_produces_owned_container(init);
 }
 
+// A destination is a written contract, never the current value's inferred tag.
+// Only fresh result positions adopt it; argument evaluation keeps its own order.
+static void plan_destination(AstNode* node, Type* contract, int depth = 0) {
+    node = ast_unwrap_primary(node);
+    if (!node || !contract || depth > 64 ||
+            lambda_type_contract_has_binder(contract, true)) return;
+    switch (node->node_type) {
+    case AST_NODE_MAP: {
+        AstMapNode* literal = (AstMapNode*)node;
+        TypeMap* target = (TypeMap*)lambda_type_nonnull_map_contract(contract);
+        if (!target || !target->is_trusted_contract || literal->has_computed_key ||
+                !ast_map_contract_storage_valid(target) ||
+                !ast_map_literal_keys_follow_contract(literal, target)) return;
+        literal->interp_destination = target;
+        ShapeEntry* field = target->shape;
+        for (AstNode* item = literal->item; item;
+                item = item->next, field = typemap_next_field(target, field)) {
+            plan_destination(((AstNamedNode*)item)->as, field->type, depth + 1);
+        }
+        return;
+    }
+    case AST_NODE_IF_EXPR: {
+        AstIfNode* branch = (AstIfNode*)node;
+        plan_destination(branch->then, contract, depth + 1);
+        plan_destination(branch->otherwise, contract, depth + 1);
+        return;
+    }
+    case AST_NODE_MATCH_EXPR:
+        for (AstMatchArm* arm = ((AstMatchNode*)node)->first_arm; arm;
+                arm = (AstMatchArm*)arm->next)
+            plan_destination(arm->body, contract, depth + 1);
+        return;
+    case AST_NODE_CONTENT:
+    case AST_NODE_LIST: {
+        int values = 0, declarations = 0, statements = 0;
+        AstNode* result = interp_proc_block_last_value((AstListNode*)node,
+            &values, &declarations, &statements);
+        if (values == 1) plan_destination(result, contract, depth + 1);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+static void plan_place(PlanCtx* pc, AstCompoundAssignNode* assignment) {
+    if (assignment->interp_place) return;
+    InterpPlacePlan* place = (InterpPlacePlan*)pool_calloc(pc->script->pool,
+        sizeof(InterpPlacePlan));
+    if (!place) { pc->failed = true; return; }
+    if (!ast_collect_cow_path(&place->path, assignment->object) || !place->path.root ||
+            place->path.root->node_type != AST_NODE_IDENT) return;
+    place->root = ((AstIdentNode*)place->path.root)->entry;
+    if (!place->root) return;
+    int64_t index_mask = 0;
+    place->leaf_contract = lambda_type_contract_has_binder(place->root->declared_type, true)
+        ? NULL : ast_map_path_leaf_contract(place->root->declared_type,
+        &place->path, assignment->key,
+        assignment->node_type == AST_NODE_MEMBER_ASSIGN_STAM, &index_mask);
+    place->key_shape = (uint64_t)(place->path.count + 1) |
+        ((uint64_t)place->root->is_var_param << 8) | ((uint64_t)index_mask << 16);
+    assignment->interp_place = place;
+}
+
 static void plan_assign_entry(PlanCtx* pc, NameEntry* entry) {
     if (!entry || entry->storage_assigned) return;
     plan_mark_cow_owned(entry);
+    entry->interp_boundary = interp_boundary_plan_create(pc->script->pool,
+        entry->declared_type);
     if (pc->next_slot > UINT16_MAX) { pc->failed = true; return; }
     entry->slot = (int32_t)pc->next_slot++;
     entry->binding_storage = pc->storage;
@@ -1818,6 +1884,11 @@ static void plan_function(PlanCtx* outer, AstFuncNode* fn) {
     }
     pc.param_count = (uint32_t)param_index;
 
+    if (signature && signature->has_explicit_return_contract) {
+        pc.plan->return_boundary = interp_boundary_plan_create(pc.script->pool,
+            signature->return_contract);
+        plan_destination(fn->body, signature->return_contract);
+    }
     plan_walk(fn->body, &pc);
     plan_mark_handoff_loops(fn);
     // should_use_tco is lowering's own eligibility test (named, not a closure,
@@ -1867,8 +1938,25 @@ static void plan_walk(AstNode* node, void* ctx) {
     case AST_NODE_EVENT_HANDLER:
         // The owning view plans handlers after its body bindings.
         return;
-    case AST_NODE_VARIABLE_DECLARATOR:
-        plan_assign_entry(pc, ((AstDeclaratorNode*)node)->entry);
+    case AST_NODE_VARIABLE_DECLARATOR: {
+        AstDeclaratorNode* declaration = (AstDeclaratorNode*)node;
+        plan_assign_entry(pc, declaration->entry);
+        plan_destination(declaration->init, declaration->declared_type);
+        break;
+    }
+    case AST_NODE_ASSIGN_STAM: {
+        AstAssignStamNode* assignment = (AstAssignStamNode*)node;
+        plan_destination(assignment->value, assignment->target_entry
+            ? assignment->target_entry->declared_type : NULL);
+        break;
+    }
+    case AST_NODE_RETURN_STAM:
+        plan_destination(((AstReturnNode*)node)->value, pc->plan->return_boundary
+            ? pc->plan->return_boundary->contract : NULL);
+        break;
+    case AST_NODE_INDEX_ASSIGN_STAM:
+    case AST_NODE_MEMBER_ASSIGN_STAM:
+        plan_place(pc, (AstCompoundAssignNode*)node);
         break;
     case AST_NODE_PARAM:
     case AST_NODE_KEY_EXPR:
