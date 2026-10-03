@@ -161,15 +161,15 @@ resource-limit terminations need their own classifications.
 
 #### Execution-tier blindness
 
-The runner does not set `LAMBDA_TIER`. Under **D8.1.1v10**, the default is AUTO
+The runner does not set `LAMBDA_EXEC_BACKEND`. Under **D8.1.1v10**, the default is AUTO
 and a fresh process begins in T0. Many generated cases are too small or too
 short-lived to promote, so a nominal “runtime fuzz” campaign can cover parsing,
 front-end analysis, and T0 while never exercising eager whole-module MIR
-Direct. `LAMBDA_TIER=jit` must be an explicit matrix row; AUTO remains a
+Direct. `LAMBDA_EXEC_BACKEND=jit` must be an explicit matrix row; AUTO remains a
 separate tiering-policy target, not a substitute for eager JIT.
 
 The existing `test/interp/tier_sweep.py` contains the same historical trap: its
-variable named `jit_out` is produced by unsetting `LAMBDA_TIER`, which now means
+variable named `jit_out` is produced by unsetting `LAMBDA_EXEC_BACKEND`, which now means
 AUTO. The common execution helper must be corrected before it is reused as a
 fuzz oracle.
 
@@ -552,7 +552,7 @@ oracle unless a user-facing contract explicitly requires it.
 The mandatory comparison for a deterministic valid program is:
 
 ```text
-LAMBDA_TIER=interp  versus  LAMBDA_TIER=jit
+LAMBDA_EXEC_BACKEND=interp  versus  LAMBDA_EXEC_BACKEND=jit
 ```
 
 Both runs use the same binary family, arguments, dry-run policy, fixture root,
@@ -565,7 +565,7 @@ locale/timezone policy, and bounded output capture. They compare:
 
 The T0 row must report actual interpreter execution with fallback zero. A
 fallback comparison is inconclusive, not parity. The eager row must explicitly
-select `jit`; unsetting `LAMBDA_TIER` selects AUTO and cannot serve as the JIT
+select `jit`; unsetting `LAMBDA_EXEC_BACKEND` selects AUTO and cannot serve as the JIT
 oracle under **D8.1.1v10**.
 
 AUTO is then compared against the agreed explicit result. Its oracle also
@@ -947,7 +947,7 @@ regression suite.
 | Invalid text dominates and never reaches runtime. | Separate arbitrary-invalid and valid-by-construction budgets and metrics. |
 | Generated “valid” programs contain unresolved names/effect/type errors. | Stateful scope/effect/type generation and front-end phase classification. |
 | T0 silently falls back to JIT and manufactures parity. | Require execution counters and fallback zero for comparable T0 rows. |
-| AUTO is mistaken for eager JIT. | Always set `LAMBDA_TIER=jit` for the eager oracle; test AUTO separately. |
+| AUTO is mistaken for eager JIT. | Always set `LAMBDA_EXEC_BACKEND=jit` for the eager oracle; test AUTO separately. |
 | Persistent in-process runtime retains global state. | Limit in-process fuzzing to audited parser APIs; use subprocess/fork isolation elsewhere. |
 | Nondeterminism creates false semantic mismatches. | Manifest determinism, hermetic environment, invariant oracles, schedule seeds, and confirmation reruns. |
 | Timeout minimization changes the cause. | Require isolated reproduction and preserve the target/signature/resource profile. |

@@ -23,7 +23,7 @@ typedef enum LambdaTier {
     LAMBDA_TIER_AUTO,      // T0 + per-function satellite promotion (P2)
 } LambdaTier;
 
-// Parsed once at startup from LAMBDA_TIER; unset keeps the shipped `auto`
+// Parsed once at startup from LAMBDA_EXEC_BACKEND; unset keeps the shipped `auto`
 // policy, while `jit` explicitly selects eager whole-module compilation.
 // Safe to call before any parse.
 LambdaTier lambda_tier_selected(void);

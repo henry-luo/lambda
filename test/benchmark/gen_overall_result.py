@@ -30,7 +30,7 @@ SUITE_LABELS = {
 ENGINE_LABELS = {
     "mir": "MIR (untyped)",
     "mir_typed": "MIR (typed)",
-    # Auto-tier columns. The MIR columns above pin LAMBDA_TIER=jit so the
+    # Auto-tier columns. The MIR columns above pin LAMBDA_EXEC_BACKEND=jit so the
     # series stays comparable back through Result18; these two report what a
     # user actually gets from `lambda.exe run` with no tier override, which
     # since the interpreter-first default is a different execution path.
@@ -638,8 +638,8 @@ def write_report(args, data):
         w("Each engine's own `__TIMING__` figure: the timed workload only, with "
           "startup and compilation outside the measured region. This is the "
           "historical series, comparable back through Result18, the MIR "
-          "columns pin `LAMBDA_TIER=jit`, and LambdaJS pins "
-          "`JS_EXECUTION_BACKEND=mir`.")
+          "columns pin `LAMBDA_EXEC_BACKEND=jit`, and LambdaJS pins "
+          "`JS_EXEC_BACKEND=mir`.")
         w()
 
     w("## Summary" if not e2e_engines else "### Summary")
@@ -697,8 +697,8 @@ def write_report(args, data):
         w()
         w("Wall clock from process invocation to exit, so **every engine pays its "
           "own startup and compilation inside the number**. The MIR and LambdaJS "
-          "columns use the shipped auto tier -- no `LAMBDA_TIER` or "
-          "`JS_EXECUTION_BACKEND` override -- which is what `lambda.exe run "
+          "columns use the shipped auto tier -- no `LAMBDA_EXEC_BACKEND` or "
+          "`JS_EXEC_BACKEND` override -- which is what `lambda.exe run "
           "script.ls` and `lambda.exe js script.js` actually do.")
         w()
         w("This set exists because the two questions are different. Part 1 asks "

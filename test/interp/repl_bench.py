@@ -27,7 +27,7 @@ def build_history(lines: int) -> str:
 
 def time_run(path: str, tier: str, repeats: int) -> float:
     env = dict(os.environ)
-    env["LAMBDA_TIER"] = tier
+    env["LAMBDA_EXEC_BACKEND"] = tier
     samples = []
     for attempt in range(repeats + 1):
         start = time.perf_counter()

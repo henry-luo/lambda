@@ -3,8 +3,8 @@
 // in the body must resolve to those locals. They did not on the eager JIT tier
 // until the object field's scope helper carried its binding back-pointer, so
 // every implicit read evaluated as 0 there while T0 returned the right value.
-// Tier parity is the point of this fixture: run it under LAMBDA_TIER=interp
-// and LAMBDA_TIER=jit and the output must be identical.
+// Tier parity is the point of this fixture: run it under LAMBDA_EXEC_BACKEND=interp
+// and LAMBDA_EXEC_BACKEND=jit and the output must be identical.
 
 type Counter {
     value: int,

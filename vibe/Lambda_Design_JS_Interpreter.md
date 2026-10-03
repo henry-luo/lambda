@@ -17,7 +17,7 @@ landed AST slice.
 AST interpreter the only executor of dynamic source. Direct and indirect
 `eval`, the `Function`-family constructors, string timer handlers, and
 `$262.evalScript` parse into a retained `JsScript` and run in T0. The caller's
-tier and `JS_EXECUTION_BACKEND` do not change this. MIR never lowers dynamic
+tier and `JS_EXEC_BACKEND` do not change this. MIR never lowers dynamic
 source, and the MIR dynamic-code compilation service is deleted. See §5.6,
 §11.6, §15.18, and Appendix S2.
 
@@ -25,7 +25,7 @@ source, and the MIR dynamic-code compilation service is deleted. See §5.6,
 
 **Hotness-only promotion and loop-head handoff (USER, 2026-10-03):** **D8.1.3v22 / JSI18v2** make JS promotion depend only on hot hits. `JS_FUNC_JIT_THRESHOLD` defaults to 100 calls (D8.1.3v23; 1000 in v22, five before), and a loop that reaches `JS_LOOP_JIT_THRESHOLD` (10000) may hand its running activation to compiled code at the loop-head test, in the shape **D8.1.1v14** rules for Lambda. No definition is compiled at first entry or because it owns a loop. JS keeps its own selector and knob names. Both thresholds are provisional. See §9.3; plan in [`impl/Lambda_Impl_JS_Interp_Tune.md`](impl/Lambda_Impl_JS_Interp_Tune.md). Not yet implemented beyond the threshold default.
 
-**Static-module prebuild revision (2026-09-19):** `JS_EXECUTION_BACKEND=auto`
+**Static-module prebuild revision (2026-09-19):** `JS_EXEC_BACKEND=auto`
 is now an explicit AST-first module policy. The shared prebuild scheduler
 discovers static imports with the direct parser, publishes only AST templates
 to `InputScriptCache` from isolated worker runtimes, and canonicalizes the

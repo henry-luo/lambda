@@ -50,7 +50,7 @@ printf "script\tbytes\tparse_ms\tast_ms\tplan_ms\ttranspile_ms\n"
     best_parse=""; best_ast=""; best_plan=""; best_tr=""
     for _ in $(seq "$REPS"); do
         rm -f "$PROFILE"
-        LAMBDA_PROFILE=1 LAMBDA_TIER="$TIER" timeout 300 "$LAMBDA" --no-log --dry-run "$script" >/dev/null 2>&1
+        LAMBDA_PROFILE=1 LAMBDA_EXEC_BACKEND="$TIER" timeout 300 "$LAMBDA" --no-log --dry-run "$script" >/dev/null 2>&1
         # the profile file is rewritten per process; keep only this script's own row
         row=$(grep -v '^#' "$PROFILE" 2>/dev/null | awk -F'\t' -v s="$script" '$1==s || $1 ~ ("/" s "$")' | tail -1)
         [ -z "$row" ] && continue

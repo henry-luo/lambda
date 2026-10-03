@@ -1604,7 +1604,7 @@ check-error-recovery:
 	@python3 test/error_handling/check_recovery_boundaries.py
 
 # ---------------------------------------------------------------------------
-# T0 AST interpreter (LAMBDA_TIER=interp) — vibe/impl/Lambda_Impl_Ast_Interp.md
+# T0 AST interpreter (LAMBDA_EXEC_BACKEND=interp) — vibe/impl/Lambda_Impl_Ast_Interp.md
 # ---------------------------------------------------------------------------
 
 # Differential gate: every script in the committed P0 subset must match its
@@ -1666,7 +1666,7 @@ test-gc-rooting-core: build
 		./lambda.exe js --no-log test/js/regression_side_stack_frame_gc.js > temp/gc_rooting_js_jit.txt
 	@diff -u test/js/regression_side_stack_frame_gc.txt temp/gc_rooting_js_jit.txt
 	@echo "Running LambdaJS AST functional RegExp replacement exact-root gate..."
-	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 JS_EXECUTION_BACKEND=ast \
+	@LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1 JS_EXEC_BACKEND=ast \
 		./lambda.exe js --no-log test/js/regexp_replace_callback_ast_gc.js > temp/gc_rooting_js_regexp_replace.txt
 	@diff -u test/js/regexp_replace_callback_ast_gc.txt temp/gc_rooting_js_regexp_replace.txt
 	@echo "Running Lambda-to-JS Promise membrane exact-root forced-GC gate..."
@@ -1803,7 +1803,7 @@ test262-baseline: test-js-exception-catalog ensure-test262-gtest
 	@./test/test_js_test262_gtest.exe --baseline-only --batch-only --run-async --async-list=test/js262/test262_baseline.txt $(if $(VERBOSE),--verbose)
 
 # JS execution-tier parity: test_js_gtest (--baseline) and the test262 baseline,
-# each under pinned whole-module MIR (JS_EXECUTION_BACKEND=mir) and the full AST
+# each under pinned whole-module MIR (JS_EXEC_BACKEND=mir) and the full AST
 # interpreter, then a report of per-tier results and cross-tier divergence.
 # Narrow with SUITE=js|test262 and/or MODE=mir|ast; VERBOSE=1 streams child output.
 test-js-parity: build-test

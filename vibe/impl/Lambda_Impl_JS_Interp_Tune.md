@@ -61,7 +61,7 @@ needed); make P2 useful and add loop-head handoff (§5, items E1–E4, ruled in
 ### 2.1 Method and limits
 
 Release binary, `lambda.exe js <file>`, backend pinned with
-`JS_EXECUTION_BACKEND=mir|ast` or left unset (AUTO). "exec" is the script's
+`JS_EXEC_BACKEND=mir|ast` or left unset (AUTO). "exec" is the script's
 own `__TIMING__` line; "wall" is process wall time and includes parse and
 compile. Minimum of two runs, 30 s timeout.
 
@@ -148,7 +148,7 @@ Causes, from the source:
   `js_interp_loop_needs_per_iteration_env` walks the whole loop subtree at
   each loop entry for the same kind of static fact.
 - **Selector read per call.** `js_execution_auto_requested()` calls
-  `getenv("JS_EXECUTION_BACKEND")` on every interpreted call.
+  `getenv("JS_EXEC_BACKEND")` on every interpreted call.
 - **Environments.** Every call, and every block or loop scope with a
   binding, allocates a GC `JsInterpEnv` and registers it as a root. An
   identifier read then walks the environment chain comparing scope pointers
@@ -207,7 +207,7 @@ Expected: 18–31% of T0.
 **J2 — Loop facts at plan time.** Store "needs a per-iteration environment"
 on `AstLoopControlNode` beside `interp_handoff_ordinal`.
 
-**J3 — Resolve the selector once.** Read `JS_EXECUTION_BACKEND` and
+**J3 — Resolve the selector once.** Read `JS_EXEC_BACKEND` and
 `JS_FUNC_JIT_THRESHOLD` once per runtime, as `lambda_tier_selected()` does.
 Expected: 7% on call-heavy code.
 
@@ -321,7 +321,7 @@ What is shared today, and what is not:
 | AST nodes, `AstIndex`, `NameEntry`, `Script` | yes | yes (`JsScript : Script`) | yes |
 | `FnPromotionCell` (counts, state, loop fields) | all fields | `call_count`, `state`, `boxed_entry` | type only |
 | Promotion driver | `interp_promote_function_if_hot`, worker pool, queue, publish at safe point, cancel | `js_interp_promote_function_if_hot`, synchronous | no |
-| Tier selector and knobs | `LAMBDA_TIER`, `LAMBDA_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE`, `LAMBDA_SATELLITE_SYNC`, cached | `JS_EXECUTION_BACKEND`, `JS_FUNC_JIT_THRESHOLD`, `getenv` per call | no |
+| Tier selector and knobs | `LAMBDA_EXEC_BACKEND`, `LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_LOOP_JIT_THRESHOLD`, `LAMBDA_SATELLITE_SYNC`, cached | `JS_EXEC_BACKEND`, `JS_FUNC_JIT_THRESHOLD`, `getenv` per call | no |
 | Plan pass | `interp_plan.cpp` (frame plan, block shape, handoff ordinals, call shape) | support scan plus run-time walks | call-shape prep only |
 | Frame storage | `FnFramePlan` slot window | GC `JsInterpEnv` per scope | storage helper only |
 | Activation chain | `InterpState::top` | `JsInterpFrame` + `JsCallActivation` | no (JSI26 unbuilt) |
@@ -398,7 +398,7 @@ off at a loop-head test in the **D8.1.1v14** shape. This replaces the v13
 sentence that no active AST frame transfers to MIR, and JSI18's entry-only
 rule. E3 is unblocked; it still depends on E1 to be useful.
 
-**R2 — JS keeps its own names.** `JS_EXECUTION_BACKEND` stays. The call and
+**R2 — JS keeps its own names.** `JS_EXEC_BACKEND` stays. The call and
 loop thresholds are `JS_FUNC_JIT_THRESHOLD` and `JS_LOOP_JIT_THRESHOLD`
 (renamed by the user from `JS_JIT_THRESHOLD` and `JS_JIT_BACKEDGE`). The shared
 kernel of A1/A2 takes its policy values from the profile, so each language
@@ -426,7 +426,7 @@ of times.
 # three backends over the JS suites (wall and exec ms)
 python3 temp/bench_auto/js_tiers.py temp/bench_auto/lambda-fix-rel out.json r7rs,awfy,js_micro
 # per-iteration probes
-cd temp/js_interp; JS_EXECUTION_BACKEND=ast ../bench_auto/lambda-fix-rel js loop.js
+cd temp/js_interp; JS_EXEC_BACKEND=ast ../bench_auto/lambda-fix-rel js loop.js
 # profile attribution by exported helper
 python3 temp/js_interp/incl.py temp/js_interp/loop.sample.txt
 ```
@@ -457,7 +457,7 @@ during the session), interleaved per row, so they are ratios, not a record.
   MIR's `js_get_reference` does.
 
 AST differential over `test/js/` (old vs new binary, forced AST): no
-divergence. Probes (exec ms, `JS_EXECUTION_BACKEND=ast`):
+divergence. Probes (exec ms, `JS_EXEC_BACKEND=ast`):
 
 | Probe | before | after |
 |---|---:|---:|

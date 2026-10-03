@@ -1,4 +1,4 @@
-# T0 interpreter — exclusion list (LAMBDA_TIER=interp)
+# T0 interpreter — exclusion list (LAMBDA_EXEC_BACKEND=interp)
 #
 # Scripts whose pre-scan finds a construct the walker does not execute. Each
 # runs on the whole-module JIT path instead, counted in the run summary

@@ -393,7 +393,7 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/proc/for_in_bool_truthiness.ls",
      "test/lambda/proc/for_in_bool_truthiness.txt"},
     // S1.6 (LR07-23..27): goldens that failed only on the JIT, found by running
-    // every golden with LAMBDA_TIER=jit. A method's `_b` wrapper re-boxed its
+    // every golden with LAMBDA_EXEC_BACKEND=jit. A method's `_b` wrapper re-boxed its
     // Item result (six segfaults), a widened bool array's slow read folded "x"
     // to false (D3.3.1v2), a repeated literal key read its first entry, a
     // string-pattern `case` compared with `==`, and a direct store wrote a raw
@@ -526,7 +526,7 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsPropertyKeys) {
     static const char* const thresholds[] = {"1", "5"};
     ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
     for (const char* threshold : thresholds) {
-        ScopedTestEnv jit_threshold("LAMBDA_JIT_THRESHOLD", threshold);
+        ScopedTestEnv jit_threshold("LAMBDA_FUNC_JIT_THRESHOLD", threshold);
         for (const TierParityFixture& fixture : fixtures) {
             char trace[256];
             snprintf(trace, sizeof(trace), "%s at threshold %s", fixture.script, threshold);
@@ -543,7 +543,7 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsTailCallIdentity) {
     static const char* const thresholds[] = {"1", "5"};
     ScopedTestEnv sync("LAMBDA_SATELLITE_SYNC", "1");
     for (const char* threshold : thresholds) {
-        ScopedTestEnv jit_threshold("LAMBDA_JIT_THRESHOLD", threshold);
+        ScopedTestEnv jit_threshold("LAMBDA_FUNC_JIT_THRESHOLD", threshold);
         SCOPED_TRACE(threshold);
         test_lambda_script_against_file("test/lambda/tail_call.ls",
             "test/lambda/tail_call.txt", false, "auto");

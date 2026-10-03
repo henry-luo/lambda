@@ -82,7 +82,7 @@ All fresh diagnostics in this plan used:
 
 - Binary: `test/benchmark/exe/lambda-v50-a9489bc329`.
 - SHA-256: `10f5c44a312ef039867fac1fb17b0bd10b1f044dd0ba48b066885adde9a19490`.
-- Platform: macOS arm64; `LAMBDA_TIER=jit`.
+- Platform: macOS arm64; `LAMBDA_EXEC_BACKEND=jit`.
 - Timing: the benchmark's in-program execution marker, not process wall time.
 - Date: 2026-10-02, Asia/Singapore. JSON timestamps may be UTC.
 
@@ -222,7 +222,7 @@ with its evidence; it is not reported as an implemented optimization.
    Use the same input files, timer placement and output checks. Include
    Primes, Fast Diff, Levenshtein and Divrec; audit typed Raytrace3d before
    interpreting its gap. Preserve the original untyped sources byte-for-byte.
-3. Obtain finalized MIR with `LAMBDA_MIR_DUMP_PATH` and `LAMBDA_TIER=jit`.
+3. Obtain finalized MIR with `LAMBDA_MIR_DUMP_PATH` and `LAMBDA_EXEC_BACKEND=jit`.
    Use `utils/analyze_mir_gap.py`; do not count imports as executed helpers.
    Optional specialization diagnostics use the existing
    `LAMBDA_MIR_SPECIALIZATION_PROFILE` gate. Do not modify `log.conf` to

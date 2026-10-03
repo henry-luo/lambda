@@ -1070,7 +1070,7 @@ ceremony it costs.
 port of `richards2.ls` under this idiom — one `w` world value owning
 `tasks`/`datas`/`pkts`, ids everywhere a pointer used to be, `w` as the single
 `var` parameter. It reproduces the benchmark's `qpc=2322 / hc=928` exactly, on
-both the interpreter and `LAMBDA_TIER=jit`, which settles the "can value
+both the interpreter and `LAMBDA_EXEC_BACKEND=jit`, which settles the "can value
 semantics even express this?" question with a program rather than an argument.
 The rewrite was mechanical and cost roughly 40 lines. (Its *cost* is not yet
 measured: the only figures taken so far are debug-build and under load, so they

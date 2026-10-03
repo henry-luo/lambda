@@ -226,7 +226,7 @@ Verified: `make test-lambda-baseline` 5974/5974 once the four emission-size prob
 
 ### JIT golden sweep — 2026-09-25
 
-Goldens run on `auto`, which starts in T0, so a wrong value that only the JIT produces can pass the baseline. Running all 955 goldens through the harness with `LAMBDA_TIER=jit` found 18 failures (`LAMBDA_TIER=interp`: none). They came from five defects, all fixed and archived; each has a fixture pinned in `kTune27TierParity`, and the 955 goldens now pass on both tiers.
+Goldens run on `auto`, which starts in T0, so a wrong value that only the JIT produces can pass the baseline. Running all 955 goldens through the harness with `LAMBDA_EXEC_BACKEND=jit` found 18 failures (`LAMBDA_EXEC_BACKEND=interp`: none). They came from five defects, all fixed and archived; each has a fixture pinned in `kTune27TierParity`, and the 955 goldens now pass on both tiers.
 - [LR07-23](<Lambda_Issue_Ledger (fixed).md#lr07-23>): a method's boxed wrapper re-boxed its Item result (12 goldens, six of them segfaults).
 - [LR07-24](<Lambda_Issue_Ledger (fixed).md#lr07-24>): a widened bool array's read folded the new value to `false`.
 - [LR07-25](<Lambda_Issue_Ledger (fixed).md#lr07-25>): a repeated literal key read its first entry.
@@ -316,7 +316,7 @@ Found on the way and fixed with them, each covered by those fixtures:
 
 Found and filed: [LR03-33](#lr03-33) (container patterns and function types still compare by kind), [LR03-34](#lr03-34) (a pattern annotation is rejected statically), [LR03-35](#lr03-35) (an object literal drops an undeclared field), [LR07-39](#lr07-39) (a default naming an earlier parameter fails on the JIT's direct call), [LR07-40](#lr07-40) (an unknown or repeated argument name is dropped silently) and [LR07-41](#lr07-41) (the JIT crashes on a self-referencing union's value).
 
-Verification: `make test-lambda-baseline` 5962/5962 (the forced-GC sweep included), the `kTune27TierParity` fixtures (three tiers), the named-argument negatives, every golden with `LAMBDA_TIER=interp` (1005/1005) and `LAMBDA_TIER=jit` (1004/1005). The one JIT miss, `latex/test_latex_m7`, timed out under the sweep's load and matches its golden alone. The validator gtest suites pass 154/154. `make test-radiant-baseline` had seven failures under the full parallel run: four page-load timeouts, the page suite's zengarden, one view UI fixture and the cascade-memory check. Each passes when rerun on its own.
+Verification: `make test-lambda-baseline` 5962/5962 (the forced-GC sweep included), the `kTune27TierParity` fixtures (three tiers), the named-argument negatives, every golden with `LAMBDA_EXEC_BACKEND=interp` (1005/1005) and `LAMBDA_EXEC_BACKEND=jit` (1004/1005). The one JIT miss, `latex/test_latex_m7`, timed out under the sweep's load and matches its golden alone. The validator gtest suites pass 154/154. `make test-radiant-baseline` had seven failures under the full parallel run: four page-load timeouts, the page suite's zengarden, one view UI fixture and the cascade-memory check. Each passes when rerun on its own.
 
 ### Hazard and recursion pass — 2026-09-26
 
@@ -392,8 +392,8 @@ and are not free to reorder.
 <a id="lr01-17"></a>**LR01-17 · The interpreter tier rejects task handles (E312) · OPEN (found 2026-09-22)**
 Thirteen `test/lambda/conc/*` scripts and three `proc/*` async scripts
 (`proc_async_partial_item_gc`, `proc_local_error_destructure_async`,
-`wide_scalar_across_await`) pass with `LAMBDA_TIER=jit`. They fail with
-`LAMBDA_TIER=interp` and under `auto`, which starts them in the interpreter.
+`wide_scalar_across_await`) pass with `LAMBDA_EXEC_BACKEND=jit`. They fail with
+`LAMBDA_EXEC_BACKEND=interp` and under `auto`, which starts them in the interpreter.
 `conc/start_wait` reports `error[E312]: invalid task handle`. This is
 pre-existing: the pre-P1 binary fails identically on `interp` and `auto`.
 Either the interpreter must run S13 tasks, or `auto` must not admit a script
@@ -891,7 +891,7 @@ Possible fixes, independent and combinable:
 - **(A) Save only what is live across each state.** Restrict `async_save_spills` / `async_restore_spills` to registers live at the suspension point, from a liveness pass over the async function or from the tracked set pruned at scope exits. Cost becomes linear in the number of states, with no semantic change. This is the larger codegen change.
 - **(B) Emit no suspendable unwind where the scope can own no handle.** Under S13.3.1 a block owns only the handles started in it, so a procedure (or block) with no `start` in its body can skip the park/resume state at its error exits and unwind synchronously. This removes 10 of `main`'s 12 states here. It depends on the task-scope rules: confirm that nothing else, such as `io.read`'s own task, can be registered in the caller's scope after its await completes. It needs a ruling (D8.1.1v2 / S13.3).
 
-Repro: `LAMBDA_TIER=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
+Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
 
 ## 8. Memory management & GC (LR_08)
 

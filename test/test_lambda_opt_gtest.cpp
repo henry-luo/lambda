@@ -758,7 +758,7 @@ static char* run_profiled_lambda_fixture(const char* script,
         {"LAMBDA_EXEC_PROFILE_CALLERS", callers ? "1" : "0"},
         {"LAMBDA_EXEC_PROFILE_OUT", profile_path},
         {"LAMBDA_DISABLE_MIR_CACHE", "1"},
-        {"LAMBDA_TIER", "jit"},
+        {"LAMBDA_EXEC_BACKEND", "jit"},
         {NULL, NULL}
     };
     ShellOptions options = {};

@@ -6039,7 +6039,7 @@ static InterpState* interp_current_state(void);
 // ---------------------------------------------------------------------------
 // A `while` that is a direct statement of a `pn` body (numbered by the frame
 // plan) counts the back-edges of its whole subtree. When it reaches
-// LAMBDA_JIT_BACKEDGE, the statements from that loop to the end of the body
+// LAMBDA_LOOP_JIT_THRESHOLD, the statements from that loop to the end of the body
 // are compiled as a synthesized procedure -- the continuation -- whose
 // parameters are the activation's live-in locals. Once published, the running
 // activation enters it at the loop's next head test, where T0's whole live
@@ -7420,7 +7420,7 @@ bool interp_const_fold_script(Transpiler* tp) {
     // that evaluation to allocate -- a folded String, Decimal or container is
     // born on the GC heap and dies with the frame unless it is rehomed. So the
     // pass needs a context that can allocate, not merely a context: the eager
-    // pipeline (LAMBDA_TIER=jit) compiles the whole module before the runner
+    // pipeline (LAMBDA_EXEC_BACKEND=jit) compiles the whole module before the runner
     // reaches runner_setup_context()/heap_init(), leaving `context->heap` NULL
     // while `context` itself is live. Folding `type(42)` there reached
     // heap_calloc and faulted on `context->heap->gc`. Declining the pass keeps
@@ -7550,13 +7550,13 @@ static uint32_t interp_promotion_threshold(const char* env_name, uint32_t fallba
 }
 
 static uint32_t interp_jit_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_JIT_THRESHOLD", 5);
+    return interp_promotion_threshold("LAMBDA_FUNC_JIT_THRESHOLD", 5);
 }
 
 // back-edges of one handoff loop's subtree before its continuation compiles;
 // the user set 10000 on 2026-10-02 (D8.1.1v14, Interp Tune2 §4.3)
 static uint32_t interp_jit_backedge_threshold(void) {
-    return interp_promotion_threshold("LAMBDA_JIT_BACKEDGE", 10000);
+    return interp_promotion_threshold("LAMBDA_LOOP_JIT_THRESHOLD", 10000);
 }
 
 // `LAMBDA_SATELLITE_SYNC=1` publishes each satellite at the promotion that

@@ -2246,7 +2246,7 @@ static int node_runner_main(int argc, char** argv) {
 }
 #endif // LAMBDA_NO_JS
 
-// LAMBDA_TIER selects the execution tier (D8.1.1v4). Unset selects the
+// LAMBDA_EXEC_BACKEND selects the execution tier (D8.1.1v4). Unset selects the
 // shipped `auto` policy; `jit` explicitly requests eager whole-module
 // compilation, while `interp` runs T0 without promotion.
 #if defined(LAMBDA_HEADLESS) || defined(LAMBDA_NO_JS) || defined(LAMBDA_NO_SERVE)
@@ -2281,11 +2281,11 @@ static const char* lambda_cli_excluded_feature(const char* command) {
 #endif
 
 static void apply_lambda_tier_env(void) {
-    const char* text = getenv("LAMBDA_TIER");
+    const char* text = getenv("LAMBDA_EXEC_BACKEND");
     if (!text || !text[0]) return;
     LambdaTier tier = LAMBDA_TIER_AUTO;
     if (!lambda_tier_parse(text, &tier)) {
-        log_warn("interp: unrecognized LAMBDA_TIER='%s'; using auto", text);
+        log_warn("interp: unrecognized LAMBDA_EXEC_BACKEND='%s'; using auto", text);
         return;
     }
     lambda_tier_set(tier);

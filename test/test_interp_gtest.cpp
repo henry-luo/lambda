@@ -3,7 +3,7 @@
 //
 // Three layers:
 //   1. Differential — every script in the committed P0 subset must produce
-//      byte-identical output under LAMBDA_TIER=interp and the default tier,
+//      byte-identical output under LAMBDA_EXEC_BACKEND=interp and the default tier,
 //      with zero fallbacks. The goldens are the shared oracle (SI3/D3.3.1).
 //   2. Walker micro-tests — one small source per node family, compared across
 //      tiers so a divergence names the construct that caused it.
@@ -81,7 +81,7 @@ RunResult run_script(const std::string& script, const char* tier,
     snprintf(err_path, sizeof(err_path), "temp/interp_gtest_stderr_%ld_%lu.txt",
              interp_test_process_id(), ++interp_gtest_run_sequence);
     std::string command;
-    if (tier) command += std::string("LAMBDA_TIER=") + tier + " ";
+    if (tier) command += std::string("LAMBDA_EXEC_BACKEND=") + tier + " ";
     command += LAMBDA_EXE;
     if (procedural) command += " run";
     command += " " + script + " 2>" + err_path;
@@ -376,7 +376,7 @@ TEST(InterpWalker, AllocatingConstFoldSurvivesTheEagerPipeline) {
     // `type(x)` returns a Type*, so folding it allocates. The eager pipeline
     // compiles before runner_setup_context()/heap_init(), so the fold pass ran
     // with `context->heap` NULL and faulted in heap_calloc -- the whole process
-    // died on `type(42)` under LAMBDA_TIER=jit while the interpreter printed
+    // died on `type(42)` under LAMBDA_EXEC_BACKEND=jit while the interpreter printed
     // `int`. RC14 makes inertness the contract for every fold failure, so this
     // asserts what inertness means here: both tiers print, and both exit 0.
     expect_tiers_agree("const_fold_allocating",
@@ -817,7 +817,7 @@ TEST(InterpPromotion, SnapshotKeepsInferredFloatLaneMetadata) {
         ++interp_gtest_run_sequence);
     char command[512];
     snprintf(command, sizeof(command),
-        "LAMBDA_TIER=auto LAMBDA_SATELLITE_THREADS=1 %s "
+        "LAMBDA_EXEC_BACKEND=auto LAMBDA_SATELLITE_THREADS=1 %s "
         "test/lambda/transpile_float_fmt_satellite.ls > /dev/null 2>%s",
         LAMBDA_EXE, stderr_path);
     EXPECT_EQ(system(command), 0);

@@ -2,7 +2,7 @@
 """Turnaround/memory measurement for the T0 interpreter (§6 of the impl plan).
 
 Runs the §6.1 corpus under both tiers on the same binary, selected by
-LAMBDA_TIER, and writes temp/interp_bench.tsv plus a Markdown table ready to
+LAMBDA_EXEC_BACKEND, and writes temp/interp_bench.tsv plus a Markdown table ready to
 paste into vibe/impl/Lambda_Impl_Ast_Interp.md §6.2.
 
 Protocol (U33): release build, one warm-up plus N measured runs, median.
@@ -37,9 +37,9 @@ def jit_mode_of_last_run(log_path="log.txt"):
 def run_once(argv, tier):
     env = dict(os.environ)
     if tier:
-        env["LAMBDA_TIER"] = tier
+        env["LAMBDA_EXEC_BACKEND"] = tier
     else:
-        env.pop("LAMBDA_TIER", None)
+        env.pop("LAMBDA_EXEC_BACKEND", None)
     # The child reports its own ru_maxrss: RUSAGE_CHILDREN is a running maximum
     # over every child this process ever reaped, so it cannot attribute a peak
     # to one run.

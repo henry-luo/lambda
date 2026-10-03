@@ -1748,7 +1748,7 @@ typedef struct FnPromotionCell {
     void* boxed_entry;
     // D8.1.1v14: back-edges of each handoff loop, counted over the loop's
     // whole subtree and accumulated across activations. The first loop to
-    // reach LAMBDA_JIT_BACKEDGE owns the one continuation of this definition.
+    // reach LAMBDA_LOOP_JIT_THRESHOLD owns the one continuation of this definition.
     uint32_t loop_backedges[INTERP_HANDOFF_LOOP_MAX];
     FnLoopHandoffState loop_state;
     uint8_t loop_ordinal;               // handoff loop of the continuation

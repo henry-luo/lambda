@@ -121,8 +121,8 @@ is the semantic authority and a TypeId alone is never a contract.
 
 ### 2.2 Reproduced failures on 2026-09-09
 
-The audit used the current `lambda.exe` with `LAMBDA_TIER=jit` and
-`LAMBDA_TIER=interp`. Temporary probes were removed after the run.
+The audit used the current `lambda.exe` with `LAMBDA_EXEC_BACKEND=jit` and
+`LAMBDA_EXEC_BACKEND=interp`. Temporary probes were removed after the run.
 
 | Probe | JIT result | T0 result | Broken invariant |
 |---|---|---|---|
@@ -1195,7 +1195,7 @@ Final correctness gates for this follow-up:
   invalid writes, snapshots, and exact compact-integer storage.
 
 Release measurements, with the same unchanged benchmark sources and
-`LAMBDA_TIER=jit`, `LAMBDA_DISABLE_MIR_CACHE=1`, and logging disabled:
+`LAMBDA_EXEC_BACKEND=jit`, `LAMBDA_DISABLE_MIR_CACHE=1`, and logging disabled:
 
 | DeltaBlue variant | Unchanged master (one fresh run) | Optimized median (five runs after warm-up) | Speedup |
 |---|---:|---:|---:|

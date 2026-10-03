@@ -313,7 +313,7 @@ instance, or decline AST admission until it is fixed.
   that shell, and a cached MIR hit instantiates the complete JIT dependency
   cone before entering code. Eager JIT AST-miss reuse remains ineligible until
   MIR's AST-mutated facts move to a lowering overlay.
-- `JS_EXECUTION_BACKEND=ast` instantiates a fresh `JsScript` execution image
+- `JS_EXEC_BACKEND=ast` instantiates a fresh `JsScript` execution image
   from the frozen JS AST. It does not return a prior realm's interpreter
   objects.
 - A MIR miss starts from the cached AST when compatible, avoiding reparse and

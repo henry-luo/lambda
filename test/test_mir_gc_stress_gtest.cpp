@@ -171,7 +171,7 @@ TEST_P(MirGcStressTest, MatchesUnstressedRunUnderForcedGc) {
     base.procedural = script.procedural;
     // This suite validates emitted MIR roots; AUTO would run supported Lambda
     // scripts in T0 instead and turn forced collection into an interpreter test.
-    base.env.emplace_back("LAMBDA_TIER", "jit");
+    base.env.emplace_back("LAMBDA_EXEC_BACKEND", "jit");
     // stress runs want no MIR artifacts and no log I/O; --no-log is the master
     // gate for both. Emission-pattern checks are a different binary.
     base.quiet = true;

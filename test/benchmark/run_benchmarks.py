@@ -594,8 +594,8 @@ def record_status(results, suite, name, engine, status, detail=None):
 #
 # time_run_once returns wall AND exec from the SAME run, so for the reference
 # engines both sets come from one launch. The MIR and LambdaJS columns need a
-# second pass, because set 1 pins the compiled lane (LAMBDA_TIER=jit,
-# JS_EXECUTION_BACKEND=mir) while set 2 must use the shipped auto tier.
+# second pass, because set 1 pins the compiled lane (LAMBDA_EXEC_BACKEND=jit,
+# JS_EXEC_BACKEND=mir) while set 2 must use the shipped auto tier.
 def record_time_result(results, row, suite, name, engine, wall_ms, exec_ms, ok, status,
                        detail=None, e2e_engine=None):
     val = exec_ms if ok and exec_ms is not None else (wall_ms if ok else None)
@@ -610,21 +610,24 @@ def record_time_result(results, row, suite, name, engine, wall_ms, exec_ms, ok, 
     return val
 
 
-# Set 1 pins the JIT explicitly rather than inheriting LAMBDA_TIER from the
+# Set 1 pins the JIT explicitly rather than inheriting LAMBDA_EXEC_BACKEND from the
 # caller's environment. The shipped default became interpreter-first, so an
 # unpinned run silently measured a different execution path and produced
 # numbers that looked like a catastrophic regression against the published
 # series.
 def lambda_run_cmd(script_path, tier):
-    prefix = f"LAMBDA_TIER={tier} " if tier else ""
+    # LAMBDA_TIER is the pre-2026-10-03 name, still read by archived binaries
+    prefix = f"LAMBDA_EXEC_BACKEND={tier} LAMBDA_TIER={tier} " if tier else ""
     return f"{prefix}{LAMBDA_EXE} run {script_path}"
 
 
 # LambdaJS follows the same two-set split as MIR. D8.1.3v19 made an unset
-# JS_EXECUTION_BACKEND select AST-first AUTO, so set 1 pins the whole-module MIR
+# JS_EXEC_BACKEND select AST-first AUTO, so set 1 pins the whole-module MIR
 # lane (the historical LambdaJS series) and set 2 times the shipped AUTO default.
 def lambdajs_run_cmd(script_path, backend):
-    prefix = f"JS_EXECUTION_BACKEND={backend} " if backend else ""
+    # JS_EXECUTION_BACKEND is the pre-2026-10-03 name, still read by archived binaries
+    prefix = (f"JS_EXEC_BACKEND={backend} JS_EXECUTION_BACKEND={backend} "
+              if backend else "")
     return f"{prefix}{LAMBDA_EXE} js {script_path}"
 
 

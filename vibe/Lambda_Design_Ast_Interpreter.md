@@ -20,7 +20,7 @@ This reverses U26 (`vibe/Lambda_Design_Unified_AST.md` §12) and D8.1.1 — **ru
 
 The generic `module_ast_prebuild` scheduler owns graph order and worker lifetime only. Lambda and LambdaJS each supply first-party-parser import discovery, resolver, and isolated AST-builder callbacks. Discovery remains serial and parse-accurate; independent same-language leaves run in dependency-depth waves on the thread pool. Workers create a temporary `Runtime`, publish an AST-only `InputScriptCache` template, then exit: they never instantiate imports, execute top-level code, mutate the receiving runtime, or lower MIR. This is the cache boundary in **D8.5.1v4**.
 
-On Lambda, the receiving runtime clones and plans the retained AST before T0 execution; the existing AUTO counters subsequently promote a hot supported definition to its P2 satellite under **D8.1.1v10**. A T0-ineligible module reaches the existing whole-MIR fallback only after returning to that runtime. On LambdaJS, `JS_EXECUTION_BACKEND=auto` is explicit: supported static ES modules execute their cached AST closure, unsupported units retain whole-module MIR; unset remains MIR and forced `ast` remains fail-closed (**D8.1.3v12**). JS has no per-function P2 satellite yet, so this implementation does not call its whole-module fallback "hot compilation." The focused JS gate is `JsInterpreter.AutoPrebuildsStaticImportClosureAsAst`.
+On Lambda, the receiving runtime clones and plans the retained AST before T0 execution; the existing AUTO counters subsequently promote a hot supported definition to its P2 satellite under **D8.1.1v10**. A T0-ineligible module reaches the existing whole-MIR fallback only after returning to that runtime. On LambdaJS, `JS_EXEC_BACKEND=auto` is explicit: supported static ES modules execute their cached AST closure, unsupported units retain whole-module MIR; unset remains MIR and forced `ast` remains fail-closed (**D8.1.3v12**). JS has no per-function P2 satellite yet, so this implementation does not call its whole-module fallback "hot compilation." The focused JS gate is `JsInterpreter.AutoPrebuildsStaticImportClosureAsAst`.
 
 ## 1. Why revisit U26 — the motivations, re-argued
 
@@ -75,7 +75,7 @@ U26 rejected an AST interpreter on five grounds (`Lambda_Design_Unified_AST.md:8
 ```
 
 - **T0** — tree-walk over the typed AST, boxed Items only, all operations through runtime helpers. Default for every definition.
-- **T1** — MIR Direct native code, compiled one function at a time into "satellite" MIR modules (§5.2) when the definition proves hot. Whole-module eager compilation (today's pipeline) remains available as `--jit-all` / `LAMBDA_TIER=jit` — for benchmarks, for release-mode servers, and as the differential baseline.
+- **T1** — MIR Direct native code, compiled one function at a time into "satellite" MIR modules (§5.2) when the definition proves hot. Whole-module eager compilation (today's pipeline) remains available as `--jit-all` / `LAMBDA_EXEC_BACKEND=jit` — for benchmarks, for release-mode servers, and as the differential baseline.
 - **MIR-interp** — no longer a tier. It survives as a diagnostic for debugging codegen (`--mir-interp`), because it executes the same emitted frames (Stack_Rooting §5.5); the `mir_policy.hpp` size thresholds retire once T0 is default (AI19).
 
 The unit of tiering is the **definition site** (`AstFuncNode`), not the closure instance: many closures share one definition and one counter (AI8, AIO3). Promotion never patches anything: it writes the compiled `_b` entry into the definition-site cell and (lazily) into `Function` values, both plain data (D8.4.1/DI14 respected).
@@ -193,17 +193,17 @@ The full walker, by node family (the complete per-kind inventory is the P1 check
 
 ### 5.1 Trigger
 
-Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis`: `{ state: INTERP | COMPILING | COMPILED | PINNED_INTERP, call_count, backedge_count, tail_edge_count, void* boxed_entry }`. An ordinary interpreted entry increments `call_count`; at `call_count >= LAMBDA_JIT_THRESHOLD` (default **5**) it compiles synchronously and runs that entry natively. TCO self-tail iterations reuse the active frame, so each validated logical call increments both `call_count` and the separate `tail_edge_count`. On the fifth direct self-tail edge, the runtime compiles the existing eligible satellite, preserves the rooted source argument vector, detaches the no-longer-active T0 frame, and enters the satellite through the ordinary boxed wrapper. This is not arbitrary on-stack replacement: the tail expression has no continuation and its next state is exactly a new function entry. A compile/admission failure keeps the same coerced T0 slots and continues TCO. Loop back-edges are counted per loop site; a loop reaching `LAMBDA_JIT_BACKEDGE` (default 10000) queues its definition with a loop entry and the running activation hands off at that loop's head (§5.1.1, AI23). D5.1.2's *"no hotness detection — primitives are unconditionally cheap"* is untouched: that ruling scopes stack primitives; these are per-function counters (D8.1.1v5). Counters are per-eval-context state (D5.4.1), so there is no cross-thread counter traffic.
+Each `AstFuncNode` (definition site) carries a promotion cell in its `FnAnalysis`: `{ state: INTERP | COMPILING | COMPILED | PINNED_INTERP, call_count, backedge_count, tail_edge_count, void* boxed_entry }`. An ordinary interpreted entry increments `call_count`; at `call_count >= LAMBDA_FUNC_JIT_THRESHOLD` (default **5**) it compiles synchronously and runs that entry natively. TCO self-tail iterations reuse the active frame, so each validated logical call increments both `call_count` and the separate `tail_edge_count`. On the fifth direct self-tail edge, the runtime compiles the existing eligible satellite, preserves the rooted source argument vector, detaches the no-longer-active T0 frame, and enters the satellite through the ordinary boxed wrapper. This is not arbitrary on-stack replacement: the tail expression has no continuation and its next state is exactly a new function entry. A compile/admission failure keeps the same coerced T0 slots and continues TCO. Loop back-edges are counted per loop site; a loop reaching `LAMBDA_LOOP_JIT_THRESHOLD` (default 10000) queues its definition with a loop entry and the running activation hands off at that loop's head (§5.1.1, AI23). D5.1.2's *"no hotness detection — primitives are unconditionally cheap"* is untouched: that ruling scopes stack primitives; these are per-function counters (D8.1.1v5). Counters are per-eval-context state (D5.4.1), so there is no cross-thread counter traffic.
 
 ### 5.1.1 Loop-head handoff (AI23, ruled 2026-10-02)
 
 **The problem.** A once-called procedure whose loop is the whole workload never re-enters, so no entry-based trigger helps it. The 2026-09-07 answer was to treat a loop-owning procedure as hot at its first entry. When promotion became asynchronous on 2026-09-22 (D8.1.1 *v12*: the triggering call stays T0), that trigger kept compiling the definition but the activation that needed the code could no longer reach it. Measured 2026-10-02 on the v50 release binary: `mandelbrot2` and `matmul2` run at interpreter speed under AUTO, about 250× their JIT time, while the image for `main` is ready after 16 ms; publishing it at the trigger (`LAMBDA_SATELLITE_SYNC=1`) closes the gap.
 
-**Options considered.** (a) Make the loop-owner first-entry trigger wait for its image: no new transfer point, but it compiles every loop-owning definition whether or not the loop turns out hot. (b) Hand the running activation off at a loop head once its image is published. (c) Leave the gap and document `LAMBDA_TIER=jit`. **The user ruled (b).**
+**Options considered.** (a) Make the loop-owner first-entry trigger wait for its image: no new transfer point, but it compiles every loop-owning definition whether or not the loop turns out hot. (b) Hand the running activation off at a loop head once its image is published. (c) Leave the gap and document `LAMBDA_EXEC_BACKEND=jit`. **The user ruled (b).**
 
 **The ruling.**
 
-1. Back-edges are counted per loop site. A loop reaching `LAMBDA_JIT_BACKEDGE` queues its definition once, with that loop as the handoff loop.
+1. Back-edges are counted per loop site. A loop reaching `LAMBDA_LOOP_JIT_THRESHOLD` queues its definition once, with that loop as the handoff loop.
 2. The image carries the definition's boxed entry and one **loop entry**. The loop entry takes the T0 frame's named slots, loads the locals live at the loop head, and runs the activation to completion.
 3. After publication, the activation enters the loop entry at the next head test of that loop. T0 then unwinds as for `return`, carrying the result.
 4. Handoff is one-way. Compiled code never re-enters the interpreter mid-activation (n2).
@@ -443,14 +443,14 @@ Everything. Satellite-compiled functions are ordinary MIR Direct output: dual-en
 
 ### 5.6 Policy knobs
 
-`LAMBDA_TIER=auto|interp|jit` (auto = T0 + promotion; interp = never promote; jit = today's eager whole-module — alias `--jit-all`), `LAMBDA_JIT_THRESHOLD=<n>` (default 5 for both ordinary entries and direct self-tail edges), `LAMBDA_JIT_BACKEDGE=<n>` (default 10000 back-edges of one loop site, the loop-head handoff trigger, §5.1.1). `make test` runs the baseline suites under `interp` and `jit` (§10). Benchmarks and release servers document `--jit-all`; `run` mode follows `auto` (its hot inner functions and self-tail bodies promote; a once-called `main` body with hot *inline* loops hands off at the loop head — AI23).
+`LAMBDA_EXEC_BACKEND=auto|interp|jit` (auto = T0 + promotion; interp = never promote; jit = today's eager whole-module — alias `--jit-all`), `LAMBDA_FUNC_JIT_THRESHOLD=<n>` (default 5 for both ordinary entries and direct self-tail edges), `LAMBDA_LOOP_JIT_THRESHOLD=<n>` (default 10000 back-edges of one loop site, the loop-head handoff trigger, §5.1.1). `make test` runs the baseline suites under `interp` and `jit` (§10). Benchmarks and release servers document `--jit-all`; `run` mode follows `auto` (its hot inner functions and self-tail bodies promote; a once-called `main` body with hot *inline* loops hands off at the loop head — AI23).
 
 ### 5.7 Whole-script AUTO POC — [measured 2026-08-24]
 
 An opt-in POC tests the alternative promotion policy requested for D8.1.1v4:
 
 ```text
-LAMBDA_TIER=auto LAMBDA_JIT_THRESHOLD=10 LAMBDA_AUTO_WHOLE_SCRIPT=1
+LAMBDA_EXEC_BACKEND=auto LAMBDA_FUNC_JIT_THRESHOLD=10 LAMBDA_AUTO_WHOLE_SCRIPT=1
 ```
 
 At the first eligible threshold trigger, the runtime lowers the complete AST
@@ -577,7 +577,7 @@ T0 removes the per-line **compile** share (today: full re-lower + re-link + re-c
 
 **Validation gates (D1.10: every invariant names its gate).**
 
-1. **Differential identity:** `make test-lambda-baseline` passes 100% under `LAMBDA_TIER=interp` and `LAMBDA_TIER=jit`, with identical outputs — the SI3/D3.3.1 harness grown a third leg. Divergence in anything but fault timing (S7.11.4) is a release blocker.
+1. **Differential identity:** `make test-lambda-baseline` passes 100% under `LAMBDA_EXEC_BACKEND=interp` and `LAMBDA_EXEC_BACKEND=jit`, with identical outputs — the SI3/D3.3.1 harness grown a third leg. Divergence in anything but fault timing (S7.11.4) is a release blocker.
 2. **GC soundness:** baseline + stress under forced-GC modes (`force_collect_interval`, ASan) with the interpreter driving — every helper call is a potential safepoint (object-zone allocation collects under stress).
 3. **Emission ratchet:** `--jit-all` output byte-identical to pre-change (MT7 untouched in v1); satellite budgets decided in AIO2.
 4. **Turnaround:** measured corpus — `test/lambda` suite wall-clock, REPL per-line latency at history sizes {10, 100, 1000}, a Radiant page with N scripts, `validate` on a constrained schema — each with before/after and a stated target in the P0 report, not in this doc.
@@ -595,9 +595,9 @@ The unset environment was the then-shipped AUTO policy specified by
 
 | Mode | Selector | Wall samples | Median |
 |---|---|---:|---:|
-| AUTO | `env -u LAMBDA_TIER -u LAMBDA_JIT_THRESHOLD` | 32.86s, 36.93s, 41.83s | **36.93s** |
-| Full interpreter | `LAMBDA_TIER=interp` | 33.06s, 33.14s, 33.93s | **33.14s** |
-| Full JIT | `LAMBDA_TIER=jit` | 36.66s, 37.04s, 43.20s | **37.04s** |
+| AUTO | `env -u LAMBDA_EXEC_BACKEND -u LAMBDA_FUNC_JIT_THRESHOLD` | 32.86s, 36.93s, 41.83s | **36.93s** |
+| Full interpreter | `LAMBDA_EXEC_BACKEND=interp` | 33.06s, 33.14s, 33.93s | **33.14s** |
+| Full JIT | `LAMBDA_EXEC_BACKEND=jit` | 36.66s, 37.04s, 43.20s | **37.04s** |
 
 On this corpus, full T0 interpretation is about **11.4% faster** than AUTO
 by median wall time. AUTO and eager JIT are effectively tied (0.11s median
@@ -640,7 +640,7 @@ consecutive host session, with the same release binaries and `/usr/bin/time -p`
 wall-clock measurement. This is the complete **758-test** executable: 740
 auto-discovered golden Lambda-script fixtures plus 17 negative-contract tests
 and one binary-output test. Every sample passed **758/758**. AUTO used the
-unset default selector; the interpreter control set only `LAMBDA_TIER=interp`.
+unset default selector; the interpreter control set only `LAMBDA_EXEC_BACKEND=interp`.
 All threshold/backedge and whole-script-POC overrides were unset.
 
 | Mode | Wall samples | Median | Relative to full interpreter |
@@ -656,15 +656,15 @@ control, so it makes no claim about eager-JIT profitability.
 ### Full-JIT stale-binary diagnostic — [measured 2026-08-25]
 
 Before the release runtime was rebuilt, the existing release
-`test_lambda_gtest` executable was run three times with `LAMBDA_TIER=jit`;
-`LAMBDA_JIT_THRESHOLD`, `LAMBDA_JIT_BACKEDGE`, and
+`test_lambda_gtest` executable was run three times with `LAMBDA_EXEC_BACKEND=jit`;
+`LAMBDA_FUNC_JIT_THRESHOLD`, `LAMBDA_LOOP_JIT_THRESHOLD`, and
 `LAMBDA_AUTO_WHOLE_SCRIPT` were unset. The current tree discovered **741
 script fixtures**, producing **759 GTests** including the negative-contract
 and binary-output tests.
 
 | Mode | Wall samples | Median | Result |
 |---|---:|---:|---|
-| Full JIT (`LAMBDA_TIER=jit`) | 35.63s, 41.25s, 35.83s | **35.83s** | **758/759 passed** |
+| Full JIT (`LAMBDA_EXEC_BACKEND=jit`) | 35.63s, 41.25s, 35.83s | **35.83s** | **758/759 passed** |
 
 All three runs failed the same `for_at_pairs` fixture: the expected paired
 values `a=1`, `b=2`, `c=3` were produced as `a=a`, `b=b`, `c=c`, and the
@@ -677,13 +677,13 @@ release `lambda.exe` had not been rebuilt from that source.
 ### Full-JIT verification after release rebuild — [measured 2026-08-25]
 
 After `make release` and rebuilding `test_lambda_gtest` as `release_native`,
-the focused `for_at_pairs` test passed under `LAMBDA_TIER=jit`. Three fresh
+the focused `for_at_pairs` test passed under `LAMBDA_EXEC_BACKEND=jit`. Three fresh
 full-corpus runs, with the same unset threshold/backedge/whole-script-POC
 overrides, passed **759/759** each:
 
 | Mode | Wall samples | Median | Result |
 |---|---:|---:|---|
-| Full JIT (`LAMBDA_TIER=jit`) | 41.85s, 36.14s, 42.67s | **41.85s** | **759/759 passed** |
+| Full JIT (`LAMBDA_EXEC_BACKEND=jit`) | 41.85s, 36.14s, 42.67s | **41.85s** | **759/759 passed** |
 
 This confirms the source-level S8.1.3 paired-`at` fix is present in the
 release artifact; the remaining spread is host-load variance, not a fixture
@@ -692,8 +692,8 @@ mismatch. The timing is the current passing full-JIT record for the 741-script
 
 ### AUTO promotion-threshold sweep — [measured 2026-08-24]
 
-The release `lambda.exe` was run in `LAMBDA_TIER=auto` over the same **740
-script** batch corpus with `LAMBDA_JIT_THRESHOLD` set to 3, 5, and 10. A
+The release `lambda.exe` was run in `LAMBDA_EXEC_BACKEND=auto` over the same **740
+script** batch corpus with `LAMBDA_FUNC_JIT_THRESHOLD` set to 3, 5, and 10. A
 script counts as a trigger when its log contains at least one
 `interp-tier: satellite compiled` event; every threshold completed all 740
 scripts with `BATCH_END 0`.
@@ -726,14 +726,14 @@ policy because backedge promotion is deferred until the next entry.
 
 *Detailed implementation plan for P0–P1: `vibe/impl/Lambda_Impl_Ast_Interp.md` (its §6 measurement report is the arc's exit gate).*
 
-- **P0 — skeleton + evidence. ✅ LANDED 2026-08-15.** Frame-plan pass; `InterpFrame`/side-stack integration; walker for the pure L1 core (literals, ident, unary/binary, if, let, call, list/array/map); `LAMBDA_TIER=interp` behind a flag; measurement report (turnaround + memory on the corpus). *Gate met: 81 of 279 corpus scripts run entirely under T0 with golden-identical output, 198 counted fallbacks, **0 divergences**; clean under forced GC.* Measured: **1.69×** faster turnaround on the real-workload subset and **9.4×** on a 1 000-line REPL history (both against native codegen), **11.9–28.5×** on 1k–20k-line run-once scripts against forced native codegen, and resident memory **58× lower** at 20k lines (5.38 GB of MIR IR → 92 MB). Note that the shipped default path routes modules over 100 000 MIR instructions to MIR-interp rather than codegen, so the two largest C2 rows carry a mode column and a separate forced-native baseline. The design's compile-dominance premise is confirmed on the Lambda side; see `vibe/impl/Lambda_Impl_Ast_Interp.md` §6.
+- **P0 — skeleton + evidence. ✅ LANDED 2026-08-15.** Frame-plan pass; `InterpFrame`/side-stack integration; walker for the pure L1 core (literals, ident, unary/binary, if, let, call, list/array/map); `LAMBDA_EXEC_BACKEND=interp` behind a flag; measurement report (turnaround + memory on the corpus). *Gate met: 81 of 279 corpus scripts run entirely under T0 with golden-identical output, 198 counted fallbacks, **0 divergences**; clean under forced GC.* Measured: **1.69×** faster turnaround on the real-workload subset and **9.4×** on a 1 000-line REPL history (both against native codegen), **11.9–28.5×** on 1k–20k-line run-once scripts against forced native codegen, and resident memory **58× lower** at 20k lines (5.38 GB of MIR IR → 92 MB). Note that the shipped default path routes modules over 100 000 MIR instructions to MIR-interp rather than codegen, so the two largest C2 rows carry a mode column and a separate forced-native baseline. The design's compile-dominance premise is confirmed on the Lambda side; see `vibe/impl/Lambda_Impl_Ast_Interp.md` §6.
 - **P1 — full coverage.** Remaining constructs per §4.9 (for-clauses, match, elements, patterns, paths, pn statements, imports/module slabs, sys funcs); error/fault channels; recursion budget. *Gate: validation gate 1 (full baseline differential) + gate 2 (GC stress).*
 - **P2 — tiering.** Promotion cells, `LAMBDA_INTERPRETED` entry ABI, satellite lowering contract (§5.2), Script-scoped analysis persistence, entry swap. *Gate: promoted-function outputs identical to interp; perf floor gate 5.*
 - **P3 — one-engine unification.** `EvalMode::CONST` folder in the pass manager; `EvalMode::PREDICATE` for `that` (retired by AI17v2: predicates now run under `RUNTIME`); validator de-JIT. *Gate: fold-on/fold-off differential; `validate` runs with JIT never initialized.*
 - **P4 — REPL/shell persistent environment.** Script-alive-across-lines, appended statements, persistent slab + counters. *Gate: REPL latency flat in history length.*
 - **P5 — default flip + spec. ✅ LANDED 2026-08-24.** `auto` is the unset default; MIR-interp remains diagnostic and `jit` remains the explicit eager path. The release `test_lambda_gtest` corpus is green under the default AUTO policy (**758/758**), including the P2 scalar-module, dynamic-argument, object/procedure, and var-call regressions. **D8.1.1v5 + the implementation-doc status update record the current selector, threshold, tail-handoff rule, and gate** (§15, per CLAUDE rule 17). Stage 2 (JS) design revision opens after this gate.
 
-Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO the shipped default while preserving explicit `interp` and `jit` controls.
+Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes AUTO the shipped default while preserving explicit `interp` and `jit` controls.
 
 ## 12. Considered and rejected
 
@@ -772,7 +772,7 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO th
 | **AI5** | A build-time frame-plan pass assigns `NameEntry` slots/storage classes and static scratch depth onto `FnAnalysis`; joins the D8.2.5 pass manager | **confirmed** |
 | **AI6** | Module-level bindings live in per-context module slabs for T0 and satellites (D7.2.1); `_gvar_*` BSS remains only in whole-module `--jit-all` mode during transition | **confirmed** |
 | **AI7** | `Function` gains `def` (AST definition site — also discharging D6.2.1/S5.5.1 identity) and entry ABI `LAMBDA_INTERPRETED`; `lambda_dynamic_call` is the single tier-dispatch point; `ptr` NULL until promotion | **confirmed** |
-| **AI8v2** | Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary; loop back-edges are counted per loop site against `LAMBDA_JIT_BACKEDGE` (10000) and trigger AI23. Revised 2026-10-02; v1 in Appendix S | **confirmed** |
+| **AI8v2** | Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_FUNC_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary; loop back-edges are counted per loop site against `LAMBDA_LOOP_JIT_THRESHOLD` (10000) and trigger AI23. Revised 2026-10-02; v1 in Appendix S | **confirmed** |
 | **AI9** | Promotion unit: satellite MIR module (function + `_b` wrapper) in the Script's `jit_context`, linked on demand via the existing import resolver, BSS pointers written post-link | **confirmed** |
 | **AI10** | Whole-module AST analyses (call sites, param narrowing, `FnVariantAnalysis`) run once per Script at first promotion and persist Script-scoped; lowering-session tables promoted to Script lifetime | **confirmed** |
 | **AI11** | Suspension-capable definitions (`may_await`/`is_generator`/`needs_task_context`/`START`) bypass T0 — compiled at first call; interpreter continuations are future work | **confirmed** |
@@ -809,7 +809,7 @@ Each phase is landable and revertible behind `LAMBDA_TIER`; P5 now makes AUTO th
 ## Appendix S — Superseded rulings
 
 - ~~**n2** — (n2) No general OSR in v1 — arbitrary interpreter program counters and locals never materialize into MIR frames. A direct validated self-tail call is the narrow exception: it is already a function-entry boundary, so AUTO may hand it to the compiled boxed entry (§5.1; D8.1.1v5). AIO11 still tracks hot inline loops in a once-called `main`.~~ Superseded 2026-10-02 by **AI23** (§5.1.1): loop-head handoff is a second sanctioned boundary. What remains a non-goal is deoptimization.
-- ~~**AI8** — Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary, while general loop backedges still mark for next-call promotion.~~ Superseded 2026-10-02 by **AI8v2**. The per-definition back-edge count (default 1024) only marked a definition for a later entry, which a once-called loop owner never has.
+- ~~**AI8** — Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_FUNC_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary, while general loop backedges still mark for next-call promotion.~~ Superseded 2026-10-02 by **AI8v2**. The per-definition back-edge count (default 1024) only marked a definition for a later entry, which a once-called loop owner never has.
 - ~~**Loop-owner first-entry trigger (D8.1.1 *v7*, 2026-09-07)** — a procedure whose body owns a loop statement promotes at its first entry, as hot by construction.~~ Retired 2026-10-02 by **AI23**. It compiled synchronously when introduced; after asynchronous promotion (D8.1.1 *v12*, 2026-09-22) the triggering activation could no longer reach the image, and the trigger queued every loop-owning definition regardless of how long its loop ran.
 - ~~**§12 rejection** — **OSR / on-stack replacement.** High machinery cost (frame materialization into natively-typed registers — the exact problem U26 flagged), low expected value for Lambda's workloads; function-entry replacement plus backedge-triggered next-call promotion covers all but once-called long-running bodies (AIO11).~~ Superseded 2026-10-02 by **AI23**. The machinery-cost argument holds for leaving compiled code, not for entering it from T0's boxed slots.
 - ~~**AIO11 — Once-called hot bodies.** `pn main()` with heavy inline loops never re-enters, so backedge marking never pays. Options: honest documentation + `--jit-all`; per-script pragma; eager-compile heuristic on `run`-mode `main`; OSR (last resort). Decide from real `run`-mode corpora before P5.~~ Closed 2026-10-02 by **AI23**: the user ruled loop-head handoff over waiting at first entry and over documentation alone.

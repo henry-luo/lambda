@@ -65,7 +65,7 @@ Item 1 is worth more than all of them for the workloads it covers.
   `--no-log`. Its interpreter user-CPU is within about 15% of the release
   binary. Local symbols are stripped, so all `interp.cpp` static functions
   appear as one "walker self" bucket.
-- Every child set `LAMBDA_TIER` explicitly and `LAMBDA_NO_LOG=1`.
+- Every child set `LAMBDA_EXEC_BACKEND` explicitly and `LAMBDA_NO_LOG=1`.
 - Before any item lands, Round 1's Phase 0 protocol applies: idle machine, one
   warm-up and five samples, preserved before/after release binaries
   ([Round 1 §5](Lambda_Impl_Interp_Tune.md#5-phase-0--freeze-a-trustworthy-baseline)).
@@ -232,7 +232,7 @@ so the *v7* trigger compiles code the triggering activation cannot use (F1).
 |---|---|---|
 | (a) Wait at the loop-bodied first entry | The entering call blocks for its compile, then enters native code. | Not chosen. It compiles every loop-bodied procedure whether or not its loop turns out hot. |
 | **(b) Loop-head handoff** | The running activation transfers at a loop-head test once its image is published. | **Chosen.** |
-| (c) Leave as is | Once-called loop owners need `LAMBDA_TIER=jit`. | Not chosen. |
+| (c) Leave as is | Once-called loop owners need `LAMBDA_EXEC_BACKEND=jit`. | Not chosen. |
 
 ### 4.1 What was ruled, and where it is recorded
 
@@ -279,7 +279,7 @@ normal entry and once behind the loop entry.
 ### 4.3 Trigger threshold
 
 **Ruled default: 10,000 back-edges of one loop**, counted per loop site and
-accumulated across activations, under the existing `LAMBDA_JIT_BACKEDGE` knob
+accumulated across activations, under the existing `LAMBDA_LOOP_JIT_THRESHOLD` knob
 (shipped today as 1024, counted per definition). The user set it on
 2026-10-02, asked for the break-even to be measured, and the measurement
 below supports it.
@@ -289,8 +289,8 @@ the whole loop costs the same as compiling the definition and running it
 natively. Triggering there bounds the total at twice the optimum.
 
 **Method.** A once-called `pn main()` whose loop runs N times, N from 0 to
-500,000, run two ways on the v50 release binary: `LAMBDA_TIER=interp`, and
-`LAMBDA_TIER=auto LAMBDA_SATELLITE_SYNC=1`, which compiles `main` at its first
+500,000, run two ways on the v50 release binary: `LAMBDA_EXEC_BACKEND=interp`, and
+`LAMBDA_EXEC_BACKEND=auto LAMBDA_SATELLITE_SYNC=1`, which compiles `main` at its first
 entry. The metric is total process CPU (user + system, all threads, so worker
 compile time is included), minimum of 7 runs, fitted linearly in N. Load
 average was 12–20 during the capture; it inflates both sides alike.
@@ -549,7 +549,7 @@ marking, per §4.4.
 
 **1.7 Stress mode and tests.**
 
-- `LAMBDA_JIT_BACKEDGE=1` with `LAMBDA_SATELLITE_SYNC=1` makes every eligible
+- `LAMBDA_LOOP_JIT_THRESHOLD=1` with `LAMBDA_SATELLITE_SYNC=1` makes every eligible
   loop hand off at its second head test, deterministically. The whole
   `test_lambda_gtest` corpus runs in this mode as a differential against the
   interpreter goldens. This is the gate for **S1.6** and **D3.3.1v2**.
@@ -572,7 +572,7 @@ marking, per §4.4.
 - `mandelbrot2`, `matmul2` and `levenshtein2` under default AUTO are within
   2× of their `LAMBDA_SATELLITE_SYNC=1` times in §2.3. The remainder is the
   interpreted run-up to the threshold plus the compile.
-- The stress-mode corpus run has no output difference from `LAMBDA_TIER=interp`.
+- The stress-mode corpus run has no output difference from `LAMBDA_EXEC_BACKEND=interp`.
 - `test_lambda_gtest` wall time under default AUTO does not regress beyond
   Round 1's 5% and 5 ms triage threshold, and the count of images created
   across the corpus is lower than before Phase 1.6.
@@ -586,7 +586,7 @@ marking, per §4.4.
 | Compiled code assumes a container is unique when T0 left it shared | Fact join at the handoff head (1.3); the aliasing tests and the stress corpus (1.7) |
 | The body cannot be entered at an interior label without restructuring lowering | The 1.3 spike decides this before any other phase starts; the outlined-loop shape in §4.2 is the fallback |
 | Lowering twice doubles compile time and image size | Measured in the spike; the work runs on a worker |
-| The 10,000 default rests on four small probes and two benchmarks | The 1.1 census over the corpus; re-measure after Items 2–5; `LAMBDA_JIT_BACKEDGE` is one constant to change |
+| The 10,000 default rests on four small probes and two benchmarks | The 1.1 census over the corpus; re-measure after Items 2–5; `LAMBDA_LOOP_JIT_THRESHOLD` is one constant to change |
 | Private MIR contexts accumulate | Fewer triggers after 1.6; the per-Script cap |
 | A cold loop crosses the threshold first and its entry is never used | Per-loop counters; a second handoff image per definition is left as an open question for after slice 2 |
 
@@ -737,7 +737,7 @@ Additions specific to this round:
 
 | Item | Extra coverage |
 |---|---|
-| 1 | The stress-mode corpus differential and the focused tests of Phase 1.7. An ineligible loop and a refused definition complete in T0. `LAMBDA_TIER=interp` never counts, queues or hands off. |
+| 1 | The stress-mode corpus differential and the focused tests of Phase 1.7. An ineligible loop and a refused definition complete in T0. `LAMBDA_EXEC_BACKEND=interp` never counts, queues or hands off. |
 | 2 | Every boundary kind fails with byte-identical text under `interp` and `jit`: declaration, assignment, each argument position, binder sites. |
 | 3 | Each contract class admits and rejects the same values as before, including `T?`, sized numerics, `u64`, arrays with counted axes, typed maps, unions. |
 | 4 | Arity mismatch, optional and rest parameters, named arguments, `var` borrows, methods and recursion-depth exhaustion still take the general path and behave identically. |
@@ -747,7 +747,7 @@ Additions specific to this round:
 Commands, after building release test runners:
 
 ```sh
-env LAMBDA_TIER=interp ./test/test_lambda_gtest.exe --gtest_brief=1
+env LAMBDA_EXEC_BACKEND=interp ./test/test_lambda_gtest.exe --gtest_brief=1
 ./test/test_lambda_gtest.exe --gtest_brief=1          # default AUTO
 ./test/test_interp_gtest.exe
 make test-lambda-baseline
@@ -760,11 +760,11 @@ on 2026-09-24. Classify any new failure against that set first.
 
 ```sh
 # user-CPU by tier
-LAMBDA_TIER=interp LAMBDA_NO_LOG=1 /usr/bin/time -p \
+LAMBDA_EXEC_BACKEND=interp LAMBDA_NO_LOG=1 /usr/bin/time -p \
   test/benchmark/exe/lambda-v50-a9489bc329 run --no-log test/benchmark/beng/mandelbrot2.ls
 
 # AUTO with synchronous publication (§2.3)
-LAMBDA_TIER=auto LAMBDA_SATELLITE_SYNC=1 LAMBDA_NO_LOG=1 /usr/bin/time -p \
+LAMBDA_EXEC_BACKEND=auto LAMBDA_SATELLITE_SYNC=1 LAMBDA_NO_LOG=1 /usr/bin/time -p \
   test/benchmark/exe/lambda-v50-a9489bc329 run --no-log test/benchmark/beng/mandelbrot2.ls
 
 # break-even sweep (§4.3): probes A–D and the fit
@@ -875,7 +875,7 @@ argument gets, with the slow body on a shape miss.
   is adopted at interpreted function entries and every 256 back-edges of the
   queued loop.
 - **Retired:** the v7 loop-owner first-entry trigger and the per-definition
-  back-edge marking. `LAMBDA_JIT_BACKEDGE` defaults to 10,000.
+  back-edge marking. `LAMBDA_LOOP_JIT_THRESHOLD` defaults to 10,000.
 - **Not done from §6:** the Phase 1.1 census, and carrying the definition's
   own boxed entry in the loop-triggered image (it still promotes by its call
   and self-tail thresholds).
@@ -887,7 +887,7 @@ Measured under default AUTO against the baseline: `mandelbrot2` 12.04 →
 `mandelbrot2` 0.06 s, `matmul2` 0.05 s.
 
 **Gates.** AUTO corpus differential against the baseline 1,092/1,092
-identical. Stress differential (`LAMBDA_JIT_BACKEDGE=1
+identical. Stress differential (`LAMBDA_LOOP_JIT_THRESHOLD=1
 LAMBDA_SATELLITE_SYNC=1`, every eligible loop hands off at its second head
 test) against the interpreter: 1,091/1,092, the exception being pre-existing
 (defect 3 below). New regression `test/lambda/proc/interp_loop_handoff.ls`
@@ -1049,8 +1049,8 @@ ended before its image arrived), 6 pinned (fasta, revcomp, hyphen,
 three_way_merge2).
 
 **Defects found and fixed.** Each was caught by a differential against
-`interp` in stress mode (`LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1`) or
-under forced call promotion (`LAMBDA_JIT_THRESHOLD=2 LAMBDA_SATELLITE_SYNC=1`).
+`interp` in stress mode (`LAMBDA_LOOP_JIT_THRESHOLD=1 LAMBDA_SATELLITE_SYNC=1`) or
+under forced call promotion (`LAMBDA_FUNC_JIT_THRESHOLD=2 LAMBDA_SATELLITE_SYNC=1`).
 Regression cases (g)–(i) are in `test/lambda/proc/interp_loop_handoff.ls`.
 
 1. A continuation skips batched parameter-type inference. It has no call
@@ -1086,12 +1086,12 @@ are slower, none because of the handoff:
   present on `2b2339b88`, so the cause is a master change since v50; not
   bisected.
 
-**AST (`LAMBDA_TIER=interp`) against the v50 binary** (one run per row, same
+**AST (`LAMBDA_EXEC_BACKEND=interp`) against the v50 binary** (one run per row, same
 quiet machine): untyped **0.61×**, typed **0.55×**. R7RS gained most
 (0.39–0.45; `tak` 45 → 12 ms, `divrec` 492 → 127 ms), from §12.1–12.4.
 
 **Break-even, re-measured** (the §4.3 probes on this release). The "buy" side
-is now `LAMBDA_JIT_BACKEDGE=1 LAMBDA_SATELLITE_SYNC=1`, so it pays for exactly
+is now `LAMBDA_LOOP_JIT_THRESHOLD=1 LAMBDA_SATELLITE_SYNC=1`, so it pays for exactly
 what the threshold decides, one continuation image:
 
 | Probe | T0 per iteration, v50 → now | Continuation compile | Crossover N |
@@ -1108,7 +1108,7 @@ two strategies are within 0.6 ms of each other on every probe. Triggering at
 break-even is the rent-or-buy rule: total cost at most twice the optimum
 whatever the loop's eventual length.
 
-**Threshold sweep** (whole AUTO suite, `LAMBDA_JIT_BACKEDGE` at each value,
+**Threshold sweep** (whole AUTO suite, `LAMBDA_LOOP_JIT_THRESHOLD` at each value,
 3 runs each, quiet machine). Geomean is against 10,000 over 58 rows. Excluded
 are `larceny/array1` (see below) and four Text rows whose 50,000 runs hit a
 load spike. Image counts are over the 126 benchmark scripts.

@@ -126,7 +126,7 @@ struct Runtime {
     // A document chooses one JS execution tier before its preamble runs;
     // mixing AST and MIR closures in a single realm has no shared ABI.
     bool js_ast_backend;
-    // D8.1.3v22 promotion policy, read from JS_EXECUTION_BACKEND /
+    // D8.1.3v22 promotion policy, read from JS_EXEC_BACKEND /
     // JS_FUNC_JIT_THRESHOLD / JS_LOOP_JIT_THRESHOLD once per runtime at first use rather
     // than from the environment on every interpreted call.
     bool js_promotion_policy_resolved;
