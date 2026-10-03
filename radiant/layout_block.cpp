@@ -4919,12 +4919,13 @@ static DomDocument* load_iframe_srcdoc_doc(LayoutContext* lycon,
                                            int viewport_width,
                                            int viewport_height) {
     if (!srcdoc || !*srcdoc) return nullptr;
-    // The embedding element owns this document, but parenting it under the
-    // embedding document's context waits for the teardown-order audit: a
-    // cascade destroy of that context must not run before the iframe releases
-    // the embedded document.
-    Pool* pool = mem_pool_create(mem_context_process(MEM_ROLE_LAYOUT),
-                                 MEM_ROLE_LAYOUT, "iframe_srcdoc");
+    // The embedding element owns this document, so its loader pool sits under
+    // the embedding document's context. Teardown releases embedded documents
+    // before the view tree, and the context is released second to last, so a
+    // cascade never runs ahead of the iframe's release.
+    MemContext* parent = lycon->doc && lycon->doc->services.mem_ctx
+        ? (MemContext*)lycon->doc->services.mem_ctx : mem_context_process(MEM_ROLE_LAYOUT);
+    Pool* pool = mem_pool_create(parent, MEM_ROLE_LAYOUT, "iframe_srcdoc");
     if (!pool) {
         log_error("iframe_srcdoc_load: failed to create memory pool");
         return nullptr;

@@ -323,10 +323,9 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
             // the document pool only at that lifetime seam and seed CSS initials.
             img_element->embed = lam::own((EmbedProp*)pool_calloc(img_element->doc->document_pool, sizeof(EmbedProp)));
             if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
-        } else {
-            img_element->embed = lam::own((EmbedProp*)mem_calloc(1, sizeof(EmbedProp), MEM_CAT_NETWORK));
-            if (img_element->embed) *img_element->embed = EMBED_PROP_DEFAULT;
         }
+        // with neither a view tree nor a document pool there is no owner for
+        // the prop; a heap copy here was never released (teardown audit F4)
         if (!img_element->embed) {
             log_error("network: failed to allocate embed property");
             image_surface_destroy(img_surface);

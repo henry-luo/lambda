@@ -55,10 +55,19 @@ void GifAnimation::finish(AnimationInstance* anim) {
         image_gif_free(frames);
         frames = NULL;
     }
-    // Note: surface->pixels now points to freed memory.
-    // The surface itself is not freed here — the caller owns it.
-    // We reset to NULL so the renderer shows nothing (or the caller can re-set).
-    image_surface_detach_pixels(surface);
+    // The frame pixels are gone. A cache-owned surface outlives this document's
+    // scheduler, so it returns to its own decoded still rather than to no pixels
+    // (teardown audit: a cancelled GIF left the cache entry blank).
+    if (surface && surface->owned_pixels) {
+        surface->pixels = surface->owned_pixels;
+        surface->pitch = still_pitch;
+        surface->decoded_width = still_decoded_width;
+        surface->decoded_height = still_decoded_height;
+        surface->alpha_mode = still_alpha_mode;
+        image_surface_bump_generation(surface);
+    } else {
+        image_surface_detach_pixels(surface);
+    }
     anim->state = NULL;
     lam::Temp<GifAnimation> self(this);  // the finished animation releases its player
 }
@@ -97,6 +106,10 @@ AnimationInstance* gif_animation_create(AnimationScheduler* scheduler,
     ga->loop_count = gif_frames->loop_count;
     ga->loops_completed = 0;
     ga->frame_end_time = gif_frames->frames[0].delay_ms / 1000.0;
+    ga->still_pitch = surface->pitch;
+    ga->still_decoded_width = surface->decoded_width;
+    ga->still_decoded_height = surface->decoded_height;
+    ga->still_alpha_mode = surface->alpha_mode;
 
     // Decoded GIF frames are tightly packed; the raster painter needs their
     // stride as well as the pointer when it samples each row.

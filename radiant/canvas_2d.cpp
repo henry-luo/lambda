@@ -74,6 +74,7 @@ struct CanvasEntry {
 struct CanvasRegistry {
     CanvasEntry* entries;
     lam::Own<Pool> pool;  // holds this registry and its entries
+    lam::Up<DomDocument> document;
 };
 
 static Color canvas_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -186,6 +187,8 @@ static void canvas_registry_destroy(void* data) {
     for (CanvasEntry* entry = registry->entries; entry; entry = entry->next) {
         canvas_entry_release(entry);
     }
+    // later resource destructors must not reach the freed registry (teardown audit F5)
+    registry->document->services.canvas_registry = nullptr;
     // the registry itself lives in this pool
     mem_pool_destroy(registry->pool);
 }
@@ -206,6 +209,7 @@ static CanvasRegistry* canvas_registry_for_document(DomDocument* document,
         return nullptr;
     }
     registry->pool = lam::own(pool);
+    registry->document = lam::up(document);
     document->services.canvas_registry = registry;
     return registry;
 }

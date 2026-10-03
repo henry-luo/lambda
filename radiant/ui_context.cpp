@@ -20,6 +20,7 @@
 #include "../lambda/js/js_runtime_state.hpp"
 #include "../lambda/runtime/runtime-state.h"
 #include "../lambda/runtime/transpiler.hpp"
+#include "network_integration.h"
 
 void fontface_cleanup(UiContext* uicon);
 char* load_font_path(FontContext *font_ctx, const char* font_name);
@@ -396,7 +397,46 @@ static void destroy_dom_owned_embed_images(DomNode* node) {
 
 void free_document(DomDocument* doc) {
     if (!doc) return;
+    // Every check that can refuse teardown runs before the first release, so a
+    // refused document stays whole and owned instead of half torn down (its
+    // Input and loader pool used to be detached and then dropped on return).
+    Runtime* timer_runtime = doc->js.runtime;
+    EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
+    Runtime* state_runtime = dom_document_script_runtime(doc);
+    EvalContext* state_owner = state_runtime
+        ? runtime_get_eval_context(state_runtime) : nullptr;
+    if (timer_owner && state_owner && timer_owner != state_owner) {
+        // One document cannot multiplex independent evaluators on one host
+        // thread. Such documents need a shared owner or separate worker.
+        log_error("free_document: Lambda and JS runtimes have different EvalContexts; document retained");
+        return;
+    }
+    EvalContext* document_owner = state_owner ? state_owner : timer_owner;
+    // EO5v2: another document may hold the thread (each manages its own
+    // EvalContext). Teardown is a quiescent point, so take the binding rather
+    // than refusing — refusing here used to leak the whole document.
+    if (document_owner && !radiant_eval_context_switch(document_owner)) {
+        log_error("free_document: could not bind the document EvalContext; document retained");
+        return;
+    }
+    // Timer handles live in the document capsule; teardown must not inspect
+    // another document's queue through an ambient host context. StateStore owns
+    // template/render maps attached to the state runtime; bind its canonical
+    // context until thread teardown, since nested cleanup cannot save and
+    // restore a different evaluator.
+    if ((timer_owner && js_runtime_state_for(timer_owner) && !js_runtime_state_init(timer_owner)) ||
+        (state_owner && (!eval_context_matches(state_owner) ||
+            (js_runtime_state_for(state_owner) && !js_runtime_state_init(state_owner))))) {
+        log_error("free_document: document runtime state unavailable; document retained");
+        return;
+    }
+
     radiant_cancel_async_document_loads(doc);
+    // Network image release detaches surfaces from element embed props, which
+    // live in the view tree's prop pool; run it while that pool is alive rather
+    // than from the document-resource destructor after the view tree is gone
+    // (teardown audit F3). The destructor then finds no manager.
+    radiant_cleanup_network_support(doc);
 
     Input* document_input = dom_document_take_owned_input_resources(doc);
     Pool* owned_loader_pool = doc->owned_loader_pool;
@@ -406,30 +446,6 @@ void free_document(DomDocument* doc) {
     // document arena destroys the native nodes they point at.
     radiant_dom_invalidate_document(doc);
 
-    Runtime* timer_runtime = doc->js.runtime;
-    EvalContext* timer_owner = timer_runtime ? runtime_get_eval_context(timer_runtime) : nullptr;
-    Runtime* state_runtime = dom_document_script_runtime(doc);
-    EvalContext* state_owner = state_runtime
-        ? runtime_get_eval_context(state_runtime) : nullptr;
-    if (timer_owner && state_owner && timer_owner != state_owner) {
-        // One document cannot multiplex independent evaluators on one host
-        // thread. Such documents need a shared owner or separate worker.
-        log_error("free_document: Lambda and JS runtimes have different EvalContexts");
-        return;
-    }
-    EvalContext* document_owner = state_owner ? state_owner : timer_owner;
-    // EO5v2: another document may hold the thread (each manages its own
-    // EvalContext). Teardown is a quiescent point, so take the binding rather
-    // than refusing — refusing here used to leak the whole document.
-    if (document_owner && !radiant_eval_context_switch(document_owner)) {
-        log_error("free_document: could not bind the document EvalContext");
-        return;
-    }
-    if (timer_owner && js_runtime_state_for(timer_owner)) {
-        // Timer handles live in the document capsule; teardown must not inspect
-        // another document's queue through an ambient host context.
-        if (!js_runtime_state_init(timer_owner)) return;
-    }
     if (timer_owner && js_runtime_state_for(timer_owner)) {
         if (script_runner_js_batch_cleanup_unsafe()) {
             js_event_loop_abandon_document_timers(doc);
@@ -438,14 +454,6 @@ void free_document(DomDocument* doc) {
         }
     }
 
-    if (state_owner) {
-        // StateStore owns template/render maps attached to this runtime. Bind
-        // its canonical context until thread teardown; nested cleanup cannot
-        // save and restore a different evaluator.
-        if (!eval_context_matches(state_owner)) return;
-        if (js_runtime_state_for(state_owner) &&
-                !js_runtime_state_init(state_owner)) return;
-    }
     dom_retire_begin_destroy(doc);
     radiant_document_destroy_state(doc);
 

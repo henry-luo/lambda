@@ -2684,6 +2684,10 @@ typedef struct GifAnimation {
 
     // Target surface — pixel pointer is swapped on frame change
     struct ImageSurface* surface;
+    // the surface's own decode, restored when the animation ends: a cached
+    // surface outlives the document whose scheduler drives this animation
+    int still_pitch, still_decoded_width, still_decoded_height;
+    ImageAlphaMode still_alpha_mode;
 #ifdef __cplusplus
     void tick(AnimationInstance* anim, float t);
     void finish(AnimationInstance* anim);

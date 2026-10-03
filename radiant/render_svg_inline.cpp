@@ -7430,6 +7430,7 @@ struct SvgLayerRegistry {
     lam::Own<SvgLayerEntry> entries;
     size_t cached_bytes;
     lam::Own<Pool> pool;  // holds this registry and its entries
+    lam::Up<DomDocument> document;
 };
 
 static const size_t SVG_LAYER_MAX_BYTES = (size_t)48 << 20;         // one layer
@@ -7464,6 +7465,8 @@ static void svg_layer_registry_destroy(void* data) {
     for (SvgLayerEntry* entry = registry->entries; entry; entry = entry->next) {
         svg_layer_entry_release_surface(registry, entry);
     }
+    // later resource destructors must not reach the freed registry (teardown audit F5)
+    registry->document->services.svg_layer_registry = nullptr;
     // the registry itself lives in this pool
     mem_pool_destroy(registry->pool);
 }
@@ -7483,6 +7486,7 @@ static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) 
         return nullptr;
     }
     registry->pool = lam::own(pool);
+    registry->document = lam::up(document);
     document->services.svg_layer_registry = registry;
     return registry;
 }
