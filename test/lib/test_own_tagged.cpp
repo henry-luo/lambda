@@ -291,6 +291,10 @@ static_assert(CanAssign<lam::Own<KindProp>, lam::Own<KindDerivedProp>>::value, "
 static_assert(!CanAssign<lam::Up<KindDerivedProp>, lam::Up<KindProp>>::value, "no implicit downcast");
 static_assert(!CanAssign<lam::Own<KindProp>, lam::Up<KindDerivedProp>>::value, "upcast keeps the kind");
 static_assert(!CanAssign<lam::OwnArr<KindProp>, lam::OwnArr<KindDerivedProp>>::value, "OwnArr stride is fixed");
+static_assert(!CanAssign<lam::Shared<KindProp>, KindProp*>::value, "raw -> Shared must be explicit");
+static_assert(!CanAssign<lam::Shared<KindProp>, lam::Own<KindProp>>::value, "Own must not become Shared");
+static_assert(!CanAssign<lam::Own<KindProp>, lam::Shared<KindProp>>::value, "Shared must not become Own");
+static_assert(CanAssign<lam::Shared<KindProp>, lam::Shared<KindDerivedProp>>::value, "Shared upcasts");
 
 TEST(MemoryKinds, DeducingFactoriesAndExplicitCasts) {
     KindDerivedProp derived = {};

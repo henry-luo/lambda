@@ -44,6 +44,7 @@ typedef struct StateStore StateStore;  // From radiant/state_store.hpp
 typedef struct Url Url;  // From lib/url.h
 typedef struct VectorPathProp VectorPathProp;  // From radiant/view.hpp
 typedef struct MultiColumnProp MultiColumnProp;  // From radiant/view.hpp
+typedef struct MarkerProp MarkerProp;  // From radiant/view.hpp
 typedef struct Runtime Runtime;  // From lambda/lambda.h
 struct DomElement;
 
@@ -666,6 +667,8 @@ struct DomElementExt {
     // outlive layout-property teardown while a control is detached.
     uint8_t selectionchange_event_pending;
     DomElement* selectionchange_event_next;
+    // ::marker layout state; markers have no BlockProp
+    lam::Own<MarkerProp> marker;
 };
 
 /**
@@ -1022,6 +1025,8 @@ struct DomElement : DomNode {
         return data ? &data->frags[kind] : nullptr;
     }
     MultiColumnProp* multicol_prop() const { return ext ? ext->multicol : nullptr; }
+    MarkerProp* marker_prop() const { return ext ? ext->marker : nullptr; }
+    void set_marker_prop(MarkerProp* value) { if (value || ext) ensure_ext()->marker = lam::own(value); }
     void set_multicol_prop(MultiColumnProp* value) { if (value || ext) ensure_ext()->multicol = value; }
     VectorPathProp* vector_path() const { return ext ? ext->vpath : nullptr; }
     void set_vector_path(VectorPathProp* value) { if (value || ext) ensure_ext()->vpath = value; }

@@ -2202,8 +2202,7 @@ static bool intrinsic_has_cyclic_percentage_descendant(
     for (DomNode* child = element->first_child; child; child = child->next_sibling) {
         if (!child->is_element()) continue;
         DomElement* child_element = child->as_element();
-        // ::marker stores MarkerProp in the shared blk slot, not BlockProp;
-        // it is generated content and cannot contribute a descendant cycle.
+        // ::marker is generated content and cannot contribute a descendant cycle.
         if (child_element->view_type == RDT_VIEW_MARKER) continue;
         ViewBlock* child_view = lam::unsafe_view_block_element_storage(child_element);
         if (layout_block_is_display_none(child_view) ||
@@ -2477,9 +2476,8 @@ static bool intrinsic_list_item_has_table_ancestor(DomElement* element) {
 static float intrinsic_list_item_marker_width(LayoutContext* lycon,
                                               ViewBlock* view_block) {
     if (view_block && view_block->pseudo && view_block->pseudo->marker &&
-        view_block->pseudo->marker->blk) {
-        MarkerProp* marker = reinterpret_cast<MarkerProp*>(
-            view_block->pseudo->marker->blk);
+        view_block->pseudo->marker->marker_prop()) {
+        MarkerProp* marker = view_block->pseudo->marker->marker_prop();
         if (marker->width > 0.0f) {
             float width = marker->width;
             DomElement* element = lam::dom_as<DOM_NODE_ELEMENT>(view_block);

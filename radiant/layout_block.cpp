@@ -6612,8 +6612,8 @@ void setup_inline(LayoutContext* lycon, ViewBlock* block) {
         }
         bool has_outside_marker = block->display.list_item && block->pseudo &&
             block->pseudo->marker_generated && block->pseudo->marker &&
-            block->pseudo->marker->blk &&
-            reinterpret_cast<MarkerProp*>(block->pseudo->marker->blk)->is_outside;
+            block->pseudo->marker->marker_prop() &&
+            block->pseudo->marker->marker_prop()->is_outside;
         if (block->block()->unicode_bidi == CSS_VALUE_PLAINTEXT &&
             !has_outside_marker) {
             // CSS Writing Modes §2.2: plaintext derives the paragraph base
@@ -7078,7 +7078,7 @@ bool layout_block_is_self_collapsing(ViewBlock* vb) {
             } else {
                 if (child->view_type == RDT_VIEW_MARKER) {
                     // CSS 2.2 §12.5 + §8.3.1: An outside marker with visible content
-                    MarkerProp* mp = child->is_element() ? reinterpret_cast<MarkerProp*>(lam::dom_require<DOM_NODE_ELEMENT>(child)->blk) : nullptr;
+                    MarkerProp* mp = child->is_element() ? lam::dom_require<DOM_NODE_ELEMENT>(child)->marker_prop() : nullptr;
                     is_substantial = (mp != nullptr);  // marker exists = has content
                 } else {
                     is_substantial = true;

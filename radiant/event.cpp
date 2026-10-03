@@ -11459,7 +11459,7 @@ void update_caret_visual_position(UiContext* uicon, DocState* state) {
     } else if (view->view_type == RDT_VIEW_MARKER) {
         // For markers: caret is at left edge (offset 0) or right edge (offset 1)
         ViewMarker* marker = lam::view_require<RDT_VIEW_MARKER>(view);
-        MarkerProp* marker_prop = marker && marker->blk ? (MarkerProp*)marker->blk : nullptr;
+        MarkerProp* marker_prop = marker ? marker->marker_prop() : nullptr;
         float marker_width = marker_prop ? marker_prop->width : view->width;
         float marker_height = marker_prop ? marker_prop->height : view->height;
         if (caret_offset == 0) {

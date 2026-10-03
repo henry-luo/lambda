@@ -1146,7 +1146,7 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
-    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    MarkerProp* marker_prop = elem->marker_prop();
     if (!marker_prop) return;
 
     float x = abs_x + marker->x;

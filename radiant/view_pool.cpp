@@ -235,6 +235,12 @@ static void* view_prop_get_multicol(DomElement* elem) {
 static void view_prop_clear_multicol(DomElement* elem, ViewTree*) {
     if (elem) elem->set_multicol_prop(nullptr);
 }
+static void* view_prop_get_marker(DomElement* elem) {
+    return elem ? (void*)elem->marker_prop() : nullptr;
+}
+static void view_prop_clear_marker(DomElement* elem, ViewTree*) {
+    if (elem) elem->set_marker_prop(nullptr);
+}
 static void* view_prop_get_vpath(DomElement* elem) {
     return elem ? (void*)elem->vector_path() : nullptr;
 }
@@ -532,14 +538,8 @@ static void reset_layout_cache(DomElement* elem, ViewTree* tree) {
     radiant::layout_cache_init(elem->layout_cache, tree ? tree->layout_generation : 0);
 }
 
-static void reset_block_or_marker_prop(DomElement* elem, ViewTree*) {
-    if (!elem || !elem->blk) return;
-    if (view_element_uses_marker_prop(elem)) {
-        // ::marker stores MarkerProp in the shared blk slot; treating it as the
-        // larger BlockProp overwrites adjacent view-pool allocations.
-        return;
-    }
-    memcpy(elem->blk, &BLOCK_PROP_DEFAULT, sizeof(BlockProp));
+static void reset_marker_prop(DomElement*, ViewTree*) {
+    // a retained ::marker keeps its MarkerProp; list layout refreshes it in place
 }
 
 static void reset_pseudo_content_prop(DomElement*, ViewTree*) {
@@ -581,7 +581,8 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "font",            release_element_font_prop, free_element_font_payload, view_prop_get_font,            view_prop_clear_font,            nullptr,         nullptr,       &FONT_PROP_DEFAULT,          sizeof(FontProp),          nullptr },
     { "inline",          nullptr,                   nullptr,                   view_prop_get_in_line,         view_prop_clear_inline,          nullptr,         free_inline_prop, nullptr,                    sizeof(InlineProp),        reset_inline_prop },
     { "boundary",        nullptr,                   free_boundary_payload,     view_prop_get_bound,           view_prop_clear_bound,           nullptr,         nullptr,       &BOUNDARY_PROP_DEFAULT,      sizeof(BoundaryProp),      nullptr },
-    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       nullptr,                      sizeof(BlockProp),         reset_block_or_marker_prop },
+    { "block",           nullptr,                   nullptr,                   view_prop_get_blk,             view_prop_clear_blk,             nullptr,         nullptr,       &BLOCK_PROP_DEFAULT,         sizeof(BlockProp),         nullptr },
+    { "marker",          nullptr,                   nullptr,                   view_prop_get_marker,          view_prop_clear_marker,          nullptr,         nullptr,       nullptr,                      sizeof(MarkerProp),        reset_marker_prop },
     { "scroll",          nullptr,                   free_scroll_payload,       view_prop_get_scroller,        view_prop_clear_scroller,        nullptr,         nullptr,       &SCROLL_PROP_DEFAULT,        sizeof(ScrollProp),        nullptr },
     { "embed",           release_embed_prop_entry,  free_embed_payload,        view_prop_get_embed,           view_prop_clear_embed,           nullptr,         nullptr,       &EMBED_PROP_DEFAULT,         sizeof(EmbedProp),         reset_embed_prop, release_embed_prop_for_reset },
     { "position",        nullptr,                   nullptr,                   view_prop_get_position,        view_prop_clear_position,        nullptr,         nullptr,       &POSITION_PROP_DEFAULT,      sizeof(PositionProp),      nullptr },
@@ -696,10 +697,9 @@ static void view_teardown_apply_table(ViewTree* tree,
 
 static void view_teardown_clear_element_scalars(DomElement* elem) {
     if (!elem) return;
-    // Retained ::marker nodes must keep their discriminator because their blk
-    // slot is MarkerProp, and normal inline layout would cast it to BlockProp.
-    elem->view_type = view_element_uses_marker_prop(elem)
-        ? RDT_VIEW_MARKER : RDT_VIEW_NONE;
+    // Retained ::marker nodes keep their discriminator: list layout refreshes
+    // the MarkerProp in place and does not recreate the marker view.
+    elem->view_type = elem->marker_prop() ? RDT_VIEW_MARKER : RDT_VIEW_NONE;
     elem->content_width = 0.0f;
     elem->content_height = 0.0f;
     elem->set_has_cached_intrinsic_widths(false);

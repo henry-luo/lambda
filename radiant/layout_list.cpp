@@ -338,7 +338,7 @@ bool layout_marker_is_outside(View* view) {
         return false;
     }
     MarkerProp* marker_prop = marker
-        ? reinterpret_cast<MarkerProp*>(marker->blk) : nullptr;
+        ? marker->marker_prop() : nullptr;
     // CSS Lists 3 §3: outside markers paint beside the principal box and do not
     // contribute to its in-flow size; inside markers remain ordinary inline content.
     return marker_prop && marker_prop->is_outside;
@@ -557,7 +557,7 @@ static DomElement* create_marker_element(LayoutContext* lycon, DomElement* paren
         marker_prop->width = font_size * 1.375f;
     }
     marker_elem->view_type = RDT_VIEW_MARKER;
-    marker_elem->blk = (BlockProp*)marker_prop;
+    marker_elem->set_marker_prop(marker_prop);
 
     return marker_elem;
 }
@@ -698,11 +698,10 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             ? space.width / effective_zoom : space.width;
     }
     if (block->pseudo->marker_generated && block->pseudo->marker &&
-        block->pseudo->marker->blk) {
+        block->pseudo->marker->marker_prop()) {
         // Retained marker boxes outlive style-only reflows, so refresh inherited
         // placement instead of leaving the marker in its pre-mutation mode.
-        MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(
-            block->pseudo->marker->blk);
+        MarkerProp* marker_prop = block->pseudo->marker->marker_prop();
         marker_prop->is_outside = is_outside_position;
         if (!set_marker_image_geometry(parent_elem, marker_prop, image_default_size,
                                        image_gap, effective_zoom) && is_bullet_marker) {
@@ -736,7 +735,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         if (marker_elem) {
             block->pseudo->marker = marker_elem;
             block->pseudo->marker_generated = true;
-            MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(marker_elem->blk);
+            MarkerProp* marker_prop = marker_elem->marker_prop();
             if (marker_prop && !is_outside_position &&
                 marker_prop->trailing_space_width > 0.0f &&
                 !layout_list_item_has_in_flow_content(dom_elem)) {
@@ -746,7 +745,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                 marker_prop->trailing_space_trimmed = true;
             }
             sync_marker_line_height(lycon, block,
-                                    reinterpret_cast<MarkerProp*>(marker_elem->blk),
+                                    marker_elem->marker_prop(),
                                     marker_font_size);
         }
     }

@@ -4060,7 +4060,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         }
 
         if (elem->view_type == RDT_VIEW_MARKER) {
-            MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+            MarkerProp* marker_prop = elem->marker_prop();
             if (marker_prop) {
                 ViewSpan* marker_span = lam::view_require_element(set_view(lycon, RDT_VIEW_MARKER, elem));
                 if (marker_span) {

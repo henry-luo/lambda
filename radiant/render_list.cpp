@@ -13,7 +13,7 @@ void render_marker_view(RenderContext* rdcon, ViewSpan* marker) {
     if (!marker || !marker->is_element()) return;
 
     DomElement* elem = lam::dom_require_element(lam::view_dom_node(marker));
-    MarkerProp* marker_prop = (MarkerProp*)elem->blk;
+    MarkerProp* marker_prop = elem->marker_prop();
     if (!marker_prop) {
         return;
     }

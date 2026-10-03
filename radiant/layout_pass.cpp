@@ -60,9 +60,7 @@ static void layout_measure_snapshot_append(::LayoutContext* lycon, ScratchMark* 
             snapshot->form_intrinsic_width = element->form->intrinsic_width;
             snapshot->form_intrinsic_height = element->form->intrinsic_height;
         }
-        // ::marker shares blk with MarkerProp, so it has no BlockProp state to restore.
-        snapshot->has_block_prop = element->blk != nullptr &&
-            !view_element_uses_marker_prop(element);
+        snapshot->has_block_prop = element->blk != nullptr;
         if (snapshot->has_block_prop) {
             snapshot->block_given_width = element->block()->given_width;
             snapshot->block_given_height = element->block()->given_height;

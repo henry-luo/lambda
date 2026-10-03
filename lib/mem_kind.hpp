@@ -9,6 +9,9 @@
 //   OwnArr<T>   the field owns a block of scalar elements (no element tracing)
 //   Up<T>       the target is in the holder's node or an ancestor node (outlives it)
 //   Counted<T>  the target is owned elsewhere and pinned by a count
+//   Shared<T>   the target is a value shared by several holders (an ancestor's
+//               prop, an interned canonical entry); its owner keeps it alive
+//               for every holder, and no holder writes through this pointer
 //   Handle<T>   index + generation into a slot table; not dereferenceable
 //   Foreign<T>  an opaque vendor resource (ThorVG, FreeType, platform objects)
 //
@@ -86,6 +89,11 @@ template<class T> struct Counted {
     LAM_MEM_KIND_UPCAST(Counted)
 };
 
+template<class T> struct Shared {
+    LAM_MEM_KIND_POINTER_BODY(Shared)
+    LAM_MEM_KIND_UPCAST(Shared)
+};
+
 template<class T> struct Foreign {
     LAM_MEM_KIND_POINTER_BODY(Foreign)
     LAM_MEM_KIND_UPCAST(Foreign)
@@ -99,6 +107,7 @@ template<class T> struct Foreign {
 template<class T> constexpr Up<T> up(T* p) { return Up<T>(p); }
 template<class T> constexpr Own<T> own(T* p) { return Own<T>(p); }
 template<class T> constexpr Counted<T> counted(T* p) { return Counted<T>(p); }
+template<class T> constexpr Shared<T> shared(T* p) { return Shared<T>(p); }
 
 // Slot reference: valid only through lookup in the owning slot table, which
 // compares generations and returns null for a recycled slot.
@@ -128,6 +137,7 @@ LAM_MEM_KIND_ASSERT_LAYOUT(Own);
 LAM_MEM_KIND_ASSERT_LAYOUT(OwnArr);
 LAM_MEM_KIND_ASSERT_LAYOUT(Up);
 LAM_MEM_KIND_ASSERT_LAYOUT(Counted);
+LAM_MEM_KIND_ASSERT_LAYOUT(Shared);
 LAM_MEM_KIND_ASSERT_LAYOUT(Foreign);
 #undef LAM_MEM_KIND_ASSERT_LAYOUT
 

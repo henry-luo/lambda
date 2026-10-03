@@ -4048,7 +4048,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     if (!text_view) {
         text_view = lam::view_require<RDT_VIEW_TEXT>(set_view(lycon, RDT_VIEW_TEXT, text_node));
-        text_view->font = lycon->font.style;
+        text_view->font = lam::shared(lycon->font.style);
     }
 
     TextRect* rect = lycon->doc->view_tree->alloc_text_rect();

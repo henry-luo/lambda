@@ -416,4 +416,4 @@ rules:
     file: utils/check_mem_kind_nodes.py
     category: memory-safety
     tags: [radiant, ownership, kinds, mandatory]
-    note: "Reads lam::Up<T> fields and LAM_NODE_OF levels from the Clang AST; fails when an Up target's declared level is not the holder's level or an ancestor (lib/mem_node.hpp). Holders or targets without a declared level are counted as unchecked."
+    note: "Reads lam::Up<T> and lam::Shared<T> fields and LAM_NODE_OF levels from the Clang AST; fails when an Up target's declared level is not the holder's level or an ancestor (lib/mem_node.hpp). Holders or targets without a declared level are counted as unchecked."

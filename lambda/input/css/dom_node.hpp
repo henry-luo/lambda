@@ -232,7 +232,9 @@ struct DomText : public DomNode {
 
     // view related fields
     lam::Own<TextRect> rect;  // first text rect
-    FontProp *font;  // font for this text
+    // font in force: the FontProp of the nearest font-owning ancestor, shared
+    // with that element and its other descendants; the text never owns it
+    lam::Shared<FontProp> font;
 
     // Factories rely on zeroed arena/pool storage and write only semantic non-zero fields.
     static DomText* create(String* native_string, DomElement* parent_element);

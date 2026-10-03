@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that every lam::Up<T> field points at an outliving ownership level.
+"""Check that every lam::Up<T> / lam::Shared<T> field points at an outliving level.
 
 An Up<T> field claims its target lives in the holder's level of the ownership
 tree or in an ancestor level, so the target outlives the holder. The C++ type
@@ -8,7 +8,10 @@ lint reads the claim from the Clang AST:
 
   * levels:  structs in namespace lam with a `parent` typedef (lib/mem_node.hpp)
   * homes:   LAM_NODE_OF(T, Level) specializations of lam::NodeOf<T>
-  * claims:  every FIELD_DECL of type lam::Up<T> in a repo struct
+  * claims:  every FIELD_DECL of type lam::Up<T> or lam::Shared<T> in a repo struct
+
+A Shared<T> field makes the same claim about the shared value's owner, so it
+is checked the same way.
 
 A field is a violation when both the holder and the target have a declared
 level and the target's level is neither the holder's level nor one of its
@@ -92,7 +95,8 @@ def collect(tu, ci, cfg):
         if rel is None:
             continue
         t = c.type.get_canonical()
-        if not bare(t.spelling).startswith("lam::Up<"):
+        kind = bare(t.spelling).split("<", 1)[0]
+        if kind not in ("lam::Up", "lam::Shared"):
             continue
         holder = enclosing_record(c, ci)
         if holder is None:
@@ -103,7 +107,7 @@ def collect(tu, ci, cfg):
         seen.add(key)
         target = bare(t.get_template_argument_type(0).get_canonical().spelling)
         claims.append((bare(holder.type.get_canonical().spelling), c.spelling, target,
-                       rel, c.location.line))
+                       rel, c.location.line, kind[len("lam::"):]))
     return levels, homes, claims
 
 
@@ -148,7 +152,7 @@ def main() -> int:
 
     levels, homes, claims = collect(tu, ci, cfg)
     violations, unchecked = [], defaultdict(list)
-    for holder, field, target, rel, line in claims:
+    for holder, field, target, rel, line, kind in claims:
         hl, tl = homes.get(holder), homes.get(target)
         if hl == STACK_LEVEL:
             continue
@@ -157,13 +161,13 @@ def main() -> int:
                 f"{rel}:{line}: {holder}::{field} -> {target}")
             continue
         if tl not in ancestors_or_self(hl, levels):
-            violations.append(f"{rel}:{line}: error: {holder}::{field} is Up<{target}>, "
+            violations.append(f"{rel}:{line}: error: {holder}::{field} is {kind}<{target}>, "
                               f"but {target} lives in {tl}, which is not {hl} or its ancestor")
 
     for v in violations:
         print(v)
     n_unchecked = sum(len(v) for v in unchecked.values())
-    print(f"mem-kind-nodes: {len(claims)} Up fields, {len(violations)} violations, "
+    print(f"mem-kind-nodes: {len(claims)} Up/Shared fields, {len(violations)} violations, "
           f"{n_unchecked} unchecked ({len(unchecked['holder'])} undeclared holder level, "
           f"{len(unchecked['target'])} undeclared target level)")
     if args.verbose:
