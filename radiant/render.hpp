@@ -155,7 +155,7 @@ typedef struct {
     RdtStrokeCap cap;
     RdtStrokeJoin join;
     float miter_limit;
-    const float* dash_array;
+    lam::Up<const float> dash_array;  // the holder of the options owns the copy
     int dash_count;
     float dash_phase;
 } RdtGradientOptions;
@@ -298,7 +298,7 @@ struct RdtPathMetricSegment {
     size_t subpath;
 };
 struct RdtPathMetrics {
-    RdtPathMetricSegment* segments;
+    lam::OwnArr<RdtPathMetricSegment> segments;
     size_t count, capacity, subpath_count;
     float length;
     bool closed;
@@ -357,9 +357,9 @@ RdtMatrix svg_resolve_local_transform(const char* value, bool from_css,
     const char* origin, const Bound* reference_box, const SvgLengthContext* lengths);
 // Shared authored cascade/presentation lookup for SVG interaction and resources.
 struct SvgDomStyleScope {
-    DomElement* root;
-    DomElement* parent;
-    const SvgDomStyleScope* previous;
+    lam::Up<DomElement> root;
+    lam::Up<DomElement> parent;
+    lam::Up<const SvgDomStyleScope> previous;
     float viewport_width;
     float viewport_height;
     bool has_viewport;
@@ -821,14 +821,14 @@ typedef struct {
 // Element group marker: records a matched display-list item range for subtree
 // culling and future retained display-list reuse.
 typedef struct {
-    const char* name;
-    const char* value;
+    lam::Up<const char> name;    // borrowed from the recording walk or the display-list arena
+    lam::Up<const char> value;
 } RenderSemanticAttribute;
 
 typedef struct {
-    const RenderSemanticAttribute* attributes;
+    lam::Up<const RenderSemanticAttribute> attributes;
     int attribute_count;
-    const char* title; // accessible text for glyphs lowered to resolved outlines
+    lam::Up<const char> title; // accessible text for glyphs lowered to resolved outlines
 } RenderSemanticGroup;
 
 typedef struct {
@@ -3613,14 +3613,14 @@ struct RdtSvgFilterLight {
 };
 struct RdtSvgFilterNode {
     RdtSvgFilterKind kind;
-    Element* element;
-    RdtSvgFilterNoise* noise;
+    lam::Up<Element> element;
+    lam::Own<RdtSvgFilterNoise> noise;      // program-arena data
     RdtSvgFilterLight light;
     int input, input2;
-    int* merge_inputs;
+    lam::OwnArr<int> merge_inputs;
     size_t merge_count;
-    const char* result;
-    const char* region[4];
+    lam::Own<const char> result;
+    lam::Own<const char> region[4];
     float values[20];
     Color color;
     CssEnum blend_mode;
@@ -3628,27 +3628,27 @@ struct RdtSvgFilterNode {
     bool linear, valid;
 };
 struct RdtSvgFilterProgram {
-    Arena* arena;
-    Element* element;
+    lam::Own<Arena> arena;               // holds nodes, noise, merge inputs and tokens
+    lam::Up<Element> element;
     uint64_t epoch;
     uint64_t animation_generation;
-    RdtSvgFilterProgram* next;
-    RdtSvgFilterNode* nodes;
+    lam::Own<RdtSvgFilterProgram> next;
+    lam::OwnArr<RdtSvgFilterNode> nodes;
     size_t count, active_users;
-    const char* region[4];
+    lam::Own<const char> region[4];
     bool filter_bbox, primitive_bbox, compiled, valid, allocation_failed;
 };
 constexpr size_t RDT_SVG_FILTER_MAX_NODES = 4096;
 struct RdtSvgFilterRun {
-    ScratchArena* scratch;
-    MemContext* memory;
-    const ImageSurface* source;
+    lam::Up<ScratchArena> scratch;
+    lam::Up<MemContext> memory;
+    lam::Up<const ImageSurface> source;
     Bound source_bounds, geometry;
     SvgLengthContext lengths;
     RdtMatrix frame;
     float density;
     size_t work_limit;
-    size_t* work_used; // shared by nested captures and kernels during one synchronous evaluation
+    lam::Up<size_t> work_used; // shared by nested captures and kernels during one synchronous evaluation
     bool (*draw_source)(void* context, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
     void* source_context;
     bool (*draw_image)(void* context, const RdtSvgFilterNode* node, const RdtSvgFilterRun* run,
@@ -4025,12 +4025,12 @@ typedef enum {
 typedef struct {
     SvgPaintKind kind;
     Color color;
-    const char* reference;      // walk-owned URL and optional fallback
-    const char* fallback;
-    Element* source;
+    lam::Up<const char> reference;      // walk-owned URL and optional fallback
+    lam::Up<const char> fallback;
+    lam::Up<Element> source;
     RdtMatrix source_transform;
-    void* source_style;         // borrowed walk-owned declaration document for relative paint URLs
-    const char* source_path;
+    lam::Up<struct SvgStyleContext> source_style;  // borrowed walk-owned declaration document for relative paint URLs
+    lam::Up<const char> source_path;
 } SvgPaint;
 
 typedef struct {
@@ -4038,7 +4038,7 @@ typedef struct {
     Color current_color;
     Bound geometry_box;
     RdtMatrix transform;
-    const struct SvgInlineRenderContext* source_context; // borrowed producer scope, including its parent context paint
+    lam::Up<const struct SvgInlineRenderContext> source_context; // borrowed producer scope, including its parent context paint
 } SvgContextPaint;
 
 enum SvgInheritedPropertyId {
@@ -4049,10 +4049,10 @@ enum SvgInheritedPropertyId {
 };
 
 struct SvgInheritedProperty {
-    const char* value;           // walk-owned computed tokens; percentages retain their used viewport basis
+    lam::Up<const char> value;   // walk-owned computed tokens; percentages retain their used viewport basis
     SvgLengthContext lengths;   // font metrics at the declaring element
-    void* source_style;
-    const char* source_path;
+    lam::Up<struct SvgStyleContext> source_style;
+    lam::Up<const char> source_path;
 };
 
 struct SvgInlineRenderContext {
@@ -4093,8 +4093,8 @@ struct SvgInlineRenderContext {
     bool stroke_none;
     SvgPaint fill_paint, stroke_paint;
     SvgInheritedProperty inherited_properties[SVG_STYLE_PROPERTY_COUNT];
-    const SvgContextPaint* context_paint;
-    void* paint_resource_scope;  // borrowed linked scopes prevent recursive paint servers
+    lam::Up<const SvgContextPaint> context_paint;
+    lam::Up<const struct SvgPaintResourceScope> paint_resource_scope;  // borrowed linked scopes prevent recursive paint servers
 
     // inherited text properties (used by <text>/<tspan> when not on element itself)
     lam::Up<const char> inherited_font_family;   // pointer into Element attribute string memory (lifetime of SVG element tree)
@@ -4115,10 +4115,10 @@ struct SvgInlineRenderContext {
     bool visibility_hidden;
     lam::Up<const char> inherited_font_style;
 
-    Element* effect_source;      // source capture omits this element's own effects exactly once
-    const RdtSvgFilterRun* filter_work; // borrowed capture/kernel budget, including nested filter inputs
+    lam::Up<Element> effect_source;      // source capture omits this element's own effects exactly once
+    lam::Up<const RdtSvgFilterRun> filter_work; // borrowed capture/kernel budget, including nested filter inputs
     bool clip_geometry;         // clip children contribute fill geometry regardless of authored paint
-    SvgClipHitQuery* clip_hit_query; // borrowed analytic point query through the same clip traversal
+    lam::Up<SvgClipHitQuery> clip_hit_query; // borrowed analytic point query through the same clip traversal
 
     // Tree searched for same-document references (<use href="#id">): the DOM
     // tree root for inline SVG, otherwise the SVG root.

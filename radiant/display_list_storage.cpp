@@ -73,13 +73,13 @@ bool dl_copy_semantic_group(DisplayList* dl, RenderSemanticGroup* out,
             &dl->arena, (size_t)source->attribute_count * sizeof(RenderSemanticAttribute));
         if (!attrs) return false;
         for (int i = 0; i < source->attribute_count; i++) {
-            attrs[i] = {copy_string(source->attributes[i].name), copy_string(source->attributes[i].value)};
+            attrs[i] = {lam::up(copy_string(source->attributes[i].name)), lam::up(copy_string(source->attributes[i].value))};
             if (!attrs[i].name || !attrs[i].value) return false;
         }
-        copy.attributes = attrs;
+        copy.attributes = lam::up(attrs);
         copy.attribute_count = source->attribute_count;
     }
-    copy.title = copy_string(source->title);
+    copy.title = lam::up(copy_string(source->title));
     if (source->title && !copy.title) return false;
     *out = copy;
     return true;

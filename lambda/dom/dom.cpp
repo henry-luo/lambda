@@ -13903,7 +13903,7 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
     RdtMatrix offset = rdt_matrix_translate(dom_svg_attribute_number(elem, "x", 0.0f),
         dom_svg_attribute_number(elem, "y", 0.0f));
     RdtMatrix frame = rdt_matrix_multiply(instance_ctm, &offset);
-    SvgDomStyleScope scope = {reference, elem, g_dom_svg_style_scope, 0.0f, 0.0f, false};
+    SvgDomStyleScope scope = {lam::up(reference), lam::up(elem), lam::up(g_dom_svg_style_scope), 0.0f, 0.0f, false};
     SvgAnimationSourceScope animation_scope(reference->doc, reference, elem);
     const SvgDomStyleScope* saved_scope = g_dom_svg_style_scope;
     g_dom_svg_style_scope = &scope;

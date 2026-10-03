@@ -6260,7 +6260,7 @@ static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
         } else if (padding && layout_css_value_has_percentage(value)) {
             // The parsed or substituted tree is retained by the view generation;
             // percent-bearing math must wait for this pane's final scrollport.
-            target[side] = {0.0f, 0.0f, value};
+            target[side] = {0.0f, 0.0f, lam::up(value)};
         } else {
             float pixels = resolve_length_value(lycon, family[0], value);
             target[side] = isfinite(pixels) && (!padding || pixels >= 0.0f)
@@ -6296,7 +6296,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
                 collect_cascade_priority_decl, &collector);
             qsort(declarations, (size_t)collector.count,
                   sizeof(CssDeclaration*), compare_cascade_priority_decls);
-            lycon->cascade_priority_decls = declarations;
+            lycon->cascade_priority_decls = lam::up(declarations);
             lycon->cascade_priority_count = collector.count;
         }
     }
@@ -6779,7 +6779,7 @@ void resolve_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     resolve_placeholder_pseudo_style(dom_elem, lycon);
     resolve_file_button_pseudo_style(dom_elem, lycon);
     resolve_selection_pseudo_style(dom_elem, lycon);
-    lycon->cascade_priority_decls = saved_cascade_decls;
+    lycon->cascade_priority_decls = lam::up(saved_cascade_decls);
     lycon->cascade_priority_count = saved_cascade_count;
 }
 

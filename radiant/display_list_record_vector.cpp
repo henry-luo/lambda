@@ -169,8 +169,8 @@ void dl_fill_linear_gradient(DisplayList* dl, RdtPath* path,
     item->fill_linear_gradient.has_gradient_transform = (gradient_transform != nullptr);
     if (gradient_transform) item->fill_linear_gradient.gradient_transform = *gradient_transform;
     item->fill_linear_gradient.options = options ? *options : RdtGradientOptions{};
-    item->fill_linear_gradient.options.dash_array = options
-        ? dl_copy_dashes(dl, options->dash_array, options->dash_count) : nullptr;
+    item->fill_linear_gradient.options.dash_array = lam::up(options
+        ? dl_copy_dashes(dl, options->dash_array, options->dash_count) : nullptr);
 }
 
 void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
@@ -196,8 +196,8 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
     item->fill_radial_gradient.has_gradient_transform = (gradient_transform != nullptr);
     if (gradient_transform) item->fill_radial_gradient.gradient_transform = *gradient_transform;
     item->fill_radial_gradient.options = options ? *options : RdtGradientOptions{};
-    item->fill_radial_gradient.options.dash_array = options
-        ? dl_copy_dashes(dl, options->dash_array, options->dash_count) : nullptr;
+    item->fill_radial_gradient.options.dash_array = lam::up(options
+        ? dl_copy_dashes(dl, options->dash_array, options->dash_count) : nullptr);
 }
 
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,

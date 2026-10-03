@@ -2194,7 +2194,7 @@ typedef struct {
 typedef struct ScrollSpacingValue {
     float pixels;
     float percent;
-    const CssValue* expression;  // percentage math needs the final scrollport size
+    lam::Up<const CssValue> expression;  // percentage math needs the final scrollport size
 } ScrollSpacingValue;
 
 typedef enum ScrollSnapAxis {

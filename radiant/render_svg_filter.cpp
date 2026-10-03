@@ -4,13 +4,21 @@
 #include "../lib/memtrack.h"
 #include <limits.h>
 
+// the registry and its programs live in `pool`, which the document's
+// resource hook destroys; each program's graph lives in the program's arena.
 struct SvgFilterRegistry {
-    DomDocument* document;
-    MemContext* memory;
+    lam::Own<Pool> pool;
+    lam::Up<DomDocument> document;
+    lam::Up<MemContext> memory;
     MemNode* node;
     uint32_t reclaimer;
-    RdtSvgFilterProgram* programs;
+    lam::Own<RdtSvgFilterProgram> programs;
 };
+
+static void svg_filter_program_free(SvgFilterRegistry* registry, RdtSvgFilterProgram* program) {
+    arena_destroy(program->arena);
+    pool_free(registry->pool, program);
+}
 
 struct RdtSvgFilterNoise {
     unsigned lattice[514];
@@ -139,14 +147,14 @@ static bool svg_filter_registry_stat(void* data, MemStatSample* sample) {
 static size_t svg_filter_registry_reclaim(MemPressureLevel, size_t target, void* data) {
     SvgFilterRegistry* registry = (SvgFilterRegistry*)data;
     size_t freed = 0;
-    RdtSvgFilterProgram** cursor = &registry->programs;
+    lam::Own<RdtSvgFilterProgram>* cursor = &registry->programs;
     while (*cursor && (!target || freed < target)) {
         RdtSvgFilterProgram* program = *cursor;
         if (program->active_users) { cursor = &program->next; continue; }
         *cursor = program->next;
         freed += svg_filter_program_bytes(program);
         // the registry is the sole memory-context node; reclaiming its raw arenas does not reenter the coordinator.
-        arena_destroy(program->arena); mem_free(program);
+        svg_filter_program_free(registry, program);
     }
     return freed;
 }
@@ -157,18 +165,24 @@ static void svg_filter_registry_destroy(void* data) {
     svg_filter_registry_reclaim(MEM_PRESSURE_CRITICAL, 0, registry);
     mem_unregister(registry->node);
     registry->document->services.svg_filter_registry = nullptr;
-    mem_free(registry);
+    // the registry itself lives in this pool
+    mem_pool_destroy(registry->pool);
 }
 
 RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, Element* element) {
     if (!document || !element) return nullptr;
     SvgFilterRegistry* registry = (SvgFilterRegistry*)document->services.svg_filter_registry;
     if (!registry) {
-        registry = (SvgFilterRegistry*)mem_calloc(1, sizeof(*registry), MEM_CAT_RENDER);
-        if (!registry) return nullptr;
-        registry->document = document; registry->memory = (MemContext*)document->services.mem_ctx;
-        if (!registry->memory) registry->memory = mem_context_root();
-        if (!dom_document_add_resource(document, registry, svg_filter_registry_destroy)) { mem_free(registry); return nullptr; }
+        MemContext* memory = document->services.mem_ctx ? (MemContext*)document->services.mem_ctx : mem_context_root();
+        Pool* pool = mem_pool_create(memory, MEM_ROLE_RENDER, "render.svg.filter_registry");
+        if (!pool) return nullptr;
+        registry = (SvgFilterRegistry*)pool_calloc(pool, sizeof(*registry));
+        // the document takes ownership once its resource hook is registered
+        if (!registry || !dom_document_add_resource(document, registry, svg_filter_registry_destroy)) {
+            mem_pool_destroy(pool); return nullptr;
+        }
+        registry->pool = lam::own(pool);
+        registry->document = lam::up(document); registry->memory = lam::up(memory);
         registry->node = mem_register(registry->memory, MEM_KIND_CACHE, MEM_ROLE_RENDER,
             "render.svg.filter_programs", registry, nullptr, svg_filter_registry_stat, nullptr);
         registry->reclaimer = mem_context_register_reclaimer(registry->memory,
@@ -182,22 +196,22 @@ RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, El
             program->active_users++; return program;
         }
     if (!render_memory_allow_allocation(registry->memory, sizeof(RdtSvgFilterProgram) + ARENA_INITIAL_CHUNK_SIZE)) return nullptr;
-    RdtSvgFilterProgram* program = (RdtSvgFilterProgram*)mem_calloc(1, sizeof(*program), MEM_CAT_RENDER);
+    RdtSvgFilterProgram* program = (RdtSvgFilterProgram*)pool_calloc(registry->pool, sizeof(*program));
     if (!program) return nullptr;
-    program->arena = arena_create_default();
-    if (!program->arena) { mem_free(program); return nullptr; }
+    program->arena = lam::own(arena_create_default());
+    if (!program->arena) { pool_free(registry->pool, program); return nullptr; }
     arena_set_mem_category(program->arena, MEM_CAT_RENDER);
-    program->element = element; program->epoch = document->mutation_epoch; program->active_users = 1;
+    program->element = lam::up(element); program->epoch = document->mutation_epoch; program->active_users = 1;
     // clock-only SMIL changes alter compiled resource facts without changing the DOM epoch.
     program->animation_generation = animation_generation;
-    program->next = registry->programs; registry->programs = program;
+    program->next = registry->programs; registry->programs = lam::own(program);
     // stale, unpinned programs are retired on mutation rather than accumulating until document teardown.
-    RdtSvgFilterProgram** cursor = &registry->programs;
+    lam::Own<RdtSvgFilterProgram>* cursor = &registry->programs;
     while (*cursor) {
         RdtSvgFilterProgram* old = *cursor;
         if ((old->epoch != program->epoch || old->animation_generation != animation_generation ||
             old->allocation_failed) && !old->active_users) {
-            *cursor = old->next; arena_destroy(old->arena); mem_free(old);
+            *cursor = old->next; svg_filter_program_free(registry, old);
         } else cursor = &old->next;
     }
     return program;
@@ -233,7 +247,7 @@ static bool svg_filter_nonempty(Bound box) {
         box.right > box.left && box.bottom > box.top;
 }
 
-static Bound svg_filter_resolve_region(const char* const* tokens, const SvgLengthContext* lengths,
+static Bound svg_filter_resolve_region(const lam::Own<const char>* tokens, const SvgLengthContext* lengths,
     Bound defaults, Bound basis, bool bbox) {
     SvgLengthContext context = *lengths;
     if (bbox) context.viewport_width = context.viewport_height = 1.0f;
@@ -769,7 +783,7 @@ bool render_svg_filter_execute(const RdtSvgFilterProgram* program, const RdtSvgF
         !isfinite(run->density) || run->density <= 0.0f || !program->count || program->count > RDT_SVG_FILTER_MAX_NODES) return false;
     SvgFilterExecution execution = {};
     RdtSvgFilterRun budget = *run;
-    if (!budget.work_used) budget.work_used = &execution.work;
+    if (!budget.work_used) budget.work_used = lam::up(&execution.work);
     run = &budget; execution.run = run;
     if (!render_svg_filter_region(program, run, &execution.region)) return false;
     execution.grid = {floorf(execution.region.left * run->density), floorf(execution.region.top * run->density),

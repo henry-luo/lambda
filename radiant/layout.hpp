@@ -3326,7 +3326,7 @@ typedef struct LayoutContext {
     ScratchArena scratch;
     // A style-pass-local ordering of winning declarations, sorted by the
     // cascade comparator so side-specific props can retain an exact rank.
-    CssDeclaration** cascade_priority_decls;
+    lam::Up<CssDeclaration*> cascade_priority_decls;
     int cascade_priority_count;
     // pass-lifetime data that is not stack-shaped (counter state, generated
     // content); owned by the view tree and reset at layout_cleanup

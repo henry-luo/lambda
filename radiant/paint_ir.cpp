@@ -681,7 +681,7 @@ static void paint_assign_gradient_options(RdtGradientOptions* target,
     *target = source ? *source : RdtGradientOptions{};
     *owned_dashes = source ? paint_copy_dashes(source->dash_array, source->dash_count)
                            : lam::OwnArr<float>();
-    target->dash_array = *owned_dashes;
+    target->dash_array = lam::up(*owned_dashes);
 }
 
 void paint_fill_linear_gradient(PaintList* pl, RdtPath* path,

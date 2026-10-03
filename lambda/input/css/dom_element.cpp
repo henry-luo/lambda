@@ -97,8 +97,8 @@ bool dom_element_record_namespaced_attribute(DomElement* element,
          attr; attr = attr->next) {
         if (strcmp(attr->namespace_uri, namespace_uri) == 0 &&
             strcmp(attr->local_name, local) == 0) {
-            attr->qualified_name = pool_strdup(pool, qualified_name);
-            attr->value = pool_strdup(pool, value);
+            attr->qualified_name = lam::own(pool_strdup(pool, qualified_name));
+            attr->value = lam::own(pool_strdup(pool, value));
             attr->active = attr->qualified_name && attr->value;
             return attr->active;
         }
@@ -106,15 +106,15 @@ bool dom_element_record_namespaced_attribute(DomElement* element,
     DomNamespacedAttribute* attr = (DomNamespacedAttribute*)pool_calloc(
         pool, sizeof(DomNamespacedAttribute));
     if (!attr) return false;
-    attr->namespace_uri = pool_strdup(pool, namespace_uri);
-    attr->local_name = pool_strdup(pool, local);
-    attr->qualified_name = pool_strdup(pool, qualified_name);
-    attr->value = pool_strdup(pool, value);
+    attr->namespace_uri = lam::own(pool_strdup(pool, namespace_uri));
+    attr->local_name = lam::own(pool_strdup(pool, local));
+    attr->qualified_name = lam::own(pool_strdup(pool, qualified_name));
+    attr->value = lam::own(pool_strdup(pool, value));
     if (!attr->namespace_uri || !attr->local_name ||
         !attr->qualified_name || !attr->value) return false;
     attr->active = true;
     attr->next = ext->namespaced_attributes;
-    ext->namespaced_attributes = attr;
+    ext->namespaced_attributes = lam::own(attr);
     return true;
 }
 
@@ -1935,7 +1935,7 @@ static int dom_element_apply_selection_rule(DomElement* element, CssRule* rule,
         }
         if (!target->source ||
             css_declaration_cascade_compare(&candidate, &previous) >= 0) {
-            target->source = declaration;
+            target->source = lam::up(declaration);
             target->specificity = candidate.specificity;
             target->origin = candidate.origin;
             applied_count++;

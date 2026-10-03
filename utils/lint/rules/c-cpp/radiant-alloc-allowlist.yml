@@ -13,7 +13,7 @@ rule:
       # the callee name only; nested calls are matched as their own nodes
       regex: "^(?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*(alloc|_free|dup|mmap|memalign|sbrk|valloc)[A-Za-z0-9_]*\\s*\\("
     - not:
-        regex: "^(?:lam::)?(mem_|pool_|arena_|scratch_|strbuf_|arraylist_|hashmap_|lru_|mem_grow_array|pool_grow_array|temp_array|free_owned|tvg_|FT_|uv_|objc_|CF|CG|CFRetain|CFRelease|CGColorSpace|CGImage|CGContext|CGGradient|CGPath|NS|WK|g_|png_|rdt_|paint_|dl_|view_pool_|view_prop_|image_|render_clip_|retained_dl_|canvas_|cg_|radiant_stack_|block_context_alloc|grid_scratch_|picture_cache_|paint_cache_|css_font_face_descriptor_free|layout_non_negative_free_space|str_dup|stringbuf_free|source_pos_free|session_strdup)[A-Za-z0-9_]*\\s*\\("
+        regex: "^(?:lam::)?(mem_|pool_|arena_|scratch_|strbuf_|arraylist_|hashmap_|lru_|mem_grow_array|pool_grow_array|temp_array|free_owned|tvg_|FT_|uv_|objc_|CF|CG|CFRetain|CFRelease|CGColorSpace|CGImage|CGContext|CGGradient|CGPath|NS|WK|g_|png_|rdt_|paint_|dl_|view_pool_|view_prop_|image_|render_clip_|retained_dl_|canvas_|cg_|radiant_stack_|block_context_alloc|grid_scratch_|picture_cache_|paint_cache_|css_font_face_descriptor_free|layout_non_negative_free_space|str_dup|stringbuf_free|source_pos_free|session_strdup|render_memory_allow_allocation|svg_filter_compile_alloc|svg_filter_program_free|svg_animation_alloc|base64_encode_alloc)[A-Za-z0-9_]*\\s*\\("
 files:
   - "radiant/**/*.{c,cpp,h,hpp,mm}"
 # Interaction, editing, scripting, state and application-shell code is out of

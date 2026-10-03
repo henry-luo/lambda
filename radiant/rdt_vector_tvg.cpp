@@ -796,7 +796,7 @@ static Tvg_Paint paint_cache_store_gradient(uint64_t hash, RdtPaintCacheKind kin
         size_t bytes = (size_t)options->dash_count * sizeof(float);
         e->dash_array = (float*)mem_alloc(bytes, MEM_CAT_CACHE_IMAGE);
         if (e->dash_array) memcpy(e->dash_array, options->dash_array, bytes);
-        e->gradient_options.dash_array = e->dash_array;
+        e->gradient_options.dash_array = lam::up(e->dash_array);
     }
     e->stop_count = stop_count;
     e->stops = (RdtGradientStop*)mem_alloc((size_t)stop_count * sizeof(RdtGradientStop), MEM_CAT_CACHE_IMAGE);

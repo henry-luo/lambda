@@ -429,7 +429,7 @@ static void svg_animation_clear_frozen(SvgAnimationRegistry* registry, SvgAnimat
     if (!control || !control->frozen_text) return;
     registry->frozen_bytes -= strlen(control->frozen_text) + 1;
     registry->budget_owner->total_frozen_bytes -= strlen(control->frozen_text) + 1;
-    mem_free(control->frozen_text); control->frozen_text = nullptr;
+    lam::Temp<char> dropped(control->frozen_text); control->frozen_text = nullptr;
 }
 
 static bool svg_animation_control_destroy(const void* data, void* context) {
@@ -439,7 +439,7 @@ static bool svg_animation_control_destroy(const void* data, void* context) {
     registry->budget_owner->total_instance_count -= control->count;
     svg_animation_clear_frozen(registry, (SvgAnimationControl*)control);
     for (SvgAnimationInstanceTime* time = control->times; time;) {
-        SvgAnimationInstanceTime* next = time->next; mem_free(time); time = next;
+        SvgAnimationInstanceTime* next = time->next; lam::Temp<SvgAnimationInstanceTime> owned(time); time = next;
     }
     return true;
 }
@@ -464,7 +464,8 @@ static void svg_animation_prune(SvgAnimationRegistry* registry) {
     for (SvgTimeline** link = &registry->timelines; *link;) {
         SvgTimeline* timeline = *link;
         if (!timeline->driver && !dom_node_ref_validate(registry->document, timeline->root)) {
-            *link = timeline->next; registry->budget_owner->total_timeline_count--; mem_free(timeline);
+            *link = timeline->next; registry->budget_owner->total_timeline_count--;
+            lam::Temp<SvgTimeline> owned(timeline);
         } else link = &timeline->next;
     }
 }
@@ -496,11 +497,13 @@ static bool svg_animation_registry_stat(void* data, MemStatSample* sample) {
 
 static void svg_animation_registry_destroy(void* data) {
     SvgAnimationRegistry* registry = (SvgAnimationRegistry*)data;
+    // the destroy call hands the registry over
+    lam::Temp<SvgAnimationRegistry> owned(registry);
     mem_unregister(registry->memory_node);
     for (SvgAnimationUseInstance* instance = registry->instances; instance;) {
         SvgAnimationUseInstance* next = instance->next;
         registry->budget_owner->total_use_count--;
-        svg_animation_registry_destroy(instance->registry); mem_free(instance); instance = next;
+        svg_animation_registry_destroy(instance->registry); lam::Temp<SvgAnimationUseInstance> owned(instance); instance = next;
     }
     // D4.2.6/D4.5.1v3: cancel callbacks stop borrowing the document before sample storage is released.
     for (SvgTimeline* timeline = registry->timelines; timeline;) {
@@ -508,7 +511,7 @@ static void svg_animation_registry_destroy(void* data) {
         if (timeline->driver && registry->document->state)
             animation_scheduler_cancel(registry->document->state->animation_scheduler, timeline->driver);
         registry->budget_owner->total_timeline_count--;
-        mem_free(timeline); timeline = next;
+        lam::Temp<SvgTimeline> owned(timeline); timeline = next;
     }
     SvgAnimatedTargetMap::destroy(registry->targets);
     hashmap_scan(registry->controls, svg_animation_control_destroy, registry);
@@ -517,11 +520,10 @@ static void svg_animation_registry_destroy(void* data) {
     SvgAnimationControlMap::destroy(registry->controls);
     if (registry->samples) mem_pool_destroy(registry->samples);
     if (!registry->instance_host.address) registry->document->services.svg_animation_registry = nullptr;
-    mem_free(registry);
 }
 
 static SvgAnimationRegistry* svg_animation_registry_new(DomDocument* doc, DomDocument* owner, bool published) {
-    SvgAnimationRegistry* registry = (SvgAnimationRegistry*)mem_calloc(1, sizeof(*registry), MEM_CAT_RENDER);
+    SvgAnimationRegistry* registry = (SvgAnimationRegistry*)mem_calloc(1, sizeof(*registry), MEM_CAT_RENDER); // OBJ_HEAP_OK: the owner document's resource hook, or the parent registry's use instance, owns it; svg_animation_registry_destroy releases it
     if (!registry) return nullptr;
     registry->document = doc; registry->owner_document = owner; registry->generation = 1;
     registry->budget_owner = registry;
@@ -539,7 +541,7 @@ static SvgAnimationRegistry* svg_animation_registry_new(DomDocument* doc, DomDoc
         SvgAnimatedTargetMap::destroy(registry->targets);
         SvgAnimationControlMap::destroy(registry->controls);
         if (registry->samples) mem_pool_destroy(registry->samples);
-        mem_free(registry); return nullptr;
+        lam::Temp<SvgAnimationRegistry> dropped(registry); return nullptr;
     }
     return registry;
 }
@@ -588,7 +590,7 @@ static SvgTimeline* svg_animation_timeline(DomElement* element, bool create) {
         if (timeline->root.address == root && timeline->root.expected_id == root->DomNode::id) return timeline;
     if (!create) return nullptr;
     if (registry->budget_owner->total_timeline_count >= 4096) { log_error("SVG_ANIMATION_LIMIT: document exceeds 4096 timelines"); return nullptr; }
-    SvgTimeline* timeline = (SvgTimeline*)mem_calloc(1, sizeof(*timeline), MEM_CAT_RENDER);
+    SvgTimeline* timeline = (SvgTimeline*)mem_calloc(1, sizeof(*timeline), MEM_CAT_RENDER); // OBJ_HEAP_OK: the registry's timeline list owns it; prune and registry teardown release it
     if (!timeline) return nullptr;
     timeline->registry = registry; timeline->root = dom_node_ref(root);
     struct timespec wallclock;
@@ -701,7 +703,7 @@ static SvgAnimationRegistry* svg_animation_use_registry(DomElement* host, DomEle
              instance->source.address != source || instance->source.expected_id != source->DomNode::id))) {
             *link = instance->next;
             owner->budget_owner->total_use_count--;
-            svg_animation_registry_destroy(instance->registry); mem_free(instance);
+            svg_animation_registry_destroy(instance->registry); lam::Temp<SvgAnimationUseInstance> owned(instance);
             continue;
         }
         if (instance->host.address == host && instance->host.expected_id == host->DomNode::id &&
@@ -711,10 +713,10 @@ static SvgAnimationRegistry* svg_animation_use_registry(DomElement* host, DomEle
     }
     if (!found) {
         if (owner->budget_owner->total_use_count >= 4096) { log_error("SVG_ANIMATION_LIMIT: document exceeds 4096 use instances"); return nullptr; }
-        found = (SvgAnimationUseInstance*)mem_calloc(1, sizeof(*found), MEM_CAT_RENDER);
+        found = (SvgAnimationUseInstance*)mem_calloc(1, sizeof(*found), MEM_CAT_RENDER); // OBJ_HEAP_OK: the owner registry's use-instance list owns it
         if (!found) return nullptr;
         found->registry = svg_animation_registry_new(source->doc, owner->owner_document, false);
-        if (!found->registry) { mem_free(found); return nullptr; }
+        if (!found->registry) { lam::Temp<SvgAnimationUseInstance> dropped(found); return nullptr; }
         found->host = dom_node_ref(host); found->source = dom_node_ref(source);
         found->registry->instance_host = found->host; found->registry->instance_root = found->source;
         found->registry->budget_owner = owner->budget_owner;
@@ -759,7 +761,8 @@ static void svg_image_animation_tick(AnimationInstance* instance, float) {
     // picture draw state is private to this surface; immutable parsed picture owners stay at time zero.
     rdt_picture_set_animation_time(player->image->pic, seconds);
     if (player->image->pixels) {
-        mem_free(player->image->pixels); player->image->pixels = nullptr;
+        // the surface owns its decoded raster; a new time re-decodes from the picture
+        lam::free_owned(player->image->owned_pixels); player->image->pixels = nullptr;
         player->image->decoded_width = player->image->decoded_height = player->image->pitch = 0;
     }
     image_surface_bump_generation(player->image);
@@ -768,7 +771,7 @@ static void svg_image_animation_tick(AnimationInstance* instance, float) {
 
 static void svg_image_animation_release(AnimationInstance* instance) {
     SvgImageAnimation* player = (SvgImageAnimation*)instance->state;
-    if (player) { mem_unregister(player->memory_node); mem_free(player); }
+    if (player) { mem_unregister(player->memory_node); lam::Temp<SvgImageAnimation> owned(player); }
     instance->state = nullptr;
 }
 
@@ -780,13 +783,13 @@ void svg_image_animation_register(UiContext* ui, ImageSurface* image) {
     AnimationScheduler* scheduler = doc->state->animation_scheduler;
     for (AnimationInstance* driver = scheduler->first; driver; driver = driver->next)
         if (driver->type == ANIM_SVG && driver->target == image) return;
-    SvgImageAnimation* player = (SvgImageAnimation*)mem_calloc(1, sizeof(*player), MEM_CAT_RENDER);
+    SvgImageAnimation* player = (SvgImageAnimation*)mem_calloc(1, sizeof(*player), MEM_CAT_RENDER); // OBJ_HEAP_OK: the scheduler's animation instance owns the player state; svg_image_animation_release frees it
     if (!player) return;
     player->document = doc; player->image = image;
     player->memory_node = mem_register(svg_animation_memory(doc),
         MEM_KIND_CACHE, MEM_ROLE_MEDIA, "svg.image.clock", player, nullptr, svg_image_animation_stat, nullptr);
     AnimationInstance* driver = animation_instance_create(scheduler);
-    if (!driver) { mem_unregister(player->memory_node); mem_free(player); return; }
+    if (!driver) { mem_unregister(player->memory_node); lam::Temp<SvgImageAnimation> dropped(player); return; }
     driver->type = ANIM_SVG; driver->target = image; driver->state = player;
     driver->duration = INFINITY; driver->start_time = scheduler->current_time;
     driver->tick = svg_image_animation_tick;
@@ -979,7 +982,7 @@ static const char* svg_animation_base(SvgAnimationRegistry* registry, DomElement
     const char* base = svg_get_dom_presentation_property(target, name, inherits,
         nullptr, 0, nullptr, &owned);
     const char* result = base || initial ? svg_animation_copy(registry, base ? base : initial) : nullptr;
-    mem_free(owned);
+    lam::Temp<char> dropped(owned);
     return result;
 }
 
@@ -1653,7 +1656,7 @@ struct SvgAnimationTimingQuery {
         remaining(initial) {}
     ~SvgAnimationTimingQuery() {
         if (svg_animation_work) svg_animation_work->remaining -= initial - remaining;
-        for (SvgAnimationTimingEntry* entry : entries) mem_free(entry);
+        for (SvgAnimationTimingEntry* entry : entries) lam::Temp<SvgAnimationTimingEntry> owned(entry);
     }
 };
 
@@ -1790,10 +1793,10 @@ static SvgAnimationTimingEntry* svg_animation_timing_entry(SvgTimeline* timeline
     }
     if (!entry) {
         if (query->entries.size() >= 512) { query->failed = true; return nullptr; }
-        entry = (SvgAnimationTimingEntry*)mem_calloc(1, sizeof(*entry), MEM_CAT_RENDER);
+        entry = (SvgAnimationTimingEntry*)mem_calloc(1, sizeof(*entry), MEM_CAT_RENDER); // OBJ_HEAP_OK: the timing query's entry list owns it until the query ends
         if (!entry) { query->failed = true; return nullptr; }
         entry->element = animation; entry->horizon = horizon;
-        if (!query->entries.append(entry)) { mem_free(entry); query->failed = true; return nullptr; }
+        if (!query->entries.append(entry)) { lam::Temp<SvgAnimationTimingEntry> dropped(entry); query->failed = true; return nullptr; }
         query->changed = true;
     }
     // an anchored cycle borrows the last iteration; an unanchored cycle starts empty.
@@ -1877,7 +1880,7 @@ bool svg_animation_begin_end(DomElement* animation, bool end, double offset) {
         if (time->value == timeline->time + offset && time->resolved_at == timeline->time &&
             time->end == end && time->broadcast == svg_animation_event_broadcast) return true;
     if (control->count >= 256 || timeline->registry->budget_owner->total_instance_count >= 65536) return false;
-    SvgAnimationInstanceTime* time = (SvgAnimationInstanceTime*)mem_calloc(1, sizeof(*time), MEM_CAT_RENDER);
+    SvgAnimationInstanceTime* time = (SvgAnimationInstanceTime*)mem_calloc(1, sizeof(*time), MEM_CAT_RENDER); // OBJ_HEAP_OK: the animation control's instance-time list owns it
     if (!time) return false;
     time->value = timeline->time + offset; time->resolved_at = timeline->time; time->end = end;
     time->broadcast = svg_animation_event_broadcast;
@@ -2078,7 +2081,7 @@ static void svg_animation_forget_source_registry(SvgAnimationRegistry* owner, Do
         if (instance->registry->document == source) {
             *link = instance->next;
             owner->budget_owner->total_use_count--;
-            svg_animation_registry_destroy(instance->registry); mem_free(instance);
+            svg_animation_registry_destroy(instance->registry); lam::Temp<SvgAnimationUseInstance> owned(instance);
         } else {
             svg_animation_forget_source_registry(instance->registry, source);
             link = &instance->next;
@@ -2504,7 +2507,7 @@ const char* svg_animation_source_value(Element* element, const char* name) {
             const char* computed = svg_get_dom_presentation_property(target->as_element(), name, false,
                 nullptr, 0, nullptr, &owned);
             value->resolved_text = computed ? svg_animation_copy(registry, computed) : xml;
-            value->resolved = true; mem_free(owned);
+            value->resolved = true; lam::Temp<char> dropped(owned);
         }
         return value->resolved_text;
     }

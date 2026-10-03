@@ -669,7 +669,7 @@ struct DomSyntheticAttribute {
 // Highlight declarations borrow stylesheet values while preserving the
 // element-specific cascade inputs without allocating a full style tree.
 struct CssSelectionCascadeValue {
-    CssDeclaration* source;
+    lam::Up<CssDeclaration> source;
     CssSpecificity specificity;
     CssOrigin origin;
 };
@@ -680,12 +680,12 @@ struct CssSelectionStyle {
 };
 
 struct DomNamespacedAttribute {
-    const char* namespace_uri;
-    const char* local_name;
-    const char* qualified_name;
-    const char* value;
+    lam::Own<const char> namespace_uri;   // document-pool copies
+    lam::Own<const char> local_name;
+    lam::Own<const char> qualified_name;
+    lam::Own<const char> value;
     bool active;
-    DomNamespacedAttribute* next;
+    lam::Own<DomNamespacedAttribute> next;
 };
 
 DomNamespacedAttribute* dom_element_namespaced_attributes(DomElement* element);
@@ -727,7 +727,7 @@ struct DomElementExt {
     lam::OwnArr<DomSyntheticAttribute> synthetic_attributes;
     int synthetic_attribute_count;
     int synthetic_attribute_capacity;
-    DomNamespacedAttribute* namespaced_attributes;
+    lam::Own<DomNamespacedAttribute> namespaced_attributes;
     // Layout-only ruby column geometry. This lives outside InlineProp because
     // computed inline styles may be absent or canonicalized across elements.
     float ruby_column_anchor_x;
