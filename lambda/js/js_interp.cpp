@@ -2540,9 +2540,36 @@ static JsInterpCompletion js_interp_eval_initializer_with_binding_name(
     return js_interp_eval(frame, initializer);
 }
 
+// The realm-owned row of literal values for this frame's immutable parser image.
+static JsAstLiteralCacheEntry* js_interp_frame_literal_cache(JsInterpFrame* frame) {
+    if (!frame->literal_cache) {
+        const void* ast_image = frame->script->cache_template
+            ? (const void*)frame->script->cache_template : (const void*)frame->script;
+        frame->literal_cache = js_ast_literal_cache_acquire(ast_image,
+            frame->script->runtime_literal_count);
+    }
+    return frame->literal_cache;
+}
+
 static JsInterpCompletion js_interp_property_key(JsInterpFrame* frame,
         JsMemberNode* member) {
     if (!member) return js_interp_throw(ItemError);
+    if (!member->computed && member->property &&
+            member->property->node_type == AST_NODE_IDENT &&
+            ((JsIdentifierNode*)member->property)->js_property_key_slot) {
+        // A static name's canonical key is computed once per realm; the
+        // property kernels then skip their by-bytes name-pool lookup.
+        JsIdentifierNode* name = (JsIdentifierNode*)member->property;
+        uint32_t slot = name->js_property_key_slot - 1;
+        JsAstLiteralCacheEntry* cache = js_interp_frame_literal_cache(frame);
+        Item key = ItemNull;
+        if (js_ast_literal_cache_read(cache, slot, &key)) return js_interp_normal(key);
+        if (!js_canonicalize_property_string(js_interp_name_key(name->name), &key)) {
+            return js_interp_throw(ItemError);
+        }
+        if (cache) js_ast_literal_cache_write(cache, slot, key);
+        return js_interp_normal(key);
+    }
     if (!member->computed && member->property &&
             member->property->node_type == AST_NODE_IDENT) {
         Item result = js_interp_private_key_for_frame(frame,
@@ -2558,12 +2585,18 @@ static JsInterpCompletion js_interp_property_key(JsInterpFrame* frame,
     return item_is_error(result) ? js_interp_throw(result) : js_interp_normal(result);
 }
 
+// `dense_read`: a plain read may stop at a numeric index into an existing own
+// dense array element, as MIR's js_get_reference does. ToPropertyKey of a
+// Number and that element read are unobservable, so the canonical string key
+// is never built; on a hit the completion carries the element value.
 static JsInterpCompletion js_interp_member_key_after_base(JsInterpFrame* frame,
         JsMemberNode* member, Item base, bool require_object,
         bool defer_property_reference, uint64_t* key_home,
-        bool* key_deferred, uint64_t* super_base_home = NULL) {
+        bool* key_deferred, uint64_t* super_base_home = NULL,
+        bool* dense_read = NULL) {
     if (!member || !key_home) return js_interp_throw(ItemError);
     if (key_deferred) *key_deferred = false;
+    if (dense_read) *dense_read = false;
     if (!member->computed) {
         if (super_base_home) {
             Item super_base = js_super_get_base(base);
@@ -2580,6 +2613,18 @@ static JsInterpCompletion js_interp_member_key_after_base(JsInterpFrame* frame,
     }
     JsInterpCompletion raw_key = js_interp_eval(frame, (JsAstNode*)member->property);
     if (raw_key.kind != JS_INTERP_NORMAL) return raw_key;
+    if (dense_read && get_type_id(base) == LMD_TYPE_ARRAY) {
+        TypeId key_type = get_type_id(raw_key.value);
+        uint32_t index = 0;
+        Item element = ItemNull;
+        if ((key_type == LMD_TYPE_INT || key_type == LMD_TYPE_INT64 ||
+                key_type == LMD_TYPE_FLOAT) &&
+                js_property_key_to_array_index(raw_key.value, &index) &&
+                js_array_try_get_existing_own_dense_no_gc(base, index, &element)) {
+            *dense_read = true;
+            return js_interp_normal(element);
+        }
+    }
     RootFrame roots(1);
     Rooted<Item> raw_key_root(roots, raw_key.value);
     if (super_base_home) {
@@ -4169,10 +4214,12 @@ static JsInterpMemberResult js_interp_eval_member_chain(JsInterpFrame* frame,
         return {js_interp_normal(make_js_undefined()), true};
     }
     bool key_deferred = false;
+    bool dense_read = false;
     JsInterpCompletion key = js_interp_member_key_after_base(frame, member,
         object_root.get(), !super_property, false, key_root.home(), &key_deferred,
-        super_property ? super_base_root.home() : NULL);
-    if (key.kind != JS_INTERP_NORMAL) return {key, false};
+        super_property ? super_base_root.home() : NULL,
+        super_property ? NULL : &dense_read);
+    if (key.kind != JS_INTERP_NORMAL || dense_read) return {key, false};
     Item result = super_property
         ? js_super_property_get_from_base(object_root.get(), super_base_root.get(),
             key_root.get())
@@ -4251,7 +4298,11 @@ static JsInterpCompletion js_interp_eval(JsInterpFrame* frame, JsAstNode* node) 
         return js_interp_normal(replay_value);
     }
     JsInterpCompletion result = js_interp_eval_raw(frame, node);
-    if (result.kind == JS_INTERP_NORMAL && !js_interp_expression_may_suspend(node) &&
+    // Only a suspended activation records replay values. Test it first: the
+    // may-suspend question walks the subtree, and asking it on every
+    // evaluation of an ordinary frame was 18-31% of T0 time.
+    if (result.kind == JS_INTERP_NORMAL && frame->suspended_activation &&
+            !js_interp_expression_may_suspend(node) &&
             !js_interp_expression_replay_record(frame, node, result.value)) {
         return js_interp_throw(ItemError);
     }
@@ -4272,12 +4323,7 @@ static JsInterpCompletion js_interp_eval_raw(JsInterpFrame* frame, JsAstNode* no
                     : js_make_string_len(literal->value.string_value->chars,
                         literal->value.string_value->len));
             }
-            if (!frame->literal_cache) {
-                const void* ast_image = frame->script->cache_template
-                    ? (const void*)frame->script->cache_template : (const void*)frame->script;
-                frame->literal_cache = js_ast_literal_cache_acquire(ast_image,
-                    frame->script->runtime_literal_count);
-            }
+            js_interp_frame_literal_cache(frame);
             Item cached = ItemNull;
             if (js_ast_literal_cache_read(frame->literal_cache,
                     literal->runtime_literal_slot, &cached)) {
@@ -6537,17 +6583,33 @@ static void js_interp_p2_scan_node(JsAstNode* node,
     }
 }
 
-// D8.1.3v22: a definition is compiled only on a hot hit; the default is
+// D8.1.3v22: a definition is compiled only on a hot hit; the defaults are
 // provisional until release profiling.
 #define JS_JIT_THRESHOLD_DEFAULT 1000
+#define JS_JIT_BACKEDGE_DEFAULT 10000
 
-static int js_interp_p2_threshold(void) {
-    const char* text = getenv("JS_JIT_THRESHOLD");
-    if (!text || !text[0]) return JS_JIT_THRESHOLD_DEFAULT;
+static uint32_t js_interp_policy_threshold(const char* name, uint32_t fallback) {
+    const char* text = getenv(name);
+    if (!text || !text[0]) return fallback;
     char* end = NULL;
     long threshold = strtol(text, &end, 10);
     return end && !*end && threshold > 0 && threshold <= INT_MAX
-        ? (int)threshold : JS_JIT_THRESHOLD_DEFAULT;
+        ? (uint32_t)threshold : fallback;
+}
+
+// The promotion policy is fixed for a runtime once its first interpreted call
+// asks for it; the selector and knobs are not re-read from the environment on
+// every call (getenv was 7% of a call-heavy T0 profile).
+static Runtime* js_interp_promotion_policy(void) {
+    Runtime* runtime = context ? context->runtime : NULL;
+    if (!runtime || runtime->js_promotion_policy_resolved) return runtime;
+    runtime->js_promotion_auto = js_execution_auto_requested();
+    runtime->js_promotion_call_threshold = js_interp_policy_threshold(
+        "JS_JIT_THRESHOLD", JS_JIT_THRESHOLD_DEFAULT);
+    runtime->js_promotion_backedge_threshold = js_interp_policy_threshold(
+        "JS_JIT_BACKEDGE", JS_JIT_BACKEDGE_DEFAULT);
+    runtime->js_promotion_policy_resolved = true;
+    return runtime;
 }
 
 static const char* js_interp_p2_admission_reason(JsFunction* function,
@@ -6589,11 +6651,12 @@ static const char* js_interp_p2_admission_reason(JsFunction* function,
 }
 
 bool js_interp_promote_function_if_hot(JsFunction* function) {
-    if (!function || !js_execution_auto_requested() ||
-            js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
+    if (!function || js_fn_body_kind(function) != JS_FUNCTION_BODY_AST ||
             !function->code) {
         return false;
     }
+    Runtime* policy = js_interp_promotion_policy();
+    if (!policy || !policy->js_promotion_auto) return false;
     JsCallableCode* code = function->code;
     FnPromotionCell* promotion = &code->p2_promotion;
     if (promotion->state == FN_PROMOTION_COMPILED ||
@@ -6602,7 +6665,7 @@ bool js_interp_promote_function_if_hot(JsFunction* function) {
         return false;
     }
     if (promotion->call_count != UINT32_MAX) promotion->call_count++;
-    if (promotion->call_count < (uint32_t)js_interp_p2_threshold()) return false;
+    if (promotion->call_count < policy->js_promotion_call_threshold) return false;
 
     AstFunctionId function_id = AST_FUNCTION_ID_INVALID;
     const char* reason = js_interp_p2_admission_reason(function, &function_id);

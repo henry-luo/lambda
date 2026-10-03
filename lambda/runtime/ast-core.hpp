@@ -946,6 +946,11 @@ typedef struct AstIdentNode : AstNode {
     // binder, type or pattern name). Sits in tail padding: identifiers are
     // also created by morphing other nodes in place, so the size must not grow.
     bool interp_frame_slot_read;
+    // LambdaJS: 1-based slot of a static member name in the script's realm
+    // literal cache, which holds its canonical property key (0 = none). The
+    // parser assigns it like a string literal's slot; the AST stores no
+    // runtime String (D4.6.2v2). Also in tail padding.
+    uint32_t js_property_key_slot;
 } AstIdentNode;
 // name, entry, capture owner, then slot + flag inside one padded word
 static_assert(sizeof(AstIdentNode) == sizeof(AstNode) + 4 * sizeof(void*),
