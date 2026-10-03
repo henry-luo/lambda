@@ -6779,9 +6779,38 @@ static Item interp_call_internal(Function* fn, const Item* args, int argc,
                     // until this scope closes, but it must not be an active
                     // caller while the native entry can call back into T0.
                     List tail_args = {.length = params, .items = (Item*)(void*)frame->slots};
+                    // A variadic activation's rest list is not a fixed slot:
+                    // passing only `params` words made the satellite's adapter
+                    // see no extras and install its no-rest sentinel, so
+                    // `varg()` read empty after the handoff. Re-spread the
+                    // activation's current rest list (kept rooted by its frame
+                    // slot) after the fixed arguments.
+                    Item* spread = NULL;
+                    if (is_variadic && frame->vargs_index < frame->slot_count) {
+                        List* rest_list = (List*)(uintptr_t)frame->slots[frame->vargs_index];
+                        int64_t rest_len = rest_list ? rest_list->length : 0;
+                        if (rest_len > 0) {
+                            spread = (Item*)mem_calloc((size_t)(params + rest_len),
+                                sizeof(Item), MEM_CAT_EVAL);
+                            if (!spread) {
+                                result = ItemError;
+                                break;
+                            }
+                            for (int p = 0; p < (int)params; p++) {
+                                spread[p] = (Item){.item = frame->slots[p]};
+                            }
+                            for (int64_t r = 0; r < rest_len; r++) {
+                                spread[params + r] = rest_list->items[r];
+                            }
+                            tail_args.length = params + rest_len;
+                            tail_args.items = spread;
+                        }
+                    }
                     frame->st->top = frame->caller;
                     st->depth++;
-                    return fn_call(callable, &tail_args);
+                    Item tail_result = fn_call(callable, &tail_args);
+                    if (spread) mem_free(spread);
+                    return tail_result;
                 }
                 if (frame->signal != EvalSignal::TAIL_CALL) break;
                 frame->signal = EvalSignal::NORMAL;
