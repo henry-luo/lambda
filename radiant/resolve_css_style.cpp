@@ -2416,17 +2416,13 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
         str_copy(copy, url_len + 1, url, url_len);
         return copy;
     }
-    char* resolved = radiant_resolve_resource_path(
-        url, base_path, false, MEM_CAT_TEMP);
+    lam::Temp<char> resolved(radiant_resolve_resource_path(
+        url, base_path, false, MEM_CAT_TEMP));
     if (!resolved) return nullptr;
-    size_t resolved_len = strlen(resolved);
+    size_t resolved_len = strlen(resolved.get());
     char* copy = (char*)alloc_prop(lycon, resolved_len + 1);
-    if (!copy) {
-        mem_free(resolved);
-        return nullptr;
-    }
-    str_copy(copy, resolved_len + 1, resolved, resolved_len);
-    mem_free(resolved);
+    if (!copy) return nullptr;
+    str_copy(copy, resolved_len + 1, resolved.get(), resolved_len);
     return copy;
 }
 
@@ -4049,7 +4045,7 @@ static GridTrackSize* parse_repeat_function(const CssValue* val) {
     if (actual_track_count == 0) {
         return NULL;
     }
-    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT);
+    GridTrackSize* track_size = (GridTrackSize*)mem_calloc(1, sizeof(GridTrackSize), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: owned by its GridTrackList; destroy_grid_track_size releases it
     if (!track_size) {
         return NULL;
     }

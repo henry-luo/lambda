@@ -409,8 +409,7 @@ static void release_grid_prop(GridProp* grid) {
         for (int i = 0; i < grid->area_count; i++) {
             destroy_grid_area(&grid->grid_areas[i]);
         }
-        mem_free(grid->grid_areas);
-        grid->grid_areas = nullptr;
+        lam::free_owned(grid->grid_areas);
         grid->area_count = 0;
         grid->allocated_areas = 0;
     }
@@ -483,10 +482,7 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
         form->placeholder_font = nullptr;
     }
     form_control_prop_release(elem, form);
-    if (form->heap_allocated) {
-        mem_free(form);
-        elem->form = nullptr;
-    }
+    if (form->heap_allocated) lam::free_owned(elem->form);
 }
 
 static void clear_item_prop(DomElement* elem, ViewTree*) {

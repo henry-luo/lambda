@@ -137,7 +137,7 @@ static bool cg_ensure_clip_capacity(int needed_depth) {
         memcpy(grown, s_cg_clip_stack, (size_t)s_cg_clip_depth * sizeof(CGClipEntry));
     }
     if (s_cg_clip_stack != s_cg_clip_inline_stack) {
-        mem_free(s_cg_clip_stack);
+        lam::Temp<CGClipEntry> old_stack(s_cg_clip_stack);  // the grown stack replaces the heap one
     }
     s_cg_clip_stack = grown;
     s_cg_clip_capacity = new_capacity;
@@ -147,7 +147,7 @@ static bool cg_ensure_clip_capacity(int needed_depth) {
 
 static void cg_release_heap_clip_stack_if_empty() {
     if (s_cg_clip_depth != 0 || s_cg_clip_stack == s_cg_clip_inline_stack) return;
-    mem_free(s_cg_clip_stack);
+    lam::Temp<CGClipEntry> heap_stack(s_cg_clip_stack);
     s_cg_clip_stack = s_cg_clip_inline_stack;
     s_cg_clip_capacity = RDT_CG_INITIAL_CLIP_DEPTH;
 }
@@ -687,12 +687,10 @@ void rdt_stroke_path(RdtVector* vec, RdtPath* p, Color color, float width,
 static CGGradientRef create_cg_gradient(CGColorSpaceRef colorspace,
                                          const RdtGradientStop* stops, int count) {
     // Gradient stop counts can come from parsed SVG/CSS, so do not size stack buffers from them.
-    CGFloat* components = (CGFloat*)mem_calloc((size_t)count * 4, sizeof(CGFloat), MEM_CAT_RENDER);
-    CGFloat* locations = (CGFloat*)mem_calloc((size_t)count, sizeof(CGFloat), MEM_CAT_RENDER);
+    lam::Temp<CGFloat> components = lam::temp_array_zero<CGFloat>((size_t)count * 4, MEM_CAT_RENDER);
+    lam::Temp<CGFloat> locations = lam::temp_array_zero<CGFloat>((size_t)count, MEM_CAT_RENDER);
     if (!components || !locations) {
         log_error("RDT_CG_GRADIENT_ALLOC failed for %d gradient stop(s)", count);
-        mem_free(locations);
-        mem_free(components);
         return nullptr;
     }
     for (int i = 0; i < count; i++) {
@@ -702,10 +700,7 @@ static CGGradientRef create_cg_gradient(CGColorSpaceRef colorspace,
         components[i * 4 + 3] = stops[i].a / 255.0;
         locations[i] = stops[i].offset;
     }
-    CGGradientRef gradient = CGGradientCreateWithColorComponents(colorspace, components, locations, count);
-    mem_free(locations);
-    mem_free(components);
-    return gradient;
+    return CGGradientCreateWithColorComponents(colorspace, components.get(), locations.get(), count);
 }
 
 static CGGradientRef cg_begin_gradient_fill(RdtVectorImpl* cg, RdtPath* path,
@@ -896,8 +891,8 @@ static void cg_svg_shared_release(RdtSvgShared* shared) {
     if (shared->ref_count <= 0) destroy = true;
     pthread_mutex_unlock(&g_svg_shared_mutex);
     if (destroy) {
+        lam::Temp<RdtSvgShared> owned(shared);  // the last reference releases the shared tree
         if (shared->pool) pool_destroy(shared->pool);
-        mem_free(shared);
     }
 }
 
@@ -916,15 +911,15 @@ static RdtPicture* cg_svg_picture_create(const char* data, int size, const char*
     }
     input->ui_mode = false;
 
-    char* buf = (char*)mem_alloc((size_t)size + 1, MEM_CAT_RENDER);
+    lam::Temp<char> buf = lam::temp_array<char>((size_t)size + 1, MEM_CAT_RENDER);
     if (!buf) {
         pool_destroy(pool);
         return nullptr;
     }
-    memcpy(buf, data, (size_t)size);
+    memcpy(buf.get(), data, (size_t)size);
     buf[size] = '\0';
-    Element* svg_root = html5_parse_svg_document(input, buf, nullptr);
-    mem_free(buf);
+    Element* svg_root = html5_parse_svg_document(input, buf.get(), nullptr);
+    buf.reset();
 
     if (!input->root.item || input->root.item == ITEM_ERROR || !svg_root) {
         log_error("cg_svg_picture_create: failed to parse SVG picture");
@@ -966,28 +961,25 @@ static char* cg_read_file_bytes(const char* path, int* out_size) {
         fclose(fp);
         return nullptr;
     }
-    char* buf = (char*)mem_alloc((size_t)fsz, MEM_CAT_RENDER);
+    lam::Temp<char> buf = lam::temp_array<char>((size_t)fsz, MEM_CAT_RENDER);
     if (!buf) {
         fclose(fp);
         return nullptr;
     }
-    size_t rd = fread(buf, 1, (size_t)fsz, fp);
+    size_t rd = fread(buf.get(), 1, (size_t)fsz, fp);
     fclose(fp);
     if (rd == 0) {
-        mem_free(buf);
         return nullptr;
     }
     if (out_size) *out_size = (int)rd;
-    return buf;
+    return buf.release();
 }
 
 static RdtPicture* cg_svg_picture_load_file(const char* path) {
     int size = 0;
-    char* data = cg_read_file_bytes(path, &size);
+    lam::Temp<char> data(cg_read_file_bytes(path, &size));
     if (!data) return nullptr;
-    RdtPicture* pic = cg_svg_picture_create(data, size, path);
-    mem_free(data);
-    return pic;
+    return cg_svg_picture_create(data.get(), size, path);
 }
 
 static const char* cg_picture_elem_attr(Element* element, const char* attr_name) {
@@ -1254,7 +1246,7 @@ void rdt_picture_free(RdtPicture* pic) {
     if (pic->image) CGImageRelease(pic->image);
     if (pic->paint) tvg_paint_unref(pic->paint, true);
     if (pic->svg) cg_svg_shared_release(pic->svg);
-    if (pic->source_path) mem_free(pic->source_path);
+    lam::Temp<char> source_path(pic->source_path);
     free(pic);
 }
 

@@ -188,8 +188,7 @@ static void on_snapshot_ready(GObject* object, GAsyncResult* result, gpointer us
     int pitch = cw * 4;
 
     if (surf->width != cw || surf->height != ch || !surf->pixels) {
-        if (surf->pixels) mem_free(surf->pixels);
-        surf->pixels = mem_calloc((size_t)(pitch * ch), 1, MEM_CAT_LAYOUT);
+        image_surface_adopt_pixels(surf, mem_calloc((size_t)(pitch * ch), 1, MEM_CAT_LAYOUT));
         surf->width  = cw;
         surf->height = ch;
         surf->pitch  = pitch;

@@ -154,7 +154,7 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
 
     // read CSS content from local file
     size_t css_size = 0;
-    char* css_content = read_file_to_string(res->local_path, &css_size);
+    lam::Temp<char> css_content(read_file_to_string(res->local_path, &css_size));
     if (!css_content) {
         log_error("network: failed to read CSS file: %s", res->local_path);
         return;
@@ -162,7 +162,6 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
     if (css_size == 0) {
         // Empty stylesheets are valid CSS; treat them as no-op resources so
         // zero-byte downloads do not surface as parser/read failures.
-        mem_free(css_content);
         log_debug("network: skipping empty CSS resource: %s", res->url);
         return;
     }
@@ -176,18 +175,16 @@ void process_css_resource(NetworkResource* res, struct DomDocument* doc) {
         engine = css_engine_create(doc->document_pool);
         if (!engine) {
             log_error("network: failed to create CSS engine");
-            mem_free(css_content);
             return;
         }
     } else {
         log_error("network: no CSS engine or pool available");
-        mem_free(css_content);
         return;
     }
 
     // parse the stylesheet
-    CssStylesheet* sheet = css_parse_stylesheet(engine, css_content, res->url);
-    mem_free(css_content);  // content was copied by parser
+    CssStylesheet* sheet = css_parse_stylesheet(engine, css_content.get(), res->url);
+    css_content.reset();  // content was copied by parser
 
     if (!sheet) {
         log_error("network: failed to parse CSS: %s", res->url);
@@ -251,7 +248,7 @@ void process_image_resource(NetworkResource* res, struct DomElement* img_element
         if (img_surface) {
             img_surface->width = img_width;
             img_surface->height = img_height;
-            img_surface->source_path = mem_strdup(res->local_path, MEM_CAT_IMAGE);
+            img_surface->source_path = lam::own(mem_strdup(res->local_path, MEM_CAT_IMAGE));
             log_debug("network: image metadata loaded lazily: %dx%d from %s",
                       img_width, img_height, res->local_path);
         }
@@ -432,10 +429,10 @@ void process_font_resource(NetworkResource* res, const struct CssFontFaceDescrip
     source.path = res->local_path;
     source.format = NULL;
 
-    FontFaceUnicodeRange* unicode_ranges = nullptr;
+    lam::Temp<FontFaceUnicodeRange> unicode_ranges;
     if (font_face->unicode_range_count > 0 && font_face->unicode_ranges) {
-        unicode_ranges = (FontFaceUnicodeRange*)mem_calloc(
-            (size_t)font_face->unicode_range_count, sizeof(FontFaceUnicodeRange), MEM_CAT_NETWORK);
+        unicode_ranges = lam::temp_array_zero<FontFaceUnicodeRange>(
+            (size_t)font_face->unicode_range_count, MEM_CAT_NETWORK);
         if (unicode_ranges) {
             for (int i = 0; i < font_face->unicode_range_count; i++) {
                 unicode_ranges[i].start_codepoint = font_face->unicode_ranges[i].start_codepoint;
@@ -450,14 +447,13 @@ void process_font_resource(NetworkResource* res, const struct CssFontFaceDescrip
     face_desc.slant = fs;
     face_desc.sources = &source;
     face_desc.source_count = 1;
-    face_desc.unicode_ranges = unicode_ranges;
+    face_desc.unicode_ranges = unicode_ranges.get();
     face_desc.unicode_range_count = unicode_ranges ? font_face->unicode_range_count : 0;
 
     if (font_face_register(uicon->font_ctx, &face_desc)) {
         log_debug("network: registered font local path for '%s': %s",
                   face_desc.family, res->local_path);
     }
-    if (unicode_ranges) mem_free(unicode_ranges);
 
     // schedule reflow for document to apply new font
     if (res->manager && res->manager->document) {
@@ -479,11 +475,10 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element) 
 
     // read SVG file content
     size_t svg_size = 0;
-    char* svg_content = read_file_to_string(res->local_path, &svg_size);
+    lam::Temp<char> svg_content(read_file_to_string(res->local_path, &svg_size));
     if (!svg_content || svg_size == 0) {
-        // Empty downloads still allocate a NUL buffer; free it before
-        // treating the external SVG reference as unavailable.
-        if (svg_content) mem_free(svg_content);
+        // Empty downloads still allocate a NUL buffer; the Temp frees it before
+        // the external SVG reference is treated as unavailable.
         log_error("network: failed to read SVG file: %s", res->local_path);
         return;
     }
@@ -509,8 +504,7 @@ void process_svg_resource(NetworkResource* res, struct DomElement* use_element) 
 
     log_debug("network: SVG resource loaded, target_id=%s, size=%zu bytes",
               target_id ? target_id : "(none)", svg_size);
-
-    mem_free(svg_content);
+    svg_content.reset();
 
     // schedule reflow so the <use> element can incorporate the SVG
     if (res->manager) {
@@ -553,10 +547,9 @@ void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
         return;
     }
     size_t content_size = 0;
-    char* content = read_file_to_string(res->local_path, &content_size);
+    lam::Temp<char> content(read_file_to_string(res->local_path, &content_size));
     if (!content || content_size == 0) {
         log_warn("network: failed to read cached script: %s", res->local_path);
-        if (content) mem_free(content);
         return;
     }
 
@@ -565,7 +558,7 @@ void process_script_resource(NetworkResource* res, struct DomDocument* doc) {
     // The script content is available in the cache file for later execution
     // via flush_layout_updates() or a future incremental script runner pass.
     log_info("network: script cached for deferred execution: %s (%zu bytes)", res->url, content_size);
-    mem_free(content);
+    content.reset();
 
     // Schedule reflow so the main thread can pick up and execute this script
     if (res->manager && doc->root) {

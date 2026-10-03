@@ -3457,7 +3457,7 @@ static void distribute_rowspan_heights(ViewTable* table, TableMetadata* meta) {
         }
     }
     for (int i = 0; i < rowspan_cells->length; i++) {
-        mem_free(rowspan_cells->data[i]);
+        lam::Temp<RowspanCell> cell((RowspanCell*)rowspan_cells->data[i]);
     }
     arraylist_free(rowspan_cells);
 }
@@ -7019,7 +7019,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             } else {
                 ColspanWidthContribution* contribution =
-                    (ColspanWidthContribution*)mem_calloc(1, sizeof(ColspanWidthContribution), MEM_CAT_LAYOUT);
+                    (ColspanWidthContribution*)mem_calloc(1, sizeof(ColspanWidthContribution), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: colspan contribution; released after the colspan pass in this function
                 contribution->cell = tcell;
                 contribution->col = col;
                 contribution->span = tcell->td->col_span;
@@ -7034,8 +7034,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     for (int i = 0; i < colspan_widths->length; i++) {
         ColspanWidthContribution* contribution =
             (ColspanWidthContribution*)colspan_widths->data[i];
+        lam::Temp<ColspanWidthContribution> owned(contribution);  // applied once, then released
         apply_colspan_width_contribution(table, meta, contribution);
-        mem_free(contribution);
     }
     arraylist_free(colspan_widths);
     for (int c = 0; c < columns; c++) {

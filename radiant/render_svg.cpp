@@ -99,10 +99,9 @@ static void svg_lower_paint_list(SvgRenderContext* ctx) {
 
 static void svg_append_base64(StrBuf* out, const uint8_t* data, size_t len) {
     if (!out || !data) return;
-    char* b64 = base64_encode_alloc(data, len, BASE64_STD);
+    lam::Temp<char> b64(base64_encode_alloc(data, len, BASE64_STD));
     if (!b64) return;
-    strbuf_append_str(out, b64);
-    mem_free(b64);
+    strbuf_append_str(out, b64.get());
 }
 
 static bool svg_emit_raster_fallback_image(SvgRenderContext* ctx,
@@ -180,8 +179,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     NEXT_RECT:
     float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
 
-    char* text_content = render_text_create_export_segment(
-        str, text_rect, text_transform, true);
+    lam::Temp<char> text_content(render_text_create_export_segment(
+        str, text_rect, text_transform, true));
 
     // Calculate natural text width and gap count for justify rendering.
     // NOTE: includes trailing spaces. The layout's count_justify_opportunities
@@ -192,9 +191,9 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     float natural_width = 0.0f;
     int space_count = 0;
     if (font_box_handle(&ctx->font)) {
-        size_t content_len = strlen(text_content);
+        size_t content_len = strlen(text_content.get());
 
-        unsigned char* scan = (unsigned char*)text_content;
+        unsigned char* scan = (unsigned char*)text_content.get();
         unsigned char* content_end = scan + content_len;
         while (scan < content_end) {  // Only scan up to content_end
             if (is_space(*scan)) {
@@ -268,8 +267,8 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         PaintGlyphRun run = {};
         run.font = lam::up(&ctx->font);
         run.color = ctx->color;
-        run.text = lam::up(text_content);
-        run.text_len = (int)strlen(text_content); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
+        run.text = text_content.get();
+        run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.
         run.owns_text = ctx->effect_fallback.active;
@@ -285,15 +284,15 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         paint_glyph_run(svg_active_paint_list(ctx), &run);
         svg_lower_paint_list(ctx);
 
-        if (!run.owns_text) mem_free(text_content);
+        if (run.owns_text) text_content.release();  // the paint list keeps the text
         text_rect = text_rect->next;
         if (text_rect) { goto NEXT_RECT; }
         return;
     }
 
-    size_t transformed_len = strlen(text_content);
+    size_t transformed_len = strlen(text_content.get());
     StrBuf* escaped_text = strbuf_new_cap(transformed_len * 2);
-    escape_append(escaped_text, text_content, transformed_len, ESCAPE_RULES_HTML_TEXT,
+    escape_append(escaped_text, text_content.get(), transformed_len, ESCAPE_RULES_HTML_TEXT,
                   ESCAPE_RULES_HTML_TEXT_COUNT, ESCAPE_CTRL_NONE);
 
     svg_indent(ctx);
@@ -360,7 +359,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
 
-    mem_free(text_content);  strbuf_free(escaped_text);
+    text_content.reset();  strbuf_free(escaped_text);
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -1337,7 +1336,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.ui_context = uicon;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg.backdrop.arena");
+    ctx.page_backdrop_arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.svg.backdrop.arena");
     if (ctx.page_backdrop_arena) {
         dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
         ctx.page_backdrop_ready = true;
@@ -1452,15 +1451,12 @@ static int render_export_session_to_svg(RenderExportSession* session, const char
         // SVG output dimensions are scaled; coordinates inside are in CSS pixels with viewBox transform
         int svg_width = (int)(session->content_width * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
         int svg_height = (int)(session->content_height * session->output_scale); // INT_CAST_OK: SVG dimensions are integer pixels.
-        char* svg_content = render_view_tree_to_svg(ui_context, doc->view_tree->root,
-                                                   svg_width, svg_height, doc->state);
+        lam::Temp<char> svg_content(render_view_tree_to_svg(ui_context, doc->view_tree->root,
+                                                   svg_width, svg_height, doc->state));
         if (svg_content) {
-            if (save_svg_to_file(svg_content, svg_file)) {
+            if (save_svg_to_file(svg_content.get(), svg_file)) {
                 log_info("Successfully rendered HTML to SVG: %s", svg_file);
-                mem_free(svg_content);
                 return 0;
-            } else {
-                mem_free(svg_content);
             }
         } else {
         }

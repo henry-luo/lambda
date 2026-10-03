@@ -495,27 +495,23 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
     const char* preload = is_video ? element->get_attribute("preload") : nullptr;
     bool preload_none = preload && strcmp(preload, "none") == 0;
     RdtVideo* media = nullptr;
-    char* selected_file_path = nullptr;
+    lam::Temp<char> selected_file_path;
     DomNode* source_cursor = nullptr;
     const char* src = nullptr;
     while ((src = html_media_next_source(media_element, &source_cursor))) {
         Url* abs_url = parse_url(doc->url, src);
-        char* file_path = abs_url ? url_to_local_path(abs_url) : nullptr;
+        lam::Temp<char> file_path(abs_url ? url_to_local_path(abs_url) : nullptr);
         if (abs_url) url_destroy(abs_url);
         if (!file_path) continue;
 
         RdtVideo* candidate = rdt_video_create(&media_callbacks, doc->state);
-        if (!candidate) {
-            mem_free(file_path);
-            continue;
-        }
-        if (!preload_none && rdt_video_open_file(candidate, file_path) != 0) {
+        if (!candidate) continue;
+        if (!preload_none && rdt_video_open_file(candidate, file_path.get()) != 0) {
             rdt_video_destroy(candidate);
-            mem_free(file_path);
             continue;
         }
         media = candidate;
-        selected_file_path = file_path;
+        selected_file_path.reset(file_path.release());
         break;
     }
     if (!media) return;
@@ -534,12 +530,11 @@ static void initialize_html_media(LayoutContext* lycon, DomNode* element,
         }
 
         if (element->has_attribute("autoplay")) {
-            if (preload_none) rdt_video_open_file(media, selected_file_path);
+            if (preload_none) rdt_video_open_file(media, selected_file_path.get());
             rdt_video_play(media);
             if (doc->state) doc->state->has_active_video = true;
         }
     }
-    mem_free(selected_file_path);
 }
 
 static DomElement* parent_table_element(DomNode* element) {

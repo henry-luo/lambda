@@ -57,11 +57,9 @@ char* radiant_document_resource_base(DomDocument* doc, MemCategory category) {
         const char* href = url_get_href(doc->url);
         return href ? mem_strdup(href, category) : nullptr;
     }
-    char* local = url_to_local_path(doc->url);
+    lam::Temp<char> local(url_to_local_path(doc->url));
     if (!local) return nullptr;
-    char* result = mem_strdup(local, category);
-    mem_free(local);
-    return result;
+    return mem_strdup(local.get(), category);
 }
 
 static char* radiant_try_wpt_root(const char* root, const char* href,
@@ -76,11 +74,10 @@ static char* radiant_try_wpt_root(const char* root, const char* href,
         const char* query = strpbrk(path, "?#");
         size_t path_len = query ? (size_t)(query - path) : strlen(path);
         size_t separator = i == 0 ? 0 : 1;
-        char* candidate = mem_join3(root, root_len, separator ? "/" : "", separator,
-                                    path, path_len, category);
+        lam::Temp<char> candidate(mem_join3(root, root_len, separator ? "/" : "", separator,
+                                            path, path_len, category));
         if (!candidate) continue;
-        if (file_exists(candidate)) return candidate;
-        mem_free(candidate);
+        if (file_exists(candidate.get())) return candidate.release();
     }
     return nullptr;
 }
@@ -90,11 +87,9 @@ static char* radiant_try_wpt_prefix(const char* prefix, size_t prefix_len,
                                     MemCategory category) {
     if (!prefix || prefix_len == 0) return nullptr;
     size_t suffix_len = suffix ? strlen(suffix) : 0;
-    char* root = mem_join2(prefix, prefix_len, suffix, suffix_len, category);
+    lam::Temp<char> root(mem_join2(prefix, prefix_len, suffix, suffix_len, category));
     if (!root) return nullptr;
-    char* result = radiant_try_wpt_root(root, href, category);
-    mem_free(root);
-    return result;
+    return radiant_try_wpt_root(root.get(), href, category);
 }
 
 char* radiant_resolve_wpt_resource_path(const char* href, Url* base_url,
@@ -102,26 +97,20 @@ char* radiant_resolve_wpt_resource_path(const char* href, Url* base_url,
     if (!href || href[0] != '/' || href[1] == '/') return nullptr;
 
     if (base_url) {
-        char* base_local = url_to_local_path(base_url);
+        lam::Temp<char> base_local(url_to_local_path(base_url));
         if (base_local) {
-            const char* wpt_marker = strstr(base_local, "/ref/wpt/");
+            const char* wpt_marker = strstr(base_local.get(), "/ref/wpt/");
             if (wpt_marker) {
-                size_t root_len = (size_t)(wpt_marker - base_local) + strlen("/ref/wpt");
-                char* resolved = radiant_try_wpt_prefix(base_local, root_len,
+                size_t root_len = (size_t)(wpt_marker - base_local.get()) + strlen("/ref/wpt");
+                char* resolved = radiant_try_wpt_prefix(base_local.get(), root_len,
                                                         nullptr, href, category);
-                if (resolved) {
-                    mem_free(base_local);
-                    return resolved;
-                }
+                if (resolved) return resolved;
             }
             char candidate[4096];
             if (radiant_resolve_layout_support_resource_path(
-                    href, base_local, candidate, sizeof(candidate))) {
-                char* resolved = mem_strdup(candidate, category);
-                mem_free(base_local);
-                return resolved;
+                    href, base_local.get(), candidate, sizeof(candidate))) {
+                return mem_strdup(candidate, category);
             }
-            mem_free(base_local);
         }
     }
 
@@ -169,20 +158,14 @@ char* radiant_resolve_resource_path(const char* href, const char* base_path,
     }
 
     bool base_valid = base_url && base_url->is_valid;
-    char* resolved = radiant_resolve_resource_url(href, base_url, category);
+    lam::Temp<char> resolved(radiant_resolve_resource_url(href, base_url, category));
     if (base_url) url_destroy(base_url);
     if (!resolved) return nullptr;
-    if (strncmp(resolved, "file:", 5) == 0) {
-        Url* file_url = url_parse(resolved);
-        char* local = file_url ? url_to_local_path(file_url) : nullptr;
+    if (strncmp(resolved.get(), "file:", 5) == 0) {
+        Url* file_url = url_parse(resolved.get());
+        lam::Temp<char> local(file_url ? url_to_local_path(file_url) : nullptr);
         if (file_url) url_destroy(file_url);
-        mem_free(resolved);
-        if (local) {
-            char* result = mem_strdup(local, category);
-            mem_free(local);
-            return result;
-        }
-        return nullptr;
+        return local ? mem_strdup(local.get(), category) : nullptr;
     }
     if (base_path && !radiant_url_is_http(base_path) &&
         href[0] != '/' && !url_is_absolute_url(href) &&
@@ -192,13 +175,10 @@ char* radiant_resolve_resource_path(const char* href, const char* base_path,
             size_t dir_len = (size_t)(slash - base_path) + 1;
             size_t href_len = strlen(href);
             char* joined = mem_join2(base_path, dir_len, href, href_len, category);
-            if (joined) {
-                mem_free(resolved);
-                return joined;
-            }
+            if (joined) return joined;
         }
     }
-    return resolved;
+    return resolved.release();
 }
 
 static bool radiant_resource_is_shared_res_href(const char* href) {
@@ -256,30 +236,26 @@ bool radiant_resolve_shared_data_resource_path(const char* href, const char* bas
     }
 
     const char* rel_href = (href[0] == '.' && href[1] == '/') ? href + 2 : href;
-    char* local_base = radiant_resource_base_to_local_path(base_path);
+    lam::Temp<char> local_base(radiant_resource_base_to_local_path(base_path));
     if (!local_base) return false;
 
     size_t data_root_len = 0;
-    bool found_root = radiant_resource_data_root_len(local_base, &data_root_len);
+    bool found_root = radiant_resource_data_root_len(local_base.get(), &data_root_len);
     if (!found_root) {
-        mem_free(local_base);
         return false;
     }
 
     size_t href_len = strlen(rel_href);
     if (data_root_len + 1 + href_len + 1 > out_size) {
-        mem_free(local_base);
         return false;
     }
 
     // Local file runs open category pages directly, but browser references serve
     // shared res/... assets from the layout/data root.
-    str_copy(out_path, out_size, local_base, data_root_len);
+    str_copy(out_path, out_size, local_base.get(), data_root_len);
     out_path[data_root_len] = '/';
     memcpy(out_path + data_root_len + 1, rel_href, href_len);
     out_path[data_root_len + 1 + href_len] = '\0';
-
-    mem_free(local_base);
     return access(out_path, R_OK) == 0;
 }
 
@@ -335,12 +311,11 @@ bool radiant_resolve_layout_relative_resource_path(const char* source_path,
     if (!source_path || !base_path || !out_path || out_size == 0) return false;
     if (access(source_path, R_OK) == 0) return false;
 
-    char* local_base = radiant_resource_base_to_local_path(base_path);
+    lam::Temp<char> local_base(radiant_resource_base_to_local_path(base_path));
     if (!local_base) return false;
 
     size_t data_root_len = 0;
-    if (!radiant_resource_data_root_len(local_base, &data_root_len)) {
-        mem_free(local_base);
+    if (!radiant_resource_data_root_len(local_base.get(), &data_root_len)) {
         return false;
     }
 
@@ -348,22 +323,19 @@ bool radiant_resolve_layout_relative_resource_path(const char* source_path,
     // files remain under ref/wpt/css/<suite>; resolve the missing relative
     // source against that canonical tree before layout falls back to a system
     // resource with different metrics.
-    const char* suite_start = local_base + data_root_len;
+    const char* suite_start = local_base.get() + data_root_len;
     if (*suite_start == '/') suite_start++;
     if (strncmp(suite_start, "wpt-", 4) != 0) {
-        mem_free(local_base);
         return false;
     }
     const char* suite_end = strchr(suite_start, '/');
     if (!suite_end || suite_end == suite_start + 4) {
-        mem_free(local_base);
         return false;
     }
 
     size_t source_prefix_len = data_root_len + 1 + (size_t)(suite_end - suite_start);
-    if (strncmp(source_path, local_base, source_prefix_len) != 0 ||
+    if (strncmp(source_path, local_base.get(), source_prefix_len) != 0 ||
         source_path[source_prefix_len] != '/') {
-        mem_free(local_base);
         return false;
     }
 
@@ -372,7 +344,6 @@ bool radiant_resolve_layout_relative_resource_path(const char* source_path,
     size_t required = strlen("ref/wpt/css/") + suite_name_len + 1 +
         strlen(relative_path) + 1;
     if (required > out_size) {
-        mem_free(local_base);
         return false;
     }
 
@@ -381,6 +352,5 @@ bool radiant_resolve_layout_relative_resource_path(const char* source_path,
                            (int)suite_name_len, suite_start + 4, relative_path);
     bool resolved = written > 0 && (size_t)written < out_size &&
         access(out_path, R_OK) == 0;
-    mem_free(local_base);
     return resolved;
 }

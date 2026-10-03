@@ -88,14 +88,8 @@ void TileGrid::init(int surface_w, int surface_h, float raster_scale) {
 }
 
 void TileGrid::destroy() {
-    if (tiles) {
-        mem_free(tiles);
-        tiles = nullptr;
-    }
-    if (pixel_slab) {
-        mem_free(pixel_slab);
-        pixel_slab = nullptr;
-    }
+    lam::free_owned(tiles);
+    lam::free_owned(pixel_slab);
     pixel_slab_count = 0;
     total = 0;
 }
@@ -164,7 +158,7 @@ static void worker_init_local(Tile* tile) {
 
 void WorkerState::init(Tile* tile) {
     if (initialized) return;
-    arena = lam::own(mem_arena_create(NULL, MEM_ROLE_RENDER, "tile.arena"));
+    arena = lam::own(mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "tile.arena"));
     mem_scratch_init(NULL, &scratch, arena, MEM_ROLE_RENDER, "tile.scratch");
     // Now safe to create ThorVG canvas (internally uses malloc/new)
     rdt_vector_init(&vec, tile->pixels, tile->pixel_w, tile->pixel_h, tile->stride);
@@ -290,7 +284,7 @@ void RenderPool::destroy() {
         pthread_join(threads[i], nullptr);
     }
 
-    mem_free(threads);
+    lam::free_owned(threads);
     pthread_mutex_destroy(&mutex);
     pthread_cond_destroy(&work_available);
     pthread_cond_destroy(&all_done);

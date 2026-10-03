@@ -72,10 +72,8 @@ public:
     {}
 
     ~CellOccupancyMatrix() {
-        if (data_) {
-            mem_free(data_);
-            data_ = nullptr;
-        }
+        lam::Temp<CellOccupancyState> storage(data_);  // the matrix owns its cell storage
+        data_ = nullptr;
     }
 
     CellOccupancyMatrix(const CellOccupancyMatrix&) = delete;
@@ -347,7 +345,7 @@ private:
         // Create new data array
         size_t new_count = new_row_count * new_col_count;
         CellOccupancyState* new_data = (CellOccupancyState*)mem_calloc(
-            new_count, sizeof(CellOccupancyState), MEM_CAT_LAYOUT);
+            new_count, sizeof(CellOccupancyState), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: CellOccupancyMatrix cell storage; replaced on growth, released by the destructor
         if (!new_data && new_count > 0) {
             return;
         }
@@ -364,9 +362,7 @@ private:
         }
 
         // Update state
-        if (data_) {
-            mem_free(data_);
-        }
+        lam::Temp<CellOccupancyState> previous(data_);  // the grown storage replaces it
         data_ = new_data;
         data_count_ = new_count;
         row_count_ = new_row_count;

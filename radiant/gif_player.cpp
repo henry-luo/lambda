@@ -58,8 +58,8 @@ void GifAnimation::finish(AnimationInstance* anim) {
     // The surface itself is not freed here — the caller owns it.
     // We reset to NULL so the renderer shows nothing (or the caller can re-set).
     image_surface_detach_pixels(surface);
-    mem_free(this);
     anim->state = NULL;
+    lam::Temp<GifAnimation> self(this);  // the finished animation releases its player
 }
 
 void gif_animation_tick(AnimationInstance* anim, float t) {

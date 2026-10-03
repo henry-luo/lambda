@@ -47,18 +47,17 @@ void destroy_grid_track_list(GridTrackList* track_list) {
     if (!track_list) return;
 
     // Free tracks
+    lam::Temp<GridTrackList> owned(track_list);  // the caller hands the list over
     for (int i = 0; i < track_list->track_count; i++) {
         destroy_grid_track_size(track_list->tracks[i]);
     }
-    mem_free(track_list->tracks);
+    lam::free_owned(track_list->tracks);
 
     // Free line names
     for (int i = 0; i < track_list->line_name_count; i++) {
-        mem_free(track_list->line_names[i]);
+        lam::Temp<char> name(track_list->line_names[i]);
     }
-    mem_free(track_list->line_names);
-
-    mem_free(track_list);
+    lam::free_owned(track_list->line_names);
 }
 
 // Create a new grid track size
@@ -109,6 +108,7 @@ GridTrackSize* clone_grid_track_size(const GridTrackSize* track_size) {
 // Destroy a grid track size
 void destroy_grid_track_size(GridTrackSize* track_size) {
     if (!track_size) return;
+    lam::Temp<GridTrackSize> owned(track_size);  // the caller hands the track over
 
     if (track_size->min_size) {
         destroy_grid_track_size(track_size->min_size);
@@ -120,17 +120,16 @@ void destroy_grid_track_size(GridTrackSize* track_size) {
         for (int i = 0; i < track_size->repeat_track_count; i++) {
             destroy_grid_track_size(track_size->repeat_tracks[i]);
         }
-        mem_free(track_size->repeat_tracks);
+        lam::free_owned(track_size->repeat_tracks);
     }
 
-    mem_free(track_size);
 }
 
 // Destroy a grid area
 void destroy_grid_area(GridArea* area) {
     if (!area) return;
 
-    mem_free(area->name);
+    lam::free_owned(area->name);
     // Don't free the area itself if it's part of an array
 }
 
@@ -182,10 +181,7 @@ void clear_grid_template_areas(GridProp* grid) {
     if (!grid) return;
 
     for (int i = 0; i < grid->area_count; i++) {
-        if (grid->grid_areas && grid->grid_areas[i].name) {
-            mem_free(grid->grid_areas[i].name);
-            grid->grid_areas[i].name = nullptr;
-        }
+        if (grid->grid_areas) lam::free_owned(grid->grid_areas[i].name);
     }
     grid->area_count = 0;
 }

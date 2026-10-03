@@ -66,14 +66,12 @@ void LottiePlayer::finish(AnimationInstance* anim) {
     }
 
     // Free pixel buffer
-    if (pixels) {
-        mem_free(pixels);
-        pixels = NULL;
-    }
+    lam::Temp<uint32_t> buffer(pixels);  // the player owns its raster buffer
+    pixels = NULL;
     image_surface_detach_pixels(surface);
 
-    mem_free(this);
     anim->state = NULL;
+    lam::Temp<LottiePlayer> self(this);  // the finished animation releases its player
 }
 
 void lottie_animation_tick(AnimationInstance* anim, float t) {
@@ -146,7 +144,7 @@ static LottiePlayer* lottie_player_init(ImageSurface* surface,
 
     // Allocate pixel buffer
     uint32_t* pixels = (uint32_t*)mem_calloc(render_width * render_height,
-                                              sizeof(uint32_t), MEM_CAT_RENDER);
+                                              sizeof(uint32_t), MEM_CAT_RENDER); // OBJ_HEAP_OK: owned by the LottiePlayer; released when the animation finishes
 
     tvg_swcanvas_set_target(canvas, pixels, render_width,
                             render_width, render_height, TVG_COLORSPACE_ABGR8888);

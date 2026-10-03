@@ -50,7 +50,7 @@ static void paint_free_owned_path(RdtPath** path, bool* owns_path) {
 static void paint_free_owned_gradient_stops(const RdtGradientStop** stops,
                                             bool* owns_stops) {
     if (!stops || !owns_stops || !*owns_stops || !*stops) return;
-    mem_free((void*)*stops);
+    lam::Temp<RdtGradientStop> owned((RdtGradientStop*)*stops);  // owns_stops: this command's copy
     *stops = nullptr;
     *owns_stops = false;
 }
@@ -64,7 +64,7 @@ static void paint_free_owned_gradient_payload(RdtPath** path, bool* owns_path,
 
 static void paint_free_owned_glyph_run_text(PaintGlyphRun* run) {
     if (!run || !run->owns_text || !run->text) return;
-    mem_free((void*)run->text);
+    lam::Temp<char> owned((char*)run->text);  // owns_text: this command's copy
     run->text = nullptr;
     run->owns_text = false;
 }

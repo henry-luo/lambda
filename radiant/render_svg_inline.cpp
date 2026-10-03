@@ -2511,20 +2511,14 @@ static char* resolve_font_via_fontface(FontContext* font_ctx, const char* family
         // base64 decode and write
         size_t b64_len = strlen(comma + 1);
         size_t decoded_len = 0;
-        uint8_t* decoded = base64_decode(comma + 1, b64_len, &decoded_len);
-        if (!decoded || decoded_len == 0) {
-            if (decoded) mem_free(decoded);
-            continue;
-        }
+        lam::Temp<uint8_t> decoded(base64_decode(comma + 1, b64_len, &decoded_len));
+        if (!decoded || decoded_len == 0) continue;
 
         FILE* fout = fopen(temp_path, "wb");
-        if (!fout) {
-            mem_free(decoded);
-            continue;
-        }
-        size_t written = fwrite(decoded, 1, decoded_len, fout);
+        if (!fout) continue;
+        size_t written = fwrite(decoded.get(), 1, decoded_len, fout);
         fclose(fout);
-        mem_free(decoded);
+        decoded.reset();
         if (written != decoded_len) {
             continue;
         }
@@ -2668,34 +2662,34 @@ static char* resolve_svg_font_path(const char* font_family, const char** out_fon
             }
         }
         // platform lookup
-        char* p = font_platform_find_fallback(fam, NULL);
-        if (p && strstr(p, ".ttc")) { mem_free(p); p = nullptr; }
+        lam::Temp<char> p(font_platform_find_fallback(fam, NULL));
+        if (p && strstr(p.get(), ".ttc")) p.reset();
         if (p) {
             if (out_font_name) {
                 // derive font_name from the file basename (sans extension); the
                 // candidate `fam` may live in a stack buffer that goes out of
                 // scope after this function returns.
                 static char platform_font_name[256];
-                svg_font_name_from_path(platform_font_name, sizeof(platform_font_name), p);
+                svg_font_name_from_path(platform_font_name, sizeof(platform_font_name), p.get());
                 *out_font_name = platform_font_name;
             }
-            return p;
+            return p.release();
         }
         // database lookup
         if (font_ctx) {
             const char* dbname = nullptr;
-            p = resolve_font_via_database(font_ctx, fam, &dbname, weight, slant);
+            p.reset(resolve_font_via_database(font_ctx, fam, &dbname, weight, slant));
             if (p) {
                 if (out_font_name) {
                     static char db_font_name[256];
                     if (dbname) {
                         str_copy(db_font_name, sizeof(db_font_name), dbname, strlen(dbname));
                     } else {
-                        svg_font_name_from_path(db_font_name, sizeof(db_font_name), p);
+                        svg_font_name_from_path(db_font_name, sizeof(db_font_name), p.get());
                     }
                     *out_font_name = db_font_name;
                 }
-                return p;
+                return p.release();
             }
         }
         return nullptr;
@@ -2771,11 +2765,8 @@ static const char* resolve_svg_radiant_font_family(const char* font_family,
             font_family_exists(font_ctx, start)) {
             return mem_strdup(start, MEM_CAT_RENDER);
         }
-        char* platform_path = font_platform_find_fallback(start, NULL);
-        if (platform_path) {
-            mem_free(platform_path);
-            return mem_strdup(start, MEM_CAT_RENDER);
-        }
+        lam::Temp<char> platform_path(font_platform_find_fallback(start, NULL));
+        if (platform_path) return mem_strdup(start, MEM_CAT_RENDER);
     }
 
     return fallback_family ? fallback_family : font_family;
@@ -2819,11 +2810,8 @@ static void collect_svg_style_rules(SvgInlineRenderContext* ctx, Element* elem) 
     if (!ctx || !elem) return;
     const char* tag = get_element_tag_name(elem);
     if (tag && strcmp(tag, "style") == 0) {
-        const char* css = get_direct_text_content(elem);
-        if (css && *css) {
-            parse_svg_style_text(ctx, css);
-            mem_free((void*)css);
-        }
+        lam::Temp<char> css((char*)get_direct_text_content(elem));
+        if (css && *css.get()) parse_svg_style_text(ctx, css.get());
         return;
     }
     for (int64_t i = 0; i < elem->length; i++) {
@@ -3229,10 +3217,10 @@ typedef struct SvgTextAdjust {
 
 typedef struct SvgTextFont {
     bool resolved;              // resolution was attempted
-    char* path;                 // ThorVG font file; null when no font is found
+    lam::Own<char> path;        // ThorVG font file; null when no font is found
     char name[256];             // ThorVG font name (the resolvers reuse static buffers)
-    const char* family;         // family for font_resolve
-    bool free_family;
+    const char* family;         // family for font_resolve: owned_family or a borrowed name
+    lam::Own<char> owned_family;  // set when the resolver returned a fresh copy
     float ascent_ratio;
 } SvgTextFont;
 
@@ -3413,8 +3401,8 @@ static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool a
     // "Arial Bold") is a file name that font_resolve does not know as a family.
     const char* family = style->font_family[0] ? style->font_family : SVG_DEFAULT_FONT_FAMILY;
     const char* font_name = nullptr;
-    font->path = resolve_svg_font_path(family, &font_name, ctx->font_ctx, style->font_weight,
-                                       style->font_slant, allow_embedded_font);
+    font->path = lam::own(resolve_svg_font_path(family, &font_name, ctx->font_ctx, style->font_weight,
+                                       style->font_slant, allow_embedded_font));
     if (!font->path) return nullptr;
     if (font_name) str_copy(font->name, sizeof(font->name), font_name, strlen(font_name));
 
@@ -3425,7 +3413,10 @@ static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool a
     font->family = resolve_svg_radiant_font_family(family, ctx->font_ctx, style->font_weight,
                                                    style->font_slant, metrics_family,
                                                    allow_embedded_font);
-    font->free_family = font->family && font->family != metrics_family && font->family != family;
+    // the resolver returns one of its inputs or a fresh copy; own only the copy
+    if (font->family && font->family != metrics_family && font->family != family) {
+        font->owned_family = lam::own((char*)font->family);
+    }
     font->ascent_ratio = 0.8f;
     if (ctx->font_ctx && font->family && style->font_size > 0.0f) {
         FontStyleDesc desc = {};
@@ -3446,8 +3437,9 @@ static SvgTextFont* svg_text_font(SvgTextLayout* layout, int style_index, bool a
 static void svg_text_release_fonts(SvgTextLayout* layout) {
     for (int i = 0; i < layout->style_count; i++) {
         SvgTextFont* font = &layout->fonts[i];
-        if (font->path) mem_free(font->path);
-        if (font->free_family) mem_free((void*)font->family);
+        lam::free_owned(font->path);
+        lam::free_owned(font->owned_family);
+        font->family = nullptr;
     }
 }
 
@@ -3707,11 +3699,15 @@ static char* svg_resolve_resource_path(SvgInlineRenderContext* ctx, const char* 
         return mem_strdup(href_no_fragment, MEM_CAT_RENDER);
     }
     if (!ctx || !ctx->source_path || !*ctx->source_path) return mem_strdup(href_no_fragment, MEM_CAT_RENDER);
-    char* dir = file_path_dirname(ctx->source_path);
+    lam::Temp<char> dir(file_path_dirname(ctx->source_path));
     if (!dir) return mem_strdup(href_no_fragment, MEM_CAT_RENDER);
-    char* path = file_path_join(dir, href_no_fragment);
-    mem_free(dir);
-    return path;
+    return file_path_join(dir.get(), href_no_fragment);
+}
+
+// The resource path of an href without its fragment; caller frees.
+static char* svg_resolve_href(SvgInlineRenderContext* ctx, const char* href) {
+    lam::Temp<char> href_file(svg_href_file_part(href, nullptr));
+    return svg_resolve_resource_path(ctx, href_file ? href_file.get() : href);
 }
 
 static int svg_pdf_image_id_from_href(const char* href) {
@@ -3820,11 +3816,9 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
     if (strncmp(href, "data:", 5) == 0) {
         size_t decoded_len = 0;
         char declared_mime[64] = {0};
-        uint8_t* decoded = parse_data_uri(href, declared_mime, sizeof(declared_mime), &decoded_len);
-        if (!decoded || decoded_len == 0) {
-            if (decoded) mem_free(decoded);
-            return;
-        }
+        lam::Temp<uint8_t> owned_decoded(parse_data_uri(href, declared_mime, sizeof(declared_mime), &decoded_len));
+        if (!owned_decoded || decoded_len == 0) return;
+        const uint8_t* decoded = owned_decoded.get();
 
         // Sniff actual format from magic bytes (more reliable than declared mime)
         const char* mime_hint = nullptr;
@@ -3844,14 +3838,11 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
             else if (strstr(declared_mime, "svg")) mime_hint = "svg";
         }
 
-        if (!mime_hint) {
-            mem_free(decoded);
-            return;
-        }
+        if (!mime_hint) return;
 
         if (strcmp(mime_hint, "svg") == 0) {
             RdtPicture* rdt_pic = rdt_picture_load_data((const char*)decoded, (int)decoded_len, "svg");
-            mem_free(decoded);
+            owned_decoded.reset();
             if (!rdt_pic) {
                 return;
             }
@@ -3860,7 +3851,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
         }
 
         Tvg_Paint pic = tvg_picture_new();
-        if (!pic) { mem_free(decoded); return; }
+        if (!pic) return;
 
         float intrinsic_w = 0;
         float intrinsic_h = 0;
@@ -3869,7 +3860,7 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
         // copy=true so ThorVG holds its own copy and we can free decoded
         Tvg_Result result = tvg_picture_load_data(pic, (const char*)decoded, (uint32_t)decoded_len,
                                                   mime_hint, NULL, true);
-        mem_free(decoded);
+        owned_decoded.reset();
         if (result != TVG_RESULT_SUCCESS) {
             tvg_paint_unref(pic, true);
             return;
@@ -3904,30 +3895,18 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
 
         return;
     } else if (href_is_svg) {
-        char* href_file = svg_href_file_part(href, nullptr);
-        char* resolved_href = svg_resolve_resource_path(ctx, href_file ? href_file : href);
-        if (href_file) mem_free(href_file);
-        if (resolved_href && svg_resource_stack_contains(resolved_href)) {
-            mem_free(resolved_href);
-            return;
-        }
-        RdtPicture* rdt_pic = rdt_picture_load(resolved_href ? resolved_href : href);
-        if (!rdt_pic) {
-            if (resolved_href) mem_free(resolved_href);
-            return;
-        }
+        lam::Temp<char> resolved_href(svg_resolve_href(ctx, href));
+        if (resolved_href && svg_resource_stack_contains(resolved_href.get())) return;
+        RdtPicture* rdt_pic = rdt_picture_load(resolved_href ? resolved_href.get() : href);
+        if (!rdt_pic) return;
         render_svg_image_picture(ctx, elem, rdt_pic, x, y, width, height);
-        if (resolved_href) mem_free(resolved_href);
         return;
     } else {
         Tvg_Paint pic = tvg_picture_new();
         if (!pic) return;
-        char* href_file = svg_href_file_part(href, nullptr);
-        char* resolved_href = svg_resolve_resource_path(ctx, href_file ? href_file : href);
-        if (href_file) mem_free(href_file);
-        Tvg_Result result = tvg_picture_load(pic, resolved_href ? resolved_href : href);
+        lam::Temp<char> resolved_href(svg_resolve_href(ctx, href));
+        Tvg_Result result = tvg_picture_load(pic, resolved_href ? resolved_href.get() : href);
         if (result != TVG_RESULT_SUCCESS) {
-            if (resolved_href) mem_free(resolved_href);
             tvg_paint_unref(pic, true);
             return;
         }
@@ -3951,8 +3930,6 @@ static void render_svg_image(SvgInlineRenderContext* ctx, Element* elem) {
         if (rdt_pic) {
             svg_draw_picture(ctx, rdt_pic, op, &m);
         }
-
-        if (resolved_href) mem_free(resolved_href);
     }
 }
 
@@ -4449,32 +4426,24 @@ static void render_svg_use_target(SvgInlineRenderContext* ctx, Element* use_elem
 static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_elem, const char* href) {
     if (!ctx || !use_elem || !href) return false;
     const char* fragment = nullptr;
-    char* href_file = svg_href_file_part(href, &fragment);
-    if (!href_file || !*href_file || !fragment || !*fragment) {
-        if (href_file) mem_free(href_file);
-        return false;
-    }
-    char* resolved_href = svg_resolve_resource_path(ctx, href_file);
-    mem_free(href_file);
+    lam::Temp<char> href_file(svg_href_file_part(href, &fragment));
+    if (!href_file || !*href_file.get() || !fragment || !*fragment) return false;
+    lam::Temp<char> resolved_href(svg_resolve_resource_path(ctx, href_file.get()));
+    href_file.reset();
     if (!resolved_href) return false;
-    if (svg_resource_stack_contains(resolved_href)) {
-        mem_free(resolved_href);
-        return false;
-    }
-    bool pushed_resource = svg_resource_stack_push(resolved_href);
+    if (svg_resource_stack_contains(resolved_href.get())) return false;
+    bool pushed_resource = svg_resource_stack_push(resolved_href.get());
 
-    RdtPicture* pic = rdt_picture_load(resolved_href);
+    RdtPicture* pic = rdt_picture_load(resolved_href.get());
     if (!pic) {
-        if (pushed_resource) svg_resource_stack_pop(resolved_href);
-        mem_free(resolved_href);
+        if (pushed_resource) svg_resource_stack_pop(resolved_href.get());
         return false;
     }
     Element* root = rdt_picture_get_svg_root(pic);
     Element* ref = rdt_picture_find_svg_element_by_id(pic, fragment);
     if (!root || !ref) {
         rdt_picture_free(pic);
-        if (pushed_resource) svg_resource_stack_pop(resolved_href);
-        mem_free(resolved_href);
+        if (pushed_resource) svg_resource_stack_pop(resolved_href.get());
         return false;
     }
 
@@ -4505,8 +4474,7 @@ static bool render_svg_external_use(SvgInlineRenderContext* ctx, Element* use_el
     ctx->id_scope = lam::up(saved_id_scope);
 
     rdt_picture_free(pic);
-    if (pushed_resource) svg_resource_stack_pop(resolved_href);
-    mem_free(resolved_href);
+    if (pushed_resource) svg_resource_stack_pop(resolved_href.get());
     return true;
 }
 
@@ -5123,9 +5091,9 @@ static void render_svg_subscene_to_display_list(const PaintSvgSubscene* subscene
                                                 DisplayList* dl) {
     if (!subscene || !subscene->svg_root || !dl) return;
 
-    Pool* temp_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "render.svg_inline");
+    Pool* temp_pool = mem_pool_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.svg_inline");
     if (!temp_pool) return;
-    Arena* temp_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.svg_inline.arena");
+    Arena* temp_arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.svg_inline.arena");
     if (!temp_arena) {
         mem_pool_destroy(temp_pool);
         return;
@@ -5313,11 +5281,11 @@ struct SvgLayerEntry {
     float scale;
     SvgInitialPaint paint;          // inherited paint is part of the rendered content
     ImageSurface* surface;          // null until the content was painted twice unchanged
-    SvgLayerEntry* next;
+    lam::Own<SvgLayerEntry> next;
 };
 
 struct SvgLayerRegistry {
-    SvgLayerEntry* entries;
+    lam::Own<SvgLayerEntry> entries;
     size_t cached_bytes;
 };
 
@@ -5347,16 +5315,15 @@ static void svg_layer_entry_release_surface(SvgLayerRegistry* registry, SvgLayer
 }
 
 static void svg_layer_registry_destroy(void* data) {
-    SvgLayerRegistry* registry = (SvgLayerRegistry*)data;
+    // the document resource hands its registry over for teardown
+    lam::Temp<SvgLayerRegistry> registry((SvgLayerRegistry*)data);
     if (!registry) return;
-    SvgLayerEntry* entry = registry->entries;
-    while (entry) {
-        SvgLayerEntry* next = entry->next;
-        svg_layer_entry_release_surface(registry, entry);
-        mem_free(entry);
-        entry = next;
+    while (registry->entries) {
+        lam::Own<SvgLayerEntry> entry = registry->entries;
+        svg_layer_entry_release_surface(registry.get(), entry);
+        registry->entries = entry->next;
+        lam::free_owned(entry);
     }
-    mem_free(registry);
 }
 
 static SvgLayerRegistry* svg_layer_registry_for_document(DomDocument* document) {
@@ -5376,11 +5343,11 @@ static SvgLayerEntry* svg_layer_entry_for_element(SvgLayerRegistry* registry, Do
     for (SvgLayerEntry* entry = registry->entries; entry; entry = entry->next) {
         if (entry->element == element) return entry;
     }
-    SvgLayerEntry* entry = (SvgLayerEntry*)mem_calloc(1, sizeof(SvgLayerEntry), MEM_CAT_LAYOUT);
+    SvgLayerEntry* entry = (SvgLayerEntry*)mem_calloc(1, sizeof(SvgLayerEntry), MEM_CAT_LAYOUT); // OBJ_HEAP_OK: owned by the document's SvgLayerRegistry entry list
     if (!entry) return nullptr;
     entry->element = element;
     entry->next = registry->entries;
-    registry->entries = entry;
+    registry->entries = lam::own(entry);
     return entry;
 }
 

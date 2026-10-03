@@ -619,7 +619,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
     uint32_t preedit_start = display.preedit_start;
     uint32_t preedit_end = display.preedit_end;
     uint32_t preedit_caret_byte = display.preedit_caret_byte;
-    char* preedit_display = display.preedit_display;
+    lam::Temp<char> preedit_display(display.preedit_display);
     bool has_preedit = display.has_preedit;
     bool is_placeholder = display.is_placeholder;
     bool is_password = !has_preedit && !is_placeholder && src_text &&
@@ -631,12 +631,12 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
         form_control_password_reveal_get(reveal_state, static_cast<View*>(block),
                                          &password_reveal_start, &password_reveal_end);
     }
-    char* mask_buf = nullptr;
+    lam::Temp<char> mask_buf;
     const char* text = src_text;
     if (is_password) {
-        mask_buf = build_password_display(src_text, (int)strlen(src_text),
-            password_reveal_start, password_reveal_end);
-        if (mask_buf) text = mask_buf;
+        mask_buf.reset(build_password_display(src_text, (int)strlen(src_text),
+            password_reveal_start, password_reveal_end));
+        if (mask_buf) text = mask_buf.get();
     }
     FontProp* render_font = form_render_font(block, form, is_placeholder);
 
@@ -793,8 +793,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
         }
     }
 
-    if (mask_buf) mem_free(mask_buf);
-    if (preedit_display) mem_free(preedit_display);
+
 }
 
 /**
@@ -1314,7 +1313,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
     uint32_t preedit_start = display.preedit_start;
     uint32_t preedit_end = display.preedit_end;
     uint32_t preedit_caret_byte = display.preedit_caret_byte;
-    char* preedit_display = display.preedit_display;
+    lam::Temp<char> preedit_display(display.preedit_display);
     bool has_preedit = display.has_preedit;
     bool is_placeholder = display.is_placeholder;
     FontProp* render_font = form_render_font(block, form, is_placeholder);
@@ -1441,19 +1440,19 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
         int line_start = 0;
         int start_line = 0, start_col = 0;
         int end_line = 0, end_col = 0;
-        textarea_offset_to_line_col(preedit_display, (int)preedit_start, &start_line, &start_col);
-        textarea_offset_to_line_col(preedit_display, (int)preedit_end, &end_line, &end_col);
+        textarea_offset_to_line_col(preedit_display.get(), (int)preedit_start, &start_line, &start_col);
+        textarea_offset_to_line_col(preedit_display.get(), (int)preedit_end, &end_line, &end_col);
         if (start_line == end_line) {
-            line_start = textarea_line_start(preedit_display, start_line);
+            line_start = textarea_line_start(preedit_display.get(), start_line);
             FontBox fbox = {0};
             setup_font(rdcon->ui_context, &fbox, block->font);
             if (font_box_handle(&fbox)) {
                 float raster_scale = ui_context_raster_scale(rdcon->ui_context);
                 float ux0 = content_x + layout_measure_utf8_text_width(
-                    font_box_handle(&fbox), block->font, preedit_display + line_start,
+                    font_box_handle(&fbox), block->font, preedit_display.get() + line_start,
                     (size_t)start_col, raster_scale) * s;
                 float ux1 = content_x + layout_measure_utf8_text_width(
-                    font_box_handle(&fbox), block->font, preedit_display + line_start,
+                    font_box_handle(&fbox), block->font, preedit_display.get() + line_start,
                     (size_t)end_col, raster_scale) * s;
                 if (ux1 > ux0) {
                     Color underline = make_color(0x33, 0x33, 0x33, 0xCC);
@@ -1535,7 +1534,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
         }
     }
 
-    if (preedit_display) mem_free(preedit_display);
+
 
 }
 

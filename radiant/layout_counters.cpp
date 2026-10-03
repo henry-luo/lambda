@@ -44,7 +44,7 @@ bool CounterContext::init(Arena* backing_arena) {
     void* frame_mem = mem_alloc(sizeof(lam::ArrayList<CounterFrame>), MEM_CAT_LAYOUT);
     if (!frame_mem) {
         scope_stack->~ArrayList<CounterScope*>();
-        mem_free(scope_stack);
+        lam::Temp<lam::ArrayList<CounterScope*>> storage(scope_stack);
         scope_stack = nullptr;
         return false;
     }
@@ -74,12 +74,12 @@ void CounterContext::destroy() {
             }
         }
         scope_stack->~ArrayList<CounterScope*>();
-        mem_free(scope_stack);
+        lam::Temp<lam::ArrayList<CounterScope*>> storage(scope_stack);  // destroyed above, storage freed here
         scope_stack = nullptr;
     }
     if (frame_stack) {
         frame_stack->~ArrayList<CounterFrame>();
-        mem_free(frame_stack);
+        lam::Temp<lam::ArrayList<CounterFrame>> storage(frame_stack);
         frame_stack = nullptr;
     }
     current_scope = nullptr;

@@ -72,7 +72,7 @@ static DomDocument* render_export_load_transform_document(RenderExportSession* s
     if (!transform_request || !transform_request->document_file || !transform_request->transform) {
         return nullptr;
     }
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_LAYOUT, "render.document_transform");
+    Pool* pool = mem_pool_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_LAYOUT, "render.document_transform");
     if (!pool) return nullptr;
     Url* document_url = url_parse_with_base(transform_request->document_file, session->base_url);
     if (!document_url) {
@@ -114,7 +114,7 @@ static void init_render_pool_once() {
 void render_pool_shutdown() {
     if (g_render_pool) {
         render_pool_destroy(g_render_pool);
-        mem_free(g_render_pool);
+        lam::Temp<RenderPool> pool(g_render_pool);  // shutdown releases the singleton
         g_render_pool = nullptr;
     }
 }
@@ -211,8 +211,9 @@ StrBuf* render_encode_surface_png(ImageSurface* surface) {
                  8, PNG_COLOR_TYPE_RGBA, PNG_INTERLACE_NONE,
                  PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png_ptr, info_ptr);
-    png_bytep* rows = (png_bytep*)mem_alloc(
-        sizeof(png_bytep) * surface->height, MEM_CAT_RENDER);
+    // libpng owns the row table: png_malloc/png_free, since a longjmp out of
+    // png_write_image must not cross a destructor
+    png_bytep* rows = (png_bytep*)png_malloc(png_ptr, sizeof(png_bytep) * surface->height);
     if (!rows) {
         png_destroy_write_struct(&png_ptr, &info_ptr);
         strbuf_free(png_bytes);
@@ -223,7 +224,7 @@ StrBuf* render_encode_surface_png(ImageSurface* surface) {
     }
     png_write_image(png_ptr, rows);
     png_write_end(png_ptr, NULL);
-    mem_free(rows);
+    png_free(png_ptr, rows);
     png_destroy_write_struct(&png_ptr, &info_ptr);
     return png_bytes;
 }
@@ -249,15 +250,14 @@ static bool render_export_session_begin_internal(
     session->auto_width = auto_width;
     session->auto_height = auto_height;
 
-    session->ui_context = lam::up((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
+    session->ui_context = lam::own((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: export session owns the headless UI context shell.
     if (!session->ui_context) {
         log_error("[EXPORT_SESSION] Failed to allocate headless UI context");
         return false;
     }
     if (ui_context_init(session->ui_context, true, session->device_scale) != 0) {
         log_error("[EXPORT_SESSION] Failed to initialize headless UI context");
-        mem_free(session->ui_context);
-        session->ui_context = nullptr;
+        lam::free_owned(session->ui_context);
         return false;
     }
     int surface_width = raster_surface
@@ -272,12 +272,11 @@ static bool render_export_session_begin_internal(
     session->ui_context->viewport_width = layout_width;
     session->ui_context->viewport_height = layout_height;
 
-    session->base_url = lam::up(get_current_dir());
+    session->base_url = lam::own(get_current_dir());
     if (!session->base_url) {
         log_error("[EXPORT_SESSION] Could not resolve the current directory");
         ui_context_cleanup(session->ui_context);
-        mem_free(session->ui_context);
-        session->ui_context = nullptr;
+        lam::free_owned(session->ui_context);
         return false;
     }
 
@@ -355,8 +354,7 @@ void render_export_session_end(RenderExportSession* session) {
     }
     if (session->ui_context) {
         ui_context_cleanup(session->ui_context);
-        mem_free(session->ui_context);
-        session->ui_context = nullptr;
+        lam::free_owned(session->ui_context);
     }
     session->document = nullptr;
 }
@@ -435,11 +433,15 @@ static void render_output_cleanup_context(RenderContext* rdcon) {
     layout_content_bounds_cache_destroy(rdcon->content_bounds_cache);
     rdcon->content_bounds_cache = nullptr;
     if (rdcon->paint_list) {
+        lam::Temp<PaintList> owned(rdcon->paint_list);  // this context created its paint list
         paint_list_destroy(rdcon->paint_list);
         rdcon->paint_list->~PaintList();
-        mem_free(rdcon->paint_list);
         rdcon->paint_list = nullptr;
     }
+#ifndef NDEBUG
+    size_t live_scratch = scratch_live_count(&rdcon->scratch);
+    if (live_scratch) log_error("[SCRATCH_PASS_EXIT] render pass ended with %zu live scratch blocks", live_scratch);
+#endif
     scratch_release(&rdcon->scratch);
     rdt_vector_destroy(&rdcon->vec);
 }

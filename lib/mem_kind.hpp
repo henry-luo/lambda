@@ -7,6 +7,7 @@
 //
 //   Own<T>      the field owns the target; it is traced and torn down with the holder
 //   OwnArr<T>   the field owns a block of scalar elements (no element tracing)
+//   OwnSpan<T>  an OwnArr with its element count, for arrays sized at runtime
 //   Up<T>       the target is in the holder's node or an ancestor node (outlives it)
 //   Counted<T>  the target is owned elsewhere and pinned by a count
 //   Shared<T>   the target is a value shared by several holders (an ancestor's
@@ -116,6 +117,18 @@ template<class T> constexpr Counted<T> counted(T* p) { return Counted<T>(p); }
 template<class T> constexpr Shared<T> shared(T* p) { return Shared<T>(p); }
 template<class T> constexpr Foreign<T> foreign(T* p) { return Foreign<T>(p); }
 
+// An owned array and its element count in one field, so a tracer or an
+// external verifier can bound every element access by the recorded length.
+template<class T> struct OwnSpan {
+    OwnArr<T> data;
+    size_t count;
+
+    T& operator[](size_t i) const { return data[i]; }
+    T* begin() const { return data.get(); }
+    T* end() const { return data.get() + count; }
+    bool empty() const { return count == 0; }
+};
+
 // Slot reference: valid only through lookup in the owning slot table, which
 // compares generations and returns null for a recycled slot.
 template<class T> struct Handle {
@@ -148,6 +161,8 @@ LAM_MEM_KIND_ASSERT_LAYOUT(Shared);
 LAM_MEM_KIND_ASSERT_LAYOUT(Foreign);
 #undef LAM_MEM_KIND_ASSERT_LAYOUT
 
+static_assert(sizeof(OwnSpan<int>) == sizeof(int*) + sizeof(size_t), "OwnSpan is a pointer and a count");
+static_assert(__is_trivial(OwnSpan<int>), "OwnSpan must be trivial");
 static_assert(sizeof(Handle<int>) == 8, "Handle must be two 32-bit words");
 static_assert(__is_trivial(Handle<int>), "Handle must be trivial");
 static_assert(__is_standard_layout(Handle<int>), "Handle must be standard-layout");

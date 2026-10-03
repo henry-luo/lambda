@@ -357,21 +357,19 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
     content_max_y += 50;
 
     // Render to SVG (now includes caret if present)
-    char* svg_content = render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
+    lam::Temp<char> svg_content(render_view_tree_to_svg(uicon, uicon->document->view_tree->root,
                                                 content_max_x, content_max_y,
-                                                uicon->document->state);
+                                                uicon->document->state));
     if (!svg_content) {
         log_error("render_uicontext_to_svg: failed to render view tree");
         return 1;
     }
 
-    if (!save_svg_to_file(svg_content, svg_file)) {
+    if (!save_svg_to_file(svg_content.get(), svg_file)) {
         log_error("render_uicontext_to_svg: failed to save SVG to %s", svg_file);
-        mem_free(svg_content);
         return 1;
     }
 
-    mem_free(svg_content);
     log_info("render_uicontext_to_svg: completed successfully");
     return 0;
 }
@@ -393,8 +391,7 @@ static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
         script_runner_cleanup_js_state(doc);
         if (doc->view_tree) {
             view_pool_destroy(doc->view_tree);
-            mem_free(doc->view_tree);
-            doc->view_tree = nullptr;
+            lam::free_owned(doc->view_tree);
         }
         dom_document_destroy(doc);
     }

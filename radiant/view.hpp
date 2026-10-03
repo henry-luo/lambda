@@ -605,7 +605,9 @@ typedef struct ImageSurface {
     int pitch;             // no. of bytes per row of the actual decoded pixel buffer
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
-    void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
+    void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL;
+                           // owned_pixels, or a buffer borrowed from a GIF frame, video or Lottie player
+    lam::OwnArr<uint8_t> owned_pixels;  // the buffer this surface owns; set through image_surface_adopt_pixels
 #ifndef LAMBDA_HEADLESS
     struct RdtPicture* pic;  // SVG picture (opaque, managed by rdt_vector API)
 #endif
@@ -613,8 +615,8 @@ typedef struct ImageSurface {
     Url* url;        // the resolved absolute URL of the image
     bool cache_owned;      // true when UiContext image_cache owns this surface
     bool network_owned;    // true when a NetworkResource releases this surface
-    char* source_path;     // local file path for lazy decode (NULL if already decoded or HTTP)
-    unsigned char* source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
+    lam::Own<char> source_path;  // local file path for lazy decode (NULL if already decoded or HTTP)
+    lam::OwnArr<unsigned char> source_data;  // in-memory data for lazy decode of HTTP images (NULL if file-based)
     size_t source_data_len;      // length of source_data
     int tile_offset_y;   // tiled PNG rendering: physical-pixel Y start of this tile (0 = full-page surface)
     uint64_t generation; // incremented when borrowed pixels/picture content changes
@@ -644,6 +646,9 @@ extern void image_surface_destroy(ImageSurface* img_surface);
 extern void image_surface_ensure_decoded(ImageSurface* img, int target_w, int target_h);
 extern void image_surface_bump_generation(ImageSurface* img_surface);
 extern void image_surface_detach_pixels(ImageSurface* img_surface);
+// The surface takes a memtracked pixel buffer: it replaces (and frees) the
+// buffer the surface owned and becomes the pixels it paints.
+extern void image_surface_adopt_pixels(ImageSurface* img_surface, void* pixels);
 extern void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip,
                               struct ClipShape** clip_shapes = nullptr, int clip_depth = 0);
 extern void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode,
@@ -2875,8 +2880,8 @@ struct UiContext;
 // Individual src entry with path and format
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontFaceSrc {
-    char* path;                  // Resolved local path
-    char* format;                // Format string: "woff", "truetype", "opentype", etc.
+    lam::Own<char> path;                  // Resolved local path
+    lam::Own<char> format;                // Format string: "woff", "truetype", "opentype", etc.
 } FontFaceSrc;
 
 // Font face descriptor for @font-face support
@@ -2885,15 +2890,15 @@ typedef struct FontFaceSrc {
 // unified module; this struct only stores the CSS @font-face metadata.
 // tier-2: view-pool, rebuilt each relayout
 typedef struct FontFaceDescriptor {
-    char* family_name;           // font-family value
-    char* src_local_path;        // local font file path (no web URLs) - first/fallback
-    char* src_local_name;        // src: local() font name value
-    FontFaceSrc* src_entries;    // Array of all src entries with formats
+    lam::Own<char> family_name;           // font-family value
+    lam::Own<char> src_local_path;        // local font file path (no web URLs) - first/fallback
+    lam::Own<char> src_local_name;        // src: local() font name value
+    lam::OwnArr<FontFaceSrc> src_entries;    // Array of all src entries with formats
     int src_count;               // Number of entries in src_entries array
     CssEnum font_style;         // normal, italic, oblique
     CssEnum font_weight;        // 100-900, normal, bold
     CssEnum font_display;       // auto, block, swap, fallback, optional
-    FontFaceUnicodeRange* unicode_ranges;
+    lam::OwnArr<FontFaceUnicodeRange> unicode_ranges;
     int unicode_range_count;
     bool is_loaded;              // loading state
 } FontFaceDescriptor;
@@ -3866,7 +3871,7 @@ typedef struct UiContext {
     char** fallback_fonts;  // fallback fonts
 
     // @font-face support
-    FontFaceDescriptor** font_faces;    // Array of @font-face declarations
+    lam::OwnArr<FontFaceDescriptor*> font_faces;    // Array of @font-face declarations
     int font_face_count;
     int font_face_capacity;
 

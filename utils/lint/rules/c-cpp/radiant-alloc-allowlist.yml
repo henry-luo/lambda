@@ -1,16 +1,48 @@
 id: radiant-alloc-allowlist
 language: cpp
-severity: warning
+severity: error
 message: >-
   Allocation-ish call outside Radiant's sanctioned memory API allowlist. Use
-  mem_*/pool_*/arena_*/scratch_* or add the prefix to this rule after review.
+  mem_*/pool_*/arena_*/scratch_* or a reviewed typed API (prefix listed in
+  this rule), or add the prefix to this rule after review.
 metadata:
   suppress: ALLOC_API_OK
 rule:
   all:
     - kind: call_expression
-      regex: "\\b[A-Za-z_][A-Za-z0-9_]*(alloc|_free|dup|mmap|memalign|sbrk|valloc)[A-Za-z0-9_]*\\s*\\("
+      # the callee name only; nested calls are matched as their own nodes
+      regex: "^(?:[A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*(alloc|_free|dup|mmap|memalign|sbrk|valloc)[A-Za-z0-9_]*\\s*\\("
     - not:
-        regex: "\\b(mem_|pool_|arena_|scratch_|strbuf_|arraylist_|hashmap_|lru_|mem_grow_array|pool_grow_array|tvg_|FT_|uv_|objc_|CF|CG|CFRetain|CFRelease|CGColorSpace|CGImage|CGContext|CGGradient|CGPath|NS|WK)[A-Za-z0-9_]*\\s*\\("
+        regex: "^(?:lam::)?(mem_|pool_|arena_|scratch_|strbuf_|arraylist_|hashmap_|lru_|mem_grow_array|pool_grow_array|temp_array|free_owned|tvg_|FT_|uv_|objc_|CF|CG|CFRetain|CFRelease|CGColorSpace|CGImage|CGContext|CGGradient|CGPath|NS|WK|g_|png_|rdt_|paint_|dl_|view_pool_|view_prop_|image_|render_clip_|retained_dl_|canvas_|cg_|radiant_stack_|block_context_alloc|grid_scratch_|picture_cache_|paint_cache_|css_font_face_descriptor_free|layout_non_negative_free_space|str_dup|stringbuf_free|source_pos_free|session_strdup)[A-Za-z0-9_]*\\s*\\("
 files:
   - "radiant/**/*.{c,cpp,h,hpp,mm}"
+# Interaction, editing, scripting, state and application-shell code is out of
+# this rule's scope until its own phase.
+ignores:
+  # the Core Graphics backend is not built (exclude_source_files); its libc
+  # calloc/free pairs are reviewed when it is brought back
+  - "radiant/rdt_vector_cg.mm"
+  - "radiant/*event*"
+  - "radiant/*edit*"
+  - "radiant/*script*"
+  - "radiant/state_store*"
+  - "radiant/browsing*"
+  - "radiant/clipboard*"
+  - "radiant/text_control*"
+  - "radiant/ime_*"
+  - "radiant/webview*"
+  - "radiant/window*"
+  - "radiant/cmd_*"
+  - "radiant/network*"
+  - "radiant/source_pos*"
+  - "radiant/dom_range*"
+  - "radiant/*selection*"
+  - "radiant/devtool*"
+  - "radiant/*automation*"
+  - "radiant/ui_*"
+  - "radiant/*menu*"
+  - "radiant/focus*"
+  - "radiant/keyboard*"
+  - "radiant/undo*"
+  - "radiant/caret*"
+  - "radiant/drag*"

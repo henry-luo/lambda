@@ -770,9 +770,10 @@ struct OffscreenRenderArenas {
     Arena* scratch_arena = nullptr;
 
     bool init(const char* pool_label, const char* list_label, const char* scratch_label) {
-        pool = mem_pool_create(NULL, MEM_ROLE_RENDER, pool_label);
-        list_arena = pool ? mem_arena_create(NULL, MEM_ROLE_RENDER, list_label) : nullptr;
-        scratch_arena = list_arena ? mem_arena_create(NULL, MEM_ROLE_RENDER, scratch_label) : nullptr;
+        MemContext* context = mem_context_process(MEM_ROLE_RENDER);
+        pool = mem_pool_create(context, MEM_ROLE_RENDER, pool_label);
+        list_arena = pool ? mem_arena_create(context, MEM_ROLE_RENDER, list_label) : nullptr;
+        scratch_arena = list_arena ? mem_arena_create(context, MEM_ROLE_RENDER, scratch_label) : nullptr;
         if (scratch_arena) return true;
         destroy();
         return false;
@@ -1805,7 +1806,7 @@ typedef struct RadiantStackPaintEntry {
 } RadiantStackPaintEntry;
 
 typedef struct RadiantStackPaintList {
-    lam::Up<RadiantStackPaintEntry> entries;
+    lam::OwnArr<RadiantStackPaintEntry> entries;
     int count;
 } RadiantStackPaintList;
 
@@ -2450,16 +2451,16 @@ inline void radiant_retain_marker_text_content(MarkerProp* marker, lam::PoolPtr<
 }
 
 inline void radiant_take_image_source_path(ImageSurface* surface, lam::SessionPtr<char>& source_path) {
-    surface->source_path = lam::detach_session_buffer(source_path);
+    surface->source_path = lam::own(lam::detach_session_buffer(source_path));
 }
 
 inline void radiant_take_image_source_data(ImageSurface* surface, lam::SessionPtr<unsigned char>& source_data, size_t len) {
-    surface->source_data = lam::detach_session_buffer(source_data);
+    surface->source_data = lam::own_arr(lam::detach_session_buffer(source_data));
     surface->source_data_len = len;
 }
 
 inline void radiant_clear_image_source_data(ImageSurface* surface) {
-    surface->source_data = nullptr;
+    lam::free_owned(surface->source_data);
     surface->source_data_len = 0;
 }
 
@@ -3560,8 +3561,8 @@ typedef struct RenderOutputTarget {
 } RenderOutputTarget;
 
 typedef struct RenderExportSession {
-    lam::Up<UiContext> ui_context;
-    lam::Up<Url> base_url;
+    lam::Own<UiContext> ui_context;
+    lam::Own<Url> base_url;
     lam::Up<DomDocument> document;
     float output_scale;
     float device_scale;

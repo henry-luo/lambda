@@ -1329,13 +1329,10 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     NEXT_RECT:
     float base_x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
 
-    char* text_content = render_text_create_export_segment(
-        str, text_rect, text_transform, false);
+    lam::Temp<char> text_content(render_text_create_export_segment(
+        str, text_rect, text_transform, false));
 
-    if (strlen(text_content) == 0) {
-        mem_free(text_content);
-        return;
-    }
+    if (strlen(text_content.get()) == 0) return;
 
     // Set font if available
     float font_size = 16.0f;
@@ -1352,19 +1349,19 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     // Calculate natural width using glyph metrics (excluding trailing spaces)
     float natural_width = 0.0f;
     int space_count = 0;
-    size_t content_len = strlen(text_content);
+    size_t content_len = strlen(text_content.get());
     // Find end of non-whitespace content
-    while (content_len > 0 && text_content[content_len - 1] == ' ') {
+    while (content_len > 0 && text_content.get()[content_len - 1] == ' ') {
         content_len--;
     }
 
     if (font_box_handle(&ctx->font)) {
         for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
-            if (text_content[i] == ' ') {
+            if (text_content.get()[i] == ' ') {
                 natural_width += space_width;
                 space_count++;
             } else {
-                natural_width += font_measure_char(font_box_handle(&ctx->font), (uint32_t)text_content[i]);
+                natural_width += font_measure_char(font_box_handle(&ctx->font), (uint32_t)text_content.get()[i]);
             }
         }
     }
@@ -1380,8 +1377,8 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     PaintGlyphRun run = {};
     run.font = lam::up(&ctx->font);
     run.color = ctx->color;
-    run.text = lam::up(text_content);
-    run.text_len = (int)strlen(text_content); // INT_CAST_OK: text run byte length is bounded by TextRect input.
+    run.text = text_content.get();
+    run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: text run byte length is bounded by TextRect input.
     run.owns_text = ctx && ctx->effect_fallback.active;
     run.font_family = ctx->font.style ? ctx->font.style->family : nullptr;
     run.font_size = font_size;
@@ -1391,7 +1388,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     paint_glyph_run(pdf_active_paint_list(ctx), &run);
     pdf_lower_paint_list(ctx);
 
-    if (!run.owns_text) mem_free(text_content);
+    if (run.owns_text) text_content.release();  // the paint list keeps the text
     text_rect = text_rect->next;
     if (text_rect) { goto NEXT_RECT; }
 }
@@ -1806,7 +1803,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.current_y = 0;
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
-    ctx.page_backdrop_arena = mem_arena_create(NULL, MEM_ROLE_RENDER, "render.pdf.backdrop.arena");
+    ctx.page_backdrop_arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.pdf.backdrop.arena");
     if (ctx.page_backdrop_arena) {
         dl_init(&ctx.page_backdrop_dl, ctx.page_backdrop_arena);
         ctx.page_backdrop_ready = true;

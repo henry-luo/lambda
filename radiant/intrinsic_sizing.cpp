@@ -2805,13 +2805,10 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
     if (block->embed && block->embedp()->img) return block->embedp()->img;
     const char* src_value = tag == MARKUP_NAME_IMG
         ? element->get_attribute("src") : element->get_attribute(MARKUP_NAME_DATA);
-    char* selected_source = tag == MARKUP_NAME_IMG
-        ? layout_resolve_replaced_image_source(element) : nullptr;
-    if (selected_source) src_value = selected_source;
-    if (!src_value || !lycon || !lycon->ui_context) {
-        if (selected_source) mem_free(selected_source);
-        return nullptr;
-    }
+    lam::Temp<char> selected_source(tag == MARKUP_NAME_IMG
+        ? layout_resolve_replaced_image_source(element) : nullptr);
+    if (selected_source) src_value = selected_source.get();
+    if (!src_value || !lycon || !lycon->ui_context) return nullptr;
 
     if (!block->embed) block->ensure_embed(lycon);
     size_t src_len = strlen(src_value);
@@ -2819,7 +2816,6 @@ ImageSurface* layout_ensure_replaced_image_surface(LayoutContext* lycon,
     strbuf_append_str_n(src_buf, src_value, src_len);
     block->embed->img = load_image(lycon->ui_context, src_buf->str);
     strbuf_free(src_buf);
-    if (selected_source) mem_free(selected_source);
     return block->embedp()->img;
 }
 

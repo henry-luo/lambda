@@ -147,7 +147,7 @@ RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block
     }
     int total = child_count + paint->layer_count;
     if (total <= 0) return list;
-    list.entries = lam::up((RadiantStackPaintEntry*)mem_calloc(
+    list.entries = lam::own_arr((RadiantStackPaintEntry*)mem_calloc(
         (size_t)total, sizeof(RadiantStackPaintEntry), MEM_CAT_RENDER));
     if (!list.entries) return list;
 
@@ -185,7 +185,6 @@ RadiantStackPaintList radiant_stack_collect_custom_layout_paint(ViewBlock* block
 
 void radiant_stack_free_custom_layout_paint(RadiantStackPaintList* list) {
     if (!list) return;
-    if (list->entries) mem_free(list->entries);
-    list->entries = nullptr;
+    lam::free_owned(list->entries);
     list->count = 0;
 }

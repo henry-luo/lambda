@@ -97,7 +97,7 @@ static CanvasState canvas_initial_state(void) {
 
 static void canvas_state_destroy(CanvasState* state) {
     if (!state) return;
-    if (state->font) mem_free(state->font);
+    lam::Temp<char> font(state->font);  // the state releases its font text
     state->font = nullptr;
 }
 
@@ -106,7 +106,7 @@ static bool canvas_state_set_font(CanvasState* state, const char* font, int font
         font_len >= RADIANT_CANVAS_FONT_TEXT_MAX) return false;
     char* copy = mem_dup_n(font, (size_t)font_len, MEM_CAT_LAYOUT);
     if (!copy) return false;
-    if (state->font) mem_free(state->font);
+    lam::Temp<char> previous(state->font);  // the copy takes the slot
     state->font = copy;
     return true;
 }
@@ -123,9 +123,9 @@ static void canvas_free_saved_states(CanvasEntry* entry) {
     if (!entry) return;
     CanvasSavedState* saved = entry->saved_states;
     while (saved) {
+        lam::Temp<CanvasSavedState> owned(saved);  // the entry releases its saved states
         CanvasSavedState* next = saved->next;
         canvas_state_destroy(&saved->state);
-        mem_free(saved);
         saved = next;
     }
     entry->saved_states = nullptr;
@@ -135,9 +135,9 @@ static void canvas_free_clips(CanvasEntry* entry) {
     if (!entry) return;
     CanvasClip* clip = entry->clips;
     while (clip) {
+        lam::Temp<CanvasClip> owned(clip);  // the entry releases its clips
         CanvasClip* next = clip->next;
         if (clip->path) rdt_path_free(clip->path);
-        mem_free(clip);
         clip = next;
     }
     entry->clips = nullptr;
@@ -147,10 +147,9 @@ static void canvas_free_clips(CanvasEntry* entry) {
 static void canvas_pop_clips_to_depth(CanvasEntry* entry, int depth) {
     if (!entry) return;
     while (entry->clips && entry->clip_depth > depth) {
-        CanvasClip* clip = entry->clips;
+        lam::Temp<CanvasClip> clip(entry->clips);  // popped clips are released
         entry->clips = clip->next;
         if (clip->path) rdt_path_free(clip->path);
-        mem_free(clip);
         entry->clip_depth--;
     }
 }
@@ -168,17 +167,18 @@ static void canvas_reset_state(CanvasEntry* entry) {
 }
 
 static void canvas_entry_destroy(CanvasEntry* entry) {
+    lam::Temp<CanvasEntry> owned(entry);  // the registry hands the entry over
     if (!entry) return;
     canvas_free_saved_states(entry);
     canvas_free_clips(entry);
     if (entry->path) rdt_path_free(entry->path);
     canvas_state_destroy(&entry->state);
     if (entry->surface) image_surface_destroy(entry->surface);
-    mem_free(entry);
 }
 
 static void canvas_registry_destroy(void* data) {
-    CanvasRegistry* registry = (CanvasRegistry*)data;
+    // the document resource hands its registry over for teardown
+    lam::Temp<CanvasRegistry> registry((CanvasRegistry*)data);
     if (!registry) return;
     CanvasEntry* entry = registry->entries;
     while (entry) {
@@ -186,7 +186,6 @@ static void canvas_registry_destroy(void* data) {
         canvas_entry_destroy(entry);
         entry = next;
     }
-    mem_free(registry);
 }
 
 static CanvasRegistry* canvas_registry_for_document(DomDocument* document,
@@ -481,14 +480,13 @@ extern "C" bool radiant_canvas_save(void* canvas_element) {
 extern "C" bool radiant_canvas_restore(void* canvas_element) {
     CanvasEntry* entry = canvas_entry_for_element((DomElement*)canvas_element, true);
     if (!entry) return false;
-    CanvasSavedState* saved = entry->saved_states;
-    if (!saved) return true;
+    if (!entry->saved_states) return true;
+    lam::Temp<CanvasSavedState> saved(entry->saved_states);  // the popped state is released
     canvas_state_destroy(&entry->state);
     entry->state = saved->state;
     saved->state.font = nullptr;
     canvas_pop_clips_to_depth(entry, saved->clip_depth);
     entry->saved_states = saved->next;
-    mem_free(saved);
     return true;
 }
 

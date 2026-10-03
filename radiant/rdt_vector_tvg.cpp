@@ -277,9 +277,10 @@ static bool rdt_picture_retain_svg_owner(RdtPicture* pic) {
 
 static void picture_cache_entry_release(const RdtPictureCacheEntry* entry) {
     if (!entry) return;
-    if (entry->path_key) mem_free(entry->path_key);
-    if (entry->mime_key) mem_free(entry->mime_key);
-    if (entry->data_copy) mem_free(entry->data_copy);
+    // releasing an entry hands its key and data copies over
+    lam::Temp<char> path_key(entry->path_key);
+    lam::Temp<char> mime_key(entry->mime_key);
+    lam::Temp<char> data_copy(entry->data_copy);
     if (entry->picture) rdt_picture_free(entry->picture);
 }
 
@@ -408,17 +409,16 @@ static void picture_cache_evict_to_capacity_locked(HashMap* cache) {
 static bool picture_cache_insert_path_locked(const char* path, RdtPicture* picture) {
     if (!path || !picture) return false;
     if (!picture_cache_ensure_path_locked()) return false;
+    lam::Temp<char> path_key(mem_strdup(path, MEM_CAT_CACHE_IMAGE));
+    if (!path_key) return false;
     RdtPictureCacheEntry e = {};
-    e.path_key = mem_strdup(path, MEM_CAT_CACHE_IMAGE);
+    e.path_key = path_key.get();
     e.picture = picture;
     e.last_used = picture_cache_next_stamp_locked();
-    if (!e.path_key) return false;
     const RdtPictureCacheEntry* replaced =
         (const RdtPictureCacheEntry*)hashmap_set(g_picture_path_cache, &e);
-    if (hashmap_oom(g_picture_path_cache)) {
-        if (e.path_key) mem_free(e.path_key);
-        return false;
-    }
+    if (hashmap_oom(g_picture_path_cache)) return false;
+    path_key.release();  // the cache entry owns the key now
     if (replaced) picture_cache_entry_release(replaced);
     picture_cache_evict_to_capacity_locked(g_picture_path_cache);
     return true;
@@ -429,28 +429,24 @@ static bool picture_cache_insert_data_locked(const char* data, int size,
                                              RdtPicture* picture) {
     if (!data || size <= 0 || !picture) return false;
     if (!picture_cache_ensure_data_locked()) return false;
+    lam::Temp<char> data_copy = lam::temp_array<char>((size_t)size, MEM_CAT_CACHE_IMAGE);
+    if (!data_copy) return false;
+    memcpy(data_copy.get(), data, (size_t)size);
+    lam::Temp<char> mime_key(mem_strdup(mime_type ? mime_type : "", MEM_CAT_CACHE_IMAGE));
+    if (!mime_key) return false;
     RdtPictureCacheEntry e = {};
-    e.data_copy = (char*)mem_alloc((size_t)size, MEM_CAT_CACHE_IMAGE);
-    if (!e.data_copy) {
-        return false;
-    }
-    memcpy(e.data_copy, data, (size_t)size);
+    e.data_copy = data_copy.get();
     e.data_size = size;
     e.data_hash = hash;
-    e.mime_key = mem_strdup(mime_type ? mime_type : "", MEM_CAT_CACHE_IMAGE);
+    e.mime_key = mime_key.get();
     e.picture = picture;
     e.last_used = picture_cache_next_stamp_locked();
-    if (!e.mime_key) {
-        mem_free(e.data_copy);
-        return false;
-    }
     const RdtPictureCacheEntry* replaced =
         (const RdtPictureCacheEntry*)hashmap_set(g_picture_data_cache, &e);
-    if (hashmap_oom(g_picture_data_cache)) {
-        mem_free(e.data_copy);
-        mem_free(e.mime_key);
-        return false;
-    }
+    if (hashmap_oom(g_picture_data_cache)) return false;
+    // the cache entry owns the copies now
+    data_copy.release();
+    mime_key.release();
     if (replaced) picture_cache_entry_release(replaced);
     picture_cache_evict_to_capacity_locked(g_picture_data_cache);
     return true;
@@ -659,7 +655,8 @@ static void paint_cache_insert_entry_locked(RdtPaintCacheEntry* entry) {
     if (hashmap_oom(g_paint_cache)) {
         paint_cache_entry_free(entry);
     } else {
-        mem_free(entry);
+        // the cache copied the entry's fields; only the staging shell is freed
+        lam::Temp<RdtPaintCacheEntry> shell(entry);
         g_paint_cache_count++;
     }
 }
@@ -686,7 +683,7 @@ static RdtPaintCacheEntry* paint_cache_new_entry(uint64_t hash,
                                                  const RdtPath* path,
                                                  Tvg_Paint paint) {
     RdtPaintCacheEntry* entry = (RdtPaintCacheEntry*)mem_calloc(
-        1, sizeof(RdtPaintCacheEntry), MEM_CAT_CACHE_IMAGE);
+        1, sizeof(RdtPaintCacheEntry), MEM_CAT_CACHE_IMAGE); // OBJ_HEAP_OK: paint cache staging shell; freed once the cache has copied it
     entry->kind = kind;
     entry->hash = hash;
     entry->path = rdt_path_clone(path);
@@ -762,15 +759,16 @@ static Tvg_Paint paint_cache_store_gradient(uint64_t hash, RdtPaintCacheKind kin
 static void paint_cache_entry_release_fields(RdtPaintCacheEntry* e) {
     if (!e) return;
     if (e->path) rdt_path_free(e->path);
-    if (e->dash_array) mem_free(e->dash_array);
-    if (e->stops) mem_free(e->stops);
+    // releasing an entry hands its dash and stop copies over
+    lam::Temp<float> dash_array(e->dash_array);
+    lam::Temp<RdtGradientStop> stops(e->stops);
     if (e->paint) tvg_paint_unref(e->paint, true);
 }
 
 static void paint_cache_entry_free(RdtPaintCacheEntry* e) {
+    lam::Temp<RdtPaintCacheEntry> owned(e);
     if (!e) return;
     paint_cache_entry_release_fields(e);
-    mem_free(e);
 }
 
 static bool paint_cache_free_scan(const void* item, void* udata) {
@@ -1112,7 +1110,7 @@ static const RdtVectorCaps g_tvg_caps = {
 };
 
 void rdt_vector_init(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
-    RdtVectorImpl* impl = (RdtVectorImpl*)mem_calloc(1, sizeof(RdtVectorImpl), MEM_CAT_RENDER);
+    RdtVectorImpl* impl = (RdtVectorImpl*)mem_calloc(1, sizeof(RdtVectorImpl), MEM_CAT_RENDER); // OBJ_HEAP_OK: owned by RdtVector::impl; rdt_vector_destroy releases it
     impl->canvas = tvg_swcanvas_create(TVG_ENGINE_OPTION_DEFAULT);
     impl->pixels = pixels;
     impl->width = w;
@@ -1134,8 +1132,7 @@ void rdt_vector_destroy(RdtVector* vec) {
     RdtVectorImpl* impl = vec->impl;
     tvg_flush_batch_scene(impl);
     if (impl->canvas) tvg_canvas_destroy(impl->canvas);
-    mem_free(impl);
-    vec->impl = nullptr;
+    lam::free_owned(vec->impl);
 }
 
 void rdt_vector_set_target(RdtVector* vec, uint32_t* pixels, int w, int h, int stride) {
@@ -1207,7 +1204,7 @@ uint64_t rdt_vector_clip_mask_count(const RdtVector* vec) {
 // ============================================================================
 
 RdtPath* rdt_path_new(void) {
-    RdtPath* p = (RdtPath*)mem_calloc(1, sizeof(RdtPath), MEM_CAT_RENDER);
+    RdtPath* p = (RdtPath*)mem_calloc(1, sizeof(RdtPath), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the path; rdt_path_free releases it
     return p;
 }
 
@@ -1253,9 +1250,10 @@ void rdt_path_add_circle(RdtPath* p, float cx, float cy, float rx, float ry) {
 }
 
 void rdt_path_free(RdtPath* p) {
+    // the caller hands the path over
+    lam::Temp<RdtPath> owned(p);
     if (!p) return;
-    mem_free(p->entries);
-    mem_free(p);
+    lam::Temp<RdtPath::Entry> entries(p->entries);
 }
 
 RdtPath* rdt_path_clone(const RdtPath* src) {
@@ -1588,9 +1586,10 @@ static void tvg_gradient_set_stops(Tvg_Gradient gradient,
     // hold; keep the fast stack path for normal gradients and spill large,
     // valid stop arrays to render-owned heap storage instead of aborting.
     bool heap_stops = stops_size > LAMBDA_ALLOCA_MAX_BYTES;
-    Tvg_Color_Stop* tvg_stops = heap_stops
-        ? (Tvg_Color_Stop*)mem_alloc(stops_size, MEM_CAT_RENDER)
-        : LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
+    lam::Temp<Tvg_Color_Stop> heap_buffer = heap_stops
+        ? lam::temp_array<Tvg_Color_Stop>((size_t)stop_count, MEM_CAT_RENDER)
+        : lam::Temp<Tvg_Color_Stop>();
+    Tvg_Color_Stop* tvg_stops = heap_stops ? heap_buffer.get() : LAMBDA_ALLOCA(stop_count, Tvg_Color_Stop);
     for (int index = 0; index < stop_count; index++) {
         tvg_stops[index].offset = stops[index].offset;
         tvg_stops[index].r = stops[index].r;
@@ -1599,7 +1598,6 @@ static void tvg_gradient_set_stops(Tvg_Gradient gradient,
         tvg_stops[index].a = stops[index].a;
     }
     tvg_gradient_set_color_stops(gradient, tvg_stops, stop_count);
-    if (heap_stops) mem_free(tvg_stops);
 }
 
 static void tvg_gradient_apply_transform(Tvg_Gradient gradient,
@@ -1768,7 +1766,7 @@ static bool ensure_clip_capacity(int needed_depth) {
     if (needed_depth <= s_clip_capacity) return true;
     int new_capacity = s_clip_capacity * 2;
     while (new_capacity < needed_depth) new_capacity *= 2;
-    ClipEntry* new_stack = (ClipEntry*)mem_calloc((size_t)new_capacity, sizeof(ClipEntry), MEM_CAT_RENDER);
+    ClipEntry* new_stack = (ClipEntry*)mem_calloc((size_t)new_capacity, sizeof(ClipEntry), MEM_CAT_RENDER); // OBJ_HEAP_OK: thread-local clip stack; replaced on growth, released when empty
     if (!new_stack) {
         log_warn("[RAD_CAP_TVG_CLIP] failed to grow clip stack to depth %d", needed_depth);
         return false;
@@ -1777,7 +1775,7 @@ static bool ensure_clip_capacity(int needed_depth) {
         memcpy(new_stack, s_clip_stack, (size_t)s_clip_depth * sizeof(ClipEntry));
     }
     if (s_clip_stack != s_clip_inline_stack) {
-        mem_free(s_clip_stack);
+        lam::Temp<ClipEntry> old_stack(s_clip_stack);  // the grown stack replaces the heap one
     }
     s_clip_stack = new_stack;
     s_clip_capacity = new_capacity;
@@ -1787,7 +1785,7 @@ static bool ensure_clip_capacity(int needed_depth) {
 
 static void release_heap_clip_stack_if_empty() {
     if (s_clip_depth != 0 || s_clip_stack == s_clip_inline_stack) return;
-    mem_free(s_clip_stack);
+    lam::Temp<ClipEntry> heap_stack(s_clip_stack);
     s_clip_stack = s_clip_inline_stack;
     s_clip_capacity = RDT_INITIAL_CLIP_DEPTH;
 }
@@ -1801,7 +1799,7 @@ void rdt_push_clip(RdtVector* vec, RdtPath* clip_path, const RdtMatrix* transfor
     tvg_flush_batch_scene(vec->impl);
 
     // copy the path for the duration of the clip
-    RdtPath* copy = (RdtPath*)mem_calloc(1, sizeof(RdtPath), MEM_CAT_RENDER);
+    RdtPath* copy = (RdtPath*)mem_calloc(1, sizeof(RdtPath), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the copy; rdt_path_free releases it
     if (clip_path->count > 0) {
         copy->entries = (RdtPath::Entry*)mem_alloc(clip_path->count * sizeof(RdtPath::Entry), MEM_CAT_RENDER);
         memcpy(copy->entries, clip_path->entries, clip_path->count * sizeof(RdtPath::Entry));
@@ -1975,7 +1973,7 @@ void rdt_draw_image(RdtVector* vec, const uint32_t* pixels, int src_w, int src_h
 static RdtPicture* svg_picture_create(const char* data, int size, const char* source_path) {
     if (!data || size <= 0) return nullptr;
 
-    Pool* pool = mem_pool_create(NULL, MEM_ROLE_MEDIA, "rdt.vector.tvg");
+    Pool* pool = mem_pool_create(mem_context_process(MEM_ROLE_MEDIA), MEM_ROLE_MEDIA, "rdt.vector.tvg");
     if (!pool) {
         log_error("svg_picture_create: pool_create failed");
         return nullptr;
@@ -1989,10 +1987,10 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
 
     // html5_parse_svg_document expects a null-terminated string and applies the
     // same SVG tag/attribute correction path used by inline HTML SVG.
-    char* buf = mem_dup_n((const char*)data, size, MEM_CAT_RENDER);
+    lam::Temp<char> buf(mem_dup_n((const char*)data, size, MEM_CAT_RENDER));
     if (!buf) { mem_pool_destroy(pool); return nullptr; }
-    Element* svg_root = html5_parse_svg_document(input, buf, nullptr);
-    mem_free(buf);
+    Element* svg_root = html5_parse_svg_document(input, buf.get(), nullptr);
+    buf.reset();
 
     if (!input->root.item || input->root.item == ITEM_ERROR) {
         log_error("svg_picture_create: html5_parse_svg_document failed");
@@ -2010,7 +2008,7 @@ static RdtPicture* svg_picture_create(const char* data, int size, const char* so
     float w = isz.width  > 0 ? isz.width  : 300.0f;
     float h = isz.height > 0 ? isz.height : 150.0f;
 
-    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
+    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the picture; RdtPicture::release frees it
     p->kind = RdtPicture::KIND_SVG_DOM;
     p->input = input;
     p->pool = pool;
@@ -2107,7 +2105,7 @@ RdtPicture* RdtPicture::dup() {
         if (!paint) return nullptr;
         Tvg_Paint dup = tvg_paint_duplicate(paint);
         if (!dup) return nullptr;
-        RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
+        RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the picture; RdtPicture::release frees it
         p->kind = RdtPicture::KIND_TVG_PAINT;
         atomic_store32(&p->ref_count, 1);
         p->paint = dup;
@@ -2119,7 +2117,7 @@ RdtPicture* RdtPicture::dup() {
     // owner so cache eviction cannot free the shared Element tree underneath.
     if (!rdt_picture_retain_svg_owner(this)) return nullptr;
     RdtPicture* owner = rdt_picture_svg_owner(this);
-    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
+    RdtPicture* p = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the picture; RdtPicture::release frees it
     if (!p) {
         rdt_picture_free(owner);
         return nullptr;
@@ -2278,7 +2276,7 @@ void RdtPicture::release() {
     if (pic->kind == RdtPicture::KIND_SVG_DOM) {
         RdtPicture* owner = pic->owner;
         if (owner) {
-            mem_free(pic);
+            lam::Temp<RdtPicture> handle(pic);  // a duplicate handle goes; the shared owner may stay
             pic = owner;
         }
         int32_t refs = atomic_dec32(&pic->ref_count);
@@ -2288,12 +2286,12 @@ void RdtPicture::release() {
             return;
         }
         if (pic->pool) mem_pool_destroy(pic->pool);
-        if (pic->source_path) mem_free(pic->source_path);
+        lam::Temp<char> source_path(pic->source_path);
         // input is allocated from the pool; destroyed implicitly above
     } else {
         if (pic->paint) tvg_paint_unref(pic->paint, true);
     }
-    mem_free(pic);
+    lam::Temp<RdtPicture> last(pic);  // the last reference frees the picture
 }
 
 void rdt_picture_free(RdtPicture* pic) {
@@ -2306,7 +2304,7 @@ void rdt_picture_free(RdtPicture* pic) {
 
 RdtPicture* rdt_picture_take_tvg_paint(Tvg_Paint paint, float w, float h) {
     if (!paint) return nullptr;
-    RdtPicture* pic = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER);
+    RdtPicture* pic = (RdtPicture*)mem_calloc(1, sizeof(RdtPicture), MEM_CAT_RENDER); // OBJ_HEAP_OK: the caller owns the picture; RdtPicture::release frees it
     pic->kind = RdtPicture::KIND_TVG_PAINT;
     atomic_store32(&pic->ref_count, 1);
     pic->paint = paint;

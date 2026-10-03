@@ -3,6 +3,7 @@
 
 #include "../../lib/ownership.hpp"
 #include "../../lib/mem_kind.hpp"
+#include "../../lib/arraylist.hpp"
 #include "../../lib/tagged.hpp"
 #include "../../radiant/radiant.hpp"
 
@@ -307,6 +308,29 @@ TEST(MemoryKinds, DeducingFactoriesAndExplicitCasts) {
     // an explicit cast reads like a cast of the raw pointer
     KindDerivedProp* back = (KindDerivedProp*)node.prop;
     EXPECT_EQ(back, &derived);
+}
+
+TEST(MemoryKinds, OwnSpanBoundsItsOwnedArray) {
+    float values[3] = {1.0f, 2.0f, 3.0f};
+    lam::OwnSpan<float> span = {lam::own_arr(values), 3};
+    float sum = 0.0f;
+    for (float v : span) sum += v;
+    EXPECT_FLOAT_EQ(sum, 6.0f);
+    EXPECT_FLOAT_EQ(span[1], 2.0f);
+    EXPECT_FALSE(span.empty());
+}
+
+TEST(MemoryKinds, ArrayListTakesStorageFromANodePool) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    {
+        lam::ArrayList<int> list(pool, 2);
+        for (int i = 0; i < 100; i++) ASSERT_TRUE(list.append(i));
+        EXPECT_EQ(list.size(), 100u);
+        EXPECT_TRUE(pool_owns(pool, list.data()));
+        EXPECT_EQ(list[99], 99);
+    }
+    pool_destroy(pool);
 }
 
 // ---------------------------------------------------------------------------

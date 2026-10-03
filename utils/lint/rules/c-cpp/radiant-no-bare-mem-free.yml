@@ -1,22 +1,19 @@
-id: obj-heap-ok
+id: radiant-no-bare-mem-free
 language: cpp
 severity: error
 message: >-
-  Typed struct heap allocation in Radiant should be reviewed as a long-lived
-  heap root. Add "// OBJ_HEAP_OK: <reason>" when it has no natural pool/scratch
-  owner; otherwise move it to the correct lifetime owner.
-metadata:
-  suppress: OBJ_HEAP_OK
+  Bare mem_free in Radiant view, HTML/CSS/SVG, layout or rendering code. A
+  function-scoped buffer belongs in a lam::Temp owner; an owning field is a
+  lam::Own/OwnArr released with lam::free_owned; a teardown function adopts
+  what it releases into a lam::Temp.
 rule:
-  pattern:
-    context: "void f() { $T* $V = ($T*)mem_calloc($$$A); }"
-    selector: declaration
+  kind: call_expression
+  regex: "^mem_free\\s*\\("
 files:
   - "radiant/**/*.{c,cpp,h,hpp,mm}"
+# Interaction, editing, scripting, state and application-shell code is out of
+# this rule's scope until its own phase.
 ignores:
-  # the Core Graphics backend is not built (exclude_source_files); its libc
-  # calloc/free pairs are reviewed when it is brought back
-  - "radiant/rdt_vector_cg.mm"
   - "radiant/*event*"
   - "radiant/*edit*"
   - "radiant/*script*"

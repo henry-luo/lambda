@@ -5094,6 +5094,12 @@ void layout_init(LayoutContext* lycon, DomDocument* doc, UiContext* uicon) {
 
 void layout_cleanup(LayoutContext* lycon) {
     Arena* scratch_arena = lycon->scratch.arena;
+#ifndef NDEBUG
+    // every scratch block belongs to a scope that ends inside the pass; the
+    // final release is a safety net, not the owner of pass memory
+    size_t live_scratch = scratch_live_count(&lycon->scratch);
+    if (live_scratch) log_error("[SCRATCH_PASS_EXIT] layout pass ended with %zu live scratch blocks", live_scratch);
+#endif
     scratch_release(&lycon->scratch);
 
     if (lycon->counter_context) {

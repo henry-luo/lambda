@@ -49,6 +49,6 @@ TableMetadata* table_metadata_create(ScratchScope* scope, int cols, int rows) {
 
 void table_metadata_destroy(TableMetadata* meta) {
     if (!meta) return;
+    lam::Temp<TableMetadata> storage(meta);  // destroyed below, storage freed on return
     meta->~TableMetadata(); // NEW_DELETE_OK: paired with table_metadata_create.
-    mem_free(meta);
 }
