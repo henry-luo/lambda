@@ -740,9 +740,10 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         pool_free(lycon->doc->view_tree->prop_pool, marker_font_prop);
         marker_font_prop = nullptr;
     }
-    if (block->pseudo->marker && block->pseudo->marker->blk) {
-        MarkerProp* marker_prop = reinterpret_cast<MarkerProp*>(
-            block->pseudo->marker->blk);
+    // the marker's MarkerProp lives in its own field, not in blk
+    MarkerProp* marker_prop = block->pseudo->marker
+        ? block->pseudo->marker->marker_prop() : nullptr;
+    if (marker_prop) {
         marker_prop->has_color = resolve_pseudo_color(lycon,
             list_elem->pseudo_style(PSEUDO_STYLE_MARKER), &marker_prop->color);
     }
