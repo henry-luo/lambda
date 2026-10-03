@@ -724,9 +724,7 @@ static bool svg_filter_evaluate_node(const RdtSvgFilterProgram* program, size_t 
                 pixel = svg_filter_pack(values); break;
             }
             uint32_t mixed = render_composite_blend_pixel(render_pixel_unpremultiply_abgr(second), render_pixel_unpremultiply_abgr(first), node->blend_mode);
-            uint8_t alpha = (uint8_t)(mixed >> 24);
-            pixel = render_pixel_pack_abgr(render_pixel_premultiply_channel((uint8_t)mixed, alpha),
-                render_pixel_premultiply_channel((uint8_t)(mixed >> 8), alpha), render_pixel_premultiply_channel((uint8_t)(mixed >> 16), alpha), alpha); break;
+            pixel = render_pixel_premultiply_abgr(mixed); break;
         }
         default: valid = false; break;
         }

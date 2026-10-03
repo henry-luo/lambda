@@ -3006,6 +3006,8 @@
               "radiant/display_list_replay_glyph.cpp",
               "radiant/display_list_replay_state.cpp",
               "radiant/raster_pixel.cpp",
+              "radiant/render_image_encode.cpp",
+              "radiant/render_memory.cpp",
               "radiant/paint_ir.cpp",
               "radiant/render_paint_block.cpp",
               "radiant/render_paint_boundary.cpp",

@@ -3489,6 +3489,7 @@ uint32_t render_pixel_pack_abgr(uint32_t red, uint32_t green,
                                 uint32_t blue, uint32_t alpha);
 uint8_t render_pixel_premultiply_channel(uint8_t channel, uint8_t alpha);
 uint8_t render_pixel_unpremultiply_channel(uint8_t channel, uint8_t alpha);
+uint32_t render_pixel_premultiply_abgr(uint32_t pixel);
 uint32_t render_pixel_unpremultiply_abgr(uint32_t pixel);
 uint32_t render_pixel_scale_premultiplied(uint32_t pixel, uint8_t opacity);
 float render_color_srgb_to_linear(float channel);

@@ -5,9 +5,7 @@
     "width": 330,
     "height": 250
   },
-  "env": {
-    "LANGUAGE": "en-US:en"
-  },
+  "env": [{"key": "LANGUAGE", "value": "en-US:en"}],
   "events": [
     {
       "type": "assert_pixel",

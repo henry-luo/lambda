@@ -13,14 +13,16 @@
     padding: 8px;
   }
   .spacer { height: 70px; }
-  #victim { display: block; margin: 8px 0; }
+  #victim { height: 32px; overflow: auto; margin: 8px 0; }
+  #victim .spacer { height: 80px; }
   #replace { margin-top: 14px; }
 </style>
 </head>
 <body>
   <div id="host">
     <div class="spacer">top</div>
-    <input id="victim" value="victim">
+    <!-- scroll state is pruned on detachment; form values survive until DOM retirement (D4.5.1v4). -->
+    <div id="victim"><div class="spacer">victim</div></div>
     <div class="spacer">bottom</div>
   </div>
   <button id="replace">Replace children</button>

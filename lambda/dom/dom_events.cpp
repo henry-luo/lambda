@@ -2300,8 +2300,9 @@ Item dom_dispatch_event(Item elem_item, Item event_item) {
     // Mark event as dispatching.
     event_set_bool(event_item, "__dispatch_flag", true);
 
-    // SMIL consumes the same dispatch occurrence after the native re-entry guard.
-    if (DomElement* target = (DomElement*)dom_unwrap_element(elem_root.get())) {
+    // unwrapping also returns text/comment nodes; the SMIL seam accepts only elements.
+    DomNode* target_node = (DomNode*)dom_unwrap_element(elem_root.get());
+    if (DomElement* target = target_node ? target_node->as_element() : nullptr) {
         double detail = 0;
         item_try_to_double(event_get_item(event_root.get(), "detail"), &detail);
         dom_engine_svg_timing_event(target, type, bubbles, detail);
