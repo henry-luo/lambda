@@ -304,6 +304,7 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     free_background_prop(tree, elem->boundary()->background);
     if (elem->boundary()->border) {
         free_linear_gradient(tree, elem->boundary()->border->border_image_linear_gradient);
+        view_pool_free_ptr(tree, elem->boundary()->border->border_image_url);
     }
     view_pool_free_ptr(tree, elem->boundary()->border);
     view_pool_free_ptr(tree, elem->boundary()->mask);
@@ -475,6 +476,10 @@ static void release_form_prop(DomElement* elem, ViewTree*) {
     if (form->placeholder_font) {
         font_prop_release_handle(form->placeholder_font);
         form->placeholder_font = nullptr;
+    }
+    if (form->file_button_font) {
+        font_prop_release_handle(form->file_button_font);
+        form->file_button_font = nullptr;
     }
     form_control_prop_release(elem, form);
     if (form->heap_allocated) {
@@ -2186,11 +2191,8 @@ static void append_font_json(DomElement* elem, StrBuf* buf, int indent,
                              weight_terminator);
     }
     if (include_decoration) {
-        const char* decoration = "none";
-        if (font) {
-            const CssEnumInfo* value = css_enum_info(font->text_deco);
-            if (value) decoration = (const char*)value->name;
-        }
+        char decoration[48];
+        font_text_decoration_names(font, decoration, sizeof(decoration));
         strbuf_append_char_n(buf, ' ', indent + 2);
         strbuf_append_format(buf, "\"decoration\": \"%s\"\n", decoration);
     }

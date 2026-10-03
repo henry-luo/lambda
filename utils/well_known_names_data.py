@@ -53,9 +53,13 @@ padding-block-start padding-block-end padding-inline padding-inline-start paddin
 border-top-width border-right-width border-bottom-width border-left-width border-top-style
 border-right-style border-bottom-style border-left-style border-top-color border-right-color
 border-bottom-color border-left-color border-width border-style border-color border-top
-border-right border-bottom border-left border-inline border-inline-start border-inline-end
-border-block border-block-start border-block-end border-block-width border-block-color
+border-right border-bottom border-left border-inline border-inline-width border-inline-style
+border-inline-color border-inline-start border-inline-start-width border-inline-start-style
+border-inline-start-color border-inline-end border-inline-end-width border-inline-end-style
+border-inline-end-color border-block border-block-style border-block-start
+border-block-start-style border-block-end border-block-end-style border-block-width border-block-color
 border-block-start-width border-block-start-color border-block-end-color border-block-end-width
+border-start-start-radius border-start-end-radius border-end-start-radius border-end-end-radius
 box-sizing box-decoration-break aspect-ratio fill stroke stroke-width font-family font-size
 font-weight font-style font-variant font-size-adjust font-kerning font-variant-ligatures
 font-variant-caps font-variant-numeric font-variant-alternates font-variant-east-asian
@@ -95,7 +99,9 @@ pointer-events float-defer float-offset float-reference image-orientation image-
 mask-image mask-type nesting overflow-block overflow-clip-margin overflow-inline overscroll-behavior
 ruby-align ruby-position scroll-behavior scroll-margin scroll-padding scroll-snap-align
 scroll-snap-type transition-delay transition-duration transition-property transition-timing-function
-wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-size contain-intrinsic-block-size scrollbar-gutter content-visibility all zoom text-wrap text-wrap-mode
+wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-size contain-intrinsic-block-size scrollbar-gutter content-visibility all zoom text-wrap text-wrap-mode text-underline-offset text-decoration-skip-ink text-underline-position overscroll-behavior-x overscroll-behavior-y
+scroll-margin-top scroll-margin-right scroll-margin-bottom scroll-margin-left scroll-margin-block scroll-margin-block-start scroll-margin-block-end scroll-margin-inline scroll-margin-inline-start scroll-margin-inline-end
+scroll-padding-top scroll-padding-right scroll-padding-bottom scroll-padding-left scroll-padding-block scroll-padding-block-start scroll-padding-block-end scroll-padding-inline scroll-padding-inline-start scroll-padding-inline-end
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

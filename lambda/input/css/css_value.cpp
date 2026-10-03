@@ -20,6 +20,69 @@ bool css_absolute_length_to_px(CssUnit unit, double value, double* pixels) {
     return true;
 }
 
+bool css_viewport_length_to_px(CssUnit unit, double value, double width,
+                               double height, bool vertical_inline_axis,
+                               double* pixels) {
+    if (!pixels) return false;
+    double base = 0.0;
+    switch (unit) {
+        case CSS_UNIT_VW: case CSS_UNIT_SVW: case CSS_UNIT_LVW: case CSS_UNIT_DVW:
+            base = width; break;
+        case CSS_UNIT_VH: case CSS_UNIT_SVH: case CSS_UNIT_LVH: case CSS_UNIT_DVH:
+            base = height; break;
+        case CSS_UNIT_VI: case CSS_UNIT_SVI: case CSS_UNIT_LVI: case CSS_UNIT_DVI:
+            base = vertical_inline_axis ? height : width; break;
+        case CSS_UNIT_VB: case CSS_UNIT_SVB: case CSS_UNIT_LVB: case CSS_UNIT_DVB:
+            base = vertical_inline_axis ? width : height; break;
+        case CSS_UNIT_VMIN: case CSS_UNIT_SVMIN: case CSS_UNIT_LVMIN: case CSS_UNIT_DVMIN:
+            base = width < height ? width : height; break;
+        case CSS_UNIT_VMAX: case CSS_UNIT_SVMAX: case CSS_UNIT_LVMAX: case CSS_UNIT_DVMAX:
+            base = width > height ? width : height; break;
+        default: return false;
+    }
+    // Radiant has no retractable viewport UI; all three variants share its
+    // current viewport dimensions until such UI contributes separate sizes.
+    *pixels = value * base / 100.0;
+    return true;
+}
+
+const char* css_math_token_name(const CssValue* value) {
+    if (!value) return NULL;
+    if (value->type == CSS_VALUE_TYPE_CUSTOM)
+        return value->data.custom_property.name;
+    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
+        const CssEnumInfo* info = css_enum_info(value->data.keyword);
+        return info ? info->name : NULL;
+    }
+    return NULL;
+}
+
+static bool css_value_contains_var_reference_inner(const CssValue* value,
+                                                   int depth) {
+    if (!value || depth > 32) return false;
+    if (value->type == CSS_VALUE_TYPE_VAR) return true;
+    if (value->type == CSS_VALUE_TYPE_LIST) {
+        if (!value->data.list.values) return false;
+        for (int i = 0; i < value->data.list.count; i++) {
+            if (css_value_contains_var_reference_inner(
+                    value->data.list.values[i], depth + 1)) return true;
+        }
+    } else if (value->type == CSS_VALUE_TYPE_FUNCTION &&
+               value->data.function && value->data.function->name) {
+        if (strcmp(value->data.function->name, "var") == 0) return true;
+        for (int i = 0; value->data.function->args &&
+             i < value->data.function->arg_count; i++) {
+            if (css_value_contains_var_reference_inner(
+                    value->data.function->args[i], depth + 1)) return true;
+        }
+    }
+    return false;
+}
+
+bool css_value_contains_var_reference(const CssValue* value) {
+    return css_value_contains_var_reference_inner(value, 0);
+}
+
 float css_font_size_keyword_px(CssEnum keyword) {
     switch (keyword) {
         case CSS_VALUE_XX_SMALL: return 9.0f;
@@ -45,6 +108,7 @@ static const CssEnumInfo css_value_definitions[] = {
     {"inherit", 7, CSS_VALUE_INHERIT, CSS_VALUE_GROUP_GLOBAL},
     {"unset", 5, CSS_VALUE_UNSET, CSS_VALUE_GROUP_GLOBAL},
     {"revert", 6, CSS_VALUE_REVERT, CSS_VALUE_GROUP_GLOBAL},
+    {"revert-layer", 12, CSS_VALUE_REVERT_LAYER, CSS_VALUE_GROUP_GLOBAL},
     {"flex-start", 10, CSS_VALUE_FLEX_START, CSS_VALUE_GROUP_ALIGNMENT},
     {"flex-end", 8, CSS_VALUE_FLEX_END, CSS_VALUE_GROUP_ALIGNMENT},
     {"center", 6, CSS_VALUE_CENTER, CSS_VALUE_GROUP_ALIGNMENT},
@@ -479,6 +543,12 @@ static const CssEnumInfo css_value_definitions[] = {
     // object-fit values (must match enum order: FILL, SCALE_DOWN after SMALL_CAPS)
     {"fill", 4, CSS_VALUE_FILL, CSS_VALUE_GROUP_OBJECT_FIT},
     {"scale-down", 10, CSS_VALUE_SCALE_DOWN, CSS_VALUE_GROUP_OBJECT_FIT},
+    {"smooth", 6, CSS_VALUE_SMOOTH, CSS_VALUE_GROUP_MISC},
+    {"high-quality", 12, CSS_VALUE_HIGH_QUALITY, CSS_VALUE_GROUP_MISC},
+    {"pixelated", 9, CSS_VALUE_PIXELATED, CSS_VALUE_GROUP_MISC},
+    {"crisp-edges", 11, CSS_VALUE_CRISP_EDGES, CSS_VALUE_GROUP_MISC},
+    {"optimizespeed", 13, CSS_VALUE_OPTIMIZE_SPEED, CSS_VALUE_GROUP_MISC},
+    {"optimizequality", 15, CSS_VALUE_OPTIMIZE_QUALITY, CSS_VALUE_GROUP_MISC},
     // text-box-trim values
     {"trim-start", 10, CSS_VALUE_TRIM_START, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
     {"trim-end", 8, CSS_VALUE_TRIM_END, CSS_VALUE_GROUP_TEXT_BOX_TRIM},
@@ -532,6 +602,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"replace", 7, CSS_VALUE_REPLACE, CSS_VALUE_GROUP_MISC},
     {"flat", 4, CSS_VALUE_FLAT, CSS_VALUE_GROUP_MISC},
     {"preserve-3d", 11, CSS_VALUE_PRESERVE_3D, CSS_VALUE_GROUP_MISC},
+    {"from-font", 9, CSS_VALUE_FROM_FONT, CSS_VALUE_GROUP_MISC},
+    {"chain", 5, CSS_VALUE_CHAIN, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
 };
 
@@ -798,10 +870,22 @@ static const CssUnitEntry css_unit_table[] = {
     // small/large/dynamic viewport units
     {"svw",  3, CSS_UNIT_SVW},
     {"svh",  3, CSS_UNIT_SVH},
+    {"svi",  3, CSS_UNIT_SVI},
+    {"svb",  3, CSS_UNIT_SVB},
+    {"svmin",5, CSS_UNIT_SVMIN},
+    {"svmax",5, CSS_UNIT_SVMAX},
     {"lvw",  3, CSS_UNIT_LVW},
     {"lvh",  3, CSS_UNIT_LVH},
+    {"lvi",  3, CSS_UNIT_LVI},
+    {"lvb",  3, CSS_UNIT_LVB},
+    {"lvmin",5, CSS_UNIT_LVMIN},
+    {"lvmax",5, CSS_UNIT_LVMAX},
     {"dvw",  3, CSS_UNIT_DVW},
     {"dvh",  3, CSS_UNIT_DVH},
+    {"dvi",  3, CSS_UNIT_DVI},
+    {"dvb",  3, CSS_UNIT_DVB},
+    {"dvmin",5, CSS_UNIT_DVMIN},
+    {"dvmax",5, CSS_UNIT_DVMAX},
     // container query units
     {"cqw",  3, CSS_UNIT_CQW},
     {"cqh",  3, CSS_UNIT_CQH},

@@ -332,6 +332,8 @@ extern "C" Item dom_form_request_submit_bridge(Item form_item, Item submitter_it
         &has_submitter, &submitter));
     if (has_submitter && !submitter) return make_js_undefined();
 
+    dom_form_mark_user_validity(form);
+
     if (dom_should_validate_submit(form, submitter)) {
         Item valid = dom_check_validity_bridge(form_item);
         if (!js_is_truthy(valid)) return make_js_undefined();

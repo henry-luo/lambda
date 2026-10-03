@@ -13,7 +13,7 @@ static constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
 
 static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
 static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
-static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* border, Rect rect);
+static bool render_border_image(RenderContext* rdcon, BorderProp* border, Rect rect);
 
 static inline Color color_darken(Color c, float factor) {
     Color out;
@@ -457,7 +457,7 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     Spacing orig_width = border->width;
     for (int i = 0; i < 4; i++) border->width.values[i] *= s;
 
-    if (render_border_image_gradient(rdcon, border, rect)) {
+    if (render_border_image(rdcon, border, rect)) {
         border->width = orig_width;
         border->radius = orig_radius;
         return;
@@ -476,40 +476,135 @@ void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
     border->radius = orig_radius;
 }
 
-static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* border, Rect rect) {
-    if (!rdcon || !border ||
-        border->border_image_type != GRADIENT_LINEAR ||
-        !border->border_image_linear_gradient ||
-        border->border_image_linear_gradient->stop_count < 2) {
-        return false;
+typedef struct {
+    float first;
+    float step;
+    float size;
+    int count;
+} BorderImageTileAxis;
+
+static BorderImageTileAxis border_image_tile_axis(CssEnum repeat, float start,
+                                                   float extent, float natural_size) {
+    BorderImageTileAxis axis = {start, extent, extent, 1};
+    if (extent <= 0.0f || natural_size <= 0.0f ||
+        (repeat != CSS_VALUE_REPEAT && repeat != CSS_VALUE_ROUND &&
+         repeat != CSS_VALUE_SPACE)) return axis;
+    if (repeat == CSS_VALUE_ROUND) {
+        // INT_CAST_OK: a rounded tile count is discrete; positions stay float.
+        axis.count = max(1, (int)roundf(extent / natural_size));
+        axis.size = extent / axis.count;
+        axis.step = axis.size;
+    } else if (repeat == CSS_VALUE_SPACE) {
+        // INT_CAST_OK: a whole-tile count is discrete; positions stay float.
+        axis.count = (int)floorf(extent / natural_size);
+        axis.size = natural_size;
+        float gap = (extent - axis.count * axis.size) / (axis.count + 1);
+        axis.first = start + gap;
+        axis.step = axis.size + gap;
+    } else {
+        axis.size = natural_size;
+        axis.step = axis.size;
+        float center_tile = start + (extent - axis.size) * 0.5f;
+        float preceding = ceilf((center_tile - start) / axis.step);
+        axis.first = center_tile - preceding * axis.step;
+        // INT_CAST_OK: the number of clipped repeated tiles is discrete.
+        axis.count = (int)ceilf((start + extent - axis.first) / axis.step);
     }
+    return axis;
+}
 
-    LinearGradient* gradient = border->border_image_linear_gradient;
-    float edge_width = border->has_border_image_width
-        ? border->border_image_width * rdcon->raster_scale : 0.0f;
-    float top = border->has_border_image_width ? edge_width : border->width.values[0];
-    float right = border->has_border_image_width ? edge_width : border->width.values[1];
-    float bottom = border->has_border_image_width ? edge_width : border->width.values[2];
-    float left = border->has_border_image_width ? edge_width : border->width.values[3];
-    top = min(top, rect.height * 0.5f);
-    bottom = min(bottom, rect.height * 0.5f);
-    left = min(left, rect.width * 0.5f);
-    right = min(right, rect.width * 0.5f);
-    if (top <= 0.0f && right <= 0.0f && bottom <= 0.0f && left <= 0.0f) {
-        return true;
+static void render_border_image_gradient_tile(RenderContext* rdcon,
+                                               Rect source, Rect dest,
+                                               RadiantGradientLine line,
+                                               float line_length_squared,
+                                               RdtGradientStop* stops,
+                                               int stop_count) {
+    if (source.width <= 0.0f || source.height <= 0.0f ||
+        dest.width <= 0.0f || dest.height <= 0.0f ||
+        line_length_squared <= 0.0f) return;
+    RdtPath* piece = rdt_path_new();
+    if (!piece) return;
+    rdt_path_add_rect(piece, dest.x, dest.y, dest.width, dest.height,
+                      0.0f, 0.0f);
+    // Affine mapping preserves the gradient's source position in each tile.
+    float vx = line.x2 - line.x1;
+    float vy = line.y2 - line.y1;
+    float cx = dest.x + dest.width * 0.5f;
+    float cy = dest.y + dest.height * 0.5f;
+    float sx = source.x + source.width * 0.5f;
+    float sy = source.y + source.height * 0.5f;
+    float center_t = ((sx - line.x1) * vx + (sy - line.y1) * vy)
+        / line_length_squared;
+    float tx = (source.width / dest.width) * vx / line_length_squared;
+    float ty = (source.height / dest.height) * vy / line_length_squared;
+    float slope_squared = tx * tx + ty * ty;
+    if (slope_squared > 0.0f) {
+        rc_fill_linear_gradient(rdcon, piece,
+            cx - center_t * tx / slope_squared,
+            cy - center_t * ty / slope_squared,
+            cx + (1.0f - center_t) * tx / slope_squared,
+            cy + (1.0f - center_t) * ty / slope_squared,
+            stops, stop_count, RDT_FILL_WINDING,
+            render_state_current_transform(rdcon));
     }
+    rdt_path_free(piece);
+}
 
-    RdtPath* ring = rdt_path_new();
-    if (!ring) return false;
-    rdt_path_add_rect(ring, rect.x, rect.y, rect.width, rect.height, 0.0f, 0.0f);
-    rdt_path_add_rect(ring,
-        rect.x + left, rect.y + top,
-        max(0.0f, rect.width - left - right),
-        max(0.0f, rect.height - top - bottom),
-        0.0f, 0.0f);
+static void render_border_image_raster_tile(RenderContext* rdcon,
+                                             ImageSurface* image,
+                                             Rect source, Rect dest) {
+    if (!rdcon || !image || !image->pixels) return;
+    float decoded_x_scale = image->decoded_width > 0
+        ? (float)image->decoded_width / image->width : 1.0f;
+    float decoded_y_scale = image->decoded_height > 0
+        ? (float)image->decoded_height / image->height : 1.0f;
+    // INT_CAST_OK: decoded raster sample coordinates and extents are integers.
+    int sx0 = (int)floorf(source.x * decoded_x_scale);
+    int sy0 = (int)floorf(source.y * decoded_y_scale);
+    int sx1 = (int)ceilf((source.x + source.width) * decoded_x_scale);
+    int sy1 = (int)ceilf((source.y + source.height) * decoded_y_scale);
+    int decoded_width = image->decoded_width > 0 ? image->decoded_width : image->width;
+    int decoded_height = image->decoded_height > 0 ? image->decoded_height : image->height;
+    sx0 = max(0, min(sx0, decoded_width));
+    sy0 = max(0, min(sy0, decoded_height));
+    sx1 = max(sx0, min(sx1, decoded_width));
+    sy1 = max(sy0, min(sy1, decoded_height));
+    if (sx1 == sx0 || sy1 == sy0) return;
+    int stride = image->pitch / 4;
+    const uint32_t* pixels = (const uint32_t*)image->pixels + sy0 * stride + sx0;
+    rc_draw_image(rdcon, pixels, sx1 - sx0, sy1 - sy0, stride,
+                  dest.x, dest.y, dest.width, dest.height, 255,
+                  render_state_current_transform(rdcon), image);
+}
 
-    int stop_count = gradient->stop_count;
-    RdtGradientStop* stops = LAMBDA_ALLOCA(stop_count, RdtGradientStop);
+static bool render_border_image(RenderContext* rdcon, BorderProp* border, Rect rect) {
+    if (!rdcon || !border) return false;
+    LinearGradient* gradient = border->border_image_type == GRADIENT_LINEAR
+        ? border->border_image_linear_gradient : nullptr;
+    ImageSurface* image = border->border_image_url
+        ? load_image(rdcon->ui_context, border->border_image_url) : nullptr;
+    if (gradient && gradient->stop_count < 2) return false;
+    if (image) {
+        image_surface_ensure_decoded(image, image->width, image->height);
+        if (!image->pixels || image->width <= 0 || image->height <= 0)
+            return false;
+    }
+    if (!gradient && !image) return false;
+    if (border->has_border_image_outset) {
+        float outset[4];
+        for (int side = 0; side < 4; side++) {
+            outset[side] = border->border_image_outset_number[side]
+                ? border->border_image_outset[side] * border->width.values[side]
+                : border->border_image_outset[side] * rdcon->raster_scale;
+        }
+        rect.x -= outset[3];
+        rect.y -= outset[0];
+        rect.width += outset[1] + outset[3];
+        rect.height += outset[0] + outset[2];
+    }
+    int stop_count = gradient ? gradient->stop_count : 0;
+    RdtGradientStop* stops = stop_count
+        ? LAMBDA_ALLOCA(stop_count, RdtGradientStop) : nullptr;
     for (int i = 0; i < stop_count; i++) {
         GradientStop* stop = &gradient->stops[i];
         float pos = stop->position >= 0.0f
@@ -518,18 +613,143 @@ static bool render_border_image_gradient(RenderContext* rdcon, BorderProp* borde
         stops[i] = {pos, stop->color.r, stop->color.g, stop->color.b, stop->color.a};
     }
 
-    RadiantGradientLine line = radiant_linear_gradient_line(rect, gradient->angle);
+    float source_width_total = image ? (float)image->width : rect.width;
+    float source_height_total = image ? (float)image->height : rect.height;
+    float numeric_slice_scale = image ? 1.0f : rdcon->raster_scale;
+    float source_top = border->has_border_image_slice
+        ? (border->border_image_slice_percent[0]
+            ? source_height_total * border->border_image_slice[0] / 100.0f
+            : border->border_image_slice[0] * numeric_slice_scale)
+        : source_height_total;
+    float source_right = border->has_border_image_slice
+        ? (border->border_image_slice_percent[1]
+            ? source_width_total * border->border_image_slice[1] / 100.0f
+            : border->border_image_slice[1] * numeric_slice_scale)
+        : source_width_total;
+    float source_bottom = border->has_border_image_slice
+        ? (border->border_image_slice_percent[2]
+            ? source_height_total * border->border_image_slice[2] / 100.0f
+            : border->border_image_slice[2] * numeric_slice_scale)
+        : source_height_total;
+    float source_left = border->has_border_image_slice
+        ? (border->border_image_slice_percent[3]
+            ? source_width_total * border->border_image_slice[3] / 100.0f
+            : border->border_image_slice[3] * numeric_slice_scale)
+        : source_width_total;
+    // Source slices may overlap; only the middle regions disappear in that case.
+    source_top = min(source_top, source_height_total);
+    source_right = min(source_right, source_width_total);
+    source_bottom = min(source_bottom, source_height_total);
+    source_left = min(source_left, source_width_total);
+    float natural_sides[4] = {source_top, source_right,
+                              source_bottom, source_left};
+    float widths[4];
+    for (int side = 0; side < 4; side++) {
+        float value = border->border_image_width[side];
+        uint8_t type = border->border_image_width_type[side];
+        widths[side] = !border->has_border_image_width
+            ? border->width.values[side]
+            : type == BORDER_IMAGE_COMPONENT_AUTO
+                ? (image ? natural_sides[side] * rdcon->raster_scale
+                                 : border->width.values[side])
+            : type == BORDER_IMAGE_COMPONENT_NUMBER
+                ? value * border->width.values[side]
+            : type == BORDER_IMAGE_COMPONENT_LENGTH
+                ? value * rdcon->raster_scale
+            : value * (side % 2 == 0 ? rect.height : rect.width) / 100.0f;
+    }
+    float top = widths[0];
+    float right = widths[1];
+    float bottom = widths[2];
+    float left = widths[3];
+    float width_factor = left + right > 0.0f
+        ? rect.width / (left + right) : 1.0f;
+    float height_factor = top + bottom > 0.0f
+        ? rect.height / (top + bottom) : 1.0f;
+    float width_scale = min(1.0f, min(width_factor, height_factor));
+    top *= width_scale;
+    right *= width_scale;
+    bottom *= width_scale;
+    left *= width_scale;
+    if (top <= 0.0f && right <= 0.0f && bottom <= 0.0f && left <= 0.0f &&
+        !border->border_image_slice_fill) return true;
+    float source_x[4] = {0.0f, source_left,
+        source_width_total - source_right, source_width_total};
+    float source_y[4] = {0.0f, source_top,
+        source_height_total - source_bottom, source_height_total};
+    float dest_x[4] = {rect.x, rect.x + left, rect.x + rect.width - right,
+                       rect.x + rect.width};
+    float dest_y[4] = {rect.y, rect.y + top, rect.y + rect.height - bottom,
+                       rect.y + rect.height};
+    Rect source_box = {0.0f, 0.0f, source_width_total, source_height_total};
+    RadiantGradientLine line = {};
+    if (gradient) line = radiant_linear_gradient_line(
+        source_box, radiant_linear_gradient_used_angle(gradient, source_box));
+    float vx = line.x2 - line.x1;
+    float vy = line.y2 - line.y1;
+    float length_squared = gradient ? vx * vx + vy * vy : 1.0f;
 
     RdtPath* clip = render_path_create_clip_path(rdcon);
     rc_push_clip(rdcon, clip, NULL);
-    rc_fill_linear_gradient(rdcon, ring,
-        line.x1, line.y1, line.x2, line.y2,
-        stops, stop_count, RDT_FILL_EVEN_ODD,
-        render_state_current_transform(rdcon));
+    for (int row = 0; row < 3; row++) {
+        for (int column = 0; column < 3; column++) {
+            if (row == 1 && column == 1 && !border->border_image_slice_fill)
+                continue;
+            float source_width = source_x[column + 1] - source_x[column];
+            float source_height = source_y[row + 1] - source_y[row];
+            float dest_width = dest_x[column + 1] - dest_x[column];
+            float dest_height = dest_y[row + 1] - dest_y[row];
+            if (source_width <= 0.0f || source_height <= 0.0f ||
+                dest_width <= 0.0f || dest_height <= 0.0f ||
+                length_squared <= 0.0f) continue;
+            float natural_width = dest_width;
+            float natural_height = dest_height;
+            if (column == 1) {
+                float scale = row != 1 ? dest_height / source_height
+                    : source_top > 0.0f ? top / source_top
+                    : source_bottom > 0.0f ? bottom / source_bottom : 1.0f;
+                natural_width = source_width * scale;
+            }
+            if (row == 1) {
+                float scale = column != 1 ? dest_width / source_width
+                    : source_left > 0.0f ? left / source_left
+                    : source_right > 0.0f ? right / source_right : 1.0f;
+                natural_height = source_height * scale;
+            }
+            CssEnum horizontal = column == 1
+                ? border->border_image_repeat[0] : CSS_VALUE_STRETCH;
+            CssEnum vertical = row == 1
+                ? border->border_image_repeat[1] : CSS_VALUE_STRETCH;
+            BorderImageTileAxis x_axis = border_image_tile_axis(
+                horizontal, dest_x[column], dest_width, natural_width);
+            BorderImageTileAxis y_axis = border_image_tile_axis(
+                vertical, dest_y[row], dest_height, natural_height);
+            RdtPath* region_clip = rdt_path_new();
+            if (!region_clip) continue;
+            rdt_path_add_rect(region_clip, dest_x[column], dest_y[row],
+                              dest_width, dest_height, 0.0f, 0.0f);
+            rc_push_clip(rdcon, region_clip, NULL);
+            Rect source = {source_x[column], source_y[row],
+                           source_width, source_height};
+            for (int iy = 0; iy < y_axis.count; iy++) {
+                for (int ix = 0; ix < x_axis.count; ix++) {
+                    Rect destination = {x_axis.first + ix * x_axis.step,
+                                        y_axis.first + iy * y_axis.step,
+                                        x_axis.size, y_axis.size};
+                    if (gradient) {
+                        render_border_image_gradient_tile(rdcon, source, destination,
+                            line, length_squared, stops, stop_count);
+                    } else {
+                        render_border_image_raster_tile(rdcon, image, source, destination);
+                    }
+                }
+            }
+            rc_pop_clip(rdcon);
+            rdt_path_free(region_clip);
+        }
+    }
     rc_pop_clip(rdcon);
     rdt_path_free(clip);
-    rdt_path_free(ring);
-    log_debug("[BORDER IMAGE] rendered linear-gradient border-image with %d stops", stop_count);
     return true;
 }
 

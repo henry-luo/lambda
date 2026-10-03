@@ -28,8 +28,14 @@ uint64_t inline_prop_hash(const InlineProp* value) {
     INLINE_HASH_FIELD(caret_shape);
     INLINE_HASH_FIELD(color.c);
     INLINE_HASH_FIELD(accent_color.c);
+    INLINE_HASH_FIELD(caret_color.c);
+    INLINE_HASH_FIELD(selection_color.c);
+    INLINE_HASH_FIELD(selection_background_color.c);
     INLINE_HASH_FIELD(has_color);
     INLINE_HASH_FIELD(has_accent_color);
+    INLINE_HASH_FIELD(caret_color_mode);
+    INLINE_HASH_FIELD(has_selection_color);
+    INLINE_HASH_FIELD(has_selection_background_color);
     INLINE_HASH_FIELD(svg_fill_color.c);
     INLINE_HASH_FIELD(svg_stroke_color.c);
     INLINE_HASH_FIELD(vertical_align);
@@ -55,11 +61,18 @@ bool inline_prop_equal(const InlineProp* left, const InlineProp* right) {
     // Explicit semantic comparison keeps padding and future compiler layout out
     // of the canonicalization contract.
     return left->cursor == right->cursor &&
+           left->image_rendering == right->image_rendering &&
            left->caret_shape == right->caret_shape &&
            left->color.c == right->color.c &&
            left->accent_color.c == right->accent_color.c &&
+           left->caret_color.c == right->caret_color.c &&
+           left->selection_color.c == right->selection_color.c &&
+           left->selection_background_color.c == right->selection_background_color.c &&
            left->has_color == right->has_color &&
            left->has_accent_color == right->has_accent_color &&
+           left->caret_color_mode == right->caret_color_mode &&
+           left->has_selection_color == right->has_selection_color &&
+           left->has_selection_background_color == right->has_selection_background_color &&
            left->svg_fill_color.c == right->svg_fill_color.c &&
            left->svg_stroke_color.c == right->svg_stroke_color.c &&
            left->vertical_align == right->vertical_align &&

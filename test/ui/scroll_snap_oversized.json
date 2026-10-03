@@ -1,0 +1,13 @@
+{
+  "name": "Mandatory snap permits free scrolling within an oversized snap area",
+  "html": "test/ui/scroll_snap_oversized.html",
+  "viewport": {"width": 240, "height": 240},
+  "events": [
+    {"type": "click", "target": {"selector": "#inside"}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 150, "tolerance": 1},
+    {"type": "click", "target": {"selector": "#edge"}},
+    {"type": "assert_state_store", "target": {"selector": "#pane"},
+     "view_state": true, "kind": "scroll", "view_scroll_y": 300, "tolerance": 1}
+  ]
+}

@@ -3483,7 +3483,7 @@ func runJetStream(name string) bool {
 func Run(suite, name string) bool {
 	started := time.Now()
 	ok := dispatch(suite, name)
-	if (suite != "jetstream" || name != "navier_stokes") && suite != "text" {
+	if (suite != "jetstream" || name != "navier_stokes") && suite != "text" && suite != "julia" {
 		fmt.Printf("__TIMING__:%.6f\n", float64(time.Since(started).Nanoseconds())/1e6)
 	}
 	return ok
@@ -3491,6 +3491,8 @@ func Run(suite, name string) bool {
 
 func dispatch(suite, name string) bool {
 	switch suite {
+	case "julia":
+		return runJuliaMicro(name)
 	case "r7rs":
 		return runR7RS(name)
 	case "awfy":

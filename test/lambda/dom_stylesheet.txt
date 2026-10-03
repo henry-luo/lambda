@@ -7,7 +7,7 @@
   disabled: false,
   r0_selector: "p",
   r0_type: 1,
-  r0_text: "p{color: green;}",
+  r0_text: "p { color: green; }",
   r1_selector: ".lead",
   r1_has_weight: true
 }

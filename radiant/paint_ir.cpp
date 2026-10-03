@@ -7,6 +7,7 @@
 // ==========================================================================
 
 #include "render.hpp"
+#include "layout.hpp"
 #include "../lib/log.h"
 #include "../lib/memtrack.h"
 #include "../lib/escape.h"
@@ -16,6 +17,27 @@
 #include <limits.h>
 
 #define PAINT_LIST_INITIAL_CAPACITY 1024
+
+void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
+                             float cjk_spacing) {
+    if (!out || !text || text_len <= 0 || cjk_spacing <= 0.0f) return;
+    const char* cursor = text;
+    const char* end = text + text_len;
+    uint32_t previous = 0;
+    strbuf_append_str(out, " dx=\"");
+    while (cursor < end) {
+        uint32_t current = 0;
+        int bytes = str_utf8_decode(cursor, (size_t)(end - cursor), &current);
+        if (bytes <= 0) { cursor++; continue; }
+        cursor += bytes;
+        if (previous) strbuf_append_char(out, ' ');
+        float gap = text_justify_cjk_gap(previous, current)
+            ? cjk_spacing : 0.0f;
+        strbuf_append_format(out, "%.2f", gap);
+        previous = current;
+    }
+    strbuf_append_char(out, '"');
+}
 
 static PaintSvgSubsceneRasterLowerFn g_svg_subscene_raster_lowerer = nullptr;
 static PaintSvgSubsceneSvgLowerFn g_svg_subscene_svg_lowerer = nullptr;
@@ -1999,6 +2021,8 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             if (p->word_spacing > 0.01f) {
                 strbuf_append_format(out, " word-spacing=\"%.2f\"", p->word_spacing);
             }
+            paint_svg_append_cjk_dx(out, p->text, p->text_len,
+                                    p->cjk_spacing);
             paint_svg_append_matrix_attr(out,
                                          paint_optional_transform(p->has_transform, &p->transform));
             strbuf_append_char(out, '>');

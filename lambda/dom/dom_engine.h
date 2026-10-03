@@ -61,6 +61,8 @@ bool dom_engine_input_set_live_value(DomElement* element, const char* value);
 void dom_engine_input_reset_live_value(DomElement* element);
 bool dom_engine_input_value_sanitize(const char* type, const char* value,
                                      char* output, size_t output_size);
+bool dom_engine_input_value_as_number(const char* type, const char* value,
+                                      double* output);
 void dom_engine_input_value_validate(const char* type, const char* value,
                                      const char* min_value, const char* max_value,
                                      const char* step_value,

@@ -2,7 +2,9 @@
 #include "render.hpp"
 #include "layout.hpp"
 #include "../lib/log.h"
+#include "../lib/tagged.hpp"
 #include "../lambda/core/well_known_markup_names.h"
+#include "../lambda/dom/dom_observers.h"
 
 struct ScrollConfig {
     float SCROLLBAR_SIZE;
@@ -155,17 +157,22 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
         rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + padding_clip.right * s);
         rdcon->block.clip.bottom = min(rdcon->block.clip.bottom, rdcon->block.y + padding_clip.bottom * s);
 
-        // Copy border-radius for rounded corner clipping when overflow:hidden (scale radius)
+        // Copy border-radius for the resolved overflow clip edge (scale radius)
         if (block->bound && block->boundary_mut()->border) {
             BorderProp* border = block->boundary()->border;
             // resolve percentage border-radius if not yet resolved
             resolve_border_radius_percentages(&border->radius, block->width, block->height);
             if (corner_has_radius(&border->radius)) {
                 rdcon->block.has_clip_radius = true;
-                // Use inner radius (outer minus border width) for padding-box clipping
-                BoxEdges inset = layout_boundary_border_edges(block->boundary());
-                float horizontal_inset[4] = {inset.left, inset.right, inset.right, inset.left};
-                float vertical_inset[4] = {inset.top, inset.top, inset.bottom, inset.bottom};
+                // Derive each corner from the chosen clip edge, including a
+                // signed overflow-clip-margin outside or inside the border.
+                float horizontal_inset[4] = {
+                    padding_clip.left, block->width - padding_clip.right,
+                    block->width - padding_clip.right, padding_clip.left};
+                float vertical_inset[4] = {
+                    padding_clip.top, padding_clip.top,
+                    block->height - padding_clip.bottom,
+                    block->height - padding_clip.bottom};
                 for (int corner = 0; corner < 4; corner++) {
                     rdcon->block.clip_radius.horizontal[corner] =
                         fmaxf(0, border->radius.horizontal[corner] - horizontal_inset[corner]) * s;
@@ -253,6 +260,7 @@ void scroll_apply_pending_element_scroll(ViewBlock* block) {
     float target_y = elem->has_pending_element_scroll_y()
         ? elem->pending_scroll_y() : current_y;
 
+    scroll_snap_adjust_position(block, &target_x, &target_y);
     scroll_state_set_position_for_view(state, static_cast<View*>(block),
         block->scroll()->pane, target_x, target_y, false);
     if (state) {
@@ -262,11 +270,272 @@ void scroll_apply_pending_element_scroll(ViewBlock* block) {
     }
 }
 
-bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
-    ScrollEvent* event = &evcon->event.scroll;
-    // GLFW gives scroll deltas that are pre-adjusted to match the user's OS scrolling preference
-    // yoffset > 0 = Scroll up, yoffset < 0 = Scroll down
-    log_debug("firing scroll event: %f, %f", event->xoffset, event->yoffset);
+struct ScrollSmoothTickContext {
+    DomDocument* document;
+    DocState* state;
+    double now;
+    bool active;
+};
+
+static bool scroll_smooth_tick_view(View* view, void* context) {
+    ScrollSmoothTickContext* tick = (ScrollSmoothTickContext*)context;
+    ViewBlock* block = lam::view_as_block(view);
+    if (!block || !block->scroller || !block->scroll()->pane) return true;
+    float old_x = 0.0f, old_y = 0.0f;
+    scroll_state_get_position_for_view(tick->state, view, block->scroll()->pane,
+                                       &old_x, &old_y, nullptr, nullptr);
+    bool viewport = view == tick->document->view_tree->root;
+    tick->active |= scroll_state_tick_smooth_for_view(tick->state, view,
+        block->scroll()->pane, tick->now, viewport);
+    float new_x = 0.0f, new_y = 0.0f;
+    scroll_state_get_position_for_view(tick->state, view, block->scroll()->pane,
+                                       &new_x, &new_y, nullptr, nullptr);
+    if (new_x != old_x || new_y != old_y) {
+        if (viewport)
+            doc_state_sync_viewport_scroll(tick->state, tick->document,
+                                           new_x, new_y);
+        dom_notify_scroll_position_change(view, old_x, old_y);
+    }
+    return true;
+}
+
+bool scroll_smooth_tick_document(DomDocument* document, double now) {
+    if (!document || !document->state ||
+        !document->state->has_active_smooth_scroll ||
+        !document->view_tree || !document->view_tree->root) return false;
+    ScrollSmoothTickContext tick = {document, document->state, now, false};
+    view_geometry_walk_elements(document->view_tree->root,
+                                scroll_smooth_tick_view, &tick);
+    document->state->has_active_smooth_scroll = tick.active;
+    return tick.active;
+}
+
+struct ScrollSnapSearch {
+    ViewBlock* container;
+    float desired_x, desired_y;
+    float port_width, port_height;
+    float padding_used[4];
+    float min_x, max_x, min_y, max_y;
+    float best_x, best_y, distance_x, distance_y;
+    float distance_pair;
+    float previous_x, following_x, previous_y, following_y;
+    bool oversized_x, oversized_y;
+    bool use_x, use_y, found_x, found_y;
+};
+
+static bool scroll_snap_axis_enabled(ScrollSnapAxis axis, bool horizontal,
+                                     bool inline_vertical) {
+    if (axis == SCROLL_SNAP_AXIS_NONE) return false;
+    if (axis == SCROLL_SNAP_AXIS_BOTH || axis == SCROLL_SNAP_AXIS_PAIR) return true;
+    if (axis == SCROLL_SNAP_AXIS_X) return horizontal;
+    if (axis == SCROLL_SNAP_AXIS_Y) return !horizontal;
+    return axis == SCROLL_SNAP_AXIS_BLOCK
+        ? horizontal == inline_vertical : horizontal != inline_vertical;
+}
+
+static bool scroll_snap_position_for_axis(ScrollSnapSearch* search,
+                                           DomElement* target, bool horizontal,
+                                           float* out_position,
+                                           bool* out_oversized_cover = nullptr) {
+    bool inline_vertical = layout_element_inline_axis_is_vertical(search->container);
+    CssEnum align = horizontal == inline_vertical
+        ? target->scroll()->snap_align_block
+        : target->scroll()->snap_align_inline;
+    if (align == CSS_VALUE_NONE) return false;
+    LayoutLogicalSides logical = layout_logical_sides(inline_vertical,
+        layout_element_writing_mode(search->container) == WM_VERTICAL_RL,
+        search->container->block()->direction == CSS_VALUE_RTL);
+    CssBoxSide start_side = horizontal == inline_vertical
+        ? logical.block_start : logical.inline_start;
+    bool start_is_min = start_side == (horizontal
+        ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_TOP);
+    int min_side = horizontal ? CSS_BOX_SIDE_LEFT : CSS_BOX_SIDE_TOP;
+    int max_side = horizontal ? CSS_BOX_SIDE_RIGHT : CSS_BOX_SIDE_BOTTOM;
+    float port_size = horizontal ? search->port_width : search->port_height;
+    float local = layout_scroll_document_coord(target, horizontal) -
+        layout_scrollport_start(search->container, horizontal);
+    float target_size = horizontal ? target->width : target->height;
+    float area_start = local - target->scroll()->scroll_margin[min_side].pixels;
+    float area_end = local + target_size +
+        target->scroll()->scroll_margin[max_side].pixels;
+    float pad_start = search->padding_used[min_side];
+    float pad_end = search->padding_used[max_side];
+    if (out_oversized_cover) {
+        float snapport_size = max(0.0f, port_size - pad_start - pad_end);
+        float desired = horizontal ? search->desired_x : search->desired_y;
+        *out_oversized_cover = snapport_size > 0.0f &&
+            area_end - area_start > snapport_size &&
+            area_start <= desired + pad_start &&
+            area_end >= desired + port_size - pad_end;
+    }
+    float position = 0.0f;
+    if (align == CSS_VALUE_CENTER) {
+        position = (area_start + area_end - port_size - pad_start + pad_end) * 0.5f;
+    } else if ((align == CSS_VALUE_START) == start_is_min) {
+        position = area_start - pad_start;
+    } else {
+        position = area_end - port_size + pad_end;
+    }
+    float minimum = horizontal ? search->min_x : search->min_y;
+    float maximum = horizontal ? search->max_x : search->max_y;
+    position = max(minimum, min(maximum, position));
+    *out_position = position;
+    return true;
+}
+
+static void scroll_snap_consider_axis(ScrollSnapSearch* search,
+                                      DomElement* target, bool horizontal) {
+    float position = 0.0f;
+    bool oversized_cover = false;
+    if (!scroll_snap_position_for_axis(search, target, horizontal, &position,
+                                       &oversized_cover)) return;
+    float desired = horizontal ? search->desired_x : search->desired_y;
+    float* previous = horizontal ? &search->previous_x : &search->previous_y;
+    float* following = horizontal ? &search->following_x : &search->following_y;
+    if (position <= desired) *previous = max(*previous, position);
+    if (position >= desired) *following = min(*following, position);
+    if (oversized_cover) {
+        *(horizontal ? &search->oversized_x : &search->oversized_y) = true;
+    }
+    float distance = fabsf(position - (horizontal
+        ? search->desired_x : search->desired_y));
+    float* best_distance = horizontal ? &search->distance_x : &search->distance_y;
+    if (distance < *best_distance) {
+        *best_distance = distance;
+        *(horizontal ? &search->best_x : &search->best_y) = position;
+        *(horizontal ? &search->found_x : &search->found_y) = true;
+    }
+}
+
+static void scroll_snap_consider_pair(ScrollSnapSearch* search,
+                                      DomElement* target) {
+    float x = 0.0f, y = 0.0f;
+    // Pair positions must come from the same snap area in both axes.
+    if (!scroll_snap_position_for_axis(search, target, true, &x) ||
+        !scroll_snap_position_for_axis(search, target, false, &y)) return;
+    float dx = (x - search->desired_x) / max(1.0f, search->port_width);
+    float dy = (y - search->desired_y) / max(1.0f, search->port_height);
+    float distance = dx * dx + dy * dy;
+    if (distance < search->distance_pair) {
+        search->distance_pair = distance;
+        search->best_x = x;
+        search->best_y = y;
+        search->found_x = search->found_y = true;
+    }
+}
+
+void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,
+                                 bool explicit_target) {
+    if (!block || !block->scroller || !block->scroll()->pane || !x || !y) return;
+    bool inline_vertical = layout_element_inline_axis_is_vertical(block);
+    ScrollSnapAxis axis = block->scroll()->snap_axis;
+    ScrollSnapSearch search = {};
+    search.container = block;
+    search.use_x = scroll_snap_axis_enabled(axis, true, inline_vertical);
+    search.use_y = scroll_snap_axis_enabled(axis, false, inline_vertical);
+    if (!search.use_x && !search.use_y) return;
+    search.desired_x = *x;
+    search.desired_y = *y;
+    search.distance_x = search.distance_y = search.distance_pair = INFINITY;
+    search.port_width = layout_content_size_from_border_box(block, block->width, true);
+    search.port_height = layout_content_size_from_border_box(block, block->height, false);
+    LayoutContext length_context = {};
+    length_context.doc = block->doc;
+    length_context.view = static_cast<View*>(block);
+    length_context.elmt = block;
+    length_context.ui_context = block->doc
+        ? static_cast<UiContext*>(block->doc->js.host_ui_context) : nullptr;
+    length_context.pool = block->doc && block->doc->view_tree
+        ? block->doc->view_tree->prop_pool : nullptr;
+    length_context.width = length_context.ui_context
+        ? length_context.ui_context->viewport_width : block->width;
+    length_context.height = length_context.ui_context
+        ? length_context.ui_context->viewport_height : block->height;
+    length_context.root_font_size = block->doc && block->doc->root
+        ? block->doc->root->fontp()->font_size : 16.0f;
+    for (int side = 0; side < 4; side++) {
+        float base = side == CSS_BOX_SIDE_LEFT || side == CSS_BOX_SIDE_RIGHT
+            ? search.port_width : search.port_height;
+        search.padding_used[side] = layout_scroll_spacing_used(
+            &length_context, block, block->scroll()->scroll_padding[side], base);
+    }
+    DocState* state = block->doc ? block->doc->state : nullptr;
+    scroll_state_get_range_for_view(state, static_cast<View*>(block),
+        block->scroll()->pane, &search.min_x, &search.max_x,
+        &search.min_y, &search.max_y);
+    search.previous_x = search.min_x;
+    search.following_x = search.max_x;
+    search.previous_y = search.min_y;
+    search.following_y = search.max_y;
+    // Walk the current view tree without retaining DOM pointers across relayout.
+    // A nested scroll container owns its descendants' snap areas.
+    DomNode* node = block->first_child;
+    while (node) {
+        DomNode* next = node->next_sibling;
+        if (node->is_element()) {
+            DomElement* target = node->as_element();
+            if (target->width > 0.0f && target->height > 0.0f &&
+                (target->scroll()->snap_align_block != CSS_VALUE_NONE ||
+                 target->scroll()->snap_align_inline != CSS_VALUE_NONE)) {
+                if (axis == SCROLL_SNAP_AXIS_PAIR)
+                    scroll_snap_consider_pair(&search, target);
+                else {
+                    if (search.use_x) scroll_snap_consider_axis(&search, target, true);
+                    if (search.use_y) scroll_snap_consider_axis(&search, target, false);
+                }
+            }
+            ViewBlock* nested = lam::view_as_block(static_cast<View*>(target));
+            bool owns_descendants = nested &&
+                layout_block_establishes_scroll_container(nested) &&
+                !(target->tag() == MARKUP_NAME_BODY && target->parent == block);
+            if (!owns_descendants && target->first_child) {
+                node = target->first_child;
+                continue;
+            }
+        }
+        while (!next && node->parent != block) {
+            node = node->parent;
+            next = node->next_sibling;
+        }
+        node = next;
+    }
+    float proximity_x = search.port_width * 0.25f;
+    float proximity_y = search.port_height * 0.25f;
+    if (axis == SCROLL_SNAP_AXIS_PAIR) {
+        if (search.found_x && (block->scroll()->snap_mandatory ||
+            search.distance_pair <= 0.25f * 0.25f)) {
+            *x = search.best_x;
+            *y = search.best_y;
+        }
+        return;
+    }
+    // An oversized snap area admits every position where it covers the
+    // snapport, provided adjacent snap points leave more than a snapport gap.
+    float snapport_width = max(0.0f, search.port_width -
+        search.padding_used[CSS_BOX_SIDE_LEFT] -
+        search.padding_used[CSS_BOX_SIDE_RIGHT]);
+    float snapport_height = max(0.0f, search.port_height -
+        search.padding_used[CSS_BOX_SIDE_TOP] -
+        search.padding_used[CSS_BOX_SIDE_BOTTOM]);
+    if (!explicit_target && search.oversized_x &&
+        search.following_x - search.previous_x > snapport_width)
+        search.found_x = false;
+    if (!explicit_target && search.oversized_y &&
+        search.following_y - search.previous_y > snapport_height)
+        search.found_y = false;
+    if (search.found_x && (block->scroll()->snap_mandatory ||
+        search.distance_x <= proximity_x)) *x = search.best_x;
+    if (search.found_y && (block->scroll()->snap_mandatory ||
+        search.distance_y <= proximity_y)) *y = search.best_y;
+}
+
+bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp,
+                       float delta_x, float delta_y,
+                       float* applied_x, float* applied_y) {
+    if (applied_x) *applied_x = 0.0f;
+    if (applied_y) *applied_y = 0.0f;
+    if (!evcon || !block || !sp) return false;
+    log_debug("wheel-chain: requested pixels %f, %f", delta_x, delta_y);
 
     DomDocument* doc = block && block->doc
         ? block->doc
@@ -281,22 +550,24 @@ bool scrollpane_scroll(EventContext* evcon, ViewBlock* block, ScrollPane* sp) {
                                     &h_min, &h_max, &v_min, &v_max);
     float previous_h = h;
     float previous_v = v;
-    float scroll_amount = RDT_WHEEL_PIXEL_STEP;
-
     // signed reverse-flow ranges may scroll even when their upper bound is zero.
-    if (event->yoffset != 0 && v_max > v_min) {
-        v += -event->yoffset * scroll_amount;
-    }
-    if (event->xoffset != 0 && h_max > h_min) {
-        h += -event->xoffset * scroll_amount;
-    }
+    if (delta_y != 0.0f && v_max > v_min &&
+        scroll_axis_accepts_wheel(block->scroll()->overflow_y)) v += delta_y;
+    if (delta_x != 0.0f && h_max > h_min &&
+        scroll_axis_accepts_wheel(block->scroll()->overflow_x)) h += delta_x;
 
+    float wheel_applied_x = max(h_min, min(h_max, h)) - previous_h;
+    float wheel_applied_y = max(v_min, min(v_max, v)) - previous_v;
+    if (wheel_applied_x != 0.0f || wheel_applied_y != 0.0f)
+        scroll_snap_adjust_position(block, &h, &v);
     // Centralized writer path for scroll mutations.
     scroll_state_set_position_for_view(state, (View*)block, sp, h, v, false);
 
     scroll_state_get_position_for_view(state, (View*)block, sp, &h, &v, NULL, NULL);
-    log_debug("updated scroll position: %f, %f", h, v);
-    evcon->need_repaint = true;
+    if (applied_x) *applied_x = wheel_applied_x;
+    if (applied_y) *applied_y = wheel_applied_y;
+    log_debug("wheel-chain: updated position %f, %f", h, v);
+    if (h != previous_h || v != previous_v) evcon->need_repaint = true;
     // todo: set invalidate_rect
     return h != previous_h || v != previous_v;
 }

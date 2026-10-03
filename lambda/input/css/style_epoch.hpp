@@ -10,6 +10,7 @@ struct CssEngine;
 struct CssRule;
 struct DomDocument;
 struct DomElement;
+struct CssSelectionStyle;
 
 typedef struct StyleEpochStats {
     uint64_t current_epoch_id;
@@ -65,6 +66,11 @@ void style_epoch_unbind_element(DomElement* element);
 void style_epoch_mark_global_change(DomDocument* doc);
 uint64_t style_epoch_current_id(DomDocument* doc);
 void style_epoch_get_stats(DomDocument* doc, StyleEpochStats* out);
+
+// Selection styles share the document's CSS epoch lifetime and avoid a
+// document-pool style tree for every node matched by global ::selection.
+CssSelectionStyle* style_epoch_selection_style(DomElement* element, bool create);
+void style_epoch_selection_clear_element(DomElement* element);
 
 // Deterministic collision coverage; never enabled by production paths.
 void style_epoch_debug_force_hash_collision(DomDocument* doc, bool enabled);

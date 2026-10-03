@@ -1,0 +1,53 @@
+<!doctype html>
+<style>
+  body { margin: 0; }
+  .scroller { width: 180px; height: 150px; overflow: auto; }
+  .before { height: 180px; }
+  .target { height: 20px; background: #6aa; }
+  .after { height: 200px; }
+  #physical { scroll-padding: 15px 0 0; }
+  #physical-target { scroll-margin: 20px 0 0; }
+  #logical { scroll-padding: 0; scroll-padding-block-start: 10%; }
+  #logical-target { scroll-margin-block-start: 15px; }
+  #end { scroll-padding: 10px 0 25px; }
+  #end-target { scroll-margin: 20px 0 10px; }
+  #math { scroll-padding-top: calc(10px + 5%); }
+  #em { font-size: 20px; scroll-padding-top: calc(1em + 5%); }
+</style>
+<button id="go-physical">Physical scroll spacing</button>
+<button id="go-logical">Logical scroll spacing</button>
+<button id="go-end">End alignment</button>
+<button id="go-math">Mixed math spacing</button>
+<button id="go-em">Font-relative math spacing</button>
+<div class="scroller" id="physical">
+  <div class="before"></div><div class="target" id="physical-target"></div>
+  <div class="after"></div>
+</div>
+<div class="scroller" id="logical">
+  <div class="before"></div><div class="target" id="logical-target"></div>
+  <div class="after"></div>
+</div>
+<div class="scroller" id="end">
+  <div class="before"></div><div class="target" id="end-target"></div>
+  <div class="after"></div>
+</div>
+<div class="scroller" id="math">
+  <div class="before"></div><div class="target" id="math-target"></div>
+  <div class="after"></div>
+</div>
+<div class="scroller" id="em">
+  <div class="before"></div><div class="target" id="em-target"></div>
+  <div class="after"></div>
+</div>
+<script>
+  document.getElementById('go-physical').addEventListener('click', () =>
+    document.getElementById('physical-target').scrollIntoView({block: 'start'}));
+  document.getElementById('go-logical').addEventListener('click', () =>
+    document.getElementById('logical-target').scrollIntoView({block: 'start'}));
+  document.getElementById('go-end').addEventListener('click', () =>
+    document.getElementById('end-target').scrollIntoView({block: 'end'}));
+  document.getElementById('go-math').addEventListener('click', () =>
+    document.getElementById('math-target').scrollIntoView({block: 'start'}));
+  document.getElementById('go-em').addEventListener('click', () =>
+    document.getElementById('em-target').scrollIntoView({block: 'start'}));
+</script>

@@ -26,6 +26,11 @@ static bool css_value_is_revert(const CssValue* value) {
         value->data.keyword == CSS_VALUE_REVERT;
 }
 
+static bool css_value_is_revert_layer(const CssValue* value) {
+    return value && value->type == CSS_VALUE_TYPE_KEYWORD &&
+        value->data.keyword == CSS_VALUE_REVERT_LAYER;
+}
+
 static bool css_revert_can_use_origin(const CssDeclaration* revert_decl,
                                       const CssDeclaration* candidate) {
     if (!revert_decl || !candidate || revert_decl->origin == candidate->origin) {
@@ -55,15 +60,30 @@ static bool css_revert_can_use_origin(const CssDeclaration* revert_decl,
     return false;
 }
 
-static CssDeclaration* style_node_resolve_revert(StyleNode* node,
-                                                 CssDeclaration* revert_decl) {
-    if (!node || !revert_decl) return NULL;
+static bool css_rollback_allows_candidate(const CssDeclaration* rollback,
+                                          const CssDeclaration* candidate) {
+    if (css_value_is_revert(rollback->value)) {
+        return css_revert_can_use_origin(rollback, candidate);
+    }
+    if (candidate->origin != rollback->origin) return true;
+    // Inline declarations form their own unlayered cascade position.
+    if (rollback->specificity.inline_style) {
+        return !candidate->specificity.inline_style;
+    }
+    return candidate->layer_order != rollback->layer_order;
+}
+
+static CssDeclaration* style_node_resolve_rollback(StyleNode* node,
+                                                    CssDeclaration* rollback) {
+    if (!node || !rollback) return NULL;
 
     for (WeakDeclaration* weak = node->weak_list; weak; weak = weak->next) {
         CssDeclaration* candidate = weak->declaration;
-        if (!css_revert_can_use_origin(revert_decl, candidate)) continue;
-        if (css_value_is_revert(candidate->value)) {
-            return style_node_resolve_revert(node, candidate);
+        if (css_declaration_cascade_compare(candidate, rollback) >= 0) continue;
+        if (!css_rollback_allows_candidate(rollback, candidate)) continue;
+        if (css_value_is_revert(candidate->value) ||
+            css_value_is_revert_layer(candidate->value)) {
+            return style_node_resolve_rollback(node, candidate);
         }
         return candidate;
     }
@@ -581,7 +601,19 @@ int css_declaration_cascade_compare(const CssDeclaration* a, const CssDeclaratio
         return (level_a < level_b) ? -1 : 1;
     }
 
-    // Within the same cascade level, compare specificity
+    if (a->specificity.inline_style != b->specificity.inline_style) {
+        return a->specificity.inline_style ? 1 : -1;
+    }
+
+    // Layers outrank specificity; important declarations reverse layer order.
+    bool important = a->important || a->specificity.important;
+    if (a->layer_order != b->layer_order) {
+        if (a->layer_order == 0) return important ? -1 : 1;
+        if (b->layer_order == 0) return important ? 1 : -1;
+        return (a->layer_order < b->layer_order) == important ? 1 : -1;
+    }
+
+    // Within the same layer, compare specificity
     int spec_cmp = css_specificity_compare(a->specificity, b->specificity);
     if (spec_cmp != 0) {
         return spec_cmp;
@@ -730,9 +762,12 @@ static void style_node_destroy(StyleNode* node) {
 CssDeclaration* style_node_resolve_cascade(StyleNode* node) {
     if (!node) return NULL;
 
-    // CSS-wide revert rolls the property back across the current origin.
-    if (node->winning_decl && css_value_is_revert(node->winning_decl->value)) {
-        return style_node_resolve_revert(node, node->winning_decl);
+    // CSS-wide rollback selects the next eligible origin or layer before
+    // computed-value resolution sees the declaration.
+    if (node->winning_decl &&
+        (css_value_is_revert(node->winning_decl->value) ||
+         css_value_is_revert_layer(node->winning_decl->value))) {
+        return style_node_resolve_rollback(node, node->winning_decl);
     }
     return node->winning_decl;
 }
@@ -865,14 +900,70 @@ StyleNode* style_tree_apply_declaration(StyleTree* style_tree, CssDeclaration* d
     return NULL;
 }
 
+struct CssRollbackFilter {
+    const CssDeclaration* rollback;
+    const CssRollbackFilter* previous;
+};
+
+static CssDeclaration* style_tree_best_property_candidate(
+    StyleNode* property_node, StyleNode* all_node, StyleNode* shorthand_node,
+    const CssDeclaration* ceiling, const CssRollbackFilter* filters) {
+    CssDeclaration* best = NULL;
+    StyleNode* nodes[3] = {property_node, all_node, shorthand_node};
+    for (int source = 0; source < 3; source++) {
+        StyleNode* node = nodes[source];
+        if (!node) continue;
+        CssDeclaration* candidate = node->winning_decl;
+        WeakDeclaration* weak = node->weak_list;
+        while (candidate) {
+            bool eligible = !ceiling ||
+                css_declaration_cascade_compare(candidate, ceiling) < 0;
+            for (const CssRollbackFilter* filter = filters;
+                 eligible && filter; filter = filter->previous) {
+                eligible = css_rollback_allows_candidate(filter->rollback, candidate);
+            }
+            if (eligible && (!best ||
+                css_declaration_cascade_compare(candidate, best) > 0)) {
+                best = candidate;
+            }
+            candidate = weak ? weak->declaration : NULL;
+            weak = weak ? weak->next : NULL;
+        }
+    }
+    if (best && (css_value_is_revert(best->value) ||
+                 css_value_is_revert_layer(best->value))) {
+        // `all` and a longhand share one cascade order, including rollback.
+        CssRollbackFilter filter = {best, filters};
+        return style_tree_best_property_candidate(
+            property_node, all_node, shorthand_node, best, &filter);
+    }
+    return best;
+}
+
 CssDeclaration* style_tree_get_declaration(StyleTree* style_tree, CssPropertyCode property_code) {
     if (!style_tree) return NULL;
 
     AvlNode* avl_node = avl_tree_search(style_tree->tree, property_code);
-    if (!avl_node) return NULL;
+    StyleNode* node = avl_node ? (StyleNode*)avl_node->declaration : NULL;
+    if (property_code == CSS_PROPERTY_ALL || property_code == CSS_PROPERTY_DIRECTION ||
+        property_code == CSS_PROPERTY_UNICODE_BIDI || property_code == CSS_PROPERTY_CUSTOM ||
+        property_code <= 0 || property_code >= CSS_PROPERTY_COUNT) {
+        return style_node_resolve_cascade(node);
+    }
 
-    StyleNode* node = (StyleNode*)avl_node->declaration;
-    return style_node_resolve_cascade(node);
+    bool border_image_part = property_code == CSS_PROPERTY_BORDER_IMAGE_SOURCE ||
+        property_code == CSS_PROPERTY_BORDER_IMAGE_SLICE ||
+        property_code == CSS_PROPERTY_BORDER_IMAGE_WIDTH ||
+        property_code == CSS_PROPERTY_BORDER_IMAGE_OUTSET ||
+        property_code == CSS_PROPERTY_BORDER_IMAGE_REPEAT;
+    AvlNode* shorthand_node = border_image_part
+        ? avl_tree_search(style_tree->tree, CSS_PROPERTY_BORDER_IMAGE) : NULL;
+    AvlNode* all_node = avl_tree_search(style_tree->tree, CSS_PROPERTY_ALL);
+    if (!all_node && !shorthand_node) return style_node_resolve_cascade(node);
+    return style_tree_best_property_candidate(node,
+        all_node ? (StyleNode*)all_node->declaration : NULL,
+        shorthand_node ? (StyleNode*)shorthand_node->declaration : NULL,
+        NULL, NULL);
 }
 
 void* style_tree_get_computed_value(StyleTree* style_tree,

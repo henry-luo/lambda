@@ -691,6 +691,12 @@ static void tick_document_animation_tree(DomDocument* document,
         tick->active = animation_scheduler_tick(scheduler, tick->now, dirty) || tick->active;
         tick->ticked = true;
     }
+    if (state && state->has_active_smooth_scroll &&
+        (tick->depth > 0 || tick->tick_root)) {
+        tick->active = scroll_smooth_tick_document(document, tick->now) ||
+            tick->active;
+        tick->ticked = true;
+    }
     if (document->view_tree && document->view_tree->root) {
         view_geometry_walk_elements(document->view_tree->root,
                                     tick_embedded_document_animation, tick);
@@ -1592,10 +1598,13 @@ static void radiant_notify_scrolled_view(EventContext* evcon, ViewBlock* block,
 
 // The package selects `wheel`; this helper retains the live pane walk,
 // clamped mutation, scroll notification, and repaint mechanism.
-static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
-    if (!evcon || !stack) return false;
+static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack,
+                                        float* remaining_x, float* remaining_y) {
+    if (!evcon || !stack || !remaining_x || !remaining_y) return false;
     bool changed = false;
-    for (int i = 0; i < stack->length; i++) {
+    // The view stack is root-first; a wheel gesture starts at the nearest pane.
+    for (int i = stack->length - 1; i >= 0; i--) {
+        if (*remaining_x == 0.0f && *remaining_y == 0.0f) break;
         View* view = static_cast<View*>(stack->data[i]);
         if (!view || !view->is_block()) continue;
         ViewBlock* block = lam::view_require_block(view);
@@ -1604,9 +1613,30 @@ static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
         float old_y = 0.0f;
         scroll_state_get_position_for_view(event_context_target_state(evcon), view,
             block->scroll()->pane, &old_x, &old_y, nullptr, nullptr);
-        if (scrollpane_scroll(evcon, block, block->scroll()->pane)) {
+        float applied_x = 0.0f;
+        float applied_y = 0.0f;
+        if (scrollpane_scroll(evcon, block, block->scroll()->pane,
+                              *remaining_x, *remaining_y,
+                              &applied_x, &applied_y)) {
             radiant_notify_scrolled_view(evcon, block, old_x, old_y);
             changed = true;
+        }
+        *remaining_x -= applied_x;
+        *remaining_y -= applied_y;
+        if (fabsf(*remaining_x) < 0.001f) *remaining_x = 0.0f;
+        if (fabsf(*remaining_y) < 0.001f) *remaining_y = 0.0f;
+        const ScrollProp* scroll = block->scroll();
+        // A contained scroll boundary discards only that axis's unused wheel
+        // motion; the other axis can continue to an ancestor scroll container.
+        if ((scroll->overscroll_x == CSS_VALUE_CONTAIN ||
+             scroll->overscroll_x == CSS_VALUE_NONE) &&
+            scroll_axis_accepts_wheel(scroll->overflow_x)) {
+            *remaining_x = 0.0f;
+        }
+        if ((scroll->overscroll_y == CSS_VALUE_CONTAIN ||
+             scroll->overscroll_y == CSS_VALUE_NONE) &&
+            scroll_axis_accepts_wheel(scroll->overflow_y)) {
+            *remaining_y = 0.0f;
         }
     }
     return changed;
@@ -1614,14 +1644,19 @@ static bool apply_wheel_scroll_to_stack(EventContext* evcon, ArrayList* stack) {
 
 static bool apply_wheel_scroll_operation(EventContext* evcon, View* target) {
     if (!evcon || !target) return false;
+    // GLFW offsets are signed opposite to CSS scroll coordinates.
+    float remaining_x = -evcon->event.scroll.xoffset * RDT_WHEEL_PIXEL_STEP;
+    float remaining_y = -evcon->event.scroll.yoffset * RDT_WHEEL_PIXEL_STEP;
     ArrayList* target_list = build_view_stack(evcon, target);
-    bool changed = apply_wheel_scroll_to_stack(evcon, target_list);
+    bool changed = apply_wheel_scroll_to_stack(evcon, target_list,
+                                               &remaining_x, &remaining_y);
     arraylist_free(target_list);
 
     // An embedded document's wheel chain continues at its iframe container.
     if (evcon->iframe_container) {
         ArrayList* parent_list = build_view_stack(evcon, evcon->iframe_container);
-        if (apply_wheel_scroll_to_stack(evcon, parent_list)) changed = true;
+        if (apply_wheel_scroll_to_stack(evcon, parent_list,
+                                        &remaining_x, &remaining_y)) changed = true;
         arraylist_free(parent_list);
     }
     return changed;
@@ -3746,6 +3781,12 @@ static bool radiant_dispatch_event_from_script_impl(void* dom_node,
 extern "C" bool radiant_dispatch_event_from_script(void* dom_node, const char* event_name) {
     // `input` and `change` are the notifications a control emits after its own
     // state settles: they bubble and are not cancelable (HTML 4.10.5).
+    if (strcmp(event_name, "change") == 0) {
+        DomNode* node = (DomNode*)dom_node;
+        if (node && node->is_element()) {
+            dom_set_user_validity(node, true);
+        }
+    }
     return radiant_dispatch_event_from_script_impl(
         dom_node, event_name, true, false, false);
 }
@@ -6395,6 +6436,8 @@ static DomJsStructuralDependency dom_js_selector_structural_dependency(
     DomJsStructuralDependency dependency = DOM_JS_STRUCTURAL_DEPENDENCY_NONE;
     for (size_t i = 0; i + 1 < selector->compound_selector_count; i++) {
         CssCombinator combinator = selector->combinators[i];
+        if (combinator == CSS_COMBINATOR_COLUMN)
+            return DOM_JS_STRUCTURAL_DEPENDENCY_BROAD;
         if (combinator == CSS_COMBINATOR_NEXT_SIBLING ||
             combinator == CSS_COMBINATOR_SUBSEQUENT_SIBLING) {
             dependency = DOM_JS_STRUCTURAL_DEPENDENCY_LOCAL;
@@ -6484,6 +6527,26 @@ static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc
         if (dom_js_stylesheet_structural_dependency(doc->stylesheets[i]) ==
                 DOM_JS_STRUCTURAL_DEPENDENCY_BROAD) {
             return true;
+        }
+    }
+    return false;
+}
+
+static bool dom_js_selector_has_column_dependency(CssSelector* selector) {
+    if (!selector) return false;
+    for (size_t i = 0; i + 1 < selector->compound_selector_count; i++) {
+        if (selector->combinators[i] == CSS_COMBINATOR_COLUMN) return true;
+    }
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        if (!compound) continue;
+        for (size_t s = 0; s < compound->simple_selector_count; s++) {
+            CssSimpleSelector* simple = compound->simple_selectors[s];
+            if (!simple) continue;
+            for (size_t f = 0; f < simple->function_selector_count; f++) {
+                if (dom_js_selector_has_column_dependency(simple->function_selectors[f]))
+                    return true;
+            }
         }
     }
     return false;
@@ -6612,6 +6675,28 @@ static bool dom_js_stylesheet_tree_has_match(CssStylesheet* stylesheet,
                                              predicate, context)) {
             return true;
         }
+    }
+    return false;
+}
+
+static bool dom_js_rule_has_column_dependency(CssRule* rule, void*) {
+    if (!rule || (rule->type != CSS_RULE_STYLE &&
+                  rule->type != CSS_RULE_NESTING &&
+                  rule->type != CSS_RULE_NESTED_DECLARATIONS)) return false;
+    CssSelectorGroup* group = rule->data.style_rule.selector_group;
+    if (group) {
+        for (size_t i = 0; i < group->selector_count; i++) {
+            if (dom_js_selector_has_column_dependency(group->selectors[i])) return true;
+        }
+    }
+    return dom_js_selector_has_column_dependency(rule->data.style_rule.selector);
+}
+
+static bool dom_js_document_has_column_css_dependency(DomDocument* doc) {
+    if (!doc || !doc->stylesheets) return false;
+    for (int i = 0; i < doc->stylesheet_count; i++) {
+        if (dom_js_stylesheet_tree_has_match(doc->stylesheets[i],
+                dom_js_rule_has_column_dependency, nullptr)) return true;
     }
     return false;
 }
@@ -6749,6 +6834,9 @@ static bool dom_js_document_has_structural_css_dependency(DomDocument* doc) {
     return false;
 }
 
+static bool document_has_pseudo_state_rules(DomDocument* doc,
+                                            uint32_t pseudo_state);
+
 static bool dom_js_mutation_can_incremental(DomDocument* doc,
                                             bool require_layout_state,
                                             const char** reason) {
@@ -6766,6 +6854,8 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
     bool has_broad_structural_css = false;
     bool checked_class_relational_css = false;
     bool has_class_relational_css = false;
+    bool checked_column_css = false;
+    bool has_column_css = false;
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
         if (!dom_js_record_has_connected_endpoint(doc, record)) {
@@ -6774,6 +6864,13 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
         if (record->kind == DOM_JS_MUTATION_UNKNOWN ||
             record->kind == DOM_JS_MUTATION_TREE_REPLACE) {
             if (reason) *reason = "broad-mutation";
+            return false;
+        }
+        if (record->kind == DOM_JS_MUTATION_CONTROL_VALUE &&
+            document_has_pseudo_state_rules(doc, PSEUDO_STATE_VALUE_DEPENDENT)) {
+            // A value-sensitive selector can style siblings or ancestors, so
+            // the control's retained subtree is not the invalidation closure.
+            if (reason) *reason = "value-sensitive-selector";
             return false;
         }
         if (record->kind == DOM_JS_MUTATION_STYLE && record->target &&
@@ -6789,6 +6886,17 @@ static bool dom_js_mutation_can_incremental(DomDocument* doc,
             dom_js_node_is_stylesheet_related(record->parent)) {
             if (reason) *reason = "stylesheet-mutation";
             return false;
+        }
+        if (record->kind == DOM_JS_MUTATION_ATTRIBUTE) {
+            if (!checked_column_css) {
+                has_column_css = dom_js_document_has_column_css_dependency(doc);
+                checked_column_css = true;
+            }
+            // A column or span mutation can restyle cells outside the local subtree.
+            if (has_column_css) {
+                if (reason) *reason = "column-selector-mutation";
+                return false;
+            }
         }
         if ((record->kind == DOM_JS_MUTATION_CHILD_INSERT ||
              record->kind == DOM_JS_MUTATION_CHILD_REMOVE)) {
@@ -8802,6 +8910,15 @@ static bool css_simple_selector_uses_pseudo_state(CssSimpleSelector* simple,
         case PSEUDO_STATE_PLACEHOLDER_SHOWN:
             matches_state = simple->type == CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN;
             break;
+        case PSEUDO_STATE_VALUE_DEPENDENT:
+            matches_state = simple->type == CSS_SELECTOR_PSEUDO_IN_RANGE ||
+                simple->type == CSS_SELECTOR_PSEUDO_OUT_OF_RANGE ||
+                simple->type == CSS_SELECTOR_PSEUDO_VALID ||
+                simple->type == CSS_SELECTOR_PSEUDO_INVALID ||
+                simple->type == CSS_SELECTOR_PSEUDO_PLACEHOLDER_SHOWN ||
+                simple->type == CSS_SELECTOR_PSEUDO_USER_INVALID ||
+                simple->type == CSS_SELECTOR_PSEUDO_USER_VALID;
+            break;
         default:
             break;
     }
@@ -9576,37 +9693,6 @@ static View* find_form_activation_button(View* target, bool reset) {
     return nullptr;
 }
 
-static View* find_first_form_submitter_in_tree(DomNode* node, DomElement* form) {
-    for (DomNode* current = node; current; current = current->next_sibling) {
-        if (!current->is_element()) continue;
-        DomElement* current_elem = current->as_element();
-        if (dom_is_submit_button((void*)current) &&
-            dom_find_form_owner((void*)current) == form &&
-            !dom_is_disabled((void*)current)) {
-            return static_cast<View*>(current);
-        }
-        View* nested = find_first_form_submitter_in_tree(current_elem->first_child, form);
-        if (nested) return nested;
-    }
-    return nullptr;
-}
-
-static View* find_first_form_submitter(DomElement* form) {
-    if (!form) return nullptr;
-    DomDocument* doc = form->doc;
-    bool connected = false;
-    if (doc && doc->root) {
-        for (DomNode* node = (DomNode*)form; node; node = node->parent) {
-            if (node == (DomNode*)doc->root) {
-                connected = true;
-                break;
-            }
-        }
-    }
-    return find_first_form_submitter_in_tree(
-        connected ? (DomNode*)doc->root : form->first_child, form);
-}
-
 // Run the package policy for a submitter or an implicit form target. Native
 // validates the resolved nodes, but only the DOM package may perform submission.
 static bool run_form_submit_activation(EventContext* evcon, View* target) {
@@ -10228,6 +10314,7 @@ static bool prepare_previous_focus_blur(EventContext* evcon,
 
 static void dispatch_focus_change_observed(EventContext* evcon, View* target) {
     if (!evcon || !target) return;
+    if (target->is_element()) dom_set_user_validity(target, true);
     radiant_dispatch_simple_event(evcon, target, "change", true, false);
     sm_observe_action(event_context_target_state(evcon),
                       SM_ACT_DISPATCH_CHANGE);
@@ -13532,7 +13619,8 @@ void handle_event(UiContext* uicon, DomDocument* doc, RdtEvent* event) {
                 focus_elem->form->control_type == FORM_CONTROL_TEXT) {
                 DomElement* owner = dom_find_form_owner((void*)focus_elem);
                 if (owner) {
-                    View* submitter = find_first_form_submitter(owner);
+                    View* submitter = static_cast<View*>(
+                        dom_form_first_submitter(owner, true));
                     View* activation = submitter ? submitter : static_cast<View*>(owner);
                     if (run_form_submit_activation(&evcon, activation)) {
                         evcon.need_repaint = true;
