@@ -116,6 +116,74 @@ size_t str_rfind_byte(const char* s, size_t len, char c);
 size_t str_find(const char* s, size_t s_len,
                 const char* needle, size_t needle_len);
 
+/** frequency rank of a byte in typical text and source code, measured over
+ *  this repository: 0 is the rarest byte, 255 the most common (space). */
+uint8_t str_byte_rank(uint8_t c);
+
+/** A prepared needle for repeated searches (the str_find kernel, GRP8).
+ *  Preparation picks the needle's rarest byte by str_byte_rank, so a scan
+ *  stops only where that byte occurs instead of at every occurrence of the
+ *  first byte. With fold_ascii the match is ASCII-case-insensitive; a letter
+ *  scan byte is then searched in both cases. `bytes` is borrowed and must
+ *  outlive the needle. */
+typedef struct StrNeedle {
+    const char* bytes;
+    size_t len;
+    size_t rare_at;     /* offset of the scan byte within the needle */
+    uint8_t rare;       /* the scan byte (lowercase in fold mode) */
+    uint8_t rare_alt;   /* its uppercase in fold mode; else equal to rare */
+    uint8_t rare_rank;  /* str_byte_rank of the scan byte (both cases in fold mode) */
+    bool fold_ascii;
+    /* the second-rarest position, for the packed-pair scan (len >= 2) */
+    size_t pair_at;
+    uint8_t pair;
+    uint8_t pair_alt;
+    bool use_pair;      /* scan two bytes at a fixed distance instead of one */
+} StrNeedle;
+
+void str_needle_init(StrNeedle* needle, const char* bytes, size_t len, bool fold_ascii);
+/** first occurrence of the needle in [s, s+s_len). returns offset or STR_NPOS. */
+size_t str_needle_find(const StrNeedle* needle, const char* s, size_t s_len);
+
+/** str_simd.c: the packed-pair scan (GRP8). Tests the needle's two rarest
+ *  positions 16 starts at a time (NEON, SSE2; a scalar loop elsewhere), both
+ *  cases at once in fold mode, and verifies only where both agree. Requires
+ *  needle->len >= 2. returns offset or STR_NPOS. */
+size_t str_needle_find_pair(const StrNeedle* needle, const char* s, size_t s_len);
+/** whether the needle occurs at `at` (fold-aware), for the SIMD tier */
+bool str_needle_equal_at(const StrNeedle* needle, const char* at);
+
+/** str_teddy.c: Teddy multi-literal search (GRP29). Finds the leftmost
+ *  occurrence of any of up to STR_TEDDY_MAX literals in one pass: each
+ *  literal's first 1–4 bytes are a fingerprint in one of 8 buckets, nibble
+ *  tables give the buckets that may start at each byte (16 at a time with
+ *  NEON, or SSSE3 chosen by a one-time CPUID check), and only those positions
+ *  are verified. Literal bytes are borrowed and must outlive the matcher. */
+#define STR_TEDDY_MAX 64
+typedef struct StrTeddy {
+    uint8_t lo[4][16];      /* bucket masks by low nibble, per fingerprint byte */
+    uint8_t hi[4][16];      /* bucket masks by high nibble */
+    int fp_len;             /* fingerprint bytes: min(4, shortest literal) */
+    int count;
+    size_t min_len;
+    const char* bytes[STR_TEDDY_MAX];
+    size_t lens[STR_TEDDY_MAX];
+    bool fold[STR_TEDDY_MAX];  /* ASCII case-insensitive, per literal */
+    uint8_t bucket_lits[8][STR_TEDDY_MAX];
+    uint8_t bucket_count[8];
+} StrTeddy;
+
+/** false for 0 or more than STR_TEDDY_MAX literals, or an empty one */
+bool str_teddy_init(StrTeddy* teddy, const char* const* bytes, const size_t* lens,
+                    const bool* fold, int count);
+/** leftmost position where any literal occurs, or STR_NPOS; `which` (may be
+ *  NULL) receives the index of a literal occurring there */
+size_t str_teddy_find(const StrTeddy* teddy, const char* s, size_t s_len, int* which);
+/** the portable form, byte at a time: the reference the SIMD forms are tested against */
+size_t str_teddy_find_portable(const StrTeddy* teddy, const char* s, size_t s_len, int* which);
+/** the form str_teddy_find runs on this CPU: "neon", "ssse3" or "portable" */
+const char* str_teddy_kernel(void);
+
 /** find last occurrence. */
 size_t str_rfind(const char* s, size_t s_len,
                  const char* needle, size_t needle_len);

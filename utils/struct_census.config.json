@@ -9,6 +9,7 @@
     "lambda/js/mvp",
     "lambda/module",
     "lib/sqlite",
+    "lib/re2",
     "lib/font/woff2",
     "lib/font/freetype",
     "lib/mem-pool/test",
@@ -65,7 +66,7 @@
     "include_dirs": [
       ".",
       "lambda/mir",
-      "build_temp/re2-noabsl",
+      "lib/re2",
       "lambda/tree-sitter/lib/include",
       "lambda/tree-sitter-lambda/bindings/c",
       "lambda/tree-sitter-typescript/bindings/c",

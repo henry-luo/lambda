@@ -2871,6 +2871,36 @@ static SysFuncInfo* lookup_builtin_module_member(const char* module,
     return lookup_module_prefixed_sys_func(module, member, arg_count);
 }
 
+// S17.8.1: an option name a system function does not define is a compile-time
+// error where its options argument is a map literal at the call. Names the
+// literal cannot show (a spread) are left to the function's run-time warning.
+static void direct_check_literal_options(Transpiler* tp, SysFuncInfo* info,
+        AstNode* arguments, int injected) {
+    int index = -1;
+    if (!sys_func_option_names(info->fn, &index) || index < 0 ||
+            info->arg_count <= index) return;
+    AstNode* arg = arguments;
+    for (int i = injected; arg && i < index; i++) arg = arg->next;
+    AstNode* root = ast_unwrap_primary(arg);
+    if (!root || root->node_type != AST_NODE_MAP) return;
+    // registry names spell a module member with '_' (io_grep is io.grep)
+    const char* display = info->name;
+    char dotted[64];
+    if (strncmp(display, "io_", 3) == 0) {
+        snprintf(dotted, sizeof(dotted), "io.%s", display + 3);
+        display = dotted;
+    }
+    for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
+        AstNamedNode* option = (AstNamedNode*)item;
+        if (!option->name || sys_func_option_known(info->fn, option->name->chars,
+                (size_t)option->name->len)) continue;
+        record_semantic_error_span(tp, item->source_span, ERR_INVALID_OPERATION,
+            "unknown option '%.*s' for %s (S17.8.1)",
+            (int)option->name->len, option->name->chars, display);
+    }
+}
+
 static bool start_option_name_is(AstNamedNode* option, const char* name) {
     size_t length = strlen(name);
     return option && option->name && option->name->len == (int)length &&
@@ -9763,6 +9793,8 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
         }
         call->can_raise = info->can_raise;
         call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
+        direct_check_literal_options(tp, info, call->argument,
+            call->pipe_inject ? tp->pipe_inject_args : 0);
         call->type = sys_func_call_result_type(tp, info,
             sys_func_call_may_return_error(tp, info, call->argument, NULL),
             call->argument, NULL);

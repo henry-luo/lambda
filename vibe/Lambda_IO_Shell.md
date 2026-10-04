@@ -1,4 +1,4 @@
-# Lambda Shell / I/O Module
+# Lambda I/O Shell Module (`io.*`)
 
 This document describes the `io` module functions available in Lambda Script for file system operations and network I/O.
 
@@ -199,6 +199,53 @@ io.chmod("./config.json", 644)
 
 ---
 
+### io.grep(source, pattern, options?)
+
+Search files for a pattern, line by line, like grep. Runs on `lib/grep`, the line-oriented search library on RE2 designed in `vibe/Lambda_Lib_Grep.md` (§9B); implementation record `vibe/impl/Lambda_Impl_Lib_Grep.md`.
+
+**Ruling (GRP26, USER, 2026-10-04; not yet ratified into `doc/Lambda_Formal_Semantics.md`).** **`io.grep(source, pattern, options?)` searches files line by line and is a procedure.** A match never spans a line terminator (GRP1); a line ends at `"\n"` or `"\r\n"`, whose `"\r"` is never matched (GRP18). Results are match maps `{value, index}` in a stable order — sources as given, files in path order, matches in position order (GRP25) — where `index` counts code points from the start of the file as in-memory `find` does (S17.4.1, GRP4); options add `file`, `line` (1-based), `byte_offset`, `text`, `before`/`after` (GRP4, GRP20, GRP24). A directory honours ignore files and skips hidden entries and dependency directories (GRP14); a source named explicitly is always searched (GRP22). An option name it does not define is a compile-time error in a literal and a warning in a value (S17.8.1, GRP28). *Why: its result depends on the file system, which `fn` may not (S12.1.1v2); a line-oriented search is what makes it fast and is what grep means.* [S12.1.1v2, S17.4.1, S17.8.1; GRP1, GRP4, GRP14, GRP18, GRP20–GRP28]
+
+**Type:** Procedure (it reads only, but its result depends on the file system; `fn` must be deterministic, S12.1.1v2)
+
+**Parameters:**
+- `source` - What to search: a path to a file or a directory, a path ending in `*` (the directory's own files) or `**` (everything below), a string naming a local path, or an array of these
+- `pattern` - A string (literal text) or a string pattern, or an array of either; a match of any counts
+- `options` - Optional map:
+
+| Option | Type | Default | Effect |
+|--------|------|---------|--------|
+| `line` | bool | false | adds `line`, the 1-based line number |
+| `byte_offset` | bool | false | adds `byte_offset`, the 0-based offset in bytes |
+| `text` | bool | false | adds `text`, the whole line without its terminator |
+| `context`, `before`, `after` | int | 0 | adds `before`/`after`, the neighbouring lines' text |
+| `ignore_case` | bool | false | Unicode simple case folding (S17.7.1) |
+| `word` | bool | false | a match may not touch a letter, digit or `_` on either side |
+| `whole_line` | bool | false | the pattern must match a whole line (GRP23) |
+| `invert` | bool | false | report the lines with no match (GRP24) |
+| `limit` | int | none | at most this many matches in total, the first in path order (GRP25) |
+| `limit_per_file` | int | none | at most this many matches per file (GRP25) |
+| `files` | bool | false | the paths of files with a match instead of match maps (GRP21) |
+| `include`, `exclude` | string or array | none | gitignore-style globs (GRP22) |
+| `max_depth`, `max_size` | int | none | walk depth (a directory's own entries are at depth 1) and file size limits (GRP22) |
+| `hidden` | bool | false | also search names starting with `.` (GRP14) |
+| `ignore` | bool | true | honour `.gitignore`/`.ignore` and skip `node_modules`, `bower_components`, `__pycache__`, `venv`, `site-packages` (GRP14) |
+| `binary` | bool | false | search files with a NUL in their first 8 KiB instead of skipping them |
+
+**Returns:** An array of match maps — `{value, index}`, plus `file` when the source is a directory, a wildcard or an array (a path for a path source, text for a text source) — or, with `files: true`, an array of file paths. A source that does not exist raises E401.
+
+**Example:**
+```lambda
+pn todo_report() {
+    let todos = io.grep(/.src, \("TODO" ":" s* w+), {line: true, text: true})^
+    for (t in todos) {
+        print(t.file, t.line, t.text, "\n")
+    }
+    let users = io.grep(/.src.**, "parse_options", {files: true, include: "*.ls"})^
+}
+```
+
+---
+
 ## Complete Example
 
 ```lambda
@@ -241,7 +288,7 @@ pn main() {
   - `let` bindings
 - `io.copy()` supports remote URLs (http/https) as the source - data is fetched and saved locally
 - Path arguments accept string paths; relative paths are resolved from the current working directory
-- Error handling: Functions return `null` on failure and log errors
+- Error handling: Functions return `null` on failure and log errors; `io.grep` instead raises an error value (E401 for a missing source)
 
 ---
 

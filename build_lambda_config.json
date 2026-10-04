@@ -18,6 +18,7 @@
     "lib",
     "lib/font",
     "lib/font/woff2",
+    "lib/grep",
     "lambda",
     "lambda/core",
     "lambda/io",
@@ -86,7 +87,7 @@
   "includes": [
     ".",
     "lambda/mir",
-    "build_temp/re2-noabsl",
+    "lib/re2",
     "lib/font/woff2/include",
     "mac-deps/thorvg/src/bindings/capi"
   ],
@@ -272,8 +273,8 @@
       "name": "re2",
       "version": "2023-03-01",
       "description": "RE2 regular expression library for string pattern matching",
-      "include": "build_temp/re2-noabsl",
-      "lib": "build_temp/re2-noabsl/cmake_build/libre2.a",
+      "include": "lib/re2",
+      "lib": "build_temp/re2_build/libre2.a",
       "link": "static"
     },
     {
@@ -453,7 +454,8 @@
         "lib/font/*.c",
         "lib/font/*.cpp",
         "lib/font/woff2/*.c",
-        "lib/font/woff2/*.cpp"
+        "lib/font/woff2/*.cpp",
+        "lib/grep/*.cpp"
       ],
       "exclude_patterns": [
         "lib/clock_compat.c",
@@ -465,6 +467,7 @@
       ],
       "libraries": [
         "utf8proc",
+        "re2",
         "mbedtls",
         "mbedx509",
         "mbedcrypto",
@@ -1242,6 +1245,7 @@
       "output": "lambda-cli.exe",
       "source_dirs": [
         "lib",
+        "lib/grep",
         "lambda",
         "lambda/core",
         "lambda/io",
@@ -1277,7 +1281,7 @@
       "includes": [
         ".",
         "lambda/mir",
-        "build_temp/re2-noabsl"
+        "lib/re2"
       ],
       "exclude_libraries": [
         "glfw",
@@ -2175,6 +2179,19 @@
             "icon": "\ud83d\udcd0"
           },
           {
+            "source": "lib/test_grep_gtest.cpp",
+            "name": "Grep Library Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_grep_gtest.exe",
+            "icon": "\ud83d\udd0e"
+          },
+          {
             "source": "lib/test_str_scan_gtest.cpp",
             "name": "Str Scanner Tier Tests",
             "dependencies": [
@@ -2300,6 +2317,7 @@
               "lib/hashmap.c",
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_lru_cache_gtest.exe",
@@ -2425,6 +2443,7 @@
               "lib/arena.c",
               "lib/mempool.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -2442,6 +2461,7 @@
             "additional_sources": [
               "lib/hashmap.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -2460,6 +2480,7 @@
               "lib/thread_pool.c",
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_thread_pool_gtest.exe",
@@ -2555,6 +2576,7 @@
               "lib/log.c",
               "lib/mempool.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_font_context_gtest.exe",
@@ -2589,6 +2611,7 @@
               "lib/arraylist.c",
               "lib/strbuf.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_woff2_gtest.exe",
@@ -2652,6 +2675,7 @@
               "lib/arena.c",
               "lib/mempool.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -2673,6 +2697,7 @@
               "lib/arena.c",
               "lib/mempool.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -2701,6 +2726,7 @@
             "additional_sources": [
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "libraries": [
@@ -2721,6 +2747,7 @@
               "lib/mempool.c",
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "libraries": [
@@ -2759,6 +2786,7 @@
               "lib/arena.c",
               "lib/mempool.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -2777,6 +2805,7 @@
               "lib/avl_tree.c",
               "lib/mempool.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -2810,6 +2839,7 @@
               "lib/mempool.c",
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_scratch_arena_gtest.exe",
@@ -2827,6 +2857,7 @@
               "lib/mem_context.c",
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_mem_context_gtest.exe",
@@ -2851,6 +2882,7 @@
               "lib/mempool.c",
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_mem_factory_gtest.exe",
@@ -2873,6 +2905,7 @@
               "lib/mempool.c",
               "lib/log.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c"
             ],
             "binary": "test_mem_vm_gtest.exe",
@@ -2919,6 +2952,7 @@
               "lib/avl_tree.c",
               "lib/mempool.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -4279,6 +4313,7 @@
               "lib/memtrack.c",
               "lib/arena.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/log.c"
             ],
@@ -4310,6 +4345,7 @@
               "lib/arena.c",
               "lib/string.c",
               "lib/str.c",
+              "lib/str_simd.c",
               "lib/utf.c",
               "lib/hashmap.c",
               "lib/log.c"

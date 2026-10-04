@@ -21,3 +21,6 @@ lambda/tree-sitter-latex-math/** text eol=lf
 *.woff2 binary
 *.ttf  binary
 *.otf  binary
+
+# io.grep fixture: keep its CRLF line endings (test/lambda/proc/io_grep.ls)
+test/input/grep_tree/crlf.txt -text

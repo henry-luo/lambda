@@ -222,7 +222,7 @@ lib/
 
 ### Lambda Script
 
-Maps to `io.*` procedures already designed in `Lambda_Shell.md`:
+Maps to `io.*` procedures already designed in `Lambda_IO_Shell.md`:
 
 ```lambda
 // file reads — functional context

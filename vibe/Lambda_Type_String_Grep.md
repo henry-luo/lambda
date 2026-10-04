@@ -71,6 +71,10 @@ find(/src, todo_pat, {ignore_case: true})
 | `find(file_path, pattern)` | `{value, index}` | Single file — same shape as string find |
 | `find(dir_or_wildcard, pattern)` | `{file, value, index}` | Multi-file — `file` is the matching path |
 
+> **Update 2026-10-04 (USER), second.** A system function `io.grep(source, pattern, options?)` is added as the direct, full-option surface of `lib/grep`: see `vibe/Lambda_Lib_Grep.md` §9B (GRP26). `io.grep` is ruled procedural (`pn`): a file search is non-deterministic, and `fn` must be deterministic (S12.1.1v2). File-based `find(path, pattern, options?)` stays an `fn` (GRP27): it calls `lib/grep` underneath, so it is line-oriented like `io.grep`. Its determinism comes from session caching, which a separate proposal will work out for `find(path)`, `input()`, `exists()` and `path#` together; see `vibe/Lambda_Lib_Grep.md` §9B.4.
+
+> **Update 2026-10-04 (USER).** File-based `find` takes an optional third argument, `find(path, pattern, options?)`. With `{line: true}` each match also carries its line number: `{value, index, line}`, or `{file, value, index, line}` for a directory. The default stays `{value, index}`. `line` is 1-based, following grep. `index` is in code points from the start of the file, the same unit as in-memory `find`. `{byte_offset: true}` adds the match's 0-based `byte_offset` in the same opt-in way. This revises design decision 1 below ("no extra `line`/`col` fields"). The search engine is `lib/grep`: see `vibe/Lambda_Lib_Grep.md` (GRP4), which also sets the directory defaults (`.gitignore` honoured, hidden and dependency directories skipped, GRP14).
+
 **Options map fields:**
 
 | Option | Type | Default | Description |

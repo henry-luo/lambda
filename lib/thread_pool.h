@@ -56,6 +56,9 @@ void tp_shutdown(ThreadPool* tp);
 // Shutdown + free.
 void tp_destroy(ThreadPool* tp);
 
+// Number of online CPUs (what tp_create uses for threads <= 0); 4 if unknown.
+int tp_hardware_threads(void);
+
 // Introspection.
 int tp_thread_count(const ThreadPool* tp);
 size_t tp_pending(const ThreadPool* tp);

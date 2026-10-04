@@ -1,0 +1,21 @@
+T1: [{ value: "TODO", index: 6}, { value: "TODO", index: 23}]
+T2: [{ file: \.test.input.grep_tree.code.'main.ls', value: "TODO", index: 15, line: 1}, { file: \.test.input.grep_tree.'crlf.txt', value: "TODO", index: 0, line: 1}, { file: \.test.input.grep_tree.'notes.txt', value: "TODO", index: 6, line: 1}, { file: \.test.input.grep_tree.'notes.txt', value: "TODO", index: 23, line: 3}, { file: \.test.input.grep_tree.'unicode.txt', value: "TODO", index: 5, line: 1}, { file: \.test.input.grep_tree.'unicode.txt', value: "TODO", index: 22, line: 2}]
+T3: [{ value: "TODO: crlf", index: 0, text: "TODO: crlf line"}]
+T4: [{ file: \.test.input.grep_tree.code.deep.'util.ls', value: "todo", index: 15, line: 1}, { file: \.test.input.grep_tree.code.'main.ls', value: "TODO", index: 15, line: 1}]
+T5: [\.test.input.grep_tree.code.'main.ls', \.test.input.grep_tree.'crlf.txt', \.test.input.grep_tree.'notes.txt', \.test.input.grep_tree.'unicode.txt']
+T6: [\.test.input.grep_tree.code.'main.ls']
+T7: []
+T8: 12
+T9: [{ value: "beta", index: 18, line: 2}]
+T10: [{ value: "beta", index: 18, before: ["alpha TODO: first"], after: ["TODO: second item 42"]}]
+T11: [{ file: \.test.input.grep_tree.code.'main.ls', value: "TODO", index: 15, line: 1}, { file: \.test.input.grep_tree.'crlf.txt', value: "TODO", index: 0, line: 1}, { file: \.test.input.grep_tree.'notes.txt', value: "TODO", index: 6, line: 1}]
+T12: 4
+T13: [{ value: "end", index: 17, line: 2}]
+T14: [{ value: "TODO", index: 5, byte_offset: 6}, { value: "TODO", index: 22, byte_offset: 27}]
+T15: [\.test.input.grep_tree.'crlf.txt', \.test.input.grep_tree.'notes.txt', \.test.input.grep_tree.'unicode.txt']
+T16: [\.test.input.grep_tree.code.'main.ls']
+T17: [{ file: "test/input/grep_tree/notes.txt", value: "beta", index: 18, line: 2}, { file: "test/input/grep_tree/notes.txt", value: "42", index: 41, line: 3}, { file: "test/input/grep_tree/code/deep/util.ls", value: "1", index: 10, line: 1}, { file: "test/input/grep_tree/code/main.ls", value: "42", index: 8, line: 1}, { file: "test/input/grep_tree/code/main.ls", value: "7", index: 34, line: 2}]
+T18: [{ value: "x", index: 4}]
+T19: true
+T20: [{ value: "beta", index: 18, line: 2}]
+

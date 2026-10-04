@@ -463,9 +463,24 @@ TEST(LambdaOptStrings, LiteralSplitKernelAvoidsBytewiseComparisons) {
     std::string find_kernel = lib_source.substr(find_kernel_start,
         find_kernel_end - find_kernel_start);
     EXPECT_NE(find_kernel.find("if (needle_len == 1) return str_find_byte("), std::string::npos);
-    EXPECT_NE(find_kernel.find("memchr(p, first"), std::string::npos);
-    EXPECT_NE(find_kernel.find("memcmp(hit + 2, needle + 2, needle_len - 2)"),
-        std::string::npos);
+    // GRP8 (vibe/Lambda_Lib_Grep.md): the candidate scan anchors on the
+    // needle's rarest byte, or on its two rarest at a fixed distance (the
+    // packed pair in lib/str_simd.c), and compares the needle only at a
+    // candidate -- still never a comparison at every byte.
+    EXPECT_NE(find_kernel.find("str_needle_find(&prepared, s, s_len)"), std::string::npos);
+    size_t needle_start = lib_source.find("size_t str_needle_find(const StrNeedle* needle,");
+    ASSERT_NE(needle_start, std::string::npos);
+    std::string needle_kernel = lib_source.substr(needle_start,
+        lib_source.find("\n}\n", needle_start) - needle_start);
+    EXPECT_NE(needle_kernel.find("memchr(p, needle->rare"), std::string::npos);
+    EXPECT_NE(needle_kernel.find("str_needle_equal_at(needle, start)"), std::string::npos);
+    EXPECT_NE(needle_kernel.find("return str_needle_find_pair(needle, s, s_len)"), std::string::npos);
+    char* simd_text = read_text_file("lib/str_simd.c");
+    ASSERT_NE(simd_text, nullptr);
+    if (!simd_text) return;
+    std::string simd_source(simd_text);
+    free(simd_text);
+    EXPECT_NE(simd_source.find("str_needle_equal_at(n, s + i + k)"), std::string::npos);
     // The literal replace() and find() paths share the kernel; before they did,
     // both called memcmp at every byte (four fifths of revcomp).
     size_t replace_start = runtime_source.find("static Item fn_replace_impl(");

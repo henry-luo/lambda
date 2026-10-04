@@ -40,7 +40,7 @@ struct ThreadPool {
     pthread_cond_t all_done;
 };
 
-static int tp_detect_threads(void) {
+int tp_hardware_threads(void) {
 #if defined(_SC_NPROCESSORS_ONLN)
     long n = sysconf(_SC_NPROCESSORS_ONLN);
     if (n > 0) return (int)n;
@@ -98,7 +98,7 @@ static void* tp_worker_main(void* arg) {
 }
 
 ThreadPool* tp_create_with_stack(int threads, size_t stack_size) {
-    if (threads <= 0) threads = tp_detect_threads();
+    if (threads <= 0) threads = tp_hardware_threads();
 
     ThreadPool* tp = (ThreadPool*)calloc(1, sizeof(ThreadPool));
     if (!tp) return NULL;
