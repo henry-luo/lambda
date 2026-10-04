@@ -55,11 +55,12 @@ def check(script, directory):
 def main():
     directory = ROOT / "temp/mir_check" / ("profile_parity_" + str(os.getpid()))
     directory.mkdir(parents=True, exist_ok=True)
-    scripts = ("array_root_before_gc", "tune26_dense_carried_index")
+    scripts = ("array_root_before_gc", "tune26_dense_carried_index",
+               "typed_fill_activation_cert")
     results = [check(ROOT / "test/mir/lambda" / (name + ".ls"), directory)
                for name in scripts]
     (directory / "result.json").write_text(json.dumps(results, indent=2) + "\n")
-    print("MIR profile parity: helper and dense-loop fixtures preserve roots and safepoints")
+    print("MIR profile parity: helper, dense-loop and fill metadata fixtures preserve roots and safepoints")
 
 
 if __name__ == "__main__":

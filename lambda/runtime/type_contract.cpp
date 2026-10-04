@@ -1573,6 +1573,12 @@ MapContractRelation lambda_map_contract_relation(const TypeMap* candidate,
     if (candidate == expected && expected->is_trusted_contract) {
         return MAP_CONTRACT_EXACT_TRUSTED;
     }
+    // equal field storage does not establish a nominal object's identity (S11.3.1v2)
+    if (TypeNominal* nominal = type_nominal_record((Type*)expected)) {
+        TypeNominal* actual = type_nominal_record((Type*)candidate);
+        if (!actual || !lambda_nominal_derives_from(actual, nominal))
+            return MAP_CONTRACT_INCOMPATIBLE;
+    }
     if (candidate->length != expected->length) return MAP_CONTRACT_INCOMPATIBLE;
 
     bool storage_compatible = true;

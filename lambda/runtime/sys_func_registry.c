@@ -2259,6 +2259,18 @@ JitImport jit_runtime_imports[] = {
       JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
       JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER),
       JIT_IMPORT_RESULT_SCALAR_STABLE}},
+    // certificate interning allocates pool metadata only, never guest values or roots
+    {"lambda_array_rep_cert_resolve", FPTR(lambda_array_rep_cert_resolve),
+     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_RAW_NON_GC_POINTER,
+      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER)}},
+    {"lambda_fill_for_contract_int_lane_resolved", FPTR(lambda_fill_for_contract_int_lane_resolved),
+     {JIT_EFFECT_MAY_GC, JIT_REENTRY_UNKNOWN, JIT_VALUE_BOXED_ITEM,
+      JIT_ARG_CLASS(0, JIT_VALUE_NON_GC_SCALAR) |
+      JIT_ARG_CLASS(1, JIT_VALUE_BOXED_ITEM) |
+      JIT_ARG_CLASS(2, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(3, JIT_VALUE_RAW_NON_GC_POINTER) |
+      JIT_ARG_CLASS(4, JIT_VALUE_RAW_NON_GC_POINTER),
+      JIT_IMPORT_RESULT_SCALAR_STABLE}},
     {"lambda_array_admit_numeric_contract", FPTR(lambda_array_admit_numeric_contract)},
     {"lambda_array_empty_for_contract", FPTR(lambda_array_empty_for_contract)},
     {"lambda_map_set_checked", FPTR(lambda_map_set_checked)},
@@ -3876,6 +3888,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_module_name_id_at",
         "lambda_active_module_name_id", "lambda_active_module_name_item",
         "lambda_async_frame_get_word",
+        // full-contract interning uses heap-owned pool/hashmap metadata, without guest allocation
+        "lambda_array_rep_cert_resolve",
         // Exact String-character equality reads only the already-rooted Item.
         "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at",
         "fn_str_eq_ptr",

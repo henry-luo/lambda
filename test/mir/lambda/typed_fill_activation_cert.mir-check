@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "description": "D3.3.3v3/D8.4.1v2: lazy activation-local certificates reuse equivalent full primitive contracts; initialization dominates conditional and loop first use. The existing guarded loop emits proven and generic siblings, with two fill sites per sibling sharing the activation register.",
+  "checks": [
+    {
+      "in_func": "_repeated_#",
+      "expect_seq": [
+        "mov\t{{r:cert}}, 0",
+        ", {{r:cert}}, 0",
+        ", 9007199254740991",
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "mov\t{{r:cert}}, {{r}}",
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved",
+        ", {{r:cert}}, 0",
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "mov\t{{r:cert}}, {{r}}",
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+      ],
+      "count": {
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 3,
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 3
+      },
+      "forbid": [
+        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+      ]
+    },
+    {
+      "in_func": "_looped_#",
+      "expect_seq": [
+        "mov\t{{r:cert}}, 0",
+        ", {{r:cert}}, 0",
+        ", 9007199254740991",
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "mov\t{{r:cert}}, {{r}}",
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved",
+        ", {{r:cert}}, 0",
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "mov\t{{r:cert}}, {{r}}",
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+      ],
+      "count": {
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 4,
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 4
+      },
+      "forbid": [
+        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+      ]
+    },
+    {
+      "in_func": "_other_lanes_#",
+      "expect_seq": [
+        "mov\t{{r:cert}}, 0",
+        ", {{r:cert}}, 0",
+        ", 9007199254740991",
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve",
+        "mov\t{{r:cert}}, {{r}}",
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved"
+      ],
+      "count": {
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved": 2,
+        "call\tlambda_array_rep_cert_resolve_p, lambda_array_rep_cert_resolve": 2
+      },
+      "forbid": [
+        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane"
+      ]
+    }
+  ]
+}

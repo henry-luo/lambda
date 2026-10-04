@@ -11521,16 +11521,22 @@ Item lambda_fill_for_contract(Item count, Item value, Type* expected, const char
     return lambda_array_admit_numeric_contract(built.get(), expected, boundary);
 }
 
-Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
-        const char* boundary) {
+Item lambda_fill_for_contract_int_lane_resolved(int64_t count, Item value,
+        Type* expected, const char* boundary, ArrayRepCert* cert) {
     // the compiler proved a plain primitive T[] destination and an int lane;
     // poison, negative counts and metadata misses retain the full diagnostic path
     if (count >= 0 && count <= INT53_MAX) {
-        ArrayRepCert* cert = lambda_array_rep_cert_resolve(expected);
         Item exact = ItemNull;
         if (runtime_try_primitive_fill_length(count, value, cert, &exact)) return exact;
     }
     return lambda_fill_for_contract({.item = i2it(count)}, value, expected, boundary);
+}
+
+Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
+        const char* boundary) {
+    ArrayRepCert* cert = count >= 0 && count <= INT53_MAX
+        ? lambda_array_rep_cert_resolve(expected) : NULL;
+    return lambda_fill_for_contract_int_lane_resolved(count, value, expected, boundary, cert);
 }
 
 // Tune29 §19.1 item 2: `[]` crossing a primitive T[] boundary (`return []`

@@ -1972,9 +1972,13 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         bool fresh_parameter_rejection = false;
         bool source_was_error[LAMBDA_MAX_FUNCTION_ARGS] = {};
         for (int i = 0; i < (int)params; i++) {
-            AstNode* value_node = has_named_args ? resolved_args[i] : positional;
-            if (!has_named_args && positional) positional = positional->next;
-            if (value_node) {
+            bool receiver_slot = injected && i == 0;
+            AstNode* value_node = receiver_slot ? NULL
+                : has_named_args ? resolved_args[i] : positional;
+            if (!receiver_slot && !has_named_args && positional) positional = positional->next;
+            if (receiver_slot) {
+                words[i] = injected->item;
+            } else if (value_node) {
                 words[i] = eval_expr(f, value_node).item;
             } else {
                 TypeParam* type_param = parameter ? lambda_type_param(parameter->type) : NULL;
@@ -2378,7 +2382,7 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         uint64_t result_home = 0;
         return interp_call_js_export(fn, words, dispatch_argc, &result_home);
     }
-    if (!injected && ast_type_func_has_var_parameter(direct_signature)) {
+    if (ast_type_func_has_var_parameter(direct_signature)) {
         NameEntry* borrowed[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         uint64_t* borrow_homes[LAMBDA_MAX_FUNCTION_ARGS] = {0};
         AstNode* borrow_args[LAMBDA_MAX_FUNCTION_ARGS] = {0};

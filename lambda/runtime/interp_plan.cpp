@@ -1067,9 +1067,7 @@ static void plan_destination(Pool* pool, AstNode* node, Type* contract, int dept
     case AST_NODE_MAP: {
         AstMapNode* literal = (AstMapNode*)node;
         TypeMap* target = (TypeMap*)lambda_type_nonnull_map_contract(contract);
-        // a structural literal cannot manufacture nominal identity at admission
-        if (!target || type_nominal_record((Type*)target) ||
-                !target->is_trusted_contract || literal->has_computed_key ||
+        if (!target || !target->is_trusted_contract || literal->has_computed_key ||
                 !ast_map_contract_storage_valid(target) ||
                 !ast_map_literal_keys_follow_contract(literal, target)) return;
         literal->interp_destination = target;
@@ -1245,10 +1243,11 @@ static void plan_link_call_shape(Pool* pool, AstCallNode* call) {
     // diagnostic instead of narrowing its source count into the shared plan.
     (void)ast_plan_call_shape(call);
     AstFuncNode* target = ast_direct_call_function(call);
-    if (!target || !call->interp_call_shape_planned ||
+    if (!target || !call->interp_call_shape_planned || call->interp_has_spread_args ||
+            (call->pipe_inject && call->interp_has_named_args) ||
             call->interp_source_argc > LAMBDA_MAX_FUNCTION_ARGS) return;
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {};
-    ast_resolve_call_args(call->argument, target, call->interp_source_argc, resolved);
+    ast_resolve_call_arguments(call, target, call->interp_source_argc, resolved);
     int index = 0;
     for (AstNamedNode* parameter = target->param; parameter && index < LAMBDA_MAX_FUNCTION_ARGS;
             parameter = (AstNamedNode*)parameter->next, index++) {

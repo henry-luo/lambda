@@ -5,7 +5,7 @@
     {
       "in_func": "_tune26_inferred_swap_lane_#",
       "expect": [
-        "call\tlambda_fill_for_contract_int_lane_p, lambda_fill_for_contract_int_lane",
+        "call\tlambda_fill_for_contract_int_lane_resolved_p, lambda_fill_for_contract_int_lane_resolved",
         "mov\ti64:({{r}}), {{r}}",
         "call\tlambda_array_set_checked_lane_p, lambda_array_set_checked_lane"
       ],

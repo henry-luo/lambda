@@ -10796,8 +10796,8 @@ MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item) {
         VALUE_REP_ITEM).reg;
 }
 
-MirValue jm_profile_lower_value(void* owner, AstNode* node) {
-    return jm_transpile_expression_value((JsMirTranspiler*)owner, (JsAstNode*)node);
+MirValue jm_profile_lower_value(void* owner, AstNode* node, uint32_t demand) {
+    return jm_transpile_expression_value((JsMirTranspiler*)owner, (JsAstNode*)node, demand);
 }
 
 MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value) {

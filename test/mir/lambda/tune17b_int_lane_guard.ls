@@ -1,8 +1,5 @@
-// Tune17b: a proven native int producer must reach the raw int[] store lane.
-// Regression guard: MIR's `S` opcode suffix selects the 32-bit comparison, not
-// "signed". Emitting the int53 validity check with GES/LES truncated both
-// operands to int32, so the test became `(int32)v >= 1 && (int32)v <= -1` --
-// unsatisfiable -- and every proven store fell through to the checked setter.
+// D2.6.2-D2.6.3: int[] stores admit poison and reject the full-width null lane.
+// A 32-bit test aliases INT_LANE_NULL with finite zero; the guard must be BEQ.
 
 pn tune17b_swap(var v: int[], i: int, j: int) any {
     var tmp = v[i]
@@ -15,4 +12,10 @@ pn main() {
     tune17b_swap(v, 0, 1)
     print(v[0])
     print("\n")
+    var rejected = false
+    tune17b_swap(v, 0, 99) ^ { rejected = true }
+    print(string([rejected, v[0]]) ++ "\n")
+    var zero: int[] = [0, 5]
+    tune17b_swap(zero, 0, 1)
+    print(string(zero) ++ "\n")
 }

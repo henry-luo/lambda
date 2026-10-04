@@ -1,8 +1,8 @@
 # Typed Lambda performance audit — 2026-10-03
 
-**Status:** the first tuning round (§10–§12) is complete. The follow-up P0–P5 scope (§13) is implemented; final validation is in progress (§14). Strict interpreter selection and untyped Queens support were fixed before these tuning rounds (§6/§9). Performance comparisons use **pinned MIR (`LAMBDA_EXEC_BACKEND=jit`)**, with separate strict pure-T0 evidence. No AUTO timings enter these comparisons.
+**Status:** the first tuning round (§10–§12) and follow-up P0–P5 scope (§13) are implemented and validated. All fifteen matched annotation workloads meet the declared parity gate in both tiers; actual new-typed/previous-erased comparisons also pass all thirty combinations (§14.6). Remaining same-source and existing-port differences stay visible (§14.5–§14.7). Strict interpreter selection and untyped Queens support were fixed before these tuning rounds (§6/§9). Performance comparisons use **pinned MIR (`LAMBDA_EXEC_BACKEND=jit`)**, with separate strict pure-T0 evidence. No AUTO timings enter these comparisons.
 
-**Follow-up implementation, 2026-10-03:** the P0–P5 changes proposed in §13 are implemented in source (§14). Final correctness and repeated release performance validation are in progress. §13 also corrects the earlier interpretation of MIR root counters: the old counter instrumentation introduced extra safepoints (§13.1). The uninstrumented timings remain valid.
+**Follow-up completed, 2026-10-04:** the release passes the complete **6,213/6,213** baseline. Two independent acceptance campaigns establish 24 annotation speedups and six practical-equivalence results within the declared 2% uncertainty tolerance. Direct comparisons against the previous erased release establish 29 speedups and one practical-equivalence result. §13 also corrects the earlier interpretation of MIR root counters: the old counter instrumentation introduced extra safepoints (§13.1). The uninstrumented timings remain valid.
 
 **Authority:** D8.1.1v15 (execution selection), D2.4.1–D2.4.3 (contract and representation), D3.2.4v4/D3.3.4 (record admission and full inferred contracts), D5.3.3 (precise roots), S7.7.2–S7.7.4 (boundary failures), S9.1.2–S9.1.3 (snapshots and borrows).
 
@@ -509,7 +509,7 @@ instead of redefining unequal work or permitting fallback as a speed result.
 
 ## 13. Further tuning proposal — 2026-10-03
 
-**Status: implemented in source; final validation in progress (§14).** The target is per-workload typed/untyped
+**Status: implemented and validated (§14.6).** The target is per-workload typed/untyped
 parity for equal work in each pinned tier. Implementing §5 delivered large
 gains, but completion of those changes is not completion of that target.
 
@@ -833,6 +833,22 @@ larger of the two actual node sizes. Parameter binder-site plans also retain
 the binder stored on TypeParam; a generic type-graph walk must never inspect
 that compact wrapper as a complete contract (S11.4.8v2).
 
+Fresh argument planning also exposed two nominal-identity shortcuts. A plain
+map must not adopt a nominal object's layout, and storage compatibility cannot
+establish nominal identity. Both shared checks now retain the nominal-base
+relation. Conditional inference also joins branches with different nominal
+records rather than certifying both with the first branch's shape (S11.3.1v2).
+
+Aggregate user pipe calls now use the existing rooted dynamic-call dispatch
+with a virtual first argument, including borrowed homes and suspension handling
+(S10.1.2v4, D5.1.3). Shared argument proofs and T0 destination plans resolve
+that receiver to its actual parameter position. The ownership interval walk
+uses the same resolver for receivers and named arguments: ignoring either
+could misclassify a mutating borrow as a readonly observer and omit a snapshot's
+share mark (S9.1.2). Regression coverage checks fractional and full-width
+record fields, four-argument transport, nominal rejection/inheritance, borrowed
+snapshots, immutable-borrow diagnostics, self-tail injection and an async call.
+
 `typed_tuning_boundary_guards.ls` and its golden cover exact/fractional/negative,
 null/error and huge fill counts, numeric conversion, bool and empty fills,
 counted/literal contracts, list splicing, scalar OOB rejection, COW snapshots,
@@ -849,9 +865,454 @@ that a separate execution heap has a separate identity. The boundary fixture
 also runs in the forced-GC suite. Python controls test annotation erasure and
 the paired two-sided uncertainty interval.
 
-### 14.3 Final evidence
+### 14.3 Argument-layout candidate evidence (superseded)
 
-Validation is in progress. Artifacts are under `temp/typed_tuning2/`. Preflight
+This candidate's validation is archived under `temp/typed_tuning2/`. Preflight
 and interrupted campaigns are diagnostic evidence, not the final acceptance
 results. The prior release control is `lambda-before.exe`; source revisions and
 binary hashes are recorded by each completed paired campaign.
+
+The merged argument-layout candidate passed the complete Lambda baseline:
+6,209/6,209, with the input prerequisite also passing 2,104/2,104
+(`baseline_argument_complete.log`). The previously recorded twelve render
+failures are passing in this merged tree. Release-host checks passed emission
+243/243, forced GC 294/294, optimizer 53/53 and nine focused contract/diagnostic
+tests; the debug baseline also covers the optimizer's debug-only fault test.
+The async pipe fixture separately passed release execution with collection at
+every allocation and freed-memory poisoning.
+
+The release candidate is `lambda-argument-final.exe`, SHA-256
+`bffadb01f2a7f6f817624d3c538f40653eab79356c4090f58cb8569e64e0c408`.
+Its production source corpus is
+`066a7863a8214fa6732345d659f2f49a6b29a91d7b667b6dcae4eecf03b3541f`,
+recorded in `argument_final_manifest.json`. `final_*` campaigns use this frozen
+candidate; the earlier `completed_*` campaigns belong to their archived
+candidate and are retained separately.
+
+Corrected executed counts in `argument_corrected_roots/result.json` compare
+the typed source with its annotation-erased twin, once per original workload.
+Every pair first passes output/static-root/safepoint parity with profiling off
+and on (P0, D5.3.3).
+
+| Workload | Erased root stores | Typed root stores | Erased root reloads | Typed root reloads | Erased helper calls | Typed helper calls |
+|---|---:|---:|---:|---:|---:|---:|
+| fannkuch | 13 | 10 | 9 | 9 | 16 | 16 |
+| nqueens | 162,257 | 114,870 | 122,274 | 149,154 | 61,206 | 39,890 |
+
+These executed counters locate remaining traffic; they are not timing ratios.
+The two final broad campaigns use 21 alternating release pairs and identical
+repetitions targeting one second. The union of annotation-only rows with a
+median above one or a paired two-sided 95% upper bound above 1.02 is assigned
+two independent 41-pair follow-ups targeting three seconds. The broad results
+remain visible rather than being replaced by those precision runs.
+
+#### Broad annotation-only campaigns
+
+Each cell is typed/erased median ratio and paired two-sided 95% interval.
+Ratios below one favour typed execution. The six selected precision cases
+remain inconclusive against the interval gate in these broad campaigns; their
+follow-ups are reported separately. All outputs, source hashes and binary
+hashes passed, and every T0 diagnostic reports zero fallback/satellites.
+
+| Workload | MIR A | MIR B | T0 A | T0 B |
+|---|---|---|---|---|
+| bounce | 0.7871 [0.7232, 0.8156] | 0.7934 [0.7721, 0.8460] | 0.8839 [0.8317, 0.9333] | 0.8671 [0.8410, 0.9140] |
+| fannkuch | 0.9752 [0.9199, 1.0512] | 0.9708 [0.9101, 1.0294] | 0.9479 [0.8962, 1.0066] | 0.9537 [0.9012, 0.9900] |
+| nqueens | 0.9610 [0.9177, 1.0288] | 0.9692 [0.9102, 1.0121] | 0.9523 [0.9257, 1.0128] | 0.9674 [0.9273, 1.0204] |
+| Queens | 0.2711 [0.2552, 0.2912] | 0.2861 [0.2614, 0.3023] | 0.9618 [0.9255, 1.0010] | 0.9851 [0.9450, 1.0141] |
+| fasta | 0.6014 [0.5751, 0.6587] | 0.6166 [0.5801, 0.6521] | 0.9812 [0.9615, 1.0003] | 0.9672 [0.9478, 1.0098] |
+| deriv | 0.2834 [0.2646, 0.3066] | 0.2711 [0.2581, 0.2836] | 0.8616 [0.8382, 0.8929] | 0.8351 [0.8054, 0.9248] |
+| towers | 0.5302 [0.4975, 0.5645] | 0.5234 [0.4891, 0.5684] | 0.9670 [0.9411, 0.9898] | 0.9259 [0.8956, 1.0340] |
+| sieve | 0.8216 [0.7384, 0.9264] | 0.8288 [0.7704, 0.8655] | 0.9504 [0.9342, 0.9763] | 0.9600 [0.9162, 0.9815] |
+| primes | 0.9280 [0.8889, 1.0617] | 0.9721 [0.9102, 1.0141] | 0.9934 [0.9617, 1.0255] | 0.9651 [0.9307, 0.9876] |
+| quicksort | 0.4931 [0.4612, 0.5219] | 0.4791 [0.4485, 0.5155] | 0.8917 [0.8533, 0.9192] | 0.8944 [0.8505, 0.9282] |
+| binarytrees | 0.6797 [0.6415, 0.7256] | 0.6804 [0.6436, 0.7151] | 0.9210 [0.8917, 0.9523] | 0.9111 [0.8789, 0.9703] |
+| gcbench | 0.5016 [0.4668, 0.5217] | 0.4859 [0.4639, 0.5221] | 0.9367 [0.9154, 0.9615] | 0.9467 [0.9225, 0.9666] |
+| Richards | 0.2485 [0.2365, 0.2540] | 0.2449 [0.2335, 0.2541] | 0.8520 [0.8430, 0.8593] | 0.8670 [0.8508, 0.8778] |
+| prettier_ast | 0.4175 [0.4053, 0.4460] | 0.4352 [0.4011, 0.4490] | 0.9555 [0.9485, 0.9661] | 0.9566 [0.9452, 0.9639] |
+
+#### Precision follow-ups and annotation parity
+
+Each selected row has two independent 41-pair campaigns, with identical
+repetitions targeting three seconds. All full outputs and provenance checks
+passed; strict T0 diagnostics report zero fallback and zero MIR satellites.
+The paired intervals below resolve the wide broad-campaign intervals.
+
+| Tier | Workload | C ratio [95% interval] | D ratio [95% interval] |
+|---|---|---|---|
+| MIR | fannkuch | 0.9771 [0.9664, 0.9826] | 0.9709 [0.9641, 0.9772] |
+| MIR | nqueens | 0.9704 [0.9546, 0.9787] | 0.9669 [0.9600, 0.9757] |
+| MIR | primes | 0.9583 [0.9528, 0.9719] | 0.9746 [0.9564, 0.9819] |
+| T0 | nqueens | 0.9793 [0.9674, 0.9882] | 0.9765 [0.9680, 0.9902] |
+| T0 | towers | 0.9615 [0.9539, 0.9684] | 0.9659 [0.9602, 0.9690] |
+| T0 | primes | 0.9584 [0.9487, 0.9767] | 0.9662 [0.9541, 0.9770] |
+
+All fourteen annotation-only targets meet the per-workload gate in both
+pinned tiers across two independent campaigns: median no greater than one
+and paired two-sided 95% upper bound at most 1.02. Fannkuch, Queens and fasta in T0
+are practical equivalence within tolerance; the other 25 tier/workload
+combinations demonstrate a speedup in both acceptance campaigns. This claim
+is for the matched annotation controls; port and same-source old/new results
+remain separate.
+
+
+**Untyped-control regression found during final validation**
+
+The first same-source untyped MIR campaign exposed a quicksort penalty of
+1.2184×, paired 95% interval [1.1602, 1.2544], over 41 equal-output pairs.
+That campaign was stopped; `final_same_untyped_jit.json` is a partial report
+and is not completion evidence. The annotation-only results above remain
+measurements of their frozen binary, but cannot by themselves establish that
+the control was not slowed.
+
+Separate release sampling and uninstrumented MIR isolated the defect: the
+nullable integer ordered-comparison emitter refused its existing signed
+predicate, despite the caller already testing and absorbing null under
+S6.1.2. This added two band checks, float conversions and a double predicate
+to each comparison. Erased quicksort's partition grew 504→576 instructions
+with four conversion helper sites; its sortedness check grew 153→188 with
+two. No algorithm, input or borrow changed.
+
+The shared emitter now accepts nullable lanes. Signed order with the existing
+NaN exclusion implements the non-null int domain (S4.1.2, D2.2.2), and the
+caller still publishes the bool-null marker for either absent operand
+(S6.1.2, S7.1.1v3). The new `nullable_int_ordered_pair` MIR fixture checks
+all 81 pairs of finite endpoints, signed infinities, NaN and out-of-bounds
+null across `<`, `<=`, `>` and `>=`, with full goldens and a prohibition on
+float comparison/conversion in the pair emitter. Both pinned modes pass.
+Completion required repeating annotation parity and same-source controls
+after this fix; §14.6 records those completed comparisons. The earlier frozen
+binary is retained as diagnostic evidence.
+
+
+The final lowering also addresses the two other sources of redundant work:
+
+- The shared lowering hook now supplies demand to the language producer
+  before emission (D8.2.6). Ordered int/float comparisons used only as
+  conditions produce the canonical truth value directly, with null mapped to
+  false (S3.1). Ordinary expression consumers still receive the 0/1/2 nullable
+  bool lane (S6.1.2). Nullable bool branch normalization uses `lane == 1`.
+- The existing certified integer-array equality helper is shared with ordered
+  comparisons and a sealed non-null integer local or literal. Its live
+  unsigned bounds guard proves that a loaded element cannot be null; the
+  signed predicate retains NaN exclusion. The existing fallback owns the
+  absent-read result, and effectful/unproved operands remain on their original
+  path (S4.1.2, S7.1.1v3, D2.6.2–D2.6.3).
+- Native integer stores now exclude only `INT_LANE_NULL`, using a 64-bit
+  `BEQ`. Infinity and NaN are valid integer storage lanes under D2.6.3; a
+  finite-range gate needlessly sent them through checked setters. The cold
+  setter still owns null rejection or nullable-array demotion (D2.6.2).
+
+The pair fixture checks array-read values and branches as well as nullable
+parameters, including float branch conversion, and adds infinity/NaN stores,
+COW snapshots and failed null writes. The existing `tune17b_int_lane_guard`
+fixture now asserts the full-width null exclusion rather than the obsolete
+finite-range gate, with zero-store and absent-read failure goldens. No
+formal ruling changes or native-stack GC scanning are introduced.
+
+### 14.4 Nullable-comparison candidate evidence (superseded) — 2026-10-04
+
+The §14.4 engine source corpus is
+`883ca97970a6aec54966598b1d0fe37d9e39385253fea2023b177e69cf2ef84a`.
+The rebuilt frozen release, `lambda-proof-final.exe`, has SHA-256
+`cf3ff1bf6bedc97f985cfb068c6da93bb60d59d8030d706eb03ab86b25fc5111`;
+`proof_final_manifest.json` records its compiler, build inputs and source
+identities. The `proof_*` campaigns use this release. Earlier binaries and
+reports remain separate; no earlier timing is relabeled as a measurement of
+this binary.
+
+The complete Lambda baseline passes **6,211/6,211**, with input prerequisite
+**2,104/2,104** (`proof_baseline_final.log`). Release-host checks pass
+MIR emission **244/244**, forced GC **295/295**, optimizer **53/53**, nine
+focused contract/negative tests and three benchmark-helper tests. The emission
+suite includes the previously failing
+`LambdaMirProfiling.DiagnosticCallsPreserveProductionRootsAndSafepoints`.
+The optimizer's debug-only fault check is covered by the full baseline.
+
+An inferred `any` array still needs absence checks: an untyped mutation can
+copy an out-of-bounds null into a valid slot. The extended comparison fixture
+checks that operation, its old snapshot and the subsequent null comparison
+in both tiers (S6.1.2, S7.1.1v3, S9.1.2). A physical integer carrier alone
+does not establish a full null-free source contract (D3.3.4).
+
+The archived `proof_*` campaigns include annotation-only, same-source and
+actual previous-erased/new-typed comparisons. Their direct MIR nqueens row
+remained inconclusive, leading to the separate release profile and subsequent
+activation-local certificate reuse below. These measurements retain their
+original binary identity; §14.6 contains the completion candidate's results.
+Multiplying ratios from independent campaigns does not establish paired
+cross-release uncertainty.
+
+The earlier fourteen-case annotation corpus includes **Larceny primes**. P3's
+2,122,050-store diagnosis concerns the canonical **Kostya primes** benchmark,
+so the permanent fifteen-case corpus now includes matched Kostya controls in
+both tiers (§14.5). Its typed and untyped ports differ only in annotations and
+a comment; the erased twin preserves its algorithm, casts, input and borrowing.
+The temporary port driver's invalid `larceny/primes` selector was corrected
+to `kostya/primes`; its failed selection log is retained, and the unfinished
+sequence resumed without relabeling or rerunning completed measurements.
+
+### 14.5 Activation-local fill certificate reuse — completed
+
+The release sample for the §14.4 candidate exposed repeated metadata work in
+MIR nqueens: `lambda_array_rep_cert_resolve` occupied 117 exclusive observations
+in the typed sample and did not exceed the five-observation reporting threshold
+in either erased sample. These observations locate a cost; sample durations are
+not benchmark ratios. The raw samples and full-output checks remain in
+`temp/typed_tuning2/nqueens_final_profile/`.
+
+A synchronous MIR activation now lazily resolves its first eligible native fill
+certificate and reuses it at equivalent full-contract destinations. The compiler
+uses the same invariant contract relation as heap-owned certificate interning,
+qualifies each register by its MIR function, and initializes it at entry even
+when first use lies inside a conditional or loop. Resolution stays after argument
+evaluation, and negative or poisoned counts skip it. Async functions keep their
+existing path. The register dies with the activation: no heap pointer enters an
+AST plan, generated code, module cache cell or cross-context state (D3.3.3v3,
+D8.4.1v2).
+
+The resolved native-fill helper shares the existing primitive kernel and complete
+cold admission; it receives the original contract and boundary for diagnostics.
+Its effect remains MAY_GC with conservative reentry, while metadata resolution is
+NO_GC/nonreentrant and returns a raw non-GC pointer. Precise Item ownership stays
+with the existing root paths (D5.3.3). The activation fixture covers conditional
+first use, equivalent aliases, repeated loop allocations, distinct primitive
+contracts, invalid counts, incompatible values and full output under forced GC.
+
+The permanent annotation corpus now includes canonical Kostya primes as well as
+Larceny primes, so P3's original store-heavy workload is measured directly rather
+than represented by the other primes port. New release evidence uses the
+`cert_*` prefix; §14.4's `proof_*` reports remain tied to their original binary.
+
+The new release is `lambda-cert-final.exe`, SHA-256
+`dc21b010c08afe64e51320661f054eea659f8803e5bb9a62337d66310e30602b`,
+with source corpus
+`2e1da64ab4adcf565418ac8249bacadfd4d46e81ffc471f985c06b693fb62f92`
+(`cert_final_manifest.json`). The complete baseline passes **6,213/6,213**,
+including input **2,104/2,104**, MIR emission **245/245**, forced GC **296/296**,
+and optimizer **54/54** (`cert_baseline_pass.log`). The expanded profiler parity
+check includes the activation fixture.
+
+A separate release diagnostic execution counts **15,131** nqueens native fills
+and **5,509** certificate resolutions, eliminating 9,622 lookups (63.6%). Typed
+root stores/reloads remain **114,870/149,154**; erased remain
+**162,257/122,274**. Profiling still leaves output, static roots, memory traffic
+and safepoints unchanged (`cert_corrected_roots/result.json`). The helper counter
+now sees resolution as an explicit MIR import: its increase is visibility of
+previously internal calls, not evidence of more runtime work. In the new native
+sample the resolver has 51 exclusive observations, versus 117 in the prior
+candidate; sampling is diagnostic evidence only. Full profiled goldens match.
+
+The separate nqueens preflight uses two independent 21-pair pinned-MIR campaigns,
+with equal repetitions calibrated to one second. Typed/current-erased ratios are
+**0.9328 [0.8965, 0.9478]** and **0.9176 [0.8058, 0.9648]**. The corresponding
+actual new-typed/previous-erased campaigns are **1.0196 [0.9097, 1.1130]** and
+**0.9875 [0.9544, 1.0261]**: these wider cross-release intervals remain
+inconclusive, and do not inherit the annotation-only speedup claim. Every
+preflight output matches its complete golden and all provenance checks pass.
+
+The completion candidate's 41-pair, 300 ms same-source MIR quicksort control
+reproduces a remaining untyped slowdown: **1.0726 [1.0362, 1.1331]** versus the
+previous release (`cert_same_untyped_jit.json`). The earlier nullable/branch/read
+fixes reduced the original 1.2184× regression, but did not eliminate it. This
+penalty remains visible independently of annotation ratios and corpus averages;
+actual old-erased/new-typed pairs are required before claiming parity against
+that reference. No inferred array is treated as null-free to remove required
+absence semantics (S6.1.2, D3.3.4).
+
+The existing strict-T0 Prettier ports also retain a visible difference:
+**1.1164 [1.1017, 1.1567]** typed/untyped over 15 pairs
+(`cert_ports_interp.json`). Their diagnostic executions visit **405,560,741**
+and **313,221,749** interpreted nodes respectively, with zero fallback and no
+MIR execution. The typed port performs 29.5% more interpreted work. Its
+annotation-erased twin keeps that algorithm and workload, so this port ratio
+does not establish an annotation penalty. Both timed ports match the complete
+formatted-output golden (`cert_port_golden_validation.json`).
+
+### 14.6 Completed release comparisons — 2026-10-04
+
+These tables use only the frozen release and source hashes in §14.5.
+All completion sequences finished successfully (`cert_all_validation.log`);
+the release, frozen copy and current source manifest were verified again
+after timing. Superseded §14.3/§14.4 reports remain separate.
+
+#### Completion annotation-only campaigns
+
+A and B are independent 15-pair campaigns, calibrated to 300 ms with
+identical repetitions. Each cell is typed/erased median and paired two-sided
+95% interval; a smaller ratio is faster. All fifteen cases remain visible.
+
+| Workload | MIR A | MIR B | T0 A | T0 B |
+|---|---|---|---|---|
+| bounce | 0.7384 [0.7272, 0.7472] | 0.7428 [0.7374, 0.7591] | 0.8674 [0.8431, 0.8848] | 0.8761 [0.8591, 0.8869] |
+| fannkuch | 0.9161 [0.9100, 0.9401] | 0.9272 [0.9167, 0.9382] | 0.9463 [0.9317, 0.9698] | 0.9600 [0.9395, 0.9784] |
+| nqueens | 0.9416 [0.9289, 0.9661] | 0.9321 [0.9193, 0.9424] | 0.9699 [0.9437, 1.0220] | 0.9769 [0.9600, 0.9925] |
+| Queens | 0.2745 [0.2705, 0.2775] | 0.2716 [0.2678, 0.2736] | 0.9804 [0.9333, 0.9981] | 0.9741 [0.9603, 0.9884] |
+| fasta | 0.6178 [0.6004, 0.6307] | 0.6211 [0.6139, 0.6361] | 0.9856 [0.9751, 0.9980] | 0.9820 [0.9561, 1.0244] |
+| deriv | 0.2719 [0.2664, 0.2752] | 0.2528 [0.2488, 0.2612] | 0.8769 [0.8604, 0.8923] | 0.8767 [0.8480, 0.8848] |
+| towers | 0.5162 [0.4658, 0.5302] | 0.5270 [0.5238, 0.5357] | 0.9525 [0.9351, 0.9759] | 0.9550 [0.9242, 0.9727] |
+| sieve | 0.8253 [0.8187, 0.8269] | 0.8204 [0.8140, 0.8282] | 0.9589 [0.9441, 0.9815] | 0.9648 [0.9388, 0.9873] |
+| primes | 0.9833 [0.9618, 0.9930] | 0.9729 [0.9459, 1.0057] | 0.9757 [0.9674, 1.0152] | 0.9859 [0.9501, 1.0081] |
+| quicksort | 0.5420 [0.5357, 0.5532] | 0.5454 [0.5387, 0.5570] | 0.9065 [0.8759, 0.9214] | 0.8945 [0.8473, 0.9122] |
+| kostya_primes | 0.9724 [0.9497, 1.0020] | 0.9673 [0.9483, 0.9877] | 0.9734 [0.9140, 1.1100] | 0.9730 [0.9576, 0.9932] |
+| binarytrees | 0.7199 [0.7077, 0.7338] | 0.7602 [0.7384, 0.7758] | 0.9212 [0.8925, 0.9495] | 0.9162 [0.9042, 0.9211] |
+| gcbench | 0.4825 [0.4593, 0.4885] | 0.4882 [0.4700, 0.4911] | 0.9523 [0.8390, 0.9627] | 0.9314 [0.9073, 0.9455] |
+| Richards | 0.2443 [0.2390, 0.2467] | 0.2440 [0.2410, 0.2467] | 0.8670 [0.8443, 0.8940] | 0.8416 [0.6253, 0.8970] |
+| prettier_ast | 0.4313 [0.4224, 0.4392] | 0.4314 [0.4270, 0.4367] | 0.9731 [0.8839, 1.0000] | 0.9456 [0.9385, 0.9678] |
+
+The predeclared uncertainty rule selects the union of rows with either
+broad median above one or upper bound above 1.02. C and D use 41 pairs each,
+targeting 1.5 seconds; the broad reports above are retained.
+
+| Tier | Workload | C | D |
+|---|---|---|---|
+| T0 | fasta | 0.9883 [0.8482, 1.1097] | 0.9791 [0.9687, 1.0109] |
+| T0 | kostya_primes | 0.9618 [0.9526, 0.9806] | 0.9913 [0.9672, 1.0020] |
+| T0 | nqueens | 0.9606 [0.9440, 0.9722] | 0.9764 [0.9658, 0.9877] |
+
+Rows still unresolved after C/D receive two independent E/F campaigns,
+41 pairs each at three seconds. C/D remain visible above.
+
+| Tier | Workload | E | F |
+|---|---|---|---|
+| T0 | fasta | 0.9826 [0.9649, 0.9932] | 0.9751 [0.8554, 1.0183] |
+
+**All 30 tier/workload combinations pass the annotation-only gate** in
+their two acceptance campaigns: median at most one and 95% upper bound at
+most 1.02. 24 demonstrate speedups in both campaigns; 6 meet practical
+equivalence within the 2% measurement tolerance. No positive penalty is
+passed by a corpus mean. Strict T0 diagnostics show zero fallback and zero
+MIR satellite execution (D8.1.1v15).
+
+#### Previous erased release versus completion typed release
+
+These are actual alternating old-erased/new-typed process pairs, with equal
+work, equal repetitions and complete goldens. They independently check the
+older untyped control; they are not products of annotation and old/new ratios.
+
+| Workload | MIR acceptance campaigns | MIR ratios | T0 acceptance campaigns | T0 ratios |
+|---|---|---|---|---|
+| bounce | A, B | 0.7567 [0.7127, 0.7989]; 0.7450 [0.6314, 0.8559] | A, B | 0.8651 [0.8145, 0.9121]; 0.9265 [0.8710, 0.9809] |
+| fannkuch | C, D | 0.9519 [0.9357, 0.9805]; 0.9504 [0.9238, 0.9832] | C, D | 0.9209 [0.9036, 0.9382]; 0.9290 [0.9140, 0.9536] |
+| nqueens | E, F | 0.9670 [0.9593, 0.9723]; 0.9781 [0.9575, 0.9934] | C, D | 0.9524 [0.9399, 0.9676]; 0.9652 [0.9528, 0.9800] |
+| Queens | A, B | 0.2663 [0.2583, 0.2891]; 0.2593 [0.2393, 0.3205] | C, D | 0.9659 [0.9480, 0.9972]; 0.9676 [0.9533, 0.9806] |
+| fasta | A, B | 0.5803 [0.5714, 0.6106]; 0.6279 [0.5989, 0.7082] | C, D | 0.9475 [0.9277, 0.9608]; 0.9445 [0.9329, 0.9580] |
+| deriv | A, B | 0.2461 [0.2378, 0.2608]; 0.2532 [0.2381, 0.2758] | A, B | 0.8766 [0.8200, 0.9350]; 0.9163 [0.8188, 1.0160] |
+| towers | A, B | 0.3552 [0.3125, 0.5687]; 0.4826 [0.4544, 0.5044] | C, D | 0.9552 [0.9333, 0.9658]; 0.9485 [0.9369, 0.9661] |
+| sieve | C, D | 0.8286 [0.8184, 0.8691]; 0.8371 [0.8180, 0.8861] | C, D | 0.8993 [0.8866, 0.9084]; 0.8890 [0.8764, 0.9042] |
+| primes | C, D | 0.9686 [0.9609, 0.9803]; 0.9689 [0.9372, 0.9906] | C, D | 0.9339 [0.9206, 0.9476]; 0.9299 [0.9164, 0.9404] |
+| quicksort | A, B | 0.5708 [0.5531, 0.6032]; 0.6105 [0.5695, 0.6578] | A, B | 0.9065 [0.8539, 0.9392]; 0.9024 [0.8510, 0.9292] |
+| kostya_primes | C, D | 0.9585 [0.9502, 0.9738]; 0.9643 [0.9380, 0.9848] | A, B | 0.9383 [0.9105, 0.9679]; 0.9227 [0.8854, 0.9449] |
+| binarytrees | A, B | 0.7343 [0.6387, 0.8199]; 0.6452 [0.6230, 0.6909] | A, B | 0.9228 [0.8767, 0.9627]; 0.8880 [0.8465, 0.9426] |
+| gcbench | A, B | 0.4512 [0.4308, 0.4831]; 0.4382 [0.4134, 0.4743] | A, B | 0.9221 [0.9103, 0.9389]; 0.9433 [0.9303, 0.9499] |
+| Richards | A, B | 0.2614 [0.2500, 0.2818]; 0.2525 [0.2405, 0.2693] | A, B | 0.8558 [0.8363, 0.8914]; 0.8490 [0.8384, 0.8781] |
+| prettier_ast | A, B | 0.4344 [0.4171, 0.4614]; 0.3817 [0.3759, 0.3982] | A, B | 0.9613 [0.8996, 0.9781]; 0.9609 [0.9526, 0.9791] |
+
+Both acceptance campaigns pass for all 30 combinations against the
+previous erased release. Cross-release A/B use 15 pairs at 300 ms; selected
+C/D use 41 at 1.5 seconds; any unresolved C/D rows receive E/F with 41 pairs
+at three seconds. The complete broad and precision reports remain
+in `cert_cross_{a,b,c,d,e,f}_{jit,interp}.json`.
+
+#### Same-source old/new controls
+
+These ratios are completion/previous release for the **same** source.
+Untyped rows use 41 pairs, typed rows 15; identical repetition targets
+300 ms. This table is separate from annotation cost and port differences.
+
+| Workload | Untyped MIR | Typed MIR | Untyped T0 | Typed T0 |
+|---|---|---|---|---|
+| bounce | 1.0279 [0.9975, 1.0465] | 0.9628 [0.8549, 1.0461] | 0.9942 [0.9397, 1.0147] | 0.7829 [0.7597, 0.7984] |
+| fannkuch | 1.0056 [0.9740, 1.0386] | 0.9732 [0.9094, 1.0343] | 1.2866 [0.9470, 1.4443] | 0.8314 [0.8019, 0.8769] |
+| nqueens | 1.0337 [0.9782, 1.0911] | 0.8113 [0.7499, 0.8610] | 0.9869 [0.9546, 1.0251] | 0.8244 [0.7709, 0.8589] |
+| Queens | 0.9629 [0.9357, 0.9829] | 0.9507 [0.8791, 0.9936] | 1.0271 [0.9999, 1.1430] | 0.7321 [0.7101, 0.7646] |
+| fasta | 0.9967 [0.9436, 1.0346] | 0.9916 [0.9204, 1.0151] | 0.9794 [0.9489, 0.9977] | 0.9052 [0.8334, 0.9695] |
+| deriv | 0.9108 [0.8868, 0.9583] | 0.9931 [0.9646, 1.0738] | 0.9885 [0.9544, 1.0125] | 0.8620 [0.8030, 0.8847] |
+| towers | 0.8725 [0.8409, 0.9197] | 0.9913 [0.8885, 1.1024] | 0.9648 [0.9290, 0.9942] | 0.7215 [0.6915, 0.7444] |
+| sieve | 1.0008 [0.9361, 1.0780] | 0.9964 [0.9615, 1.0857] | 1.2620 [0.8030, 1.2804] | 0.7986 [0.7644, 0.8478] |
+| primes | 0.9937 [0.9554, 1.0572] | 0.9955 [0.9192, 1.0862] | 0.9537 [0.9173, 0.9873] | 0.8602 [0.8340, 0.9052] |
+| quicksort | 1.0726 [1.0362, 1.1331] | 1.0337 [0.9593, 1.1197] | 0.7600 [0.6823, 1.0530] | 0.7797 [0.7379, 0.8314] |
+| kostya_primes | 0.9970 [0.9407, 1.0580] | 1.0247 [0.9454, 1.1069] | 0.9446 [0.9273, 0.9630] | 0.8570 [0.8231, 0.9059] |
+| binarytrees | 0.8627 [0.8349, 0.9049] | 0.9838 [0.9019, 1.0995] | 1.0157 [0.9689, 1.0628] | 0.9714 [0.8247, 1.2163] |
+| gcbench | 0.9010 [0.8611, 0.9373] | 0.9398 [0.8887, 1.0638] | 0.9879 [0.9587, 1.0054] | 0.6440 [0.5438, 0.8319] |
+| Richards | 1.0483 [0.9888, 1.1047] | 0.9866 [0.9493, 1.0784] | 0.7588 [0.6730, 1.1399] | 0.8338 [0.8129, 0.8674] |
+| prettier_ast | 0.9120 [0.8954, 0.9280] | 0.9555 [0.8696, 1.0263] | 0.9907 [0.9731, 1.0030] | 0.7908 [0.7833, 0.7999] |
+
+#### Existing ports and watchlist
+
+Port ratios are typed/untyped in the completion release, 15 pairs each.
+Port algorithms, casts and borrowing can differ; they do not isolate
+annotation overhead. Every timed output matches the complete shared or
+per-source golden (`cert_port_golden_validation.json`).
+
+| Port | MIR | T0 |
+|---|---|---|
+| r7rs/nqueens | 0.9696 [0.9489, 0.9821] | 0.9548 [0.9308, 0.9898] |
+| awfy/sieve | 1.0000 [0.8800, 1.0833] | 0.9343 [0.8743, 1.0172] |
+| awfy/queens | 0.3230 [0.3072, 0.3608] | 0.9735 [0.9378, 1.0061] |
+| awfy/towers | 0.5291 [0.5231, 0.5381] | 0.9603 [0.8589, 1.0277] |
+| awfy/bounce | 0.8387 [0.7647, 0.9016] | 0.9200 [0.8563, 0.9792] |
+| awfy/richards | 0.2406 [0.2316, 0.2647] | 0.8631 [0.8430, 0.8704] |
+| beng/binarytrees | 0.5273 [0.5109, 0.5350] | 0.9268 [0.9022, 0.9579] |
+| beng/fannkuch | 0.9139 [0.8305, 1.0149] | 0.9408 [0.8907, 0.9663] |
+| beng/fasta | 0.9056 [0.8641, 0.9533] | 1.0015 [0.9773, 1.0334] |
+| kostya/primes | 0.9694 [0.9608, 0.9791] | 0.9857 [0.9477, 1.0102] |
+| larceny/deriv | 0.3778 [0.3694, 0.3803] | 0.9593 [0.9063, 1.0176] |
+| larceny/gcbench | 0.8535 [0.7513, 0.8793] | 0.9662 [0.9428, 0.9850] |
+| larceny/quicksort | 0.5695 [0.5380, 0.6202] | 0.8941 [0.8725, 0.9318] |
+| text/prettier_ast | 0.4226 [0.4122, 0.4539] | 1.1164 [1.1017, 1.1567] |
+
+Watchlist ratios are same-source completion/previous release, with
+21 pairs at 500 ms, complete goldens and separate strict-T0 diagnostics.
+
+| Workload | MIR | T0 |
+|---|---|---|
+| larceny/puzzle | 1.0414 [0.9717, 1.0732] | 0.9737 [0.9412, 1.0004] |
+| text/microdiff | 0.9620 [0.9397, 1.0090] | 1.0060 [0.9643, 1.0373] |
+
+#### Fasta cast factorial
+
+Each ratio is cast/no-cast at a fixed annotation setting in pinned MIR.
+The explicit cast is varied independently; full sequence goldens agree.
+
+| Source | A | B |
+|---|---|---|
+| erased | 1.4803 [1.4310, 1.5194] | 1.4526 [1.4397, 1.4978] |
+| typed | 0.9791 [0.9597, 1.0126] | 0.9915 [0.9643, 1.0104] |
+
+### 14.7 Limits and reproduction
+
+The acceptance claim covers the fifteen matched annotation controls in the
+two pinned modes, and their actual previous-erased/new-typed comparisons.
+It does not guarantee that every arbitrary annotated program has zero cost.
+Practical equivalence uses the predeclared 2% uncertainty tolerance; a
+reproducible positive penalty cannot pass through an aggregate average.
+The same-source untyped MIR quicksort regression and the existing strict-T0
+Prettier port difference remain visible above. Puzzle and microdiff have no
+established positive penalty in these watchlist measurements, but their
+intervals remain inconclusive.
+
+The permanent runner regenerates annotation twins and complete goldens,
+calibrates equal repetitions, alternates process order and records binary,
+source and build provenance. A fresh full-corpus annotation check is:
+
+```bash
+make test-lambda-baseline
+make release
+for tier in jit interp; do
+  for campaign in a b; do
+    python3 test/benchmark/run_typed_audit.py --candidate ./lambda.exe \
+      --tier "$tier" --annotation-controls --pairs 15 \
+      --annotation-target-ms 300 \
+      --output "temp/typed_tuning2/reproduce_${campaign}_${tier}.json"
+  done
+done
+```
+
+Run profiling and other CPU-heavy validation separately from these timings.
+For a same-source comparison, supply `--control <previous-release>` and
+`--source typed` or `--source untyped`. Preserve the complete broad reports
+when extending selected uncertain rows. The exact completion sequencing,
+actual cross-release driver and report renderer are retained alongside the
+`cert_*` artifacts in `temp/typed_tuning2/`; `cert_final_manifest.json` binds
+those results to the release and source hashes in §14.5.

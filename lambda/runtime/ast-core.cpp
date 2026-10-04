@@ -1459,6 +1459,8 @@ AstNode* ast_index_binding_definition(const AstIndex* index, AstBindingId id) {
 // adopted values and fields must walk in the same order (D3.2.4v4)
 extern "C" bool ast_map_literal_keys_follow_contract(AstMapNode* map_node,
         TypeMap* expected) {
+    // a plain map cannot acquire nominal identity through layout adoption (S11.3.1v2)
+    if (!map_node || !expected || type_nominal_record((Type*)expected)) return false;
     ShapeEntry* expected_field = expected->shape;
     AstNode* item = map_node->item;
     while (expected_field && item) {

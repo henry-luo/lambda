@@ -2961,6 +2961,10 @@ extern "C" {
     // compile-proved plain primitive destination; preserve the count's native int lane
     Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
         const char* boundary);
+    // activation-local metadata resolution; certificates belong to the current heap
+    ArrayRepCert* lambda_array_rep_cert_resolve(Type* contract);
+    Item lambda_fill_for_contract_int_lane_resolved(int64_t count, Item value,
+        Type* expected, const char* boundary, ArrayRepCert* cert);
     // shared construction kernel; count and scalar lane are admitted by the caller
     Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane);
     bool lambda_try_fill_for_contract(Item count, Item value, Type* expected, Item* result);
