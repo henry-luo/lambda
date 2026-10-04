@@ -356,11 +356,11 @@ TEST_F(DomRetirementTest, RetiredTextLeavesBorrowedAncestorFontAllocated) {
     ASSERT_NE(text, nullptr);
     ASSERT_TRUE(span->append_child(text));
     FontProp* owned = (FontProp*)tree.alloc_prop(sizeof(FontProp));
-    parent->font = owned;
-    text->font = lam::shared(owned);
+    parent->font = lam::view_prop(owned);
+    text->font = lam::view_ref(owned);
     TextRect* rect = tree.alloc_text_rect();
     ASSERT_NE(rect, nullptr);
-    text->rect = lam::own(rect);
+    text->rect = lam::view_prop(rect);
 
     ASSERT_TRUE(parent->remove_child(span));
     EXPECT_EQ(dom_retire_sweep(&doc), 2u);

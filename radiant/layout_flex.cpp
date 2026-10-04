@@ -271,7 +271,10 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
         ? container->block()->white_space : CSS_VALUE_NORMAL;
     item->blk->writing_mode = container->blk
         ? container->block()->writing_mode : WM_HORIZONTAL_TB;
-    item->font = text_view->font ? text_view->font : container->font;
+    // The pass-local anonymous item borrows the text's or container's font; it
+    // lives in layout scratch and is never torn down by the view tree, so this
+    // slot is never released through the item.
+    item->font = lam::view_prop((FontProp*)(text_view->font ? (FontProp*)text_view->font : (FontProp*)container->font));
     item->ensure_flex_item(lycon->doc ? lycon->doc->view_tree : nullptr);
     if (!item->fi) return nullptr;
     item->fi->anonymous_text = lam::up(text);
@@ -446,7 +449,7 @@ static void layout_anonymous_flex_text(ViewElement* item, LayoutContext* lycon,
             rect->height = item->height;
             rect->length = (int)text_node->length; // INT_CAST_OK: text rectangle source length
             rect->line_number = lycon->block.line_number;
-            text->rect = lam::own(rect);
+            text->rect = lam::view_prop(rect);
             layout_set_view_geometry(text, rect->x, rect->y,
                                      rect->width, rect->height);
             lycon->line.advance_x += space_width;

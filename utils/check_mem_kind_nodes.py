@@ -50,6 +50,8 @@ HEADERS = [
     "radiant/render.hpp",
 ]
 STACK_LEVEL = "lam::NodeStack"
+DOCUMENT_LEVEL = "lam::NodeDocument"
+VIEW_TREE_LEVEL = "lam::NodeViewTree"
 TU_NAME = "temp/check_mem_kind_nodes_tu.cpp"
 RAW_ALLOWLIST = ROOT / "utils" / "lint" / "mem_kind_raw_fields.txt"
 RAW_HEADERS = HEADERS + ["lambda/input/css/dom_node.hpp"]
@@ -112,7 +114,7 @@ def collect(tu, ci, cfg):
                 if owner is not None:
                     raw[f"{bare(owner.type.get_canonical().spelling)}::{c.spelling}"] = f"{rel}:{c.location.line}"
         kind = bare(t.spelling).split("<", 1)[0]
-        if kind not in ("lam::Up", "lam::Shared"):
+        if kind not in ("lam::Up", "lam::Shared", "lam::ViewProp", "lam::ViewRef"):
             continue
         holder = enclosing_record(c, ci)
         if holder is None:
@@ -172,6 +174,22 @@ def main() -> int:
     violations, unchecked = [], defaultdict(list)
     for holder, field, target, rel, line, kind in claims:
         hl, tl = homes.get(holder), homes.get(target)
+        if kind in ("ViewProp", "ViewRef"):
+            # the one sanctioned downward pointer: a Document-level node into its
+            # document's view tree (a ViewProp target lives there; a ViewRef
+            # target lives there or above)
+            if hl != DOCUMENT_LEVEL:
+                violations.append(f"{rel}:{line}: error: {holder}::{field} is {kind}<{target}>, "
+                                  f"but its holder lives in {hl or 'an undeclared level'}, not {DOCUMENT_LEVEL}")
+            elif tl is None:
+                unchecked["target"].append(f"{rel}:{line}: {holder}::{field} -> {target}")
+            elif kind == "ViewProp" and tl != VIEW_TREE_LEVEL:
+                violations.append(f"{rel}:{line}: error: {holder}::{field} is ViewProp<{target}>, "
+                                  f"but {target} lives in {tl}, not {VIEW_TREE_LEVEL}")
+            elif kind == "ViewRef" and tl not in ancestors_or_self(VIEW_TREE_LEVEL, levels):
+                violations.append(f"{rel}:{line}: error: {holder}::{field} is ViewRef<{target}>, "
+                                  f"but {target} lives in {tl}, which is not {VIEW_TREE_LEVEL} or above")
+            continue
         if hl == STACK_LEVEL:
             continue
         if hl is None or tl is None:
@@ -202,7 +220,7 @@ def main() -> int:
     for v in violations:
         print(v)
     n_unchecked = sum(len(v) for v in unchecked.values())
-    print(f"mem-kind-nodes: {len(claims)} Up/Shared fields, {len(violations)} violations, "
+    print(f"mem-kind-nodes: {len(claims)} Up/Shared/View fields, {len(violations)} violations, "
           f"{n_unchecked} unchecked ({len(unchecked['holder'])} undeclared holder level, "
           f"{len(unchecked['target'])} undeclared target level); {len(raw)} raw pointer fields allowed")
     if args.verbose:

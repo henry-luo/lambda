@@ -649,7 +649,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                             marker_style == CSS_VALUE_DISCLOSURE_OPEN);
 
     if (!block->pseudo) {
-        block->pseudo = lam::own((PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp)));
+        block->pseudo = lam::view_prop((PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp)));
         memset(block->pseudo, 0, sizeof(PseudoContentProp));
     }
 
@@ -715,7 +715,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             marker_font_handle, image);
 
         if (marker_elem) {
-            marker_elem->font = marker_font_prop;
+            marker_elem->font = lam::view_prop(marker_font_prop);
             block->pseudo->marker = lam::up(marker_elem);
             block->pseudo->marker_generated = true;
             MarkerProp* marker_prop = marker_elem->marker_prop();
@@ -733,7 +733,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         }
     }
     if (current_marker && !current_marker->font) {
-        current_marker->font = marker_font_prop;
+        current_marker->font = lam::view_prop(marker_font_prop);
     } else if (!block->pseudo->marker && marker_font_prop) {
         // A failed generated-node allocation must release its transient font.
         font_prop_release_handle(marker_font_prop);

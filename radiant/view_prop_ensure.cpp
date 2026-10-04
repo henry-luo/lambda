@@ -38,11 +38,11 @@ static InlineProp* ensure_inline_prop(DomElement* element, Pool* pool,
         memcpy(owned, element->in_line, sizeof(InlineProp));
         // Canonical values are immutable; crossing ensure_inline is the single
         // mutation gate that restores element-owned writable storage.
-        element->in_line = lam::shared(owned);
+        element->in_line = lam::view_ref(owned);
         element->mark_inline_prop_owned();
         if (tree) tree->canonical_stats.inline_cows++;
     } else if (!element->in_line) {
-        element->in_line = lam::shared((InlineProp*)pool_calloc(pool, sizeof(InlineProp)));
+        element->in_line = lam::view_ref((InlineProp*)pool_calloc(pool, sizeof(InlineProp)));
         if (element->in_line) {
             memcpy(element->in_line, &INLINE_PROP_DEFAULT, sizeof(InlineProp));
             element->mark_inline_prop_owned();

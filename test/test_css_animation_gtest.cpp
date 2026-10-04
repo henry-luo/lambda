@@ -114,7 +114,7 @@ TEST(CssPropTable, DirtyMutationDoesNotConsumePendingLayout) {
     InlineProp in_line = INLINE_PROP_DEFAULT;
     in_line.opacity = 1.0f;
     element.doc = lam::up(&doc);
-    element.in_line = lam::shared(&in_line);
+    element.in_line = lam::view_ref(&in_line);
     element.set_styles_resolved(true);
     doc.root = lam::up(&element);
     doc.js.mutation_count = 1;
@@ -134,7 +134,7 @@ TEST(CssPropTable, VisibilityUsesRenderEnumNames) {
     element.set_synthetic(true);
     InlineProp in_line = INLINE_PROP_DEFAULT;
     element.doc = lam::up(&doc);
-    element.in_line = lam::shared(&in_line);
+    element.in_line = lam::view_ref(&in_line);
     element.set_styles_resolved(true);
     doc.root = lam::up(&element);
 
@@ -434,7 +434,7 @@ protected:
         DomElement* element = (DomElement*)mock->buf;
         element->node_type = DOM_NODE_ELEMENT;
         element->doc = lam::up(&doc);
-        ((ViewSpan*)element)->in_line = lam::shared(&mock->in_line);
+        ((ViewSpan*)element)->in_line = lam::view_ref(&mock->in_line);
         return element;
     }
 
@@ -524,7 +524,7 @@ TEST_F(AnimationTickTest, TransformAnimationMarksDocumentOwnedList) {
     MockElement mock;
     DomElement* element = createMockElement(&mock);
     TransformProp transform = {};
-    element->transform = lam::own(&transform);
+    element->transform = lam::view_prop(&transform);
 
     TransformFunction keyframe_function = {};
     keyframe_function.type = TRANSFORM_TRANSLATEX;

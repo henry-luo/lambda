@@ -209,6 +209,14 @@ void free_owned(Pool* pool, OwnArr<T>& field) {
     field = nullptr;
 }
 
+// A view-tree block owned by a Document-level node, returned to the view
+// tree's pool.
+template<class T, auto Slot>
+void free_owned(Pool* pool, ViewProp<T, Slot>& field) {
+    if (field) pool_free(pool, (void*)field.get());
+    field = nullptr;
+}
+
 template<class T>
 PoolPtr<T> checked_pool_ptr(Pool* pool, T* raw) {
     (void)pool;

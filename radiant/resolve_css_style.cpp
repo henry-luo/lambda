@@ -9816,18 +9816,20 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
         case CSS_PROPERTY_FILTER:
         case CSS_PROPERTY_BACKDROP_FILTER: {
             bool is_backdrop_filter = prop_id == CSS_PROPERTY_BACKDROP_FILTER;
-            lam::Own<FilterProp>* target_filter = is_backdrop_filter
-                ? span->backdrop_filter_slot()
-                : span->filter_slot();
+            auto set_target = [&](FilterProp* filter) {
+                if (is_backdrop_filter) span->set_backdrop_filter_prop(filter);
+                else span->set_filter_prop(filter);
+            };
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
-                *target_filter = nullptr;
+                set_target(nullptr);
                 break;
             }
-            *target_filter = lam::own(is_backdrop_filter
+            FilterProp* target_filter = is_backdrop_filter
                 ? (FilterProp*)alloc_prop(lycon, sizeof(FilterProp))
-                : span->ensure_filter(lycon));
-            if (!*target_filter) break;
-            (*target_filter)->functions = lam::own(resolve_css_function_list<FilterFunction>(
+                : span->ensure_filter(lycon);
+            set_target(target_filter);
+            if (!target_filter) break;
+            target_filter->functions = lam::own(resolve_css_function_list<FilterFunction>(
                 value,
                 [&](const CssValue* item) {
                     return item && item->type == CSS_VALUE_TYPE_FUNCTION
@@ -10725,11 +10727,11 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
                 if (css_find_background_gradient_layer(last_layer, GRADIENT_LINEAR)) linear_count++;
                 else if (css_find_background_gradient_layer(last_layer, GRADIENT_RADIAL)) radial_count++;
                 if (radial_count > 0) {
-                    bg->radial_layers = lam::own_arr((RadialGradient**)alloc_prop(lycon, sizeof(RadialGradient*) * radial_count));
+                    bg->radial_layers = lam::own_arr((lam::Own<RadialGradient>*)alloc_prop(lycon, sizeof(lam::Own<RadialGradient>) * radial_count));
                     bg->radial_layer_count = 0;
                 }
                 if (linear_count > 0) {
-                    bg->linear_layers = lam::own_arr((LinearGradient**)alloc_prop(lycon, sizeof(LinearGradient*) * linear_count));
+                    bg->linear_layers = lam::own_arr((lam::Own<LinearGradient>*)alloc_prop(lycon, sizeof(lam::Own<LinearGradient>) * linear_count));
                     bg->linear_layer_count = 0;
                 }
                 for (int i = count - 1; i >= 0; i--) {
