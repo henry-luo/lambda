@@ -299,7 +299,7 @@ static bool dl_validation_fail(DisplayListValidationResult* result, int index,
 }
 
 static bool dl_validate_positive_image(const DlDrawImage* image) {
-    return image->pixels && image->src_w > 0 && image->src_h > 0 &&
+    return (image->local_pixels || !image->resource.is_null()) && image->src_w > 0 && image->src_h > 0 &&
            image->src_stride > 0 && image->dst_w >= 0.0f && image->dst_h >= 0.0f;
 }
 
@@ -422,9 +422,8 @@ bool dl_validate(const DisplayList* dl, DisplayListValidationResult* result) {
                 }
                 break;
             case DL_BLIT_SURFACE_SCALED:
-                if (!dl_validate_resource_size(item->blit_surface_scaled.src_surface,
-                                               item->blit_surface_scaled.dst_w,
-                                               item->blit_surface_scaled.dst_h)) {
+                if ((!item->blit_surface_scaled.local_source && item->blit_surface_scaled.src_resource.is_null()) ||
+                    dl_has_negative_size(item->blit_surface_scaled.dst_w, item->blit_surface_scaled.dst_h)) {
                     return fail("surface blit payload is invalid");
                 }
                 break;
@@ -570,8 +569,9 @@ bool dl_item_is_retainable_for_fragment(const DisplayItem* item) {
 
     switch (item->op) {
         case DL_DRAW_IMAGE:
-            if (!dl_retainable_surface(item->draw_image.pixels,
-                                       item->draw_image.resource,
+            // frame-local pixels are never retained
+            if (item->draw_image.local_pixels ||
+                !dl_retainable_surface(item, item->draw_image.resource,
                                        item->draw_image.resource_generation)) {
                 return false;
             }
@@ -583,8 +583,8 @@ bool dl_item_is_retainable_for_fragment(const DisplayItem* item) {
             }
             break;
         case DL_BLIT_SURFACE_SCALED:
-            if (!dl_retainable_surface(item->blit_surface_scaled.src_surface,
-                                       item->blit_surface_scaled.src_resource,
+            if (item->blit_surface_scaled.local_source ||
+                !dl_retainable_surface(item, item->blit_surface_scaled.src_resource,
                                        item->blit_surface_scaled.src_generation)) {
                 return false;
             }
@@ -709,4 +709,47 @@ void dl_end_element(DisplayList* dl, int begin_index) {
     end->element_marker.marker_y = begin->element_marker.marker_y;
     end->element_marker.marker_w = begin->element_marker.marker_w;
     end->element_marker.marker_h = begin->element_marker.marker_h;
+}
+
+bool dl_draw_image_resolve(const DlDrawImage* item, DlResolvedImage* out) {
+    if (!item || !out) return false;
+    *out = {};
+    if (item->resource.is_null()) {
+        if (!item->local_pixels) return false;
+        out->pixels = item->local_pixels;  // same kind: a frame-local borrow
+        out->width = item->src_w; out->height = item->src_h; out->stride = item->src_stride;
+        out->straight_alpha = item->straight_alpha;
+        out->generation = item->resource_generation;
+        return true;
+    }
+    ImageSurface* owner = image_surface_lookup(item->resource);
+    if (!owner || !owner->pixels) return false;
+    int width = owner->decoded_width > 0 ? owner->decoded_width : owner->width;
+    int height = owner->decoded_height > 0 ? owner->decoded_height : owner->height;
+    int stride = owner->pitch > 0 ? owner->pitch / 4 : width;
+    if (width <= 0 || height <= 0 || stride < width) return false;
+    int x = item->src_x, y = item->src_y, w = item->src_w, h = item->src_h;
+    // a re-decode at another size keeps the recorded region in proportion
+    if (item->surface_w > 0 && item->surface_h > 0 &&
+        (width != item->surface_w || height != item->surface_h)) {
+        x = (int)((int64_t)x * width / item->surface_w); // INT_CAST_OK: pixel coordinate inside the surface
+        y = (int)((int64_t)y * height / item->surface_h); // INT_CAST_OK: pixel coordinate inside the surface
+        w = (int)(((int64_t)w * width + item->surface_w / 2) / item->surface_w); // INT_CAST_OK: pixel extent inside the surface
+        h = (int)(((int64_t)h * height + item->surface_h / 2) / item->surface_h); // INT_CAST_OK: pixel extent inside the surface
+        if (x + w > width) w = width - x;
+        if (y + h > height) h = height - y;
+    }
+    if (x < 0 || y < 0 || w <= 0 || h <= 0 || x + w > width || y + h > height) return false;
+    out->pixels = lam::up((const uint32_t*)owner->pixels + (size_t)y * (size_t)stride + (size_t)x);
+    out->width = w; out->height = h; out->stride = stride;
+    out->straight_alpha = owner->alpha_mode == IMAGE_ALPHA_STRAIGHT;
+    out->generation = owner->generation;
+    out->owner = lam::up(owner);
+    return true;
+}
+
+ImageSurface* dl_blit_source_resolve(const DlBlitSurfaceScaled* item) {
+    if (!item) return nullptr;
+    if (item->local_source) return item->local_source;
+    return image_surface_lookup(item->src_resource);
 }

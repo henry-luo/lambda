@@ -55,6 +55,8 @@ void dl_replay(DisplayList* dl, RdtVector* vec,
                ScratchArena* scratch, float scale,
                DirtyTracker* dirty_tracker) {
     (void)clip;
+    // image owners resolved during this replay stay alive until it ends
+    ImageSurfaceReadScope read_scope;
     if (!dl_validate_or_log(dl, "dl_replay")) {
         return;
     }

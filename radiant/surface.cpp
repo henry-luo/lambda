@@ -940,6 +940,8 @@ void image_cache_cleanup(UiContext* uicon) {
         ImageMap::destroy(uicon->image_cache);
         uicon->image_cache = NULL;
     }
+    // surfaces destroyed during a render session were queued; release them now
+    image_surface_drain_retired();
 }
 
 ImageSurface* image_surface_create(int pixel_width, int pixel_height) {
@@ -1021,19 +1023,11 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
 
 
 void image_surface_destroy(ImageSurface* img_surface) {
-    if (img_surface) {
-        // stale handles stop resolving before the memory goes away
-        // the destroy call hands the surface over; borrowed pixels stay with their owner
-        lam::Temp<ImageSurface> owned(img_surface);
-        image_surface_release_slot(img_surface);
-        lam::free_owned(img_surface->owned_pixels);
-        img_surface->pixels = nullptr;
-        if (img_surface->pic) {
-            rdt_picture_free(img_surface->pic);
-        }
-        lam::free_owned(img_surface->source_path);
-        lam::free_owned(img_surface->source_data);
-    }
+    if (!img_surface) return;
+    // stale handles stop resolving at once; the storage goes at the quiet point
+    // when a render session may still be reading it (image_surface_generation.cpp)
+    if (image_surface_defer_release(img_surface)) return;
+    image_surface_release_now(img_surface);
 }
 
 void image_surface_adopt_pixels(ImageSurface* img_surface, void* pixels) {

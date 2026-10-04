@@ -3276,7 +3276,8 @@
               "radiant/animation.cpp",
               "radiant/image_surface_generation.cpp",
               "radiant/gif_player.cpp",
-              "lib/image.c"
+              "lib/image.c",
+              "test/test_media_player_stubs.cpp"
             ],
             "binary": "test_gif_player_gtest.exe",
             "icon": "\ud83c\udf9e\ufe0f"
@@ -3339,7 +3340,8 @@
             "additional_sources": [
               "radiant/animation.cpp",
               "radiant/image_surface_generation.cpp",
-              "radiant/lottie_player.cpp"
+              "radiant/lottie_player.cpp",
+              "test/test_media_player_stubs.cpp"
             ],
             "binary": "test_lottie_player_gtest.exe",
             "icon": "\ud83c\udfad"

@@ -648,16 +648,39 @@ typedef struct ImageSurface {
     // surfaces built on the stack or inside another object, which are never
     // referenced by a retained display list.
     lam::Handle<struct ImageSurface> self;
+    lam::Own<struct ImageSurface> retire_next;  // link in the retire queue once destroyed
 } ImageSurface;
 
 // The one allocation path for heap ImageSurfaces: zeroed and
 // registered in the slot table. image_surface_destroy releases the slot.
 extern ImageSurface* image_surface_alloc(void);
-// The live surface behind `handle`, or null once it was destroyed. Reads only
-// the slot table, never the surface.
+// The live surface behind `handle`, or null once it was destroyed. Lock-free;
+// reads only the slot table. Inside an ImageSurfaceReadScope the result stays
+// valid until the scope ends: destroyed surfaces are released only at a quiet
+// point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
-// Invalidates every handle to `surface`; image_surface_destroy calls it.
+// Invalidates every handle to `surface` and returns its slot at once (only for
+// surfaces no reader can hold; image_surface_destroy defers instead).
 extern void image_surface_release_slot(ImageSurface* surface);
+// A render session that reads surfaces through handles (display-list replay,
+// tile workers, retained checks, export lowering). While any scope is open,
+// image_surface_destroy queues surfaces; the scope that closes last, on a
+// thread that is not a render worker, releases the queue.
+struct ImageSurfaceReadScope {
+    ImageSurfaceReadScope();
+    ~ImageSurfaceReadScope();
+    ImageSurfaceReadScope(const ImageSurfaceReadScope&) = delete;
+    ImageSurfaceReadScope& operator=(const ImageSurfaceReadScope&) = delete;
+};
+// Render worker threads only count their scopes; they never release the queue.
+extern void image_surface_mark_render_worker_thread(void);
+// Releases queued surfaces now when no read scope is open (shutdown, teardown).
+extern void image_surface_drain_retired(void);
+// image_surface_destroy's work: frees the surface's storage and its slot.
+extern void image_surface_release_now(ImageSurface* surface);
+// Nulls the surface's slot and queues it when a read scope is open; returns
+// false when the caller may release it at once.
+extern bool image_surface_defer_release(ImageSurface* surface);
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern ImageSurface* image_surface_decode_file(const char* path);

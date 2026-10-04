@@ -7142,6 +7142,8 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
     render_svg_record_subscene(&logical, &dl, true);
     PaintList paint = {};
     bool valid = dl_validate_or_log(&dl, "svg_export_vector");
+    // resolved image pixels feed the paint list until the consumer has run
+    ImageSurfaceReadScope read_scope;
     // the consumer runs before the recording owner expires (D4.2.2v2); unrepresentable pixel operations select shared replay.
     for (int i = 0; valid && i < dl.item_count(); i++) {
         const DisplayItem& item = dl.data()[i];
@@ -7177,13 +7179,16 @@ bool render_svg_subscene_with_paint(const PaintSvgSubscene* subscene,
         }
         case DL_DRAW_IMAGE: {
             const DlDrawImage& p = item.draw_image;
+            DlResolvedImage resolved;
+            // a released owner draws nothing
+            if (!dl_draw_image_resolve(&p, &resolved)) break;
             // the display-list stack exclusively owns this arena until synchronous export ends.
             ImageSurface* image = (ImageSurface*)scratch_calloc(&dl.arena, sizeof(ImageSurface));
             if (!image) { valid = false; break; }
-            image->width = p.src_w; image->height = p.src_h; image->pitch = p.src_stride * 4;
-            image->pixels = (void*)p.pixels;
-            image->alpha_mode = p.straight_alpha ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
-            paint_draw_image(&paint, p.pixels, p.src_w, p.src_h, p.src_stride,
+            image->width = resolved.width; image->height = resolved.height; image->pitch = resolved.stride * 4;
+            image->pixels = (void*)resolved.pixels;
+            image->alpha_mode = resolved.straight_alpha ? IMAGE_ALPHA_STRAIGHT : IMAGE_ALPHA_PREMULTIPLIED;
+            paint_draw_image(&paint, resolved.pixels, resolved.width, resolved.height, resolved.stride,
                 p.dst_x, p.dst_y, p.dst_w, p.dst_h, p.opacity,
                 p.has_transform ? &p.transform : nullptr, image); break;
         }

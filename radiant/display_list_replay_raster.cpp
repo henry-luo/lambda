@@ -53,6 +53,9 @@ void dl_replay_blit_surface_scaled(ImageSurface* surface,
                                    const DisplayReplayDirtyClip* dirty_clip,
                                    const DlBlitSurfaceScaled* blit) {
     if (!blit) return;
+    // a released source draws nothing
+    ImageSurface* source = dl_blit_source_resolve(blit);
+    if (!source) return;
     Rect dst_rect = {blit->dst_x, blit->dst_y, blit->dst_w, blit->dst_h};
     Bound bound = blit->clip;
     dl_replay_intersect_dirty_clip(dirty_clip, &bound);
@@ -61,7 +64,7 @@ void dl_replay_blit_surface_scaled(ImageSurface* surface,
     ClipShape* shape_ptrs[RDT_MAX_CLIP_SHAPES];
     int clip_depth = dl_restore_clip_shapes(&blit->clip_shapes, shapes, shape_ptrs);
     RasterPaintContext raster = raster_paint_context(surface, &bound, shape_ptrs, clip_depth);
-    raster_blit_surface_scaled(&raster, (ImageSurface*)blit->src_surface, nullptr,
+    raster_blit_surface_scaled(&raster, source, nullptr,
                                &dst_rect, (ScaleMode)blit->scale_mode, blit->opacity);
 }
 
@@ -69,6 +72,8 @@ void dl_replay_blit_surface_scaled_at_offset(ImageSurface* surface, ScratchArena
                                              const DlBlitSurfaceScaled* blit,
                                              float offset_x, float offset_y) {
     if (!blit) return;
+    ImageSurface* source = dl_blit_source_resolve(blit);
+    if (!source) return;
     Rect dst_rect = {blit->dst_x - offset_x, blit->dst_y - offset_y,
                      blit->dst_w, blit->dst_h};
     Bound bound = dl_replay_offset_clip_to_surface(&blit->clip, surface, offset_x, offset_y);
@@ -80,7 +85,7 @@ void dl_replay_blit_surface_scaled_at_offset(ImageSurface* surface, ScratchArena
     int clip_depth = dl_restore_clip_shapes(&blit->clip_shapes, shapes, shape_ptrs,
                                             scratch, offset_x, offset_y);
     RasterPaintContext raster = raster_paint_context(surface, &bound, shape_ptrs, clip_depth);
-    raster_blit_surface_scaled(&raster, (ImageSurface*)blit->src_surface, nullptr,
+    raster_blit_surface_scaled(&raster, source, nullptr,
                                &dst_rect, (ScaleMode)blit->scale_mode, blit->opacity);
     if (scratch) scratch_restore(scratch, clip_mark);
 }
