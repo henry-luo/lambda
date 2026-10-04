@@ -222,6 +222,17 @@ enum DomTextContentType {
  * Always backed by Lambda String (references chars, no copy).
  * Maintains synchronization with Lambda tree via MarkEditor through parent element.
  */
+// A text node's pointers into its document's view tree, as lam::ViewProp /
+// lam::ViewRef fields. A field can name only a listed slot, and the view-tree
+// teardown handles every listed slot (a switch over this enum).
+#define DOM_TEXT_VIEW_SLOTS(X) X(rect) X(font)
+enum class DomTextViewSlot {
+#define DOM_VIEW_SLOT_ENUM(name) name,
+    DOM_TEXT_VIEW_SLOTS(DOM_VIEW_SLOT_ENUM)
+#undef DOM_VIEW_SLOT_ENUM
+    count
+};
+
 // tier-1: doc-pool, survives relayout
 struct DomText : public DomNode {
     // Text-specific fields (reference to Lambda String)
@@ -231,10 +242,10 @@ struct DomText : public DomNode {
     lam::Up<String> native_string;
 
     // view related fields
-    lam::Own<TextRect> rect;  // first text rect
+    lam::ViewProp<TextRect, DomTextViewSlot::rect> rect;  // first text rect (view-tree pool)
     // font in force: the FontProp of the nearest font-owning ancestor, shared
     // with that element and its other descendants; the text never owns it
-    lam::Shared<FontProp> font;
+    lam::ViewRef<FontProp, DomTextViewSlot::font> font;  // the font in force, from an ancestor's prop
 
     // Factories rely on zeroed arena/pool storage and write only semantic non-zero fields.
     static DomText* create(String* native_string, DomElement* parent_element);

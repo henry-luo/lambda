@@ -1104,7 +1104,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsBackgroundAndSolidBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1140,7 +1140,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsUniformRoundedBackground) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1169,7 +1169,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsOpaqueUniformRoundedBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1212,7 +1212,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1269,7 +1269,7 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsLinearGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryLinearGradientPaint paint = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1313,7 +1313,7 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsRadialGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryRadialGradientPaint paint = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 120.0f;
     view.height = 80.0f;
     bound.background = lam::own(&bg);

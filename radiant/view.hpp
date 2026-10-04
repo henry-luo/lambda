@@ -1386,9 +1386,9 @@ typedef struct {
     lam::Own<RadialGradient> radial_gradient;
     lam::Own<ConicGradient> conic_gradient;
     // Multiple gradient layers (for stacked gradients)
-    lam::OwnArr<RadialGradient*> radial_layers;  // array of additional radial gradients
+    lam::OwnArr<lam::Own<RadialGradient>> radial_layers;  // array of additional radial gradients
     int radial_layer_count;
-    lam::OwnArr<LinearGradient*> linear_layers;  // array of additional linear gradients
+    lam::OwnArr<lam::Own<LinearGradient>> linear_layers;  // array of additional linear gradients
     int linear_layer_count;
     CssEnum blend_mode;  // CSS background-blend-mode (CSS_VALUE_NORMAL default, CSS_VALUE_MULTIPLY, etc.)
 } BackgroundProp;
@@ -2802,7 +2802,7 @@ struct ViewTree {
     // scratch and the frame display list each get their own arena.
     lam::Own<Arena> render_scratch_arena;
     lam::Own<Arena> display_list_arena;
-    lam::OwnArr<CanonicalInlineEntry*> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
+    lam::OwnArr<lam::Own<CanonicalInlineEntry>> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
     size_t inline_canonical_bucket_count;
     size_t inline_canonical_count;
     size_t canonical_prop_cap_bytes;
@@ -2829,6 +2829,28 @@ struct ViewTree {
 uint64_t inline_prop_hash(const InlineProp* value);
 bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
 LAM_NODE_OF(ViewTree, NodeViewTree);
+// Element and text props live in the view tree's storage; Document-level nodes
+// hold them through lam::ViewProp / lam::ViewRef.
+LAM_NODE_OF(FontProp, NodeViewTree);
+LAM_NODE_OF(InlineProp, NodeViewTree);
+LAM_NODE_OF(BoundaryProp, NodeViewTree);
+LAM_NODE_OF(BlockProp, NodeViewTree);
+LAM_NODE_OF(ScrollProp, NodeViewTree);
+LAM_NODE_OF(EmbedProp, NodeViewTree);
+LAM_NODE_OF(PositionProp, NodeViewTree);
+LAM_NODE_OF(TransformProp, NodeViewTree);
+LAM_NODE_OF(PseudoContentProp, NodeViewTree);
+LAM_NODE_OF(FlexItemProp, NodeViewTree);
+LAM_NODE_OF(GridItemProp, NodeViewTree);
+LAM_NODE_OF(TableProp, NodeViewTree);
+LAM_NODE_OF(TableCellProp, NodeViewTree);
+LAM_NODE_OF(FormControlProp, NodeViewTree);
+LAM_NODE_OF(MultiColumnProp, NodeViewTree);
+LAM_NODE_OF(VectorPathProp, NodeViewTree);
+LAM_NODE_OF(FilterProp, NodeViewTree);
+LAM_NODE_OF(MarkerProp, NodeViewTree);
+LAM_NODE_OF(TextRect, NodeViewTree);
+LAM_NODE_OF(LayoutFragmentBox, NodeViewTree);
 
 // The document's ViewTree shell lives in the document's pool; the document owns
 // it across retained layout resets.

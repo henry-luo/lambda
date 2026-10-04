@@ -4692,7 +4692,7 @@ static void mark_table_node(LayoutContext* lycon, DomNode* node, ViewElement* pa
             lycon, node, RDT_VIEW_TABLE_ROW, display));
         if (row) {
             if (node->is_element()) {
-                row->pseudo = lam::own(alloc_pseudo_content_prop(lycon, lam::view_require_block(row)));
+                row->pseudo = lam::view_prop(alloc_pseudo_content_prop(lycon, lam::view_require_block(row)));
                 if (row->pseudo) {
                     DomElement* row_elem = node->as_element();
                     auto insert_pseudo_for_row = [&](DomElement* pseudo, bool is_before) {

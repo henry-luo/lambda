@@ -1495,7 +1495,7 @@ static DomElement* create_pseudo_element(LayoutContext* lycon, DomElement* paren
     // IMPORTANT: Do NOT share parent's FontProp pointer with pseudo-element!
     pseudo_elem->font = nullptr;
     if (parent_font) {
-        pseudo_elem->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+        pseudo_elem->font = lam::view_prop((FontProp*)alloc_prop(lycon, sizeof(FontProp)));
         if (pseudo_elem->font) font_prop_copy(pseudo_elem->font, parent_font);
     }
     // pseudo_elem->bound = parent->bound;  // BUG: causes shared BackgroundProp
@@ -5438,7 +5438,7 @@ static void insert_pseudo_into_rendered_tree(DomElement* element,
 void layout_materialize_pseudo_content(LayoutContext* lycon, ViewBlock* block,
                                        bool include_marker, bool create_first_letter) {
     if (!lycon || !block || !block->is_element()) return;
-    block->pseudo = lam::own(alloc_pseudo_content_prop(lycon, block));
+    block->pseudo = lam::view_prop(alloc_pseudo_content_prop(lycon, block));
     DomElement* element = lam::dom_require<DOM_NODE_ELEMENT>(block);
     if (block->pseudo) {
         if (block->pseudo->before) {

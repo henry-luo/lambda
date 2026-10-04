@@ -622,6 +622,9 @@ enum DomElementFlag : uint32_t {
     ELMT_FLAG_PARSER_INSERTED_TABLE_FORM = 1u << 27,
     ELMT_FLAG_SCROLL_EVENT_PENDING = 1u << 28,
     ELMT_FLAG_USER_VALIDITY = 1u << 29,
+    // A pass-local element in layout scratch (an anonymous flex text item): its
+    // props live in that scratch too, so it never reaches the view-tree pool.
+    ELMT_FLAG_SCRATCH_LIVED = 1u << 30,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -698,19 +701,34 @@ void dom_element_remove_namespaced_attribute(DomElement* element,
 const char* dom_element_get_namespaced_attribute(DomElement* element,
     const char* namespace_uri, const char* local_name);
 
+// An element's pointers into its document's view tree (props, item props,
+// layout caches and fragments), as lam::ViewProp / lam::ViewRef fields on the
+// element or its extension. A field can name only a listed slot, and the
+// view-tree teardown handles every listed slot (a switch over this enum).
+#define DOM_ELEMENT_VIEW_SLOTS(X) \
+    X(font) X(in_line) X(bound) X(blk) X(scroller) X(embed) X(position) \
+    X(transform) X(pseudo) X(layout_cache) X(fi) X(gi) X(tb) X(td) X(form) \
+    X(multicol) X(vpath) X(filter) X(backdrop_filter) X(marker) X(layout_fragments)
+enum class DomViewSlot {
+#define DOM_VIEW_SLOT_ENUM(name) name,
+    DOM_ELEMENT_VIEW_SLOTS(DOM_VIEW_SLOT_ENUM)
+#undef DOM_VIEW_SLOT_ENUM
+    count
+};
+
 // tier-1: doc-pool, survives relayout
 struct DomElementExt {
     NameId name_id;
     FragmentUnion frags[FRAGMENT_UNION_COUNT];
     uint8_t fragment_presence_mask;
     lam::Own<StyleTree> pseudo_styles[PSEUDO_STYLE_COUNT];
-    lam::Own<MultiColumnProp> multicol;
-    lam::Own<VectorPathProp> vpath;
-    lam::Own<FilterProp> filter;
-    lam::Own<FilterProp> backdrop_filter;
+    lam::ViewProp<MultiColumnProp, DomViewSlot::multicol> multicol;
+    lam::ViewProp<VectorPathProp, DomViewSlot::vpath> vpath;
+    lam::ViewProp<FilterProp, DomViewSlot::filter> filter;
+    lam::ViewProp<FilterProp, DomViewSlot::backdrop_filter> backdrop_filter;
     lam::Own<CssTransitionElemState> transition_state;
     lam::Up<CustomLayoutPaintState> custom_layout_paint;  // a document resource's paint state
-    lam::Own<LayoutFragmentBox> layout_fragments;  // fragment list
+    lam::ViewProp<LayoutFragmentBox, DomViewSlot::layout_fragments> layout_fragments;  // fragment list
     int layout_fragment_count;
     float last_remembered_width;
     float last_remembered_height;
@@ -746,7 +764,7 @@ struct DomElementExt {
     uint8_t selectionchange_event_pending;
     lam::Up<DomElement> selectionchange_event_next;
     // ::marker layout state; markers have no BlockProp
-    lam::Own<MarkerProp> marker;
+    lam::ViewProp<MarkerProp, DomViewSlot::marker> marker;
 };
 
 /**
@@ -772,8 +790,9 @@ struct DomElement : DomNode {
     // The element owns each prop it points to (Own<T>). in_line and
     // specified_style are Shared<T>: a canonical value shared with other
     // elements, or the element's private copy after copy-on-write (recorded by
-    // the inline_prop_shared flag and the style epoch). font stays raw: the
-    // pass-local anonymous flex item borrows another element's FontProp.
+    // the inline_prop_shared flag and the style epoch). A scratch-lived
+    // anonymous flex item borrows another element's FontProp in font; it never
+    // reaches view-tree teardown.
     // === Embedded Lambda Element (at known offset from DomNode base) ===
     // In UI mode, this IS the Lambda Element. Otherwise, data is copied from the
     // original Element during create(). MarkEditor operates on
@@ -811,9 +830,9 @@ struct DomElement : DomNode {
     DisplayValue display;
 
     // span properties
-    FontProp* font;  // font style
-    lam::Own<BoundaryProp> bound;  // block boundary properties
-    lam::Shared<InlineProp> in_line;  // inline specific style properties
+    lam::ViewProp<FontProp, DomViewSlot::font> font;  // font style
+    lam::ViewProp<BoundaryProp, DomViewSlot::bound> bound;  // block boundary properties
+    lam::ViewRef<InlineProp, DomViewSlot::in_line> in_line;  // private copy or canonical entry (inline_prop_shared)  // inline specific style properties
 
     // CSS Text soft hyphen fragments can contribute to an inline element's
     // border-box union without producing an additional DOM text rect.
@@ -849,31 +868,31 @@ struct DomElement : DomNode {
     // Reads must enter through the tagged accessors below; direct members are
     // reserved for mutation after the corresponding tag has been established.
     union {
-        lam::Own<FlexItemProp> fi;
-        lam::Own<GridItemProp> gi;
+        lam::ViewProp<FlexItemProp, DomViewSlot::fi> fi;
+        lam::ViewProp<GridItemProp, DomViewSlot::gi> gi;
     };
-    lam::Own<TableProp> tb;  // table specific properties
-    lam::Own<TableCellProp> td;  // table cell specific properties
-    lam::Own<FormControlProp> form;  // form control properties
+    lam::ViewProp<TableProp, DomViewSlot::tb> tb;  // table specific properties
+    lam::ViewProp<TableCellProp, DomViewSlot::td> td;  // table cell specific properties
+    lam::ViewProp<FormControlProp, DomViewSlot::form> form;  // form control properties
 
     // block properties
     float content_width, content_height;  // width and height of the child content including padding
-    BlockProp* blk;  // block specific style properties
-    lam::Own<ScrollProp> scroller;  // handles overflow
+    lam::ViewProp<BlockProp, DomViewSlot::blk> blk;  // block specific style properties
+    lam::ViewProp<ScrollProp, DomViewSlot::scroller> scroller;  // handles overflow
     // block content related properties for flexbox, image, iframe
-    lam::Own<EmbedProp> embed;
+    lam::ViewProp<EmbedProp, DomViewSlot::embed> embed;
     // positioning properties for CSS positioning
-    lam::Own<PositionProp> position;
+    lam::ViewProp<PositionProp, DomViewSlot::position> position;
     // CSS transform properties
-    lam::Own<TransformProp> transform;
+    lam::ViewProp<TransformProp, DomViewSlot::transform> transform;
     // CSS filter and transition state live in the doc-pool extension so the
     // table/form metadata can remain independent without growing this object.
     // pseudo-element content and layout state (::before/::after)
-    lam::Own<PseudoContentProp> pseudo;
+    lam::ViewProp<PseudoContentProp, DomViewSlot::pseudo> pseudo;
     // vector path for PDF/SVG curve rendering
     // Layout cache for avoiding redundant layout computations (Taffy-inspired)
     // Stores up to 9 measurement results + 1 final layout result
-    lam::Own<radiant::LayoutCache> layout_cache;
+    lam::ViewProp<radiant::LayoutCache, DomViewSlot::layout_cache> layout_cache;
 
     bool flag(DomElementFlag value) const { return (elmt_flags & value) != 0; }
     void set_flag(DomElementFlag value, bool enabled) {
@@ -910,6 +929,8 @@ struct DomElement : DomNode {
     void set_parser_inserted_table_form(bool value) {
         set_flag(ELMT_FLAG_PARSER_INSERTED_TABLE_FORM, value);
     }
+    bool scratch_lived() const { return flag(ELMT_FLAG_SCRATCH_LIVED); }
+    void mark_scratch_lived() { set_flag(ELMT_FLAG_SCRATCH_LIVED, true); }
     bool inline_prop_shared() const { return flag(ELMT_FLAG_INLINE_PROP_SHARED); }
     void mark_inline_prop_owned() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, false); }
     void mark_inline_prop_shared() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, true); }
@@ -1109,16 +1130,14 @@ struct DomElement : DomNode {
     }
     MultiColumnProp* multicol_prop() const { return ext ? ext->multicol : nullptr; }
     MarkerProp* marker_prop() const { return ext ? ext->marker : nullptr; }
-    void set_marker_prop(MarkerProp* value) { if (value || ext) ensure_ext()->marker = lam::own(value); }
-    void set_multicol_prop(MultiColumnProp* value) { if (value || ext) ensure_ext()->multicol = lam::own(value); }
+    void set_marker_prop(MarkerProp* value) { if (value || ext) ensure_ext()->marker = lam::view_prop(value); }
+    void set_multicol_prop(MultiColumnProp* value) { if (value || ext) ensure_ext()->multicol = lam::view_prop(value); }
     VectorPathProp* vector_path() const { return ext ? ext->vpath : nullptr; }
-    void set_vector_path(VectorPathProp* value) { if (value || ext) ensure_ext()->vpath = lam::own(value); }
+    void set_vector_path(VectorPathProp* value) { if (value || ext) ensure_ext()->vpath = lam::view_prop(value); }
     FilterProp* filter_prop() const { return ext ? ext->filter : nullptr; }
-    lam::Own<FilterProp>* filter_slot() { return &ensure_ext()->filter; }
-    void set_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->filter = lam::own(value); }
+    void set_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->filter = lam::view_prop(value); }
     FilterProp* backdrop_filter_prop() const { return ext ? ext->backdrop_filter : nullptr; }
-    lam::Own<FilterProp>* backdrop_filter_slot() { return &ensure_ext()->backdrop_filter; }
-    void set_backdrop_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->backdrop_filter = lam::own(value); }
+    void set_backdrop_filter_prop(FilterProp* value) { if (value || ext) ensure_ext()->backdrop_filter = lam::view_prop(value); }
     CssTransitionElemState* transition_state_prop() const { return ext ? ext->transition_state : nullptr; }
     void set_transition_state_prop(CssTransitionElemState* value) {
         if (value || ext) ensure_ext()->transition_state = lam::own(value);
@@ -1126,7 +1145,7 @@ struct DomElement : DomNode {
     CustomLayoutPaintState* custom_layout_paint_prop() const { return ext ? ext->custom_layout_paint : nullptr; }
     void set_custom_layout_paint_prop(CustomLayoutPaintState* value) { if (value || ext) ensure_ext()->custom_layout_paint = lam::up(value); }
     LayoutFragmentBox* layout_fragment_list() const { return ext ? ext->layout_fragments : nullptr; }
-    void set_layout_fragment_list(LayoutFragmentBox* value) { if (value || ext) ensure_ext()->layout_fragments = lam::own(value); }
+    void set_layout_fragment_list(LayoutFragmentBox* value) { if (value || ext) ensure_ext()->layout_fragments = lam::view_prop(value); }
     int layout_fragments_count() const { return ext ? ext->layout_fragment_count : 0; }
     int& layout_fragments_count_ref() { return ensure_ext()->layout_fragment_count; }
     bool has_last_remembered_width() const { return ext && ext->has_last_remembered_width; }
