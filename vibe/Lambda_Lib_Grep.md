@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 
-**Status:** Ruled and implemented (2026-10-04, worktree `lib-grep`): G-pre, G0–G5, G5A, G6 (packed pair, and Teddy per GRP29) and G7 are built; G5B waits on the caching proposal. Implementation record, decisions taken during the build, measurements and a draft `io.grep` ruling: `vibe/impl/Lambda_Impl_Lib_Grep.md`. **Ruled by the user, 2026-10-04:** GRP3 (vendor-free public API), GRP4 (results are matches, line number optional), GRP6 (one RE2 object per worker), GRP7 (internal use of `re2/regexp.h`), GRP8 (SIMD kernels in `lib/`), GRP9v2 (no RE2 patch for grep's own acceleration; one RE2 patch, the NEON + SSE2 prefix kernel, is in scope for in-memory `find`/`replace`/`split`), GRP14 (ignore defaults), GRP15 (vendor RE2 at `lib/re2/`), GRP16 (stay on RE2 `2023-03-01`), GRP17 (UTF-8 only in v1), GRP18 (`\n` and `\r\n` terminators), GRP19 (symlinks not followed), GRP20–GRP23 (line text, per-file sink control, walk filters, whole-line match, all in v1), GRP24 (inverted match and context lines, after GRP20), GRP25 (per-file and total match limits), GRP26 (`io.grep()` system function, procedural), GRP27 (file-based `find()` stays an `fn` and calls `lib/grep` underneath; its session caching is a separate proposal), GRP28 (unknown option names; ratified as S17.8.1). The remaining decisions are proposals; §11 lists the open ones.
+**Status:** Ruled and implemented (2026-10-04, worktree `lib-grep`): G-pre, G0–G5, G5A, G6 (packed pair, and Teddy per GRP29) and G7 are built; G5B waits on the caching proposal. Implementation record, decisions taken during the build, measurements and a draft `io.grep` ruling: `vibe/impl/Lambda_Impl_Lib_Grep.md`. **Ruled by the user, 2026-10-04:** GRP3 (vendor-free public API), GRP4 (results are matches, line number optional), GRP6 (one RE2 object per worker), GRP7 (internal use of `re2/regexp.h`), GRP8 (SIMD kernels in `lib/`), GRP9v2 (no RE2 patch for grep's own acceleration; one RE2 patch, the NEON + SSE2 prefix kernel, is in scope for in-memory `find`/`replace`/`split`), GRP14 (ignore defaults), GRP15 (vendor RE2 at `lib/re2/`), GRP16 (stay on RE2 `2023-03-01`), GRP17 (UTF-8 only in v1), GRP18 (`\n` and `\r\n` terminators), GRP19 (symlinks not followed), GRP20–GRP23 (line text, per-file sink control, walk filters, whole-line match, all in v1), GRP24 (inverted match and context lines, after GRP20), GRP25 (per-file and total match limits), GRP26 (`io.grep()` system function, procedural), GRP27 (file-based `find()` stays an `fn` and calls `lib/grep` underneath; its session caching is a separate proposal), GRP28 (unknown option names; ratified as S17.8.1), GRP30 (a count mode, as `grep -c`) and GRP31 (records report their line's terminator), both built the same day. The remaining decisions are proposals; §11 lists the open ones.
 
 **Scope:** a line-oriented text search library under `./lib/grep`, built on the RE2 that Lambda already links, and the Lambda system function `io.grep()` that exposes it to scripts (§9B). The library covers pattern compilation, literal acceleration, single-buffer and streaming search, and parallel directory search. Other consumers (file-based `find(path, pattern)`, a CLI command, the editor's find panel) keep their own design docs.
 
@@ -434,8 +434,10 @@ The design is not a full grep. This table states what v1 covers and what it leav
 | Stop after the first match (`-q`) | yes | The sink returns stop, or a total limit of 1 |
 | Total match limit, per-file limit (`-m`) | yes | GRP25 |
 | Sorted output (`--sort path`) | yes | §9 |
-| Color, JSON, counts (`-c`), column (`--column`), smart case (`-S`) | consumer | All derivable from the match record |
+| Counts of matching lines (`-c`) | yes | GRP30: lines are counted, not enumerated; with `-v`, the other lines |
+| Color, JSON, column (`--column`), smart case (`-S`) | consumer | All derivable from the match record |
 | The text of the matching line | yes | Opt-in (GRP20) |
+| Each line's terminator, `\n` or `\r\n` | yes | GRP31; grep and ripgrep have no such field (ripgrep's `--crlf` only changes what `$` matches) |
 | Files with matches (`-l`), files without (`-L`) | yes | Three-way sink result and a per-file end callback (GRP21) |
 | File-name filters (`--include`, `--exclude`, `-g`), depth limit (`--max-depth`), size limit | yes | GRP22. Named file types (`-t rust`) are a consumer-side table of globs. |
 | Whole-line match (`-x`) | yes | GRP23 |
@@ -457,7 +459,7 @@ The design is not a full grep. This table states what v1 covers and what it leav
 - **Per-file limit.** A searcher stops reading an input once it has reported that many matches from it. This is local to one worker and costs nothing.
 - **Total limit.** One counter is shared by all workers of a directory search. A worker claims a slot from it before reporting each match; when the counter is exhausted the walk stops submitting jobs and running searches end at their next match.
 - **Which matches a total limit keeps.** In an unsorted parallel search the first *n* matches to arrive depend on thread timing. When the caller asks for sorted results, the limit applies in path order, so the result is deterministic: files are still searched in parallel, each capped at *n* matches, and the merge takes the first *n* in order. `io.grep` uses the sorted form (§9B.3).
-- With inverted match (GRP24), the limits count reported lines.
+- With inverted match (GRP24), the limits count reported lines; when counting (GRP30), counted lines.
 
 **GRP22 (USER, 2026-10-04). Caller filters on the walk.** Include globs, exclude globs, a maximum depth and a maximum file size, applied after the ignore layers of GRP14 and using the same glob matcher. A file must pass the ignore layers, match an include glob if any are given, and match no exclude glob. As with the ignore layers, a path named explicitly as a root is exempt.
 
@@ -467,6 +469,10 @@ The design is not a full grep. This table states what v1 covers and what it leav
 
 - **Inverted match** reports each line that contains no match. The record has no match, so its match fields are empty and its line fields are filled; `line_text` is implied. All three tiers still apply: the searcher finds matching lines as usual and reports the lines between them.
 - **Context lines** report up to N lines before and after each matching line, through a separate callback so a consumer can tell context from matches. Overlapping contexts are reported once. In a stream, the framer keeps the last N lines unconsumed (§7.1).
+
+**GRP30 (USER, 2026-10-04). A count mode, as `grep -c`.** The user asked whether the library could count lines; it could only hand over match records, so a consumer had to de-duplicate records it did not need. Ruled: a `count` option with `rg -c`'s meaning — one `{file, count}` per file that has lines with a match, `count` being how many, or with inverted match how many lines have none. As built (implementation record, decisions 14–18): the library's `count_lines` option skips the match and context callbacks and hands the count to the per-file end callback (GRP21). A selected line is confirmed and counted, never enumerated, so no offsets or line numbers are computed; under inverted match the lines between two matching lines are counted by their newlines without being visited; a pattern that matches every line, such as an empty one, gives the line count (`grep -c ''`) from newlines alone. The limits (GRP25) count lines in this mode: the per-file limit caps each count and a total limit caps their sum, cutting the count of the file it ends in. In `io.grep` a count record names its file even for a single-file source, and `count` with `files` is an error.
+
+**GRP31 (USER, 2026-10-04). Records report their line's terminator.** GRP18 makes the `\r` of a `\r\n` part of the terminator, so no pattern can see it, and a consumer could not tell a CRLF line from an LF one; ripgrep can (`rg -c '\r$'`) only because its default terminator is a bare `\n`. Each record now carries how its line ended — `\n`, `\r\n`, or nothing for an input's last line when it is unterminated — and the consumer decides what to do with it. The library fills it on every record, including inverted and context lines; it costs one subtraction. In `io.grep`, `line_ending: true` adds a `line_ending` field holding `"\n"`, `"\r\n"` or `null`. The name follows `line`, `byte_offset` and `text`, each named after the field it adds. With `count: true` it has no effect, since a count has no line to describe.
 
 ---
 
@@ -499,7 +505,10 @@ The result is an array of match maps, in path order and, within a file, in posit
 | `line` | with `{line: true}` | 1-based line number |
 | `byte_offset` | with `{byte_offset: true}` | 0-based byte offset of the match |
 | `text` | with `{text: true}` | The whole line containing the match, without its terminator (GRP20) |
+| `line_ending` | with `{line_ending: true}` | `"\n"`, `"\r\n"`, or `null` for a last line with no terminator (GRP31) |
 | `before`, `after` | with `{context: n}` or `{before: n, after: m}` | Arrays of the neighbouring lines' text (GRP24) |
+
+With `{count: true}` the result is instead one `{file, count}` per file with a selected line, in path order (GRP30); with `{files: true}`, the paths of the files with a match (GRP21).
 
 ```lambda
 string todo = "TODO" ":" \s* \w+
@@ -524,10 +533,12 @@ Each option maps onto a library option already ruled. The names are ruled (USER,
 | `whole_line` | bool | false | GRP23 |
 | `invert` | bool | false | GRP24. Results are lines: `value` is the line's text. |
 | `line`, `byte_offset`, `text` | bool | false | GRP4, GRP20 |
+| `line_ending` | bool | false | GRP31 |
 | `context`, `before`, `after` | int | 0 | GRP24 |
 | `limit` | int | 0 (none) | total limit, GRP25 |
 | `limit_per_file` | int | 0 (none) | per-file limit, GRP25 |
 | `files` | bool | false | Return the paths of files with a match instead of match maps (GRP21) |
+| `count` | bool | false | Return one `{file, count}` per file instead of match maps (GRP30); not with `files` |
 | `include`, `exclude` | string or array of strings | none | globs, GRP22 |
 | `max_depth` | int | none | GRP22 |
 | `max_size` | int | none | bytes, GRP22 |
@@ -609,11 +620,13 @@ Directory search is bound by walking and opening files, so on this hardware the 
 
 Single-file throughput (265 MB) is where the engines differ: literal, folded-literal and literal-bearing patterns run level with or ahead of ripgrep, and a pattern with no usable literal is about 4× slower (RE2's DFA, as predicted above). Literal sets lost ground before Teddy — 8 literals 148 vs 78 ms (one scan per literal), 12 literals 468 vs 86 ms (over the then cap of 8, so RE2 searched). With Teddy and pure sets in tier 0 (GRP29), warm runs measure 3 literals 75–79 vs 72–77 ms, 8 literals 87–88 vs 77–80 ms (40,096 matches: the remaining gap is per-match work), 12 literals 95–98 vs 86–94 ms, 24 literals 92–104 vs 88–100 ms. Full numbers: `vibe/impl/Lambda_Impl_Lib_Grep.md` §4.
 
+Counting (GRP30) against `rg -c` on the same 265 MB file, 6.06 million lines, every count equal: literal patterns level (`TODO` 55 vs 47 ms, `-i todo` 69–72 vs 69–70 ms), `the` 83–88 vs 73–75 ms (112–115 ms when the same matches are reported instead of counted), inverted `-v the` 99–100 vs 133–140 ms, and every line (`""`) 44 vs 177–178 ms, where `wc -l` takes 243 ms. Over the whole repo the per-file counts equal ripgrep's except for the two fixture files the built-in directory list skips.
+
 ---
 
 ## 11. Open questions for the user
 
-None. Every decision GRP1 to GRP28 is ruled or an unchallenged part of the design those rulings build on.
+None. Every decision GRP1 to GRP31 is ruled or an unchallenged part of the design those rulings build on.
 
 Work this doc creates outside its own phases: migrating existing system functions to S17.8.1 (Appendix C), and the separate caching proposal that file-based `find` waits on (GRP27).
 

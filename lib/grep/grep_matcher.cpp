@@ -118,6 +118,11 @@ GrepStatus grep_matcher_create(const char* const* patterns, const size_t* length
     m->options = *options;
     m->regex = (char*)byte_builder_take(&rx, &m->regex_len);
     m->report_group = report_group;
+    // an empty pattern matches at the start of any line, so a count need not
+    // look (GRP30); word and whole-line wrapping put conditions around it
+    for (size_t i = 0; i < count; i++) {
+        if (lengths[i] == 0 && !options->word && !options->whole_line) m->every_line = true;
+    }
 
     re2::RE2::Options opts = grep_re2_options(options);
     m->re = lam::re2_glue_compile(m->regex, m->regex_len, opts, "grep", error_buf, error_buf_len);

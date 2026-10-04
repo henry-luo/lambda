@@ -31,6 +31,7 @@ static const char* const GREP_BUILTIN_SKIP_DIRS[] = {
 struct GrepRec {
     bool context;
     bool has_line;
+    GrepLineEnding line_ending;
     uint64_t byte_offset;
     uint64_t char_offset;
     uint64_t line_number;
@@ -44,8 +45,7 @@ struct GrepFileResult {
     GrepRec* recs;
     size_t nrec, cap;
     ByteBuilder bytes;        // the text the records point into
-    uint64_t match_count;     // selected records buffered
-    uint64_t cap_matches;     // stop buffering after this many (0 = no cap)
+    uint64_t match_count;     // from file_done: selected records, or lines counted (GRP30)
     uint64_t last_line_abs;   // the previous record's line, to store a line once
     size_t last_line_len, last_line_off;
     bool has_last_line;
@@ -153,6 +153,7 @@ static GrepAction buffer_record(GrepFileResult* r, const GrepMatch* gm, bool con
     rec->byte_offset = gm->byte_offset;
     rec->char_offset = gm->char_offset;
     rec->line_number = gm->line_number;
+    rec->line_ending = gm->line_ending;
     rec->text_off = r->bytes.length;
     rec->text_len = gm->length;
     bool ok = byte_builder_append(&r->bytes, gm->text, gm->length);
@@ -177,17 +178,15 @@ static GrepAction buffer_record(GrepFileResult* r, const GrepMatch* gm, bool con
         return GREP_SKIP_FILE;
     }
     r->nrec++;
-    if (!context) {
-        r->match_count++;
-        if (r->cap_matches && r->match_count >= r->cap_matches) return GREP_SKIP_FILE;
-    }
     return GREP_CONTINUE;
 }
 
 static GrepAction buffer_matched(void* ud, const GrepMatch* gm) { return buffer_record((GrepFileResult*)ud, gm, false); }
 static GrepAction buffer_context(void* ud, const GrepMatch* gm) { return buffer_record((GrepFileResult*)ud, gm, true); }
-static GrepAction buffer_file_done(void* ud, const char*, uint64_t) {
-    ((GrepFileResult*)ud)->searched = true;
+static GrepAction buffer_file_done(void* ud, const char*, uint64_t count) {
+    GrepFileResult* r = (GrepFileResult*)ud;
+    r->match_count = count;
+    r->searched = true;
     return GREP_CONTINUE;
 }
 
@@ -233,6 +232,11 @@ static void deliver_sorted(GrepWalk* w) {
         if (!r->searched || r->failed) continue;
         uint64_t here = 0;
         bool stop = false, skip = false, cut = false;
+        if (w->m->options.count_lines) {
+            // a count buffers no records: the limit cuts the number (GRP30)
+            here = limit && r->match_count > limit - total ? limit - total : r->match_count;
+            total += here;
+        }
         for (size_t k = 0; k < r->nrec && !skip; k++) {
             const GrepRec* rec = &r->recs[k];
             if (!rec->context && limit && total >= limit) {
@@ -248,6 +252,7 @@ static void deliver_sorted(GrepWalk* w) {
             gm.byte_offset = rec->byte_offset;
             gm.char_offset = rec->char_offset;
             gm.line_number = rec->line_number;
+            gm.line_ending = rec->line_ending;
             if (rec->has_line) {
                 gm.line = (const char*)r->bytes.data + rec->line_off;
                 gm.line_length = rec->line_len;
@@ -307,14 +312,21 @@ static GrepAction direct_context(void* ud, const GrepMatch* gm) {
 
 static GrepAction direct_file_done(void* ud, const char* path, uint64_t count) {
     GrepWalk* w = (GrepWalk*)ud;
+    uint64_t limit = w->w->max_matches_total;
     pthread_mutex_lock(&w->mu);
     GrepAction action = GREP_STOP;
     bool cut = w->limit_path && path && strcmp(path, w->limit_path) == 0;
     if (!w->stop || cut) {
+        if (w->m->options.count_lines && limit) {
+            // a count arrives only here: the limit cuts the number (GRP30)
+            if (count > limit - w->delivered) count = limit - w->delivered;
+            w->delivered += count;
+            cut = w->delivered >= limit;
+        }
         action = w->user->file_done ? w->user->file_done(w->user->user_data, path, count) : GREP_CONTINUE;
-        if (action == GREP_STOP) w->stop = true;
+        if (action == GREP_STOP || cut) w->stop = true;
         if (cut) {
-            mem_free(w->limit_path);
+            if (w->limit_path) mem_free(w->limit_path);
             w->limit_path = NULL;
             action = GREP_STOP;
         }
@@ -329,6 +341,9 @@ static void file_job(void* arg) {
     GrepFileJob* job = (GrepFileJob*)arg;
     GrepWalk* w = job->walk;
     GrepSearcher* s = walk_stopped(w) ? NULL : acquire_searcher(w);
+    // a total limit caps every file at that many: no file can contribute
+    // more, and the merge keeps the first ones in path order (GRP25)
+    uint64_t cap = w->w->max_matches_total;
     if (s) {
         if (w->sorted) {
             GrepFileResult* r = (GrepFileResult*)mem_calloc(1, sizeof(GrepFileResult), MEM_CAT_TEMP);
@@ -336,12 +351,8 @@ static void file_job(void* arg) {
                 r->path = job->label;
                 job->label = NULL;
                 r->root_index = job->root_index;
-                // a total limit caps every file at that many: the merge keeps
-                // the first ones in path order (GRP25)
-                uint64_t per = w->m->options.max_matches_per_file, total = w->w->max_matches_total;
-                r->cap_matches = per && total ? (per < total ? per : total) : (per ? per : total);
                 GrepSink sink = {r, buffer_matched, w->user->context ? buffer_context : NULL, buffer_file_done};
-                if (grep_search_file_as(s, job->open_path, r->path, &sink) != GREP_OK) r->failed = true;
+                if (grep_search_file_as(s, job->open_path, r->path, &sink, cap) != GREP_OK) r->failed = true;
                 pthread_mutex_lock(&w->mu);
                 arraylist_append(w->results, r);
                 pthread_mutex_unlock(&w->mu);
@@ -350,7 +361,7 @@ static void file_job(void* arg) {
             }
         } else {
             GrepSink sink = {w, direct_matched, w->user->context ? direct_context : NULL, direct_file_done};
-            grep_search_file_as(s, job->open_path, job->label, &sink);
+            grep_search_file_as(s, job->open_path, job->label, &sink, cap);
         }
         release_searcher(w, s);
     }

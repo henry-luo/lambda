@@ -4,7 +4,7 @@
 // terminator (GRP1). A line ends at "\n" or "\r\n"; the "\r" of a pair belongs
 // to the terminator, never to the line (GRP18). Results are matches (GRP4):
 // one record per match, with byte offset always and code-point offset, line
-// number and line text on request.
+// number and line text on request — or, counting, one number per input (GRP30).
 //
 // The API is C-callable and exposes no vendor type (GRP3): patterns go in as
 // regex text (RE2 syntax), and RE2 could be replaced behind this header.
@@ -45,15 +45,24 @@ typedef struct GrepOptions {
     bool word;               // a match must not touch a letter, digit or '_' on either side
     bool whole_line;         // a pattern must match an entire line (GRP23)
     bool invert;             // report lines with no match instead of matches (GRP24)
+    bool count_lines;        // count the selected lines instead of reporting them, as grep -c
+                             //   (GRP30): no matched or context calls; file_done gets the count
     bool line_numbers;       // fill GrepMatch.line_number (1-based, as grep -n)
     bool char_offsets;       // fill GrepMatch.char_offset (code points, 0-based)
     bool line_text;          // fill GrepMatch.line / line_length (GRP20)
     bool binary_as_text;     // search inputs with a NUL in their first 8 KiB instead of skipping them
     int before_context;      // context lines reported before each selected line (GRP24)
     int after_context;       // ... and after it
-    uint64_t max_matches_per_file;  // 0 = unlimited (GRP25); counts lines under invert
+    uint64_t max_matches_per_file;  // 0 = unlimited (GRP25); counts lines under invert or count_lines
     size_t max_line_bytes;   // streams only; 0 = 64 MiB
 } GrepOptions;
+
+// How a line ended (GRP31). The "\r" of a "\r\n" belongs to the terminator.
+typedef enum GrepLineEnding {
+    GREP_EOL_NONE = 0,       // the last line of an input, unterminated
+    GREP_EOL_LF,             // "\n"
+    GREP_EOL_CRLF,           // "\r\n"
+} GrepLineEnding;
 
 typedef struct GrepMatch {
     const char* path;        // NULL for buffer input unless a label was given
@@ -64,6 +73,7 @@ typedef struct GrepMatch {
     uint64_t line_number;    // 1-based; 0 unless line_numbers
     const char* line;        // the enclosing line without its terminator; NULL unless
     size_t line_length;      //   line_text (always set for invert and context records)
+    GrepLineEnding line_ending;  // the enclosing line's terminator (GRP31)
 } GrepMatch;
 
 typedef enum GrepAction {
@@ -78,7 +88,9 @@ typedef struct GrepSink {
     // optional: a context line (GRP24); never a selected line
     GrepAction (*context)(void* user_data, const GrepMatch* line);
     // optional: an input was searched to its end or skipped by the sink (GRP21);
-    // not called for inputs skipped as binary or failing with an error
+    // not called for inputs skipped as binary or failing with an error.
+    // match_count is the selected records reported, or under count_lines the
+    // selected lines (cut by a total limit as records would be)
     GrepAction (*file_done)(void* user_data, const char* path, uint64_t match_count);
 } GrepSink;
 

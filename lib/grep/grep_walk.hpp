@@ -37,5 +37,7 @@ void grep_ignore_free(GrepIgnoreNode* node);
 int grep_ignore_decide(const GrepIgnoreNode* node, const char* rel, bool is_dir);
 
 // Opens `open_path` but reports `label` (a symlinked root is opened resolved).
+// `cap` (0 = none) ends the input after that many selected records or lines,
+// on top of max_matches_per_file.
 GrepStatus grep_search_file_as(GrepSearcher* searcher, const char* open_path, const char* label,
-                               const GrepSink* sink);
+                               const GrepSink* sink, uint64_t cap);

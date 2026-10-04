@@ -35,7 +35,9 @@ struct IoGrepOptions {
     bool want_line;
     bool want_byte_offset;
     bool want_text;
+    bool want_line_ending;
     bool files_only;
+    bool count;               // one {file, count} per file instead of matches (GRP30)
     int before;
     int after;
     ArrayList* include;       // mem-owned glob strings
@@ -46,6 +48,7 @@ struct IoGrepOptions {
 struct IoGrepRec {
     bool context;
     bool has_line;
+    GrepLineEnding line_ending;
     uint64_t byte_offset;
     uint64_t char_offset;
     uint64_t line_number;
@@ -53,13 +56,17 @@ struct IoGrepRec {
     size_t line_off, line_len;
 };
 
-enum IoGrepField { F_FILE, F_VALUE, F_INDEX, F_LINE, F_BYTE, F_TEXT, F_BEFORE, F_AFTER, F_COUNT };
+enum IoGrepField {
+    F_FILE, F_VALUE, F_INDEX, F_LINE, F_BYTE, F_TEXT, F_LINE_ENDING, F_BEFORE, F_AFTER, F_COUNT,
+    F_NFIELDS
+};
 
 struct IoGrepRun {
     const IoGrepOptions* o;
     TypeMap* shape;
-    int slot[F_COUNT];        // position in the shape, or -1
+    int slot[F_NFIELDS];      // position in the shape, or -1
     int fields;
+    uint64_t selected;        // what a total limit counts: matches, files, or lines counted
     Rooted<Array*>* result;   // the caller's rooted result array (reloaded after every allocation)
     // the source being searched
     Path* root_path;          // NULL when the source was given as text
@@ -177,7 +184,9 @@ bool parse_options(Item options, IoGrepOptions* o, Item* error) {
         option_bool(shape, data, "line", &o->want_line, error) &&
         option_bool(shape, data, "byte_offset", &o->want_byte_offset, error) &&
         option_bool(shape, data, "text", &o->want_text, error) &&
+        option_bool(shape, data, "line_ending", &o->want_line_ending, error) &&
         option_bool(shape, data, "files", &o->files_only, error) &&
+        option_bool(shape, data, "count", &o->count, error) &&
         option_bool(shape, data, "hidden", &o->walk.hidden, error) &&
         option_bool(shape, data, "ignore", &ignore_files, error) &&
         option_bool(shape, data, "binary", &o->grep.binary_as_text, error) &&
@@ -203,6 +212,12 @@ bool parse_options(Item options, IoGrepOptions* o, Item* error) {
     o->after = (int)(after >= 0 ? after : context);
     o->grep.before_context = o->before;
     o->grep.after_context = o->after;
+    // both say what a result is: a file, or a file with its count
+    if (o->files_only && o->count) {
+        *error = io_grep_error(ERR_INVALID_OPERATION, "io.grep: options 'files' and 'count' cannot be combined%s", NULL);
+        return false;
+    }
+    o->grep.count_lines = o->count;
     // a file's paths are the result: its first match is enough (GRP21)
     if (o->files_only) o->grep.max_matches_per_file = 1;
     return true;
@@ -370,22 +385,36 @@ Item context_lines(IoGrepRun* run, uint64_t from, uint64_t to) {
     return (Item){.array = lines.get()};
 }
 
-bool emit_record(IoGrepRun* run, const IoGrepRec* r, Item file) {
-    RootFrame roots(F_COUNT + 2);
+// the line's terminator as text (GRP31); null when the input ended without one
+Item line_ending_item(GrepLineEnding e) {
+    if (e == GREP_EOL_CRLF) return make_string("\r\n", 2);
+    if (e == GREP_EOL_LF) return make_string("\n", 1);
+    return ItemNull;
+}
+
+// One result map. `file` is the file value; a match record also takes `r`, a
+// count record (GRP30) only `count`.
+bool emit_record(IoGrepRun* run, const IoGrepRec* r, Item file, uint64_t count) {
+    RootFrame roots(F_NFIELDS + 2);
     Rooted<Item> v0(roots, ItemNull), v1(roots, ItemNull), v2(roots, ItemNull), v3(roots, ItemNull),
-        v4(roots, ItemNull), v5(roots, ItemNull), v6(roots, ItemNull), v7(roots, ItemNull);
-    Rooted<Item>* vals[F_COUNT] = {&v0, &v1, &v2, &v3, &v4, &v5, &v6, &v7};
+        v4(roots, ItemNull), v5(roots, ItemNull), v6(roots, ItemNull), v7(roots, ItemNull),
+        v8(roots, ItemNull), v9(roots, ItemNull);
+    Rooted<Item>* vals[F_NFIELDS] = {&v0, &v1, &v2, &v3, &v4, &v5, &v6, &v7, &v8, &v9};
     Rooted<Map*> map(roots, (Map*)NULL);
     Rooted<Item> file_item(roots, file);
     const char* base = (const char*)run->bytes.data;
     if (run->slot[F_FILE] >= 0) vals[run->slot[F_FILE]]->set(file_item.get());
-    vals[run->slot[F_VALUE]]->set(make_string(base + r->text_off, r->text_len));
-    vals[run->slot[F_INDEX]]->set((Item){.item = i2it((int64_t)r->char_offset)});
+    if (run->slot[F_COUNT] >= 0) vals[run->slot[F_COUNT]]->set((Item){.item = i2it((int64_t)count)});
+    if (r) {
+        vals[run->slot[F_VALUE]]->set(make_string(base + r->text_off, r->text_len));
+        vals[run->slot[F_INDEX]]->set((Item){.item = i2it((int64_t)r->char_offset)});
+    }
     if (run->slot[F_LINE] >= 0) vals[run->slot[F_LINE]]->set((Item){.item = i2it((int64_t)r->line_number)});
     if (run->slot[F_BYTE] >= 0) vals[run->slot[F_BYTE]]->set((Item){.item = i2it((int64_t)r->byte_offset)});
     if (run->slot[F_TEXT] >= 0) {
         vals[run->slot[F_TEXT]]->set(r->has_line ? make_string(base + r->line_off, r->line_len) : ItemNull);
     }
+    if (run->slot[F_LINE_ENDING] >= 0) vals[run->slot[F_LINE_ENDING]]->set(line_ending_item(r->line_ending));
     if (run->slot[F_BEFORE] >= 0) {
         uint64_t from = r->line_number > (uint64_t)run->o->before ? r->line_number - run->o->before : 1;
         vals[run->slot[F_BEFORE]]->set(context_lines(run, from, r->line_number - 1));
@@ -393,7 +422,7 @@ bool emit_record(IoGrepRun* run, const IoGrepRec* r, Item file) {
     if (run->slot[F_AFTER] >= 0) {
         vals[run->slot[F_AFTER]]->set(context_lines(run, r->line_number + 1, r->line_number + run->o->after));
     }
-    Item values[F_COUNT];
+    Item values[F_NFIELDS];
     for (int i = 0; i < run->fields; i++) {
         values[i] = vals[i]->get();
         if (get_type_id(values[i]) == LMD_TYPE_ERROR) return false;
@@ -423,6 +452,7 @@ GrepAction buffer(IoGrepRun* run, const GrepMatch* gm, bool context) {
     IoGrepRec* r = &run->recs[run->nrec];
     memset(r, 0, sizeof(*r));
     r->context = context;
+    r->line_ending = gm->line_ending;
     r->byte_offset = gm->byte_offset;
     r->char_offset = gm->char_offset;
     r->line_number = gm->line_number;
@@ -449,14 +479,19 @@ GrepAction on_context(void* ud, const GrepMatch* gm) { return buffer((IoGrepRun*
 GrepAction on_file_done(void* ud, const char* path, uint64_t count) {
     IoGrepRun* run = (IoGrepRun*)ud;
     if (run->failed) return GREP_STOP;
+    // count is what the file contributed to a total limit, in that limit's unit
+    run->selected += count;
     RootFrame roots(1);
     Rooted<Item> file(roots, ItemNull);
-    if (run->multi || run->o->files_only) file.set(file_value(run, path ? path : ""));
+    // a files or count result is about the file, so it always names it
+    if (run->multi || run->o->files_only || run->o->count) file.set(file_value(run, path ? path : ""));
     if (run->o->files_only) {
         if (count > 0) array_push_verbatim(run->result->get(), file.get());
+    } else if (run->o->count) {
+        if (count > 0 && !emit_record(run, NULL, file.get(), count)) run->failed = true;
     } else {
         for (size_t i = 0; i < run->nrec && !run->failed; i++) {
-            if (!run->recs[i].context && !emit_record(run, &run->recs[i], file.get())) run->failed = true;
+            if (!run->recs[i].context && !emit_record(run, &run->recs[i], file.get(), 0)) run->failed = true;
         }
     }
     run->nrec = 0;
@@ -527,10 +562,12 @@ static Item io_grep_impl(Item source, Item pattern, Item options) {
         o.walk.exclude_globs = (const char* const*)o.exclude->data;
         o.walk.exclude_count = (size_t)arraylist_length(o.exclude);
     }
-    // context arrays and line text need lines and their numbers internally
-    bool context = o.before > 0 || o.after > 0;
-    o.grep.line_numbers = o.want_line || context;
-    o.grep.line_text = o.want_text || context;
+    // context arrays and line text need lines and their numbers internally; a
+    // count reports none of them, nor a code-point index
+    bool context = !o.count && (o.before > 0 || o.after > 0);
+    o.grep.line_numbers = !o.count && (o.want_line || context);
+    o.grep.line_text = !o.count && (o.want_text || context);
+    if (o.count) o.grep.char_offsets = false;
 
     // the sources, in order; an array searches each (§9B.1)
     int nsources = get_type_id(source) == LMD_TYPE_ARRAY ? (int)source.array->length : 1;
@@ -548,23 +585,30 @@ static Item io_grep_impl(Item source, Item pattern, Item options) {
     run.o = &o;
     run.multi = get_type_id(source) == LMD_TYPE_ARRAY || (nsources > 0 && sources[0].is_dir);
     // the record shape, built once for the whole call
-    const char* names[F_COUNT];
-    TypeId types[F_COUNT];
-    for (int i = 0; i < F_COUNT; i++) run.slot[i] = -1;
+    const char* names[F_NFIELDS];
+    TypeId types[F_NFIELDS];
+    for (int i = 0; i < F_NFIELDS; i++) run.slot[i] = -1;
     auto add_field = [&](IoGrepField f, const char* name, TypeId type) {
         run.slot[f] = run.fields;
         names[run.fields] = name;
         types[run.fields] = type;
         run.fields++;
     };
-    if (run.multi) add_field(F_FILE, "file", LMD_TYPE_ANY);
-    add_field(F_VALUE, "value", LMD_TYPE_STRING);
-    add_field(F_INDEX, "index", LMD_TYPE_INT);
-    if (o.want_line) add_field(F_LINE, "line", LMD_TYPE_INT);
-    if (o.want_byte_offset) add_field(F_BYTE, "byte_offset", LMD_TYPE_INT);
-    if (o.want_text) add_field(F_TEXT, "text", LMD_TYPE_ANY);
-    if (o.before > 0) add_field(F_BEFORE, "before", LMD_TYPE_ANY);
-    if (o.after > 0) add_field(F_AFTER, "after", LMD_TYPE_ANY);
+    if (o.count) {
+        // {file, count}: the match-record options have nothing to apply to
+        add_field(F_FILE, "file", LMD_TYPE_ANY);
+        add_field(F_COUNT, "count", LMD_TYPE_INT);
+    } else {
+        if (run.multi) add_field(F_FILE, "file", LMD_TYPE_ANY);
+        add_field(F_VALUE, "value", LMD_TYPE_STRING);
+        add_field(F_INDEX, "index", LMD_TYPE_INT);
+        if (o.want_line) add_field(F_LINE, "line", LMD_TYPE_INT);
+        if (o.want_byte_offset) add_field(F_BYTE, "byte_offset", LMD_TYPE_INT);
+        if (o.want_text) add_field(F_TEXT, "text", LMD_TYPE_ANY);
+        if (o.want_line_ending) add_field(F_LINE_ENDING, "line_ending", LMD_TYPE_ANY);
+        if (o.before > 0) add_field(F_BEFORE, "before", LMD_TYPE_ANY);
+        if (o.after > 0) add_field(F_AFTER, "after", LMD_TYPE_ANY);
+    }
 
     RootFrame roots(1);
     Rooted<Array*> result(roots, array());
@@ -583,7 +627,7 @@ static Item io_grep_impl(Item source, Item pattern, Item options) {
         GrepWalkOptions walk = o.walk;
         if (src->max_depth >= 0) walk.max_depth = src->max_depth;
         // a total limit spans every source (GRP25)
-        size_t before = (size_t)result.get()->length;
+        uint64_t before = run.selected;
         walk.max_matches_total = remaining;
         GrepSink sink = {&run, on_match, context ? on_context : NULL, on_file_done};
         const char* roots_os[1] = {src->os->str};
@@ -594,9 +638,8 @@ static Item io_grep_impl(Item source, Item pattern, Item options) {
             ok = false;
             break;
         }
-        // every result is one match (files mode keeps one per file)
         if (o.walk.max_matches_total) {
-            size_t got = (size_t)result.get()->length - before;
+            uint64_t got = run.selected - before;
             if (got >= remaining) break;
             remaining -= got;
         }

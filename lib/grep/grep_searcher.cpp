@@ -6,7 +6,8 @@
 // literal scan (tiers 0/1) or by RE2 over the block (tier 2) — and only then
 // looks at the line: matches are enumerated by RE2 on the line alone, so "^",
 // "$", "\A", "\z" and "\b" see exactly the line, and the "\r" of a "\r\n"
-// never takes part (GRP18).
+// never takes part (GRP18). Counting (GRP30) stops at the line: a selected
+// line is confirmed and counted, never enumerated.
 
 #include "grep_walk.hpp"
 #include "../line_framer.h"
@@ -39,7 +40,8 @@ struct GrepSearcher {
     uint64_t abs_base;       // absolute offset of data[0]
     uint64_t line_at_done;   // line number of the line starting at data[done]
     uint64_t char_at_done;   // code-point offset of data[done]
-    uint64_t matches;        // selected records reported for this input
+    uint64_t matches;        // selected records reported (lines counted, counting) for this input
+    uint64_t cap;            // the input ends after this many (0 = no cap)
     uint64_t emitted_end;    // absolute end of the last reported line (incl. terminator)
     int before;              // effective context sizes (0 without a context callback)
     int after;
@@ -108,16 +110,18 @@ static void begin_input(GrepSearcher* s, const char* path, const GrepSink* sink)
     s->line_at_done = 1;
     s->char_at_done = 0;
     s->matches = 0;
+    s->cap = o->max_matches_per_file;
     s->emitted_end = 0;
     s->after_left = 0;
     s->input_done = false;
     s->stopped = false;
-    bool ctx = sink && sink->context;
+    // a count reports no lines, so no context either
+    bool ctx = sink && sink->context && !o->count_lines;
     s->before = ctx && o->before_context > 0 ? o->before_context : 0;
     s->after = ctx && o->after_context > 0 ? o->after_context : 0;
-    // without context or invert, enumerating a candidate line already says
-    // whether it matches: a separate confirming RE2 call would be redundant
-    s->confirm_lines = o->invert || s->before > 0 || s->after > 0;
+    // without context, invert or counting, enumerating a candidate line
+    // already says whether it matches: a confirming RE2 call would be redundant
+    s->confirm_lines = o->invert || o->count_lines || s->before > 0 || s->after > 0;
 }
 
 // ── positions ──────────────────────────────────────────────────────────
@@ -140,6 +144,11 @@ static uint64_t char_offset_of(GrepSearcher* s, size_t at) {
         return s->char_cursor_off;
     }
     return s->char_cursor_off - str_utf8_count(s->data + at, s->char_cursor - at);
+}
+
+static GrepLineEnding line_ending_of(const GrepLine& line) {
+    size_t n = line.next - line.content_end;
+    return n == 2 ? GREP_EOL_CRLF : n == 1 ? GREP_EOL_LF : GREP_EOL_NONE;
 }
 
 static GrepLine make_line(const GrepSearcher* s, size_t start, size_t end) {
@@ -183,8 +192,7 @@ static void deliver(GrepSearcher* s, bool context, const GrepMatch* gm) {
 
 static void count_selected(GrepSearcher* s) {
     s->matches++;
-    uint64_t limit = s->m->options.max_matches_per_file;
-    if (limit && s->matches >= limit) s->input_done = true;
+    if (s->cap && s->matches >= s->cap) s->input_done = true;
 }
 
 // a whole line as a record (context lines and inverted selections)
@@ -199,6 +207,7 @@ static void fill_line_record(GrepSearcher* s, const GrepLine& line, GrepMatch* g
     if (o->line_numbers) gm->line_number = line_number_of(s, line.start);
     gm->line = gm->text;
     gm->line_length = gm->length;
+    gm->line_ending = line_ending_of(line);
 }
 
 static void emit_context(GrepSearcher* s, const GrepLine& line) {
@@ -257,6 +266,7 @@ static void report_match(GrepSearcher* s, const GrepLine& line, uint64_t line_no
         gm.line = s->data + line.start;
         gm.line_length = line.content_end - line.start;
     }
+    gm.line_ending = line_ending_of(line);
     deliver(s, false, &gm);
     count_selected(s);
 }
@@ -320,6 +330,10 @@ static void enumerate_matches(GrepSearcher* s, const GrepLine& line) {
 }
 
 static void select_line(GrepSearcher* s, const GrepLine& line) {
+    if (s->m->options.count_lines) {
+        count_selected(s);   // confirmed already (confirm_lines), never enumerated
+        return;
+    }
     emit_before(s, line.start);
     if (s->input_done) return;
     if (s->m->options.invert) {
@@ -393,6 +407,20 @@ static bool next_matching_line(GrepSearcher* s, size_t pos, GrepLine* out) {
     return false;
 }
 
+// Counting (GRP30) the lines of data[start, end) without looking at them, when
+// all of them are selected. `end` is a line start or the block's end; only an
+// input's final block ends inside a line, and that line counts too.
+static void count_lines_in(GrepSearcher* s, size_t start, size_t end) {
+    if (start >= end) return;
+    uint64_t n = str_count_byte(s->data + start, end - start, '\n');
+    if (s->data[end - 1] != '\n') n++;
+    if (s->cap && s->matches + n >= s->cap) {
+        n = s->cap - s->matches;
+        s->input_done = true;
+    }
+    s->matches += n;
+}
+
 // Search data[done, len): complete lines, plus a final unterminated line when
 // the input ends here. data[0, done) holds lines of earlier blocks kept only
 // as before-context.
@@ -405,14 +433,21 @@ static void search_block(GrepSearcher* s, const char* data, size_t len, size_t d
     s->line_cursor_no = s->line_at_done;
     s->char_cursor = done;
     s->char_cursor_off = s->char_at_done;
-    s->has_cr = len > done && memchr(data + done, '\r', len - done) != NULL;
-
     size_t pos = done;
+    if (o->count_lines && s->m->every_line) {
+        // every line matches (grep -c ''): the count is the number of lines
+        if (!o->invert) count_lines_in(s, done, len);
+        pos = len;
+    } else {
+        s->has_cr = len > done && memchr(data + done, '\r', len - done) != NULL;
+    }
     while (pos < len && !s->input_done) {
         GrepLine found;
         bool hit = next_matching_line(s, pos, &found);
         size_t gap_end = hit ? found.start : len;
-        if (o->invert) {
+        if (o->invert && o->count_lines) {
+            count_lines_in(s, pos, gap_end);   // the lines between matches are the selected ones
+        } else if (o->invert) {
             // every line in the gap is selected; the matching line is context
             size_t p = pos;
             while (p < gap_end && !s->input_done) {
@@ -535,11 +570,11 @@ GrepStatus grep_stream_finish(GrepStream* stream) {
 }
 
 GrepStatus grep_search_file(GrepSearcher* searcher, const char* path, const GrepSink* sink) {
-    return grep_search_file_as(searcher, path, path, sink);
+    return grep_search_file_as(searcher, path, path, sink, 0);
 }
 
 GrepStatus grep_search_file_as(GrepSearcher* searcher, const char* open_path, const char* label,
-                               const GrepSink* sink) {
+                               const GrepSink* sink, uint64_t cap) {
     if (!searcher || !open_path || !sink) return GREP_ERR_ARGUMENT;
     const char* path = label ? label : open_path;
     FILE* f = file_open_regular_read(open_path);
@@ -554,6 +589,7 @@ GrepStatus grep_search_file_as(GrepSearcher* searcher, const char* open_path, co
         fclose(f);
         return GREP_ERR_MEMORY;
     }
+    if (cap && (!searcher->cap || cap < searcher->cap)) searcher->cap = cap;
     GrepStatus status = GREP_OK;
     while (status == GREP_OK && stream_wants_more(st)) {
         size_t n = fread(buf, 1, GREP_CHUNK_BYTES, f);

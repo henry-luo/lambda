@@ -4021,8 +4021,8 @@ bool jit_import_validate_no_gc_allowlist(void) {
 // reading an options value warns about one at run time. Functions not listed
 // here are not yet migrated to the convention.
 static const char* const io_grep_option_names[] = {
-    "ignore_case", "word", "whole_line", "invert", "line", "byte_offset", "text",
-    "context", "before", "after", "limit", "limit_per_file", "files",
+    "ignore_case", "word", "whole_line", "invert", "line", "byte_offset", "text", "line_ending",
+    "context", "before", "after", "limit", "limit_per_file", "files", "count",
     "include", "exclude", "max_depth", "max_size", "hidden", "ignore", "binary",
     NULL,
 };

@@ -25,6 +25,7 @@ namespace {
 
 struct Rec {
     bool context;
+    GrepLineEnding line_ending;
     char path[128];
     char text[160];
     char line[160];
@@ -60,6 +61,7 @@ GrepAction collect(Collector* c, const GrepMatch* gm, bool context) {
         r.byte_offset = gm->byte_offset;
         r.char_offset = gm->char_offset;
         r.line_number = gm->line_number;
+        r.line_ending = gm->line_ending;
     }
     if (!context && c->stop_after >= 0) {
         int matches = 0;
@@ -292,6 +294,158 @@ TEST(GrepSearch, TiersAgreeWithReference) {
     }
 }
 
+// GRP30: a count is the number of lines the reference's matches fall on, in
+// every tier and forced to tier 2; invert counts the other lines. A count
+// reports no records and no context.
+TEST(GrepSearch, CountsSelectedLinesInEveryTier) {
+    static Rec ref[MAX_RECS];
+    size_t len = strlen(CORPUS);
+    uint64_t total_lines = str_count_byte(CORPUS, len, '\n') + (CORPUS[len - 1] != '\n');
+    for (const char* pattern : CORPUS_PATTERNS) {
+        for (int icase = 0; icase < 2; icase++) {
+            int nref = reference(pattern, icase, CORPUS, len, ref, MAX_RECS);
+            ASSERT_GE(nref, 0) << pattern;
+            ASSERT_LE(nref, MAX_RECS) << pattern;
+            uint64_t lines = 0;
+            for (int i = 0; i < nref; i++) lines += i == 0 || ref[i].line_number != ref[i - 1].line_number;
+            for (int force = 0; force < 2; force++) {
+                for (int inv = 0; inv < 2; inv++) {
+                    GrepOptions o = opts();
+                    o.ignore_case = icase;
+                    o.invert = inv;
+                    o.count_lines = true;
+                    o.before_context = 1;
+                    o.after_context = 1;
+                    GrepMatcher* m = make(pattern, o);
+                    ASSERT_NE(m, nullptr) << pattern;
+                    if (force) {
+                        grep_literal_plan_release(&m->plan);
+                        m->plan.tier = GREP_TIER_REGEX;
+                    }
+                    static Collector c;
+                    c.n = 0;
+                    c.files_done = 0;
+                    search(m, CORPUS, len, &c, true);
+                    char what[128];
+                    snprintf(what, sizeof(what), "/%s/ icase=%d forced=%d invert=%d", pattern, icase, force, inv);
+                    EXPECT_EQ(c.n, 0) << what;
+                    ASSERT_EQ(c.files_done, 1) << what;
+                    EXPECT_EQ(c.done_counts[0], inv ? total_lines - lines : lines) << what;
+                    grep_matcher_destroy(m);
+                }
+            }
+        }
+    }
+}
+
+TEST(GrepSearch, CountStopsAtThePerFileLimit) {
+    GrepOptions o = opts();
+    o.count_lines = true;
+    o.max_matches_per_file = 2;
+    GrepMatcher* m = make("x", o);
+    Collector c;
+    search(m, "x x\nx\nx\n", 8, &c);
+    EXPECT_EQ(c.n, 0);
+    ASSERT_EQ(c.files_done, 1);
+    EXPECT_EQ(c.done_counts[0], 2u);   // lines, however many matches each holds
+    grep_matcher_destroy(m);
+    // inverted, the lines between matches are counted in bulk, and capped
+    o.invert = true;
+    o.max_matches_per_file = 3;
+    m = make("x", o);
+    c.files_done = 0;
+    search(m, "a\nb\nx\nc\nd\ne", 11, &c);
+    EXPECT_EQ(c.done_counts[0], 3u);
+    o.max_matches_per_file = 0;
+    grep_matcher_destroy(m);
+    m = make("x", o);
+    c.files_done = 0;
+    search(m, "a\nb\nx\nc\nd\ne", 11, &c);
+    EXPECT_EQ(c.done_counts[0], 5u);   // the unterminated "e" counts
+    grep_matcher_destroy(m);
+}
+
+// An empty pattern matches every line, so its count (grep -c '') is the line
+// count, taken without matching; it must equal what matching gives ("x*" also
+// matches every line but goes through RE2), whole and chunked
+TEST(GrepSearch, CountOfAnEmptyPatternIsTheLineCount) {
+    struct { const char* text; uint64_t lines; } cases[] = {
+        {"", 0}, {"\n", 1}, {"a", 1}, {"a\r\n\nb", 3}, {"a\nb\n", 2}, {"a\rb\r", 1}, {CORPUS, 0},
+    };
+    cases[6].lines = str_count_byte(CORPUS, strlen(CORPUS), '\n') + 1;
+    for (auto& tc : cases) {
+        size_t len = strlen(tc.text);
+        for (int inv = 0; inv < 2; inv++) {
+            GrepOptions o = opts();
+            o.count_lines = true;
+            o.invert = inv;
+            GrepMatcher* fast = make("", o);
+            GrepMatcher* slow = make("x*", o);
+            ASSERT_TRUE(fast && slow);
+            EXPECT_TRUE(fast->every_line);
+            EXPECT_FALSE(slow->every_line);
+            static Collector a, b;
+            a.files_done = b.files_done = 0;
+            search(fast, tc.text, len, &a);
+            search(slow, tc.text, len, &b);
+            ASSERT_EQ(a.files_done, 1);
+            EXPECT_EQ(a.done_counts[0], inv ? 0 : tc.lines) << tc.text;
+            EXPECT_EQ(a.done_counts[0], b.done_counts[0]) << tc.text;
+            for (size_t chunk = 1; chunk <= 7 && len; chunk += 2) {
+                a.files_done = 0;
+                search_chunked(fast, tc.text, len, chunk, &a);
+                EXPECT_EQ(a.done_counts[0], b.done_counts[0]) << tc.text << " chunk " << chunk;
+            }
+            grep_matcher_destroy(fast);
+            grep_matcher_destroy(slow);
+        }
+    }
+    // the per-file limit caps it; whole-line wrapping makes "" an empty-line test
+    GrepOptions o = opts();
+    o.count_lines = true;
+    o.max_matches_per_file = 2;
+    GrepMatcher* m = make("", o);
+    Collector c;
+    search(m, CORPUS, strlen(CORPUS), &c);
+    EXPECT_EQ(c.done_counts[0], 2u);
+    grep_matcher_destroy(m);
+    o = opts();
+    o.count_lines = true;
+    o.whole_line = true;
+    m = make("", o);
+    EXPECT_FALSE(m->every_line);
+    c.files_done = 0;
+    search(m, CORPUS, strlen(CORPUS), &c);
+    EXPECT_EQ(c.done_counts[0], 2u);   // "\n" and "\r\n"
+    grep_matcher_destroy(m);
+}
+
+// GRP31: every record says how its line ended, invert and context records too
+TEST(GrepSearch, RecordsCarryTheLineEnding) {
+    const char text[] = "a1\r\nb\na2\nc\r\na3\r";   // the final '\r' is content: no terminator follows
+    GrepOptions o = opts();
+    o.before_context = 1;
+    GrepMatcher* m = make("a\\d", o);
+    Collector c;
+    search(m, text, strlen(text), &c, true);
+    ASSERT_EQ(c.n, 5);   // a1, b (context), a2, c (context), a3
+    GrepLineEnding expect[] = {GREP_EOL_CRLF, GREP_EOL_LF, GREP_EOL_LF, GREP_EOL_CRLF, GREP_EOL_NONE};
+    for (int i = 0; i < 5; i++) EXPECT_EQ(c.recs[i].line_ending, expect[i]) << i;
+    EXPECT_TRUE(c.recs[1].context);
+    grep_matcher_destroy(m);
+    o = opts();
+    o.invert = true;
+    o.line_text = true;
+    m = make("a", o);
+    c.n = 0;
+    search(m, text, strlen(text), &c);
+    ASSERT_EQ(c.n, 2);
+    EXPECT_STREQ(c.recs[1].line, "c");
+    EXPECT_EQ(c.recs[0].line_ending, GREP_EOL_LF);
+    EXPECT_EQ(c.recs[1].line_ending, GREP_EOL_CRLF);
+    grep_matcher_destroy(m);
+}
+
 TEST(GrepSearch, NoMatchSpansALine) {
     GrepMatcher* m = make("a\\sb", opts());
     Collector c;
@@ -519,7 +673,26 @@ TEST(GrepStream, ResultsIndependentOfChunkSize) {
                     EXPECT_EQ(part.recs[i].byte_offset, whole.recs[i].byte_offset);
                     EXPECT_EQ(part.recs[i].char_offset, whole.recs[i].char_offset);
                     EXPECT_EQ(part.recs[i].line_number, whole.recs[i].line_number);
+                    EXPECT_EQ(part.recs[i].line_ending, whole.recs[i].line_ending);
                 }
+            }
+            grep_matcher_destroy(m);
+        }
+        // a count does not depend on chunking either (GRP30)
+        for (int inv = 0; inv < 2; inv++) {
+            GrepOptions o = opts();
+            o.count_lines = true;
+            o.invert = inv;
+            GrepMatcher* m = make(pattern, o);
+            ASSERT_NE(m, nullptr);
+            static Collector whole, part;
+            whole.files_done = 0;
+            search(m, big, big_len, &whole);
+            for (size_t chunk = 1; chunk <= 40; chunk += 3) {
+                part.files_done = 0;
+                search_chunked(m, big, big_len, chunk, &part);
+                ASSERT_EQ(part.files_done, 1);
+                EXPECT_EQ(part.done_counts[0], whole.done_counts[0]) << pattern << " chunk " << chunk << " invert " << inv;
             }
             grep_matcher_destroy(m);
         }
@@ -684,6 +857,8 @@ TEST_F(GrepWalkTest, DefaultLayersAndPathOrder) {
     };
     ASSERT_EQ(c.n, (int)(sizeof(expect) / sizeof(expect[0])));
     for (int i = 0; i < c.n; i++) EXPECT_STREQ(c.recs[i].path, expect[i]) << i;
+    // the line ending survives the sorted buffering (GRP31)
+    for (int i = 0; i < c.n; i++) EXPECT_EQ(c.recs[i].line_ending, GREP_EOL_LF) << i;
     EXPECT_EQ(c.files_done, 8);
 }
 
@@ -795,6 +970,45 @@ TEST_F(GrepWalkTest, UnsortedDeliversEveryMatch) {
     run(w, &c);
     EXPECT_EQ(c.n, 9);
     EXPECT_EQ(c.files_done, 8);
+}
+
+// GRP30: a sorted count reports each file's lines in path order; a total limit
+// cuts the count of the file it ends in, on every thread count
+TEST_F(GrepWalkTest, CountsPerFileAndCutsAtTheLimit) {
+    GrepOptions o = opts();
+    o.count_lines = true;
+    Collector c;
+    run(walk_opts(), &c, "needle", &o);
+    EXPECT_EQ(c.n, 0);
+    ASSERT_EQ(c.files_done, 8);
+    EXPECT_STREQ(c.done_paths[0], "temp/grep_gtest_tree/a.txt");
+    EXPECT_EQ(c.done_counts[0], 2u);
+    for (int i = 1; i < 8; i++) EXPECT_EQ(c.done_counts[i], 1u) << c.done_paths[i];
+    for (int threads = 1; threads <= 8; threads++) {
+        GrepWalkOptions w = walk_opts();
+        w.threads = threads;
+        w.max_matches_total = 3;
+        Collector cut;
+        run(w, &cut, "needle", &o);
+        ASSERT_EQ(cut.files_done, 2) << threads;   // a.txt 2, keep.log 1
+        EXPECT_EQ(cut.done_counts[0], 2u);
+        EXPECT_EQ(cut.done_counts[1], 1u);
+        w.max_matches_total = 1;
+        Collector one;
+        run(w, &one, "needle", &o);
+        ASSERT_EQ(one.files_done, 1) << threads;
+        EXPECT_EQ(one.done_counts[0], 1u);   // a.txt's two lines, cut to one
+    }
+    // unsorted: files come in any order, and the limit still caps the sum
+    GrepWalkOptions w = walk_opts();
+    w.sorted = false;
+    w.threads = 4;
+    w.max_matches_total = 3;
+    Collector un;
+    run(w, &un, "needle", &o);
+    uint64_t sum = 0;
+    for (int i = 0; i < un.files_done && i < 64; i++) sum += un.done_counts[i];
+    EXPECT_EQ(sum, 3u);
 }
 
 // the ignore files of the repository enclosing a root apply below it

@@ -203,7 +203,9 @@ io.chmod("./config.json", 644)
 
 Search files for a pattern, line by line, like grep. Runs on `lib/grep`, the line-oriented search library on RE2 designed in `vibe/Lambda_Lib_Grep.md` (§9B); implementation record `vibe/impl/Lambda_Impl_Lib_Grep.md`.
 
-**Ruling (GRP26, USER, 2026-10-04; not yet ratified into `doc/Lambda_Formal_Semantics.md`).** **`io.grep(source, pattern, options?)` searches files line by line and is a procedure.** A match never spans a line terminator (GRP1); a line ends at `"\n"` or `"\r\n"`, whose `"\r"` is never matched (GRP18). Results are match maps `{value, index}` in a stable order — sources as given, files in path order, matches in position order (GRP25) — where `index` counts code points from the start of the file as in-memory `find` does (S17.4.1, GRP4); options add `file`, `line` (1-based), `byte_offset`, `text`, `before`/`after` (GRP4, GRP20, GRP24). A directory honours ignore files and skips hidden entries and dependency directories (GRP14); a source named explicitly is always searched (GRP22). An option name it does not define is a compile-time error in a literal and a warning in a value (S17.8.1, GRP28). *Why: its result depends on the file system, which `fn` may not (S12.1.1v2); a line-oriented search is what makes it fast and is what grep means.* [S12.1.1v2, S17.4.1, S17.8.1; GRP1, GRP4, GRP14, GRP18, GRP20–GRP28]
+**Ruling (GRP26, USER, 2026-10-04; not yet ratified into `doc/Lambda_Formal_Semantics.md`).** **`io.grep(source, pattern, options?)` searches files line by line and is a procedure.** A match never spans a line terminator (GRP1); a line ends at `"\n"` or `"\r\n"`, whose `"\r"` is never matched (GRP18). Results are match maps `{value, index}` in a stable order — sources as given, files in path order, matches in position order (GRP25) — where `index` counts code points from the start of the file as in-memory `find` does (S17.4.1, GRP4); options add `file`, `line` (1-based), `byte_offset`, `text`, `line_ending`, `before`/`after` (GRP4, GRP20, GRP24, GRP31), or make the result one `{file, count}` per file, as `grep -c` (GRP30). A directory honours ignore files and skips hidden entries and dependency directories (GRP14); a source named explicitly is always searched (GRP22). An option name it does not define is a compile-time error in a literal and a warning in a value (S17.8.1, GRP28). *Why: its result depends on the file system, which `fn` may not (S12.1.1v2); a line-oriented search is what makes it fast and is what grep means.* [S12.1.1v2, S17.4.1, S17.8.1; GRP1, GRP4, GRP14, GRP18, GRP20–GRP28, GRP30, GRP31]
+
+**Rulings (USER, 2026-10-04).** **GRP30: `count: true` returns one `{file, count}` per file instead of match maps,** where `count` is the number of the file's lines with a match (with `invert`, without one) — what `rg -c` prints. Files with no such line are left out. **GRP31: `line_ending: true` adds `line_ending` to each match map:** `"\n"`, `"\r\n"`, or `null` for a last line with no terminator. Since the `"\r"` of a `"\r\n"` is never content (GRP18), this field is how a caller tells the two kinds of line apart; what to do with it is the caller's. The option is named after the field it adds, as `line`, `byte_offset` and `text` are, and has no effect together with `count`.
 
 **Type:** Procedure (it reads only, but its result depends on the file system; `fn` must be deterministic, S12.1.1v2)
 
@@ -217,6 +219,7 @@ Search files for a pattern, line by line, like grep. Runs on `lib/grep`, the lin
 | `line` | bool | false | adds `line`, the 1-based line number |
 | `byte_offset` | bool | false | adds `byte_offset`, the 0-based offset in bytes |
 | `text` | bool | false | adds `text`, the whole line without its terminator |
+| `line_ending` | bool | false | adds `line_ending`: `"\n"`, `"\r\n"`, or `null` for a last line with no terminator (GRP31) |
 | `context`, `before`, `after` | int | 0 | adds `before`/`after`, the neighbouring lines' text |
 | `ignore_case` | bool | false | Unicode simple case folding (S17.7.1) |
 | `word` | bool | false | a match may not touch a letter, digit or `_` on either side |
@@ -225,13 +228,14 @@ Search files for a pattern, line by line, like grep. Runs on `lib/grep`, the lin
 | `limit` | int | none | at most this many matches in total, the first in path order (GRP25) |
 | `limit_per_file` | int | none | at most this many matches per file (GRP25) |
 | `files` | bool | false | the paths of files with a match instead of match maps (GRP21) |
+| `count` | bool | false | one `{file, count}` per file instead of match maps: its lines with a match (GRP30); not with `files` |
 | `include`, `exclude` | string or array | none | gitignore-style globs (GRP22) |
 | `max_depth`, `max_size` | int | none | walk depth (a directory's own entries are at depth 1) and file size limits (GRP22) |
 | `hidden` | bool | false | also search names starting with `.` (GRP14) |
 | `ignore` | bool | true | honour `.gitignore`/`.ignore` and skip `node_modules`, `bower_components`, `__pycache__`, `venv`, `site-packages` (GRP14) |
 | `binary` | bool | false | search files with a NUL in their first 8 KiB instead of skipping them |
 
-**Returns:** An array of match maps — `{value, index}`, plus `file` when the source is a directory, a wildcard or an array (a path for a path source, text for a text source) — or, with `files: true`, an array of file paths. A source that does not exist raises E401.
+**Returns:** An array of match maps — `{value, index}`, plus `file` when the source is a directory, a wildcard or an array (a path for a path source, text for a text source) — or, with `files: true`, an array of file paths, or, with `count: true`, an array of `{file, count}` in path order (`limit` and `limit_per_file` then count lines). A source that does not exist raises E401.
 
 **Example:**
 ```lambda
@@ -241,6 +245,7 @@ pn todo_report() {
         print(t.file, t.line, t.text, "\n")
     }
     let users = io.grep(/.src.**, "parse_options", {files: true, include: "*.ls"})^
+    let lines = io.grep(/.src, "", {count: true})^   // every file's line count: "" matches every line
 }
 ```
 

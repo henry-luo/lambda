@@ -80,4 +80,32 @@ pn main() {
     let opts = {line: true, colour: "never"}
     print("T20:", io.grep("test/input/grep_tree/notes.txt", "beta", opts)^)
     print("\n")
+
+    // count: the lines with a match per file, files without one left out (GRP30)
+    print("T21:", io.grep(\.test.input.grep_tree, "TODO", {count: true})^)
+    print("\n")
+
+    // a count names its file even for one source; invert counts the other lines
+    print("T22:", io.grep("test/input/grep_tree/notes.txt", "TODO", {count: true, invert: true})^)
+    print("\n")
+
+    // the limits count lines: limit_per_file caps each count, limit their sum
+    print("T23:", io.grep(\.test.input.grep_tree, "TODO", {count: true, limit_per_file: 1})^)
+    print("\n")
+    print("T24:", io.grep(\.test.input.grep_tree, "TODO", {count: true, limit: 3})^)
+    print("\n")
+
+    // line_ending: "\n", "\r\n", or null for a last line without one (GRP31)
+    print("T25:", io.grep("test/input/grep_tree/eol.txt", "line", {line: true, line_ending: true})^)
+    print("\n")
+
+    // an empty pattern matches every line, so a count is the number of lines;
+    // line_ending has nothing to apply to in a count
+    print("T26:", io.grep("test/input/grep_tree/eol.txt", "", {count: true, line_ending: true})^)
+    print("\n")
+
+    // files and count both say what a result is: asking for both is an error
+    var both: any | error = io.grep("test/input/grep_tree/notes.txt", "TODO", {files: true, count: true})
+    print("T27:", both is error)
+    print("\n")
 }

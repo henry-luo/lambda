@@ -1388,6 +1388,7 @@ Each match map has `value` (the matched text) and `index` (its offset in code po
 | `line` | bool | false | adds `line`, the 1-based line number |
 | `byte_offset` | bool | false | adds `byte_offset`, the match's 0-based offset in bytes |
 | `text` | bool | false | adds `text`, the whole line without its terminator |
+| `line_ending` | bool | false | adds `line_ending`, how the line ended: `"\n"`, `"\r\n"`, or `null` for a last line with no terminator |
 | `context`, `before`, `after` | int | 0 | adds `before`/`after`, arrays of the neighbouring lines' text |
 | `ignore_case` | bool | false | Unicode simple case folding, as `find` |
 | `word` | bool | false | a match may not touch a letter, digit or `_` on either side |
@@ -1396,6 +1397,7 @@ Each match map has `value` (the matched text) and `index` (its offset in code po
 | `limit` | int | none | at most this many matches in total, the first in path order |
 | `limit_per_file` | int | none | at most this many matches per file |
 | `files` | bool | false | return the paths of files with a match instead of match maps |
+| `count` | bool | false | return one `{file, count}` per file instead of match maps: how many of its lines have a match, as `grep -c` |
 | `include`, `exclude` | string or array | none | gitignore-style globs a file must match / may not match |
 | `max_depth` | int | none | how far below a directory to look (its own entries are at depth 1) |
 | `max_size` | int | none | skip files larger than this many bytes |
@@ -1414,10 +1416,20 @@ pn todo_report() {
     // which Lambda files mention a name, ignoring case
     let users = io.grep(/.src.**, "parse_options", {files: true, include: "*.ls", ignore_case: true})^
     print(len(users), "files\n")
+
+    // how many lines of each file have a TODO, and how many lines each file
+    // has at all (an empty pattern matches every line)
+    let todo_lines = io.grep(/.src, "TODO", {count: true})^
+    let all_lines = io.grep(/.src, "", {count: true})^
+
+    // the TODOs that sit on Windows-style lines
+    for (t in io.grep(/.src, "TODO", {line_ending: true})^) {
+        if (t.line_ending == "\r\n") { print(t.file, "\n") }
+    }
 }
 ```
 
-Matching is **line-oriented**: a match never spans a line terminator, so a pattern's `...` and a literal newline stop at the end of the line. A line ends at `"\n"` or `"\r\n"`; the `"\r"` of a pair is never part of a match or of `text`. In a directory, files listed in ignore files, hidden entries, the dependency directories above, symbolic links and binary files are skipped, but a path given as the source is always searched. A source that does not exist raises an error (E401). An option name `io.grep` does not define is a compile-time error in a map literal at the call, and is ignored with a warning when the options arrive as a value (S17.8.1).
+Matching is **line-oriented**: a match never spans a line terminator, so a pattern's `...` and a literal newline stop at the end of the line. A line ends at `"\n"` or `"\r\n"`; the `"\r"` of a pair is never part of a match or of `text`, and `line_ending` reports which terminator a line had. With `count: true` the result is one `{file, count}` per file, in path order, for the files with at least one such line, and `limit` and `limit_per_file` count lines; `count` cannot be combined with `files`, and the options that add fields to match maps do not apply to it. In a directory, files listed in ignore files, hidden entries, the dependency directories above, symbolic links and binary files are skipped, but a path given as the source is always searched. A source that does not exist raises an error (E401). An option name `io.grep` does not define is a compile-time error in a map literal at the call, and is ignored with a warning when the options arrive as a value (S17.8.1).
 
 `io.grep` is a procedure: its result depends on the file system. It runs on `lib/grep`, a line-oriented search library on RE2 (`vibe/Lambda_Lib_Grep.md`).
 
