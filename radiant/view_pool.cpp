@@ -199,12 +199,7 @@ template<class T, auto Slot> static void view_pool_free(ViewTree* tree, lam::Vie
 }
 // A `next`-linked payload list, each node owned by the previous one.
 template<class T> static void view_pool_free_list(ViewTree* tree, lam::Own<T>& head) {
-    if (!tree || !tree->prop_pool) return;
-    while (head) {
-        lam::Own<T> next = head->next;
-        lam::free_owned(tree->prop_pool, head);
-        head = next;
-    }
+    if (tree && tree->prop_pool) lam::free_owned_list(tree->prop_pool, head);
 }
 // O4 (open): a private copy behind a Shared field (its own-or-shared flag says
 // private) is freed through this one typed path until that design lands.
@@ -568,6 +563,7 @@ static void view_prop_free_##name(DomElement* elem, ViewTree* tree) { \
 static void view_prop_free_##name(DomElement* elem, ViewTree* tree) { \
     if (elem && elem->ext) view_pool_free(tree, elem->ext->field); \
 }
+DEFINE_VIEW_PROP_FREE(font, font)
 DEFINE_VIEW_PROP_FREE(bound, bound)
 DEFINE_VIEW_PROP_FREE(blk, blk)
 DEFINE_VIEW_PROP_FREE(scroller, scroller)
@@ -583,14 +579,6 @@ DEFINE_VIEW_EXT_PROP_FREE(marker, marker)
 DEFINE_VIEW_EXT_PROP_FREE(vpath, vpath)
 #undef DEFINE_VIEW_PROP_FREE
 #undef DEFINE_VIEW_EXT_PROP_FREE
-
-// DomElement::font stays raw (a pass-local anonymous flex item borrows a
-// font), so it is the one prop block freed through a raw typed pointer.
-static void view_prop_free_font(DomElement* elem, ViewTree* tree) {
-    if (!elem || !elem->font || !tree || !tree->prop_pool) return;
-    pool_free(tree->prop_pool, elem->font);
-    elem->font = nullptr;
-}
 
 static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "font", release_element_font_prop, free_element_font_payload, view_prop_get_font, view_prop_clear_font, view_prop_free_font, nullptr, nullptr, &FONT_PROP_DEFAULT, sizeof(FontProp), nullptr },
@@ -738,6 +726,8 @@ static void view_teardown_apply_table(ViewTree* tree,
                                       DomElement* elem,
                                       int flags) {
     if (!elem) return;
+    // scratch-lived elements borrow their font and own nothing in the prop pool
+    assert(!elem->scratch_lived());
     int count = sizeof(VIEW_PROP_TEARDOWN) / sizeof(VIEW_PROP_TEARDOWN[0]);
     for (int i = 0; i < count; i++) {
         const ViewPropTeardownEntry* entry = &VIEW_PROP_TEARDOWN[i];

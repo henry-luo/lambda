@@ -9,7 +9,7 @@
 struct CanonicalInlineEntry {
     uint64_t hash;
     InlineProp* value;
-    CanonicalInlineEntry* next;
+    lam::Own<CanonicalInlineEntry> next;
 };
 
 static uint32_t inline_float_hash_bits(float value) {
@@ -90,13 +90,13 @@ bool inline_prop_equal(const InlineProp* left, const InlineProp* right) {
 
 static bool canonical_inline_resize(ViewTree* tree, size_t bucket_count) {
     if (!tree || !tree->prop_pool || bucket_count < 16) return false;
-    CanonicalInlineEntry** buckets = (CanonicalInlineEntry**)pool_calloc(
-        tree->prop_pool, bucket_count * sizeof(CanonicalInlineEntry*));
+    lam::Own<CanonicalInlineEntry>* buckets = (lam::Own<CanonicalInlineEntry>*)pool_calloc(
+        tree->prop_pool, bucket_count * sizeof(lam::Own<CanonicalInlineEntry>));
     if (!buckets) return false;
     for (size_t i = 0; i < tree->inline_canonical_bucket_count; i++) {
-        CanonicalInlineEntry* entry = tree->inline_canonical_buckets[i];
+        lam::Own<CanonicalInlineEntry> entry = tree->inline_canonical_buckets[i];
         while (entry) {
-            CanonicalInlineEntry* next = entry->next;
+            lam::Own<CanonicalInlineEntry> next = entry->next;
             size_t bucket = (size_t)(entry->hash & (bucket_count - 1u));
             entry->next = buckets[bucket];
             buckets[bucket] = entry;
@@ -148,13 +148,13 @@ static InlineProp* canonical_inline_find_or_create(ViewTree* tree,
         }
     }
 
-    CanonicalInlineEntry* entry = (CanonicalInlineEntry*)pool_calloc(
-        tree->prop_pool, sizeof(CanonicalInlineEntry));
+    lam::Own<CanonicalInlineEntry> entry = lam::own((CanonicalInlineEntry*)pool_calloc(
+        tree->prop_pool, sizeof(CanonicalInlineEntry)));
     if (!entry) return nullptr;
     InlineProp* canonical = (InlineProp*)arena_calloc(tree->canonical_prop_arena,
                                                       sizeof(InlineProp));
     if (!canonical) {
-        pool_free(tree->prop_pool, entry);
+        lam::free_owned(tree->prop_pool, entry);
         return nullptr;
     }
     memcpy(canonical, value, sizeof(InlineProp));
@@ -183,12 +183,7 @@ void view_tree_canonical_init(ViewTree* tree) {
 void view_tree_canonical_destroy(ViewTree* tree) {
     if (!tree) return;
     for (size_t i = 0; i < tree->inline_canonical_bucket_count; i++) {
-        CanonicalInlineEntry* entry = tree->inline_canonical_buckets[i];
-        while (entry) {
-            CanonicalInlineEntry* next = entry->next;
-            pool_free(tree->prop_pool, entry);
-            entry = next;
-        }
+        lam::free_owned_list(tree->prop_pool, tree->inline_canonical_buckets[i]);
     }
     lam::free_owned(tree->prop_pool, tree->inline_canonical_buckets);
     tree->inline_canonical_buckets = nullptr;

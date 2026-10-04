@@ -254,9 +254,11 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
 
     // With a scope the item is that caller's temporary; without one it lives
     // until the enclosing flex pass restores its scratch mark.
-    ViewElement* item = scope
-        ? (ViewElement*)scratch_scope_calloc(&lycon->scratch, scope, sizeof(ViewElement))
-        : (ViewElement*)scratch_calloc(&lycon->scratch, sizeof(ViewElement));
+    auto scratch_item_calloc = [&](size_t size) -> void* {
+        return scope ? scratch_scope_calloc(&lycon->scratch, scope, size)
+                     : scratch_calloc(&lycon->scratch, size);
+    };
+    ViewElement* item = (ViewElement*)scratch_item_calloc(sizeof(ViewElement));
     if (!item) return nullptr;
     // CSS Flexbox §4 generates an anonymous blockified item for each non-empty
     // direct text run; keeping it pass-local avoids changing the DOM/render tree.
@@ -265,23 +267,32 @@ static ViewElement* create_anonymous_flex_text_item(LayoutContext* lycon,
     item->parent = lam::up((DomNode*)container);
     item->tag_name = lam::up("anonymous-flex-item");
     item->display = {CSS_VALUE_BLOCK, CSS_VALUE_FLOW, false};
-    item->ensure_block(lycon);
-    item->ensure_boundary(lycon);
-    item->blk->white_space = container->blk
+    // The item's props share its scratch lifetime, so they go when the scratch
+    // is restored; the view-tree pool would keep them until the tree dies.
+    item->mark_scratch_lived();
+    BlockProp* blk = (BlockProp*)scratch_item_calloc(sizeof(BlockProp));
+    BoundaryProp* bound = (BoundaryProp*)scratch_item_calloc(sizeof(BoundaryProp));
+    FlexItemProp* fi = (FlexItemProp*)scratch_item_calloc(sizeof(FlexItemProp));
+    if (!blk || !bound || !fi) return nullptr;
+    memcpy(blk, &BLOCK_PROP_DEFAULT, sizeof(BlockProp));
+    blk->text_align = lycon->block.text_align;
+    blk->direction = lycon->block.direction;
+    blk->white_space = container->blk
         ? container->block()->white_space : CSS_VALUE_NORMAL;
-    item->blk->writing_mode = container->blk
+    blk->writing_mode = container->blk
         ? container->block()->writing_mode : WM_HORIZONTAL_TB;
-    // The pass-local anonymous item borrows the text's or container's font; it
-    // lives in layout scratch and is never torn down by the view tree, so this
-    // slot is never released through the item.
+    memcpy(bound, &BOUNDARY_PROP_DEFAULT, sizeof(BoundaryProp));
+    memcpy(fi, &FLEX_ITEM_PROP_DEFAULT, sizeof(FlexItemProp));
+    item->blk = lam::view_prop(blk);
+    item->bound = lam::view_prop(bound);
+    item->set_parent_item_kind(DomElement::PARENT_ITEM_FLEX);
+    item->fi = lam::view_prop(fi);
+    // Borrows the text's or container's font: a scratch-lived item never
+    // reaches view-tree teardown (asserted there), so the slot is never freed.
     item->font = lam::view_prop((FontProp*)(text_view->font ? (FontProp*)text_view->font : (FontProp*)container->font));
-    item->ensure_flex_item(lycon->doc ? lycon->doc->view_tree : nullptr);
-    if (!item->fi) return nullptr;
     item->fi->anonymous_text = lam::up(text);
-    FlexAnonymousTextRun* first_run = scope
-        ? (FlexAnonymousTextRun*)scratch_scope_calloc(&lycon->scratch, scope,
-                                                      sizeof(FlexAnonymousTextRun))
-        : (FlexAnonymousTextRun*)scratch_calloc(&lycon->scratch, sizeof(FlexAnonymousTextRun));
+    FlexAnonymousTextRun* first_run =
+        (FlexAnonymousTextRun*)scratch_item_calloc(sizeof(FlexAnonymousTextRun));
     if (!first_run) return nullptr;
     first_run->text = lam::up(text);
     first_run->preserve_leading_space = preserve_leading_space;

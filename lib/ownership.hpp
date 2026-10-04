@@ -217,6 +217,16 @@ void free_owned(Pool* pool, ViewProp<T, Slot>& field) {
     field = nullptr;
 }
 
+// A `next`-linked pool list, each node owned by the previous one.
+template<class T>
+void free_owned_list(Pool* pool, Own<T>& head) {
+    while (head) {
+        Own<T> next = head->next;
+        free_owned(pool, head);
+        head = next;
+    }
+}
+
 template<class T>
 PoolPtr<T> checked_pool_ptr(Pool* pool, T* raw) {
     (void)pool;

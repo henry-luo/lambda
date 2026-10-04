@@ -293,8 +293,9 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
 struct IntrinsicFontScope {
     lam::Up<LayoutContext> lycon;
     FontBox saved_font;
-    lam::Up<FontProp> prop_a;
-    lam::Up<FontProp> prop_b;
+    // temporary font props, returned to the prop pool when the scope ends
+    lam::Own<FontProp> prop_a;
+    lam::Own<FontProp> prop_b;
 
     IntrinsicFontScope(LayoutContext* l, FontBox saved)
         : lycon(l), saved_font(saved), prop_a(nullptr), prop_b(nullptr) {}

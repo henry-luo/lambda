@@ -622,6 +622,9 @@ enum DomElementFlag : uint32_t {
     ELMT_FLAG_PARSER_INSERTED_TABLE_FORM = 1u << 27,
     ELMT_FLAG_SCROLL_EVENT_PENDING = 1u << 28,
     ELMT_FLAG_USER_VALIDITY = 1u << 29,
+    // A pass-local element in layout scratch (an anonymous flex text item): its
+    // props live in that scratch too, so it never reaches the view-tree pool.
+    ELMT_FLAG_SCRATCH_LIVED = 1u << 30,
 };
 
 static_assert((ELMT_FLAG_INLINE_PROP_SHARED & ((1u << 17) - 1u)) == 0,
@@ -787,8 +790,9 @@ struct DomElement : DomNode {
     // The element owns each prop it points to (Own<T>). in_line and
     // specified_style are Shared<T>: a canonical value shared with other
     // elements, or the element's private copy after copy-on-write (recorded by
-    // the inline_prop_shared flag and the style epoch). font stays raw: the
-    // pass-local anonymous flex item borrows another element's FontProp.
+    // the inline_prop_shared flag and the style epoch). A scratch-lived
+    // anonymous flex item borrows another element's FontProp in font; it never
+    // reaches view-tree teardown.
     // === Embedded Lambda Element (at known offset from DomNode base) ===
     // In UI mode, this IS the Lambda Element. Otherwise, data is copied from the
     // original Element during create(). MarkEditor operates on
@@ -925,6 +929,8 @@ struct DomElement : DomNode {
     void set_parser_inserted_table_form(bool value) {
         set_flag(ELMT_FLAG_PARSER_INSERTED_TABLE_FORM, value);
     }
+    bool scratch_lived() const { return flag(ELMT_FLAG_SCRATCH_LIVED); }
+    void mark_scratch_lived() { set_flag(ELMT_FLAG_SCRATCH_LIVED, true); }
     bool inline_prop_shared() const { return flag(ELMT_FLAG_INLINE_PROP_SHARED); }
     void mark_inline_prop_owned() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, false); }
     void mark_inline_prop_shared() { set_flag(ELMT_FLAG_INLINE_PROP_SHARED, true); }

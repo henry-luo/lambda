@@ -2802,7 +2802,7 @@ struct ViewTree {
     // scratch and the frame display list each get their own arena.
     lam::Own<Arena> render_scratch_arena;
     lam::Own<Arena> display_list_arena;
-    lam::OwnArr<CanonicalInlineEntry*> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
+    lam::OwnArr<lam::Own<CanonicalInlineEntry>> inline_canonical_buckets; // Resizable exact-value index in prop_pool.
     size_t inline_canonical_bucket_count;
     size_t inline_canonical_count;
     size_t canonical_prop_cap_bytes;
