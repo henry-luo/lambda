@@ -875,7 +875,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         return;
     }
 
-    uicon->surface = rec_surf;
+    uicon->surface = lam::up(rec_surf);
     uicon->window_height = first_h;
 
     RenderProfiler profiler;
@@ -897,7 +897,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         dl_item_count(&display_list));
     if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
         image_surface_destroy(rec_surf);
-        uicon->surface = saved_surface;
+        uicon->surface = lam::up(saved_surface);
         uicon->window_height = saved_window_height;
         png_destroy_write_struct(&png, &info);
         fclose(fp);
@@ -963,7 +963,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
     image_surface_destroy(rec_surf);
 
-    uicon->surface = saved_surface;
+    uicon->surface = lam::up(saved_surface);
     uicon->window_height = saved_window_height;
 
     png_write_end(png, NULL);

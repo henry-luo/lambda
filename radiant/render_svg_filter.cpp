@@ -6,7 +6,7 @@
 
 // the registry and its programs live in `pool`, which the document's
 // resource hook destroys; each program's graph lives in the program's arena.
-struct SvgFilterRegistry {
+struct SvgFilterRegistry : DomDocumentResourceData {
     lam::Own<Pool> pool;
     lam::Up<DomDocument> document;
     lam::Up<MemContext> memory;
@@ -159,7 +159,7 @@ static size_t svg_filter_registry_reclaim(MemPressureLevel, size_t target, void*
     return freed;
 }
 
-static void svg_filter_registry_destroy(void* data) {
+static void svg_filter_registry_destroy(DomDocumentResourceData* data) {
     SvgFilterRegistry* registry = (SvgFilterRegistry*)data;
     mem_context_unregister_reclaimer(registry->reclaimer);
     svg_filter_registry_reclaim(MEM_PRESSURE_CRITICAL, 0, registry);

@@ -578,7 +578,7 @@ static void svg_style_destroy(SvgStyleContext* style) {
     SvgStyleMap::destroy(style->entries);
     if (style->isolated_document) {
         // D4.2.6: layout payloads release borrowed fonts/images before their private document owner.
-        view_tree_shell_destroy(style->isolated_document->view_tree);
+        view_tree_shell_destroy(style->isolated_document, style->isolated_document->view_tree);
         if (style->isolated_ui) image_cache_cleanup(style->isolated_ui);
         if (style->isolated_surface) image_surface_destroy(style->isolated_surface);
         lam::free_owned(style->isolated_ui);
@@ -621,7 +621,7 @@ static bool svg_style_init(SvgStyleContext* style, Element* root,
         if (!style->document) { svg_style_destroy(style); return false; }
         dom_document_borrow_input_resources(style->document);
         style->document->services.svg_image_document = image_document;
-        if (source_path && *source_path) style->document->url = url_parse_path_or_url(source_path, nullptr);
+        if (source_path && *source_path) style->document->url = lam::own(url_parse_path_or_url(source_path, nullptr));
         style->document->root = lam::up(build_dom_tree_from_element(root, style->document, nullptr));
         style->engine = css_engine_create(style->document->document_pool);
         if (!style->document->root || !style->engine) { svg_style_destroy(style); return false; }
@@ -662,7 +662,7 @@ static FontContext* svg_style_font_context(SvgStyleContext* style, const char* s
         }
     }
     // D4: registration copies descriptors; the temporary UI bridge owns only its CSS metadata.
-    UiContext bridge = {}; bridge.font_ctx = fonts;
+    UiContext bridge = {}; bridge.font_ctx = lam::up(fonts);
     for (int i = 0; i < style->document->stylesheet_count; i++) {
         CssStylesheet* sheet = style->document->stylesheets[i];
         if (sheet && !sheet->disabled) process_font_face_rules_from_stylesheet(&bridge, sheet, source_path, image_document);
@@ -1657,13 +1657,13 @@ static SvgResourceDocument* svg_resource_document_create(SvgInlineRenderContext*
 }
 
 // the cache lives in `pool`, which the document's resource hook destroys
-struct SvgUseResourceCache {
+struct SvgUseResourceCache : DomDocumentResourceData {
     lam::Own<Pool> pool;
     lam::Up<DomDocument> document;
     SvgResourceDocument* documents;
 };
 
-static void svg_use_resource_cache_destroy(void* data) {
+static void svg_use_resource_cache_destroy(DomDocumentResourceData* data) {
     SvgUseResourceCache* cache = (SvgUseResourceCache*)data;
     for (SvgResourceDocument* document = cache->documents; document;) {
         SvgResourceDocument* next = document->next;
@@ -5952,12 +5952,12 @@ static UiContext* svg_style_layout_html(SvgInlineRenderContext* ctx, SvgStyleCon
     if (!style || !style->isolated_document) return nullptr;
     if (style->isolated_ui) return style->isolated_ui;
     lam::Temp<UiContext> owned_ui((UiContext*)mem_calloc(1, sizeof(UiContext), MEM_CAT_RENDER)); // OBJ_HEAP_OK: the SVG style context owns the isolated layout's headless UI shell; svg_style_destroy releases it
-    lam::Own<ViewTree> tree = view_tree_shell_create();
+    lam::Own<ViewTree> tree = view_tree_shell_create(style->isolated_document);
     if (!owned_ui || !tree) { lam::free_owned(tree); return nullptr; }
     UiContext* ui = owned_ui.get();
     style->isolated_ui = lam::own(owned_ui.release());
     DomDocument* doc = style->isolated_document;
-    ui->document = doc; ui->font_ctx = ctx->font_ctx; ui->headless = true;
+    ui->document = lam::up(doc); ui->font_ctx = ctx->font_ctx; ui->headless = true;
     ui->viewport_width = ctx->current_viewport_w; ui->viewport_height = ctx->current_viewport_h;
     ui->device_scale = ui->device_scale_x = ui->device_scale_y = ctx->raster_scale;
     ui_context_init_default_fonts(ui);
@@ -6003,7 +6003,7 @@ static void render_svg_foreign_object(SvgInlineRenderContext* ctx, Element* elem
         else {
             if (!style->isolated_surface) style->isolated_surface = svg_create_paint_surface(
                 ctx->viewport_width * ctx->raster_scale, ctx->viewport_height * ctx->raster_scale);
-            isolated_ui->surface = style->isolated_surface;
+            isolated_ui->surface = lam::up(style->isolated_surface);
             if (!isolated_ui->surface) return;
             isolated.block.clip = {0, 0, (float)isolated_ui->surface->width, (float)isolated_ui->surface->height};
         }
@@ -7427,7 +7427,7 @@ struct SvgLayerEntry {
 
 // The registry and its entries live in one pool under the document's memory
 // context; entries are only ever added, so the pool is released whole.
-struct SvgLayerRegistry {
+struct SvgLayerRegistry : DomDocumentResourceData {
     lam::Own<SvgLayerEntry> entries;
     size_t cached_bytes;
     lam::Own<Pool> pool;  // holds this registry and its entries
@@ -7459,7 +7459,7 @@ static void svg_layer_entry_release_surface(SvgLayerRegistry* registry, SvgLayer
     entry->surface = nullptr;
 }
 
-static void svg_layer_registry_destroy(void* data) {
+static void svg_layer_registry_destroy(DomDocumentResourceData* data) {
     // the document resource hands its registry over for teardown
     SvgLayerRegistry* registry = (SvgLayerRegistry*)data;
     if (!registry) return;

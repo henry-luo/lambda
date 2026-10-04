@@ -300,7 +300,7 @@ static bool js_document_session_start(JsDocumentSession* session, DomDocument* d
         return false;
     }
     session->initialized = true;
-    session->uicon.document = dom_doc;
+    session->uicon.document = lam::up(dom_doc);
     dom_set_ui_context(&session->uicon);
     session->uicon.window_width = JS_DOCUMENT_VIEWPORT_WIDTH;
     session->uicon.window_height = JS_DOCUMENT_VIEWPORT_HEIGHT;

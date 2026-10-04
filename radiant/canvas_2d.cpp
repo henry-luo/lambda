@@ -71,7 +71,7 @@ struct CanvasEntry {
 
 // The registry and its entries live in one pool under the document's memory
 // context; per-entry drawing stacks (saved states, clips) stay Temp-managed.
-struct CanvasRegistry {
+struct CanvasRegistry : DomDocumentResourceData {
     CanvasEntry* entries;
     lam::Own<Pool> pool;  // holds this registry and its entries
     lam::Up<DomDocument> document;
@@ -180,7 +180,7 @@ static void canvas_entry_release(CanvasEntry* entry) {
     if (entry->surface) image_surface_destroy(entry->surface);
 }
 
-static void canvas_registry_destroy(void* data) {
+static void canvas_registry_destroy(DomDocumentResourceData* data) {
     // the document resource hands its registry over for teardown
     CanvasRegistry* registry = (CanvasRegistry*)data;
     if (!registry) return;

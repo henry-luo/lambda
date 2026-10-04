@@ -108,9 +108,9 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     clear_list.data()[0].fill_linear_gradient.owned_stops = lam::own_arr(stops);
 
     PaintGlyphRun run = {};
-    run.text = mem_strdup("owned glyph text", MEM_CAT_RENDER);
+    run.text = lam::up((const char*)mem_strdup("owned glyph text", MEM_CAT_RENDER));
     ASSERT_NE(run.text, nullptr);
-    run.owned_text = lam::own(run.text);
+    run.owned_text = lam::own((const char*)run.text);
     paint_glyph_run(&clear_list, &run);
     ASSERT_EQ(clear_list.size(), 2u);
 
@@ -125,9 +125,9 @@ TEST(PaintListTest, OwnershipPayloadsAreReleasedByClearAndDestroy) {
     PaintList destroy_list = {};
     paint_list_init(&destroy_list, nullptr);
     PaintGlyphRun destroy_run = {};
-    destroy_run.text = mem_strdup("destroy owned glyph text", MEM_CAT_RENDER);
+    destroy_run.text = lam::up((const char*)mem_strdup("destroy owned glyph text", MEM_CAT_RENDER));
     ASSERT_NE(destroy_run.text, nullptr);
-    destroy_run.owned_text = lam::own(destroy_run.text);
+    destroy_run.owned_text = lam::own((const char*)destroy_run.text);
     paint_glyph_run(&destroy_list, &destroy_run);
     ASSERT_EQ(destroy_list.size(), 1u);
     paint_list_destroy(&destroy_list);
@@ -2085,7 +2085,7 @@ TEST_F(PaintIrParityTest, SvgStreamingLoweringKeepsOpacityOpenAcrossFragments) {
 
 TEST_F(PaintIrParityTest, SvgLoweringEmitsNativeTextRun) {
     PaintGlyphRun run = {};
-    run.text = "A < B & C";
+    run.text = lam::up("A < B & C");
     run.text_len = -1;
     run.font_family = lam::up("A&B Sans");
     run.font_size = 13.5f;

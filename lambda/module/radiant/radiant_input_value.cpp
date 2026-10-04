@@ -18,7 +18,7 @@ typedef struct RadiantInputStateEntry {
     bool files_rooted;
 } RadiantInputStateEntry;
 
-typedef struct RadiantInputState {
+typedef struct RadiantInputState : DomDocumentResourceData {
     DomDocument* document;
     ArrayList* entries;
 } RadiantInputState;
@@ -514,7 +514,7 @@ static void riv_entry_destroy(RadiantInputStateEntry* entry) {
     mem_free(entry);
 }
 
-static void riv_state_destroy(void* data) {
+static void riv_state_destroy(DomDocumentResourceData* data) {
     RadiantInputState* state = (RadiantInputState*)data;
     if (!state) return;
     if (state->entries) {

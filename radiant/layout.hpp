@@ -1253,9 +1253,9 @@ typedef struct CounterContext {
     lam::Up<Arena> arena;
     lam::Up<CounterScope> current_scope;
     // owns every scope allocated during this layout pass
-    lam::ArrayList<CounterScope*>* scope_stack;
+    lam::Own<lam::ArrayList<CounterScope*>> scope_stack;
     // tracks element/pseudo boundaries separately from the active counter chain
-    lam::ArrayList<CounterFrame>* frame_stack;
+    lam::Own<lam::ArrayList<CounterFrame>> frame_stack;
 
     bool init(Arena* backing_arena);
     void destroy();

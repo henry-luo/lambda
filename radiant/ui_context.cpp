@@ -94,8 +94,9 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 
 void UiContext::create_surface(int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
-    if (surface) image_surface_destroy(surface);
-    surface = image_surface_create(pixel_width, pixel_height);
+    if (window_surface) image_surface_destroy(window_surface);
+    window_surface = lam::own(image_surface_create(pixel_width, pixel_height));
+    surface = lam::up((ImageSurface*)window_surface);
     if (!surface) {
         log_error("Error: Could not create image surface.");
     }
@@ -332,7 +333,8 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
     font_cfg.pixel_ratio = device_scale;
     font_cfg.max_cached_faces = 64;
     font_cfg.enable_lcd_rendering = true;
-    font_ctx = font_context_create(&font_cfg);
+    owned_font_ctx = lam::own(font_context_create(&font_cfg));
+    font_ctx = lam::up((FontContext*)owned_font_ctx);
     if (!font_ctx) {
         log_error("ui_context_init: failed to initialize font context");
         mem_arena_destroy(font_glyph_arena);
@@ -468,14 +470,7 @@ void free_document(DomDocument* doc) {
     // then dangle.
     if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
 
-    if (doc->view_tree) {
-        // Some imported DOM/view fixtures alias the pools; the view-tree destroy path owns that shared pool.
-        if (doc->document_pool == doc->view_tree->prop_pool) {
-            doc->document_pool = nullptr;  // Pool will be destroyed by view_pool_destroy
-        }
-
-        view_tree_shell_destroy(doc->view_tree);
-    }
+    view_tree_shell_destroy(doc, doc->view_tree);
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
     if (doc->url) {
@@ -516,6 +511,8 @@ void ui_context_cleanup(UiContext* uicon) {
     uicon->destroy();
 }
 
+// the window shell owns the top-level document and releases it here; other
+// holders of `document` only borrow it
 void UiContext::destroy_document() {
     if (document) {
         free_document(document);
@@ -538,10 +535,11 @@ void UiContext::destroy() {
     fontface_cleanup(this);  // free font cache
     font_prop_release_handle(&default_font);
     font_prop_release_handle(&legacy_default_font);
-    if (font_ctx) {
-        font_context_destroy(font_ctx);
-        font_ctx = NULL;
+    if (owned_font_ctx) {
+        font_context_destroy(owned_font_ctx);
+        owned_font_ctx = nullptr;
     }
+    font_ctx = nullptr;
     // FontContext borrows these tracked roots; destroy them after its caches release their handles.
     if (font_glyph_arena) {
         mem_arena_destroy(font_glyph_arena);
@@ -560,7 +558,8 @@ void UiContext::destroy() {
     image_cache_cleanup(this);  // cleanup image cache
     render_pool_shutdown();  // destroy worker threads before ThorVG engine
     rdt_engine_term();
-    image_surface_destroy(surface);
+    image_surface_destroy(window_surface);
+    window_surface = nullptr;
     surface = nullptr;
 
     // Only tear down GLFW if a window was created (i.e., non-headless mode).

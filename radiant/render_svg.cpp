@@ -303,7 +303,7 @@ static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
         PaintGlyphRun run = {};
         run.font = lam::up(&ctx->font);
         run.color = ctx->color;
-        run.text = text_content.get();
+        run.text = lam::up(text_content.get());
         run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: UTF-8 text run byte length is bounded by TextRect input.
         // effect fallback retains commands until rasterization, so its paint list
         // must own text that immediate SVG lowering would otherwise consume.

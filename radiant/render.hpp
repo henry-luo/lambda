@@ -696,8 +696,8 @@ typedef struct {
     int type[RDT_MAX_CLIP_SHAPES];
     float params[RDT_MAX_CLIP_SHAPES][8];
     int polygon_count[RDT_MAX_CLIP_SHAPES];
-    float* polygon_vx[RDT_MAX_CLIP_SHAPES];
-    float* polygon_vy[RDT_MAX_CLIP_SHAPES];
+    lam::OwnArr<float> polygon_vx[RDT_MAX_CLIP_SHAPES];  // display-list arena copies
+    lam::OwnArr<float> polygon_vy[RDT_MAX_CLIP_SHAPES];
 } DlClipShapeStack;
 
 // Direct-pixel fill (selection highlights, surface clear, etc.)
@@ -1273,7 +1273,7 @@ typedef struct {
 } PaintFillRoundedRect;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     Color color;
     RdtFillRule rule;
@@ -1282,7 +1282,7 @@ typedef struct {
 } PaintFillPath;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     Color color;
     float width;
@@ -1297,10 +1297,10 @@ typedef struct {
 } PaintStrokePath;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float x1, y1, x2, y2;
-    const RdtGradientStop* stops;  // the stops drawn: borrowed, or owned_stops
+    lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
     RdtFillRule rule;
@@ -1313,10 +1313,10 @@ typedef struct {
 } PaintFillLinearGradient;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float cx, cy, r;
-    const RdtGradientStop* stops;  // the stops drawn: borrowed, or owned_stops
+    lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
     RdtFillRule rule;
@@ -1540,7 +1540,7 @@ void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raste
 typedef struct {
     lam::Up<FontBox> font;
     Color color;
-    const char* text;               // optional native text payload; UTF-8, borrowed, or owned_text
+    lam::Up<const char> text;       // optional native text payload; UTF-8, borrowed, or owned_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
     lam::Own<const char> owned_text;  // set when the paint list keeps the text
     lam::Up<const char> font_family; // borrowed; optional for vector text lowering

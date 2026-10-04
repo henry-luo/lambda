@@ -500,8 +500,8 @@ TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay
     fill->fill_surface_rect.clip_shapes.depth = 1;
     fill->fill_surface_rect.clip_shapes.type[0] = CLIP_SHAPE_POLYGON;
     fill->fill_surface_rect.clip_shapes.polygon_count[0] = 3;
-    fill->fill_surface_rect.clip_shapes.polygon_vx[0] = vx;
-    fill->fill_surface_rect.clip_shapes.polygon_vy[0] = vy;
+    fill->fill_surface_rect.clip_shapes.polygon_vx[0] = lam::own_arr(vx);
+    fill->fill_surface_rect.clip_shapes.polygon_vy[0] = lam::own_arr(vy);
     dl_end_element(&source, begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -957,4 +957,62 @@ TEST_F(RetainedDisplayListTest, RejectsStaleWebviewSurfaceGeneration) {
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
     free_test_surface(surface);
+}
+
+// M6 gate: image surfaces evicted and replaced while their retained fragments
+// stay captured. An evicted surface's fragment must be rejected through its
+// handle (never by reading the freed surface); a live one must still append.
+TEST_F(RetainedDisplayListTest, EvictionStressRejectsEvictedSurfacesAndKeepsLiveOnes) {
+    const int count = 48;
+    ImageSurface* surfaces[count] = {};
+    uint32_t pixels[count][4] = {};
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    uint32_t seed = 12345;
+    for (int round = 0; round < 40; round++) {
+        DisplayList source = {};
+        dl_init(&source, arena);
+        for (int i = 0; i < count; i++) {
+            if (!surfaces[i]) {
+                surfaces[i] = image_surface_alloc();
+                ASSERT_NE(surfaces[i], nullptr);
+                surfaces[i]->width = surfaces[i]->height = 2;
+                image_surface_bump_generation(surfaces[i]);
+            }
+            int begin = dl_begin_element(&source, 1000 + i, (float)i * 4.0f, 0.0f, 2.0f, 2.0f);
+            DisplayItem* image = dl_alloc_item(&source);
+            ASSERT_NE(image, nullptr);
+            image->op = DL_DRAW_IMAGE;
+            image->bounds[0] = (float)i * 4.0f;
+            image->bounds[2] = image->bounds[3] = 2.0f;
+            image->draw_image.pixels = lam::up(pixels[i]);
+            image->draw_image.resource = surfaces[i]->self;
+            image->draw_image.resource_generation = surfaces[i]->generation;
+            dl_end_element(&source, begin);
+        }
+        retained_dl_cache_capture(cache, &source);
+        // evict about a third of the surfaces, as a cache under pressure would
+        bool evicted[count] = {};
+        for (int i = 0; i < count; i++) {
+            seed = seed * 1103515245u + 12345u;
+            if ((seed >> 16) % 3 == 0) {
+                free_test_surface(surfaces[i]);
+                surfaces[i] = nullptr;
+                evicted[i] = true;
+            }
+        }
+        DisplayList replay = {};
+        dl_init(&replay, replay_arena);
+        for (int i = 0; i < count; i++) {
+            const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 1000 + i);
+            ASSERT_NE(fragment, nullptr);
+            bool valid = retained_dl_fragment_resources_valid(fragment, 0, 1);
+            EXPECT_EQ(valid, !evicted[i]) << "round " << round << " element " << i;
+            if (valid) EXPECT_TRUE(retained_dl_append_fragment(&replay, fragment));
+        }
+        dl_destroy(&replay);
+        dl_destroy(&source);
+    }
+    for (int i = 0; i < count; i++) if (surfaces[i]) free_test_surface(surfaces[i]);
+    retained_dl_cache_destroy(cache);
 }

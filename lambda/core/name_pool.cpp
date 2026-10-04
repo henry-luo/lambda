@@ -305,7 +305,7 @@ static NamePool* name_pool_allocate_segment(Pool* memory_pool,
 
     pool->pool = backing;
     pool->parent = parent ? name_pool_retain(parent) : nullptr;
-    pool->ref_count = 1;
+    ref_count_init(&pool->ref_count);
     pool->next_unique_key_hash = 0x80000000u;
     pool->id_mode = (uint8_t)mode;
     pool->identity_backing = owned_backing;
@@ -399,7 +399,7 @@ NamePool* name_pool_retain(NamePool* pool) {
 void name_pool_release(NamePool* pool) {
     if (!pool) return;
 
-    if (ref_counted_pool_release_count(pool) == 0) {
+    if (ref_counted_pool_release_last(pool)) {
         NamePool* root = pool->identity_root ? pool->identity_root : pool;
         if (pool->id_mode == NAME_POOL_DYNAMIC && root->dynamic_child == pool) {
             uint32_t end = root->next_dynamic_pool ? root->next_dynamic_pool : 0x10000u;
@@ -607,7 +607,7 @@ void name_pool_print_stats(NamePool* pool) {
     }
 
     log_debug("NamePool: %p", pool);
-    log_debug("  ref_count: %u", __atomic_load_n(&pool->ref_count, __ATOMIC_RELAXED));
+    log_debug("  ref_count: %d", ref_count_get(&pool->ref_count));
     log_debug("  names count: %zu", name_pool_count(pool));
     log_debug("  parent: %p", pool->parent);
 

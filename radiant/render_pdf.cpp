@@ -1205,7 +1205,7 @@ static bool pdf_paint_fill_path(PdfRenderContext* ctx, RdtPath* path, Color colo
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_FILL_PATH);
     if (cmd) {
-        cmd->fill_path.owned_path = lam::own(cmd->fill_path.path);
+        cmd->fill_path.owned_path = lam::own((RdtPath*)cmd->fill_path.path);
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1231,7 +1231,7 @@ static bool pdf_paint_stroke_path(PdfRenderContext* ctx, RdtPath* path,
     bool owns_path = false;
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index, PAINT_STROKE_PATH);
     if (cmd) {
-        cmd->stroke_path.owned_path = lam::own(cmd->stroke_path.path);
+        cmd->stroke_path.owned_path = lam::own((RdtPath*)cmd->stroke_path.path);
         owns_path = true;
     }
     pdf_lower_paint_list(ctx);
@@ -1253,7 +1253,7 @@ static bool pdf_paint_fill_linear_gradient(PdfRenderContext* ctx,
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
                                                    PAINT_FILL_LINEAR_GRADIENT);
     if (cmd) {
-        cmd->fill_linear_gradient.owned_path = lam::own(cmd->fill_linear_gradient.path);
+        cmd->fill_linear_gradient.owned_path = lam::own((RdtPath*)cmd->fill_linear_gradient.path);
         if (stops) cmd->fill_linear_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_linear_gradient.stops);
         owns_payload = true;
     }
@@ -1275,7 +1275,7 @@ static bool pdf_paint_fill_radial_gradient(PdfRenderContext* ctx,
     PaintCmd* cmd = pdf_effect_fallback_latest_cmd(ctx, list, index,
                                                    PAINT_FILL_RADIAL_GRADIENT);
     if (cmd) {
-        cmd->fill_radial_gradient.owned_path = lam::own(cmd->fill_radial_gradient.path);
+        cmd->fill_radial_gradient.owned_path = lam::own((RdtPath*)cmd->fill_radial_gradient.path);
         if (stops) cmd->fill_radial_gradient.owned_stops = lam::own_arr((RdtGradientStop*)cmd->fill_radial_gradient.stops);
         owns_payload = true;
     }
@@ -1363,7 +1363,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     PaintGlyphRun run = {};
     run.font = lam::up(&ctx->font);
     run.color = ctx->color;
-    run.text = text_content.get();
+    run.text = lam::up(text_content.get());
     run.text_len = (int)strlen(text_content.get()); // INT_CAST_OK: text run byte length is bounded by TextRect input.
     // effect fallback retains commands until rasterization, so the paint list keeps the text
     if (ctx && ctx->effect_fallback.active) run.owned_text = lam::own((const char*)text_content.release());

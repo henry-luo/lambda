@@ -623,7 +623,7 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
     int saved_viewport_width = uicon->viewport_width;
     int saved_viewport_height = uicon->viewport_height;
 
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
 
     if (iframe_container &&
         (iframe_container->view_type == RDT_VIEW_BLOCK ||
@@ -642,7 +642,7 @@ static void layout_event_document_reflow(EventContext* evcon, DomDocument* doc,
         restore_embedded_document_scroll_model(doc);
     }
 
-    uicon->document = saved_doc;
+    uicon->document = lam::up(saved_doc);
     uicon->viewport_width = saved_viewport_width;
     uicon->viewport_height = saved_viewport_height;
 }
@@ -1503,7 +1503,7 @@ static void* radiant_element_from_point(DomDocument* doc, DomElement* root, floa
     hit_event.mouse_position.y = y;
     EventContext evcon;
     DomDocument* saved_document = uicon->document;
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
     event_context_init(&evcon, uicon, &hit_event);
     if (root) {
         float frame[6];
@@ -1514,7 +1514,7 @@ static void* radiant_element_from_point(DomDocument* doc, DomElement* root, floa
         ViewBlock* block = lam::view_as_block(root);
         if (block) target_block_view(&evcon, block);
     } else target_html_doc(&evcon, doc->view_tree);
-    uicon->document = saved_document;
+    uicon->document = lam::up(saved_document);
     DomElement* element = view_geometry_nearest_dom_element(
         static_cast<DomNode*>(evcon.target), 0);
     void* hit = element;
@@ -6270,7 +6270,7 @@ static void dom_js_record_reconcile(DomDocument* doc,
                                     int state_pruned) {
     if (!doc) return;
     doc->reconcile.mode = mode;
-    doc->reconcile.reason = reason ? reason : "none";
+    doc->reconcile.reason = lam::up(reason ? reason : "none");
     doc->reconcile.mutations = mutations;
     doc->reconcile.records = records;
     doc->reconcile.record_overflow = overflow;
@@ -7307,13 +7307,13 @@ static bool post_html_handler_incremental_rebuild(
     if (state) doc_state_close_context_menu(state);
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
-    if (evcon->ui_context) evcon->ui_context->document = doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
     doc->incremental_layout = true;
     doc->skip_style_reset = true;
     layout_html_doc(evcon->ui_context, doc, true);
     doc->skip_style_reset = false;
     doc->incremental_layout = false;
-    if (evcon->ui_context) evcon->ui_context->document = saved_doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
     if (doc->root) {
         view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
@@ -7435,7 +7435,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // Broad DOM fallback is a layout-resource epoch change, not a DOM/view-node
     // identity change; keep the ViewTree shell and retained nodes for StateStore.
     if (!doc->view_tree) {
-        doc->view_tree = view_tree_shell_create();
+        doc->view_tree = view_tree_shell_create(doc);
         view_pool_reset_retained(doc->view_tree);
     } else {
         view_pool_reset_retained(doc->view_tree);
@@ -7449,9 +7449,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     }
 
     DomDocument* saved_doc = evcon->ui_context ? evcon->ui_context->document : nullptr;
-    if (evcon->ui_context) evcon->ui_context->document = doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(doc);
     layout_html_doc(evcon->ui_context, doc, true);
-    if (evcon->ui_context) evcon->ui_context->document = saved_doc;
+    if (evcon->ui_context) evcon->ui_context->document = lam::up(saved_doc);
 
     int state_pruned = 0;
     if (state) {
@@ -10476,7 +10476,7 @@ typedef struct RadiantNavigationRequest {
     RadiantNavigationTargetKind target_kind;
 } RadiantNavigationRequest;
 
-typedef struct RadiantNavigationQueue {
+typedef struct RadiantNavigationQueue : DomDocumentResourceData {
     Queue requests;
 } RadiantNavigationQueue;
 
@@ -10499,7 +10499,7 @@ static void navigation_request_destroy(RadiantNavigationRequest* request) {
     mem_free(request);
 }
 
-static void navigation_queue_destroy(void* data) {
+static void navigation_queue_destroy(DomDocumentResourceData* data) {
     RadiantNavigationQueue* queue = (RadiantNavigationQueue*)data;
     if (!queue) return;
     QueueNode* link = NULL;
@@ -10743,13 +10743,13 @@ static bool navigation_commit_iframe_document(UiContext* uicon,
         DomDocument* saved_doc = uicon->document;
         float saved_viewport_width = uicon->viewport_width;
         float saved_viewport_height = uicon->viewport_height;
-        uicon->document = new_doc;
+        uicon->document = lam::up(new_doc);
         uicon->viewport_width = (float)css_vw;
         uicon->viewport_height = (float)css_vh;
         process_document_font_faces(uicon, new_doc);
         layout_html_doc(uicon, new_doc, false);
         radiant_dispatch_lambda_body_load(uicon, new_doc);
-        uicon->document = saved_doc;
+        uicon->document = lam::up(saved_doc);
         uicon->viewport_width = saved_viewport_width;
         uicon->viewport_height = saved_viewport_height;
     }

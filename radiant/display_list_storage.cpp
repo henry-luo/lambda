@@ -113,8 +113,8 @@ void dl_store_clip_shapes(DisplayList* dl, DlClipShapeStack* dst,
             memcpy(vy, shape->polygon.vy, sz);
             dst->type[i] = CLIP_SHAPE_POLYGON;
             dst->polygon_count[i] = count;
-            dst->polygon_vx[i] = vx;
-            dst->polygon_vy[i] = vy;
+            dst->polygon_vx[i] = lam::own_arr(vx);
+            dst->polygon_vy[i] = lam::own_arr(vy);
             continue;
         }
         clip_shape_to_params(shape, &dst->type[i], dst->params[i]);

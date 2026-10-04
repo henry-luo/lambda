@@ -107,14 +107,14 @@ typedef struct RadiantVelmtHost {
     RadiantVelmt velmt;
 } RadiantVelmtHost;
 
-typedef struct RadiantCustomPaintResource {
+typedef struct RadiantCustomPaintResource : DomDocumentResourceData {
     CustomLayoutPaintState paint;
     Item* roots;
     int root_count;
     Heap* owner_heap;
 } RadiantCustomPaintResource;
 
-typedef struct RadiantLayoutResource {
+typedef struct RadiantLayoutResource : DomDocumentResourceData {
     UiContext ui_context;
 } RadiantLayoutResource;
 
@@ -252,7 +252,7 @@ static void radiant_custom_paint_clear(RadiantCustomPaintResource* resource) {
     resource->paint.layer_count = 0;
 }
 
-static void radiant_custom_paint_destroy(void* data) {
+static void radiant_custom_paint_destroy(DomDocumentResourceData* data) {
     RadiantCustomPaintResource* resource = (RadiantCustomPaintResource*)data;
     if (!resource) return;
     radiant_custom_paint_clear(resource);
@@ -1251,7 +1251,7 @@ static DomDocument* radiant_load_html_document(const char* path, const char* fun
     return doc;
 }
 
-static void radiant_layout_resource_destroy(void* data) {
+static void radiant_layout_resource_destroy(DomDocumentResourceData* data) {
     RadiantLayoutResource* resource = (RadiantLayoutResource*)data;
     if (!resource) return;
     // The document destroys resources after its view tree; detaching prevents
@@ -1295,7 +1295,7 @@ static bool radiant_layout_document(DomDocument* doc, UiContext* uicon,
     ui_context_create_surface(uicon, viewport_width, viewport_height);
     uicon->window_width = viewport_width;
     uicon->window_height = viewport_height;
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
     process_document_font_faces(uicon, doc);
     // custom layout callbacks run only during an explicit layout pass; geometry
     // reads cannot substitute for this lifecycle boundary.

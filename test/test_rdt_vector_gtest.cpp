@@ -45,7 +45,7 @@ protected:
         svg = element("svg", root); ASSERT_NE(svg, nullptr);
         ASSERT_TRUE(svg->set_attribute("width", "200"));
         ASSERT_TRUE(svg->set_attribute("height", "200"));
-        ui.document = &doc; doc.js.host_ui_context = &ui;
+        ui.document = lam::up(&doc); doc.js.host_ui_context = &ui;
         doc.js.host_driven_loop = true;
         ASSERT_NE(state_store_create(&doc), nullptr);
     }
@@ -637,6 +637,34 @@ TEST(SvgAnimationTest, PictureDuplicatesRetainPrivateTimeWithoutChangingTheParse
     ASSERT_NE(cached, nullptr);
     EXPECT_DOUBLE_EQ(rdt_picture_animation_time(cached), 0);
     rdt_picture_free(cached); rdt_picture_free(duplicate); rdt_picture_free(picture);
+}
+
+// M6 gate: a picture held the way a display list holds one (a counted
+// duplicate) outlives the picture cache evicting its parsed original.
+TEST(SvgPictureCacheTest, EvictionKeepsHeldDuplicatesAlive) {
+    const char held_source[] = "<svg xmlns='http://www.w3.org/2000/svg' width='30' height='20'>"
+        "<rect width='30' height='20' fill='red'/></svg>";
+    RdtPicture* original = rdt_picture_load_data(held_source, sizeof(held_source) - 1, "svg");
+    ASSERT_NE(original, nullptr);
+    RdtPicture* held = rdt_picture_dup(original);
+    ASSERT_NE(held, nullptr);
+    rdt_picture_free(original);
+    // distinct documents push the original's entry out of the LRU cache
+    char source[160];
+    for (int i = 0; i < 160; i++) {
+        int length = snprintf(source, sizeof(source),
+            "<svg xmlns='http://www.w3.org/2000/svg' width='%d' height='10'><rect width='%d' height='10'/></svg>",
+            i + 1, i + 1);
+        RdtPicture* filler = rdt_picture_load_data(source, length, "svg");
+        ASSERT_NE(filler, nullptr);
+        rdt_picture_free(filler);
+    }
+    float width = 0.0f, height = 0.0f;
+    rdt_picture_get_size(held, &width, &height);
+    EXPECT_FLOAT_EQ(width, 30.0f);
+    EXPECT_FLOAT_EQ(height, 20.0f);
+    EXPECT_NE(rdt_picture_get_svg_root(held), nullptr);
+    rdt_picture_free(held);
 }
 
 TEST(RenderCompositeTest, MultiplyPreservesSurfaceAlphaRepresentation) {

@@ -532,7 +532,7 @@ DomDocument* show_loaded_html_doc(DomDocument* doc, const char* doc_url) {
 
     // BrowsingSession owns replacement of the previously presented document;
     // this presentation helper only publishes the newly loaded document.
-    ui_context.document = doc;
+    ui_context.document = lam::up(doc);
     ui_context_sync_document_raster_scale(&ui_context, doc);
 
     radiant_document_ensure_state(doc, "show_html_doc");
@@ -1105,7 +1105,7 @@ static int window_finish_event_sim(EventSimContext* sim_ctx) {
     if (!sim_ctx) return 0;
     int fail_count = sim_ctx->fail_count;
     if (sim_ctx->original_document) {
-        ui_context.document = (DomDocument*)sim_ctx->original_document;
+        ui_context.document = lam::up((DomDocument*)sim_ctx->original_document);
         sim_ctx->frame_stack_depth = 0;
     }
     event_sim_free(sim_ctx);
@@ -1517,7 +1517,7 @@ static int view_doc_in_window_with_events_internal(const char* doc_file,
             doc->viewport.output_scale = 1.0f;
         }
 
-        ui_context.document = doc;
+        ui_context.document = lam::up(doc);
         ui_context_sync_document_raster_scale(&ui_context, doc);
 
         // Initialize network support for HTTP-loaded documents.

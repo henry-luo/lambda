@@ -4992,13 +4992,13 @@ void layout_iframe_embedded_doc(LayoutContext* lycon, DomDocument* doc,
     DomDocument* parent_doc = lycon->ui_context->document;
     int saved_viewport_width = lycon->ui_context->viewport_width;
     int saved_viewport_height = lycon->ui_context->viewport_height;
-    lycon->ui_context->document = doc;
+    lycon->ui_context->document = lam::up(doc);
     lycon->ui_context->viewport_width = iframe_width;
     lycon->ui_context->viewport_height = iframe_height;
     process_document_font_faces(lycon->ui_context, doc);
     layout_html_doc(lycon->ui_context, doc, false);
     radiant_dispatch_lambda_body_load(lycon->ui_context, doc);
-    lycon->ui_context->document = parent_doc;
+    lycon->ui_context->document = lam::up(parent_doc);
     lycon->ui_context->viewport_width = saved_viewport_width;
     lycon->ui_context->viewport_height = saved_viewport_height;
 }

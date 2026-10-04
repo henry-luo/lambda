@@ -69,8 +69,8 @@ static void retained_dl_copy_clip_shape_stack(DisplayList* dst,
         }
         memcpy(vx, in->polygon_vx[i], sz);
         memcpy(vy, in->polygon_vy[i], sz);
-        out->polygon_vx[i] = vx;
-        out->polygon_vy[i] = vy;
+        out->polygon_vx[i] = lam::own_arr(vx);
+        out->polygon_vy[i] = lam::own_arr(vy);
     }
 }
 

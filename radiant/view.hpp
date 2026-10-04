@@ -2807,12 +2807,11 @@ uint64_t inline_prop_hash(const InlineProp* value);
 bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
 LAM_NODE_OF(ViewTree, NodeViewTree);
 
-// The document's ViewTree shell. It stays on the memtracked heap: fixtures may
-// alias the document pool with the view tree's prop pool, which the tree
-// destroys before the shell is released.
-lam::Own<ViewTree> view_tree_shell_create();
-// Destroys the tree's storage and releases the shell; clears the field.
-void view_tree_shell_destroy(lam::Own<ViewTree>& tree);
+// The document's ViewTree shell lives in the document's pool; the document owns
+// it across retained layout resets.
+lam::Own<ViewTree> view_tree_shell_create(DomDocument* doc);
+// Destroys the tree's storage and releases the shell into `doc`'s pool; clears the field.
+void view_tree_shell_destroy(DomDocument* doc, lam::Own<ViewTree>& tree);
 LAM_NODE_OF(RadiantBorderSide, NodeStack);
 LAM_NODE_OF(RadiantInsetSide, NodeStack);
 
@@ -3965,10 +3964,12 @@ typedef struct UiContext {
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
     float viewport_height; // intended viewport height (CSS logical pixels, for vh/vw units)
-    ImageSurface* surface;  // rendering surface of a window
+    lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
+    lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
 
     // font handling
-    struct FontContext* font_ctx; // unified font context
+    lam::Up<struct FontContext> font_ctx; // the font context in use: owned_font_ctx, or the host's for an isolated UI
+    lam::Own<struct FontContext> owned_font_ctx; // created by ui_context_init; destroy releases it
     lam::Own<Pool> font_pool;       // factory-registered root for font context allocations
     lam::Own<Arena> font_arena;     // factory-registered arena for font strings/database
     lam::Own<Arena> font_glyph_arena; // factory-registered arena for glyph bitmap caches
@@ -3988,7 +3989,7 @@ typedef struct UiContext {
     float device_scale_x;   // physical framebuffer px per logical window px on X
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
-    DomDocument* document;  // current document
+    lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
     int iframe_depth;
