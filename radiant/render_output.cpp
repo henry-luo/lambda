@@ -353,9 +353,9 @@ static void render_output_trace_retained_stats(RenderPathTrace* trace,
     trace->retained_reuse_rejected_dirty = stats.reuse_rejected_dirty;
 }
 
-static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
+static void render_output_init_context(RasterRenderContext* rdcon, UiContext* uicon, ViewTree* view_tree,
                                        RenderProfiler* profiler) {
-    memset(rdcon, 0, sizeof(RenderContext));
+    memset(rdcon, 0, sizeof(RasterRenderContext));
     rdcon->ui_context = lam::up(uicon);
     rdcon->profiler = lam::up(profiler);
     if (uicon && uicon->document && uicon->document->state) {
@@ -381,7 +381,7 @@ static void render_output_init_context(RenderContext* rdcon, UiContext* uicon, V
     rdcon->color.c = 0xFF000000;
 }
 
-static void render_output_cleanup_context(RenderContext* rdcon) {
+static void render_output_cleanup_context(RasterRenderContext* rdcon) {
     layout_content_bounds_cache_destroy(rdcon->content_bounds_cache);
     rdcon->content_bounds_cache = nullptr;
     if (rdcon->paint_list) {
@@ -398,7 +398,7 @@ static void render_output_cleanup_context(RenderContext* rdcon) {
     rdt_vector_destroy(&rdcon->vec);
 }
 
-RenderFrameScope::RenderFrameScope(RenderContext* r, UiContext* uicon, ViewTree* view_tree,
+RenderFrameScope::RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
                                    RenderProfiler* profiler)
     : rdcon(r), display_list{}, context_active(false), display_list_active(false) {
     if (!rdcon || !view_tree) return;
@@ -418,7 +418,7 @@ static uint32_t render_output_canvas_background(View* root_view) {
     return render_document_output_background(root_view).c;
 }
 
-static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon, ViewTree* view_tree,
+static RenderOutputClearResult render_output_clear_surface(RasterRenderContext* rdcon, ViewTree* view_tree,
                                                            DocState* state, uint32_t canvas_bg) {
     RenderOutputClearResult result = {};
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->surface || !view_tree) {
@@ -452,7 +452,7 @@ static RenderOutputClearResult render_output_clear_surface(RenderContext* rdcon,
     return result;
 }
 
-static void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_tree) {
+static void render_output_render_view_tree(RasterRenderContext* rdcon, ViewTree* view_tree) {
     if (!rdcon || !view_tree) {
         return;
     }
@@ -460,7 +460,7 @@ static void render_output_render_view_tree(RenderContext* rdcon, ViewTree* view_
     render_raster_view_tree(rdcon, view_tree);
 }
 
-static RenderOutputReplayResult render_output_replay_display_list(RenderContext* rdcon,
+static RenderOutputReplayResult render_output_replay_display_list(RasterRenderContext* rdcon,
                                                                   DisplayList* display_list,
                                                                   uint32_t canvas_bg,
                                                                   DirtyTracker* replay_dirty) {
@@ -548,7 +548,7 @@ static int render_output_render_raster_target(UiContext* uicon, ViewTree* view_t
 
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
-    RenderContext rdcon;
+    RasterRenderContext rdcon;
     RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
     DisplayList& display_list = *frame.list();
 
@@ -875,12 +875,12 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         return;
     }
 
-    uicon->surface = rec_surf;
+    uicon->surface = lam::up(rec_surf);
     uicon->window_height = first_h;
 
     RenderProfiler profiler;
     render_profiler_reset(&profiler);
-    RenderContext rdcon;
+    RasterRenderContext rdcon;
     RenderFrameScope frame(&rdcon, uicon, view_tree, &profiler);
     DisplayList& display_list = *frame.list();
 
@@ -897,7 +897,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
         dl_item_count(&display_list));
     if (!dl_validate_or_log(&display_list, "render_output_tiled_png")) {
         image_surface_destroy(rec_surf);
-        uicon->surface = saved_surface;
+        uicon->surface = lam::up(saved_surface);
         uicon->window_height = saved_window_height;
         png_destroy_write_struct(&png, &info);
         fclose(fp);
@@ -963,7 +963,7 @@ static void render_output_render_tiled_png(UiContext* uicon, ViewTree* view_tree
 
     image_surface_destroy(rec_surf);
 
-    uicon->surface = saved_surface;
+    uicon->surface = lam::up(saved_surface);
     uicon->window_height = saved_window_height;
 
     png_write_end(png, NULL);

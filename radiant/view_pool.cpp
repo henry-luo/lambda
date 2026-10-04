@@ -1068,14 +1068,18 @@ void view_pool_destroy(ViewTree* tree) {
     if (tree) tree->destroy();
 }
 
-lam::Own<ViewTree> view_tree_shell_create() {
-    return lam::own((ViewTree*)mem_calloc(1, sizeof(ViewTree), MEM_CAT_LAYOUT)); // OBJ_HEAP_OK: DomDocument owns the ViewTree shell across retained layout resets; see view_tree_shell_create.
+lam::Own<ViewTree> view_tree_shell_create(DomDocument* doc) {
+    if (!doc || !doc->document_pool) {
+        log_error("view_tree_shell_create: document has no pool for its view tree");
+        return lam::Own<ViewTree>();
+    }
+    return lam::own((ViewTree*)pool_calloc(doc->document_pool, sizeof(ViewTree)));
 }
 
-void view_tree_shell_destroy(lam::Own<ViewTree>& tree) {
+void view_tree_shell_destroy(DomDocument* doc, lam::Own<ViewTree>& tree) {
     if (!tree) return;
     view_pool_destroy(tree);
-    lam::free_owned(tree);
+    lam::free_owned(doc ? (Pool*)doc->document_pool : nullptr, tree);
 }
 
 

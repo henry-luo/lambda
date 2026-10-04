@@ -11,9 +11,9 @@
 static constexpr float BORDER_DARKEN_FACTOR  = 2.0f / 3.0f;
 static constexpr float BORDER_LIGHTEN_FACTOR = 1.0f / 3.0f;
 
-static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
-static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
-static bool render_border_image(RenderContext* rdcon, BorderProp* border, Rect rect);
+static void render_straight_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+static void render_rounded_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, Rect rect);
 
 static inline Color color_darken(Color c, float factor) {
     Color out;
@@ -66,7 +66,7 @@ static RdtPath* render_border_create_centered_stroke_path(BorderProp* border,
 /**
  * Render an inset/outset border as two trapezoid-filled polygons.
  */
-static void render_inset_outset_trapezoid(RenderContext* rdcon, Rect rect,
+static void render_inset_outset_trapezoid(RasterRenderContext* rdcon, Rect rect,
     float bw_top, float bw_right, float bw_bottom, float bw_left,
     Color tl_color, Color br_color) {
 
@@ -133,7 +133,7 @@ static int get_dash_pattern(CssEnum style, float width, float* out_dash, RdtStro
     return 0;
 }
 
-static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp* border) {
+static void render_per_side_borders(RasterRenderContext* rdcon, Rect rect, BorderProp* border) {
     float x = rect.x, y = rect.y, W = rect.width, H = rect.height;
     float bwt = border->width.top, bwr = border->width.right;
     float bwb = border->width.bottom, bwl = border->width.left;
@@ -148,7 +148,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
 
     // Helper lambda (as inline struct) for rendering one side's trapezoid with a color
     struct SideDraw {
-        static void draw(RenderContext* rdcon, Rect rect, int side,
+        static void draw(RasterRenderContext* rdcon, Rect rect, int side,
                          float width, float before, float after, Color c) {
             if (width <= 0 || c.a == 0) return;
             const RdtMatrix* xform = render_state_current_transform(rdcon);
@@ -195,7 +195,7 @@ static void render_per_side_borders(RenderContext* rdcon, Rect rect, BorderProp*
             rdt_path_free(clip);
         }
 
-        static void filled(RenderContext* rdcon, Rect rect, int side,
+        static void filled(RasterRenderContext* rdcon, Rect rect, int side,
                            float width, float bwt, float bwr,
                            float bwb, float bwl, Color color) {
             float before = (side == 0 || side == 2) ? bwl : bwt;
@@ -434,7 +434,7 @@ static inline bool needs_vector_rendering(CssEnum style) {
 /**
  * Main border rendering dispatch
  */
-void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+void render_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->border) return;
 
     BorderProp* border = view->boundary()->border;
@@ -513,7 +513,7 @@ static BorderImageTileAxis border_image_tile_axis(CssEnum repeat, float start,
     return axis;
 }
 
-static void render_border_image_gradient_tile(RenderContext* rdcon,
+static void render_border_image_gradient_tile(RasterRenderContext* rdcon,
                                                Rect source, Rect dest,
                                                RadiantGradientLine line,
                                                float line_length_squared,
@@ -550,7 +550,7 @@ static void render_border_image_gradient_tile(RenderContext* rdcon,
     rdt_path_free(piece);
 }
 
-static void render_border_image_raster_tile(RenderContext* rdcon,
+static void render_border_image_raster_tile(RasterRenderContext* rdcon,
                                              ImageSurface* image,
                                              Rect source, Rect dest) {
     if (!rdcon || !image || !image->pixels) return;
@@ -577,7 +577,7 @@ static void render_border_image_raster_tile(RenderContext* rdcon,
                   render_state_current_transform(rdcon), image);
 }
 
-static bool render_border_image(RenderContext* rdcon, BorderProp* border, Rect rect) {
+static bool render_border_image(RasterRenderContext* rdcon, BorderProp* border, Rect rect) {
     if (!rdcon || !border) return false;
     LinearGradient* gradient = border->border_image_type == GRADIENT_LINEAR
         ? border->border_image_linear_gradient : nullptr;
@@ -756,7 +756,7 @@ static bool render_border_image(RenderContext* rdcon, BorderProp* border, Rect r
 /**
  * Render straight borders (optimized path for rectangular borders)
  */
-static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+static void render_straight_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->boundary()->border;
     ImageSurface* surface = rdcon->ui_context->surface;
 
@@ -777,7 +777,7 @@ static void render_straight_border(RenderContext* rdcon, ViewBlock* view, Rect r
 }
 
 static void render_rounded_border_stroke_pair(
-        RenderContext* rdcon, Rect rect, const Corner* radius,
+        RasterRenderContext* rdcon, Rect rect, const Corner* radius,
         float outer_inset, float outer_width, Color outer_color,
         float inner_inset, float inner_width, Color inner_color,
         const RdtMatrix* xform) {
@@ -804,7 +804,7 @@ static void render_rounded_border_stroke_pair(
 /**
  * Render border with vector rendering (supports rounded corners and styled borders)
  */
-static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+static void render_rounded_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     BorderProp* border = view->boundary()->border;
     const RdtMatrix* xform = render_state_current_transform(rdcon);
 
@@ -914,7 +914,7 @@ static void render_rounded_border(RenderContext* rdcon, ViewBlock* view, Rect re
  * Outline is drawn outside the border-box, offset by outline-offset.
  * Does not affect layout. Uses border-radius if present.
  */
-void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->outline) return;
 
     OutlineProp* outline = view->boundary()->outline;

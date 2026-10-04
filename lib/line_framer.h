@@ -20,6 +20,8 @@ bool line_framer_init(LineFramer* framer, size_t initial_capacity,
                       MemCategory category);
 bool line_framer_append(LineFramer* framer, const void* data, size_t length);
 const char* line_framer_peek(LineFramer* framer, size_t* out_length);
+// every unread byte: the complete lines and any partial last line
+const char* line_framer_data(const LineFramer* framer, size_t* out_length);
 bool line_framer_consume(LineFramer* framer, size_t length);
 void line_framer_destroy(LineFramer* framer);
 

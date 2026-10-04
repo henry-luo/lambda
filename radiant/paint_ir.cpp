@@ -62,22 +62,22 @@ void PaintList::init(Arena* backing_arena) {
     (void)backing_arena;
 }
 
-static void paint_free_owned_path(RdtPath** path, lam::Own<RdtPath>* owned) {
+static void paint_free_owned_path(lam::Up<RdtPath>* path, lam::Own<RdtPath>* owned) {
     if (!path || !owned || !*owned) return;
     rdt_path_free(*owned);
     *owned = nullptr;
     *path = nullptr;
 }
 
-static void paint_free_owned_gradient_stops(const RdtGradientStop** stops,
+static void paint_free_owned_gradient_stops(lam::Up<const RdtGradientStop>* stops,
                                             lam::OwnArr<RdtGradientStop>* owned) {
     if (!stops || !owned || !*owned) return;
     lam::free_owned(*owned);
     *stops = nullptr;
 }
 
-static void paint_free_owned_gradient_payload(RdtPath** path, lam::Own<RdtPath>* owned_path,
-                                              const RdtGradientStop** stops,
+static void paint_free_owned_gradient_payload(lam::Up<RdtPath>* path, lam::Own<RdtPath>* owned_path,
+                                              lam::Up<const RdtGradientStop>* stops,
                                               lam::OwnArr<RdtGradientStop>* owned_stops) {
     paint_free_owned_path(path, owned_path);
     paint_free_owned_gradient_stops(stops, owned_stops);

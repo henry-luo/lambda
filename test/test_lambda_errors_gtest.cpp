@@ -1497,6 +1497,13 @@ TEST_F(NegativeScriptTest, RetiredCountAfterArraySuffixNamesItsReplacement) {
         "are retired: write `T{n+}` or `T{n,m}` for a run of T");
 }
 
+// S17.8.1: an unknown option name in a literal options map is a compile-time
+// error, naming the option and the function.
+TEST_F(NegativeScriptTest, IoGrepUnknownLiteralOptionIsCompileError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/io_grep_unknown_option.ls",
+        "unknown option 'linez' for io.grep (S17.8.1)");
+}
+
 // S12.3.2 / D6.2.2v2 (LR07-16): a dynamic call has no declaration to bind
 // names against; both tiers had silently passed named arguments by position.
 TEST_F(NegativeScriptTest, NamedArgumentsNeedStaticallyKnownCallee) {

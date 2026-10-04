@@ -40,7 +40,7 @@ bool CounterContext::init(Arena* backing_arena) {
     frame_stack = nullptr;
     void* stack_mem = mem_alloc(sizeof(lam::ArrayList<CounterScope*>), MEM_CAT_LAYOUT);
     if (!stack_mem) return false;
-    scope_stack = new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of scope_stack inside CounterContext::init.
+    scope_stack = lam::own(new (stack_mem) lam::ArrayList<CounterScope*>(MEM_CAT_LAYOUT, 16)); // NEW_DELETE_OK: single audited construction of scope_stack inside CounterContext::init.
     void* frame_mem = mem_alloc(sizeof(lam::ArrayList<CounterFrame>), MEM_CAT_LAYOUT);
     if (!frame_mem) {
         scope_stack->~ArrayList<CounterScope*>();
@@ -48,7 +48,7 @@ bool CounterContext::init(Arena* backing_arena) {
         scope_stack = nullptr;
         return false;
     }
-    frame_stack = new (frame_mem) lam::ArrayList<CounterFrame>(MEM_CAT_LAYOUT, 16); // NEW_DELETE_OK: single audited construction of frame_stack inside CounterContext::init.
+    frame_stack = lam::own(new (frame_mem) lam::ArrayList<CounterFrame>(MEM_CAT_LAYOUT, 16)); // NEW_DELETE_OK: single audited construction of frame_stack inside CounterContext::init.
     // Create root scope
     push_scope();
 

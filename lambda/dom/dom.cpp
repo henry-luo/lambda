@@ -865,7 +865,7 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     }
 
     DomDocument* saved_document = uicon->document;
-    uicon->document = doc;
+    uicon->document = lam::up(doc);
     dom_geometry_flush_in_progress = true;
 
     // Standalone callers synchronously flush style and layout. The host loop
@@ -884,7 +884,7 @@ extern "C" bool dom_ensure_geometry_snapshot(DomDocument* doc) {
     }
 
     dom_geometry_flush_in_progress = false;
-    uicon->document = saved_document;
+    uicon->document = lam::up(saved_document);
     return dom_has_committed_geometry_snapshot(doc);
 }
 
@@ -3396,7 +3396,7 @@ static void reset_foreign_document_cache() {
     }
     s_doc_with_window_count = 0;
 }
-JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (void* data), free_document, ((DomDocument*)data))
+JS_FORWARD_STATIC_VOID( dom_destroy_adopted_document, (DomDocumentResourceData* data), free_document, (static_cast<DomDocument*>(data)))
 
 static bool dom_retains_adopted_document(DomDocument* owner,
                                            DomDocument* target) {
@@ -13819,8 +13819,7 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
     const RdtMatrix* instance_ctm, float viewport_x, float viewport_y);
 static bool dom_svg_element_skips_hit_test(DomElement* elem);
 
-static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule, void* data) {
-    const RdtLogicalPoint* point = (const RdtLogicalPoint*)data;
+static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule, const RdtLogicalPoint* point) {
     RdtPath* contour = rdt_path_new();
     if (!contour || !render_path_append_transformed(contour, path, frame)) {
         if (contour) rdt_path_free(contour);

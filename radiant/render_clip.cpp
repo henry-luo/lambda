@@ -375,7 +375,7 @@ static ClipShape* render_clip_parse_css_shape(ScratchArena* scratch, ScratchMark
     return nullptr;
 }
 
-static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* scope,
+static bool render_clip_push_shape_scope(RasterRenderContext* rdcon, RenderClipScope* scope,
                                          ClipShape* shape) {
     if (!rdcon || !scope || !shape) {
         return false;
@@ -400,7 +400,7 @@ static bool render_clip_push_shape_scope(RenderContext* rdcon, RenderClipScope* 
 }
 
 // On success the clip scope takes over `mem`; on failure `mem` is ended here.
-static bool render_clip_push_owned_shape(RenderContext* rdcon,
+static bool render_clip_push_owned_shape(RasterRenderContext* rdcon,
                                          RenderClipScope* scope,
                                          ClipShape* shape, ScratchMark* mem) {
     if (!shape || !render_clip_push_shape_scope(rdcon, scope, shape)) {
@@ -412,7 +412,7 @@ static bool render_clip_push_owned_shape(RenderContext* rdcon,
     return true;
 }
 
-RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
+RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                            float parent_x, float parent_y, float scale) {
     RenderClipScope scope = {};
     if (!rdcon || !block) {
@@ -449,7 +449,7 @@ RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* bloc
     return scope;
 }
 
-RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* clip) {
+RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip) {
     RenderClipScope scope = {};
     if (!rdcon || !clip) {
         return scope;
@@ -471,7 +471,7 @@ RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* c
     return scope;
 }
 
-RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
+RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon) {
     RenderClipScope scope = {};
     if (!rdcon || !rdcon->block.has_clip_radius) {
         return scope;
@@ -500,7 +500,7 @@ RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon) {
     return scope;
 }
 
-void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope) {
+void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope) {
     if (!rdcon || !scope || !scope->active) {
         return;
     }

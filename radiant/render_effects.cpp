@@ -5,13 +5,13 @@
 #include <math.h>
 #include <stddef.h>
 
-static RenderEffectBackdrop render_effect_empty_backdrop(RenderContext* rdcon) {
+static RenderEffectBackdrop render_effect_empty_backdrop(RasterRenderContext* rdcon) {
     RenderEffectBackdrop backdrop = {};
     backdrop.context = lam::up(rdcon);
     return backdrop;
 }
 
-static RenderEffectBackdrop render_effect_backdrop_begin(RenderContext* rdcon,
+static RenderEffectBackdrop render_effect_backdrop_begin(RasterRenderContext* rdcon,
                                                          float x0, float y0,
                                                          float x1, float y1) {
     RenderEffectBackdrop backdrop = render_effect_empty_backdrop(rdcon);
@@ -60,7 +60,7 @@ static void render_effect_backdrop_finish_opacity(RenderEffectBackdrop* backdrop
     if (!render_effect_backdrop_active(backdrop)) {
         return;
     }
-    RenderContext* rdcon = backdrop->context;
+    RasterRenderContext* rdcon = backdrop->context;
     // vector replay produces premultiplied source pixels, including transparent SVG HTML captures.
     bool premultiplied = rdcon->ui_context && rdcon->ui_context->surface &&
         rdcon->ui_context->surface->alpha_mode == IMAGE_ALPHA_PREMULTIPLIED;
@@ -78,7 +78,7 @@ static void render_effect_backdrop_finish_blend(RenderEffectBackdrop* backdrop,
     if (!render_effect_backdrop_active(backdrop)) {
         return;
     }
-    RenderContext* rdcon = backdrop->context;
+    RasterRenderContext* rdcon = backdrop->context;
     rc_apply_blend_mode(rdcon, backdrop->x, backdrop->y,
                         backdrop->width, backdrop->height, (int)blend_mode);
     backdrop->active = false;
@@ -132,7 +132,7 @@ static void render_effect_filter_backdrop_info(const FilterProp* filter,
     *expand = ds_expand > blur_expand ? ds_expand : blur_expand;
 }
 
-RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
+RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
                                             ViewBlock* block,
                                             const BlockBlot* parent_block) {
     RenderEffectGroup group = {};
@@ -217,7 +217,7 @@ static bool render_effect_group_apply_filter(RenderEffectGroup* group,
     if (!group || !group->has_filter || !group->context || !block || !block->filter_prop()) {
         return false;
     }
-    RenderContext* rdcon = group->context;
+    RasterRenderContext* rdcon = group->context;
     Rect filter_rect = group->filter_rect;
 
 
@@ -266,7 +266,7 @@ bool render_effect_group_finish(RenderEffectGroup* group,
         return false;
     }
 
-    RenderContext* rdcon = group->context;
+    RasterRenderContext* rdcon = group->context;
     bool finished = false;
 
     if (render_effect_group_has_filter_rect(group)) {

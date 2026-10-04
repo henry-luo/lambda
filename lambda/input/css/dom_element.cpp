@@ -465,7 +465,7 @@ bool dom_document_finalize_loader_pool(DomDocument* document, Pool* pool) {
 bool dom_document_replace_url(DomDocument* document, Url* replacement) {
     if (!document || !replacement) return false;
     if (!document->url) {
-        document->url = replacement;
+        document->url = lam::own(replacement);
         return true;
     }
     // Input and the loader can retain document->url across navigation, so
@@ -557,13 +557,13 @@ void DomDocument::destroy() {
     log_debug("dom_document_destroy: destroyed document and arena");
 }
 
-bool dom_document_add_resource(DomDocument* document, void* data,
+bool dom_document_add_resource(DomDocument* document, DomDocumentResourceData* data,
                                DomDocumentResourceDestroyFn destroy) {
     if (!document || !data || !destroy) return false;
     DomDocumentResource* resource = (DomDocumentResource*)mem_calloc(
         1, sizeof(DomDocumentResource), MEM_CAT_LAYOUT);
     if (!resource) return false;
-    resource->data = data;
+    resource->data = lam::own(data);
     resource->destroy = destroy;
     resource->next = document->resources;
     document->resources = lam::own(resource);

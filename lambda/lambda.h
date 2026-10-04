@@ -686,6 +686,7 @@ typedef enum SysFunc {
     SYSFUNC_INTERSECT3,
     SYSFUNC_INTERSECT4,
     SYSFUNC_EXCEPT,
+    SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
 } SysFunc;
 
 typedef struct Type {
@@ -3416,6 +3417,8 @@ extern "C" {
     Item pn_io_symlink(Item target, Item link);
     Item pn_io_chmod(Item path, Item mode);
     Item pn_io_rename(Item old_path, Item new_path);
+    Item pn_io_grep2(Item source, Item pattern);
+    Item pn_io_grep3(Item source, Item pattern, Item options);
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
 

@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <pthread.h>
 
 #include "../radiant/render.hpp"
 #include "../lib/mempool.h"
@@ -136,7 +137,7 @@ TEST_F(RetainedDisplayListTest, TracksSkippedBorrowedResourceWithoutGeneration) 
     image->op = DL_DRAW_IMAGE;
     image->bounds[2] = 2.0f;
     image->bounds[3] = 2.0f;
-    image->draw_image.pixels = pixels;
+    image->draw_image.local_pixels = lam::up((const uint32_t*)pixels);
     image->draw_image.src_w = 2;
     image->draw_image.src_h = 2;
     image->draw_image.src_stride = 2;
@@ -461,7 +462,6 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedSurfaceGeneration) {
     blit->op = DL_BLIT_SURFACE_SCALED;
     blit->bounds[2] = 10.0f;
     blit->bounds[3] = 10.0f;
-    blit->blit_surface_scaled.src_surface = surface;
     blit->blit_surface_scaled.src_resource = surface->self;
     blit->blit_surface_scaled.src_generation = surface->generation;
     dl_end_element(&source, begin);
@@ -500,8 +500,8 @@ TEST_F(RetainedDisplayListTest, DeepCopiesRasterClipShapeStacksForRetainedReplay
     fill->fill_surface_rect.clip_shapes.depth = 1;
     fill->fill_surface_rect.clip_shapes.type[0] = CLIP_SHAPE_POLYGON;
     fill->fill_surface_rect.clip_shapes.polygon_count[0] = 3;
-    fill->fill_surface_rect.clip_shapes.polygon_vx[0] = vx;
-    fill->fill_surface_rect.clip_shapes.polygon_vy[0] = vy;
+    fill->fill_surface_rect.clip_shapes.polygon_vx[0] = lam::own_arr(vx);
+    fill->fill_surface_rect.clip_shapes.polygon_vy[0] = lam::own_arr(vy);
     dl_end_element(&source, begin);
 
     RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
@@ -584,7 +584,6 @@ TEST_F(RetainedDisplayListTest, RejectsStaleBorrowedImageGeneration) {
     image->op = DL_DRAW_IMAGE;
     image->bounds[2] = 2.0f;
     image->bounds[3] = 2.0f;
-    image->draw_image.pixels = pixels;
     image->draw_image.resource = surface->self;
     image->draw_image.resource_generation = surface->generation;
     dl_end_element(&source, begin);
@@ -625,7 +624,6 @@ TEST_F(RetainedDisplayListTest, RejectsRetainedImageAfterSurfaceDestroyed) {
     image->op = DL_DRAW_IMAGE;
     image->bounds[2] = 2.0f;
     image->bounds[3] = 2.0f;
-    image->draw_image.pixels = pixels;
     image->draw_image.resource = surface->self;
     image->draw_image.resource_generation = surface->generation;
     dl_end_element(&source, begin);
@@ -660,7 +658,7 @@ TEST_F(RetainedDisplayListTest, StackSurfaceIsNotRetained) {
     image->op = DL_DRAW_IMAGE;
     image->bounds[2] = 2.0f;
     image->bounds[3] = 2.0f;
-    image->draw_image.pixels = pixels;
+    image->draw_image.local_pixels = lam::up((const uint32_t*)pixels);
     image->draw_image.resource = surface.self;  // null: built on the stack
     image->draw_image.resource_generation = surface.generation;
     dl_end_element(&source, begin);
@@ -685,7 +683,7 @@ TEST_F(RetainedDisplayListTest, RejectsBorrowedImageWithoutGenerationAtCapture) 
     image->op = DL_DRAW_IMAGE;
     image->bounds[2] = 2.0f;
     image->bounds[3] = 2.0f;
-    image->draw_image.pixels = pixels;
+    image->draw_image.local_pixels = lam::up((const uint32_t*)pixels);
     image->draw_image.resource = lam::Handle<ImageSurface>{};
     image->draw_image.resource_generation = 0;
     dl_end_element(&source, begin);
@@ -957,4 +955,169 @@ TEST_F(RetainedDisplayListTest, RejectsStaleWebviewSurfaceGeneration) {
     retained_dl_cache_destroy(cache);
     dl_destroy(&source);
     free_test_surface(surface);
+}
+
+// M6 gate: image surfaces evicted and replaced while their retained fragments
+// stay captured. An evicted surface's fragment must be rejected through its
+// handle (never by reading the freed surface); a live one must still append.
+TEST_F(RetainedDisplayListTest, EvictionStressRejectsEvictedSurfacesAndKeepsLiveOnes) {
+    const int count = 48;
+    ImageSurface* surfaces[count] = {};
+    uint32_t pixels[count][4] = {};
+    RetainedDisplayListCache* cache = retained_dl_cache_create(pool);
+    ASSERT_NE(cache, nullptr);
+    uint32_t seed = 12345;
+    for (int round = 0; round < 40; round++) {
+        DisplayList source = {};
+        dl_init(&source, arena);
+        int image_index[count] = {};
+        for (int i = 0; i < count; i++) {
+            if (!surfaces[i]) {
+                surfaces[i] = image_surface_alloc();
+                ASSERT_NE(surfaces[i], nullptr);
+                surfaces[i]->width = surfaces[i]->height = 2;
+                image_surface_bump_generation(surfaces[i]);
+            }
+            int begin = dl_begin_element(&source, 1000 + i, (float)i * 4.0f, 0.0f, 2.0f, 2.0f);
+            image_index[i] = source.item_count();
+            DisplayItem* image = dl_alloc_item(&source);
+            ASSERT_NE(image, nullptr);
+            image->op = DL_DRAW_IMAGE;
+            image->bounds[0] = (float)i * 4.0f;
+            image->bounds[2] = image->bounds[3] = 2.0f;
+            surfaces[i]->pixels = pixels[i]; surfaces[i]->pitch = 8;
+            image->draw_image.src_w = image->draw_image.src_h = image->draw_image.src_stride = 2;
+            image->draw_image.surface_w = image->draw_image.surface_h = 2;
+            image->draw_image.resource = surfaces[i]->self;
+            image->draw_image.resource_generation = surfaces[i]->generation;
+            dl_end_element(&source, begin);
+        }
+        retained_dl_cache_capture(cache, &source);
+        // evict about a third of the surfaces, as a cache under pressure would
+        bool evicted[count] = {};
+        for (int i = 0; i < count; i++) {
+            seed = seed * 1103515245u + 12345u;
+            if ((seed >> 16) % 3 == 0) {
+                free_test_surface(surfaces[i]);
+                surfaces[i] = nullptr;
+                evicted[i] = true;
+            }
+        }
+        DisplayList replay = {};
+        dl_init(&replay, replay_arena);
+        for (int i = 0; i < count; i++) {
+            const RetainedDisplayListFragment* fragment = retained_dl_cache_get(cache, 1000 + i);
+            ASSERT_NE(fragment, nullptr);
+            bool valid = retained_dl_fragment_resources_valid(fragment, 0, 1);
+            EXPECT_EQ(valid, !evicted[i]) << "round " << round << " element " << i;
+            if (valid) EXPECT_TRUE(retained_dl_append_fragment(&replay, fragment));
+            // replay resolves a live owner's pixels; an evicted one draws nothing
+            const DisplayItem* image_item = &source.data()[image_index[i]];
+            ASSERT_EQ(image_item->op, DL_DRAW_IMAGE);
+            DlResolvedImage resolved;
+            ImageSurfaceReadScope read_scope;
+            EXPECT_EQ(dl_draw_image_resolve(&image_item->draw_image, &resolved), !evicted[i]);
+            if (!evicted[i]) EXPECT_EQ(resolved.pixels, pixels[i]);
+        }
+        dl_destroy(&replay);
+        dl_destroy(&source);
+    }
+    for (int i = 0; i < count; i++) if (surfaces[i]) free_test_surface(surfaces[i]);
+    retained_dl_cache_destroy(cache);
+}
+
+// image_surface_destroy's two steps (it lives in surface.cpp, which this test
+// does not link): queue while a read scope is open, otherwise release now
+static void retire_test_surface(ImageSurface* surface) {
+    if (!image_surface_defer_release(surface)) image_surface_release_now(surface);
+}
+
+static ImageSurface* alloc_test_surface_with_pixels(uint32_t value) {
+    ImageSurface* surface = image_surface_alloc();
+    if (!surface) return nullptr;
+    surface->owned_pixels = lam::own_arr((uint8_t*)mem_alloc(4 * sizeof(uint32_t), MEM_CAT_IMAGE));
+    if (!surface->owned_pixels) { image_surface_release_now(surface); return nullptr; }
+    surface->pixels = surface->owned_pixels;
+    for (int i = 0; i < 4; i++) ((uint32_t*)surface->pixels)[i] = value;
+    surface->width = surface->height = 2; surface->pitch = 8;
+    return surface;
+}
+
+// A surface destroyed inside an open read scope stays readable through a
+// pointer resolved earlier, while new lookups already see it gone.
+TEST_F(RetainedDisplayListTest, DestroyInsideReadScopeDefersRelease) {
+    ImageSurface* surface = alloc_test_surface_with_pixels(0xff112233u);
+    ASSERT_NE(surface, nullptr);
+    lam::Handle<ImageSurface> handle = surface->self;
+    {
+        ImageSurfaceReadScope read_scope;
+        ImageSurface* resolved = image_surface_lookup(handle);
+        ASSERT_EQ(resolved, surface);
+        retire_test_surface(surface);
+        EXPECT_EQ(image_surface_lookup(handle), nullptr);
+        // still intact until the scope closes (AddressSanitizer would flag a free)
+        EXPECT_EQ(((uint32_t*)resolved->pixels)[3], 0xff112233u);
+    }
+    EXPECT_EQ(image_surface_lookup(handle), nullptr);
+}
+
+// M6 gate: surfaces are destroyed and replaced while reader threads, like tile
+// workers, resolve handles and read pixels inside their read scopes. Under
+// AddressSanitizer any use of a released surface fails the run.
+TEST_F(RetainedDisplayListTest, EvictionWhileReadersReplayIsSafe) {
+    const int count = 32;
+    static lam::Handle<ImageSurface> handles[count];
+    ImageSurface* surfaces[count] = {};
+    for (int i = 0; i < count; i++) {
+        surfaces[i] = alloc_test_surface_with_pixels(0xff000000u | (uint32_t)i);
+        ASSERT_NE(surfaces[i], nullptr);
+        __atomic_store_n(&handles[i].index, surfaces[i]->self.index, __ATOMIC_RELAXED);
+        __atomic_store_n(&handles[i].gen, surfaces[i]->self.gen, __ATOMIC_RELEASE);
+    }
+    static int stop = 0;
+    static uint64_t reads = 0;
+    __atomic_store_n(&stop, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&reads, (uint64_t)0, __ATOMIC_RELEASE);
+    auto reader = [](void*) -> void* {
+        image_surface_mark_render_worker_thread();
+        uint64_t local = 0, checksum = 0;
+        while (!__atomic_load_n(&stop, __ATOMIC_ACQUIRE)) {
+            ImageSurfaceReadScope read_scope;
+            for (int i = 0; i < 32; i++) {
+                lam::Handle<ImageSurface> handle;
+                handle.gen = __atomic_load_n(&handles[i].gen, __ATOMIC_ACQUIRE);
+                handle.index = __atomic_load_n(&handles[i].index, __ATOMIC_RELAXED);
+                ImageSurface* surface = image_surface_lookup(handle);
+                if (!surface || !surface->pixels) continue;
+                for (int p = 0; p < 4; p++) checksum += ((const uint32_t*)surface->pixels)[p];
+                local++;
+            }
+        }
+        __atomic_add_fetch(&reads, local + (checksum & 0), __ATOMIC_RELAXED);
+        return nullptr;
+    };
+    pthread_t threads[4];
+    for (int t = 0; t < 4; t++) ASSERT_EQ(pthread_create(&threads[t], nullptr, reader, nullptr), 0);
+    uint32_t seed = 777;
+    for (int round = 0; round < 4000; round++) {
+        seed = seed * 1103515245u + 12345u;
+        int i = (int)((seed >> 16) % count); // INT_CAST_OK: bounded slot index
+        ImageSurface* replacement = alloc_test_surface_with_pixels(0xff000000u | (uint32_t)round);
+        ASSERT_NE(replacement, nullptr);
+        ImageSurface* old = surfaces[i];
+        surfaces[i] = replacement;
+        __atomic_store_n(&handles[i].index, replacement->self.index, __ATOMIC_RELAXED);
+        __atomic_store_n(&handles[i].gen, replacement->self.gen, __ATOMIC_RELEASE);
+        retire_test_surface(old);
+        // the host releases the queue at its quiet points
+        if (round % 64 == 0) {
+            ImageSurfaceReadScope host_scope;
+        }
+    }
+    __atomic_store_n(&stop, 1, __ATOMIC_RELEASE);
+    for (int t = 0; t < 4; t++) pthread_join(threads[t], nullptr);
+    image_surface_drain_retired();
+    for (int i = 0; i < count; i++) retire_test_surface(surfaces[i]);
+    image_surface_drain_retired();
+    EXPECT_GT(__atomic_load_n(&reads, __ATOMIC_RELAXED), 0u);
 }

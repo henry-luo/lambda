@@ -236,7 +236,7 @@ void render_path_append_svg_rounded_rect(StrBuf* out, Rect rect,
     rdt_path_free(path);
 }
 
-RdtPath* render_path_create_clip_path(RenderContext* rdcon) {
+RdtPath* render_path_create_clip_path(RasterRenderContext* rdcon) {
     if (!rdcon) {
         return nullptr;
     }

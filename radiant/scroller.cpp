@@ -77,7 +77,7 @@ void ScrollPane::reset() {
     state_ref = state;
 }
 
-void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(RasterRenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     DocState* state, View* view,
     bool show_hz_scroll, bool show_vt_scroll) {
@@ -146,7 +146,7 @@ void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
     log_debug("finished rendering scroller");
 }
 
-void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
+void setup_scroller(RasterRenderContext* rdcon, ViewBlock* block) {
     float s = rdcon->raster_scale;
     Bound padding_clip;
     if (layout_block_overflow_clip(block, &padding_clip)) {
@@ -198,7 +198,7 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     }
 }
 
-void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
+void render_scroller(RasterRenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
     log_debug("render scrollbars");
     // need to reset block.x and y, which was changed by the scroller
     float s = rdcon->raster_scale;

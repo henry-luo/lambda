@@ -364,14 +364,16 @@ struct SvgDomStyleScope {
     float viewport_height;
     bool has_viewport;
 };
-typedef bool (*SvgPathContainsFn)(const RdtPath*, const RdtMatrix*, RdtFillRule, void*);
+struct RdtLogicalPoint;
+// a clip hit query asks whether the logical point lies inside a clip path
+typedef bool (*SvgPathContainsFn)(const RdtPath*, const RdtMatrix*, RdtFillRule, const struct RdtLogicalPoint*);
 struct SvgClipHitQuery {
     SvgPathContainsFn contains;
-    void* data;
+    lam::Up<const struct RdtLogicalPoint> point;
     bool hit;
 };
 bool svg_dom_clip_contains_point(DomElement* element, const SvgLengthContext* lengths,
-    FontContext* fonts, const RdtMatrix* frame, SvgPathContainsFn contains, void* data,
+    FontContext* fonts, const RdtMatrix* frame, SvgPathContainsFn contains, const struct RdtLogicalPoint* point,
     const SvgDomStyleScope* scope = nullptr);
 DomNode* svg_dom_style_parent(DomNode* node, const SvgDomStyleScope* scope);
 const char* svg_get_dom_presentation_property(DomElement* element, const char* name,
@@ -651,12 +653,16 @@ typedef struct {
 } DlFillRadialGradient;
 
 typedef struct {
-    // Owning surface, by handle: a retained list checks liveness through the
-    // slot table instead of reading a surface that may be gone. Null when the
-    // pixels have no registered owner (then the item is never retained).
+    // Owned image: the owner's handle, the drawn region's origin in the owner's
+    // pixels and the owner's decoded size when recorded. Replay resolves the
+    // handle (dl_draw_image_resolve) and reads the owner's pixels then: a stale
+    // handle draws nothing, a changed generation draws the current frame.
     lam::Handle<ImageSurface> resource;
     uint64_t resource_generation;
-    const uint32_t* pixels;  // borrowed — image lifetime must exceed display list
+    int src_x, src_y;
+    int surface_w, surface_h;
+    // Unowned image (null handle): frame-local pixels, never retained.
+    lam::Up<const uint32_t> local_pixels;
     int src_w, src_h, src_stride;
     float dst_x, dst_y, dst_w, dst_h;
     uint8_t opacity;
@@ -694,8 +700,8 @@ typedef struct {
     int type[RDT_MAX_CLIP_SHAPES];
     float params[RDT_MAX_CLIP_SHAPES][8];
     int polygon_count[RDT_MAX_CLIP_SHAPES];
-    float* polygon_vx[RDT_MAX_CLIP_SHAPES];
-    float* polygon_vy[RDT_MAX_CLIP_SHAPES];
+    lam::OwnArr<float> polygon_vx[RDT_MAX_CLIP_SHAPES];  // display-list arena copies
+    lam::OwnArr<float> polygon_vy[RDT_MAX_CLIP_SHAPES];
 } DlClipShapeStack;
 
 // Direct-pixel fill (selection highlights, surface clear, etc.)
@@ -708,8 +714,8 @@ typedef struct {
 
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
 typedef struct {
-    ImageSurface* src_surface;           // borrowed for replay
-    lam::Handle<ImageSurface> src_resource;  // liveness for retained replay; may be null
+    lam::Handle<ImageSurface> src_resource;  // the source surface, resolved at replay
+    lam::Up<ImageSurface> local_source;  // unowned source (null handle) only: frame-local, never retained
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
@@ -986,6 +992,21 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
                              RdtFillRule rule, const RdtMatrix* transform,
                              const RdtMatrix* gradient_transform,
                               const RdtGradientOptions* options = nullptr);
+
+// An image item's pixels for this replay, read inside an ImageSurfaceReadScope.
+typedef struct DlResolvedImage {
+    lam::Up<const uint32_t> pixels;  // valid until the enclosing read scope ends
+    int width, height, stride;
+    bool straight_alpha;
+    uint64_t generation;
+    lam::Up<ImageSurface> owner;   // null for an unowned item
+} DlResolvedImage;
+// Resolves the owner's current pixels (the recorded region, scaled when the
+// owner was re-decoded at another size) or an unowned item's frame-local
+// pixels. False when the owner is gone: the item draws nothing.
+bool dl_draw_image_resolve(const DlDrawImage* item, DlResolvedImage* out);
+// The source surface of a blit for this replay, or null when it is gone.
+ImageSurface* dl_blit_source_resolve(const DlBlitSurfaceScaled* item);
 
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
@@ -1271,7 +1292,7 @@ typedef struct {
 } PaintFillRoundedRect;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     Color color;
     RdtFillRule rule;
@@ -1280,7 +1301,7 @@ typedef struct {
 } PaintFillPath;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     Color color;
     float width;
@@ -1295,10 +1316,10 @@ typedef struct {
 } PaintStrokePath;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float x1, y1, x2, y2;
-    const RdtGradientStop* stops;  // the stops drawn: borrowed, or owned_stops
+    lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
     RdtFillRule rule;
@@ -1311,10 +1332,10 @@ typedef struct {
 } PaintFillLinearGradient;
 
 typedef struct {
-    RdtPath* path;          // the path drawn: borrowed, or owned_path
+    lam::Up<RdtPath> path;  // the path drawn: borrowed, or owned_path
     lam::Own<RdtPath> owned_path;  // set when a deferred lowerer handed the path to this command
     float cx, cy, r;
-    const RdtGradientStop* stops;  // the stops drawn: borrowed, or owned_stops
+    lam::Up<const RdtGradientStop> stops;  // the stops drawn: borrowed, or owned_stops
     lam::OwnArr<RdtGradientStop> owned_stops;  // set when this command took the stop array
     int stop_count;
     RdtFillRule rule;
@@ -1538,7 +1559,7 @@ void paint_ir_register_svg_subscene_lowerers(PaintSvgSubsceneRasterLowerFn raste
 typedef struct {
     lam::Up<FontBox> font;
     Color color;
-    const char* text;               // optional native text payload; UTF-8, borrowed, or owned_text
+    lam::Up<const char> text;       // optional native text payload; UTF-8, borrowed, or owned_text
     int text_len;            // bytes; 0 means empty, negative means strlen(text)
     lam::Own<const char> owned_text;  // set when the paint list keeps the text
     lam::Up<const char> font_family; // borrowed; optional for vector text lowering
@@ -1853,21 +1874,25 @@ bool retained_dl_append_fragment(DisplayList* dst,
 struct RenderProfiler;
 typedef struct RenderProfiler RenderProfiler;
 
-// Semantic paint IR recording target (paint_ir.h). A RenderContext that records
+// Semantic paint IR recording target (paint_ir.h). A RasterRenderContext that records
 // painter commands must provide both paint_list and dl; the rc_* gateway emits
 // through the PaintBuilder and lowers to the display list, so the live raster
 // path flows through the semantic IR.
 struct PaintList;
 typedef struct PaintList PaintList;
 
-typedef struct RenderContext {
+// The state every render backend's walk carries. The raster painter and the
+// SVG and PDF exporters derive from it; RenderBackend::ctx points at it.
+struct RenderContext {
     FontBox font;  // current font style
     BlockBlot block;
-    ListBlot list;
     Color color;
-    RdtVector vec;      // platform-agnostic vector renderer
-
     lam::Up<UiContext> ui_context;
+};
+
+typedef struct RasterRenderContext : RenderContext {
+    ListBlot list;
+    RdtVector vec;      // platform-agnostic vector renderer
 
     // Display list for deferred rendering (Phase 1)
     // When non-NULL, render functions record to dl instead of drawing directly.
@@ -1910,14 +1935,14 @@ typedef struct RenderContext {
     // Suppresses automatic per-block display-list markers while a caller records
     // a wider element subtree marker around replaced/layer content.
     int element_marker_suppression_depth;
-} RenderContext;
+} RasterRenderContext;
 
 struct RenderFrameScope {
-    lam::Up<RenderContext> rdcon;
+    lam::Up<RasterRenderContext> rdcon;
     DisplayList display_list;
     bool context_active;
     bool display_list_active;
-    RenderFrameScope(RenderContext* r, UiContext* uicon, ViewTree* view_tree,
+    RenderFrameScope(RasterRenderContext* r, UiContext* uicon, ViewTree* view_tree,
                      RenderProfiler* profiler);
     ~RenderFrameScope();
     DisplayList* list() { return display_list_active ? &display_list : nullptr; }
@@ -1932,25 +1957,25 @@ typedef struct RenderElementMarkerScope {
     int begin_index;
 } RenderElementMarkerScope;
 
-bool render_block_dirty_misses(RenderContext* rdcon, ViewBlock* block);
-bool render_block_viewport_misses(RenderContext* rdcon, ViewBlock* block);
-bool render_block_try_retained_fragment(RenderContext* rdcon, ViewBlock* block);
-void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
+bool render_block_dirty_misses(RasterRenderContext* rdcon, ViewBlock* block);
+bool render_block_viewport_misses(RasterRenderContext* rdcon, ViewBlock* block);
+bool render_block_try_retained_fragment(RasterRenderContext* rdcon, ViewBlock* block);
+void render_block_view(RasterRenderContext* rdcon, ViewBlock* view_block);
 // render embedded HTML through the ordinary child, scrolling and stacking phases.
-double render_block_paint_children(RenderContext* rdcon, ViewBlock* block);
-void render_embed_doc(RenderContext* rdcon, ViewBlock* block);
+double render_block_paint_children(RasterRenderContext* rdcon, ViewBlock* block);
+void render_embed_doc(RasterRenderContext* rdcon, ViewBlock* block);
 Color render_document_canvas_background(View* root_view);
 Color render_document_output_background(View* root_view);
-void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
-void render_bound(RenderContext* rdcon, ViewBlock* view);
-void render_outline_deferred(RenderContext* rdcon, ViewBlock* view);
-void render_children(RenderContext* rdcon, View* view);
-void render_raster_positioned_children(RenderContext* rdcon, ViewBlock* block);
-void render_raster_positive_z_descendants(RenderContext* rdcon, View* view);
-bool render_raster_custom_layout_children(RenderContext* rdcon, ViewBlock* block);
-void render_raster_view_tree(RenderContext* rdcon, ViewTree* view_tree);
-RenderElementMarkerScope render_element_marker_begin(RenderContext* rdcon, ViewBlock* block);
-void render_element_marker_end(RenderContext* rdcon, RenderElementMarkerScope* scope);
+void render_inline_view(RasterRenderContext* rdcon, ViewSpan* view_span);
+void render_bound(RasterRenderContext* rdcon, ViewBlock* view);
+void render_outline_deferred(RasterRenderContext* rdcon, ViewBlock* view);
+void render_children(RasterRenderContext* rdcon, View* view);
+void render_raster_positioned_children(RasterRenderContext* rdcon, ViewBlock* block);
+void render_raster_positive_z_descendants(RasterRenderContext* rdcon, View* view);
+bool render_raster_custom_layout_children(RasterRenderContext* rdcon, ViewBlock* block);
+void render_raster_view_tree(RasterRenderContext* rdcon, ViewTree* view_tree);
+RenderElementMarkerScope render_element_marker_begin(RasterRenderContext* rdcon, ViewBlock* block);
+void render_element_marker_end(RasterRenderContext* rdcon, RenderElementMarkerScope* scope);
 
 // Shut down the render pool (must be called before rdt_engine_term)
 void render_pool_shutdown();
@@ -2003,69 +2028,69 @@ typedef struct RadiantStackPaintList {
 } RadiantStackPaintList;
 
 struct RenderBackend {
-    void* ctx;   // backend-specific context (SvgRenderContext*, PdfRenderContext*, etc.)
+    lam::Up<RenderContext> ctx;   // the backend's context: RasterRenderContext, SvgRenderContext or PdfRenderContext
 
     // Optional full-node overrides. Raster screen rendering uses these for
     // specialized block and inline paths behind the shared walker.
     // Backends that leave these null use the generic callbacks below.
-    void (*render_block)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
+    void (*render_block)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y,
                          FontBox* font, Color color);
-    void (*render_inline)(void* ctx, ViewSpan* span, float abs_x, float abs_y,
+    void (*render_inline)(RenderContext* ctx, ViewSpan* span, float abs_x, float abs_y,
                           FontBox* font, Color color);
 
     // ── Boundary rendering (background, borders, shadow, outline) ──────
     // Called for every block/inline element that has a BoundaryProp.
     // abs_x/abs_y = absolute CSS-px position of the element on the page.
-    void (*render_bound)(void* ctx, ViewBlock* view, float abs_x, float abs_y);
+    void (*render_bound)(RenderContext* ctx, ViewBlock* view, float abs_x, float abs_y);
 
     // ── Text rendering ─────────────────────────────────────────────────
     // Called for every ViewText node.
     // abs_x/abs_y = absolute position of the text's containing block.
-    void (*render_text)(void* ctx, ViewText* text, float abs_x, float abs_y,
+    void (*render_text)(RenderContext* ctx, ViewText* text, float abs_x, float abs_y,
                         FontBox* font, Color color);
 
     // ── Image rendering ────────────────────────────────────────────────
     // Called for blocks with embed->img.
-    void (*render_image)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*render_image)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
 
     // ── Inline SVG subscene ────────────────────────────────────────────
     // Called for MARKUP_NAME_SVG blocks. If NULL, skipped.
-    void (*render_inline_svg)(void* ctx, ViewBlock* block, float abs_x, float abs_y,
+    void (*render_inline_svg)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y,
                               FontBox* font, Color color);
-    void (*render_svg_subscene)(void* ctx, const PaintSvgSubscene* subscene);
+    void (*render_svg_subscene)(RenderContext* ctx, const PaintSvgSubscene* subscene);
 
     // ── Children group wrappers ────────────────────────────────────────
     // Emits container markup around a block's children (e.g. <g class="block"> in SVG).
     // begin returns an opaque cookie; end receives it for matched close.
-    void (*begin_block_children)(void* ctx, ViewBlock* block);
-    void (*end_block_children)(void* ctx, ViewBlock* block);
-    void (*begin_inline_children)(void* ctx, ViewSpan* span);
-    void (*end_inline_children)(void* ctx, ViewSpan* span);
+    void (*begin_block_children)(RenderContext* ctx, ViewBlock* block);
+    void (*end_block_children)(RenderContext* ctx, ViewBlock* block);
+    void (*begin_inline_children)(RenderContext* ctx, ViewSpan* span);
+    void (*end_inline_children)(RenderContext* ctx, ViewSpan* span);
 
     // ── Semantic effect wrapper ────────────────────────────────────────
     // Called around content affected by CSS stacking effects.
-    void (*begin_effect_group)(void* ctx, const PaintEffectGroup* group);
-    void (*end_effect_group)(void* ctx);
+    void (*begin_effect_group)(RenderContext* ctx, const PaintEffectGroup* group);
+    void (*end_effect_group)(RenderContext* ctx);
 
     // ── Transform wrapper ──────────────────────────────────────────────
     // Called around a block's self-paint and contents when CSS transforms are present.
-    void (*begin_transform)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
-    void (*end_transform)(void* ctx);
+    void (*begin_transform)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*end_transform)(RenderContext* ctx);
 
     // ── List marker rendering ───────────────────────────────────────────
     // Called for RDT_VIEW_MARKER nodes (::marker pseudo-elements).
     // Renders bullets (disc/circle/square), numbers (decimal/roman/alpha),
     // or disclosure triangles (for <summary>).
-    void (*render_marker)(void* ctx, ViewSpan* marker, float abs_x, float abs_y,
+    void (*render_marker)(RenderContext* ctx, ViewSpan* marker, float abs_x, float abs_y,
                           FontBox* font, Color color);
 
     // ── Column rules ───────────────────────────────────────────────────
-    void (*render_column_rules)(void* ctx, ViewBlock* block, float abs_x, float abs_y);
+    void (*render_column_rules)(RenderContext* ctx, ViewBlock* block, float abs_x, float abs_y);
 
     // ── Font setup ─────────────────────────────────────────────────────
     // Called when a view node specifies a font. Backend can update its
     // font state (e.g. PDF needs to call HPDF_Page_SetFontAndSize).
-    void (*on_font_change)(void* ctx, FontProp* font_prop);
+    void (*on_font_change)(RenderContext* ctx, FontProp* font_prop);
 };
 
 // Shared tree-walk state (managed by render_walk.cpp, passed to callbacks via ctx).
@@ -2822,12 +2847,15 @@ void radiant_stack_sort_in_paint_order(ArrayList* views);
 // ===== render_paint_block.hpp =====
 struct ViewBlock;
 
+// a block paint driver (generic walk or raster painter) derives from this
+struct RenderPaintBlockDriver {};
+
 typedef struct RenderPaintBlockOps {
-    void* ctx;
-    bool (*begin)(void* ctx, ViewBlock* block, void** phase);
-    bool (*paint_self)(void* ctx, ViewBlock* block, void* phase);
-    double (*paint_children)(void* ctx, ViewBlock* block, void* phase);
-    void (*finish)(void* ctx, ViewBlock* block, void* phase);
+    lam::Up<RenderPaintBlockDriver> ctx;
+    bool (*begin)(RenderPaintBlockDriver* ctx, ViewBlock* block, void** phase);
+    bool (*paint_self)(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase);
+    double (*paint_children)(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase);
+    void (*finish)(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase);
 } RenderPaintBlockOps;
 
 typedef struct RenderPaintBlockResult {
@@ -3238,76 +3266,76 @@ static inline void paint_record_blit_surface_scaled(PaintRecordTarget* target, c
 }
 
 // ===== render_painter.hpp =====
-struct RenderContext;
-typedef struct RenderContext RenderContext;
+struct RasterRenderContext;
+typedef struct RasterRenderContext RasterRenderContext;
 
 // ---------------------------------------------------------------------------
 // rc_* — Render-context drawing wrappers (record through PaintIR/DisplayList)
 // ---------------------------------------------------------------------------
 
-void rc_fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color);
-void rc_fill_rounded_rect(RenderContext* rdcon, float x, float y, float w, float h,
+void rc_fill_rect(RasterRenderContext* rdcon, float x, float y, float w, float h, Color color);
+void rc_fill_rounded_rect(RasterRenderContext* rdcon, float x, float y, float w, float h,
                           float rx, float ry, Color color);
-void rc_fill_path(RenderContext* rdcon, RdtPath* path, Color color,
+void rc_fill_path(RasterRenderContext* rdcon, RdtPath* path, Color color,
                   RdtFillRule rule, const RdtMatrix* transform);
-void rc_stroke_path(RenderContext* rdcon, RdtPath* path, Color color, float width,
+void rc_stroke_path(RasterRenderContext* rdcon, RdtPath* path, Color color, float width,
                     RdtStrokeCap cap, RdtStrokeJoin join,
                     const float* dash_array, int dash_count,
                     const RdtMatrix* transform, float dash_phase = 0);
-void rc_fill_linear_gradient(RenderContext* rdcon, RdtPath* path,
+void rc_fill_linear_gradient(RasterRenderContext* rdcon, RdtPath* path,
                              float x1, float y1, float x2, float y2,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform);
-void rc_fill_radial_gradient(RenderContext* rdcon, RdtPath* path,
+void rc_fill_radial_gradient(RasterRenderContext* rdcon, RdtPath* path,
                              float cx, float cy, float r,
                              const RdtGradientStop* stops, int stop_count,
                              RdtFillRule rule, const RdtMatrix* transform);
-void rc_draw_image(RenderContext* rdcon, const uint32_t* pixels,
+void rc_draw_image(RasterRenderContext* rdcon, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,
                    float dst_x, float dst_y, float dst_w, float dst_h,
                    uint8_t opacity, const RdtMatrix* transform,
                    ImageSurface* resource_owner = nullptr);
-void rc_draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
+void rc_draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y,
                    Color color, bool is_color_emoji, const Bound* clip,
                    const RdtMatrix* transform, uint64_t resource_generation);
-void rc_draw_picture(RenderContext* rdcon, RdtPicture* picture,
+void rc_draw_picture(RasterRenderContext* rdcon, RdtPicture* picture,
                      uint8_t opacity, const RdtMatrix* transform);
-void rc_video_placeholder(RenderContext* rdcon, struct RdtVideo* video,
+void rc_video_placeholder(RasterRenderContext* rdcon, struct RdtVideo* video,
                           float dst_x, float dst_y, float dst_w, float dst_h,
                           int object_fit, const Bound* clip,
                           uint64_t video_generation);
-void rc_webview_layer_placeholder(RenderContext* rdcon, ImageSurface* surface,
+void rc_webview_layer_placeholder(RasterRenderContext* rdcon, ImageSurface* surface,
                                   float dst_x, float dst_y, float dst_w, float dst_h,
                                   const Bound* clip,
                                   uint64_t surface_generation);
-void rc_push_clip(RenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform);
-void rc_pop_clip(RenderContext* rdcon);
-void rc_save_backdrop(RenderContext* rdcon, int x0, int y0, int w, int h);
-void rc_composite_opacity(RenderContext* rdcon, int x0, int y0, int w, int h,
+void rc_push_clip(RasterRenderContext* rdcon, RdtPath* clip_path, const RdtMatrix* transform);
+void rc_pop_clip(RasterRenderContext* rdcon);
+void rc_save_backdrop(RasterRenderContext* rdcon, int x0, int y0, int w, int h);
+void rc_composite_opacity(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
                           float opacity, bool premultiplied_source = false);
-void rc_apply_blend_mode(RenderContext* rdcon, int x0, int y0, int w, int h,
+void rc_apply_blend_mode(RasterRenderContext* rdcon, int x0, int y0, int w, int h,
                          int blend_mode);
-void rc_apply_filter(RenderContext* rdcon, float x, float y, float w, float h,
+void rc_apply_filter(RasterRenderContext* rdcon, float x, float y, float w, float h,
                      FilterProp* filter, const Bound* clip);
-void rc_box_blur_region(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+void rc_box_blur_region(RasterRenderContext* rdcon, int rx, int ry, int rw, int rh,
                         float blur_radius, int clip_type, const float* clip_params,
                         int exclude_type = 0, const float* exclude_params = nullptr,
                         bool premultiply_source = false,
                         bool tint_source = false, Color tint_color = Color{});
-void rc_box_blur_inset(RenderContext* rdcon, int rx, int ry, int rw, int rh,
+void rc_box_blur_inset(RasterRenderContext* rdcon, int rx, int ry, int rw, int rh,
                        int pad, float blur_radius, uint32_t bg_color);
-void rc_shadow_clip_save(RenderContext* rdcon, int rx, int ry, int rw, int rh);
-void rc_shadow_clip_restore(RenderContext* rdcon, int exclude_type, const float* exclude_params,
+void rc_shadow_clip_save(RasterRenderContext* rdcon, int rx, int ry, int rw, int rh);
+void rc_shadow_clip_restore(RasterRenderContext* rdcon, int exclude_type, const float* exclude_params,
                             int save_rx, int save_ry, int save_rw, int save_rh,
                             int restore_inside);
-void rc_outer_shadow(RenderContext* rdcon,
+void rc_outer_shadow(RasterRenderContext* rdcon,
                      float shadow_x, float shadow_y, float shadow_w, float shadow_h,
                      float sr_tl, float sr_tr, float sr_br, float sr_bl,
                      Color color, float blur_radius,
                      int exclude_type, const float* exclude_params,
                      int clip_type, const float* clip_params);
 
-void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
+void rc_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                           Rect* rect, uint32_t color, Bound* clip,
                           ClipShape** clip_shapes, int clip_depth);
 
@@ -3315,18 +3343,18 @@ void rc_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
 // Feature-facing painter helpers
 // ---------------------------------------------------------------------------
 
-void render_painter_draw_picture_rect(RenderContext* rdcon, RdtPicture* picture,
+void render_painter_draw_picture_rect(RasterRenderContext* rdcon, RdtPicture* picture,
                                       Rect* dst_rect, Bound* clip,
                                       uint8_t opacity);
-void render_painter_draw_pixels_rect(RenderContext* rdcon, const uint32_t* pixels,
+void render_painter_draw_pixels_rect(RasterRenderContext* rdcon, const uint32_t* pixels,
                                      int src_w, int src_h, int src_stride,
                                      Rect* dst_rect, Bound* clip,
                                      uint8_t opacity,
                                      ImageSurface* resource_owner = nullptr);
-void render_painter_fill_surface_rect(RenderContext* rdcon, ImageSurface* surface,
+void render_painter_fill_surface_rect(RasterRenderContext* rdcon, ImageSurface* surface,
                                       Rect* rect, uint32_t color, Bound* clip,
                                       ClipShape** clip_shapes, int clip_depth);
-void render_painter_blit_surface_scaled(RenderContext* rdcon,
+void render_painter_blit_surface_scaled(RasterRenderContext* rdcon,
                                         ImageSurface* src, Rect* src_rect,
                                         ImageSurface* dst, Rect* dst_rect, Bound* clip,
                                         ScaleMode scale_mode,
@@ -3466,10 +3494,10 @@ void render_profiler_emit_path_trace(RenderProfiler* profiler, struct UiContext*
     struct DocState* state, const RenderPathTrace* trace);
 
 // ===== render_state.hpp =====
-struct RenderContext;
+struct RasterRenderContext;
 
 typedef struct RenderTransformScope {
-    lam::Up<RenderContext> context;
+    lam::Up<RasterRenderContext> context;
     RdtMatrix previous_transform;
     bool previous_has_transform;
     float previous_perspective_distance;
@@ -3478,14 +3506,14 @@ typedef struct RenderTransformScope {
     bool active;
 } RenderTransformScope;
 
-RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock* block,
+RenderTransformScope render_state_push_transform(RasterRenderContext* rdcon, ViewBlock* block,
                                                  const BlockBlot* parent_block);
 void render_state_pop_transform(RenderTransformScope* scope);
-const RdtMatrix* render_state_current_transform(RenderContext* rdcon);
+const RdtMatrix* render_state_current_transform(RasterRenderContext* rdcon);
 
 // ===== render_path.hpp =====
-struct RenderContext;
-typedef struct RenderContext RenderContext;
+struct RasterRenderContext;
+typedef struct RasterRenderContext RasterRenderContext;
 
 RdtPath* render_path_create_rounded_rect(Rect rect, const Corner* radius);
 void render_path_append_rounded_rect(RdtPath* path, Rect rect,
@@ -3494,10 +3522,10 @@ Corner render_path_uniform_corner(float top_left, float top_right,
                                   float bottom_right, float bottom_left);
 void render_path_append_svg_rounded_rect(StrBuf* out, Rect rect,
                                          const Corner* radius);
-RdtPath* render_path_create_clip_path(RenderContext* rdcon);
+RdtPath* render_path_create_clip_path(RasterRenderContext* rdcon);
 
 // ===== render_clip.hpp =====
-struct RenderContext;
+struct RasterRenderContext;
 struct ViewBlock;
 typedef struct Bound Bound;
 
@@ -3509,11 +3537,11 @@ typedef struct RenderClipScope {
     ScratchMark mem;  // owns the shape when owns_shape; ended on pop
 } RenderClipScope;
 
-RenderClipScope render_clip_push_css_scope(RenderContext* rdcon, ViewBlock* block,
+RenderClipScope render_clip_push_css_scope(RasterRenderContext* rdcon, ViewBlock* block,
                                            float parent_x, float parent_y, float scale);
-RenderClipScope render_clip_push_rect_scope(RenderContext* rdcon, const Bound* clip);
-RenderClipScope render_clip_push_overflow_scope(RenderContext* rdcon);
-void render_clip_pop_scope(RenderContext* rdcon, RenderClipScope* scope);
+RenderClipScope render_clip_push_rect_scope(RasterRenderContext* rdcon, const Bound* clip);
+RenderClipScope render_clip_push_overflow_scope(RasterRenderContext* rdcon);
+void render_clip_pop_scope(RasterRenderContext* rdcon, RenderClipScope* scope);
 
 // ===== render_composite.hpp =====
 typedef enum RenderCompositeRegionMode {
@@ -3643,6 +3671,9 @@ struct RdtSvgFilterProgram {
     bool filter_bbox, primitive_bbox, compiled, valid, allocation_failed;
 };
 constexpr size_t RDT_SVG_FILTER_MAX_NODES = 4096;
+// A filter run calls back into the code that owns its source, image and input
+// paint; each callback's context derives from this host type.
+struct RdtSvgFilterHost {};
 struct RdtSvgFilterRun {
     lam::Up<ScratchArena> scratch;
     lam::Up<MemContext> memory;
@@ -3653,16 +3684,15 @@ struct RdtSvgFilterRun {
     float density;
     size_t work_limit;
     lam::Up<size_t> work_used; // shared by nested captures and kernels during one synchronous evaluation
-    bool (*draw_source)(void* context, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
-    void* source_context;
-    bool (*draw_image)(void* context, const RdtSvgFilterNode* node, const RdtSvgFilterRun* run,
+    bool (*draw_source)(RdtSvgFilterHost* host, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
+    lam::Up<RdtSvgFilterHost> source_context;
+    bool (*draw_image)(RdtSvgFilterHost* host, const RdtSvgFilterNode* node, const RdtSvgFilterRun* run,
         Bound region, Bound grid, ImageSurface* output);
-    void* image_context;
-    bool (*draw_input)(void* context, int input, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
-    void* input_context;
+    lam::Up<RdtSvgFilterHost> image_context;  // also the host of resolve_lengths
+    bool (*draw_input)(RdtSvgFilterHost* host, int input, const RdtSvgFilterRun* run, Bound grid, ImageSurface* output);
+    lam::Up<RdtSvgFilterHost> input_context;
     // resource font facts are resolved during the synchronous run; viewport/geometry still belong to the target.
-    void (*resolve_lengths)(void* context, Element* resource, SvgLengthContext* lengths);
-    void* length_context;
+    void (*resolve_lengths)(RdtSvgFilterHost* host, Element* resource, SvgLengthContext* lengths);
 };
 RdtSvgFilterProgram* render_svg_filter_program_acquire(DomDocument* document, Element* element);
 void render_svg_filter_program_release(RdtSvgFilterProgram* program);
@@ -3679,17 +3709,17 @@ ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, fl
 
 // ===== render_background.hpp =====
 // Background rendering functions
-void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect);
-void render_list_marker_linear_gradient(RenderContext* rdcon,
+void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_list_marker_linear_gradient(RasterRenderContext* rdcon,
                                         LinearGradient* gradient, Rect rect);
-void render_list_marker_radial_gradient(RenderContext* rdcon,
+void render_list_marker_radial_gradient(RasterRenderContext* rdcon,
                                         RadialGradient* gradient, Rect rect);
-void render_list_marker_conic_gradient(RenderContext* rdcon,
+void render_list_marker_conic_gradient(RasterRenderContext* rdcon,
                                        ConicGradient* gradient, Rect rect);
 
 // Box shadow rendering
-void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect);
-void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 
 // Software Gaussian blur (3-pass box blur approximation)
 // Can be used by box-shadow, text-shadow, and filter:blur()
@@ -3727,23 +3757,23 @@ void render_outer_shadow_blur_composite(
 
 // ===== render_border.hpp =====
 // Border rendering functions
-void render_border(RenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_border(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 bool corner_has_radius(const Corner* radius);
 void constrain_corner_radii(Corner* radius, float width, float height);
 void constrain_border_radii(BorderProp* border, float width, float height);
 void resolve_border_radius_percentages(Corner* radius, float width, float height);
 
 // Outline rendering
-void render_outline(RenderContext* rdcon, ViewBlock* view, Rect rect);
+void render_outline(RasterRenderContext* rdcon, ViewBlock* view, Rect rect);
 
 // ===== render_columns.hpp =====
-struct RenderContext;
+struct RasterRenderContext;
 
-void render_column_rules(struct RenderContext* rdcon, ViewBlock* block);
+void render_column_rules(struct RasterRenderContext* rdcon, ViewBlock* block);
 
 // ===== render_effects.hpp =====
 typedef struct RenderEffectBackdrop {
-    lam::Up<RenderContext> context;
+    lam::Up<RasterRenderContext> context;
     lam::Up<uint32_t> pixels;
     int x;
     int y;
@@ -3753,7 +3783,7 @@ typedef struct RenderEffectBackdrop {
 } RenderEffectBackdrop;
 
 typedef struct RenderEffectGroup {
-    lam::Up<RenderContext> context;
+    lam::Up<RasterRenderContext> context;
     RenderEffectBackdrop mix_blend_backdrop;
     RenderEffectBackdrop opacity_backdrop;
     RenderEffectBackdrop filter_backdrop;
@@ -3766,7 +3796,7 @@ typedef struct RenderEffectGroup {
     bool has_backdrop_filter;
 } RenderEffectGroup;
 
-RenderEffectGroup render_effect_group_begin(RenderContext* rdcon,
+RenderEffectGroup render_effect_group_begin(RasterRenderContext* rdcon,
                                             ViewBlock* block,
                                             const BlockBlot* parent_block);
 bool render_effect_group_finish(RenderEffectGroup* group,
@@ -3789,15 +3819,15 @@ void calculate_content_bounds(View* view, int* max_x, int* max_y);
 
 // ===== render_form.hpp =====
 struct DocState;
-struct RenderContext;
+struct RasterRenderContext;
 
-void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
+void render_simple_string(RasterRenderContext* rdcon, const char* text, float x, float y,
                           FontProp* font, Color color);
-void render_form_control(RenderContext* rdcon, ViewBlock* block);
-void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state);
+void render_form_control(RasterRenderContext* rdcon, ViewBlock* block);
+void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocState* state);
 
 // ===== render_glyph.hpp =====
-void draw_glyph(RenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
+void draw_glyph(RasterRenderContext* rdcon, GlyphBitmap* bitmap, int x, int y);
 
 // ===== render_img.hpp =====
 // Function declarations for image rendering
@@ -3830,25 +3860,25 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file);
 int cmd_render_batch(int argc, char** argv);
 
 // ===== render_list.hpp =====
-struct RenderContext;
+struct RasterRenderContext;
 
-void render_marker_view(struct RenderContext* rdcon, ViewSpan* marker);
-void render_litem_view(struct RenderContext* rdcon, ViewBlock* list_item);
-void render_list_view(struct RenderContext* rdcon, ViewBlock* view);
+void render_marker_view(struct RasterRenderContext* rdcon, ViewSpan* marker);
+void render_litem_view(struct RasterRenderContext* rdcon, ViewBlock* list_item);
+void render_list_view(struct RasterRenderContext* rdcon, ViewBlock* view);
 
 // ===== media render declarations =====
-struct RenderContext;
+struct RasterRenderContext;
 
 Rect render_media_image_rect(ViewBlock* view, ImageSurface* image, Rect content_rect, float raster_scale);
 bool render_media_paint_svg_picture(PaintList* paint, UiContext* ui, ViewBlock* view,
                                     const Rect* content_rect);
 bool render_media_rasterize_svg_picture(ImageSurface* surface, int target_width,
                                         int target_height);
-void render_image_view(struct RenderContext* rdcon, ViewBlock* view);
-void render_canvas_content(struct RenderContext* rdcon, ViewBlock* view);
-void render_video_content(struct RenderContext* rdcon, ViewBlock* view);
+void render_image_view(struct RasterRenderContext* rdcon, ViewBlock* view);
+void render_canvas_content(struct RasterRenderContext* rdcon, ViewBlock* view);
+void render_video_content(struct RasterRenderContext* rdcon, ViewBlock* view);
 bool render_media_is_webview_layer(ViewBlock* view);
-void render_webview_layer_content(struct RenderContext* rdcon, ViewBlock* view);
+void render_webview_layer_content(struct RasterRenderContext* rdcon, ViewBlock* view);
 
 // ===== render_output.hpp =====
 typedef struct ImageSurface ImageSurface;
@@ -3923,13 +3953,13 @@ int render_document_transform_to_output_target(const char* document_file,
     float output_scale, float device_scale, int jpeg_quality);
 
 // ===== render_overlay.hpp =====
-struct RenderContext;
+struct RasterRenderContext;
 
-void render_text_selection_rect(struct RenderContext* rdcon, ViewText* text_view,
+void render_text_selection_rect(struct RasterRenderContext* rdcon, ViewText* text_view,
                                 TextRect* text_rect);
-bool render_text_selection_span(struct RenderContext* rdcon, ViewText* text_view,
+bool render_text_selection_span(struct RasterRenderContext* rdcon, ViewText* text_view,
                                 int* start_byte, int* end_byte);
-void render_ui_overlays(struct RenderContext* rdcon, DocState* state);
+void render_ui_overlays(struct RasterRenderContext* rdcon, DocState* state);
 
 // ===== render_pdf.hpp =====
 // Main function to render HTML to PDF
@@ -3995,8 +4025,8 @@ bool save_svg_to_file(const char* svg_content, const char* filename);
 
 
 struct FontContext;  // forward declaration from lib/font/font.h
-typedef struct RenderContext RenderContext;
-typedef const char* (*SvgImageResolverFn)(void* context, int image_id);
+typedef struct RasterRenderContext RasterRenderContext;
+typedef const char* (*SvgImageResolverFn)(Element* context, int image_id);
 
 // ============================================================================
 // SVG Intrinsic Size
@@ -4071,7 +4101,7 @@ struct SvgInlineRenderContext {
     bool image_document;         // secure static image documents allow embedded resources only
     lam::Up<DisplayList> semantic_target; // export-only target; offscreen resource captures do not record wrappers
     SvgImageResolverFn image_resolver;  // optional resolver for document-owned image handles
-    void* image_resolver_context;
+    lam::Up<Element> image_resolver_context;  // the SVG root the resolver was registered for
     RdtMatrix transform;         // accumulated transform from root (viewBox × group × element)
     RdtMatrix viewport_transform; // target viewport before viewBox/group transforms
     float viewport_width, viewport_height;
@@ -4136,7 +4166,7 @@ extern "C" void svg_register_pdf_image_resolver(Element* svg_root, Item pdf_root
 extern "C" void svg_unregister_image_resolvers_for_tree(Element* root);
 extern "C" bool svg_get_registered_image_resolver(Element* svg_root,
                                                    SvgImageResolverFn* out_resolver,
-                                                   void** out_context);
+                                                   Element** out_context);
 
 // ============================================================================
 // Public API
@@ -4223,7 +4253,7 @@ Element* render_svg_reference_scope(DomElement* svg_element);
 // picture to replay would run the SVG painter on tile workers (RAD_12 §3).
 void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
                                ScratchArena* scratch, FontContext* font_ctx,
-                               RenderContext* glyph_rdcon, RdtPicture* picture,
+                               RasterRenderContext* glyph_rdcon, RdtPicture* picture,
                                uint8_t opacity, const RdtMatrix* transform);
 
 /**
@@ -4233,12 +4263,12 @@ void render_svg_record_picture(PaintList* paint_list, DisplayList* dl,
  * @param rdcon Render context with canvas, scale, clip, etc.
  * @param view ViewBlock for the SVG element
  */
-void render_inline_svg(RenderContext* rdcon, ViewBlock* view);
-void render_custom_svg_subscene(RenderContext* rdcon, Element* svg_element,
+void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view);
+void render_custom_svg_subscene(RasterRenderContext* rdcon, Element* svg_element,
                                 float viewport_width, float viewport_height);
 
 // ===== render_text.hpp =====
-void render_text_view(RenderContext* rdcon, ViewText* text_view);
+void render_text_view(RasterRenderContext* rdcon, ViewText* text_view);
 CssEnum render_text_inherited_transform(ViewText* text_view);
 char* render_text_create_export_segment(const unsigned char* text,
                                         const TextRect* text_rect,
@@ -4246,9 +4276,9 @@ char* render_text_create_export_segment(const unsigned char* text,
                                         bool include_ellipsis);
 
 // ===== render_vector_path.hpp =====
-struct RenderContext;
+struct RasterRenderContext;
 
-void render_vector_path(struct RenderContext* rdcon, ViewBlock* block);
+void render_vector_path(struct RasterRenderContext* rdcon, ViewBlock* block);
 
 // ===== video render declarations =====
 struct DisplayList;
@@ -4296,5 +4326,5 @@ LAM_NODE_OF(RenderEffectGroup, NodeStack);
 LAM_NODE_OF(RenderOutputTarget, NodeStack);
 LAM_NODE_OF(RenderExportSession, NodeStack);
 LAM_NODE_OF(RasterPaintContext, NodeStack);
-LAM_NODE_OF(RenderContext, NodeStack);
+LAM_NODE_OF(RasterRenderContext, NodeStack);
 LAM_NODE_OF(SvgInlineRenderContext, NodeStack);

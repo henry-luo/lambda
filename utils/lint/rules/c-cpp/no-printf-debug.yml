@@ -27,6 +27,7 @@ files:
   - "lib/**/*.{c,cpp}"
 ignores:
   - "**/tree-sitter*/**"
+  - "lib/re2/**"                    # vendored RE2 (lib/re2/VENDOR.md)
   # CLI / REPL entry points (existing).
   - "lambda/cli/**"
   - "lambda/repl/**"

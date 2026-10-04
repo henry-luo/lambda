@@ -4,6 +4,7 @@
 #include "../../lib/mempool.h"
 #include "../../lib/strview.h"
 #include "../../lib/hashmap.h"
+#include "../../lib/ref_count.h"
 #include "name_identity.h"
 
 typedef struct NamePool {
@@ -13,7 +14,7 @@ typedef struct NamePool {
     struct NamePool* identity_root; // Root owning arbitrary NameId segments
     struct NamePool* dynamic_child; // The single ID-allocating dynamic child
     struct NamePool** segments;  // Root-owned segment lookup table
-    uint32_t ref_count;         // atomically updated; content mutation stays owner-thread-only
+    RefCount ref_count;         // atomic; content mutation stays owner-thread-only
     uint32_t next_unique_key_hash;  // diagnostic spelling must not route SYMBOL/PRIVATE identity
     void* mem_node;             // MemContext registration node (NULL if untracked)
     Pool* identity_backing;     // Dedicated backing for an identity scope

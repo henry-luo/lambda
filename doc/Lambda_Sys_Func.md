@@ -1177,6 +1177,7 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.chmod(path, mode)` | Change file permissions | `io.chmod(/.'script.sh', "755")` |
 | `io.rename(src, dst)` | Rename file or directory | `io.rename(/.'a.txt', /.'b.txt')` |
 | `io.fetch(url, options?)` | HTTP fetch; `fetch(url, options)` is the bare spelling | `io.fetch(https.'api.example.com', {method: 'POST'})` |
+| `io.grep(source, pattern, options?)` | Search files line by line, like grep | `io.grep(/.src, "TODO", {line: true})` |
 | `cmd(command, args?)` | Execute a shell command; `args` is one array (or string) | `cmd("ls", ["-la"])` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
 
@@ -1375,6 +1376,50 @@ pn api_operations() {
     })^
 }
 ```
+
+##### io.grep(source, pattern, options?)
+
+Search files for a pattern, line by line, like grep. `source` is a path to a file or a directory, a path ending in `*` (the directory's own files) or `**` (everything below), a string naming a local path, or an array of these. `pattern` is a string (literal text) or a string pattern, or an array of either; a match of any of them counts. The result is an array of match maps in a stable order: sources as given, files in path order, matches in position order.
+
+Each match map has `value` (the matched text) and `index` (its offset in code points from the start of the file, the unit in-memory `find` uses). A search over a directory, a wildcard or an array adds `file` (a path when the source was a path, otherwise text). Options add more fields:
+
+| Option | Type | Default | Effect |
+|--------|------|---------|--------|
+| `line` | bool | false | adds `line`, the 1-based line number |
+| `byte_offset` | bool | false | adds `byte_offset`, the match's 0-based offset in bytes |
+| `text` | bool | false | adds `text`, the whole line without its terminator |
+| `context`, `before`, `after` | int | 0 | adds `before`/`after`, arrays of the neighbouring lines' text |
+| `ignore_case` | bool | false | Unicode simple case folding, as `find` |
+| `word` | bool | false | a match may not touch a letter, digit or `_` on either side |
+| `whole_line` | bool | false | the pattern must match a whole line |
+| `invert` | bool | false | report the lines with no match (`value` is the line) |
+| `limit` | int | none | at most this many matches in total, the first in path order |
+| `limit_per_file` | int | none | at most this many matches per file |
+| `files` | bool | false | return the paths of files with a match instead of match maps |
+| `include`, `exclude` | string or array | none | gitignore-style globs a file must match / may not match |
+| `max_depth` | int | none | how far below a directory to look (its own entries are at depth 1) |
+| `max_size` | int | none | skip files larger than this many bytes |
+| `hidden` | bool | false | also search names starting with `.` |
+| `ignore` | bool | true | honour `.gitignore`/`.ignore` files and skip `node_modules`, `bower_components`, `__pycache__`, `venv`, `site-packages` |
+| `binary` | bool | false | search files with a NUL byte in their first 8 KiB instead of skipping them |
+
+```lambda
+pn todo_report() {
+    // every TODO under src, with line numbers and the line itself
+    let todos = io.grep(/.src, \("TODO" ":" s* w+), {line: true, text: true})^
+    for (t in todos) {
+        print(t.file, t.line, t.text, "\n")
+    }
+
+    // which Lambda files mention a name, ignoring case
+    let users = io.grep(/.src.**, "parse_options", {files: true, include: "*.ls", ignore_case: true})^
+    print(len(users), "files\n")
+}
+```
+
+Matching is **line-oriented**: a match never spans a line terminator, so a pattern's `...` and a literal newline stop at the end of the line. A line ends at `"\n"` or `"\r\n"`; the `"\r"` of a pair is never part of a match or of `text`. In a directory, files listed in ignore files, hidden entries, the dependency directories above, symbolic links and binary files are skipped, but a path given as the source is always searched. A source that does not exist raises an error (E401). An option name `io.grep` does not define is a compile-time error in a map literal at the call, and is ignored with a warning when the options arrive as a value (S17.8.1).
+
+`io.grep` is a procedure: its result depends on the file system. It runs on `lib/grep`, a line-oriented search library on RE2 (`vibe/Lambda_Lib_Grep.md`).
 
 #### cmd(command, args?)
 

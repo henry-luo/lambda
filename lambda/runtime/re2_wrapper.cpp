@@ -972,23 +972,32 @@ static String* pattern_regex_source(TypePattern* pattern) {
     return pattern ? (pattern->regex_source ? pattern->regex_source : pattern->source) : nullptr;
 }
 
+bool pattern_unanchored_source(TypePattern* pattern, const char** out, size_t* out_len) {
+    // the source is "^<regex>$"; the partial-match operations search <regex>
+    String* regex_source = pattern_regex_source(pattern);
+    if (!regex_source) return false;
+    const char* src = regex_source->chars;
+    size_t len = regex_source->len;
+    if (len < 2 || src[0] != '^' || src[len - 1] != '$') {
+        log_error("pattern_unanchored_source: unexpected source format: %s", src);
+        return false;
+    }
+    *out = src + 1;
+    *out_len = len - 2;
+    return true;
+}
+
 #ifndef SIMPLE_SCHEMA_PARSER
 static re2::RE2* pattern_get_unanchored_options(TypePattern* pattern, bool ignore_case, bool* must_release) {
     *must_release = false;
     if (!ignore_case) return pattern_get_unanchored(pattern);
-    String* regex_source = pattern_regex_source(pattern);
-    if (!regex_source) return nullptr;
-
-    const char* src = regex_source->chars;
-    size_t len = regex_source->len;
-    if (len < 2 || src[0] != '^' || src[len - 1] != '$') {
-        log_error("pattern_get_unanchored_options: unexpected source format: %s", src);
-        return nullptr;
-    }
+    const char* src = NULL;
+    size_t len = 0;
+    if (!pattern_unanchored_source(pattern, &src, &len)) return nullptr;
     re2::RE2::Options opts = lam::re2_glue_default_options();
     opts.set_case_sensitive(false);
     re2::RE2* re = lam::re2_glue_compile(
-        src + 1, len - 2, opts, "pattern_get_unanchored_options");
+        src, len, opts, "pattern_get_unanchored_options");
     if (!re) return nullptr;
     *must_release = true;
     return re;
@@ -1025,23 +1034,17 @@ re2::RE2* pattern_get_unanchored(TypePattern* pattern) {
     if (!pattern) return nullptr;
     if (pattern->re2_unanchored) return pattern->re2_unanchored;
 
-    // source is "^<regex>$", strip leading ^ and trailing $
-    String* regex_source = pattern_regex_source(pattern);
-    if (!regex_source) return nullptr;
-    const char* src = regex_source->chars;
-    size_t len = regex_source->len;
-    if (len < 2 || src[0] != '^' || src[len - 1] != '$') {
-        log_error("pattern_get_unanchored: unexpected source format: %s", src);
-        return nullptr;
-    }
+    const char* src = NULL;
+    size_t len = 0;
+    if (!pattern_unanchored_source(pattern, &src, &len)) return nullptr;
     re2::RE2::Options opts = lam::re2_glue_default_options();
     pattern->re2_unanchored = lam::re2_glue_compile(
-        src + 1, len - 2, opts, "pattern_get_unanchored");
+        src, len, opts, "pattern_get_unanchored");
     if (!pattern->re2_unanchored) {
         return nullptr;
     }
 
-    log_debug("pattern_get_unanchored: compiled '%.*s'", (int)(len - 2), src + 1);
+    log_debug("pattern_get_unanchored: compiled '%.*s'", (int)len, src);
     return pattern->re2_unanchored;
 }
 
@@ -1054,46 +1057,45 @@ static String* make_heap_string(const char* src, size_t len) {
     return heap_strcpy(src, len);
 }
 
-// helper: create a match map {value: string, index: int}
-// allocates TypeMap + ShapeEntry chain + data buffer on heap
-Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
+TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count) {
     Pool* pool = context->pool;
-
-    // create shape entries: value(string), index(int)
-    // entry 1: "value" -> string
-    ShapeEntry* e_value = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
-    StrView* nv1 = (StrView*)((char*)e_value + sizeof(ShapeEntry));
-    nv1->str = "value";
-    nv1->length = 5;
-    e_value->name = nv1;
-    shape_entry_set_type(e_value, type_info[LMD_TYPE_STRING].type);
-    e_value->byte_offset = 0;
-
-    int64_t offset2 = e_value->storage.byte_size;
-
-    // entry 2: "index" -> int
-    ShapeEntry* e_index = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
-    StrView* nv2 = (StrView*)((char*)e_index + sizeof(ShapeEntry));
-    nv2->str = "index";
-    nv2->length = 5;
-    e_index->name = nv2;
-    shape_entry_set_type(e_index, type_info[LMD_TYPE_INT].type);
-    e_index->byte_offset = offset2;
-
-    e_value->chain_next = e_index;
-
-    int64_t byte_size = offset2 + e_index->storage.byte_size;
-
-    // create TypeMap
+    ShapeEntry* first = NULL;
+    ShapeEntry* prev = NULL;
+    int64_t byte_size = 0;
+    for (int i = 0; i < count; i++) {
+        ShapeEntry* entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
+        StrView* name = (StrView*)((char*)entry + sizeof(ShapeEntry));
+        name->str = names[i];
+        name->length = strlen(names[i]);
+        entry->name = name;
+        shape_entry_set_type(entry, type_info[types[i]].type);
+        entry->byte_offset = byte_size;
+        byte_size += entry->storage.byte_size;
+        if (prev) prev->chain_next = entry;
+        else first = entry;
+        prev = entry;
+    }
     TypeMap* mt = (TypeMap*)alloc_type(pool, LMD_TYPE_MAP, sizeof(TypeMap));
-    mt->shape = e_value;
-    mt->last = e_index;
-    mt->length = 2;
+    mt->shape = first;
+    mt->last = prev;
+    mt->length = count;
     mt->byte_size = byte_size;
-    // match shapes die with the execution pool and must not enter a cached
+    // result shapes die with the execution pool and must not enter a cached
     // module's compiler registry (D8.5.1v7).
     mt->type_index = -1;
     typemap_hash_build(mt, pool);
+    return mt;
+}
+
+// helper: create a match map {value: string, index: int}
+// allocates TypeMap + ShapeEntry chain + data buffer on heap
+Map* create_match_map(const char* match_str, size_t match_len, int64_t index) {
+    static const char* const names[] = {"value", "index"};
+    static const TypeId types[] = {LMD_TYPE_STRING, LMD_TYPE_INT};
+    TypeMap* mt = runtime_result_shape(names, types, 2);
+    ShapeEntry* e_value = mt->shape;
+    ShapeEntry* e_index = mt->last;
+    int64_t byte_size = mt->byte_size;
 
     // create Map container
     Map* mp = (Map*)heap_calloc(sizeof(Map), LMD_TYPE_MAP);

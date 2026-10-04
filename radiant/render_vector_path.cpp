@@ -2,7 +2,7 @@
 
 #include "../lib/log.h"
 
-void render_vector_path(RenderContext* rdcon, ViewBlock* block) {
+void render_vector_path(RasterRenderContext* rdcon, ViewBlock* block) {
     VectorPathProp* vpath = block->vector_path();
     if (!vpath || !vpath->segments) return;
 

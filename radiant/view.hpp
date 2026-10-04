@@ -648,16 +648,39 @@ typedef struct ImageSurface {
     // surfaces built on the stack or inside another object, which are never
     // referenced by a retained display list.
     lam::Handle<struct ImageSurface> self;
+    lam::Own<struct ImageSurface> retire_next;  // link in the retire queue once destroyed
 } ImageSurface;
 
 // The one allocation path for heap ImageSurfaces: zeroed and
 // registered in the slot table. image_surface_destroy releases the slot.
 extern ImageSurface* image_surface_alloc(void);
-// The live surface behind `handle`, or null once it was destroyed. Reads only
-// the slot table, never the surface.
+// The live surface behind `handle`, or null once it was destroyed. Lock-free;
+// reads only the slot table. Inside an ImageSurfaceReadScope the result stays
+// valid until the scope ends: destroyed surfaces are released only at a quiet
+// point, when no read scope is open anywhere.
 extern ImageSurface* image_surface_lookup(lam::Handle<ImageSurface> handle);
-// Invalidates every handle to `surface`; image_surface_destroy calls it.
+// Invalidates every handle to `surface` and returns its slot at once (only for
+// surfaces no reader can hold; image_surface_destroy defers instead).
 extern void image_surface_release_slot(ImageSurface* surface);
+// A render session that reads surfaces through handles (display-list replay,
+// tile workers, retained checks, export lowering). While any scope is open,
+// image_surface_destroy queues surfaces; the scope that closes last, on a
+// thread that is not a render worker, releases the queue.
+struct ImageSurfaceReadScope {
+    ImageSurfaceReadScope();
+    ~ImageSurfaceReadScope();
+    ImageSurfaceReadScope(const ImageSurfaceReadScope&) = delete;
+    ImageSurfaceReadScope& operator=(const ImageSurfaceReadScope&) = delete;
+};
+// Render worker threads only count their scopes; they never release the queue.
+extern void image_surface_mark_render_worker_thread(void);
+// Releases queued surfaces now when no read scope is open (shutdown, teardown).
+extern void image_surface_drain_retired(void);
+// image_surface_destroy's work: frees the surface's storage and its slot.
+extern void image_surface_release_now(ImageSurface* surface);
+// Nulls the surface's slot and queues it when a read scope is open; returns
+// false when the caller may release it at once.
+extern bool image_surface_defer_release(ImageSurface* surface);
 extern ImageSurface* image_surface_create(int pixel_width, int pixel_height);
 extern ImageSurface* image_surface_create_from(int pixel_width, int pixel_height, void* pixels);
 extern ImageSurface* image_surface_decode_file(const char* path);
@@ -2807,12 +2830,11 @@ uint64_t inline_prop_hash(const InlineProp* value);
 bool inline_prop_equal(const InlineProp* left, const InlineProp* right);
 LAM_NODE_OF(ViewTree, NodeViewTree);
 
-// The document's ViewTree shell. It stays on the memtracked heap: fixtures may
-// alias the document pool with the view tree's prop pool, which the tree
-// destroys before the shell is released.
-lam::Own<ViewTree> view_tree_shell_create();
-// Destroys the tree's storage and releases the shell; clears the field.
-void view_tree_shell_destroy(lam::Own<ViewTree>& tree);
+// The document's ViewTree shell lives in the document's pool; the document owns
+// it across retained layout resets.
+lam::Own<ViewTree> view_tree_shell_create(DomDocument* doc);
+// Destroys the tree's storage and releases the shell into `doc`'s pool; clears the field.
+void view_tree_shell_destroy(DomDocument* doc, lam::Own<ViewTree>& tree);
 LAM_NODE_OF(RadiantBorderSide, NodeStack);
 LAM_NODE_OF(RadiantInsetSide, NodeStack);
 
@@ -3965,17 +3987,19 @@ typedef struct UiContext {
     float window_height;   // window pixel height (actual framebuffer size, physical pixels)
     float viewport_width;  // intended viewport width (CSS logical pixels, for vh/vw units)
     float viewport_height; // intended viewport height (CSS logical pixels, for vh/vw units)
-    ImageSurface* surface;  // rendering surface of a window
+    lam::Up<ImageSurface> surface;  // the current render target: window_surface, or one an export pass swaps in
+    lam::Own<ImageSurface> window_surface;  // the surface create_surface made; destroy releases it
 
     // font handling
-    struct FontContext* font_ctx; // unified font context
-    Pool* font_pool;       // factory-registered root for font context allocations
-    Arena* font_arena;     // factory-registered arena for font strings/database
-    Arena* font_glyph_arena; // factory-registered arena for glyph bitmap caches
+    lam::Up<struct FontContext> font_ctx; // the font context in use: owned_font_ctx, or the host's for an isolated UI
+    lam::Own<struct FontContext> owned_font_ctx; // created by ui_context_init; destroy releases it
+    lam::Own<Pool> font_pool;       // factory-registered root for font context allocations
+    lam::Own<Arena> font_arena;     // factory-registered arena for font strings/database
+    lam::Own<Arena> font_glyph_arena; // factory-registered arena for glyph bitmap caches
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
     float minimum_logical_font_size;  // UA minimum for relative font sizes; zero disables
-    char** fallback_fonts;  // fallback fonts
+    lam::Up<char*> fallback_fonts;  // the static fallback font table
 
     // @font-face support
     lam::OwnArr<FontFaceDescriptor*> font_faces;    // Array of @font-face declarations
@@ -3983,12 +4007,12 @@ typedef struct UiContext {
     int font_face_capacity;
 
     // image cache
-    struct hashmap* image_cache;  // cache for images loaded
+    lam::Own<struct hashmap> image_cache;  // owns every loaded ImageSurface (O2)
 
     float device_scale_x;   // physical framebuffer px per logical window px on X
     float device_scale_y;   // physical framebuffer px per logical window px on Y
     float device_scale;     // isotropic device scale after validating X/Y agreement
-    DomDocument* document;  // current document
+    lam::Up<DomDocument> document;  // current document; the window shell owns the top-level one
     // Nested iframe layout belongs to this UI/document tree, not to the host
     // thread.  Recursive layout may construct short-lived LayoutContexts.
     int iframe_depth;

@@ -23,30 +23,30 @@ static bool render_text_trace_enabled(void) {
     return enabled != 0;
 }
 
-static void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
+static void render_text_inline_background(RasterRenderContext* rdcon, ViewText* text_view,
                                           TextRect* text_rect, DomElement* parent_elem,
                                           float x, float y);
-static void render_text_inline_border(RenderContext* rdcon, ViewText* text_view,
+static void render_text_inline_border(RasterRenderContext* rdcon, ViewText* text_view,
                                       TextRect* text_rect, DomElement* parent_elem,
                                       float x, float y, const Rect* bg_rect);
-static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
+static bool render_text_paint_blurred_shadows(RasterRenderContext* rdcon, unsigned char* str,
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
                                               float cjk_spacing,
                                               float x, float y);
-static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon,
+static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon,
                                                      uint32_t codepoint,
                                                      unsigned char* cursor,
                                                      unsigned char* end);
-static void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* glyph,
+static void render_text_paint_glyph_shadows(RasterRenderContext* rdcon, LoadedGlyph* glyph,
                                             TextShadow* text_shadow, float x, float y,
                                             float ascend);
-static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rect,
+static float render_text_trailing_marks(RasterRenderContext* rdcon, TextRect* text_rect,
                                         float x, float y);
-static void render_text_decorations(RenderContext* rdcon, unsigned char* str,
+static void render_text_decorations(RasterRenderContext* rdcon, unsigned char* str,
                                     TextRect* text_rect);
-static bool render_text_background_clip_linear_text(RenderContext* rdcon,
+static bool render_text_background_clip_linear_text(RasterRenderContext* rdcon,
                                                     DomElement* parent_elem,
                                                     TextRect* text_rect,
                                                     float text_x, float text_y,
@@ -155,7 +155,7 @@ char* render_text_create_export_segment(const unsigned char* text,
     return content;
 }
 
-static bool render_text_rect_misses_clip(RenderContext* rdcon, float x, float y,
+static bool render_text_rect_misses_clip(RasterRenderContext* rdcon, float x, float y,
                                          float width, float height) {
     if (!rdcon || rdcon->has_transform) return false;
     return x + width < rdcon->block.clip.left ||
@@ -164,7 +164,7 @@ static bool render_text_rect_misses_clip(RenderContext* rdcon, float x, float y,
            y > rdcon->block.clip.bottom;
 }
 
-void render_text_view(RenderContext* rdcon, ViewText* text_view) {
+void render_text_view(RasterRenderContext* rdcon, ViewText* text_view) {
 
     // CSS 2.1 §11.2: text inherits visibility from parent element
     if (text_view->parent && text_view->parent->is_element()) {
@@ -491,7 +491,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     if (emphasis_handle) font_handle_release(emphasis_handle);
 }
 
-static void render_text_inline_background(RenderContext* rdcon, ViewText* text_view,
+static void render_text_inline_background(RasterRenderContext* rdcon, ViewText* text_view,
                                           TextRect* text_rect, DomElement* parent_elem,
                                           float x, float y) {
     if (!rdcon || !text_view || !text_rect || !parent_elem ||
@@ -551,7 +551,7 @@ static void render_text_inline_background(RenderContext* rdcon, ViewText* text_v
     render_text_inline_border(rdcon, text_view, text_rect, parent_elem, x, y, &bg_rect);
 }
 
-static void render_text_inline_border(RenderContext* rdcon, ViewText* text_view,
+static void render_text_inline_border(RasterRenderContext* rdcon, ViewText* text_view,
                                       TextRect* text_rect, DomElement* parent_elem,
                                       float x, float y, const Rect* bg_rect) {
     (void)text_view;
@@ -588,7 +588,7 @@ typedef struct SkipInkGap {
     float x1;
 } SkipInkGap;
 
-static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned char* str,
+static bool render_text_paint_blurred_shadows(RasterRenderContext* rdcon, unsigned char* str,
                                               TextRect* text_rect, TextShadow* text_shadow,
                                               CssEnum text_transform, bool preserve_spaces,
                                               float space_width, float scaled_space_width,
@@ -715,7 +715,7 @@ static bool render_text_paint_blurred_shadows(RenderContext* rdcon, unsigned cha
     return true;
 }
 
-static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint32_t codepoint,
+static LoadedGlyph* render_text_load_glyph_for_paint(RasterRenderContext* rdcon, uint32_t codepoint,
                                                      unsigned char* cursor, unsigned char* end) {
     if (!rdcon || !font_box_handle(&rdcon->font) || !rdcon->font.style) {
         return nullptr;
@@ -744,7 +744,7 @@ static LoadedGlyph* render_text_load_glyph_for_paint(RenderContext* rdcon, uint3
     return glyph;
 }
 
-static void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* glyph,
+static void render_text_paint_glyph_shadows(RasterRenderContext* rdcon, LoadedGlyph* glyph,
                                             TextShadow* text_shadow, float x, float y,
                                             float ascend) {
     if (!rdcon || !glyph || !text_shadow) {
@@ -763,7 +763,7 @@ static void render_text_paint_glyph_shadows(RenderContext* rdcon, LoadedGlyph* g
     rdcon->color = saved_shadow_color;
 }
 
-static bool render_text_background_clip_linear_text(RenderContext* rdcon,
+static bool render_text_background_clip_linear_text(RasterRenderContext* rdcon,
                                                     DomElement* parent_elem,
                                                     TextRect* text_rect,
                                                     float text_x, float text_y,
@@ -872,7 +872,7 @@ static Color render_text_sample_linear_gradient(LinearGradient* gradient, Rect r
     return out;
 }
 
-static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rect,
+static float render_text_trailing_marks(RasterRenderContext* rdcon, TextRect* text_rect,
                                         float x, float y) {
     if (!rdcon || !font_box_handle(&rdcon->font) || !rdcon->font.style || !text_rect) {
         return x;
@@ -919,7 +919,7 @@ static float render_text_trailing_marks(RenderContext* rdcon, TextRect* text_rec
     return x;
 }
 
-static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
+static int collect_skip_ink_gaps(RasterRenderContext* rdcon, unsigned char* str,
                                  TextRect* text_rect, float deco_y_top, float deco_y_bot,
                                  SkipInkGap* gaps, int max_gaps) {
     float s = rdcon->raster_scale;
@@ -992,7 +992,7 @@ static int collect_skip_ink_gaps(RenderContext* rdcon, unsigned char* str,
     return gap_count;
 }
 
-static void draw_deco_with_gaps(RenderContext* rdcon, Rect rect, uint32_t color,
+static void draw_deco_with_gaps(RasterRenderContext* rdcon, Rect rect, uint32_t color,
                                 SkipInkGap* gaps, int gap_count) {
     float x_start = rect.x;
     float x_end = rect.x + rect.width;
@@ -1015,7 +1015,7 @@ static void draw_deco_with_gaps(RenderContext* rdcon, Rect rect, uint32_t color,
     }
 }
 
-static void render_single_text_decoration(RenderContext* rdcon, unsigned char* str,
+static void render_single_text_decoration(RasterRenderContext* rdcon, unsigned char* str,
                                           TextRect* text_rect, CssEnum line) {
     if (!rdcon || !rdcon->font.style || !text_rect) {
         return;
@@ -1116,7 +1116,7 @@ static void render_single_text_decoration(RenderContext* rdcon, unsigned char* s
     }
 }
 
-static void render_text_decorations(RenderContext* rdcon, unsigned char* str,
+static void render_text_decorations(RasterRenderContext* rdcon, unsigned char* str,
                                     TextRect* text_rect) {
     if (!rdcon || !rdcon->font.style) return;
     const FontProp* font = rdcon->font.style;

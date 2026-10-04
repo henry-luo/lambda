@@ -1127,6 +1127,14 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_FETCH, "io_fetch", 2, &TYPE_ANY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_fetch2", FPTR(pn_io_fetch2), NULL, NULL, false, 0},
 
+    // io.grep(source, pattern, options?) - line-oriented search over files
+    // with lib/grep; a procedure since files change (GRP26, S12.1.1v2)
+    {SYSPROC_IO_GREP, "io_grep", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_grep2", FPTR(pn_io_grep2), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_GREP, "io_grep", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_grep3", FPTR(pn_io_grep3), NULL, NULL, false, 0},
+
     // io.http module
     {SYSPROC_IO_HTTP_CREATE_SERVER, "io_http_create_server", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
@@ -4006,6 +4014,36 @@ bool jit_import_validate_no_gc_allowlist(void) {
     }
     return true;
 #endif
+}
+
+// S17.8.1: the option names each system function defines. The AST builder
+// rejects any other name in a literal options map at the call; a function
+// reading an options value warns about one at run time. Functions not listed
+// here are not yet migrated to the convention.
+static const char* const io_grep_option_names[] = {
+    "ignore_case", "word", "whole_line", "invert", "line", "byte_offset", "text",
+    "context", "before", "after", "limit", "limit_per_file", "files",
+    "include", "exclude", "max_depth", "max_size", "hidden", "ignore", "binary",
+    NULL,
+};
+
+const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
+    switch (fn) {
+    case SYSPROC_IO_GREP:
+        if (options_arg_index) *options_arg_index = 2;
+        return io_grep_option_names;
+    default:
+        return NULL;
+    }
+}
+
+bool sys_func_option_known(SysFunc fn, const char* name, size_t length) {
+    const char* const* names = sys_func_option_names(fn, NULL);
+    if (!names) return true;
+    for (int i = 0; names[i]; i++) {
+        if (strlen(names[i]) == length && memcmp(names[i], name, length) == 0) return true;
+    }
+    return false;
 }
 
 #pragma clang diagnostic pop // -Wcast-function-type-mismatch (FPTR/NPTR registry erasure)

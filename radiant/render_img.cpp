@@ -389,7 +389,7 @@ int render_uicontext_to_svg(UiContext* uicon, const char* svg_file) {
 static void render_batch_cleanup_doc(UiContext* ui_context, DomDocument* doc) {
     if (doc) {
         script_runner_cleanup_js_state(doc);
-        view_tree_shell_destroy(doc->view_tree);
+        view_tree_shell_destroy(doc, doc->view_tree);
         dom_document_destroy(doc);
     }
 
@@ -439,7 +439,7 @@ static bool render_batch_single(
         return false;
     }
 
-    ui_context->document = doc;
+    ui_context->document = lam::up(doc);
     doc->viewport.output_scale = output_scale;
     ui_context_sync_document_raster_scale(ui_context, doc);
 

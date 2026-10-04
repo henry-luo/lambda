@@ -2391,7 +2391,10 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
         // document until script_runner binds its owner context.
         document_apply_js_host_config(dom_doc, js_host_config);
     }
-    dom_doc->document_charset = detected_charset;
+    // the detector returns a static buffer the next document overwrites; the
+    // document keeps its own copy
+    dom_doc->document_charset = lam::own((const char*)(detected_charset && dom_doc->document_pool
+        ? pool_strdup(dom_doc->document_pool, detected_charset) : nullptr));
     // HTML parsing always runs with scripting enabled in the layout loader;
     // retain that mode so noscript can suppress only its rendered contents.
     dom_doc->html_scripting_enabled = true;
@@ -2422,7 +2425,7 @@ static DomDocument* load_lambda_html_doc_profiled(Url* html_url, const char* css
     // Page scripts execute before final document bookkeeping below, but their
     // URL-dependent globals and relative fetches must already observe the
     // redirected/<base>-adjusted document URL.
-    dom_doc->url = html_url;
+    dom_doc->url = lam::own(html_url);
 
     DomElement* dom_root = build_dom_tree_from_element(html_root, dom_doc, nullptr);
     if (!dom_root) {
@@ -3053,7 +3056,7 @@ static void populate_layout_document(DomDocument* doc, DomElement* root,
     doc->root = lam::up(root);
     doc->html_root = lam::up(html_root);
     doc->html_version = version;
-    doc->url = url;
+    doc->url = lam::own(url);
     // Load-time geometry reads may already have committed a ViewTree.
     doc->state = nullptr;
     if (doc->page_kind == DOM_PAGE_KIND_HTML && doc->view_tree && doc->view_tree->root) {
@@ -3706,7 +3709,7 @@ DomDocument* load_xml_doc(Url* xml_url, int viewport_width, int viewport_height,
     dom_doc->page_kind = DOM_PAGE_KIND_GENERATED;
     // dom_document_create establishes the pool that owns its style-epoch
     // manager; XML loader scratch remains in the caller's loader pool.
-    dom_doc->url = xml_url;
+    dom_doc->url = lam::own(xml_url);
 
     DomElement* html_elem = DomElement::create(dom_doc, "html", nullptr);
     if (!html_elem) {
@@ -5253,7 +5256,7 @@ static bool layout_single_file(
     load_end = time_now_ns();
     js_mir_end_document_phase_timing(&document_js_timing);
 
-    ui_context->document = doc;
+    ui_context->document = lam::up(doc);
     doc->disable_css_animations = disable_animations;
 
     DocState* state = radiant_document_ensure_state(doc, "layout_single_file");
@@ -5388,7 +5391,7 @@ static bool layout_single_file(
 
         if (doc->view_tree) {
             cleanup_phase_start = time_now_ns();
-            view_tree_shell_destroy(doc->view_tree);
+            view_tree_shell_destroy(doc, doc->view_tree);
             phase_timing.cleanup_view_ms += time_elapsed_ms_f(
                 cleanup_phase_start, time_now_ns());
         }

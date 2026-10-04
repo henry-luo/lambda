@@ -227,7 +227,15 @@ TREE_SITTER_TYPESCRIPT_LIB = lambda/tree-sitter-typescript/libtree-sitter-typesc
 TREE_SITTER_RUBY_LIB = lambda/tree-sitter-ruby/libtree-sitter-ruby.a
 TREE_SITTER_LATEX_LIB = lambda/tree-sitter-latex/libtree-sitter-latex.a
 TREE_SITTER_LATEX_MATH_LIB = lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a
-RE2_LIB = build_temp/re2-noabsl/cmake_build/libre2.a
+# RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md), pinned to the last
+# release before upstream required Abseil. It is built out of tree with its own
+# CMake so the vendored directory stays clean. Like MIR, the patches under
+# patches/re2-*.patch are ALREADY APPLIED to the vendored source.
+RE2_SRC_DIR = lib/re2
+RE2_BUILD_DIR = build_temp/re2_build
+RE2_LIB = $(RE2_BUILD_DIR)/libre2.a
+RE2_UPSTREAM_COMMIT = 3a8436ac436124a57a4e22d5c8713a2d42b381d7
+RE2_SOURCES = $(wildcard $(RE2_SRC_DIR)/re2/*.cc $(RE2_SRC_DIR)/re2/*.h $(RE2_SRC_DIR)/util/*.cc $(RE2_SRC_DIR)/util/*.h)
 
 # MIR JIT library. The source is vendored in-tree at lambda/mir (see
 # lambda/mir/VENDOR.md) and built in place, so the path is the same on every
@@ -377,19 +385,21 @@ $(TREE_SITTER_LATEX_MATH_LIB): $(LATEX_MATH_PARSER_C)
 # On Windows/CLANG64: must pass explicit compiler flags so cmake uses clang++
 # with -stdlib=libc++ (matching the rest of the build) instead of defaulting
 # to GCC/libstdc++, which would cause an ABI mismatch at link time.
-$(RE2_LIB):
-	@echo "Building re2 library from source..."
-	@mkdir -p build_temp/re2-noabsl/cmake_build
+$(RE2_LIB): $(RE2_SOURCES)
+	@echo "Building re2 library from vendored source ($(RE2_SRC_DIR))..."
+	@mkdir -p $(RE2_BUILD_DIR)
 	@# CMake needs a single executable for CMAKE_*_COMPILER; if ccache is in
 	@# use, $(CC)/$(CXX) is "ccache gcc"/"ccache g++" — split into launcher
 	@# + real compiler so cmake's compiler-ID probe works. MSYS2's ccache
 	@# cannot resolve the Windows absolute compiler path emitted into Ninja
 	@# rules, so RE2 must use the compiler directly on that platform.
-	@cd build_temp/re2-noabsl/cmake_build && \
+	@# The source path is relative so MSYS2's native cmake needs no path
+	@# translation (build_temp/re2_build -> ../../lib/re2).
+	@cd $(RE2_BUILD_DIR) && \
 		RE2_CC="$(firstword $(filter-out ccache,$(CC)))" ; \
 		RE2_CXX="$(firstword $(filter-out ccache,$(CXX)))" ; \
 		RE2_LAUNCHER="$(if $(filter yes,$(IS_MSYS2)),,$(filter ccache,$(firstword $(CC))))" ; \
-		cmake .. \
+		cmake ../../$(RE2_SRC_DIR) \
 			-DCMAKE_C_COMPILER="$$RE2_CC$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
 			-DCMAKE_CXX_COMPILER="$$RE2_CXX$(if $(filter yes,$(IS_MSYS2)),.exe,)" \
 			-DCMAKE_C_COMPILER_LAUNCHER="$$RE2_LAUNCHER" \
@@ -464,6 +474,34 @@ verify-mir-patches:
 		exit 1; \
 	fi; \
 	echo "✅ lambda/mir == upstream $(MIR_UPSTREAM_COMMIT) + patches/mir-*.patch"
+
+# Same invariant for the vendored RE2 at lib/re2: pristine upstream at
+# RE2_UPSTREAM_COMMIT plus every patches/re2-*.patch must equal the tree.
+# Only the vendored file set is compared (upstream also carries tests,
+# benchmarks and packaging that lib/re2 deliberately drops).
+verify-re2-patches:
+	@set -e; \
+	work=temp/re2-verify; \
+	rm -rf $$work; mkdir -p $$work; \
+	echo "Fetching pristine RE2 $(RE2_UPSTREAM_COMMIT)..."; \
+	git -c advice.detachedHead=false clone -q https://github.com/google/re2.git $$work/upstream; \
+	git -C $$work/upstream -c advice.detachedHead=false checkout -q $(RE2_UPSTREAM_COMMIT); \
+	for p in $$(ls patches/re2-*.patch 2>/dev/null); do \
+		echo "  applying $$p"; \
+		git -C $$work/upstream apply "$(CURDIR)/$$p" || { echo "ERROR: $$p does not apply to upstream" >&2; exit 1; }; \
+	done; \
+	fail=0; \
+	for f in $$(cd $(RE2_SRC_DIR) && find . -type f ! -name VENDOR.md); do \
+		if ! diff -q "$$work/upstream/$$f" "$(RE2_SRC_DIR)/$$f" >/dev/null 2>&1; then \
+			echo "DIFFERS: $$f"; fail=1; \
+		fi; \
+	done; \
+	if [ $$fail -ne 0 ]; then \
+		echo "ERROR: lib/re2 does not equal upstream + patches/. Either regenerate the" >&2; \
+		echo "       patch for your change or re-vendor from upstream." >&2; \
+		exit 1; \
+	fi; \
+	echo "✅ lib/re2 == upstream $(RE2_UPSTREAM_COMMIT) + patches/re2-*.patch"
 
 build-mir: $(MIR_LIB)
 
@@ -582,7 +620,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
 	    capture-layout test-layout layout layout-snapshot layout-snapshot-check layout-snapshot-diff count-loc struct-census tidy-printf benchmark bench-compile \
-	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches \
+	    fuzz-lambda fuzz-lambda-extended fuzz-lambda-asan fuzz-lambda-inventory fuzz-radiant fuzz-radiant-quick type-chart build-mir clean-mir c2mir-driver verify-mir-patches verify-re2-patches \
 	    ensure-test262-gtest test-js262-prelim test-js-parity test-js-exception-catalog test-js-callable-catalog test-js-opt test262-baseline test262-full \
 	    coverage-tools coverage-build-config coverage-build-config-native coverage-build-config-js coverage-build-all coverage-build-js test-coverage test-js-coverage \
 	test-ui-automation test-reactive-ui test-redex-baseline dom-ui dom-ui-run hit-test-ui view-ui native-gui-ui editable-unit editable-ui editable-editor-e2e test-editable test-wpt-contenteditable test-chromium-contenteditable audit-editable-ownership editable-package-disabled test-editable-ua-focused editable-form-regressions test-editable-ua drawing-editor-e2e test-drawing check-error-recovery \
@@ -609,6 +647,7 @@ help:
 	@echo "  build-mir     - Build MIR JIT library from vendored source at lambda/mir"
 	@echo "  clean-mir     - Remove MIR build outputs (keeps the vendored source)"
 	@echo "  verify-mir-patches - Check lambda/mir == upstream MIR + patches/mir-*.patch"
+	@echo "  verify-re2-patches - Check lib/re2 == upstream RE2 + patches/re2-*.patch"
 	@echo "  build-jube    - Build the standard host plus hosted Python and a compatibility link"
 	@echo "  release-jube  - Package the full hosted-language bundle (same host binary)"
 	@echo "  rebuild       - Force complete rebuild using Premake"
@@ -1581,7 +1620,7 @@ clean-all: clean-premake clean-test
 	@rm -f lambda/tree-sitter-ruby/libtree-sitter-ruby.a lambda/tree-sitter-ruby/src/*.o
 	@rm -f lambda/tree-sitter-latex/libtree-sitter-latex.a lambda/tree-sitter-latex/src/*.o
 	@rm -f lambda/tree-sitter-latex-math/libtree-sitter-latex-math.a lambda/tree-sitter-latex-math/src/*.o
-	@rm -rf build_temp/re2-noabsl/cmake_build
+	@rm -rf $(RE2_BUILD_DIR)
 	@$(MAKE) --no-print-directory clean-mir
 	@echo "All build directories and tree-sitter libraries cleaned."
 

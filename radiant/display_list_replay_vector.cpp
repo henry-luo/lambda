@@ -57,22 +57,14 @@ DisplayReplayVectorResult dl_replay_vector_item(RdtVector* vec,
 
         case DL_DRAW_IMAGE: {
             DlDrawImage* r = &item->draw_image;
-            const uint32_t* pixels = r->pixels;
-            int width = r->src_w, height = r->src_h, stride = r->src_stride;
-            uint64_t generation = r->resource_generation;
-            ImageSurface* image = image_surface_lookup(r->resource);
-            // a released owner invalidates borrowed pixels before either decode refresh or upload.
-            if (!r->resource.is_null() && !image) return DL_REPLAY_VECTOR_DREW;
-            // a later image draw can promote a shared decode before this recording replays.
-            if (image && image->generation != generation) {
-                if (!render_image_resource_pixels(image, r->dst_w, r->dst_h,
-                    &pixels, &width, &height, &stride)) return DL_REPLAY_VECTOR_DREW;
-                generation = image->generation;
-            }
-            rdt_draw_image(vec, pixels, width, height, stride,
+            // the owner's pixels as they are now (current frame, current decode);
+            // a released owner draws nothing
+            DlResolvedImage image;
+            if (!dl_draw_image_resolve(r, &image)) return DL_REPLAY_VECTOR_DREW;
+            rdt_draw_image(vec, image.pixels, image.width, image.height, image.stride,
                            r->dst_x, r->dst_y, r->dst_w, r->dst_h, r->opacity,
                            r->has_transform ? &r->transform : nullptr,
-                           generation, image ? image->alpha_mode == IMAGE_ALPHA_STRAIGHT : r->straight_alpha);
+                           image.generation, image.straight_alpha);
             return DL_REPLAY_VECTOR_DREW;
         }
 

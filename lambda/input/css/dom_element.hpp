@@ -196,7 +196,7 @@ static_assert(sizeof(ViewportMeta) == 32,
 // tier-1: last reconciliation result exposed to diagnostics and tests
 struct ReconcileLog {
     DomReconcileMode mode;
-    const char* reason;
+    lam::Up<const char> reason;  // a static description
     int mutations;
     int records;
     int record_overflow;
@@ -282,7 +282,11 @@ enum DomScrollBehavior : uint8_t {
     DOM_SCROLL_BEHAVIOR_INSTANT,
 };
 
-struct DomDocument {
+// Every payload in a document's resource table (registries, caches, adopted
+// documents) derives from this; its destroy callback casts down to its type.
+struct DomDocumentResourceData {};
+
+struct DomDocument : DomDocumentResourceData {
     // Lambda integration
     Input* input;                // Lambda Input context for MarkEditor operations
     lam::Own<Pool> document_pool;   // Document-owned selectively released objects
@@ -290,7 +294,7 @@ struct DomDocument {
     DomDocumentServices services;
 
     // Document content
-    Url* url;                    // Document URL
+    lam::Own<Url> url;           // Document URL
     lam::Up<Element> html_root;     // Parsed HTML tree in Mark notation (Lambda tree)
     lam::Up<DomElement> root;       // Root element of DOM tree (optional); owned by the node chain
     int html_version;            // Detected HTML version - maps to HtmlVersion enum
@@ -362,7 +366,7 @@ struct DomDocument {
     char* pending_navigation_url;
 
     // Document charset (from <meta charset> or HTTP Content-Type), for CSS fallback encoding
-    const char* document_charset;     // e.g. "windows-1251", nullptr means UTF-8
+    lam::Own<const char> document_charset;  // document-pool copy, e.g. "windows-1251"; nullptr means UTF-8
 
     // JS-requested viewport scroll offsets. Captured after script execution and
     // applied to the root viewport scroller after layout establishes scroll ranges.
@@ -487,16 +491,16 @@ uint32_t dom_document_alloc_node_id(DomDocument* doc);
 // the retained Input arena when UI-mode values embed their DOM storage.
 bool dom_document_owns_node_storage(DomDocument* doc, const void* storage);
 
-typedef void (*DomDocumentResourceDestroyFn)(void* data);
+typedef void (*DomDocumentResourceDestroyFn)(struct DomDocumentResourceData* data);
 
 // tier-1: doc-pool, survives relayout
 typedef struct DomDocumentResource {
-    void* data;   // opaque to the document; released by `destroy`
+    lam::Own<struct DomDocumentResourceData> data;   // released by `destroy`
     DomDocumentResourceDestroyFn destroy;
     lam::Own<DomDocumentResource> next;
 } DomDocumentResource;
 
-bool dom_document_add_resource(DomDocument* document, void* data,
+bool dom_document_add_resource(DomDocument* document, struct DomDocumentResourceData* data,
                                DomDocumentResourceDestroyFn destroy);
 
 // The parent iframe owns the embedded document's bounded upward edge. The

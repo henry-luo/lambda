@@ -84,7 +84,7 @@ void ui_context_init_default_fonts(UiContext* uicon) {
     uicon->legacy_default_font.text_underline_position = CSS_VALUE_AUTO;
     uicon->legacy_default_font.text_underline_side = CSS_VALUE__UNDEF;
     uicon->minimum_logical_font_size = 6.0f;
-    uicon->fallback_fonts = ::fallback_fonts;
+    uicon->fallback_fonts = lam::up(::fallback_fonts);
 }
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
@@ -94,8 +94,9 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
 
 void UiContext::create_surface(int pixel_width, int pixel_height) {
     // re-creates the surface for rendering, 32-bits per pixel, RGBA format
-    if (surface) image_surface_destroy(surface);
-    surface = image_surface_create(pixel_width, pixel_height);
+    if (window_surface) image_surface_destroy(window_surface);
+    window_surface = lam::own(image_surface_create(pixel_width, pixel_height));
+    surface = lam::up((ImageSurface*)window_surface);
     if (!surface) {
         log_error("Error: Could not create image surface.");
     }
@@ -308,14 +309,14 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
     // Create unified font context — owns font database internally
     // Created after the window so device scale is known.
     FontContextConfig font_cfg = {};
-    font_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "ui.font.pool");
-    font_arena = font_pool
+    font_pool = lam::own(mem_pool_create(NULL, MEM_ROLE_RENDER, "ui.font.pool"));
+    font_arena = lam::own(font_pool
         ? mem_arena_create(NULL, MEM_ROLE_RENDER, "ui.font.arena")
-        : NULL;
-    font_glyph_arena = font_pool
+        : NULL);
+    font_glyph_arena = lam::own(font_pool
         ? mem_arena_create_sized(NULL, 256 * 1024, 4 * 1024 * 1024,
                                  MEM_ROLE_RENDER, "ui.font.glyph_arena")
-        : NULL;
+        : NULL);
     if (!font_pool || !font_arena || !font_glyph_arena) {
         log_error("ui_context_init: failed to create tracked font allocators");
         if (font_glyph_arena) mem_arena_destroy(font_glyph_arena);
@@ -332,7 +333,8 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
     font_cfg.pixel_ratio = device_scale;
     font_cfg.max_cached_faces = 64;
     font_cfg.enable_lcd_rendering = true;
-    font_ctx = font_context_create(&font_cfg);
+    owned_font_ctx = lam::own(font_context_create(&font_cfg));
+    font_ctx = lam::up((FontContext*)owned_font_ctx);
     if (!font_ctx) {
         log_error("ui_context_init: failed to initialize font context");
         mem_arena_destroy(font_glyph_arena);
@@ -468,14 +470,7 @@ void free_document(DomDocument* doc) {
     // then dangle.
     if (doc->root) view_tree_release_detached_embedded_documents(doc->view_tree, doc->root);
 
-    if (doc->view_tree) {
-        // Some imported DOM/view fixtures alias the pools; the view-tree destroy path owns that shared pool.
-        if (doc->document_pool == doc->view_tree->prop_pool) {
-            doc->document_pool = nullptr;  // Pool will be destroyed by view_pool_destroy
-        }
-
-        view_tree_shell_destroy(doc->view_tree);
-    }
+    view_tree_shell_destroy(doc, doc->view_tree);
     // Note: root (DomElement) is arena-allocated and will be freed with the arena
     // No need to explicitly free it here
     if (doc->url) {
@@ -516,6 +511,8 @@ void ui_context_cleanup(UiContext* uicon) {
     uicon->destroy();
 }
 
+// the window shell owns the top-level document and releases it here; other
+// holders of `document` only borrow it
 void UiContext::destroy_document() {
     if (document) {
         free_document(document);
@@ -538,10 +535,11 @@ void UiContext::destroy() {
     fontface_cleanup(this);  // free font cache
     font_prop_release_handle(&default_font);
     font_prop_release_handle(&legacy_default_font);
-    if (font_ctx) {
-        font_context_destroy(font_ctx);
-        font_ctx = NULL;
+    if (owned_font_ctx) {
+        font_context_destroy(owned_font_ctx);
+        owned_font_ctx = nullptr;
     }
+    font_ctx = nullptr;
     // FontContext borrows these tracked roots; destroy them after its caches release their handles.
     if (font_glyph_arena) {
         mem_arena_destroy(font_glyph_arena);
@@ -560,7 +558,8 @@ void UiContext::destroy() {
     image_cache_cleanup(this);  // cleanup image cache
     render_pool_shutdown();  // destroy worker threads before ThorVG engine
     rdt_engine_term();
-    image_surface_destroy(surface);
+    image_surface_destroy(window_surface);
+    window_surface = nullptr;
     surface = nullptr;
 
     // Only tear down GLFW if a window was created (i.e., non-headless mode).

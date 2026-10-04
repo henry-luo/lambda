@@ -7725,7 +7725,7 @@ static int64_t split_utf8_part_count(const char* chars, size_t chars_len) {
 }
 
 static bool literal_type_pattern_item(Item type_item, Item* literal_item);
-static TypePattern* runtime_pattern_from_type(Type* type);
+// runtime_pattern_from_type is declared in re2_wrapper.hpp (shared with io.grep)
 
 // split(str, sep) - split string by separator; a constructor, so its result
 // is an array of strings (S2.5.7)
@@ -8349,7 +8349,7 @@ static bool literal_type_pattern_item(Item type_item, Item* literal_item) {
     return true;
 }
 
-static TypePattern* runtime_pattern_from_type(Type* type) {
+TypePattern* runtime_pattern_from_type(Type* type) {
     if (!type) return nullptr;
     if (type->kind == TYPE_KIND_PATTERN) return (TypePattern*)type;
     const char* error_msg = nullptr;

@@ -116,6 +116,12 @@ typedef struct SysFuncInfo {
     int result_arg_index;
 } SysFuncInfo;
 
+// S17.8.1: the option names a system function defines, and the index of its
+// options argument; NULL for a function without a registered options map.
+const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index);
+// true for a defined name, and for any name of an unregistered function
+bool sys_func_option_known(SysFunc fn, const char* name, size_t length);
+
 // share the text-split relation between AST typing and guarded MIR candidates;
 // an open source never proves a string element or a pointer-slot carrier.
 static inline TypeId sysfunc_text_split_element_type(const SysFuncInfo* info,

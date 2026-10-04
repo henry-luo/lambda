@@ -23,3 +23,4 @@ files:
 ignores:
   - "**/tree-sitter*/**"
   - "lib/sqlite/**"
+  - "lib/re2/**"                    # vendored RE2 (lib/re2/VENDOR.md)
