@@ -12,26 +12,26 @@
  * Main background rendering dispatch
  */
 
-static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view);
-static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+static RdtPath* background_image_clip_path(RasterRenderContext* rdcon, ViewBlock* view);
+static void render_linear_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, LinearGradient* gradient,
                                          Rect position_rect, Rect paint_rect);
-static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+static void render_radial_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, RadialGradient* gradient,
                                          Rect position_rect, Rect paint_rect);
-static void render_background_color(RenderContext* rdcon, ViewBlock* view,
+static void render_background_color(RasterRenderContext* rdcon, ViewBlock* view,
                                     Color color, Rect rect);
-static void render_background_gradient(RenderContext* rdcon, ViewBlock* view,
+static void render_background_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                        BackgroundProp* bg, Rect rect);
-static void render_background_image(RenderContext* rdcon, ViewBlock* view,
+static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view,
                                     BackgroundProp* bg, Rect rect);
-static void render_linear_gradient(RenderContext* rdcon, ViewBlock* view,
+static void render_linear_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                    LinearGradient* gradient, Rect rect);
-static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view,
+static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                    RadialGradient* gradient, Rect rect);
-static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view,
+static void render_conic_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                   ConicGradient* gradient, Rect rect);
-static void render_repeating_radial_gradient(RenderContext* rdcon, ViewBlock* view,
+static void render_repeating_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                              RadialGradient* gradient, Rect rect,
                                              float cx, float cy, float radius);
 
@@ -89,7 +89,7 @@ static Corner background_corner_inset_box(const Corner* radius, CssEnum box,
     return out;
 }
 
-void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+void render_background(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->background) return;
 
     BackgroundProp* bg = view->boundary()->background;
@@ -231,7 +231,7 @@ void render_background(RenderContext* rdcon, ViewBlock* view, Rect rect) {
  * Render solid color background
  * Handles border-radius by using ThorVG if needed
  */
-static void render_background_color(RenderContext* rdcon, ViewBlock* view, Color color, Rect rect) {
+static void render_background_color(RasterRenderContext* rdcon, ViewBlock* view, Color color, Rect rect) {
     bool has_radius = false;
     BorderProp* border = nullptr;
     if (view->bound && view->boundary_mut()->border) {
@@ -272,7 +272,7 @@ static RdtPath* background_gradient_clip_path(ViewBlock* view, Rect clip_rect) {
     return background_rounded_rect_path(view, clip_rect);
 }
 
-static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
+static void render_linear_gradient_tile(RasterRenderContext* rdcon, ViewBlock* view,
                                         LinearGradient* gradient, Rect tile_rect,
                                         Rect clip_rect) {
     if (!gradient || gradient->stop_count < 2) {
@@ -365,7 +365,7 @@ static void render_linear_gradient_tile(RenderContext* rdcon, ViewBlock* view,
     rdt_path_free(p);
 }
 
-static void render_linear_gradient(RenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
+static void render_linear_gradient(RasterRenderContext* rdcon, ViewBlock* view, LinearGradient* gradient, Rect rect) {
     render_linear_gradient_tile(rdcon, view, gradient, rect, rect);
 }
 
@@ -412,7 +412,7 @@ static float calc_radial_radius(RadialGradient* gradient, Rect rect, float cx, f
 /**
  * Render radial gradient
  */
-static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
+static void render_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view, RadialGradient* gradient, Rect rect) {
     if (!gradient || gradient->stop_count < 2) {
         return;
     }
@@ -462,17 +462,17 @@ static void render_radial_gradient(RenderContext* rdcon, ViewBlock* view, Radial
     rdt_path_free(p);
 }
 
-void render_list_marker_linear_gradient(RenderContext* rdcon,
+void render_list_marker_linear_gradient(RasterRenderContext* rdcon,
                                         LinearGradient* gradient, Rect rect) {
     render_linear_gradient_tile(rdcon, nullptr, gradient, rect, rect);
 }
 
-void render_list_marker_radial_gradient(RenderContext* rdcon,
+void render_list_marker_radial_gradient(RasterRenderContext* rdcon,
                                         RadialGradient* gradient, Rect rect) {
     render_radial_gradient(rdcon, nullptr, gradient, rect);
 }
 
-void render_list_marker_conic_gradient(RenderContext* rdcon,
+void render_list_marker_conic_gradient(RasterRenderContext* rdcon,
                                        ConicGradient* gradient, Rect rect) {
     render_conic_gradient(rdcon, nullptr, gradient, rect);
 }
@@ -512,7 +512,7 @@ static Color get_gradient_color_at(GradientStop* stops, int stop_count, float po
     return stops[stop_count - 1].color;
 }
 
-static uint32_t* background_gradient_pixel_buffer(RenderContext* rdcon, Rect rect,
+static uint32_t* background_gradient_pixel_buffer(RasterRenderContext* rdcon, Rect rect,
                                                    int* width, int* height) {
     if (!rdcon || !rdcon->dl || !width || !height) return nullptr;
     // INT_CAST_OK: raster image indexing requires integer pixel dimensions.
@@ -531,7 +531,7 @@ static uint32_t* background_gradient_pixel_buffer(RenderContext* rdcon, Rect rec
     return pixels;
 }
 
-static void background_paint_gradient_pixels(RenderContext* rdcon, ViewBlock* view,
+static void background_paint_gradient_pixels(RasterRenderContext* rdcon, ViewBlock* view,
                                               Rect rect, uint32_t* pixels,
                                               int width, int height) {
     bool pushed_clip = false;
@@ -551,7 +551,7 @@ static void background_paint_gradient_pixels(RenderContext* rdcon, ViewBlock* vi
     }
 }
 
-static void render_repeating_radial_gradient(RenderContext* rdcon, ViewBlock* view,
+static void render_repeating_radial_gradient(RasterRenderContext* rdcon, ViewBlock* view,
                                              RadialGradient* gradient, Rect rect,
                                              float cx, float cy, float radius) {
     int width = 0, height = 0;
@@ -580,7 +580,7 @@ static void render_repeating_radial_gradient(RenderContext* rdcon, ViewBlock* vi
  * Render conic gradient using software rendering
  * ThorVG doesn't support conic gradients directly, so we render pixel-by-pixel
  */
-static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
+static void render_conic_gradient(RasterRenderContext* rdcon, ViewBlock* view, ConicGradient* gradient, Rect rect) {
     if (!rdcon || !rdcon->dl || !gradient || gradient->stop_count < 2) {
         return;
     }
@@ -621,7 +621,7 @@ static void render_conic_gradient(RenderContext* rdcon, ViewBlock* view, ConicGr
 /**
  * Render background gradient (dispatch to type-specific function)
  */
-static void render_background_gradient(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
+static void render_background_gradient(RasterRenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
     switch (bg->gradient_type) {
         case GRADIENT_LINEAR:
             if (bg->linear_gradient) {
@@ -1180,7 +1180,7 @@ static uint32_t* render_outer_shadow_blur_image(
  *    - Apply border-radius if the element has rounded corners
  * 2. Inset shadows are rendered after background (inside the element)
  */
-void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+void render_box_shadow(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->box_shadow) return;
 
     ScratchScope scope(&rdcon->scratch);
@@ -1329,7 +1329,7 @@ void render_box_shadow(RenderContext* rdcon, ViewBlock* view, Rect rect) {
  *    correct base color at element edges), blurs in-place, then copies the inner
  *    rect back to the surface.  This avoids edge-clamping artifacts.
  */
-void render_box_shadow_inset(RenderContext* rdcon, ViewBlock* view, Rect rect) {
+void render_box_shadow_inset(RasterRenderContext* rdcon, ViewBlock* view, Rect rect) {
     if (!view->bound || !view->boundary()->box_shadow) return;
 
     ScratchScope scope(&rdcon->scratch);
@@ -1693,7 +1693,7 @@ static void background_for_each_tile(const BackgroundTilePlan* plan,
 }
 
 typedef struct {
-    RenderContext* rdcon;
+    RasterRenderContext* rdcon;
     ViewBlock* view;
     LinearGradient* gradient;
     Rect paint_rect;
@@ -1706,7 +1706,7 @@ static void render_linear_gradient_tile_cb(const Rect* tile_rect, void* userdata
 }
 
 typedef struct {
-    RenderContext* rdcon;
+    RasterRenderContext* rdcon;
     ViewBlock* view;
     RadialGradient* gradient;
 } RadialGradientTileContext;
@@ -1716,7 +1716,7 @@ static void render_radial_gradient_tile_cb(const Rect* tile_rect, void* userdata
     render_radial_gradient(ctx->rdcon, ctx->view, ctx->gradient, *tile_rect);
 }
 
-static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+static void render_linear_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, LinearGradient* gradient,
                                          Rect position_rect, Rect paint_rect) {
     if (!gradient) return;
@@ -1732,7 +1732,7 @@ static void render_linear_gradient_layer(RenderContext* rdcon, ViewBlock* view,
                              render_linear_gradient_tile_cb, &tile_ctx);
 }
 
-static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
+static void render_radial_gradient_layer(RasterRenderContext* rdcon, ViewBlock* view,
                                          BackgroundProp* bg, RadialGradient* gradient,
                                          Rect position_rect, Rect paint_rect) {
     if (!gradient) return;
@@ -1751,13 +1751,13 @@ static void render_radial_gradient_layer(RenderContext* rdcon, ViewBlock* view,
 /**
  * Render a single tile of a background image using the raster blit path.
  */
-static void blit_bg_tile(RenderContext* rdcon, ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip,
+static void blit_bg_tile(RasterRenderContext* rdcon, ImageSurface* img, ImageSurface* dst, Rect* tile_rect, Bound* clip,
                          ScaleMode mode = SCALE_MODE_LINEAR,
                          ClipShape** clip_shapes = nullptr, int clip_depth = 0) {
     render_painter_blit_surface_scaled(rdcon, img, NULL, dst, tile_rect, clip, mode, clip_shapes, clip_depth);
 }
 
-static int background_image_clip_shapes(RenderContext* rdcon, ViewBlock* view,
+static int background_image_clip_shapes(RasterRenderContext* rdcon, ViewBlock* view,
                                         ClipShape* rounded_shape,
                                         ClipShape** out_shapes) {
     int depth = 0;
@@ -1788,7 +1788,7 @@ static int background_image_clip_shapes(RenderContext* rdcon, ViewBlock* view,
     return depth;
 }
 
-static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view) {
+static RdtPath* background_image_clip_path(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!rdcon) return nullptr;
     Bound* clip = &rdcon->block.clip;
     float clip_w = clip->right - clip->left;
@@ -1808,7 +1808,7 @@ static RdtPath* background_image_clip_path(RenderContext* rdcon, ViewBlock* view
 /**
  * Render a single tile of a background image using the vector API (for SVG images).
  */
-static void render_bg_tile_tvg(RenderContext* rdcon, ViewBlock* view, ImageSurface* img, Rect* tile_rect) {
+static void render_bg_tile_tvg(RasterRenderContext* rdcon, ViewBlock* view, ImageSurface* img, Rect* tile_rect) {
     if (!img->pic) return;
 
     RdtPicture* pic = rdt_picture_dup(img->pic);
@@ -1824,7 +1824,7 @@ static void render_bg_tile_tvg(RenderContext* rdcon, ViewBlock* view, ImageSurfa
 }
 
 typedef struct {
-    RenderContext* rdcon;
+    RasterRenderContext* rdcon;
     ViewBlock* view;
     ImageSurface* img;
     bool is_svg;
@@ -1849,7 +1849,7 @@ static void render_background_image_tile_cb(const Rect* tile_rect, void* userdat
 /**
  * Render background image with background-size, background-position, and background-repeat.
  */
-static void render_background_image(RenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
+static void render_background_image(RasterRenderContext* rdcon, ViewBlock* view, BackgroundProp* bg, Rect rect) {
     const char* image_url = bg->image;
 
     // Load image via the image cache

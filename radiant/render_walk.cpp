@@ -25,7 +25,7 @@ typedef struct RenderWalkBlockPhase {
     bool stop_after_self;
 } RenderWalkBlockPhase;
 
-typedef struct RenderWalkBlockDriver {
+typedef struct RenderWalkBlockDriver : RenderPaintBlockDriver {
     RenderBackend* backend;
     RenderWalkState* state;
     RenderWalkBlockPhase phase;
@@ -100,8 +100,8 @@ static bool render_walk_inline_effect_group(ViewSpan* span, PaintEffectGroup* gr
     return true;
 }
 
-static bool render_walk_block_begin(void* ctx, ViewBlock* block, void** phase) {
-    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+static bool render_walk_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* block, void** phase) {
+    RenderWalkBlockDriver* driver = static_cast<RenderWalkBlockDriver*>(ctx);
     if (!driver || !driver->backend || !driver->state || !block || !phase) return false;
 
     RenderBackend* backend = driver->backend;
@@ -141,8 +141,8 @@ static bool render_walk_block_begin(void* ctx, ViewBlock* block, void** phase) {
     return true;
 }
 
-static bool render_walk_block_paint_self(void* ctx, ViewBlock* block, void* phase) {
-    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+static bool render_walk_block_paint_self(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
+    RenderWalkBlockDriver* driver = static_cast<RenderWalkBlockDriver*>(ctx);
     RenderWalkBlockPhase* p = (RenderWalkBlockPhase*)phase;
     if (!driver || !driver->backend || !driver->state || !block || !p) return false;
 
@@ -180,9 +180,9 @@ static bool render_walk_block_paint_self(void* ctx, ViewBlock* block, void* phas
     return true;
 }
 
-static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void* phase) {
+static double render_walk_block_paint_children(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)phase;
-    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+    RenderWalkBlockDriver* driver = static_cast<RenderWalkBlockDriver*>(ctx);
     if (!driver || !driver->backend || !driver->state || !block) return 0.0;
 
     RenderBackend* backend = driver->backend;
@@ -235,8 +235,8 @@ static double render_walk_block_paint_children(void* ctx, ViewBlock* block, void
     return 0.0;
 }
 
-static void render_walk_block_finish(void* ctx, ViewBlock* block, void* phase) {
-    RenderWalkBlockDriver* driver = (RenderWalkBlockDriver*)ctx;
+static void render_walk_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
+    RenderWalkBlockDriver* driver = static_cast<RenderWalkBlockDriver*>(ctx);
     RenderWalkBlockPhase* p = (RenderWalkBlockPhase*)phase;
     if (!driver || !driver->backend || !driver->state || !block || !p) return;
 
@@ -272,7 +272,7 @@ void render_walk_block(RenderBackend* backend, RenderWalkState* state, ViewBlock
     driver.state = state;
 
     RenderPaintBlockOps ops = {};
-    ops.ctx = &driver;
+    ops.ctx = lam::up(&driver);
     ops.begin = render_walk_block_begin;
     ops.paint_self = render_walk_block_paint_self;
     ops.paint_children = render_walk_block_paint_children;

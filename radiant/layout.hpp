@@ -4045,11 +4045,9 @@ static inline bool layout_text_node_has_content(DomNode* node) {
 // Grid and flex use the same display:contents flattening; policy selects their
 // distinct text participation and initialization requirements.
 typedef bool (*LayoutFlattenedTextItemPredicate)(DomNode* text,
-                                                 ViewBlock* container,
-                                                 void* context);
+                                                 ViewBlock* container);
 typedef struct LayoutFlattenedItemPolicy {
     LayoutFlattenedTextItemPredicate include_text;
-    void* context;
     lam::Up<DomElement> skipped_element;
     bool initialize_contents;
     bool reset_styles_resolved;

@@ -13819,8 +13819,7 @@ static JsDomSvgShapeHit dom_svg_use_instance_hit(DomElement* elem,
     const RdtMatrix* instance_ctm, float viewport_x, float viewport_y);
 static bool dom_svg_element_skips_hit_test(DomElement* elem);
 
-static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule, void* data) {
-    const RdtLogicalPoint* point = (const RdtLogicalPoint*)data;
+static bool dom_svg_clip_path_contains(const RdtPath* path, const RdtMatrix* frame, RdtFillRule rule, const RdtLogicalPoint* point) {
     RdtPath* contour = rdt_path_new();
     if (!contour || !render_path_append_transformed(contour, path, frame)) {
         if (contour) rdt_path_free(contour);

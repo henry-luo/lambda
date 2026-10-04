@@ -84,7 +84,7 @@ void ui_context_init_default_fonts(UiContext* uicon) {
     uicon->legacy_default_font.text_underline_position = CSS_VALUE_AUTO;
     uicon->legacy_default_font.text_underline_side = CSS_VALUE__UNDEF;
     uicon->minimum_logical_font_size = 6.0f;
-    uicon->fallback_fonts = ::fallback_fonts;
+    uicon->fallback_fonts = lam::up(::fallback_fonts);
 }
 
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height) {
@@ -308,14 +308,14 @@ int UiContext::init(bool next_headless, float requested_device_scale) {
     // Create unified font context — owns font database internally
     // Created after the window so device scale is known.
     FontContextConfig font_cfg = {};
-    font_pool = mem_pool_create(NULL, MEM_ROLE_RENDER, "ui.font.pool");
-    font_arena = font_pool
+    font_pool = lam::own(mem_pool_create(NULL, MEM_ROLE_RENDER, "ui.font.pool"));
+    font_arena = lam::own(font_pool
         ? mem_arena_create(NULL, MEM_ROLE_RENDER, "ui.font.arena")
-        : NULL;
-    font_glyph_arena = font_pool
+        : NULL);
+    font_glyph_arena = lam::own(font_pool
         ? mem_arena_create_sized(NULL, 256 * 1024, 4 * 1024 * 1024,
                                  MEM_ROLE_RENDER, "ui.font.glyph_arena")
-        : NULL;
+        : NULL);
     if (!font_pool || !font_arena || !font_glyph_arena) {
         log_error("ui_context_init: failed to create tracked font allocators");
         if (font_glyph_arena) mem_arena_destroy(font_glyph_arena);

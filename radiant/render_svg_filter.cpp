@@ -262,7 +262,7 @@ static Bound svg_filter_resolve_region(const lam::Own<const char>* tokens, const
 
 static SvgLengthContext svg_filter_resource_lengths(const RdtSvgFilterRun* run, Element* resource) {
     SvgLengthContext lengths = run->lengths;
-    if (run->resolve_lengths && resource) run->resolve_lengths(run->length_context, resource, &lengths);
+    if (run->resolve_lengths && resource) run->resolve_lengths(run->image_context, resource, &lengths);
     return lengths;
 }
 

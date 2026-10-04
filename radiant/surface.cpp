@@ -463,7 +463,7 @@ uint64_t image_cache_resource_generation(UiContext* ui) {
 ImageSurface* image_cache_adopt(UiContext* uicon, const char* key, ImageSurface* surface) {
     if (!surface) return nullptr;
     if (!uicon || !key) { image_surface_destroy(surface); return nullptr; }
-    if (!uicon->image_cache) uicon->image_cache = ImageMap::create(10);
+    if (!uicon->image_cache) uicon->image_cache = lam::own(ImageMap::create(10));
     ImageEntry search_key = {.path = (char*)key, .image = NULL};
     ImageEntry* entry = uicon->image_cache ? ImageMap::get(uicon->image_cache, search_key) : nullptr;
     if (entry && entry->image) {
@@ -495,7 +495,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     if (uicon->image_cache == NULL) {
         // create a new hash map. 2nd argument is the initial capacity.
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->image_cache = ImageMap::create(10);
+        uicon->image_cache = lam::own(ImageMap::create(10));
     }
 
     // Handle data: URIs

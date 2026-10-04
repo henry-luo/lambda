@@ -1643,7 +1643,7 @@ static bool flex_contents_whitespace_is_text_separator(DomNode* text,
 }
 
 static bool flex_collect_flattened_text_item(DomNode* text,
-                                             ViewBlock* container, void*) {
+                                             ViewBlock* container) {
     return layout_text_node_has_content(text) ||
         flex_contents_whitespace_is_text_separator(text, container);
 }

@@ -869,7 +869,7 @@ extern "C" bool radiant_canvas_fill_text(void* canvas_element, void* font_handle
     return true;
 }
 
-void render_canvas_content(RenderContext* rdcon, ViewBlock* view) {
+void render_canvas_content(RasterRenderContext* rdcon, ViewBlock* view) {
     if (!rdcon || !view || !view->is_element()) return;
     DomElement* element = lam::dom_require_element(lam::view_dom_node(view));
     CanvasEntry* entry = canvas_entry_for_element(element, false);

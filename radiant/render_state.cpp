@@ -2,7 +2,7 @@
 #include "view.hpp"
 #include "../lib/log.h"
 
-RenderTransformScope render_state_push_transform(RenderContext* rdcon, ViewBlock* block,
+RenderTransformScope render_state_push_transform(RasterRenderContext* rdcon, ViewBlock* block,
                                                  const BlockBlot* parent_block) {
     RenderTransformScope scope = {
         lam::up(rdcon),
@@ -71,7 +71,7 @@ void render_state_pop_transform(RenderTransformScope* scope) {
     scope->active = false;
 }
 
-const RdtMatrix* render_state_current_transform(RenderContext* rdcon) {
+const RdtMatrix* render_state_current_transform(RasterRenderContext* rdcon) {
     if (!rdcon || !rdcon->has_transform) {
         return nullptr;
     }

@@ -90,7 +90,7 @@ Color render_document_output_background(View* root_view) {
     return background;
 }
 
-void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
+void render_embed_doc(RasterRenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;
     if (block->bound) { render_bound(rdcon, block); }
 
@@ -195,7 +195,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     rdcon->block = pa_block;
 }
 
-void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
+void render_inline_view(RasterRenderContext* rdcon, ViewSpan* view_span) {
     render_profiler_increment(rdcon->profiler, RENDER_PROFILE_INLINE);
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
 

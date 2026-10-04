@@ -9,7 +9,7 @@
 #include <string.h>
 
 typedef struct SelectionPaintCtx {
-    RenderContext* rdcon;
+    RasterRenderContext* rdcon;
     Color          color;
     float          scale;
     float          iframe_offset_x;
@@ -18,7 +18,7 @@ typedef struct SelectionPaintCtx {
     float          root_scroll_y;
 } SelectionPaintCtx;
 
-static void render_focus_outline(RenderContext* rdcon, DocState* state) {
+static void render_focus_outline(RasterRenderContext* rdcon, DocState* state) {
     View* focused = focus_get_visible(state);
     if (!focused) return;
     if (focused->view_type != RDT_VIEW_BLOCK) return;
@@ -53,7 +53,7 @@ static void render_focus_outline(RenderContext* rdcon, DocState* state) {
     rdt_path_free(path);
 }
 
-static void render_caret(RenderContext* rdcon, DocState* state) {
+static void render_caret(RasterRenderContext* rdcon, DocState* state) {
     View* view = NULL;
     int caret_offset = 0;
     float caret_x = 0, caret_y = 0, caret_height = 0;
@@ -124,7 +124,7 @@ static void selection_paint_rect_cb(float x, float y, float w, float h, void* ud
     rc_fill_rect(ctx->rdcon, px, py, pw, ph, ctx->color);
 }
 
-static bool render_text_control_selection(RenderContext* rdcon, DomRange* range) {
+static bool render_text_control_selection(RasterRenderContext* rdcon, DomRange* range) {
     if (!rdcon || !range) return false;
     if (!range->start.node || range->start.node != range->end.node) return false;
     if (!range->start.node->is_element()) return false;
@@ -163,7 +163,7 @@ static bool rebind_paint_boundary_to_current_tree(DomNode* root,
     return true;
 }
 
-static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
+static DomRange* selection_paint_range_for_current_tree(RasterRenderContext* rdcon,
                                                         DomRange* range,
                                                         DomRange* scratch) {
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->document ||
@@ -189,7 +189,7 @@ static DomRange* selection_paint_range_for_current_tree(RenderContext* rdcon,
     return scratch;
 }
 
-static DomRange* render_active_selection_range(RenderContext* rdcon,
+static DomRange* render_active_selection_range(RasterRenderContext* rdcon,
                                                 DomRange* scratch) {
     if (!rdcon || !rdcon->ui_context || !rdcon->ui_context->document)
         return nullptr;
@@ -201,7 +201,7 @@ static DomRange* render_active_selection_range(RenderContext* rdcon,
         rdcon, selection->ranges[0], scratch);
 }
 
-bool render_text_selection_span(RenderContext* rdcon, ViewText* text_view,
+bool render_text_selection_span(RasterRenderContext* rdcon, ViewText* text_view,
                                 int* start_byte, int* end_byte) {
     if (!text_view || !start_byte || !end_byte) return false;
     DomRange scratch;
@@ -211,7 +211,7 @@ bool render_text_selection_span(RenderContext* rdcon, ViewText* text_view,
         lam::dom_require_text(text_view), start_byte, end_byte);
 }
 
-void render_text_selection_rect(RenderContext* rdcon, ViewText* text_view,
+void render_text_selection_rect(RasterRenderContext* rdcon, ViewText* text_view,
                                 TextRect* text_rect) {
     if (!rdcon || !text_view || !text_rect || !rdcon->ui_context ||
         !rdcon->ui_context->document) return;
@@ -257,7 +257,7 @@ void render_text_selection_rect(RenderContext* rdcon, ViewText* text_view,
         text_rect, rdcon->ui_context, selection_paint_rect_cb, &ctx);
 }
 
-void render_ui_overlays(RenderContext* rdcon, DocState* state) {
+void render_ui_overlays(RasterRenderContext* rdcon, DocState* state) {
     if (!state) {
         return;
     }

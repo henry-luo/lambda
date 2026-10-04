@@ -89,14 +89,14 @@ static float form_text_align_offset(ViewBlock* block, float content_w,
 }
 
 // Helper to draw a filled rectangle
-static void fill_rect(RenderContext* rdcon, float x, float y, float w, float h, Color color) {
+static void fill_rect(RasterRenderContext* rdcon, float x, float y, float w, float h, Color color) {
     Rect rect = {x, y, w, h};
     rc_fill_surface_rect(rdcon, rdcon->ui_context->surface, &rect, color.c, &rdcon->block.clip,
                       rdcon->clip_shapes, rdcon->clip_shape_depth);
 }
 
 struct TextControlSelectionPaint {
-    RenderContext* rdcon;
+    RasterRenderContext* rdcon;
     ViewBlock* block;
     Color color;
     float scale;
@@ -125,7 +125,7 @@ static void paint_text_control_selection_rect(float x, float y, float w, float h
 }
 
 // Helper to draw a filled circle using RdtVector
-static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color) {
+static void fill_circle(RasterRenderContext* rdcon, float cx, float cy, float radius, Color color) {
     RdtPath* p = rdt_path_new();
     rdt_path_add_circle(p, cx, cy, radius, radius);
     rc_fill_path(rdcon, p, color, RDT_FILL_WINDING, NULL);
@@ -133,14 +133,14 @@ static void fill_circle(RenderContext* rdcon, float cx, float cy, float radius, 
 }
 
 // Helper to draw a circle outline (ring) using RdtVector
-static void stroke_circle(RenderContext* rdcon, float cx, float cy, float radius, Color color, float stroke_width) {
+static void stroke_circle(RasterRenderContext* rdcon, float cx, float cy, float radius, Color color, float stroke_width) {
     RdtPath* p = rdt_path_new();
     rdt_path_add_circle(p, cx, cy, radius, radius);
     rc_stroke_path(rdcon, p, color, stroke_width, RDT_CAP_BUTT, RDT_JOIN_MITER, NULL, 0, NULL);
     rdt_path_free(p);
 }
 
-static void draw_rect_focus_ring(RenderContext* rdcon, float x, float y,
+static void draw_rect_focus_ring(RasterRenderContext* rdcon, float x, float y,
                                  float w, float h, float scale) {
     float ring = 2.0f * scale;
     Color ring_color = make_color(0x1A, 0x73, 0xE8, 0xFF);
@@ -158,7 +158,7 @@ static void draw_rect_focus_ring(RenderContext* rdcon, float x, float y,
 }
 
 // Helper to draw a 3D border effect (inset or outset)
-static void draw_3d_border(RenderContext* rdcon, float x, float y, float w, float h,
+static void draw_3d_border(RasterRenderContext* rdcon, float x, float y, float w, float h,
                            bool inset, float border_width) {
     Color dark = make_color(128, 128, 128);   // shadow
     Color light = make_color(208, 208, 208);  // highlight (visible against white bg)
@@ -227,7 +227,7 @@ struct FormControlBox {
     bool disabled;
 };
 
-static FormControlBox form_control_box(RenderContext* rdcon, ViewBlock* block) {
+static FormControlBox form_control_box(RasterRenderContext* rdcon, ViewBlock* block) {
     FormControlBox box;
     box.s = rdcon->raster_scale;
     box.x = rdcon->block.x + block->x * box.s;
@@ -248,7 +248,7 @@ static bool form_control_has_focus(const FormControlBox* box, ViewBlock* block) 
     return box && box->state && focus_get(box->state) == static_cast<View*>(block);
 }
 
-static void paint_default_text_control_box(RenderContext* rdcon, ViewBlock* block,
+static void paint_default_text_control_box(RasterRenderContext* rdcon, ViewBlock* block,
                                            const FormControlBox* box) {
     if (!rdcon || !block || !box) return;
     if (block->form && block->form->appearance_none) return;
@@ -295,7 +295,7 @@ struct FormGlyphStep {
     LoadedGlyph* glyph;
 };
 
-static float form_render_pixel_ratio(RenderContext* rdcon) {
+static float form_render_pixel_ratio(RasterRenderContext* rdcon) {
     return rdcon ? ui_context_raster_scale(rdcon->ui_context) : 1.0f;
 }
 
@@ -328,7 +328,7 @@ static bool form_glyph_run_next(FormGlyphRun* run, FormGlyphStep* step) {
     return false;
 }
 
-static void render_simple_string_range(RenderContext* rdcon, const char* text,
+static void render_simple_string_range(RasterRenderContext* rdcon, const char* text,
                                        size_t text_len, float x, float y,
                                        FontProp* font, Color color) {
     if (!text || text_len == 0 || !font || !rdcon->ui_context) return;
@@ -371,7 +371,7 @@ static void render_simple_string_range(RenderContext* rdcon, const char* text,
     rdcon->color = saved_color;
 }
 
-void render_simple_string(RenderContext* rdcon, const char* text, float x, float y,
+void render_simple_string(RasterRenderContext* rdcon, const char* text, float x, float y,
                           FontProp* font, Color color) {
     render_simple_string_range(rdcon, text, text ? strlen(text) : 0,
                                x, y, font, color);
@@ -383,7 +383,7 @@ void render_simple_string(RenderContext* rdcon, const char* text, float x, float
  * Returns logical pixels after removing the font raster scale; callers lower
  * through `s` only at the paint boundary.
  */
-static float measure_input_text_width(RenderContext* rdcon, FontProp* font,
+static float measure_input_text_width(RasterRenderContext* rdcon, FontProp* font,
                                       const char* text, int byte_count) {
     if (!text || byte_count <= 0 || !font || !rdcon->ui_context) return 0.0f;
     FontBox fbox = {0};
@@ -600,7 +600,7 @@ static void resolve_text_control_display_text(FormControlProp* form,
 /**
  * Render a text input control (text, password, email, etc.)
  */
-static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_text_input(RasterRenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     FormControlBox fc = form_control_box(rdcon, block);
     float s = fc.s;  // scale factor for CSS -> physical pixels
     float x = fc.x;
@@ -833,7 +833,7 @@ static void render_text_input(RenderContext* rdcon, ViewBlock* block, FormContro
 /**
  * Render a checkbox control.
  */
-static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_checkbox(RasterRenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
     FormControlBox fc = form_control_box(rdcon, block);
     float s = fc.s;
@@ -899,7 +899,7 @@ static void render_checkbox(RenderContext* rdcon, ViewBlock* block, FormControlP
 /**
  * Render a radio button control.
  */
-static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_radio(RasterRenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
     FormControlBox fc = form_control_box(rdcon, block);
     float s = fc.s;
@@ -948,7 +948,7 @@ static void render_radio(RenderContext* rdcon, ViewBlock* block, FormControlProp
  * If the button has CSS-styled background (from author stylesheet),
  * we skip the default gray background. Otherwise, render default button appearance.
  */
-static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_button(RasterRenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     FormControlBox fc = form_control_box(rdcon, block);
     float s = fc.s;
     float x = fc.x;
@@ -1000,7 +1000,7 @@ static void render_button(RenderContext* rdcon, ViewBlock* block, FormControlPro
 
 }
 
-static void render_file_input(RenderContext* rdcon, ViewBlock* block,
+static void render_file_input(RasterRenderContext* rdcon, ViewBlock* block,
                               FormControlProp* form) {
     FormControlBox fc = form_control_box(rdcon, block);
     FontProp* button_font = form->file_button_font
@@ -1085,7 +1085,7 @@ static bool form_select_is_listbox(const FormControlProp* form) {
  * `option.selected` and form submission read, so a set of selected rows needs
  * no separate painting state.
  */
-static void render_select_listbox_rows(RenderContext* rdcon, ViewBlock* block,
+static void render_select_listbox_rows(RasterRenderContext* rdcon, ViewBlock* block,
                                        FormControlProp* form,
                                        const FormControlBox* fc) {
     if (!block->is_element() || !block->font) return;
@@ -1126,7 +1126,7 @@ static void render_select_listbox_rows(RenderContext* rdcon, ViewBlock* block,
 /**
  * Render a select dropdown (closed state).
  */
-static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_select(RasterRenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     FormControlBox fc = form_control_box(rdcon, block);
     float s = fc.s;
     float x = fc.x;
@@ -1244,7 +1244,7 @@ static void render_select(RenderContext* rdcon, ViewBlock* block, FormControlPro
  * Render a select dropdown popup (when open).
  * Called separately from render_select to ensure it's drawn on top.
  */
-void render_select_dropdown(RenderContext* rdcon, ViewBlock* select, DocState* state) {
+void render_select_dropdown(RasterRenderContext* rdcon, ViewBlock* select, DocState* state) {
     if (!state) return;
     if (!select || !select->form || !form_control_is_dropdown_open(state, static_cast<View*>(select))) return;
 
@@ -1374,7 +1374,7 @@ static void textarea_offset_to_line_col(const char* text, int byte_offset, int* 
 /**
  * Render a textarea control with multi-line text, caret, and placeholder.
  */
-static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_textarea(RasterRenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     FormControlBox fc = form_control_box(rdcon, block);
     float s = fc.s;
     float x = fc.x;
@@ -1632,7 +1632,7 @@ static void render_textarea(RenderContext* rdcon, ViewBlock* block, FormControlP
 /**
  * Render a range slider control.
  */
-static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
+static void render_range(RasterRenderContext* rdcon, ViewBlock* block, FormControlProp* form) {
     (void)form;
     FormControlBox fc = form_control_box(rdcon, block);
     float s = fc.s;
@@ -1664,7 +1664,7 @@ static void render_range(RenderContext* rdcon, ViewBlock* block, FormControlProp
  * Called from render_block_view when the block owns the form-control role.
  */
 
-void render_form_control(RenderContext* rdcon, ViewBlock* block) {
+void render_form_control(RasterRenderContext* rdcon, ViewBlock* block) {
     if (!block || !block->form_control()) {
         return;
     }

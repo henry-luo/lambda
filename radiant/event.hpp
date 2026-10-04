@@ -23,8 +23,8 @@
 #include <stdio.h>
 
 #ifndef RADIANT_EVENT_CORE_ONLY
-struct RenderContext;
-typedef struct RenderContext RenderContext;
+struct RasterRenderContext;
+typedef struct RasterRenderContext RasterRenderContext;
 struct UiContext;
 struct DomDocument;
 struct DomElement;
@@ -2151,7 +2151,7 @@ ClipboardPermission clipboard_store_get_permission_write(void);
 // text control opens it; click outside / Esc closes it.
 //
 // Callers must include "view.hpp" and "render.hpp" before this header so
-// that View / RenderContext are full types (both are typedefs of
+// that View / RasterRenderContext are full types (both are typedefs of
 // anonymous structs and cannot be forward-declared).
 
 
@@ -2199,7 +2199,7 @@ bool context_menu_open_pending(DocState* state, View* target, uint32_t enabled_m
 
 // Render the popup overlay. Called from render.cpp after the dropdown
 // overlay so it appears on top.
-void context_menu_render(RenderContext* rdcon, DocState* state);
+void context_menu_render(RasterRenderContext* rdcon, DocState* state);
 
 
 // ===== scrollers =====
@@ -2208,13 +2208,13 @@ struct EventContext;
 
 void scroll_config_init(void);
 
-void scrollpane_render(RenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
+void scrollpane_render(RasterRenderContext* rdcon, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip, float scale,
     DocState* state, View* view,
     bool show_hz_scroll = true, bool show_vt_scroll = true);
 
-void setup_scroller(RenderContext* rdcon, ViewBlock* block);
-void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block);
+void setup_scroller(RasterRenderContext* rdcon, ViewBlock* block);
+void render_scroller(RasterRenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block);
 void update_scroller(ViewBlock* block, float content_width, float content_height);
 void scroll_apply_pending_element_scroll(ViewBlock* block);
 void scroll_snap_adjust_position(ViewBlock* block, float* x, float* y,

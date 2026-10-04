@@ -24,16 +24,12 @@ extern "C" {
 #include <cctype>
 #include <cwctype>
 
-typedef struct {
+// font, block, color and ui_context come from the shared RenderContext
+struct SvgRenderContext : RenderContext {
     StrBuf* svg_content;
     int indent_level;
     float viewport_width;
     float viewport_height;
-    // Context from parent render context
-    FontBox font;
-    BlockBlot block;
-    Color color;
-    UiContext* ui_context;
     PaintList paint_list;
     RenderEffectRasterFallback effect_fallback;
     Arena* page_backdrop_arena;
@@ -45,7 +41,7 @@ typedef struct {
     bool transform_emitted_stack[64];
     int transform_emitted_depth;
     int transform_emitted_overflow_depth;
-} SvgRenderContext;
+};
 
 // Forward declarations
 static void render_text_view_svg(SvgRenderContext* ctx, ViewText* text);
@@ -980,7 +976,7 @@ static void render_column_rules_svg(SvgRenderContext* ctx, ViewBlock* block) {
 // SVG RenderBackend vtable callbacks
 // ============================================================================
 
-static void svg_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
+static void svg_cb_render_bound(RenderContext* vctx, ViewBlock* view, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     // render_bound_svg reads ctx->block.{x,y} + view->{x,y}
     ctx->block.x = abs_x - view->x;
@@ -988,7 +984,7 @@ static void svg_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
     render_bound_svg(ctx, view);
 }
 
-static void svg_cb_render_text(void* vctx, ViewText* text, float abs_x, float abs_y,
+static void svg_cb_render_text(RenderContext* vctx, ViewText* text, float abs_x, float abs_y,
                                FontBox* font, Color color) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     ctx->block.x = abs_x;
@@ -998,7 +994,7 @@ static void svg_cb_render_text(void* vctx, ViewText* text, float abs_x, float ab
     render_text_view_svg(ctx, text);
 }
 
-static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void svg_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (!block->embed || !block->embedp()->img) return;
     ImageSurface* img = block->embedp()->img;
@@ -1018,7 +1014,7 @@ static void svg_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     }
 }
 
-static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+static void svg_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
                                      FontBox* font, Color color) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (!ctx || !block) return;
@@ -1063,7 +1059,7 @@ static void svg_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     ctx->color = color;
 }
 
-static void svg_cb_render_svg_subscene(void* vctx, const PaintSvgSubscene* subscene) {
+static void svg_cb_render_svg_subscene(RenderContext* vctx, const PaintSvgSubscene* subscene) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (!ctx || !subscene) return;
     paint_svg_subscene(svg_active_paint_list(ctx), subscene);
@@ -1106,7 +1102,7 @@ static void svg_append_graph_semantic_attrs(SvgRenderContext* ctx,
         origin.x, origin.y, block->width, block->height);
 }
 
-static void svg_cb_begin_block_children(void* vctx, ViewBlock* block) {
+static void svg_cb_begin_block_children(RenderContext* vctx, ViewBlock* block) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     svg_indent(ctx);
     strbuf_append_format(ctx->svg_content, "<g class=\"block\" data-element=\"%s\"",
@@ -1116,7 +1112,7 @@ static void svg_cb_begin_block_children(void* vctx, ViewBlock* block) {
     ctx->indent_level++;
 }
 
-static void svg_cb_end_block_children(void* vctx, ViewBlock* block) {
+static void svg_cb_end_block_children(RenderContext* vctx, ViewBlock* block) {
     (void)block;
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     ctx->indent_level--;
@@ -1124,7 +1120,7 @@ static void svg_cb_end_block_children(void* vctx, ViewBlock* block) {
     strbuf_append_str(ctx->svg_content, "</g>\n");
 }
 
-static void svg_cb_begin_inline_children(void* vctx, ViewSpan* span) {
+static void svg_cb_begin_inline_children(RenderContext* vctx, ViewSpan* span) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     svg_indent(ctx);
     strbuf_append_format(ctx->svg_content, "<g class=\"inline\" data-element=\"%s\">\n",
@@ -1132,7 +1128,7 @@ static void svg_cb_begin_inline_children(void* vctx, ViewSpan* span) {
     ctx->indent_level++;
 }
 
-static void svg_cb_end_inline_children(void* vctx, ViewSpan* span) {
+static void svg_cb_end_inline_children(RenderContext* vctx, ViewSpan* span) {
     (void)span;
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     ctx->indent_level--;
@@ -1140,7 +1136,7 @@ static void svg_cb_end_inline_children(void* vctx, ViewSpan* span) {
     strbuf_append_str(ctx->svg_content, "</g>\n");
 }
 
-static void svg_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group) {
+static void svg_cb_begin_effect_group(RenderContext* vctx, const PaintEffectGroup* group) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (ctx->effect_fallback.active) {
         paint_begin_effect_group(&ctx->effect_fallback.paint_list, group);
@@ -1155,7 +1151,7 @@ static void svg_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group)
     svg_lower_paint_list(ctx);
 }
 
-static void svg_cb_end_effect_group(void* vctx) {
+static void svg_cb_end_effect_group(RenderContext* vctx) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (ctx->effect_fallback.active) {
         if (ctx->effect_fallback.nested_depth > 0) {
@@ -1170,7 +1166,7 @@ static void svg_cb_end_effect_group(void* vctx) {
     svg_lower_paint_list(ctx);
 }
 
-static void svg_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void svg_cb_begin_transform(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (!block) return;
     if (ctx->transform_emitted_depth >= 64) {
@@ -1193,7 +1189,7 @@ static void svg_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, fl
     }
 }
 
-static void svg_cb_end_transform(void* vctx) {
+static void svg_cb_end_transform(RenderContext* vctx) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     if (ctx->transform_emitted_overflow_depth > 0) {
         ctx->transform_emitted_overflow_depth--;
@@ -1210,7 +1206,7 @@ static void svg_cb_end_transform(void* vctx) {
     }
 }
 
-static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, float abs_y,
+static void svg_cb_render_marker(RenderContext* vctx, ViewSpan* marker, float abs_x, float abs_y,
                                   FontBox* font, Color color) {
     if (!marker || !marker->is_element()) return;
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
@@ -1320,7 +1316,7 @@ static void svg_cb_render_marker(void* vctx, ViewSpan* marker, float abs_x, floa
     }
 }
 
-static void svg_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void svg_cb_render_column_rules(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     SvgRenderContext* ctx = (SvgRenderContext*)vctx;
     // render_column_rules_svg reads ctx->block.{x,y} + block->{x,y}
     ctx->block.x = abs_x - block->x;
@@ -1330,7 +1326,7 @@ static void svg_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
 
 static RenderBackend svg_make_backend(SvgRenderContext* ctx) {
     RenderBackend b = {};
-    b.ctx                   = ctx;
+    b.ctx                   = lam::up(ctx);
     b.render_bound          = svg_cb_render_bound;
     b.render_text           = svg_cb_render_text;
     b.render_image          = svg_cb_render_image;
@@ -1420,7 +1416,7 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, float width, fl
     ctx.indent_level = 0;
     ctx.viewport_width = width;
     ctx.viewport_height = height;
-    ctx.ui_context = uicon;
+    ctx.ui_context = lam::up(uicon);
     paint_list_init(&ctx.paint_list, nullptr);
     paint_list_init(&ctx.effect_fallback.paint_list, nullptr);
     ctx.page_backdrop_arena = mem_arena_create(mem_context_process(MEM_ROLE_RENDER), MEM_ROLE_RENDER, "render.svg.backdrop.arena");

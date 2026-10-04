@@ -49,7 +49,7 @@ static int layout_collect_flattened_item_children(
     for (DomNode* child = first_child; child; child = child->next_sibling) {
         if (child->is_text()) {
             if (policy && policy->include_text &&
-                policy->include_text(child, container, policy->context) &&
+                policy->include_text(child, container) &&
                 count < capacity) {
                 nodes[count++] = child;
             }

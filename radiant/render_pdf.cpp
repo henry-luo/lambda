@@ -39,20 +39,18 @@ typedef struct PdfPaintLoweringState {
     int unsupported_count;
 } PdfPaintLoweringState;
 
-typedef struct PdfRenderContext {
+// font, color, block (the current block context for coordinate transformation)
+// and ui_context come from the shared RenderContext
+typedef struct PdfRenderContext : RenderContext {
     HPDF_Doc pdf_doc;
     HPDF_Page current_page;
     HPDF_Font current_font;
-    UiContext* ui_context;
 
     float page_width;
     float page_height;
     float current_x;
     float current_y;
 
-    FontBox font;
-    Color color;
-    BlockBlot block;  // Current block context for coordinate transformation
     PaintList paint_list;
     RenderEffectRasterFallback effect_fallback;
     Arena* page_backdrop_arena;
@@ -1385,7 +1383,7 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
 // PDF RenderBackend vtable callbacks
 // ============================================================================
 
-static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float abs_y) {
+static void pdf_cb_render_bound(RenderContext* vctx, ViewBlock* view, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (render_paint_boundary_emit_simple(pdf_active_paint_list(ctx), view, abs_x, abs_y)) {
         pdf_lower_paint_list(ctx);
@@ -1490,7 +1488,7 @@ static void pdf_cb_render_bound(void* vctx, ViewBlock* view, float abs_x, float 
     }
 }
 
-static void pdf_cb_render_text(void* vctx, ViewText* text, float abs_x, float abs_y,
+static void pdf_cb_render_text(RenderContext* vctx, ViewText* text, float abs_x, float abs_y,
                                FontBox* font, Color color) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     ctx->block.x = abs_x;
@@ -1500,7 +1498,7 @@ static void pdf_cb_render_text(void* vctx, ViewText* text, float abs_x, float ab
     render_text_view_pdf(ctx, text);
 }
 
-static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void pdf_cb_render_image(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx || !block || !block->embed || !block->embedp()->img) return;
     ImageSurface* img = block->embedp()->img;
@@ -1517,7 +1515,7 @@ static void pdf_cb_render_image(void* vctx, ViewBlock* block, float abs_x, float
     }
 }
 
-static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, float abs_y,
+static void pdf_cb_render_inline_svg(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y,
                                      FontBox* font, Color color) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx || !block) return;
@@ -1570,14 +1568,14 @@ static void pdf_cb_render_inline_svg(void* vctx, ViewBlock* block, float abs_x, 
     (void)font;
 }
 
-static void pdf_cb_render_svg_subscene(void* vctx, const PaintSvgSubscene* subscene) {
+static void pdf_cb_render_svg_subscene(RenderContext* vctx, const PaintSvgSubscene* subscene) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx || !subscene) return;
     paint_svg_subscene(pdf_active_paint_list(ctx), subscene);
     pdf_lower_paint_list(ctx);
 }
 
-static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void pdf_cb_render_column_rules(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx || !block || !block->multicol_prop()) return;
 
@@ -1649,7 +1647,7 @@ static void pdf_cb_render_column_rules(void* vctx, ViewBlock* block, float abs_x
     }
 }
 
-static void pdf_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, float abs_y) {
+static void pdf_cb_begin_transform(RenderContext* vctx, ViewBlock* block, float abs_x, float abs_y) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx || !block) return;
     if (ctx->transform_emitted_depth >= PDF_PAINT_TRANSFORM_STACK_MAX) {
@@ -1670,7 +1668,7 @@ static void pdf_cb_begin_transform(void* vctx, ViewBlock* block, float abs_x, fl
     }
 }
 
-static void pdf_cb_end_transform(void* vctx) {
+static void pdf_cb_end_transform(RenderContext* vctx) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx) return;
     if (ctx->transform_emitted_overflow_depth > 0) {
@@ -1689,7 +1687,7 @@ static void pdf_cb_end_transform(void* vctx) {
     }
 }
 
-static void pdf_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group) {
+static void pdf_cb_begin_effect_group(RenderContext* vctx, const PaintEffectGroup* group) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx) return;
     if (ctx->effect_fallback.active) {
@@ -1705,7 +1703,7 @@ static void pdf_cb_begin_effect_group(void* vctx, const PaintEffectGroup* group)
     pdf_lower_paint_list(ctx);
 }
 
-static void pdf_cb_end_effect_group(void* vctx) {
+static void pdf_cb_end_effect_group(RenderContext* vctx) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     if (!ctx) return;
     if (ctx->effect_fallback.active) {
@@ -1721,7 +1719,7 @@ static void pdf_cb_end_effect_group(void* vctx) {
     pdf_lower_paint_list(ctx);
 }
 
-static void pdf_cb_on_font_change(void* vctx, FontProp* font_prop) {
+static void pdf_cb_on_font_change(RenderContext* vctx, FontProp* font_prop) {
     PdfRenderContext* ctx = (PdfRenderContext*)vctx;
     const char* pdf_font_name = get_pdf_font_name(font_prop->family);
     HPDF_Font font = HPDF_GetFont(ctx->pdf_doc, pdf_font_name, NULL);
@@ -1733,7 +1731,7 @@ static void pdf_cb_on_font_change(void* vctx, FontProp* font_prop) {
 
 static RenderBackend pdf_make_backend(PdfRenderContext* ctx) {
     RenderBackend b = {};
-    b.ctx              = ctx;
+    b.ctx              = lam::up(ctx);
     b.render_bound     = pdf_cb_render_bound;
     b.render_text      = pdf_cb_render_text;
     b.render_image     = pdf_cb_render_image;
@@ -1797,7 +1795,7 @@ static HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float
     ctx.page_height = height;
 
     // Initialize context
-    ctx.ui_context = uicon;
+    ctx.ui_context = lam::up(uicon);
     ctx.color.r = 0; ctx.color.g = 0; ctx.color.b = 0; ctx.color.a = 255; // Black text
     ctx.current_x = 0;
     ctx.current_y = 0;

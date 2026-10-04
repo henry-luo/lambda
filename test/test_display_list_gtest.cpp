@@ -1389,7 +1389,7 @@ TEST_F(PaintIrParityTest, GatewayRequiresPaintIrAndDisplayListTargets) {
     expect_lists_equal(lowered, direct);
 }
 
-typedef struct PaintBlockDriverProbe {
+typedef struct PaintBlockDriverProbe : RenderPaintBlockDriver {
     int begin_count;
     int self_count;
     int children_count;
@@ -1397,34 +1397,34 @@ typedef struct PaintBlockDriverProbe {
     bool continue_children;
 } PaintBlockDriverProbe;
 
-static bool probe_block_begin(void* ctx, ViewBlock* block, void** phase) {
+static bool probe_block_begin(RenderPaintBlockDriver* ctx, ViewBlock* block, void** phase) {
     (void)block;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->begin_count++;
     *phase = probe;
     return true;
 }
 
-static bool probe_block_self(void* ctx, ViewBlock* block, void* phase) {
+static bool probe_block_self(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)block;
     (void)phase;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->self_count++;
     return probe->continue_children;
 }
 
-static double probe_block_children(void* ctx, ViewBlock* block, void* phase) {
+static double probe_block_children(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)block;
     (void)phase;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->children_count++;
     return 7.0;
 }
 
-static void probe_block_finish(void* ctx, ViewBlock* block, void* phase) {
+static void probe_block_finish(RenderPaintBlockDriver* ctx, ViewBlock* block, void* phase) {
     (void)block;
     (void)phase;
-    PaintBlockDriverProbe* probe = (PaintBlockDriverProbe*)ctx;
+    PaintBlockDriverProbe* probe = static_cast<PaintBlockDriverProbe*>(ctx);
     probe->finish_count++;
 }
 
@@ -1432,7 +1432,7 @@ TEST_F(PaintIrParityTest, SharedBlockPaintDriverSkipsChildrenButFinishes) {
     PaintBlockDriverProbe probe = {};
     probe.continue_children = false;
     RenderPaintBlockOps ops = {};
-    ops.ctx = &probe;
+    ops.ctx = lam::up(&probe);
     ops.begin = probe_block_begin;
     ops.paint_self = probe_block_self;
     ops.paint_children = probe_block_children;
@@ -1453,7 +1453,7 @@ TEST_F(PaintIrParityTest, SharedBlockPaintDriverRecordsChildrenTime) {
     PaintBlockDriverProbe probe = {};
     probe.continue_children = true;
     RenderPaintBlockOps ops = {};
-    ops.ctx = &probe;
+    ops.ctx = lam::up(&probe);
     ops.begin = probe_block_begin;
     ops.paint_self = probe_block_self;
     ops.paint_children = probe_block_children;

@@ -3969,13 +3969,13 @@ typedef struct UiContext {
 
     // font handling
     struct FontContext* font_ctx; // unified font context
-    Pool* font_pool;       // factory-registered root for font context allocations
-    Arena* font_arena;     // factory-registered arena for font strings/database
-    Arena* font_glyph_arena; // factory-registered arena for glyph bitmap caches
+    lam::Own<Pool> font_pool;       // factory-registered root for font context allocations
+    lam::Own<Arena> font_arena;     // factory-registered arena for font strings/database
+    lam::Own<Arena> font_glyph_arena; // factory-registered arena for glyph bitmap caches
     FontProp default_font;  // default font style for HTML5
     FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
     float minimum_logical_font_size;  // UA minimum for relative font sizes; zero disables
-    char** fallback_fonts;  // fallback fonts
+    lam::Up<char*> fallback_fonts;  // the static fallback font table
 
     // @font-face support
     lam::OwnArr<FontFaceDescriptor*> font_faces;    // Array of @font-face declarations
@@ -3983,7 +3983,7 @@ typedef struct UiContext {
     int font_face_capacity;
 
     // image cache
-    struct hashmap* image_cache;  // cache for images loaded
+    lam::Own<struct hashmap> image_cache;  // owns every loaded ImageSurface (O2)
 
     float device_scale_x;   // physical framebuffer px per logical window px on X
     float device_scale_y;   // physical framebuffer px per logical window px on Y
