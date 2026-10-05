@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "view.hpp"
+#include "view_tree_model.hpp"
 #include <assert.h>
 #include "event.hpp"
 #include "rdt_video.h"
@@ -643,6 +644,7 @@ static constexpr bool view_slots_all_have_rows() {
 }
 static_assert(view_slots_all_have_rows(), "an element view slot has no teardown row");
 
+#ifndef NDEBUG
 // The value of a view slot, for the debug check that a pointer-clearing
 // teardown left none behind.
 static const void* view_slot_value(const DomElement* elem, DomViewSlot slot) {
@@ -673,6 +675,8 @@ static const void* view_slot_value(const DomElement* elem, DomViewSlot slot) {
     }
     return nullptr;
 }
+
+#endif
 
 static_assert(sizeof(FONT_PROP_DEFAULT) == sizeof(FontProp), "font reset metadata drift");
 static_assert(sizeof(INLINE_PROP_DEFAULT) == sizeof(InlineProp), "inline reset metadata drift");
@@ -1131,6 +1135,7 @@ void view_pool_init(ViewTree* tree, MemContext* owner) {
 
 void ViewTree::reset_retained() {
     layout_generation = generation_next32(layout_generation);
+    if (model) view_tree_model_reset(this);
     if (root) {
         // DOM mutation fallback keeps both DOM/view nodes and their owned prop
         // blocks; only external payloads and generation-local values reset.
@@ -1155,6 +1160,7 @@ void view_pool_reset_retained(ViewTree* tree) {
 }
 
 void ViewTree::destroy() {
+    view_tree_model_destroy(this);
     destroy_measurement_cache(this);
     if (root) {
         view_teardown_visit_node(this, root,

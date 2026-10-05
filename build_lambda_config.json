@@ -67,6 +67,7 @@
     "lambda/format/format_latex_html_v2.cpp",
     "lambda/input/input-adoc.cpp",
     "lib/font/font_config.c",
+    "lib/test_font_path_gtest.cpp",
     "lambda/runtime/http_module.cpp"
   ],
   "release_exclude_source_files": [
@@ -573,6 +574,7 @@
         "lambda/input/css/css_value.cpp",
         "lambda/input/css/css_value.cpp",
         "lambda/input/css/css_parser.cpp",
+        "lambda/input/css/css_paged_media.cpp",
         "lambda/input/css/css_engine.cpp",
         "lambda/input/css/css_counter_hook.cpp",
         "lambda/input/css/css_symbol_hook.cpp",
@@ -1731,7 +1733,9 @@
     "linux": {
       "output": "lambda.exe",
       "compiler": "clang",
-      "pkg_config_includes": ["webkit2gtk-4.1"],
+      "pkg_config_includes": [
+        "webkit2gtk-4.1"
+      ],
       "exclude_source_files": [
         "lib/clock_compat.c",
         "lib/font/font_backend_dwrite.cpp",
@@ -3062,7 +3066,8 @@
             "source": "test_display_list_gtest.cpp",
             "name": "Display List Tests",
             "dependencies": [
-              "lambda-data"
+              "lambda-data",
+              "lambda-lib"
             ],
             "libraries": [
               "gtest",
@@ -3084,7 +3089,8 @@
               "radiant/paint_ir.cpp",
               "radiant/render_paint_block.cpp",
               "radiant/render_paint_boundary.cpp",
-              "test/test_display_list_stubs.cpp"
+              "test/test_display_list_stubs.cpp",
+              "radiant/render_glyph_path.cpp"
             ],
             "binary": "test_display_list_gtest.exe",
             "icon": "\ud83e\uddfe"
@@ -3144,6 +3150,10 @@
           },
           {
             "source": "test/test_view_reuse_gtest.cpp",
+            "additional_sources": [
+              "test/test_view_tree_model_gtest.cpp",
+              "lib/test_font_path_gtest.cpp"
+            ],
             "name": "View Reuse Tests",
             "dependencies": [
               "lambda-rt",
@@ -4308,6 +4318,7 @@
               "lambda/input/css/css_properties.cpp",
               "lambda/input/css/css_value_parser.cpp",
               "lambda/input/css/css_value.cpp",
+              "lib/strbuf.c",
               "lib/mempool.c",
               "lib/mem_context.c",
               "lib/memtrack.c",
@@ -4339,6 +4350,7 @@
               "lambda/input/css/css_properties.cpp",
               "lambda/input/css/css_value_parser.cpp",
               "lambda/input/css/css_value.cpp",
+              "lib/strbuf.c",
               "lib/mempool.c",
               "lib/mem_context.c",
               "lib/memtrack.c",

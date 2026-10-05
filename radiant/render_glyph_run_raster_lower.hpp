@@ -11,7 +11,15 @@
 
 static inline void render_glyph_run_raster_lower(const PaintGlyphRun* run,
                                                  DisplayList* dl) {
-    if (!run || !dl || !run->text) return;
+    if (!run || !dl) return;
+    if (run->count > 0 && run->glyph_ids) {
+        RdtPath* path = render_path_create_glyph_run(run);
+        if (!path) { log_error("[RASTER_GLYPH_RUN] selected glyph outline could not be painted"); return; }
+        dl_fill_path(dl, path, run->color, RDT_FILL_WINDING, run->has_transform ? &run->transform : nullptr);
+        rdt_path_free(path);
+        return;
+    }
+    if (!run->text) return;
 
     FontBox* font = (FontBox*)run->font;
     FontHandle* font_handle = font ? font_box_handle(font) : nullptr;

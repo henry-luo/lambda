@@ -285,7 +285,13 @@ static bool paint_ir_validate_effect_group(const PaintEffectGroup* group) {
 }
 
 static bool paint_ir_validate_glyph_run(const PaintGlyphRun* run) {
-    if (!run) return false;
+    if (!run || !isfinite(run->x) || !isfinite(run->baseline_y) || !isfinite(run->font_size)) return false;
+    if (run->glyph_ids || run->xs || run->ys || run->count) {
+        if (!run->font || !run->glyph_ids || !run->xs || !run->ys || run->count <= 0) return false;
+        for (int i = 0; i < run->count; i++)
+            if (!isfinite(run->xs.get()[i]) || !isfinite(run->ys.get()[i])) return false;
+        return true;
+    }
     if (run->text) {
         return run->text_len >= -1 && run->font_size >= 0.0f;
     }
@@ -1150,27 +1156,97 @@ static bool paint_ir_lower_raster_effect_stack_command(const PaintCmd* cmd, Disp
     return true;
 }
 
+template<typename T> static void paint_raster_concat_transform(T* payload, const RdtMatrix* parent) {
+    payload->transform = payload->has_transform ? rdt_matrix_multiply(parent, &payload->transform) : *parent;
+    payload->has_transform = true;
+}
+
+static Bound paint_raster_transform_bounds(Bound bounds, const RdtMatrix* transform) {
+    Bound result = {};
+    rdt_matrix_transform_rect_bounds(transform, bounds.left, bounds.top, bounds.right, bounds.bottom,
+        &result.left, &result.top, &result.right, &result.bottom);
+    return result;
+}
+
+static void paint_raster_transform_command(PaintCmd* cmd, const RdtMatrix* transform) {
+    switch (cmd->op) {
+    case PAINT_FILL_PATH: paint_raster_concat_transform(&cmd->fill_path, transform); break;
+    case PAINT_STROKE_PATH: paint_raster_concat_transform(&cmd->stroke_path, transform); break;
+    case PAINT_FILL_LINEAR_GRADIENT: paint_raster_concat_transform(&cmd->fill_linear_gradient, transform); break;
+    case PAINT_FILL_RADIAL_GRADIENT: paint_raster_concat_transform(&cmd->fill_radial_gradient, transform); break;
+    case PAINT_DRAW_IMAGE: paint_raster_concat_transform(&cmd->draw_image, transform); break;
+    case PAINT_DRAW_IMAGE_RESOURCE: paint_raster_concat_transform(&cmd->draw_image_resource, transform); break;
+    case PAINT_DRAW_GLYPH: paint_raster_concat_transform(&cmd->draw_glyph, transform); break;
+    case PAINT_DRAW_PICTURE: paint_raster_concat_transform(&cmd->draw_picture, transform); break;
+    case PAINT_PUSH_CLIP: paint_raster_concat_transform(&cmd->push_clip, transform); break;
+    case PAINT_GLYPH_RUN: paint_raster_concat_transform(&cmd->glyph_run, transform); break;
+    case PAINT_BEGIN_EFFECT_GROUP:
+        cmd->effect_group.bounds = paint_raster_transform_bounds(cmd->effect_group.bounds, transform);
+        paint_raster_concat_transform(&cmd->effect_group, transform);
+        break;
+    case PAINT_SVG_SUBSCENE:
+        cmd->svg_subscene.transform = rdt_matrix_multiply(transform, &cmd->svg_subscene.transform);
+        cmd->svg_subscene.content_clip = paint_raster_transform_bounds(cmd->svg_subscene.content_clip, transform);
+        break;
+    default:
+        // raster-tier effect regions are already physical; rect primitives are handled below.
+        break;
+    }
+}
+
+static void paint_raster_lower_rect(DisplayList* dl, float x, float y, float w, float h,
+        float rx, float ry, Color color, const RdtMatrix* transform, bool rounded) {
+    if (!transform) {
+        if (rounded) dl_fill_rounded_rect(dl, x, y, w, h, rx, ry, color);
+        else dl_fill_rect(dl, x, y, w, h, color);
+        return;
+    }
+    RdtPath* path = rdt_path_new();
+    if (!path) return;
+    rdt_path_add_rect(path, x, y, w, h, rx, ry);
+    dl_fill_path(dl, path, color, RDT_FILL_WINDING, transform);
+    rdt_path_free(path);
+}
+
 static void paint_ir_lower_raster_internal(const PaintList* pl, DisplayList* dl) {
     if (!pl || !dl) return;
 
     PaintIrRasterEffectFrame effect_stack[PAINT_IR_RASTER_EFFECT_STACK_MAX];
     int effect_depth = 0;
+    lam::ArrayList<RdtMatrix> transforms(MEM_CAT_RENDER, 0);
 
     for (int i = 0; i < pl->item_count(); i++) {
         const PaintCmd* cmd = &pl->data()[i];
+        if (cmd->op == PAINT_PUSH_TRANSFORM) {
+            RdtMatrix next = transforms.empty() ? cmd->push_transform.transform
+                : rdt_matrix_multiply(&transforms.back(), &cmd->push_transform.transform);
+            if (!transforms.append(next)) { log_error("[PAINT_IR_TRANSFORM] raster stack allocation failed"); return; }
+            continue;
+        }
+        if (cmd->op == PAINT_POP_TRANSFORM) {
+            if (transforms.empty()) { log_error("[PAINT_IR_TRANSFORM] raster stack underflow"); return; }
+            transforms.remove_range(transforms.size() - 1, 1);
+            continue;
+        }
         if (paint_op_has_flags(cmd->op, PAINT_OP_FLAG_RASTER_NOOP)) {
             continue;
+        }
+        const RdtMatrix* transform = transforms.empty() ? nullptr : &transforms.back();
+        PaintCmd adjusted = {};
+        if (transform) {
+            // transform a borrowed copy so later PDF/SVG lowering sees the original source command.
+            adjusted = *cmd; paint_raster_transform_command(&adjusted, transform); cmd = &adjusted;
         }
         if (paint_ir_lower_raster_effect_stack_command(cmd, dl, effect_stack, &effect_depth, i)) continue;
         switch (cmd->op) {
         case PAINT_FILL_RECT: {
             const PaintFillRect* p = &cmd->fill_rect;
-            dl_fill_rect(dl, p->x, p->y, p->w, p->h, p->color);
+            paint_raster_lower_rect(dl, p->x, p->y, p->w, p->h, 0.0f, 0.0f, p->color, transform, false);
             break;
         }
         case PAINT_FILL_ROUNDED_RECT: {
             const PaintFillRoundedRect* p = &cmd->fill_rounded_rect;
-            dl_fill_rounded_rect(dl, p->x, p->y, p->w, p->h, p->rx, p->ry, p->color);
+            paint_raster_lower_rect(dl, p->x, p->y, p->w, p->h, p->rx, p->ry, p->color, transform, true);
             break;
         }
         case PAINT_FILL_PATH: {
@@ -1614,7 +1690,7 @@ static bool paint_svg_caps_allow_clip(const RenderExportTargetCaps* caps,
 
 static bool paint_svg_caps_allow_glyph_run(const RenderExportTargetCaps* caps,
                                            const PaintGlyphRun* run) {
-    if (!caps || !caps->glyph_runs || !run || !run->text) return false;
+    if (!caps || !caps->glyph_runs || !run || (!run->text && !run->glyph_ids)) return false;
     return !run->has_transform || caps->transforms;
 }
 
@@ -2029,6 +2105,24 @@ static void paint_ir_lower_svg_unchecked(const PaintList* pl, StrBuf* out,
             const PaintGlyphRun* p = &cmd->glyph_run;
             if (!paint_svg_caps_allow_glyph_run(caps, p)) {
                 note_unsupported(cmd->op);
+                break;
+            }
+            if (p->count > 0 && p->glyph_ids) {
+                RdtPath* path = render_path_create_glyph_run(p);
+                StrBuf* data = path ? path_data_or_note(path, cmd->op) : nullptr;
+                if (data) {
+                    paint_svg_indent(out, indent_level);
+                    strbuf_append_str(out, "<path d=\"");
+                    strbuf_append_str(out, data->str);
+                    strbuf_append_str(out, "\" fill=\"");
+                    paint_svg_append_color(out, p->color);
+                    strbuf_append_char(out, '"');
+                    paint_svg_append_matrix_attr(out, paint_optional_transform(p->has_transform, &p->transform));
+                    strbuf_append_str(out, "/>\n");
+                    strbuf_free(data);
+                    active_stats->emitted_count++;
+                } else if (!path) note_unsupported(cmd->op);
+                if (path) rdt_path_free(path);
                 break;
             }
             paint_svg_indent(out, indent_level);

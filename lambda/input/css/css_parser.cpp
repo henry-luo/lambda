@@ -13,6 +13,7 @@
  */
 
 #include "css_parser.hpp"
+#include "css_paged_media.hpp"
 #include "css_style.hpp"
 #include "../../../lib/log.h"
 #include "../../../lib/mem_grow.hpp"
@@ -605,8 +606,27 @@ bool css_selector_group_parse_consumed_all(const CssToken* tokens, int pos,
 }
 
 // Forward declaration
-static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool);
-static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, Pool* pool);
+enum CssIdentifierGrammar : uint8_t { CSS_IDENT_KEYWORD, CSS_IDENT_CUSTOM, CSS_IDENT_PAGE };
+static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool,
+    CssIdentifierGrammar grammar = CSS_IDENT_KEYWORD);
+static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, Pool* pool,
+    CssIdentifierGrammar grammar = CSS_IDENT_KEYWORD);
+
+static CssIdentifierGrammar css_declaration_identifier_grammar(const char* property, int index, int count) {
+    if (strcmp(property, "page") == 0) return CSS_IDENT_PAGE;
+    if (strcmp(property, "counter-reset") == 0 || strcmp(property, "counter-increment") == 0 ||
+        strcmp(property, "counter-set") == 0 || (strcmp(property, "string-set") == 0 && index == 0 && count > 1))
+        return CSS_IDENT_CUSTOM;
+    return CSS_IDENT_KEYWORD;
+}
+
+static CssIdentifierGrammar css_function_identifier_grammar(const char* name, int argument) {
+    static const char* named_functions[] = {"counter", "counters", "string", "element", "running", "attr", "var", "reversed"};
+    if (argument == 0) for (const char* candidate : named_functions)
+        if (strcmp(name, candidate) == 0) return CSS_IDENT_CUSTOM;
+    if (argument == 1 && (strcmp(name, "target-counter") == 0 || strcmp(name, "target-counters") == 0)) return CSS_IDENT_CUSTOM;
+    return CSS_IDENT_KEYWORD;
+}
 
 /**
  * Parse font-family value list with special handling for unquoted multi-word font names.
@@ -1168,7 +1188,8 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
                     int func_pos = i;
                     func_value->data.function->args[arg_idx++] = css_parse_function_from_tokens(tokens, &func_pos, token_count, pool);
                 } else {
-                    func_value->data.function->args[arg_idx++] = css_parse_token_to_value(&tokens[i], pool);
+                    CssValue* value = css_parse_token_to_value(&tokens[i], pool, css_function_identifier_grammar(func_name, arg_idx));
+                    func_value->data.function->args[arg_idx++] = value;
                 }
                 break;
             }
@@ -1195,7 +1216,8 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
                     }
                     i = func_pos - 1;  // will be incremented by for loop
                 } else {
-                    CssValue* val = css_parse_token_to_value(&tokens[i], pool);
+                    CssValue* val = css_parse_token_to_value(&tokens[i], pool,
+                        list_idx == 0 ? css_function_identifier_grammar(func_name, arg_idx) : CSS_IDENT_KEYWORD);
                     if (val) {
                         list_value->data.list.values[list_idx++] = val;
                     }
@@ -1215,7 +1237,7 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 }
 
 // Helper: Parse a single token into a CssValue
-static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
+static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool, CssIdentifierGrammar grammar) {
     if (!token || !pool) return NULL;
 
     CssValue* value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
@@ -1233,7 +1255,11 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
 
             if (token_val) {
                 CssEnum enum_id = css_enum_by_name(token_val);
-                if (enum_id != CSS_VALUE__UNDEF) {
+                const CssEnumInfo* info = css_enum_info(enum_id);
+                // Grammar names preserve authored case, even when they collide with a keyword.
+                bool reserved = enum_id == CSS_VALUE_NONE || (info && info->group == CSS_VALUE_GROUP_GLOBAL) ||
+                    (grammar == CSS_IDENT_PAGE && enum_id == CSS_VALUE_AUTO);
+                if (enum_id != CSS_VALUE__UNDEF && (grammar == CSS_IDENT_KEYWORD || reserved)) {
                     value->type = CSS_VALUE_TYPE_KEYWORD;
                     value->data.keyword = enum_id;
                 } else {
@@ -1354,13 +1380,13 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool) {
     return value;
 }
 
-static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, Pool* pool) {
+static CssValue* css_parse_value_at(const CssToken* tokens, int* pos, int end, Pool* pool, CssIdentifierGrammar grammar) {
     while (*pos < end && tokens[*pos].type == CSS_TOKEN_WHITESPACE) (*pos)++;
     if (*pos >= end) return NULL;
     if (tokens[*pos].type == CSS_TOKEN_FUNCTION) {
         return css_parse_function_from_tokens(tokens, pos, end, pool);
     }
-    CssValue* value = css_parse_token_to_value(&tokens[*pos], pool);
+    CssValue* value = css_parse_token_to_value(&tokens[*pos], pool, grammar);
     (*pos)++;
     return value;
 }
@@ -2007,6 +2033,10 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_MARKER;
                     } else if (strcmp(elem_name, "file-selector-button") == 0) {
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
+                    } else if (strcmp(elem_name, "footnote-call") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL;
+                    } else if (strcmp(elem_name, "footnote-marker") == 0) {
+                        selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER;
                     } else {
                         // Use generic pseudo-element type to preserve vendor-specific elements
                         selector->type = CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC;
@@ -2535,7 +2565,8 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
         // Single value - create directly
         int i = value_start;
         while (i < *pos) {
-            CssValue* value = css_parse_value_at(tokens, &i, *pos, pool);
+            CssValue* value = css_parse_value_at(tokens, &i, *pos, pool,
+                css_declaration_identifier_grammar(property_name, 0, value_count));
             if (value) {
                 decl->value = value;
             }
@@ -2631,7 +2662,8 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
                         int func_pos = j;
                         value = css_parse_function_from_tokens(tokens, &func_pos, group_end, pool);
                     } else {
-                        value = css_parse_token_to_value(&tokens[j], pool);
+                        value = css_parse_token_to_value(&tokens[j], pool,
+                            css_declaration_identifier_grammar(property_name, 0, gval_count));
                     }
                     list_value->data.list.values[group_idx] = value;
                 } else {
@@ -2653,7 +2685,8 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
                             value = css_parse_function_from_tokens(tokens, &func_pos, group_end, pool);
                             j = func_pos;
                         } else {
-                            value = css_parse_token_to_value(&tokens[j], pool);
+                            value = css_parse_token_to_value(&tokens[j], pool,
+                                css_declaration_identifier_grammar(property_name, sub_idx, gval_count));
                             j++;
                         }
                         if (value) sub_list->data.list.values[sub_idx++] = value;
@@ -2687,7 +2720,8 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
             int list_idx = 0;
             int i = value_start;
             while (i < *pos && list_idx < value_count) {
-                CssValue* value = css_parse_value_at(tokens, &i, *pos, pool);
+                CssValue* value = css_parse_value_at(tokens, &i, *pos, pool,
+                    css_declaration_identifier_grammar(property_name, list_idx, value_count));
                 if (value) {
                     list_value->data.list.values[list_idx++] = value;
                 }
@@ -3518,6 +3552,22 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
                     pos++;
                 }
                 int content_end = pos - 1; // Content ends before '}'
+
+                if (rule->type == CSS_RULE_PAGE) {
+                    rule->page = css_page_rule_parse(tokens, prefix_start, prefix_end,
+                                                    content_start, content_end, pool);
+                    if (!rule->page) {
+                        *out_rule = nullptr;
+                        return pos - start_pos;
+                    }
+                    // Keep original strings/functions for CSSOM and generated margin content.
+                    const char* raw_start = tokens[prefix_start].start;
+                    const char* raw_end = tokens[content_end].start + tokens[content_end].length;
+                    rule->data.generic_rule.content = pool_dup_n(pool, raw_start,
+                                                               (size_t)(raw_end - raw_start));
+                    *out_rule = rule;
+                    return pos - start_pos;
+                }
 
                 if (rule->type == CSS_RULE_FONT_FACE && brace_depth == 0 &&
                     tokens[opening_brace].start && tokens[content_end].start) {

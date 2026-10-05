@@ -942,6 +942,7 @@ typedef struct CssComputedStyle {
 // Forward declarations
 typedef struct CssRule CssRule;
 typedef struct CssStylesheet CssStylesheet;
+typedef struct CssPageRule CssPageRule;
 
 // CSS Rule types
 typedef enum CssRuleType {
@@ -973,6 +974,7 @@ typedef struct CssLayerName {
 typedef struct CssRule {
     CssRuleType type;
     Pool* pool;
+    CssPageRule* page; // typed page selectors/descriptors; generic text remains available to CSSOM
 
     // Rule content varies by type
     union {
@@ -1288,6 +1290,7 @@ bool css_property_is_animatable(CssPropertyCode property_code);
  * @return true if shorthand, false otherwise
  */
 bool css_property_is_shorthand(CssPropertyCode property_code);
+bool css_property_shorthand_contains(CssPropertyCode shorthand, CssPropertyCode property);
 
 /**
  * Get longhand properties for a shorthand property

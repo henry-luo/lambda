@@ -26,6 +26,7 @@ struct CssElementDeclarationQuery {
     SelectorMatcher* matcher;
     DomElement* element;
     const char* property;
+    uint8_t pseudo_element;
     CssDeclaration best;
     uint32_t order;
     bool found;
@@ -40,7 +41,16 @@ static void css_query_consider_declaration(CssElementDeclarationQuery* query,
          strcmp(query->property, "marker-end") == 0);
     bool font_shorthand = str_icmp_cstr(declaration->property_name, "font") == 0 &&
         css_font_shorthand_contains_property(query->property);
-    if (!marker_shorthand && !font_shorthand && str_icmp_cstr(declaration->property_name, query->property) != 0) return;
+    CssPropertyCode requested = css_property_code_from_name(query->property);
+    bool shorthand = requested > 0 && css_property_shorthand_contains(declaration->property_code, requested);
+    bool break_alias = strncmp(query->property, "break-", 6) == 0 &&
+        strncmp(declaration->property_name, "page-break-", 11) == 0 &&
+        strcmp(query->property + 6, declaration->property_name + 11) == 0;
+    bool all_reset = strcmp(declaration->property_name, "all") == 0 &&
+        strncmp(query->property, "--", 2) != 0 && strcmp(query->property, "direction") != 0 &&
+        strcmp(query->property, "unicode-bidi") != 0;
+    if (!marker_shorthand && !font_shorthand && !shorthand && !break_alias && !all_reset &&
+        str_icmp_cstr(declaration->property_name, query->property) != 0) return;
     CssDeclaration candidate = *declaration;
     candidate.specificity = specificity;
     candidate.specificity.important = declaration->important;
@@ -79,7 +89,7 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
             selector->specificity = selector_matcher_calculate_specificity(query->matcher, selector);
         }
         if (selector && selector_matcher_matches(query->matcher, selector, query->element, &match) &&
-            match.pseudo_element == PSEUDO_ELEMENT_NONE &&
+            match.pseudo_element == query->pseudo_element &&
             (!matched || css_specificity_compare(match.specificity, specificity) > 0)) {
             specificity = match.specificity;
             matched = true;
@@ -94,6 +104,8 @@ static void css_query_element_rule(CssElementDeclarationQuery* query, CssRule* r
 static void css_query_element_sheet(CssElementDeclarationQuery* query, CssStylesheet* sheet,
                                      size_t depth) {
     if (!sheet || sheet->disabled || depth > 512) return;
+    if (sheet->media && *sheet->media && query->engine &&
+        !css_evaluate_media_query(query->engine, sheet->media)) return;
     for (size_t i = 0; i < sheet->imported_count; i++) {
         css_query_element_sheet(query, sheet->imported_stylesheets[i], depth + 1);
     }
@@ -105,18 +117,19 @@ static void css_query_element_sheet(CssElementDeclarationQuery* query, CssStyles
 bool css_select_element_declaration(CssEngine* engine, SelectorMatcher* matcher,
     DomElement* element, CssStylesheet** sheets, size_t sheet_count,
     CssDeclaration** inline_declarations, size_t inline_count,
-    const char* property_name, CssDeclaration* result) {
+    const char* property_name, CssDeclaration* result, uint8_t pseudo_element) {
     if (!matcher || !element || !property_name || !result) return false;
     CssElementDeclarationQuery query = {};
     query.engine = engine;
     query.matcher = matcher;
     query.element = element;
     query.property = property_name;
+    query.pseudo_element = pseudo_element;
     for (size_t i = 0; sheets && i < sheet_count; i++) {
         css_query_element_sheet(&query, sheets[i], 0);
     }
     CssSpecificity inline_specificity = {1, 0, 0, 0, false};
-    for (size_t i = 0; inline_declarations && i < inline_count; i++) {
+    for (size_t i = 0; !pseudo_element && inline_declarations && i < inline_count; i++) {
         css_query_consider_declaration(&query, inline_declarations[i],
                                        inline_specificity, CSS_ORIGIN_AUTHOR);
     }

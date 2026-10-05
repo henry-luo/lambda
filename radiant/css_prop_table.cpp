@@ -441,17 +441,6 @@ static const CssValue* cssom_lookup_custom_property(DomElement* element,
     return nullptr;
 }
 
-static const char* cssom_identifier_name(const CssValue* value) {
-    if (!value) return nullptr;
-    if (value->type == CSS_VALUE_TYPE_STRING) return value->data.string;
-    if (value->type == CSS_VALUE_TYPE_CUSTOM) return value->data.custom_property.name;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        const CssEnumInfo* info = css_enum_info(value->data.keyword);
-        return info ? info->name : nullptr;
-    }
-    return nullptr;
-}
-
 static const CssValue* cssom_resolve_font_size_var(DomElement* element,
                                                     const CssValue* value,
                                                     int depth) {
@@ -466,7 +455,7 @@ static const CssValue* cssom_resolve_font_size_var(DomElement* element,
                strcmp(value->data.function->name, "var") == 0) {
         CssFunction* function = value->data.function;
         if (function->arg_count > 0 && function->args) {
-            name = cssom_identifier_name(function->args[0]);
+            name = css_value_identifier_name(function->args[0]);
         }
         if (function->arg_count > 1 && function->args) fallback = function->args[1];
     } else {

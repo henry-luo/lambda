@@ -309,6 +309,8 @@ struct DomDocument : DomDocumentResourceData {
 
     // Layout and state
     lam::Own<ViewTree> view_tree;   // View tree after layout
+    lam::Own<ViewTree> secondary_view_trees; // Independent layouts over this source DOM.
+    bool secondary_views_cleanup_registered;
     lam::Own<StateStore> state_store;  // Per-document state store owner
     lam::Up<DocState> state;        // Compatibility pointer to state_store->doc_state
 
@@ -441,7 +443,8 @@ struct DomDocument : DomDocumentResourceData {
                     next_node_id(1),
                     stylesheets(nullptr), stylesheet_count(0), stylesheet_capacity(0),
                     font_faces_processed(false),
-                    view_tree(nullptr), state_store(nullptr), state(nullptr),
+                    view_tree(nullptr), secondary_view_trees(nullptr),
+                    secondary_views_cleanup_registered(false), state_store(nullptr), state(nullptr),
                     resource_manager(nullptr), load_start_time(0.0), fully_loaded(true),
                     lambda_runtime(nullptr), embedding_document(nullptr),
                     embedding_element_ref({nullptr, 0}), resources(nullptr),
@@ -1565,6 +1568,9 @@ bool dom_element_has_after_content(DomElement* element);
  * @return Content string or NULL if none
  */
 const char* dom_element_get_pseudo_element_content(DomElement* element, int pseudo_element);
+struct StrBuf;
+bool dom_element_append_content(DomElement* element, const CssValue* value,
+    void* counter_context, int* quote_depth, StrBuf* text);
 
 /**
  * Get pseudo-element content with counter resolution

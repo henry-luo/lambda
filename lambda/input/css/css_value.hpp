@@ -585,6 +585,14 @@ typedef enum CssEnum : int16_t {
     CSS_VALUE_PRESERVE_3D,
     CSS_VALUE_FROM_FONT,
     CSS_VALUE_CHAIN,
+    // fragmentation targets and publishing floats
+    CSS_VALUE_ALWAYS,
+    CSS_VALUE_AVOID_PAGE,
+    CSS_VALUE_AVOID_COLUMN,
+    CSS_VALUE_AVOID_REGION,
+    CSS_VALUE_RECTO,
+    CSS_VALUE_VERSO,
+    CSS_VALUE_FOOTNOTE,
     // Radiant extensions
     CSS_VALUE__REPLACED,
     CSS_VALUE__LAST_ENTRY
@@ -599,6 +607,22 @@ typedef struct CssEnumInfo{
 
 const CssEnumInfo* css_enum_info(CssEnum id);
 CssEnum css_enum_by_name(const char* name);
+const char* css_value_identifier_name(const struct CssValue* value);
+bool css_value_keyword_equals(const struct CssValue* value, CssEnum keyword);
+struct CssFunction;
+bool css_function_name_is(const CssFunction* function, const char* name);
+struct StrBuf;
+struct CssContentBindings {
+    void* context;
+    const char* (*attribute)(void* context, const char* name);
+    const char* (*quote)(void* context, bool open, int depth);
+    bool (*function)(void* context, const CssFunction* function, StrBuf* text);
+};
+int css_content_quote_type(const CssValue* value);
+const char* css_content_attribute_name(const CssValue* value, const char** type = nullptr);
+const char* css_content_quote_char(const CssValue* quotes, bool open, int depth);
+bool css_content_append(const CssValue* value, const CssContentBindings* bindings,
+                        int* quote_depth, StrBuf* text, size_t depth = 0);
 
 // Convert a CSS named color keyword to RGBA values.
 // Returns true if the keyword is a recognized color, false otherwise.

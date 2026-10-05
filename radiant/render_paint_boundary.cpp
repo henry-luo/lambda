@@ -109,13 +109,15 @@ static void boundary_emit_border_side(PaintList* paint_list, float x, float y,
 bool render_paint_boundary_emit_simple(PaintList* paint_list, ViewBlock* view,
                                        float x, float y) {
     if (!paint_list || !view || !view->bound) return false;
+    return render_paint_boundary_emit_box(paint_list, view->bound, {x, y, view->width, view->height});
+}
 
-    BoundaryProp* bound = view->bound;
+bool render_paint_boundary_emit_box(PaintList* paint_list, BoundaryProp* bound, Rect rect) {
+    if (!paint_list || !bound) return false;
     if (bound->box_shadow || bound->outline) return false;
     if (!boundary_background_simple(bound->background)) return false;
 
-    float width = view->width;
-    float height = view->height;
+    float x = rect.x, y = rect.y, width = rect.width, height = rect.height;
     if (width < 0.0f || height < 0.0f) return false;
 
     float radius = 0.0f;

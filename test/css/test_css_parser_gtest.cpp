@@ -888,17 +888,18 @@ TEST_F(CssEngineParserTest, TextJustifyAcceptsOnlyDefinedModes) {
     }
 }
 
-TEST_F(CssEngineParserTest, LogicalFloatAndClearRejectOtherKeywords) {
+TEST_F(CssEngineParserTest, LogicalAndPageFloatClearValuesRejectOtherKeywords) {
     const char* valid[] = {
         "float: inline-start", "float: inline-end", "float: left",
         "clear: inline-start", "clear: inline-end", "clear: both",
-        "float: initial", "clear: var(--side)"
+        "float: initial", "clear: var(--side)",
+        "float: top", "float: bottom", "float: footnote", "clear: top", "clear: bottom"
     };
     for (const char* text : valid) {
         EXPECT_NE(css_parse_declaration_text(text, strlen(text), pool), nullptr) << text;
     }
     const char* invalid[] = {
-        "float: both", "float: top", "float: red",
+        "float: both", "float: red", "clear: footnote",
         "clear: 4px", "clear: auto", "clear: left right"
     };
     for (const char* text : invalid) {

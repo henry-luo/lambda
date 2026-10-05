@@ -29,6 +29,28 @@ static bool validate_time(const char* value_str, void** parsed_value, Pool* pool
 static CssPropertyCode text_align_longhands[] = {
     CSS_PROPERTY_TEXT_ALIGN_ALL, CSS_PROPERTY_TEXT_ALIGN_LAST
 };
+static CssPropertyCode margin_longhands[] = {
+    CSS_PROPERTY_MARGIN_TOP, CSS_PROPERTY_MARGIN_RIGHT, CSS_PROPERTY_MARGIN_BOTTOM, CSS_PROPERTY_MARGIN_LEFT
+};
+static CssPropertyCode padding_longhands[] = {
+    CSS_PROPERTY_PADDING_TOP, CSS_PROPERTY_PADDING_RIGHT, CSS_PROPERTY_PADDING_BOTTOM, CSS_PROPERTY_PADDING_LEFT
+};
+static CssPropertyCode border_longhands[] = {
+    CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_RIGHT_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_LEFT_WIDTH,
+    CSS_PROPERTY_BORDER_TOP_STYLE, CSS_PROPERTY_BORDER_RIGHT_STYLE, CSS_PROPERTY_BORDER_BOTTOM_STYLE, CSS_PROPERTY_BORDER_LEFT_STYLE,
+    CSS_PROPERTY_BORDER_TOP_COLOR, CSS_PROPERTY_BORDER_RIGHT_COLOR, CSS_PROPERTY_BORDER_BOTTOM_COLOR, CSS_PROPERTY_BORDER_LEFT_COLOR
+};
+static CssPropertyCode border_side_longhands[4][3] = {
+    {CSS_PROPERTY_BORDER_TOP_WIDTH, CSS_PROPERTY_BORDER_TOP_STYLE, CSS_PROPERTY_BORDER_TOP_COLOR},
+    {CSS_PROPERTY_BORDER_RIGHT_WIDTH, CSS_PROPERTY_BORDER_RIGHT_STYLE, CSS_PROPERTY_BORDER_RIGHT_COLOR},
+    {CSS_PROPERTY_BORDER_BOTTOM_WIDTH, CSS_PROPERTY_BORDER_BOTTOM_STYLE, CSS_PROPERTY_BORDER_BOTTOM_COLOR},
+    {CSS_PROPERTY_BORDER_LEFT_WIDTH, CSS_PROPERTY_BORDER_LEFT_STYLE, CSS_PROPERTY_BORDER_LEFT_COLOR}
+};
+static CssPropertyCode background_longhands[] = {
+    CSS_PROPERTY_BACKGROUND_COLOR, CSS_PROPERTY_BACKGROUND_IMAGE, CSS_PROPERTY_BACKGROUND_REPEAT,
+    CSS_PROPERTY_BACKGROUND_POSITION, CSS_PROPERTY_BACKGROUND_SIZE, CSS_PROPERTY_BACKGROUND_ATTACHMENT,
+    CSS_PROPERTY_BACKGROUND_ORIGIN, CSS_PROPERTY_BACKGROUND_CLIP
+};
 static CssPropertyCode text_emphasis_longhands[] = {
     CSS_PROPERTY_TEXT_EMPHASIS_STYLE, CSS_PROPERTY_TEXT_EMPHASIS_COLOR
 };
@@ -109,13 +131,13 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BORDER_LEFT_COLOR, "border-left-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
 
     // Border shorthand properties
-    {CSS_PROPERTY_BORDER_WIDTH, "border-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, true, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_BORDER_STYLE, "border-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_BORDER_COLOR, "border-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, true, NULL, 0, validate_color, NULL},
-    {CSS_PROPERTY_BORDER_TOP, "border-top", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
-    {CSS_PROPERTY_BORDER_RIGHT, "border-right", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
-    {CSS_PROPERTY_BORDER_BOTTOM, "border-bottom", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
-    {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_WIDTH, "border-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, true, border_longhands, 4, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_STYLE, "border-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, border_longhands + 4, 4, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_COLOR, "border-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, true, border_longhands + 8, 4, validate_color, NULL},
+    {CSS_PROPERTY_BORDER_TOP, "border-top", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[0], 3, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_RIGHT, "border-right", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[1], 3, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_BOTTOM, "border-bottom", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[2], 3, validate_string, NULL},
+    {CSS_PROPERTY_BORDER_LEFT, "border-left", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, border_side_longhands[3], 3, validate_string, NULL},
 
     // CSS Logical border properties share the writing-mode side mapper.
     {CSS_PROPERTY_BORDER_INLINE, "border-inline", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_string, NULL},
@@ -260,7 +282,7 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_BACKGROUND_BLEND_MODE, "background-blend-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
 
     // Background shorthand and additional properties
-    {CSS_PROPERTY_BACKGROUND, "background", PROP_TYPE_STRING, PROP_INHERIT_NO, "transparent", false, true, NULL, 0, validate_string, NULL},
+    {CSS_PROPERTY_BACKGROUND, "background", PROP_TYPE_STRING, PROP_INHERIT_NO, "transparent", false, true, background_longhands, 8, validate_string, NULL},
 
     // Filter Properties
     {CSS_PROPERTY_FILTER, "filter", PROP_TYPE_STRING, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_string, NULL},
@@ -289,9 +311,9 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_TRANSITION, "transition", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
 
     // Shorthand Properties
-    {CSS_PROPERTY_MARGIN, "margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
-    {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_MARGIN, "margin", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, margin_longhands, 4, validate_length, NULL},
+    {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, padding_longhands, 4, validate_length, NULL},
+    {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, border_longhands, 12, validate_keyword, NULL},
     {CSS_PROPERTY_FLEX, "flex", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "0 1 auto", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
 
@@ -1343,8 +1365,41 @@ bool css_property_validate_value_mode(CssPropertyCode id,
                                       bool quirks_mode) {
     if (!value) return false;
 
+    // Running positions retain an identifier, rather than accepting arbitrary functions.
+    if (id == CSS_PROPERTY_POSITION && value->type == CSS_VALUE_TYPE_FUNCTION && css_function_name_is(value->data.function, "running")) {
+        const CssFunction* function = value->data.function;
+        if (function->arg_count != 1 || !function->args[0] || function->args[0]->type == CSS_VALUE_TYPE_STRING) return false;
+        const CssValue* name = function->args[0];
+        if (name->type == CSS_VALUE_TYPE_KEYWORD && css_enum_info(name->data.keyword)->group == CSS_VALUE_GROUP_GLOBAL) return false;
+        return css_value_identifier_name(name) != nullptr;
+    }
     // Property-specific validation
     switch (id) {
+        case CSS_PROPERTY_BREAK_BEFORE:
+        case CSS_PROPERTY_BREAK_AFTER:
+        case CSS_PROPERTY_BREAK_INSIDE:
+        case CSS_PROPERTY_PAGE_BREAK_BEFORE:
+        case CSS_PROPERTY_PAGE_BREAK_AFTER:
+        case CSS_PROPERTY_PAGE_BREAK_INSIDE:
+        case CSS_PROPERTY_ORPHANS:
+        case CSS_PROPERTY_WIDOWS: {
+            if (value->type == CSS_VALUE_TYPE_VAR || (value->type == CSS_VALUE_TYPE_FUNCTION &&
+                value->data.function && strcmp(value->data.function->name, "var") == 0)) return true;
+            if (value->type == CSS_VALUE_TYPE_KEYWORD && css_enum_info(value->data.keyword)->group == CSS_VALUE_GROUP_GLOBAL) return true;
+            if (id == CSS_PROPERTY_ORPHANS || id == CSS_PROPERTY_WIDOWS)
+                return value->type == CSS_VALUE_TYPE_NUMBER && isfinite(value->data.number.value) &&
+                    value->data.number.value >= 1.0 && floor(value->data.number.value) == value->data.number.value;
+            if (value->type != CSS_VALUE_TYPE_KEYWORD) return false;
+            CssEnum keyword = value->data.keyword;
+            bool legacy = id == CSS_PROPERTY_PAGE_BREAK_BEFORE || id == CSS_PROPERTY_PAGE_BREAK_AFTER || id == CSS_PROPERTY_PAGE_BREAK_INSIDE;
+            bool inside = id == CSS_PROPERTY_BREAK_INSIDE || id == CSS_PROPERTY_PAGE_BREAK_INSIDE;
+            if (keyword == CSS_VALUE_AUTO || keyword == CSS_VALUE_AVOID) return true;
+            if (!legacy && (keyword == CSS_VALUE_AVOID_PAGE || keyword == CSS_VALUE_AVOID_COLUMN || keyword == CSS_VALUE_AVOID_REGION)) return true;
+            if (inside) return false;
+            if (keyword == CSS_VALUE_LEFT || keyword == CSS_VALUE_RIGHT || keyword == CSS_VALUE_ALWAYS) return true;
+            return !legacy && (keyword == CSS_VALUE_PAGE || keyword == CSS_VALUE_COLUMN || keyword == CSS_VALUE_REGION ||
+                keyword == CSS_VALUE_RECTO || keyword == CSS_VALUE_VERSO || keyword == CSS_VALUE_ALL);
+        }
         case CSS_PROPERTY_SCROLL_SNAP_TYPE:
         case CSS_PROPERTY_SCROLL_SNAP_ALIGN:
             return css_value_is_scroll_snap(id, value);
@@ -1483,8 +1538,9 @@ bool css_property_validate_value_mode(CssPropertyCode id,
             const CssEnumInfo* info = css_enum_info(keyword);
             return keyword == CSS_VALUE_NONE || keyword == CSS_VALUE_LEFT ||
                 keyword == CSS_VALUE_RIGHT || keyword == CSS_VALUE_INLINE_START ||
-                keyword == CSS_VALUE_INLINE_END ||
+                keyword == CSS_VALUE_INLINE_END || keyword == CSS_VALUE_TOP || keyword == CSS_VALUE_BOTTOM ||
                 (id == CSS_PROPERTY_CLEAR && keyword == CSS_VALUE_BOTH) ||
+                (id == CSS_PROPERTY_FLOAT && keyword == CSS_VALUE_FOOTNOTE) ||
                 (info && info->group == CSS_VALUE_GROUP_GLOBAL);
         }
         case CSS_PROPERTY_APPEARANCE: {
@@ -2329,6 +2385,13 @@ bool css_property_is_animatable(CssPropertyCode property_code) {
 bool css_property_is_shorthand(CssPropertyCode property_code) {
     const CssProperty* prop = css_property_get_by_code(property_code);
     return prop && prop->shorthand;
+}
+
+bool css_property_shorthand_contains(CssPropertyCode shorthand, CssPropertyCode property) {
+    const CssProperty* prop = css_property_get_by_code(shorthand);
+    if (!prop || !prop->shorthand) return false;
+    for (int i = 0; i < prop->longhand_count; i++) if (prop->longhand_props[i] == property) return true;
+    return false;
 }
 
 int css_property_get_longhand_properties(CssPropertyCode shorthand_id,

@@ -706,6 +706,8 @@ const char* css_format_selector_group(CssFormatter* formatter, CssSelectorGroup*
                         css_format_anb_canonical(formatter->output, &simple->nth_formula);
                         stringbuf_append_str(formatter->output, ")");
                         break;
+                    case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL:
+                    case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER:
                     case CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC:
                         // Generic pseudo-element - use stored name with ::
                         stringbuf_append_str(formatter->output, "::");

@@ -827,6 +827,8 @@ bool selector_matcher_matches_simple(SelectorMatcher* matcher,
         case CSS_SELECTOR_PSEUDO_ELEMENT_BACKDROP:
         case CSS_SELECTOR_PSEUDO_ELEMENT_PLACEHOLDER:
         case CSS_SELECTOR_PSEUDO_ELEMENT_MARKER:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL:
+        case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER:
             // Pseudo-elements are matched at a higher level (compound/selector matching)
             // Here we just return true to not block the match
             return true;
@@ -926,6 +928,10 @@ static PseudoElementType get_pseudo_element_from_compound(CssCompoundSelector* c
                 return PSEUDO_ELEMENT_PLACEHOLDER;
             case CSS_SELECTOR_PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON:
                 return PSEUDO_ELEMENT_FILE_SELECTOR_BUTTON;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_CALL:
+                return PSEUDO_ELEMENT_FOOTNOTE_CALL;
+            case CSS_SELECTOR_PSEUDO_ELEMENT_FOOTNOTE_MARKER:
+                return PSEUDO_ELEMENT_FOOTNOTE_MARKER;
             default:
                 break;
         }
