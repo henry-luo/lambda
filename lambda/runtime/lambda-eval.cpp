@@ -9170,6 +9170,88 @@ static void convert_specialized_to_generic(Array* arr) {
     log_debug("convert_specialized_to_generic: converted type %d to generic Array, len=%lld", old_type, len);
 }
 
+// S1.6: an N-D ArrayNum is invisibly the sequence of its leading-axis rows, so
+// `m[i] = v` replaces row i. A rank-2 row replaced by a flat sequence of the
+// same length whose scalars all fit the lane keeps the packed carrier.
+static bool array_num_ndim_row_store(ArrayNum* arr, int64_t row, Item value) {
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)arr->extra;
+    TypeId value_type = get_type_id(value);
+    if (shape->ndim != 2 || vector_is_ndim(value)) return false;
+    if (value_type != LMD_TYPE_ARRAY && value_type != LMD_TYPE_ARRAY_NUM) return false;
+    // a list written into a slot splices (S2.5.6), so it never stays a row
+    if (value.array->is_spreadable) return false;
+    int64_t row_len = array_num_shape_dims(shape)[1];
+    int64_t value_len = value_type == LMD_TYPE_ARRAY ? value.array->length
+        : array_num_iter_count(value.array_num);
+    if (value_len != row_len) return false;
+    for (int64_t j = 0; j < row_len; j++) {
+        if (!array_num_admits_value(arr, item_at(value, j))) return false;
+    }
+    for (int64_t j = 0; j < row_len; j++) {
+        int64_t coordinate[2] = {row, j};
+        if (item_is_error(array_num_set_nd_admitted(arr, 2, coordinate, item_at(value, j)))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Any other row write widens the N-D array in place to a generic Array of its
+// rows. Each row is an owned copy: a row view would alias the flat buffer this
+// conversion abandons. convert_specialized_to_generic widened the flat leaves
+// instead, so `m[0] = [9, 2]` on [[1, 2], [1, 2]] gave [[9, 2], 2, 1, 2].
+static bool convert_ndim_to_generic_rows(Array* arr) {
+    ArrayNum* source = (ArrayNum*)arr;
+    ArrayNumShape* shape = (ArrayNumShape*)(uintptr_t)source->extra;
+    ArrayNumElemType elem_type = source->get_elem_type();
+    // the shape side table lives in a data zone that a collection may move
+    int ndim = shape->ndim;
+    int64_t dims[LAMBDA_ARRAY_NUM_MAX_NDIM], strides[LAMBDA_ARRAY_NUM_MAX_NDIM];
+    for (int ax = 0; ax < ndim; ax++) {
+        dims[ax] = array_num_shape_dims(shape)[ax];
+        strides[ax] = array_num_shape_strides(shape)[ax];
+    }
+    int64_t row_len = 1;
+    for (int ax = 1; ax < ndim; ax++) row_len *= dims[ax];
+
+    RootFrame roots(3);
+    Rooted<Array*> rooted_arr(roots, arr);
+    Rooted<Array*> rooted_rows(roots, array_plain());
+    Rooted<ArrayNum*> rooted_row(roots, (ArrayNum*)NULL);
+    if (!rooted_rows.get()) return false;
+    for (int64_t r = 0; r < dims[0]; r++) {
+        rooted_row.set(ndim == 2 ? array_num_new(elem_type, row_len)
+            : array_num_new_ndim(elem_type, row_len, ndim - 1, dims + 1));
+        if (!rooted_row.get()) return false;
+        for (int64_t j = 0; j < row_len; j++) {
+            // unravel leaf j of the row over the trailing axes
+            int64_t offset = r * strides[0], rest = j;
+            for (int ax = ndim - 1; ax >= 1; ax--) {
+                offset += (rest % dims[ax]) * strides[ax];
+                rest /= dims[ax];
+            }
+            Item leaf = array_num_read_item((ArrayNum*)rooted_arr.get(), offset);
+            array_num_store_admitted(rooted_row.get(), j, leaf);
+        }
+        array_push_verbatim(rooted_rows.get(), {.array_num = rooted_row.get()});
+    }
+
+    int64_t count = dims[0];
+    int64_t capacity = count < 8 ? 8 : count;
+    Item* items = (Item*)heap_data_calloc(capacity * sizeof(Item));
+    if (!items) return false;
+    for (int64_t r = 0; r < count; r++) items[r] = rooted_rows.get()->items[r];
+    arr = rooted_arr.get();
+    arr->items = items;
+    arr->length = count;
+    arr->capacity = capacity;
+    arr->extra = 0;
+    arr->is_ndim = 0;
+    arr->type_id = LMD_TYPE_ARRAY;
+    arr->rep_cert = NULL;
+    return true;
+}
+
 // S9.1.1: `push(b, v)` is `b' = b ++ [v]`. An open packed array (one with no
 // declared contract) keeps its lane when every appended item fits it exactly
 // and otherwise widens in place to a generic Array, as an index write does
@@ -9308,6 +9390,36 @@ Item fn_array_set(Array* arr, int64_t index, Item value) {
     if (arr->is_static) {
         log_error("fn_array_set: cannot mutate static array");
         return ItemError;
+    }
+    // An N-D array's elements are its leading-axis rows; its `length` counts
+    // leaves, so the flat index paths below must not see it.
+    if (arr_type == LMD_TYPE_ARRAY_NUM && vector_is_ndim({.array_num = (ArrayNum*)arr})) {
+        ArrayNum* nd = (ArrayNum*)arr;
+        int64_t rows = array_num_iter_count(nd);
+        if (index < 0 || index >= rows) {
+            set_runtime_error(ERR_INDEX_OUT_OF_BOUNDS,
+                "fn_array_set: index %lld out of bounds (length %lld)",
+                (long long)index, (long long)rows);
+            return ItemError;
+        }
+        if (nd->is_view && !nd->is_mutable_view) {
+            log_error("fn_array_set: cannot mutate a read-only view; copy() first");
+            return ItemError;
+        }
+        if (array_num_ndim_row_store(nd, index, value)) return ItemNull;
+        if (nd->is_view) {
+            // a view aliases its base's buffer and cannot change representation
+            set_runtime_error(ERR_TYPE_MISMATCH,
+                "fn_array_set: an N-D array view row takes only a row of its own shape; copy() first");
+            return ItemError;
+        }
+        RootFrame roots(2);
+        Rooted<Array*> rooted_arr(roots, arr);
+        Rooted<Item> rooted_value(roots, value);
+        if (!convert_ndim_to_generic_rows(rooted_arr.get())) return ItemError;
+        arr = rooted_arr.get();
+        value = rooted_value.get();
+        arr_type = arr->type_id;
     }
     // A borrowing view aliases someone else's buffer. `content(e)` is read-only
     // for now (LR09-9), so refuse rather than write through — the ARRAY_NUM arm
