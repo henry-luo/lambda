@@ -687,6 +687,7 @@ typedef enum SysFunc {
     SYSFUNC_INTERSECT4,
     SYSFUNC_EXCEPT,
     SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
+    SYSPROC_IO_SEARCH,       // io.search(source, query, options?) - ranked full-text file search (lib/fts, FTX11)
 } SysFunc;
 
 typedef struct Type {
@@ -1807,7 +1808,6 @@ Symbol* name_key_symbol(const char* name, size_t len);
 #define ITEM_NULL_SPREADABLE ((uint64_t)LMD_TYPE_NULL << 56 | 1)  // spreadable null (skip when spreading)
 #define ITEM_JS_UNDEFINED   ((uint64_t)LMD_TYPE_UNDEFINED << 56)  // JavaScript undefined
 #define ITEM_JS_TDZ         ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 1)  // TDZ sentinel for let/const
-#define ITEM_TASK_SUSPENDED ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 2)  // internal resumable-call sentinel
 // Internal call-ABI marker.  It never reaches a Lambda binding: public MIR
 // wrappers replace it with an optional null or evaluate the declared default.
 #define ITEM_MISSING_ARGUMENT ((uint64_t)LMD_TYPE_UNDEFINED << 56 | 3)
@@ -3419,6 +3419,8 @@ extern "C" {
     Item pn_io_rename(Item old_path, Item new_path);
     Item pn_io_grep2(Item source, Item pattern);
     Item pn_io_grep3(Item source, Item pattern, Item options);
+    Item pn_io_search2(Item source, Item query);
+    Item pn_io_search3(Item source, Item query, Item options);
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
 

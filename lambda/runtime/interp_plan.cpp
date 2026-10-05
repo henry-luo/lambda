@@ -224,6 +224,8 @@ static bool interp_kind_supported(AstNodeType kind) {
     // The indexed scan visits these declarations before their bodies.
     case AST_NODE_STATE_ENTRY:
     case AST_NODE_EVENT_HANDLER:
+    // `start` launches a task on its own activation (RA12).
+    case AST_NODE_START:
     // --- P1.2: match ---
     case AST_NODE_MATCH_EXPR:
     case AST_NODE_MATCH_ARM:
@@ -291,7 +293,6 @@ typedef struct ScanCtx {
     bool indexed;
     const AstIndex* index;
     AstNodeId skip_end;
-    bool strict_interp;
 } ScanCtx;
 
 // An outer write to an N-D ArrayNum replaces a row slice, not one scalar leaf.
@@ -419,32 +420,6 @@ static bool interp_checked_scalar_index_expr(AstNode* node) {
         interp_checked_scalar_index_expr(binary->right);
 }
 
-// The native concurrency analysis must conservatively classify an indirect
-// `pn` call as await-capable because lowering cannot prove its runtime target.
-// T0 may admit only the smaller immutable-alias case whose reachable bodies
-// contain no task edge; this must not weaken the shared async analysis.
-typedef struct InterpSyncProcScan {
-    AstFuncNode* active[64];
-    int active_count;
-    bool ok;
-} InterpSyncProcScan;
-
-static AstFuncNode* interp_static_proc_binding(NameEntry* entry, int depth) {
-    if (!entry || entry->is_mutable || entry->import || depth >= 16) return NULL;
-    AstNode* declaration = entry->node;
-    if (!declaration) return NULL;
-    if (declaration->node_type == AST_NODE_PROC) return (AstFuncNode*)declaration;
-    if (declaration->node_type != AST_NODE_VARIABLE_DECLARATOR) return NULL;
-    AstNode* value = ast_unwrap_primary(((AstDeclaratorNode*)declaration)->init);
-    if (!value) return NULL;
-    if (value->node_type == AST_NODE_PROC) return (AstFuncNode*)value;
-    if (value->node_type != AST_NODE_IDENT) return NULL;
-    return interp_static_proc_binding(((AstIdentNode*)value)->entry, depth + 1);
-}
-
-static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
-        InterpSyncProcScan* scan);
-
 typedef struct SatelliteScanCtx {
     bool ok;
     // T27-6: the innermost node kind that refused, so a pinned hot function
@@ -453,84 +428,6 @@ typedef struct SatelliteScanCtx {
 } SatelliteScanCtx;
 
 static void interp_scan_satellite_node(AstNode* node, void* opaque);
-
-static void interp_sync_proc_visit(AstNode* node, void* ctx) {
-    InterpSyncProcScan* scan = (InterpSyncProcScan*)ctx;
-    if (!scan || !scan->ok || !node) return;
-    // Nested definitions run only when a call below resolves to them, so an
-    // unrelated async declaration cannot pin its synchronous owner to the JIT.
-    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_PROC) return;
-    if (node->node_type == AST_NODE_START) {
-        scan->ok = false;
-        return;
-    }
-    if (node->node_type == AST_NODE_CALL_EXPR) {
-        AstCallNode* call = (AstCallNode*)node;
-        AstNode* callee_expr = ast_unwrap_primary(call->function);
-        if (callee_expr && callee_expr->node_type == AST_NODE_SYS_FUNC) {
-            SysFuncInfo* info = ((AstSysFuncNode*)callee_expr)->fn_info;
-            if (info && info->is_async) {
-                scan->ok = false;
-                return;
-            }
-        } else if (callee_expr && lambda_type_func_is_proc(callee_expr->type)) {
-            AstFuncNode* callee = ast_direct_call_function(call);
-            if (!callee && callee_expr->node_type == AST_NODE_IDENT) {
-                callee = interp_static_proc_binding(
-                    ((AstIdentNode*)callee_expr)->entry, 0);
-            }
-            if (!callee || !interp_proc_body_is_synchronous(callee, scan)) {
-                scan->ok = false;
-                return;
-            }
-        }
-    }
-    interp_visit_children(node, interp_sync_proc_visit, scan);
-}
-
-static bool interp_proc_body_is_synchronous(AstFuncNode* fn,
-        InterpSyncProcScan* scan) {
-    if (!fn || !fn->body || !scan || !scan->ok || fn->is_async || fn->is_generator) {
-        return false;
-    }
-    for (int index = 0; index < scan->active_count; index++) {
-        if (scan->active[index] == fn) return true;
-    }
-    int active_capacity = (int)(sizeof(scan->active) / sizeof(scan->active[0]));
-    if (scan->active_count >= active_capacity) return false;
-    scan->active[scan->active_count++] = fn;
-    interp_sync_proc_visit(fn->body, scan);
-    scan->active_count--;
-    return scan->ok;
-}
-
-// Async procedures are executed by their generated MIR resumable entry, not by
-// the synchronous AST walker. Keep the same satellite structural boundary for
-// that delegated body so captures, nested definitions, member-method layouts,
-// and unsupported module bindings cannot cross the membrane accidentally.
-static bool interp_async_proc_satellite_supported(AstFuncNode* fn) {
-    if (!fn || !fn->body || fn->captures || fn->is_generator) return false;
-    SatelliteScanCtx scan = {true, AST_NODE_NULL};
-    interp_scan_satellite_node(fn->body, &scan);
-    return scan.ok;
-}
-
-// A delegated async body can contain `start(p)` edges that the outer T0 scan
-// deliberately does not descend into. Mark those direct procedure targets so
-// their values are published as boxed task entries before the generated body
-// launches them; the flag is already the native analysis fact for that ABI.
-static void interp_mark_task_entry(AstNode* node, void* opaque) {
-    (void)opaque;
-    if (!node) return;
-    if (node->node_type == AST_NODE_START) {
-        AstStartNode* start = (AstStartNode*)node;
-        AstFuncNode* target = start->call
-            ? ast_direct_call_function(start->call) : NULL;
-        if (target && target->analysis) target->analysis->needs_task_context = true;
-    }
-    interp_visit_children(node, interp_mark_task_entry, NULL);
-}
 
 static void interp_scan_visit(AstNode* node, void* ctx) {
     ScanCtx* sc = (ScanCtx*)ctx;
@@ -690,35 +587,13 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             }
         }
     }
-    // AI11/AI12: task-backed definitions bypass T0 until their resumable frame
-    // exists. The native pass is conservative for indirect pn calls, so admit
-    // one only after the local immutable-alias proof above finds no task edge.
-    if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
-            node->node_type == AST_NODE_PROC) {
-        AstFuncNode* fn = (AstFuncNode*)node;
-        InterpSyncProcScan sync_scan = {.ok = true};
-        bool task_backed = fn->analysis && (fn->analysis->may_await ||
-            fn->analysis->needs_task_context);
-        // forced T0 must reject a body that needs MIR's suspension transform
-        bool async_satellite = !sc->strict_interp && task_backed &&
-            interp_async_proc_satellite_supported(fn);
-        if (task_backed && async_satellite) {
-            interp_visit_children(fn->body, interp_mark_task_entry, NULL);
-        }
-        if (fn->is_generator ||
-                (task_backed && !async_satellite &&
-                 !interp_proc_body_is_synchronous(fn, &sync_scan))) {
-            sc->ok = false;
-            sc->reject = node->node_type;
-            return;
-        }
-        if (task_backed && async_satellite) {
-            if (sc->indexed && sc->index) {
-                AstNodeId function_id = ast_index_find(sc->index, node);
-                sc->skip_end = ast_index_subtree_end(sc->index, function_id);
-            }
-            return;
-        }
+    // A generator body has no T0 suspension of its own yet; Lambda procedures
+    // that suspend run here like any other (RA12).
+    if ((node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR ||
+            node->node_type == AST_NODE_PROC) && ((AstFuncNode*)node)->is_generator) {
+        sc->ok = false;
+        sc->reject = node->node_type;
+        return;
     }
     // `a[i] = v`, `a.f = v`, and nested paths through a plain binding root use
     // cow_path_set: it owns every detach/relink decision (S9.1.2), while T0
@@ -888,7 +763,8 @@ static void interp_scan_visit(AstNode* node, void* ctx) {
             if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
-        if (info && info->fn == SYSPROC_VMAP_SET) {
+        // `select` packs its variadic handles at the call, as lowering does.
+        if (info && (info->fn == SYSPROC_VMAP_SET || info->fn == SYSPROC_SELECT)) {
             if (!sc->indexed) interp_visit_children(node, interp_scan_visit, ctx);
             return;
         }
@@ -929,22 +805,11 @@ bool interp_scan_supported(Script* script, AstNodeType* reject) {
     if (!script || !script->ast_root) return false;
     ScanCtx sc = {true, script->interp_reject_kind};
     AstIndex* index = &script->ast_index;
-    sc.strict_interp = lambda_tier_selected() == LAMBDA_TIER_INTERP;
     if (index->graph_published) {
         sc.indexed = true;
         sc.index = index;
-        // the cached profile permits AUTO satellites; enforce this run's pin
-        // on indexed definitions without changing the shared template's facts
-        if (sc.strict_interp) {
-            for (uint32_t i = 0; sc.ok && i < index->function_count; i++) {
-                interp_scan_visit(index->functions[i].node, &sc);
-            }
-        }
-        sc.strict_interp = false;
-        if (sc.ok) {
-            sc.ok = ast_index_scan_profile_support(index,
-                interp_profile_support_node, &sc);
-        }
+        sc.ok = ast_index_scan_profile_support(index,
+            interp_profile_support_node, &sc);
     } else {
         interp_scan_visit(script->ast_root, &sc);
     }
@@ -957,7 +822,8 @@ bool interp_named_sys_args_supported(const AstNode* callee) {
     SysFuncInfo* info = ((const AstSysFuncNode*)callee)->fn_info;
     // A procedure can mutate its first Item. When that Item arrived from a
     // pipe, T0 has no direct binding to publish the required COW replacement.
-    return info && !info->is_proc;
+    // The suspension builtins (`wait`, `select`, ...) mutate no argument.
+    return info && (!info->is_proc || info->is_async);
 }
 
 // ---------------------------------------------------------------------------
@@ -2183,10 +2049,9 @@ bool interp_plan_repl_fragment(Script* script, AstNode* fragment) {
 // P2 satellite eligibility
 // ---------------------------------------------------------------------------
 
-// Satellites reuse T0's planned module slab. Task-backed procedures carry the
-// resumable task ABI, while the bounded synchronous path admits only reads and
-// stable imports; captures, nested definitions, generators, and replacement
-// writes remain on T0 (D8.1.1v2 §5.2-§5.3).
+// Satellites reuse T0's planned module slab. The bounded path admits only
+// reads and stable imports; captures, nested definitions, generators, and
+// replacement writes remain on T0 (D8.1.1v2 §5.2-§5.3).
 bool interp_satellite_import_binding(const Script* importer,
         const NameEntry* entry, Script** out_owner, int* out_slot) {
     if (out_owner) *out_owner = NULL;
@@ -2343,10 +2208,7 @@ static void interp_scan_satellite_node_kind(AstNode* node, SatelliteScanCtx* sc)
             // A satellite cannot prove the target ABI for an indirect Lambda
             // call. An `any` callee may resolve to a `var` procedure after
             // promotion, and the boxed dispatcher has no caller-root
-            // write-back channel to defer that edge to (D3.3.1 / D5.2). This
-            // is the only gate a task-backed body gets: interp_scan_visit
-            // returns as soon as it hands the body to its satellite, so it
-            // never descends here.
+            // write-back channel to defer that edge to (D3.3.1 / D5.2).
             //
             // Deliberately broader than "local dynamic binding". A named
             // `fn`/`pn` callee never reaches this point at all -- for those
@@ -2393,15 +2255,7 @@ const char* interp_satellite_refusal(const AstFuncNode* fn) {
     if (!fn || !fn->analysis || !fn->body) return "no-analysis";
     if (fn->captures) return "captures";
     if (fn->is_generator) return "generator";
-    bool task_backed = fn->node_type == AST_NODE_PROC &&
-        (fn->analysis->may_await || fn->analysis->needs_task_context);
-    if (task_backed) {
-        return interp_async_proc_satellite_supported((AstFuncNode*)fn)
-            ? NULL : "async-body";
-    }
-    if (fn->is_async || fn->analysis->may_await || fn->analysis->needs_task_context) {
-        return "async";
-    }
+    if (fn->is_async) return "async";
     TypeFunc* signature = (TypeFunc*)((AstNode*)fn)->type;
     for (TypeParam* param = signature ? signature->param : NULL;
             param; param = param->next) {

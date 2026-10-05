@@ -60,15 +60,11 @@ typedef struct ModuleDescriptor {
     struct ModuleDescriptor** static_dependencies;
     struct ModuleDescriptor* async_cycle_root;
     uint64_t static_visit_epoch;
-    void* deferred_main_ptr;
-    // An AST-interpreter module can wait before its first body step while its
-    // static async dependencies settle. The descriptor owns this GC edge.
+    // A module body can wait before its first step while its static async
+    // dependencies settle. The descriptor owns this GC edge to its carrier.
     Item deferred_async_frame;
     int body_executed;
     int post_await_pending;
-    int body_state;
-    int async_eval_order;
-    uint32_t saved_module_state_id;
     uint64_t roots_epoch;
 } ModuleDescriptor;
 

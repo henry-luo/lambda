@@ -350,9 +350,9 @@ This is a statement, not a value-producing expression:
 - In this statement interpretation the static callee must be a `pn`. A
   value-producing `fn` call uses the expression form instead; a `pn` handler
   cannot be used in a binding or another value context.
-- The call may suspend. Its completion and handler continuation live in the
-  procedure state machine, so no native stack frame or jump buffer is retained
-  across the suspension.
+- The call may suspend. The task parks with the call in place and resumes
+  it there, so the call's error reaches the handler exactly as a
+  non-suspending call's does (S7.6.7v4).
 
 Ordinary Lambda errors, including cancellation delivered as the procedure's
 error completion, always reach the handler through explicit return or resume

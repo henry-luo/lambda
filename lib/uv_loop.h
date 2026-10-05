@@ -31,6 +31,9 @@ bool lambda_uv_is_host_owned(void);
 // JS task integration — called at event-loop phase checkpoints
 void lambda_uv_set_microtask_drain(void (*drain_fn)(void));
 void lambda_uv_set_task_drain(void (*drain_fn)(void));
+// Run the microtask checkpoint now. uv_run skips its check phase when no
+// handle keeps the loop alive, so an idle drive calls this before giving up.
+void lambda_uv_checkpoint(void);
 
 #ifdef __cplusplus
 }

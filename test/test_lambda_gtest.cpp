@@ -440,7 +440,8 @@ static const TierParityFixture kTune27TierParity[] = {
     {"test/lambda/type_literal_alias.ls", "test/lambda/type_literal_alias.txt"},
     // S16.6.7v2: a procedure arrow is an anonymous AST_NODE_PROC; each tier
     // must create, call, pass, refuse and promote it as a named nested `pn`.
-    {"test/lambda/proc/pn_arrow.ls", "test/lambda/proc/pn_arrow.txt", "AST_NODE_PROC"},
+    // Its `start` launch runs in T0 too (vibe/Lambda_Design_Runtime_Async.md RA12).
+    {"test/lambda/proc/pn_arrow.ls", "test/lambda/proc/pn_arrow.txt"},
     // S1.6 (LR03-19): an object type strides its fields by storage size; a
     // union- or range-typed field overlapped the next and read back `inf`.
     {"test/lambda/object_boxed_field_layout.ls", "test/lambda/object_boxed_field_layout.txt"},

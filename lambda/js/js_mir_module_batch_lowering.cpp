@@ -2910,6 +2910,15 @@ static bool js_mir_run_analysis_plan(JsMirTranspiler* mt) {
         js_mir_forward_declare_compiler_pass(mt);
 }
 
+static bool jm_module_has_top_level_await(JsMirTranspiler* mt, JsAstNode* ast) {
+    if (!ast || ast->node_type != AST_SCRIPT) return false;
+    JsProgramNode* program = (JsProgramNode*)ast;
+    for (JsAstNode* statement = program->body; statement; statement = statement->next) {
+        if (jm_has_await(mt, statement)) return true;
+    }
+    return false;
+}
+
 static int js_mir_lower(void* opaque) {
     JsMirTranspiler* mt = (JsMirTranspiler*)opaque;
     JsAstNode* root = mt && mt->tp ? (JsAstNode*)mt->tp->ast_root : NULL;
@@ -3098,30 +3107,6 @@ static int js_mir_lower(void* opaque) {
         // what publishes the binding.
     }
 
-    // Js57 P7d-C: detect TLA in module body so the body emission can install
-    // a state-dispatch right before the main statement loop and the split
-    // sequence at the first top-level ExpressionStatement(AwaitExpression).
-    // Static entry modules retain their synchronous top-level-ticks behavior,
-    // but a dynamic import must expose the module's pending evaluation promise
-    // until its top-level await settles (ECMA-262 ContinueDynamicImport).
-    bool p7d_has_tla = false;
-    MIR_label_t p7d_post_await_label = NULL;
-    {
-        if (mt->is_module && mt->in_main && mt->filename &&
-                (js_tla_module_depth_get() >= 2 ||
-                 js_dynamic_import_suppress_module_drain > 0)) {
-            int p7d_tla_count = 0;
-            for (JsAstNode* s = program->body; s; s = s->next) {
-                p7d_tla_count += jm_count_awaits(mt, s);
-                if (p7d_tla_count > 0) break;
-            }
-            if (p7d_tla_count > 0) {
-                p7d_has_tla = true;
-                p7d_post_await_label = jm_new_label(mt);
-            }
-        }
-    }
-
     // Emit variable bindings for named function declarations (so they can be
     // used as first-class values, e.g., passed as callbacks).
     // Non-capturing function declarations are hoisted (bound before any statements).
@@ -3198,19 +3183,6 @@ static int js_mir_lower(void* opaque) {
     // AstIndex owns the program body, so the widening prepass needs no
     // synthetic block wrapper or unindexed traversal path.
     jm_prescan_float_widening(mt, (JsAstNode*)program);
-
-    // Js57 P7d-C: emit body-state dispatch right before user statements. On
-    // re-entry (deferred drain calling js_main again with body_state == 1),
-    // skip past pre-await statements to POST_AWAIT.
-    if (p7d_has_tla && p7d_post_await_label) {
-        MIR_reg_t p7d_spec = jm_box_string_literal(mt, mt->filename,
-            (int)strlen(mt->filename));
-        MIR_reg_t p7d_state = jm_callr_1(mt, "js_module_get_body_state", MIR_T_I64, p7d_spec);
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BNES,
-            MIR_new_label_op(mt->ctx, p7d_post_await_label),
-            MIR_new_reg_op(mt->ctx, p7d_state),
-            MIR_new_int_op(mt->ctx, 0)));
-    }
 
     stmt = program->body;
     while (stmt) {
@@ -3386,51 +3358,6 @@ static int js_mir_lower(void* opaque) {
 
         if (actual_stmt->node_type == AST_NODE_EXPR_STMT) {
             JsExpressionStatementNode* es = (JsExpressionStatementNode*)actual_stmt;
-            // Js57 P7d-C: split at first top-level ExpressionStatement(Await).
-            // We evaluate the await argument (so side effects + P5 publish run),
-            // mark body_state=1, set post_await_pending, and return the
-            // namespace early. The label below catches the re-entry from the
-            // depth-0 AEO drain so post-await statements run.
-            bool p7d_split_now = (p7d_has_tla && p7d_post_await_label && es->expression &&
-                                  es->expression->node_type == AST_NODE_AWAIT);
-            if (p7d_split_now) {
-                JsAwaitNode* aw = (JsAwaitNode*)es->expression;
-                MIR_reg_t arg_val = jm_new_reg(mt, "p7d_aw_arg", MIR_T_I64);
-                if (aw->argument) {
-                    arg_val = jm_transpile_box_item(mt, aw->argument);
-                } else {
-                    jm_emit_reg_op(mt, MIR_MOV, arg_val, MIR_new_int_op(mt->ctx, (int64_t)ITEM_JS_UNDEFINED));
-                }
-                MIR_reg_t p7d_spec_split = jm_box_string_literal(mt, mt->filename,
-                    (int)strlen(mt->filename));
-                // Pass through P5 publish so pending-Promise awaits chain as
-                // before (settled/non-Promise values fall through to js_await_sync).
-                MIR_reg_t p7d_await_result = jm_callr_2(mt, "js_p5_module_await", MIR_T_I64, p7d_spec_split, arg_val);
-                (void)p7d_await_result;
-                // A rejected settled promise becomes an ERROR lane at the
-                // synchronous await boundary; route it before the split marks
-                // the module as pending, or the failed evaluation is erased.
-                jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_THROW);
-                // Flip body_state and mark post-await as pending so the AEO
-                // drain at depth-0 knows to fire this module's continuation.
-                jm_call_void_2(mt, "js_module_set_body_state",
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, p7d_spec_split),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
-                jm_callr_void_1(mt, "js_module_mark_post_await_pending", p7d_spec_split);
-                // Assign this module an AEO slot (idempotent — only set on
-                // first call). Importers register with us as a parent before
-                // we hit the drain, so AEO needs to be defined first.
-                jm_callr_1(mt, "js_module_assign_async_eval_order", MIR_T_I64, p7d_spec_split);
-                // Return the namespace immediately; post-await statements run
-                // on re-entry via the dispatch label.
-                jm_emit_ret(mt, mt->namespace_reg);
-                // Emit POST_AWAIT label — subsequent statements land here on
-                // the second call.
-                jm_emit_label(mt, p7d_post_await_label);
-                p7d_post_await_label = NULL;  // single-shot split
-                stmt = stmt->next;
-                continue;
-            }
             if (es->expression) {
                 MIR_reg_t val = jm_transpile_box_item(mt, es->expression);
                 jm_emit_mov(mt, result, val);
@@ -3490,32 +3417,12 @@ static int js_mir_lower(void* opaque) {
         // uncaught exception, stop executing further statements
         jm_emit_error_lane_propagate_check(mt);
 
-        // Js57 P4 reverted in P6: the post-await body-break broke any nested
-        // module that emits exports after a top-level await (e.g. fixtures
-        // shaped like `await 1; export default await Promise.resolve(42);`).
-        // The narrow win it bought on
-        // `async-module-does-not-block-sibling-modules.js` is given up here
-        // because that test's spec-correct fix requires real TLA suspension —
-        // out of scope for the current change set. P5's
-        // `js_p5_module_await` does still publish the awaited target so the
-        // fulfillment/rejection-order dynamic-import chain works.
-
         stmt = stmt->next;
     }
 
-    // Js57 P7d-C: emit the post-await label if we set up the split machinery
-    // but never hit an ExpressionStatement(AwaitExpression) (e.g. the only
-    // top-level await is inside an export-default expression or a variable
-    // declarator initializer). The label still needs a landing site so the
-    // dispatch branch is valid; nothing else needs to happen here, the
-    // existing return-namespace path follows.
-    if (p7d_has_tla && p7d_post_await_label) {
-        jm_emit_label(mt, p7d_post_await_label);
-        p7d_post_await_label = NULL;
-    }
-    // Js57 P7d-C: every module that ran to the end of its body (TLA-post or
-    // sync) notifies the module registry so its async parents get their
-    // pending counters decremented and the AEO ready queue gets drained.
+    // Every module that ran to the end of its body, at once or after parking
+    // at a top-level await, notifies the module registry so its async parents
+    // get their pending counters decremented and become ready to start.
     if (mt->is_module && mt->in_main && mt->filename) {
         MIR_reg_t p7d_complete_spec = jm_box_string_literal(mt, mt->filename,
             (int)strlen(mt->filename));
@@ -3778,17 +3685,50 @@ cleanup:
     return retained;
 }
 
+#include "../runtime/activation.h"
+
+typedef struct JsSatelliteCompile {
+    Runtime* runtime;
+    JsScript* script;
+    const char* source;
+    size_t source_length;
+    AstFunctionId function_id;
+    const char* function_name;
+    void** out_entry;
+    bool compiled;
+} JsSatelliteCompile;
+
+static void* js_mir_compile_satellite_call(void* data) {
+    JsSatelliteCompile* compile = (JsSatelliteCompile*)data;
+    compile->compiled = js_mir_compile_satellite_unit(compile->runtime,
+        compile->script, compile->source, compile->source_length,
+        compile->function_id, compile->function_name, compile->out_entry);
+    return NULL;
+}
+
+// A promotion can fire inside a generator or async body; the compile runs on
+// the base stack so that activation stacks need not hold it (RA6).
+static bool js_mir_compile_satellite_on_base(JsSatelliteCompile* compile) {
+    bool faulted = false;
+    activation_call_on_base(js_mir_compile_satellite_call, compile, &faulted);
+    return !faulted && compile->compiled;
+}
+
 bool js_mir_compile_function_satellite(Runtime* runtime, JsScript* script,
         AstFunctionId function_id, void** out_entry) {
-    return script && js_mir_compile_satellite_unit(runtime, script, script->source,
-        script->source_length, function_id, NULL, out_entry);
+    if (!script) return false;
+    JsSatelliteCompile compile = {runtime, script, script->source,
+        script->source_length, function_id, NULL, out_entry, false};
+    return js_mir_compile_satellite_on_base(&compile);
 }
 
 bool js_mir_compile_loop_continuation(Runtime* runtime, JsScript* script,
         const char* source, size_t source_length, const char* function_name,
         void** out_entry) {
-    return function_name && js_mir_compile_satellite_unit(runtime, script, source,
-        source_length, AST_FUNCTION_ID_INVALID, function_name, out_entry);
+    if (!function_name) return false;
+    JsSatelliteCompile compile = {runtime, script, source, source_length,
+        AST_FUNCTION_ID_INVALID, function_name, out_entry, false};
+    return js_mir_compile_satellite_on_base(&compile);
 }
 
 bool js_mir_link_runtime_state(JsMirTranspiler* mt) {
@@ -3845,15 +3785,6 @@ bool jm_validate_mir_labels(MIR_context_t ctx) {
 // ============================================================================
 // ES Module loading: compile and execute a module, returning its namespace
 // ============================================================================
-
-static bool jm_module_has_top_level_await(JsMirTranspiler* mt, JsAstNode* ast) {
-    if (!ast || ast->node_type != AST_SCRIPT) return false;
-    JsProgramNode* program = (JsProgramNode*)ast;
-    for (JsAstNode* statement = program->body; statement; statement = statement->next) {
-        if (jm_count_awaits(mt, statement) > 0) return true;
-    }
-    return false;
-}
 
 static void jm_finish_module_transpile(JsTranspiler* tp, JsMirTranspiler* mt,
                                        MIR_context_t ctx) {
@@ -4082,14 +4013,18 @@ static Item jm_execute_cached_module_mir(Runtime* runtime,
     }
     g_eval_preamble_entry_count = image->entry_count;
     g_eval_preamble_var_count = image->module_var_count;
-    js_module_save_context(spec_item, lambda_active_module_state_id());
-    js_module_set_deferred_main_ptr(spec_item, image->entry_func);
     Item result = js_mir_execute_compiled_entry(image->entry_func);
     if (item_is_error(result)) {
         js_module_record_evaluation_error(spec_item, result);
         return result;
     }
-    if (js_dynamic_import_suppress_module_drain <= 0) js_event_loop_drain();
+    // As for a compiled module, only the entry drains: a nested import runs
+    // inside its importer's graph scope, and draining there could resume a
+    // sibling's parked top-level await before the remaining siblings evaluate.
+    if (js_dynamic_import_suppress_module_drain <= 0 && execution_scope.is_outermost()) {
+        js_microtask_flush();
+        js_event_loop_drain();
+    }
     Item evaluation_error = js_module_get_evaluation_error(spec_item);
     if (get_type_id(evaluation_error) != LMD_TYPE_NULL) {
         return js_throw_value(evaluation_error);
@@ -4228,6 +4163,17 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
         return js_mir_execute_ast_module(runtime, tp, filename);
     }
 
+    // The module graph is one execution. Its imports evaluate inside this
+    // scope, so only the outermost module initializes the event loop, and it
+    // does so before any body in the graph can queue a job: a nested module
+    // parked at a top-level await is resumed by such a job.
+    RuntimeExecutionScope execution_scope(context);
+    if (execution_scope.is_outermost() &&
+            !js_runtime_state.event_loop->callback_running &&
+            js_dynamic_import_suppress_module_drain <= 0) {
+        js_event_loop_init();
+    }
+
     // Js57 P5: register the current module BEFORE jm_load_imports so the
     // inherit-awaited-target call inside the loader has a registry entry to
     // write to. A throwaway namespace is used; the real one replaces it after
@@ -4283,11 +4229,14 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
             }
         }
     }
-    if (js_tla_module_depth_get() >= 2 || js_dynamic_import_suppress_module_drain > 0) {
-        if (module_has_top_level_await) {
-            js_module_mark_has_tla(p7d_self_spec_item);
-            log_debug("P7d-A: module '%s' has TLA (top-level await detected)", filename);
-        }
+    // The entry module keeps its synchronous top-level ticks; a nested or a
+    // dynamically imported one with a top-level await is evaluated on its
+    // module carrier (ECMA-262 InnerModuleEvaluation, ContinueDynamicImport).
+    mt->module_tla_carrier = module_has_top_level_await &&
+        (js_tla_module_depth_get() >= 2 || js_dynamic_import_suppress_module_drain > 0);
+    if (mt->module_tla_carrier) {
+        js_module_mark_has_tla(p7d_self_spec_item);
+        log_debug("P7d-A: module '%s' has TLA (top-level await detected)", filename);
     }
     // An artifact's MIR can outlive this compilation context.  String literal
     // pools belong to that context, so cached module code must retain literal
@@ -4380,7 +4329,6 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
     RuntimeCurrentFileScope current_file(context,
         filename ? filename : context->current_file);
     RuntimeModuleStateScope module_state(context);
-    RuntimeExecutionScope execution_scope(context);
     // Dynamic imports use the executing module's filename for relative
     // resolution; the batch entry's previous filename would resolve against
     // the worker instead of the module directory (D7.2.3, D8.5.1).
@@ -4389,47 +4337,50 @@ Item transpile_js_module_to_mir(Runtime* runtime, const char* js_source, const c
             !js_mir_link_runtime_state(mt)) {
         return ItemNull;
     }
-    if (execution_scope.is_outermost() &&
-            !js_runtime_state.event_loop->callback_running &&
-            js_dynamic_import_suppress_module_drain <= 0) {
-        js_event_loop_init();
-    }
-    // Js57 P7d: save the module's evaluation context (module-state id +
-    // namespace already on JsModule) and stash js_main as the deferred entry.
-    // Used by the AEO drain to re-enter js_main with the same module-level
-    // state when a deferred body / post-await chunk runs.
-    js_module_save_context(spec_item, lambda_active_module_state_id());
-    js_module_set_deferred_main_ptr(spec_item, (void*)js_main);
-    // Modules that already have TLA-transitive deps were registered as async
-    // parents during jm_load_imports; their bodies must wait for those deps
-    // to settle before running. Sync modules with no pending deps run their
-    // body immediately as before.
-    int p7d_pending = js_module_pending_async_deps(spec_item);
-    int p7d_has_tla = js_module_get_has_tla(spec_item);
-    if (p7d_has_tla) {
-        // Assign AEO so the drain orders us correctly relative to peer TLA
-        // modules and TLA-importers.
-        js_module_assign_async_eval_order(spec_item);
-    }
+    // A module waiting on async dependencies, or with a top-level await of
+    // its own, is evaluated on a module carrier exactly as an interpreted
+    // module is: started now, or by the ready drain once its dependencies
+    // complete; a top-level await parks it there (RA1). A carrier records its
+    // own evaluation error. Every other module runs its js_main directly.
     bool module_body_threw = false;
-    if (p7d_pending > 0) {
-        // Importer with pending TLA deps — skip js_main now; the AEO drain
-        // will invoke it once all deps have settled.
-        log_debug("P7d: module '%s' pending=%d — deferring body", filename, p7d_pending);
-        // namespace stays as the empty/placeholder until deferred run completes.
+    int pending_async_deps = js_module_pending_async_deps(spec_item);
+    if (mt->module_tla_carrier || pending_async_deps > 0) {
+        RootFrame carrier_roots(1);
+        Rooted<Item> frame_root(carrier_roots, js_async_context_create_module(NULL,
+            (void*)js_main, lambda_active_module_state_id(), spec_item));
+        if (item_is_error(frame_root.get())) {
+            namespace_obj = frame_root.get();
+            module_body_threw = true;
+        } else if (pending_async_deps > 0) {
+            log_debug("P7d: module '%s' pending=%d — deferring body", filename,
+                pending_async_deps);
+            js_module_set_deferred_async_frame(spec_item, frame_root.get());
+        } else {
+            js_async_start(frame_root.get());
+        }
+        // An importer waits on the carrier until the body has finished.
+        if (!module_body_threw && js_module_needs_async_settle(spec_item)) {
+            js_module_set_awaited_target(spec_item,
+                js_async_get_promise(frame_root.get()));
+        }
     } else {
         namespace_obj = js_mir_execute_compiled_entry((void*)js_main);
         module_body_threw = item_is_error(namespace_obj);
     }
     // Microtasks retain their function owner context, while module-vars and
-    // namespace remain dynamically scoped around this drain.
-    if (!module_body_threw && js_dynamic_import_suppress_module_drain <= 0) {
+    // namespace remain dynamically scoped around this drain. Only the entry
+    // module drains: a nested module's parked top-level await must not resume
+    // before its siblings evaluate (ECMA-262 InnerModuleEvaluation). Its
+    // resumption is a promise job, which an event loop not yet initialized
+    // for this turn does not run, so flush the jobs first as the interpreter
+    // does.
+    if (!module_body_threw && js_dynamic_import_suppress_module_drain <= 0 &&
+            js_tla_module_depth_get() <= 1) {
+        js_microtask_flush();
         js_event_loop_drain();
     }
-    // Js57 P4 (Track B3): decrement and (at depth 0) flush queued post-await
-    // chunks. Sits AFTER the namespace/module-vars restore so
-    // continuations that touch module-level state read whichever active
-    // namespace the outer caller had — typically the entry module's.
+    // Decrement and, at depth 0, start the module bodies whose async
+    // dependencies have all completed.
     js_tla_exit_module();
 
     if (module_body_threw) {

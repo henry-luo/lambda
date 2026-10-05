@@ -18,4 +18,11 @@ T17: [{ file: "test/input/grep_tree/notes.txt", value: "beta", index: 18, line: 
 T18: [{ value: "x", index: 4}]
 T19: true
 T20: [{ value: "beta", index: 18, line: 2}]
+T21: [{ file: \.test.input.grep_tree.code.'main.ls', count: 1}, { file: \.test.input.grep_tree.'crlf.txt', count: 1}, { file: \.test.input.grep_tree.'notes.txt', count: 2}, { file: \.test.input.grep_tree.'unicode.txt', count: 2}]
+T22: [{ file: "test/input/grep_tree/notes.txt", count: 1}]
+T23: [{ file: \.test.input.grep_tree.code.'main.ls', count: 1}, { file: \.test.input.grep_tree.'crlf.txt', count: 1}, { file: \.test.input.grep_tree.'notes.txt', count: 1}, { file: \.test.input.grep_tree.'unicode.txt', count: 1}]
+T24: [{ file: \.test.input.grep_tree.code.'main.ls', count: 1}, { file: \.test.input.grep_tree.'crlf.txt', count: 1}, { file: \.test.input.grep_tree.'notes.txt', count: 1}]
+T25: [{ value: "line", index: 3, line: 1, line_ending: "\n"}, { value: "line", index: 13, line: 2, line_ending: "\r\n"}, { value: "line", index: 24, line: 3, line_ending: null}]
+T26: [{ file: "test/input/grep_tree/eol.txt", count: 3}]
+T27: true
 

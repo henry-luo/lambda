@@ -4375,7 +4375,7 @@ TEST(JsInterpreter, SuspendsAsyncGeneratorAwaitsBeforeYielding) {
         "async-generator-await-order.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0), flt2it(1.0)).item,
         b2it(true));
@@ -4397,7 +4397,7 @@ TEST(JsInterpreter, RejectsAsyncGeneratorYieldedPromises) {
         "async-generator-yield-rejection.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, js_make_string("rejected value")).item, b2it(true));
 
@@ -4418,7 +4418,7 @@ TEST(JsInterpreter, IteratesAsyncGeneratorsWithForAwait) {
         "for-await-async-generator.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(42.0)).item, b2it(true));
 
@@ -4438,20 +4438,22 @@ TEST(JsInterpreter, ResumesAsyncGeneratorForAwaitHeadYield) {
         "async-generator-for-await-head-yield.js", NULL);
 
     ASSERT_FALSE(item_is_error(generator));
-    Item first = js_await_sync_incremental(js_generator_next(generator,
+    Item first = js_await_sync(js_generator_next(generator,
         make_js_undefined()));
     ASSERT_FALSE(item_is_error(first));
     EXPECT_EQ(js_iterator_result_value(first).item, ITEM_JS_UNDEFINED);
     EXPECT_EQ(js_iterator_result_done(first).item, b2it(false));
     JsGeneratorStateRecord* state = js_generator_get_ast_state(generator);
     ASSERT_NE(state, nullptr);
-    EXPECT_EQ(state->ast_replay_skip, 1);
-    Item second = js_await_sync_incremental(js_generator_next(generator,
+    // the body is parked in place on its own activation (RA1)
+    EXPECT_NE(state->activation, nullptr);
+    Item second = js_await_sync(js_generator_next(generator,
         js_make_string("key")));
     ASSERT_FALSE(item_is_error(second));
     EXPECT_EQ(js_iterator_result_value(second).item, ITEM_JS_UNDEFINED);
     EXPECT_EQ(js_iterator_result_done(second).item, b2it(true));
-    EXPECT_EQ(state->ast_replay_skip, 1);
+    // a finished body releases its activation at once
+    EXPECT_EQ(state->activation, nullptr);
 
     runtime_cleanup(&runtime);
 }
@@ -4480,7 +4482,7 @@ TEST(JsInterpreter, ResumesSuspendedExpressionsWithoutRepeatingEffects) {
     EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 5), flt2it(1.0)).item,
         b2it(true));
 
-    Item awaited = js_await_sync_incremental(js_elements_get_int(result, 4));
+    Item awaited = js_await_sync(js_elements_get_int(result, 4));
     ASSERT_FALSE(item_is_error(awaited));
     EXPECT_EQ(js_strict_equal(awaited, flt2it(5.0)).item, b2it(true));
 
@@ -4505,7 +4507,7 @@ TEST(JsInterpreter, DoesNotReplayCommaSequenceBeforeAwait) {
         "async-promise-callback-replay.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(12.0)).item, b2it(true));
 
@@ -4522,7 +4524,7 @@ TEST(JsInterpreter, ResumesNestedAwaitAtItsInnerOperand) {
         "nested-await-replay.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(result, flt2it(1.0)).item, b2it(true));
 
@@ -4543,7 +4545,7 @@ TEST(JsInterpreter, ClosesForAwaitIteratorAfterValueAwaitRejection) {
         "for-await-value-rejection.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4564,7 +4566,7 @@ TEST(JsInterpreter, AwaitsForAwaitIteratorCloseBeforeReturning) {
         "for-await-close.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4595,7 +4597,7 @@ TEST(JsInterpreter, PreservesForAwaitCloseCompletionPrecedence) {
         "for-await-close-precedence.js", NULL);
 
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4617,7 +4619,7 @@ TEST(JsMir, AwaitsForAwaitIteratorCloseBeforeReturning) {
 
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4639,7 +4641,7 @@ TEST(JsMir, AwaitsAsyncGeneratorCloseBeforeReturning) {
 
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4662,7 +4664,7 @@ TEST(JsMir, ClosesForAwaitIteratorAfterValueAwaitRejection) {
 
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4688,7 +4690,7 @@ TEST(JsMir, AwaitsNestedForAwaitCloseBeforeReturning) {
 
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4719,7 +4721,7 @@ TEST(JsMir, AwaitsForAwaitCloseOnLabeledAbruptJumps) {
 
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(result.item, b2it(true));
 
@@ -4752,7 +4754,7 @@ TEST(JsMir, PreservesForAwaitCloseCompletionPrecedence) {
 
     ASSERT_EQ(unsetenv("JS_EXEC_BACKEND"), 0);
     ASSERT_FALSE(item_is_error(promise));
-    Item result = js_await_sync_incremental(promise);
+    Item result = js_await_sync(promise);
     ASSERT_FALSE(item_is_error(result));
     EXPECT_EQ(js_strict_equal(js_elements_get_int(result, 0),
         js_make_string("close")).item, b2it(true));

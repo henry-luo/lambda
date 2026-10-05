@@ -1913,21 +1913,6 @@ void jm_emit_class_setup(JsMirTranspiler* mt, MIR_reg_t cls_obj, JsClassEntry* c
         setup->class_proto_obj);
 }
 
-// A computed member key can suspend, and the evaluated superclass is a raw
-// register held across method installation. The class object and its prototype
-// travel through the install policy and are restored there; the heritage value
-// has no such carrier.
-static bool jm_class_member_keys_can_suspend(JsMirTranspiler* mt, JsClassEntry* ce) {
-    if (!ce) return false;
-    for (int i = 0; i < ce->member_count; i++) {
-        JsClassMember* method = jm_class_member_method(ce, i);
-        if (method && method->key_expr && jm_can_suspend(mt, method->key_expr)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         JsClassEntry* ce, MIR_reg_t proto_obj, MIR_reg_t ctor_super_val, bool heritage_is_null) {
     proto_obj = jm_emit_current_class_prototype(mt, cls_obj, proto_obj);
@@ -1935,10 +1920,7 @@ void jm_emit_class_instance_setup_tail(JsMirTranspiler* mt, MIR_reg_t cls_obj,
         MIR_reg_t null_proto = jm_emit_null(mt);
         jm_callr_void_2(mt, "js_set_prototype", proto_obj, null_proto);
     }
-    int super_spill = ctor_super_val && jm_class_member_keys_can_suspend(mt, ce)
-        ? jm_gen_spill_save(mt, ctor_super_val) : -1;
     jm_emit_class_instance_methods(mt, proto_obj, cls_obj, ce);
-    if (super_spill >= 0) jm_gen_spill_load(mt, ctor_super_val, super_spill);
     jm_callr_void_2(mt, "js_set_class_instance_prototype", cls_obj, proto_obj);
     jm_callr_void_2(mt, "js_set_default_constructor_property", proto_obj, cls_obj);
     jm_callr_void_1(mt, "js_mark_all_non_enumerable", proto_obj);
@@ -1975,20 +1957,11 @@ static MIR_reg_t jm_emit_dynamic_new_expr(JsMirTranspiler* mt, JsCallNode* call,
     for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
         if (chk->node_type == AST_NODE_SPREAD) { has_spread = true; break; }
     }
-    // An argument that suspends returns from the state machine, so the callee
-    // cannot stay in a raw register across it — the ordinary call path spills
-    // it for the same reason (jm_call_yield_blocks_direct).
-    int callee_spill = -1;
-    for (JsAstNode* chk = call->arguments; chk; chk = chk->next) {
-        if (jm_can_suspend(mt, chk)) { callee_spill = jm_gen_spill_save(mt, callee); break; }
-    }
     if (has_spread) {
         MIR_reg_t args_arr = jm_build_spread_args_array(mt, call->arguments);
-        if (callee_spill >= 0) jm_gen_spill_load(mt, callee, callee_spill);
         return jm_callr_3(mt, "js_construct_array_like", MIR_T_I64, callee, args_arr, callee);
     }
     MIR_reg_t args_ptr = jm_build_args_array(mt, call->arguments, arg_count);
-    if (callee_spill >= 0) jm_gen_spill_load(mt, callee, callee_spill);
     // D6.2.2v2 makes newTarget an explicit construct operand; the generated
     // call cannot leak state into an adjacent construction on any exit.
     return jm_construct_value_into(mt, MIR_new_reg_op(mt->ctx, callee),
@@ -2167,34 +2140,25 @@ void jm_transpile_do_while(JsMirTranspiler* mt, JsDoWhileNode* dw) {
 
 MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
         JsMirSuspendKind kind, bool route_rejection) {
+    (void)kind;
     if (mt->in_generator && mt->in_async) {
-        int next_state = jm_next_resume_state(mt, kind);
-        if (next_state < 0) return promise_val;
-
-        (void)jm_callr_1(mt, "js_async_prepare_await", MIR_T_I64, promise_val);
-        if (route_rejection)
-            jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
-
-        MIR_reg_t await_result = jm_new_reg(mt, "await_res", MIR_T_I64);
-        jm_emit_suspend_env_save(mt);
-        MIR_reg_t await_target = jm_call_0(mt, "js_async_get_resolved", MIR_T_I64);
-        MIR_reg_t suspend_result = jm_call_2(mt, "js_gen_await_result", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, await_target),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)next_state));
-        jm_emit_ret(mt, suspend_result);
-
-        jm_emit_label(mt, mt->gen_state_labels[next_state]);
-        jm_emit_resume_env_restore(mt);
-        jm_emit_try_state_restore(mt);
-        jm_emit_mov(mt, await_result, mt->gen_input_reg);
-        // Resume input is ordinary data for fulfillment but must re-enter the
-        // merged ERROR lane for rejection; the host callback supplies the
-        // rejection marker because both resumes share one state label.
+        // The body parks in place on its activation; registers, try state and
+        // `with` scopes are all still live when it resumes (RA1). The resume
+        // input is the value, or the rejection as an ERROR Item. An async
+        // generator's driver must also tell this await from a yield.
+        bool async_generator = mt->current_fc && mt->current_fc->node &&
+            mt->current_fc->node->is_generator;
+        MIR_reg_t resumed = async_generator
+            ? jm_call_2(mt, "js_gen_park", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, promise_val),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)JS_GEN_PARK_AWAIT))
+            : jm_callr_1(mt, "js_await_park", MIR_T_I64, promise_val);
+        jm_emit_mov(mt, mt->gen_input_reg, resumed);
         jm_publish_call_result(mt, mt->gen_input_reg);
         jm_emit_async_resume_refresh(mt);
         if (route_rejection)
             jm_emit_error_lane_route(mt, JS_MIR_COMPLETION_AWAIT_REJECTION);
-        return await_result;
+        return resumed;
     }
 
     return jm_callr_1(mt, "js_await_sync", MIR_T_I64, promise_val);
@@ -2516,30 +2480,10 @@ void jm_transpile_for_of(JsMirTranspiler* mt, JsForOfNode* fo) {
         jm_emit_for_loop_destructure(mt, destr_pattern, obj_destr_pattern,
             loop_var, left_creates_bindings, 0);
 
-        // for-in carries its key snapshot, length, cursor and source object in
-        // plain registers across the body. `for-of` parks its iterator in the
-        // activation slot; this loop has no such home, so a body that suspends
-        // resumed with a garbage cursor and stopped after the first key.
-        int keys_spill = -1, len_spill = -1, idx_spill = -1, obj_spill = -1;
-        if (jm_can_suspend(mt, fo->body)) {
-            keys_spill = jm_gen_spill_save(mt, collection);
-            len_spill = jm_gen_spill_save(mt, len);
-            obj_spill = jm_gen_spill_save(mt, iterable);
-            idx_spill = jm_gen_spill_save(mt, idx);
-        }
-
         jm_transpile_loop_body(mt, fo->body);
 
         jm_emit_label(mt, l_update);
-        // `continue` also lands here, so the reload belongs after the label.
-        if (idx_spill >= 0) {
-            jm_gen_spill_load(mt, collection, keys_spill);
-            jm_gen_spill_load(mt, len, len_spill);
-            jm_gen_spill_load(mt, iterable, obj_spill);
-            jm_gen_spill_load(mt, idx, idx_spill);
-        }
         jm_emit_reg_binary_op(mt, MIR_ADD, idx, idx, MIR_new_int_op(mt->ctx, 1));
-        if (idx_spill >= 0) jm_gen_spill_save_at(mt, idx, idx_spill);
         jm_emit_jmp(mt, l_test);
 
         jm_emit_label(mt, l_end);
@@ -2876,20 +2820,6 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
     // Leave its close to that pad so a failing return() can propagate without
     // re-entering the body's exception-only IteratorClose handler.
     bool defer_nearest_iterator_close = mt->for_of_depth > 0;
-    // An async for-of close awaits `return()`, which suspends the state
-    // machine; a raw register does not survive the resume, so the evaluated
-    // value rides a generator env slot across the closes. Without it the
-    // resumed return completed with whatever the register last held.
-    int return_value_spill = -1;
-    if (mt->in_generator && mt->gen_env_reg) {
-        for (int i = mt->loop_depth - 1; i >= 0; i--) {
-            JsLoopLabels* loop = jm_loop_label_at(mt, i);
-            if (loop && loop->iterator_to_close && loop->is_async_iterator) {
-                return_value_spill = jm_gen_spill_save(mt, val);
-                break;
-            }
-        }
-    }
     for (int i = mt->loop_depth - 1; i >= 0; i--) {
         JsLoopLabels* loop = jm_loop_label_at(mt, i);
         if (loop && loop->iterator_to_close) {
@@ -2908,16 +2838,13 @@ void jm_transpile_return(JsMirTranspiler* mt, JsReturnNode* ret) {
             jm_emit_loop_iterator_close_checked(mt, loop);
         }
     }
-    if (return_value_spill >= 0) jm_gen_spill_load(mt, val, return_value_spill);
 
-    // v15: In generator/async state machines, return [value, -1] to signal done.
-    // If the return is inside a try/finally, delay it so the finally body runs
+    // A generator or async body completes by returning its value (RA1). If
+    // the return is inside a try/finally, delay it so the finally body runs
     // and can override the completion.
     if (mt->in_generator) {
         if (jm_emit_delayed_return_completion(mt, val, JS_MIR_COMPLETION_RETURN)) return;
-        MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+        MIR_reg_t done_result = val;
         jm_emit_eval_local_pop_if_needed(mt);
         jm_emit_with_unwind_to(mt, 0);
         jm_emit_ret(mt, done_result);
@@ -3429,10 +3356,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
 
         // Save with-scope depth so we can restore it if an exception escapes a 'with' block
         MIR_reg_t saved_with_depth = jm_call_0(mt, "js_with_save_depth", MIR_T_I64);
-        int saved_with_depth_spill = -1;
-        if (mt->in_generator) {
-            saved_with_depth_spill = jm_gen_spill_save(mt, saved_with_depth);
-        }
 
         // === Try body ===
         if (try_node->block && try_node->block->node_type == AST_NODE_BLOCK) {
@@ -3485,9 +3408,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_emit_label_with_state(mt, catch_label, JS_ERROR_LANE_SET);
 
             // Restore with-scope depth (exception may have escaped a 'with' block)
-            if (saved_with_depth_spill >= 0) {
-                jm_gen_spill_load(mt, saved_with_depth, saved_with_depth_spill);
-            }
             jm_callr_void_1(mt, "js_with_restore_depth", saved_with_depth);
 
             JsCatchNode* catch_node = (JsCatchNode*)try_node->handler;
@@ -3585,9 +3505,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             jm_emit_label(mt, finally_label);
 
             // Restore with-scope depth (exception or early exit may have escaped a 'with' block)
-            if (saved_with_depth_spill >= 0) {
-                jm_gen_spill_load(mt, saved_with_depth, saved_with_depth_spill);
-            }
             jm_callr_void_1(mt, "js_with_restore_depth", saved_with_depth);
 
             // In generators, push a minimal try context so that yield inside
@@ -3641,12 +3558,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             } else {
                 saved_error_lane_flag = jm_emit_error_lane_test(mt);
             }
-            int saved_error_lane_flag_spill = -1;
-            int saved_error_lane_val_spill = -1;
-            if (jm_can_suspend(mt, try_node->finalizer)) {
-                saved_error_lane_flag_spill = jm_gen_spill_save(mt, saved_error_lane_flag);
-                saved_error_lane_val_spill = jm_gen_spill_save(mt, saved_error_lane_val);
-            }
             if (pushed_gen_finally_ctx && mt->try_ctx_depth > 0) {
                 JsTryContext* tc = jm_try_context_at(mt, mt->try_ctx_depth - 1);
                 tc->saved_error_lane_flag_reg = saved_error_lane_flag;
@@ -3666,11 +3577,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             // Eval completion: restore saved value (finally completed normally)
             if (saved_cptn) {
                 jm_emit_mov(mt, mt->eval_completion_reg, saved_cptn);
-            }
-
-            if (saved_error_lane_flag_spill >= 0) {
-                jm_gen_spill_load(mt, saved_error_lane_flag, saved_error_lane_flag_spill);
-                jm_gen_spill_load(mt, saved_error_lane_val, saved_error_lane_val_spill);
             }
 
             // Restore the saved ERROR Item if finally completed normally. A
@@ -3725,10 +3631,7 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
                     JS_MIR_COMPLETION_RETURN)) {
                 jm_emit_with_unwind_to(mt, 0);
                 if (mt->in_generator) {
-                    MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                        MIR_T_I64, MIR_new_reg_op(mt->ctx, return_val_reg),
-                        MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
-                    jm_emit_ret(mt, done_result);
+                    jm_emit_ret(mt, return_val_reg);
                 } else {
                     MIR_reg_t native_ret = jm_native_return_reg(mt,
                         jm_item_value(return_val_reg));
@@ -3781,7 +3684,6 @@ void jm_transpile_statement(JsMirTranspiler* mt, JsAstNode* stmt) {
             JsWithLowering* with_scope = jm_with_scope_at(mt, mt->with_depth);
             if (with_scope) {
                 with_scope->object_reg = scope_reg;
-                with_scope->spill_slot = -1;
                 with_scope->frame_slot = with_base_slot;
             }
             mt->with_depth++;

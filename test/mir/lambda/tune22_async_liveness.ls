@@ -1,5 +1,5 @@
-// D5.1.1v2/D8.1.1v9: only `before`, which is read after wait(), needs a
-// named async-frame slot. The synchronous tail's new bindings stay local.
+// RA1: `before`, read after wait(), stays in its register across the park;
+// nothing is spilled to an async frame.
 pn delayed() {
     sleep(0)^
     return 4

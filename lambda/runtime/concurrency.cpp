@@ -1,8 +1,8 @@
-#include "concurrency.h"
-#include "durable_activation.hpp"
-
-#include "../lambda.hpp"
 #include "../lambda-data.hpp"
+#include "../lambda.hpp"
+#include "concurrency.h"
+#include "activation.h"
+#include "lambda-root-frame.hpp"
 #include "lambda-error.h"
 #include "recovery_frame.h"
 #include "transpiler.hpp"
@@ -22,7 +22,6 @@
 extern __thread EvalContext* context;
 extern "C" Item lambda_concurrency_fn_call_procedure_into(Function* fn, List* args,
     uint64_t* result_home);
-extern "C" Function* lambda_concurrency_to_closure(fn_ptr ptr, int arity, void* env);
 extern "C" void heap_register_gc_root(uint64_t* slot);
 extern "C" void heap_unregister_gc_root(uint64_t* slot);
 extern "C" void heap_register_gc_root_range(uint64_t* base, int count);
@@ -79,23 +78,6 @@ typedef struct LambdaTaskObserver {
     struct LambdaTaskObserver* next;
 } LambdaTaskObserver;
 
-struct LambdaAsyncFrame : DurableActivation {
-    LambdaTask* task;
-    int fault_target_state;
-    Item fault_item;
-    LambdaTaskScope* fault_scope_base;
-    uint8_t* slot_is_item;
-    int slot_capacity;
-    LambdaAsyncFrame* next;
-    LambdaTaskScope* scope_base;
-};
-
-typedef struct LambdaTaskLaunchFrame {
-    Item* roots;
-    int root_count;
-    List args;
-} LambdaTaskLaunchFrame;
-
 struct LambdaTaskScope {
     LambdaTask* owner;
     LambdaTask* children;
@@ -116,21 +98,23 @@ struct LambdaTask {
     uint64_t id;
     LambdaTaskState state;
     LambdaParkKind park_kind;
-    LambdaTaskResumeFn resume;
-    LambdaTaskFrameDestroyFn destroy_frame;
-    void* frame;
-    Item* frame_roots;
-    int frame_root_count;
+    // The task runs on its own activation; the root task is the thread's base
+    // stack itself and has none (RA8).
+    Activation* activation;
+    bool is_root;
     Item handle;
+    // owned_item_slot_store keeps a wide scalar's payload in the word right
+    // after its slot, so each owned Item is immediately followed by its own.
     Item result;
+    uint64_t result_scalar;
+    // Delivered as the return value of the park being resumed; rooted while
+    // the task waits in the run queue.
+    Item resume_value;
+    uint64_t resume_value_scalar;
     // A task owns the static fault view published after one of its polls
     // lands. The TLS fallback is only a handoff buffer, so a later task fault
     // must not rewrite an already-completed task's observable result.
     LambdaFaultRecord fault;
-    uint64_t result_scalar;
-    Item resume_value;
-    uint64_t resume_value_scalar;
-    bool has_resume_value;
     bool cancel_requested;
     bool cleanup_masked;
     bool started;
@@ -142,8 +126,6 @@ struct LambdaTask {
     LambdaWaitGroup* wait_group;
     LambdaTaskTimer* timer;
     LambdaFileRead* file_read;
-    LambdaAsyncFrame* async_frames;
-    LambdaAsyncFrame* async_cursor;
     LambdaTaskScope* scope_top;
     LambdaTaskScope* owner_scope;
     LambdaTask* next_scope_child;
@@ -156,10 +138,17 @@ struct LambdaScheduler {
     LambdaTask* all_tasks;
     Queue run_queue;
     LambdaTask* current;
+    // Code running on the base stack belongs to this task (created on demand),
+    // so task builtins work at every entry point without wrapping it.
+    LambdaTask* root;
     uint64_t next_task_id;
     uint64_t event_sequence;
     int mailbox_capacity;
     int live_count;
+    // weakly registered JS async activations (JSCU25), and this scheduler's
+    // serial, which their tokens name
+    int weak_count;
+    uint64_t serial;
     bool draining;
     uv_async_t wake;
     bool wake_initialized;
@@ -169,6 +158,7 @@ struct LambdaScheduler {
 
 static char task_handle_brand;
 static LambdaScheduler* attached_scheduler;
+static uint64_t scheduler_serial_next = 1;
 static LambdaPromiseIsFn promise_is;
 static LambdaPromiseWaitFn promise_wait;
 static LambdaHandleToPromiseFn handle_to_promise;
@@ -231,77 +221,6 @@ static void task_handle_trace(void* data, gc_heap_t* gc) {
     (void)gc;
 }
 
-static void async_frame_reset_from(LambdaAsyncFrame* frame) {
-    while (frame) {
-        durable_activation_reset(frame);
-        frame->fault_target_state = 0;
-        owned_item_slot_store(&frame->fault_item, 1, 0, ItemNull);
-        frame->fault_scope_base = NULL;
-        for (int i = 0; i < frame->slot_count; i++) {
-            owned_item_slot_store(frame->slots, frame->slot_capacity, i, ItemNull);
-            if (frame->slot_is_item) frame->slot_is_item[i] = 1;
-        }
-        frame = frame->next;
-    }
-}
-
-static void async_frame_release(LambdaAsyncFrame* frame) {
-    if (!frame) return;
-    if (frame->slots && frame->slot_capacity > 0 && scheduler_has_heap()) {
-        heap_unregister_gc_root_range((uint64_t*)frame->slots);
-    }
-    if (scheduler_has_heap()) heap_unregister_gc_root(&frame->fault_item.item);
-    mem_free(frame->slots);
-    mem_free(frame->slot_is_item);
-    mem_free(frame);
-}
-
-static void async_frames_destroy(LambdaTask* task) {
-    LambdaAsyncFrame* frame = task ? task->async_frames : NULL;
-    while (frame) {
-        LambdaAsyncFrame* next = frame->next;
-        async_frame_release(frame);
-        frame = next;
-    }
-    if (task) {
-        task->async_frames = NULL;
-        task->async_cursor = NULL;
-    }
-}
-
-static LambdaAsyncFrame* async_fault_target(LambdaTask* task) {
-    LambdaAsyncFrame* target = NULL;
-    for (LambdaAsyncFrame* frame = task ? task->async_frames : NULL;
-            frame; frame = frame->next) {
-        if (frame->fault_target_state > 0) target = frame;
-    }
-    return target;
-}
-
-static void async_discard_frames_after(LambdaTask* task,
-        LambdaAsyncFrame* target) {
-    if (!task || !target) return;
-    LambdaAsyncFrame* discarded = target->next;
-    target->next = NULL;
-    while (discarded) {
-        LambdaAsyncFrame* next = discarded->next;
-        async_frame_release(discarded);
-        discarded = next;
-    }
-}
-
-static bool async_route_fault(LambdaTask* task, Item fault) {
-    LambdaAsyncFrame* target = async_fault_target(task);
-    if (!target) return false;
-    // A native fault can abandon nested generated activations. Retain only the
-    // frame whose handler state will be re-entered; every later poll then uses
-    // the same explicit completion route as an ordinary error.
-    async_discard_frames_after(task, target);
-    owned_item_slot_store(&target->fault_item, 1, 0, fault);
-    target->state = target->fault_target_state;
-    return true;
-}
-
 static void task_scopes_destroy(LambdaTask* task) {
     LambdaTaskScope* scope = task ? task->scope_top : NULL;
     while (scope) {
@@ -350,6 +269,12 @@ static bool task_read_milliseconds(Item item, int64_t* out) {
 static void scheduler_enqueue(LambdaTask* task) {
     if (!task || task->state == LAMBDA_TASK_DONE || task->queued) return;
     task->state = LAMBDA_TASK_RUNNABLE;
+    if (task->is_root) {
+        // The root continues on the base stack once its loop turn observes
+        // the state change; wake that turn instead of queueing a poll.
+        if (task->scheduler->wake_initialized) uv_async_send(&task->scheduler->wake);
+        return;
+    }
     task->queued = true;
     queue_push(&task->scheduler->run_queue, &task->run_link);
     if (task->scheduler->wake_initialized) {
@@ -420,7 +345,6 @@ static void task_resume_with(LambdaTask* task, Item value) {
     }
     task_timer_close(task);
     owned_item_slot_store(&task->resume_value, 1, 0, value);
-    task->has_resume_value = true;
     task->park_kind = LAMBDA_PARK_NONE;
     scheduler_enqueue(task);
 }
@@ -646,6 +570,7 @@ extern "C" LambdaScheduler* lambda_scheduler_create(int mailbox_capacity) {
     scheduler->mailbox_capacity = mailbox_capacity > 0
         ? mailbox_capacity : LAMBDA_MAILBOX_DEFAULT_CAPACITY;
     scheduler->next_task_id = 1;
+    scheduler->serial = scheduler_serial_next++;
     if (uv_async_init(lambda_uv_loop(), &scheduler->wake, [](uv_async_t* handle) {
             LambdaScheduler* ready = handle ? (LambdaScheduler*)handle->data : NULL;
             if (ready) lambda_scheduler_run_ready(ready);
@@ -703,16 +628,14 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
         // Once teardown starts, retained Promise reactions must become no-ops
         // rather than dereferencing the task after this record is released.
         task_handle_invalidate(task);
-        if (task->frame_roots && task->frame_root_count > 0 && scheduler_has_heap()) {
-            heap_unregister_gc_root_range((uint64_t*)task->frame_roots);
-        }
         if (scheduler_has_heap()) {
             heap_unregister_gc_root(&task->handle.item);
             heap_unregister_gc_root(&task->result.item);
             heap_unregister_gc_root(&task->resume_value.item);
             heap_unregister_gc_root_range((uint64_t*)task->mailbox.items);
         }
-        async_frames_destroy(task);
+        activation_destroy(task->activation);
+        task->activation = NULL;
         task_scopes_destroy(task);
         LambdaTaskObserver* observer = task->observers;
         while (observer) {
@@ -721,7 +644,6 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
             mem_free(observer);
             observer = next_observer;
         }
-        if (task->destroy_frame && task->frame) task->destroy_frame(task->frame);
         file_read_release(task->file_read);
         mem_free(task->mailbox.items);
         mem_free(task);
@@ -735,12 +657,13 @@ extern "C" void lambda_scheduler_destroy(LambdaScheduler* scheduler) {
         });
         while (!scheduler->wake_closed) uv_run(lambda_uv_loop(), UV_RUN_NOWAIT);
     }
+    // Every task's activation is gone; keep no pooled stacks past the scheduler.
+    activation_release_pool();
     mem_free(scheduler);
     log_debug("concurrency scheduler: destroyed");
 }
 
-extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
-    LambdaTaskResumeFn resume, void* frame, LambdaTaskFrameDestroyFn destroy_frame) {
+static LambdaTask* task_record_create(LambdaScheduler* scheduler, bool is_root) {
     if (!scheduler || !scheduler_has_heap()) return NULL;
     LambdaTask* task = (LambdaTask*)mem_calloc(1, sizeof(LambdaTask), MEM_CAT_EVAL);
     if (!task) return NULL;
@@ -764,9 +687,8 @@ extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
     task->scheduler = scheduler;
     task->id = scheduler->next_task_id++;
     task->state = LAMBDA_TASK_RUNNABLE;
-    task->resume = resume;
-    task->frame = frame;
-    task->destroy_frame = destroy_frame;
+    task->is_root = is_root;
+    task->started = is_root;
     task->handle = (Item){.vmap = handle};
     task->result = ItemNull;
     lambda_fault_record_init(&task->fault);
@@ -774,90 +696,76 @@ extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
     task->mailbox.capacity = scheduler->mailbox_capacity;
     task->next_all = scheduler->all_tasks;
     scheduler->all_tasks = task;
-    scheduler->live_count++;
+    // The root is the base stack: it never completes, so it never holds a
+    // drain open.
+    if (!is_root) scheduler->live_count++;
 
     heap_register_gc_root(&task->handle.item);
     heap_register_gc_root(&task->result.item);
     heap_register_gc_root(&task->resume_value.item);
     heap_register_gc_root_range((uint64_t*)task->mailbox.items, task->mailbox.capacity);
-    scheduler_enqueue(task);
-    log_debug("concurrency task: created id=%llu", (unsigned long long)task->id);
+    log_debug("concurrency task: created id=%llu%s", (unsigned long long)task->id,
+        is_root ? " (root)" : "");
     return task;
 }
 
-extern "C" void lambda_task_set_frame_roots(LambdaTask* task, Item* roots, int count) {
-    if (!task || !scheduler_has_heap()) return;
-    if (task->frame_roots && task->frame_root_count > 0) {
-        heap_unregister_gc_root_range((uint64_t*)task->frame_roots);
+extern "C" LambdaTask* lambda_task_create(LambdaScheduler* scheduler,
+    ActivationEntry entry, Item arg) {
+    if (!entry) return NULL;
+    // The handle allocation below may collect; the argument has no other
+    // owner until the activation's own segment holds it.
+    RootFrame roots(1);
+    Rooted<Item> arg_root(roots, arg);
+    LambdaTask* task = task_record_create(scheduler, false);
+    if (!task) return NULL;
+    task->activation = activation_create(entry, arg_root.get(), true, task);
+    if (!task->activation) {
+        lambda_task_complete(task, task_error(ERR_OUT_OF_MEMORY,
+            "task activation allocation failed"));
+        return task;
     }
-    task->frame_roots = roots;
-    task->frame_root_count = count > 0 ? count : 0;
-    if (task->frame_roots && task->frame_root_count > 0) {
-        heap_register_gc_root_range((uint64_t*)task->frame_roots, task->frame_root_count);
-    }
+    scheduler_enqueue(task);
+    return task;
 }
 
 extern "C" int lambda_scheduler_run_one(LambdaScheduler* scheduler) {
     LambdaTask* task = scheduler_dequeue(scheduler);
     if (!task) return 0;
-    scheduler->current = task;
-    task->async_cursor = task->async_frames;
     if (task->cancel_requested && !task->cleanup_masked && !task->started) {
         // A task cancelled before its first poll has no lexical scopes yet.
-        // Once started, cancellation must re-enter its state machine so `^`
-        // propagation executes structured cancel-then-join cleanup.
+        // Once started, cancellation is delivered at its park point so `^`
+        // propagation runs structured cancel-then-join cleanup.
         lambda_task_complete(task, task_error(ERR_CANCELLED, "task cancelled"));
-    } else if (!task->resume) {
-        lambda_task_complete(task, ItemNull);
-    } else {
-        task->started = true;
-        LambdaRecoveryFrame* recovery_frame = lambda_recovery_frame_begin_for(
-            (Context*)context, LAMBDA_RECOVERY_CAP_EXECUTION_BOUNDARY);
-        if (!recovery_frame) {
-            log_error("concurrency recovery: failed to allocate task poll frame");
-            lambda_task_complete(task, lambda_recovery_publish_fault_item((Context*)context,
-                LAMBDA_FAULT_OUT_OF_MEMORY, ERR_OK));
-        } else if (LAMBDA_RECOVERY_FRAME_SETJMP(recovery_frame)) {
-            Item recovered = ItemError;
-            bool route_to_handler = false;
-            if (!lambda_recovery_frame_restore_landing(recovery_frame)) {
-                log_error("concurrency recovery: task poll landing invariant failed");
-                recovered = lambda_recovery_publish_fault_item((Context*)context,
-                    LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK);
-            } else {
-                // Publish first while the frame owns its embedded record, then
-                // retain a task-local static copy before releasing that frame.
-                (void)lambda_recovery_frame_fault_item((Context*)context, recovery_frame);
-                task->fault = recovery_frame->fault;
-                recovered = err2it(&task->fault.error);
-                route_to_handler = async_route_fault(task, recovered);
-            }
-            lambda_recovery_frame_end(recovery_frame);
-            if (route_to_handler) {
-                // The fault has become a rooted Item in the durable async
-                // frame. Re-enter the task state machine; no native landing
-                // activation is reused after this point.
-                scheduler_enqueue(task);
-            } else {
-                lambda_task_complete(task, recovered);
-            }
-        } else if (!lambda_recovery_frame_arm(recovery_frame)) {
-            log_error("concurrency recovery: failed to arm task poll frame");
-            lambda_recovery_frame_end(recovery_frame);
-            lambda_task_complete(task, lambda_recovery_publish_fault_item((Context*)context,
-                LAMBDA_FAULT_RUNTIME_BOUNDARY_DEFECT, ERR_OK));
-        } else {
-            Item result = ItemNull;
-            LambdaTaskPoll poll = task->resume(task, task->frame, &result);
-            lambda_recovery_frame_end(recovery_frame);
-            if (task->state != LAMBDA_TASK_DONE) {
-                if (poll == LAMBDA_TASK_POLL_DONE) lambda_task_complete(task, result);
-                else if (poll == LAMBDA_TASK_POLL_READY) scheduler_enqueue(task);
-                else task->state = LAMBDA_TASK_PARKED;
-            }
-        }
+        return 1;
     }
-    scheduler->current = NULL;
+    if (!task->activation) {
+        lambda_task_complete(task, ItemNull);
+        return 1;
+    }
+    task->started = true;
+    LambdaTask* previous = scheduler->current;
+    scheduler->current = task;
+    Item input = task->resume_value;
+    task->resume_value = ItemNull;
+    // Faults are contained by the activation's own execution boundary; the
+    // poll returns here whether the task parked, finished or faulted.
+    ActivationStatus status = activation_resume(task->activation, input);
+    scheduler->current = previous;
+    if (status == ACTIVATION_DONE) {
+        const LambdaFaultRecord* fault = activation_fault(task->activation);
+        Item result;
+        if (fault) {
+            // The task owns the static fault view it publishes; the
+            // activation's copy is released with it.
+            task->fault = *fault;
+            result = err2it(&task->fault.error);
+        } else {
+            result = activation_value(task->activation);
+        }
+        activation_destroy(task->activation);
+        task->activation = NULL;
+        lambda_task_complete(task, result);
+    }
     return 1;
 }
 
@@ -896,7 +804,37 @@ static void scheduler_drain_watchdog_cb(uv_timer_t* timer) {
     state->fired = true;
 }
 
-extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
+static bool scheduler_run_satisfied(const LambdaScheduler* scheduler,
+                                    const LambdaTask* awaited) {
+    return awaited ? awaited->state != LAMBDA_TASK_PARKED
+        : scheduler->live_count == 0 && scheduler->weak_count == 0;
+}
+
+// Whether anything other than `watchdog` keeps the loop alive.
+static bool scheduler_loop_busy(uv_loop_t* loop, uv_timer_t* watchdog) {
+    if (!watchdog) return uv_loop_alive(loop) != 0;
+    uv_unref((uv_handle_t*)watchdog);
+    bool busy = uv_loop_alive(loop) != 0;
+    uv_ref((uv_handle_t*)watchdog);
+    return busy;
+}
+
+// Only weak registrations remain and nothing can run: give queued promise
+// jobs their checkpoint, then collect, so a carrier nobody can reach any more
+// leaves. True if either made progress.
+static bool scheduler_settle_weak(LambdaScheduler* scheduler) {
+    if (scheduler->live_count != 0 || scheduler->weak_count == 0) return false;
+    int before = scheduler->weak_count;
+    lambda_uv_checkpoint();
+    if (scheduler->weak_count != before || scheduler->run_queue.first) return true;
+    if (scheduler_has_heap()) heap_gc_collect();
+    return scheduler->weak_count != before || scheduler->run_queue.first;
+}
+
+// Drive the loop on the base stack until `awaited` is woken, or, when it is
+// NULL, until no task is live. Tasks run on their own activations, so any of
+// them can resume in any order; nothing is buried beneath this loop.
+static int scheduler_run_until(LambdaScheduler* scheduler, LambdaTask* awaited) {
     if (!scheduler) return 0;
     uv_loop_t* loop = lambda_uv_loop();
     LambdaDrainWatchdogState watchdog_state = {false, false};
@@ -904,15 +842,22 @@ extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
     bool watchdog_initialized = false;
     bool watchdog_started = false;
     int ran = 0;
-    while (scheduler->live_count > 0 && !watchdog_state.fired) {
+    while (!scheduler_run_satisfied(scheduler, awaited) && !watchdog_state.fired) {
         int step = lambda_scheduler_run_ready(scheduler);
         ran += step;
-        if (scheduler->live_count == 0) break;
+        if (scheduler_run_satisfied(scheduler, awaited)) break;
         // run_ready intentionally stops at its initial FIFO boundary. A task
         // may enqueue a child behind that boundary; poll only after the next
         // macrotask batch has had a chance to start its I/O/timer wait.
         if (scheduler->run_queue.first) continue;
         if (!loop) break;
+        // Only weak registrations remain: wait for the loop only while
+        // something besides this drain's own watchdog keeps it alive.
+        if (!awaited && scheduler->live_count == 0 &&
+                !scheduler_loop_busy(loop, watchdog_started ? &watchdog : NULL)) {
+            if (scheduler_settle_weak(scheduler)) continue;
+            break;
+        }
         if (!watchdog_initialized && uv_timer_init(loop, &watchdog) == 0) {
             watchdog.data = &watchdog_state;
             watchdog_initialized = true;
@@ -929,6 +874,7 @@ extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
             }
         }
         uv_run(loop, UV_RUN_ONCE);
+        if (scheduler_run_satisfied(scheduler, awaited)) break;
         if (step == 0 && !uv_loop_alive(loop) && !scheduler->run_queue.first) break;
     }
     if (watchdog_initialized) {
@@ -938,16 +884,40 @@ extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
         }
         uv_run(loop, UV_RUN_NOWAIT);
     }
-    if (scheduler->live_count > 0) {
-        log_error("concurrency scheduler: drain stopped with %d live task(s)%s",
-            scheduler->live_count, watchdog_state.fired ? " after watchdog timeout" : " without runnable work");
+    // Weak registrations that nothing can settle never fail a drain.
+    if (!awaited && scheduler->live_count == 0 && scheduler->weak_count > 0) {
+        log_debug("concurrency scheduler: drain left %d unsettled JS activation(s)",
+            scheduler->weak_count);
+        return ran;
+    }
+    if (!scheduler_run_satisfied(scheduler, awaited)) {
+        log_error("concurrency scheduler: %s stopped with %d live task(s)%s",
+            awaited ? "root wait" : "drain", scheduler->live_count,
+            watchdog_state.fired ? " after watchdog timeout" : " without runnable work");
         return -1;
     }
     return ran;
 }
 
+extern "C" int lambda_scheduler_drain(LambdaScheduler* scheduler) {
+    return scheduler_run_until(scheduler, NULL);
+}
+
 extern "C" int lambda_scheduler_live_count(const LambdaScheduler* scheduler) {
-    return scheduler ? scheduler->live_count : 0;
+    return scheduler ? scheduler->live_count + scheduler->weak_count : 0;
+}
+
+extern "C" uint64_t lambda_scheduler_weak_enter(void) {
+    if (!attached_scheduler) return 0;
+    attached_scheduler->weak_count++;
+    return attached_scheduler->serial;
+}
+
+extern "C" void lambda_scheduler_weak_leave(uint64_t token) {
+    LambdaScheduler* scheduler = attached_scheduler;
+    if (!token || !scheduler || scheduler->serial != token ||
+            scheduler->weak_count <= 0) return;
+    scheduler->weak_count--;
 }
 
 extern "C" LambdaTask* lambda_scheduler_current(LambdaScheduler* scheduler) {
@@ -1112,305 +1082,100 @@ extern "C" bool lambda_task_cancel(LambdaTask* task) {
     return true;
 }
 
-extern "C" bool lambda_task_take_resume_value(LambdaTask* task, Item* out) {
-    if (!task || !task->has_resume_value) return false;
-    if (out) *out = task->resume_value;
-    task->resume_value = ItemNull;
-    task->has_resume_value = false;
-    return true;
+static LambdaTask* scheduler_root_task(LambdaScheduler* scheduler) {
+    if (!scheduler->root) scheduler->root = task_record_create(scheduler, true);
+    return scheduler->root;
 }
 
-static bool async_frame_reserve(LambdaAsyncFrame* frame, int slot_capacity) {
-    if (!frame || slot_capacity <= frame->slot_capacity) return frame != NULL;
-    Item* resized = (Item*)mem_calloc((size_t)slot_capacity * 2,
-        sizeof(Item), MEM_CAT_EVAL);
-    uint8_t* resized_kinds = (uint8_t*)mem_calloc((size_t)slot_capacity,
-        sizeof(uint8_t), MEM_CAT_EVAL);
-    if (!resized || !resized_kinds) {
-        mem_free(resized);
-        mem_free(resized_kinds);
-        return false;
+static void task_wait_abandon(LambdaTask* task) {
+    if (task->wait_group) {
+        LambdaWaitGroup* group = task->wait_group;
+        task->wait_group = NULL;
+        wait_group_unlink(group);
+        wait_group_free(group);
     }
-    for (int i = 0; i < frame->slot_count; i++) {
-        if (frame->slot_is_item && frame->slot_is_item[i]) {
-            owned_item_slot_store(resized, slot_capacity, i, frame->slots[i]);
-            resized_kinds[i] = 1;
-        } else {
-            // Raw MIR spills occupy the unscanned tail. Preserve them without
-            // interpreting arbitrary bits as Items during frame growth.
-            resized[i] = ItemNull;
-            resized[slot_capacity + i].item =
-                frame->slots[frame->slot_capacity + i].item;
+    task_timer_close(task);
+    task->park_kind = LAMBDA_PARK_NONE;
+    task->state = LAMBDA_TASK_RUNNABLE;
+}
+
+// Park the running task and return the value it is resumed with. The caller
+// has already registered whatever wakes it. A task on its own activation
+// switches away; the root task drives the loop on the base stack instead.
+extern "C" Item lambda_task_suspend(LambdaTask* task) {
+    if (!task || task->state == LAMBDA_TASK_DONE) {
+        return task_error(ERR_INVALID_STATE, "suspension requires a running task");
+    }
+    lambda_task_park(task);
+    if (task->is_root) {
+        if (scheduler_run_until(task->scheduler, task) < 0) {
+            task_wait_abandon(task);
+            return task_error(ERR_INVALID_STATE,
+                "task wait cannot complete: nothing else can run");
         }
+        Item resumed = task->resume_value;
+        task->resume_value = ItemNull;
+        return resumed;
     }
-    if (frame->slots && scheduler_has_heap()) {
-        heap_unregister_gc_root_range((uint64_t*)frame->slots);
+    if (activation_current() != task->activation) {
+        // A nested activation (a generator body) cannot park its task.
+        task_wait_abandon(task);
+        return task_error(ERR_INVALID_STATE,
+            "a task can only park on its own activation");
     }
-    mem_free(frame->slots);
-    mem_free(frame->slot_is_item);
-    frame->slots = resized;
-    frame->slot_is_item = resized_kinds;
-    frame->slot_capacity = slot_capacity;
-    if (scheduler_has_heap()) {
-        heap_register_gc_root_range((uint64_t*)frame->slots, frame->slot_capacity);
-    }
-    return true;
-}
-
-extern "C" LambdaAsyncFrame* lambda_async_frame_enter_current(int slot_capacity) {
-    LambdaTask* task = context && context->scheduler
-        ? lambda_scheduler_current(context->scheduler) : NULL;
-    if (!task) return NULL;
-    LambdaAsyncFrame* frame = task->async_cursor;
-    bool created = false;
-    if (!frame) {
-        frame = (LambdaAsyncFrame*)mem_calloc(1, sizeof(LambdaAsyncFrame), MEM_CAT_EVAL);
-        if (!frame) return NULL;
-        created = true;
-        durable_activation_init(frame, LMD_TYPE_RAW_POINTER,
-            DURABLE_ACTIVATION_LAMBDA_ASYNC);
-        frame->task = task;
-        frame->fault_item = ItemNull;
-        frame->scope_base = task->scope_top;
-        if (scheduler_has_heap()) heap_register_gc_root(&frame->fault_item.item);
-        if (!task->async_frames) {
-            task->async_frames = frame;
-        } else {
-            LambdaAsyncFrame* tail = task->async_frames;
-            while (tail->next) tail = tail->next;
-            tail->next = frame;
-        }
-    }
-    if (slot_capacity > 0 && !async_frame_reserve(frame, slot_capacity)) {
-        if (created) {
-            // A failed first reservation must undo the linked/rooted frame;
-            // otherwise a later task poll can route a fault into an activation
-            // whose spill storage was never established.
-            if (task->async_frames == frame) task->async_frames = NULL;
-            else {
-                LambdaAsyncFrame* prior = task->async_frames;
-                while (prior && prior->next != frame) prior = prior->next;
-                if (prior) prior->next = frame->next;
-            }
-            async_frame_release(frame);
-        }
-        return NULL;
-    }
-    task->async_cursor = frame->next;
-    return frame;
-}
-
-extern "C" int lambda_async_frame_state(LambdaAsyncFrame* frame) {
-    return frame ? frame->state : 0;
-}
-
-extern "C" void lambda_async_frame_set_state(LambdaAsyncFrame* frame, int state) {
-    if (frame) frame->state = state;
-}
-
-extern "C" Item lambda_async_frame_get(LambdaAsyncFrame* frame, int slot) {
-    if (!frame || slot < 0 || slot >= frame->slot_count) return ItemNull;
-    return owned_item_slot_read(frame->slots, frame->slot_capacity, slot, false);
-}
-
-extern "C" void lambda_async_frame_set(LambdaAsyncFrame* frame, int slot, Item value) {
-    if (!frame || slot < 0) return;
-    if (slot >= frame->slot_capacity) {
-        int next_capacity = frame->slot_capacity > 0 ? frame->slot_capacity : 8;
-        while (next_capacity <= slot) next_capacity *= 2;
-        // This fallback covers hand-written host use; generated functions reserve
-        // their exact compile-time slot count in the prologue.
-        if (!async_frame_reserve(frame, next_capacity)) return;
-    }
-    owned_item_slot_store(frame->slots, frame->slot_capacity, slot, value);
-    frame->slot_is_item[slot] = 1;
-    if (slot >= frame->slot_count) frame->slot_count = slot + 1;
-}
-
-extern "C" uint64_t lambda_async_frame_get_raw(LambdaAsyncFrame* frame, int slot) {
-    if (!frame || slot < 0 || slot >= frame->slot_count) return 0;
-    return frame->slots[frame->slot_capacity + slot].item;
-}
-
-extern "C" void lambda_async_frame_set_raw(LambdaAsyncFrame* frame, int slot,
-                                             uint64_t value) {
-    if (!frame || slot < 0) return;
-    if (slot >= frame->slot_capacity) {
-        int next_capacity = frame->slot_capacity > 0 ? frame->slot_capacity : 8;
-        while (next_capacity <= slot) next_capacity *= 2;
-        if (!async_frame_reserve(frame, next_capacity)) return;
-    }
-    // MIR I64 temporaries are arbitrary bit patterns. Keep them in the raw
-    // tail so the precise root range never interprets payload bits as Items.
-    frame->slots[slot] = ItemNull;
-    frame->slots[frame->slot_capacity + slot].item = value;
-    frame->slot_is_item[slot] = 0;
-    if (slot >= frame->slot_count) frame->slot_count = slot + 1;
-}
-
-static bool async_word_is_number_home(uint64_t value) {
-    if (!context || !context->side_number_base || !context->side_number_top ||
-            (value & ITEM_DBL_MASK)) return false;
-    uint8_t tag = (uint8_t)(value >> 56);
-    uintptr_t payload = value & ~ITEM_HIGH_BYTE_MASK;
-    if (tag == LMD_TYPE_FLOAT) {
-        if (payload <= 1) return false;
-    } else if (tag != LMD_TYPE_INT64 && tag != LMD_TYPE_UINT64) {
-        return false;
-    }
-    uintptr_t base = (uintptr_t)context->side_number_base;
-    uintptr_t top = (uintptr_t)context->side_number_top;
-    return payload >= base && payload < top &&
-        (payload - base) % sizeof(uint64_t) == 0;
-}
-
-static void* async_word_gc_pointer(uint64_t value) {
-    if (!value || (value & ITEM_DBL_MASK)) return NULL;
-    uint8_t tag = (uint8_t)(value >> 56);
-    if (tag == 0) return (void*)(uintptr_t)value;
-    if ((tag >= LMD_TYPE_INT64 && tag <= LMD_TYPE_BINARY) ||
-            tag == LMD_TYPE_ERROR) {
-        return (void*)(uintptr_t)(value & ~ITEM_HIGH_BYTE_MASK);
-    }
-    return NULL;
-}
-
-extern "C" void lambda_async_frame_set_word(LambdaAsyncFrame* frame, int slot,
-                                                uint64_t value) {
-    // Generated prologues reserve the complete spill layout before any value is
-    // saved. Keeping this setter allocation-free lets managed Item words remain
-    // borrowed safely across the store and preserves its audited NO_GC contract.
-    if (!frame || slot < 0 || slot >= frame->slot_capacity) return;
-    void* gc_ptr = async_word_gc_pointer(value);
-    bool managed_item = gc_ptr && context && context->heap && context->heap->gc &&
-        gc_is_managed(context->heap->gc, gc_ptr);
-    if (async_word_is_number_home(value) || managed_item) {
-        // Suspension ends the native number/root frame. Rehome scalar Items and
-        // retain managed Items; arbitrary words stay outside the scanned half.
-        owned_item_slot_store(frame->slots, frame->slot_capacity, slot,
-            (Item){.item = value});
-        frame->slot_is_item[slot] = 1;
-    } else {
-        frame->slots[slot] = ItemNull;
-        frame->slots[frame->slot_capacity + slot].item = value;
-        frame->slot_is_item[slot] = 0;
-    }
-    if (slot >= frame->slot_count) frame->slot_count = slot + 1;
-}
-
-extern "C" uint64_t lambda_async_frame_get_word(LambdaAsyncFrame* frame, int slot) {
-    if (!frame || slot < 0 || slot >= frame->slot_count) return 0;
-    return frame->slot_is_item && frame->slot_is_item[slot]
-        ? frame->slots[slot].item
-        : frame->slots[frame->slot_capacity + slot].item;
-}
-
-extern "C" void lambda_async_frame_set_fault_target(
-        LambdaAsyncFrame* frame, int state) {
-    if (!frame) return;
-    frame->fault_target_state = state > 0 ? state : 0;
-    frame->fault_scope_base = lambda_task_scope_current();
-}
-
-extern "C" void lambda_async_frame_clear_fault_target(LambdaAsyncFrame* frame) {
-    if (!frame) return;
-    frame->fault_target_state = 0;
-    frame->fault_scope_base = NULL;
-    owned_item_slot_store(&frame->fault_item, 1, 0, ItemNull);
-}
-
-extern "C" Item lambda_async_frame_take_fault(LambdaAsyncFrame* frame) {
-    if (!frame || frame->fault_target_state <= 0) return ItemError;
-    Item fault = frame->fault_item;
-    frame->fault_target_state = 0;
-    frame->fault_scope_base = NULL;
-    owned_item_slot_store(&frame->fault_item, 1, 0, ItemNull);
-    return fault;
-}
-
-extern "C" LambdaTaskScope* lambda_async_frame_fault_scope_base(
-        LambdaAsyncFrame* frame) {
-    return frame ? frame->fault_scope_base : NULL;
-}
-
-extern "C" void lambda_async_frame_complete(LambdaAsyncFrame* frame) {
-    if (!frame) return;
-    // A completed call invalidates its own saved state and every deeper call
-    // frame, so a later call at the same depth cannot resume stale code.
-    async_frame_reset_from(frame);
-}
-
-extern "C" LambdaTaskScope* lambda_async_frame_scope_base(LambdaAsyncFrame* frame) {
-    return frame ? frame->scope_base : NULL;
-}
-
-extern "C" int lambda_task_has_current(void) {
-    return context && context->scheduler &&
-        lambda_scheduler_current(context->scheduler) ? 1 : 0;
-}
-
-static LambdaTaskPoll task_launch_resume(LambdaTask* task, void* data, Item* out) {
-    LambdaTaskLaunchFrame* frame = (LambdaTaskLaunchFrame*)data;
-    Function* function = frame && frame->root_count > 0 &&
-        get_type_id(frame->roots[0]) == LMD_TYPE_FUNC
-        ? frame->roots[0].function : NULL;
-    // A task publishes its result after this callback returns. Its companion
-    // word is therefore the stable home for a MIR public wrapper's wide scalar.
-    Item result = lambda_concurrency_fn_call_procedure_into(function,
-        frame ? &frame->args : NULL, task ? &task->result_scalar : NULL);
-    if (result.item == ITEM_TASK_SUSPENDED) return LAMBDA_TASK_POLL_PARKED;
-    if (out) *out = result;
-    return LAMBDA_TASK_POLL_DONE;
-}
-
-static void task_launch_destroy(void* data) {
-    LambdaTaskLaunchFrame* frame = (LambdaTaskLaunchFrame*)data;
-    if (!frame) return;
-    mem_free(frame->roots);
-    mem_free(frame);
+    // The scheduler delivers task->resume_value as this call's result.
+    return activation_suspend(ItemNull);
 }
 
 extern "C" Item lambda_task_start_function(Item function, List* args) {
     return lambda_task_start_function_scoped(function, args, false);
 }
 
+// Launch data travels as one Item, [function, arg0, ...], rooted in the
+// activation's own segment for the entry's lifetime.
+static Item task_entry(Activation* self, Item launch) {
+    LambdaTask* task = (LambdaTask*)activation_user(self);
+    Array* items = get_type_id(launch) == LMD_TYPE_ARRAY ? launch.array : NULL;
+    Function* function = items && items->length > 0 &&
+        get_type_id(items->items[0]) == LMD_TYPE_FUNC ? items->items[0].function : NULL;
+    int arg_count = items ? (int)items->length - 1 : 0;
+    // Copy the arguments into this stack's roots: the array's buffer may move
+    // during a collection while the call is still consuming it.
+    RootSpan span((size_t)(arg_count > 0 ? arg_count : 0));
+    Item* slots = span.items();
+    for (int i = 0; i < arg_count; i++) slots[i] = items->items[i + 1];
+    List args = {};
+    args.type_id = LMD_TYPE_ARRAY;
+    args.items = slots;
+    args.length = arg_count;
+    args.capacity = arg_count;
+    // A task publishes its result after this entry returns. Its companion
+    // word is therefore the stable home for a MIR public wrapper's wide scalar.
+    return lambda_concurrency_fn_call_procedure_into(function, &args,
+        task ? &task->result_scalar : NULL);
+}
+
 extern "C" Item lambda_task_start_function_scoped(Item function, List* args, bool escapes) {
     if (!context || !context->scheduler || get_type_id(function) != LMD_TYPE_FUNC) {
         return task_error(ERR_INVALID_OPERATION, "start requires a procedure value and scheduler");
     }
-    LambdaTaskLaunchFrame* frame = (LambdaTaskLaunchFrame*)mem_calloc(
-        1, sizeof(LambdaTaskLaunchFrame), MEM_CAT_EVAL);
-    if (!frame) return task_error(ERR_OUT_OF_MEMORY, "task launch allocation failed");
-    int arg_count = args ? (int)args->length : 0;
-    frame->root_count = arg_count + 1;
-    frame->roots = (Item*)mem_calloc(
-        (size_t)frame->root_count, sizeof(Item), MEM_CAT_EVAL);
-    if (!frame->roots) {
-        mem_free(frame);
-        return task_error(ERR_OUT_OF_MEMORY, "task launch roots allocation failed");
+    // A caller may hand over an unrooted argument list (the JS membrane), so
+    // root it before the launch array allocation can collect it.
+    RootFrame roots(3);
+    Rooted<Item> function_root(roots, function);
+    Rooted<Item> args_root(roots, args ? (Item){.array = (Array*)args} : ItemNull);
+    Rooted<Item> launch_root(roots, ItemNull);
+    Array* launch = array();
+    if (!launch) return task_error(ERR_OUT_OF_MEMORY, "task launch allocation failed");
+    launch_root.set((Item){.array = launch});
+    array_push_verbatim(launch, function_root.get());
+    for (int i = 0; args && i < (int)args_root.get().array->length; i++) {
+        // re-read through the root: a push may grow (and move) the buffers
+        array_push_verbatim(launch_root.get().array, args_root.get().array->items[i]);
     }
-    frame->roots[0] = function;
-    for (int i = 0; i < arg_count; i++) frame->roots[i + 1] = args->items[i];
-    // Task creation allocates the GC-managed handle. Register the launch values
-    // before that allocation so exact-root GC cannot reclaim the function or
-    // arguments in the gap before the new task assumes ownership of this range.
-    if (scheduler_has_heap()) {
-        heap_register_gc_root_range((uint64_t*)frame->roots, frame->root_count);
-    }
-    frame->args.type_id = LMD_TYPE_ARRAY;
-    frame->args.items = frame->roots + 1;
-    frame->args.length = arg_count;
-    frame->args.capacity = arg_count;
-    LambdaTask* task = lambda_task_create(context->scheduler, task_launch_resume,
-        frame, task_launch_destroy);
-    if (!task) {
-        if (scheduler_has_heap()) {
-            heap_unregister_gc_root_range((uint64_t*)frame->roots);
-        }
-        task_launch_destroy(frame);
-        return task_error(ERR_OUT_OF_MEMORY, "task creation failed");
-    }
-    lambda_task_set_frame_roots(task, frame->roots, frame->root_count);
+    LambdaTask* task = lambda_task_create(context->scheduler, task_entry,
+        launch_root.get());
+    if (!task) return task_error(ERR_OUT_OF_MEMORY, "task creation failed");
     LambdaTask* parent = lambda_current_task();
     if (!escapes && parent && parent->scope_top) {
         task->owner_scope = parent->scope_top;
@@ -1420,41 +1185,13 @@ extern "C" Item lambda_task_start_function_scoped(Item function, List* args, boo
     return lambda_task_handle(task);
 }
 
-extern "C" Item lambda_task_run_root_function(Item function, List* args) {
-    EvalContext* owner = context;
-    if (!owner || !owner->scheduler || get_type_id(function) != LMD_TYPE_FUNC) {
-        return task_error(ERR_INVALID_STATE, "task root requires a procedure and scheduler");
-    }
-    Item handle = lambda_task_start_function(function, args);
-    LambdaTask* task = lambda_task_from_handle(handle);
-    if (!task) return handle;
-    if (lambda_scheduler_drain(owner->scheduler) < 0) {
-        return task_error(ERR_INVALID_STATE, "task root drain did not complete");
-    }
-    return lambda_task_result(task);
-}
-
-extern "C" Item lambda_task_run_root_raw(void* function_ptr, void* env,
-    int env_count, List* args) {
-    EvalContext* owner = context;
-    if (!function_ptr || !owner || !owner->scheduler) {
-        return task_error(ERR_INVALID_STATE, "task root requires a scheduler");
-    }
-    int arity = args ? (int)args->length : 0;
-    Function* function = lambda_concurrency_to_closure((fn_ptr)function_ptr, arity, env);
-    if (!function) return task_error(ERR_OUT_OF_MEMORY, "task root function allocation failed");
-    // Async root lowering publishes the generated `_b` wrapper. Mark its
-    // explicit owner so scheduler resumption never reinterprets a user Item as
-    // the generated entry's Context argument.
-    lambda_function_mark_mir_context_abi(function);
-    lambda_function_mark_lambda_boxed_procedure(function);
-    function->closure_field_count = env_count > 0 ? (uint16_t)env_count : 0;
-    return lambda_task_run_root_function((Item){.function = function}, args);
-}
-
 static LambdaTask* lambda_current_task(void) {
-    return context && context->scheduler
-        ? lambda_scheduler_current(context->scheduler) : NULL;
+    LambdaScheduler* scheduler = context ? context->scheduler : NULL;
+    if (!scheduler) return NULL;
+    if (scheduler->current) return scheduler->current;
+    // Base-stack code is the root task; another activation that is not a
+    // task (a generator body) has no task identity of its own.
+    return activation_current() ? NULL : scheduler_root_task(scheduler);
 }
 
 extern "C" LambdaTaskScope* lambda_task_scope_enter(void) {
@@ -1481,8 +1218,6 @@ extern "C" Item lambda_task_scope_leave(LambdaTaskScope* scope, bool error_exit)
         return task_error(ERR_INVALID_STATE, "invalid task scope exit");
     }
 
-    Item resumed = ItemNull;
-    (void)lambda_task_take_resume_value(task, &resumed);
     if (error_exit && !scope->cancelling) {
         scope->cancelling = true;
         scope->masked_cleanup = true;
@@ -1493,15 +1228,18 @@ extern "C" Item lambda_task_scope_leave(LambdaTaskScope* scope, bool error_exit)
     }
 
     for (LambdaTask* child = scope->children; child; child = child->next_scope_child) {
-        if (child->state == LAMBDA_TASK_DONE) continue;
-        LambdaTask* targets[1] = {child};
-        task->park_kind = LAMBDA_PARK_WAIT;
-        if (!task_wait_targets(task, targets, 1, false, 0)) {
-            return task_error(ERR_INVALID_STATE, "failed to join scoped task");
+        while (child->state != LAMBDA_TASK_DONE) {
+            LambdaTask* targets[1] = {child};
+            task->park_kind = LAMBDA_PARK_WAIT;
+            if (!task_wait_targets(task, targets, 1, false, 0)) {
+                return task_error(ERR_INVALID_STATE, "failed to join scoped task");
+            }
+            log_debug("concurrency scope: park owner=%llu child=%llu",
+                (unsigned long long)task->id, (unsigned long long)child->id);
+            // A cancellation wake does not end the join; every child is
+            // awaited before the scope closes.
+            (void)lambda_task_suspend(task);
         }
-        log_debug("concurrency scope: park owner=%llu child=%llu",
-            (unsigned long long)task->id, (unsigned long long)child->id);
-        return (Item){.item = ITEM_TASK_SUSPENDED};
     }
 
     task->scope_top = scope->parent;
@@ -1513,15 +1251,10 @@ extern "C" Item lambda_task_scope_leave(LambdaTaskScope* scope, bool error_exit)
 
 extern "C" Item lambda_task_scope_unwind(LambdaTaskScope* base, bool error_exit) {
     LambdaTask* task = lambda_current_task();
-    if (!task) return task_error(ERR_INVALID_STATE, "task-scope unwind outside task");
-    while (task->scope_top != base) {
-        if (!task->scope_top) {
-            return task_error(ERR_INVALID_STATE, "task-scope unwind crossed function boundary");
-        }
+    if (!task) return ItemNull;
+    while (task->scope_top && task->scope_top != base) {
         Item result = lambda_task_scope_leave(task->scope_top, error_exit);
-        if (result.item == ITEM_TASK_SUSPENDED || get_type_id(result) == LMD_TYPE_ERROR) {
-            return result;
-        }
+        if (get_type_id(result) == LMD_TYPE_ERROR) return result;
     }
     return ItemNull;
 }
@@ -1540,20 +1273,23 @@ extern "C" Item pn_send(Item handle, Item message) {
     return err2it_or_error(error);
 }
 
+static Item task_cancelled_error(void) {
+    return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
+}
+
+static bool task_cancel_pending(const LambdaTask* task) {
+    return task->cancel_requested && !task->cleanup_masked;
+}
+
 extern "C" Item pn_receive(void) {
     LambdaTask* task = lambda_current_task();
     if (!task) return err2it_or_error(err_create_heap(ERR_INVALID_STATE,
         "receive requires a running task", NULL));
-    Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(task, &resumed)) return resumed;
-    if (task->cancel_requested && !task->cleanup_masked) {
-        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
-    }
+    if (task_cancel_pending(task)) return task_cancelled_error();
     Item message = ItemNull;
     if (lambda_task_mailbox_receive(task, &message)) return message;
     task->park_kind = LAMBDA_PARK_RECEIVE;
-    lambda_task_park(task);
-    return (Item){.item = ITEM_TASK_SUSPENDED};
+    return lambda_task_suspend(task);
 }
 
 static Item wait_handle(Item handle, uint64_t timeout_ms) {
@@ -1562,18 +1298,14 @@ static Item wait_handle(Item handle, uint64_t timeout_ms) {
     if (!waiter || !target || waiter->scheduler != target->scheduler) {
         return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION, "invalid task handle", NULL));
     }
-    Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(waiter, &resumed)) return resumed;
-    if (waiter->cancel_requested && !waiter->cleanup_masked) {
-        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
-    }
+    if (task_cancel_pending(waiter)) return task_cancelled_error();
     if (target->state == LAMBDA_TASK_DONE) return target->result;
     LambdaTask* targets[1] = {target};
     waiter->park_kind = LAMBDA_PARK_WAIT;
     if (!task_wait_targets(waiter, targets, 1, false, timeout_ms)) {
         return err2it_or_error(err_create_heap(ERR_INVALID_STATE, "failed to wait for task", NULL));
     }
-    return (Item){.item = ITEM_TASK_SUSPENDED};
+    return lambda_task_suspend(waiter);
 }
 
 extern "C" Item pn_wait1(Item handle) {
@@ -1601,8 +1333,7 @@ extern "C" Item pn_select(Item handles, Item timeout_ms) {
         return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
             "select requires an array of task handles", NULL));
     }
-    Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(waiter, &resumed)) return resumed;
+    if (task_cancel_pending(waiter)) return task_cancelled_error();
     int count = (int)handles.array->length;
     if (count <= 0) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "select requires at least one task handle", NULL));
@@ -1627,7 +1358,7 @@ extern "C" Item pn_select(Item handles, Item timeout_ms) {
     bool parked = task_wait_targets(waiter, targets, count, true,
         timeout > 0 ? (uint64_t)timeout : 0);
     mem_free(targets);
-    return parked ? (Item){.item = ITEM_TASK_SUSPENDED}
+    return parked ? lambda_task_suspend(waiter)
                   : err2it_or_error(err_create_heap(ERR_INVALID_STATE, "failed to select tasks", NULL));
 }
 
@@ -1637,74 +1368,52 @@ extern "C" Item pn_sleep(Item duration_ms) {
     task_read_milliseconds(duration_ms, &value);
     if (!task || value < 0) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "sleep requires a running task and non-negative duration", NULL));
-    Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(task, &resumed)) return resumed;
-    if (task->cancel_requested && !task->cleanup_masked) {
-        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
-    }
+    if (task_cancel_pending(task)) return task_cancelled_error();
     if (value == 0) return ItemNull;
     task->park_kind = LAMBDA_PARK_SLEEP;
     lambda_task_park(task);
     if (!task_timer_start(task, (uint64_t)value, false)) {
-        // Timer creation failed during this poll, so restore the current task
-        // without enqueueing a duplicate runnable entry.
         task->state = LAMBDA_TASK_RUNNABLE;
         task->park_kind = LAMBDA_PARK_NONE;
         return err2it_or_error(err_create_heap(ERR_INVALID_STATE, "failed to start sleep timer", NULL));
     }
-    return (Item){.item = ITEM_TASK_SUSPENDED};
+    return lambda_task_suspend(task);
+}
+
+static Item file_read_result(LambdaTask* task, LambdaFileRead* read) {
+    task->file_read = NULL;
+    int error = read->error;
+    ssize_t length = read->length;
+    char* bytes = read->bytes;
+    read->bytes = NULL;
+    file_read_release(read);
+    if (task_cancel_pending(task)) {
+        mem_free(bytes);
+        return task_cancelled_error();
+    }
+    if (error) {
+        mem_free(bytes);
+        LambdaErrorCode code = error == UV_ENOENT
+            ? ERR_FILE_NOT_FOUND
+            : (error == UV_EACCES ? ERR_FILE_ACCESS_DENIED : ERR_FILE_READ_ERROR);
+        return err2it_or_error(err_create_heap(code, uv_strerror(error), NULL));
+    }
+    String* string = heap_strcpy(bytes ? bytes : "", length > 0 ? length : 0);
+    mem_free(bytes);
+    return string ? (Item){.item = s2it(string)}
+                  : err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY,
+                        "io.read result allocation failed", NULL));
 }
 
 extern "C" Item pn_io_read(Item target) {
     LambdaTask* task = lambda_current_task();
     if (!task) return err2it_or_error(err_create_heap(ERR_INVALID_STATE,
         "io.read requires a running task", NULL));
-
-    LambdaFileRead* read = task->file_read;
-    if (read) {
-        Item resumed = ItemNull;
-        bool has_resume = lambda_task_take_resume_value(task, &resumed);
-        if (read->done) {
-            task->file_read = NULL;
-            int error = read->error;
-            ssize_t length = read->length;
-            char* bytes = read->bytes;
-            read->bytes = NULL;
-            file_read_release(read);
-            if (task->cancel_requested && !task->cleanup_masked) {
-                mem_free(bytes);
-                return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
-            }
-            if (error) {
-                mem_free(bytes);
-                LambdaErrorCode code = error == UV_ENOENT
-                    ? ERR_FILE_NOT_FOUND
-                    : (error == UV_EACCES ? ERR_FILE_ACCESS_DENIED : ERR_FILE_READ_ERROR);
-                return err2it_or_error(err_create_heap(code, uv_strerror(error), NULL));
-            }
-            String* string = heap_strcpy(bytes ? bytes : "", length > 0 ? length : 0);
-            mem_free(bytes);
-            return string ? (Item){.item = s2it(string)}
-                          : err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY,
-                                "io.read result allocation failed", NULL));
-        }
-        if (has_resume && task->cancel_requested && !task->cleanup_masked) {
-            // The generic cancel wake races with the in-flight fs request.
-            // Keep the task parked until libuv releases the request storage.
-            uv_cancel((uv_req_t*)&read->request);
-        }
-        task->park_kind = LAMBDA_PARK_FILE_READ;
-        lambda_task_park(task);
-        return (Item){.item = ITEM_TASK_SUSPENDED};
-    }
-
-    if (task->cancel_requested && !task->cleanup_masked) {
-        return err2it_or_error(err_create_heap(ERR_CANCELLED, "task cancelled", NULL));
-    }
+    if (task_cancel_pending(task)) return task_cancelled_error();
     StrBuf* path = lambda_get_local_path_from_item(target);
     if (!path) return err2it_or_error(err_create_heap(ERR_INVALID_OPERATION,
         "io.read requires a local file target", NULL));
-    read = (LambdaFileRead*)mem_calloc(1, sizeof(LambdaFileRead), MEM_CAT_EVAL);
+    LambdaFileRead* read = (LambdaFileRead*)mem_calloc(1, sizeof(LambdaFileRead), MEM_CAT_EVAL);
     if (!read) {
         strbuf_free(path);
         return err2it_or_error(err_create_heap(ERR_OUT_OF_MEMORY,
@@ -1729,11 +1438,18 @@ extern "C" Item pn_io_read(Item target) {
             uv_strerror(status), NULL));
     }
     task->file_read = read;
-    task->park_kind = LAMBDA_PARK_FILE_READ;
-    lambda_task_park(task);
     log_debug("concurrency io.read: parked task=%llu path=%s",
         (unsigned long long)task->id, read->path);
-    return (Item){.item = ITEM_TASK_SUSPENDED};
+    while (!read->done) {
+        task->park_kind = LAMBDA_PARK_FILE_READ;
+        (void)lambda_task_suspend(task);
+        if (!read->done && task_cancel_pending(task)) {
+            // The cancellation wake races with the in-flight fs request; stay
+            // parked until libuv releases the request storage.
+            uv_cancel((uv_req_t*)&read->request);
+        }
+    }
+    return file_read_result(task, read);
 }
 
 extern "C" Item pn_self(void) {

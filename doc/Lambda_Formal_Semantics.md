@@ -1,6 +1,6 @@
 # Lambda Formal Semantics — Specification
 
-**Spec version:** 56.0.0 (2026-10-04)
+**Spec version:** 57.0.0 (2026-10-05)
 
 **Status:** normative — the single source of truth for Lambda language semantics.
 This document records what Lambda's semantics **is by decision**, not what any
@@ -954,17 +954,15 @@ it.* [TE-13, C14]
   `e^` catches errors only, propagating. `or` and `^` are *not* a soft/hard
   split — both work on both channels; the axis is coalescing-without-access
   vs error-specific handling. [TE-16]
-- **S7.6.7v3*** A statement-position procedure handler
-  `pn_call() ^ { error_body }` may protect a possibly-suspending call. No
-  `LambdaRecoveryFrame`, native frame address, or jump buffer survives a
-  scheduler yield. Ordinary errors are stored as the call's durable completion
-  and branch to the handler when the caller state machine resumes. If an S7.11
-  native system fault occurs after suspension, the task fault boundary may use
-  the temporary non-local carve-out, but it must materialize the fault as a
-  durable completion and resume the nearest active procedural handler state;
-  subsequent propagation is again frame-by-frame. A value-producing postfix
-  handler over a possibly-suspending `pn` remains a compile error because `pn`
-  handlers are statement-only. [TE-16, ER-D13, REH-D12, REH-D13]
+- **S7.6.7v4** A statement-position procedure handler
+  `pn_call() ^ { error_body }` may protect a possibly-suspending call. The
+  call parks and resumes in place, so its error reaches the handler exactly
+  as a non-suspending call's does; *suspension is invisible to error
+  handling*. A value-producing postfix handler over a possibly-suspending `pn`
+  remains a compile error because `pn` handlers are statement-only. (Revised
+  2026-10-05, v4: v3 routed the error through a durable completion and the
+  caller's state machine, with a non-local carve-out for a fault after
+  suspension.) [TE-16, ER-D13, REH-D12, REH-D13, Runtime_Async RA1]
 
 ### S7.7 Containment: the declaration-boundary skip
 
@@ -1088,10 +1086,13 @@ cardinality, and keep failure on a separate channel.* [RF1–RF6, §7.7 record]
   recursion never forces `T^stack_overflow`. Structural-equality depth
   exhaustion is instead a language-visible ordinary error and propagates by
   explicit completion through each frame. [ER-D4, ER-D9, D1.4v3]
-- **S7.11.2** Faults pass transparently through `fn` frames; only `pn`
+- **S7.11.2v2** Faults pass transparently through `fn` frames; only `pn`
   boundaries and execution boundaries own them. A caught fault cannot resume
-  the abandoned expression. Recovery frames never survive a scheduler yield —
-  an async task completes with the fault result. [ER-D9, ER-D11]
+  the abandoned expression. A task's boundaries live on its own activation
+  and stay armed across its parks; a fault in a task is contained there, and
+  the task completes with the fault result. (Revised 2026-10-05, v2: v1 said
+  recovery frames never survive a scheduler yield.) [ER-D9, ER-D11,
+  Runtime_Async §4.5]
 - **S7.11.3** Transaction barriers (module init, hosted-guest entry) take
   priority over inner handlers: no handler may resume through a
   half-initialized module or abandoned guest activation. Fault delivery
@@ -2625,7 +2626,7 @@ Status of `*`-marked rulings as of 2026-08-24. Conformance plans:
 | S7.4.4 | **Partial as of 2026-09-27, both tiers.** An error value carries its code and message, `.source` (the wrapped error, from `error(msg, source)` or the parameter map's `source`), and `.file`/`.line`/`.column` of the `error()` call that built it; an absent member is `null`. Fixture `error_members.ls`. Residue: a payload-less sentinel still answers from `last_error` ([LR10-14](../vibe/Lambda_Issue_Ledger.md#lr10-14)), and a failed check's error carries no location ([LR10-15](../vibe/Lambda_Issue_Ledger.md#lr10-15)). |
 | S7.6.1 | The one- and two-arm postfix handler grammar and MIR/interpreter lowering conform to S7.6.1v4/S7.6.2v3/S7.6.6v2, including nested `^`/`~` scope restoration, direct raised-`pn` outcome routing, and rich-error preservation. |
 | S7.6.5 | Retired `^err` destructuring and prefix `^expr` error tests are removed from the grammar, AST/runtime, and active `.ls` corpus. The handler-local `^` remains scoped to the selected error arm. |
-| S7.6.7 | Landed 2026-08-17: statement-position `pn_call() ^ { error_body }` uses explicit ordinary completions before and after suspension; durable native-fault targets cover the S7.11 carve-out without retaining a recovery frame or jump buffer across a yield. Value-producing handlers over possibly-suspending `pn` calls remain rejected. |
+| S7.6.7v4 | **Implemented 2026-10-05** (Runtime_Async P1): a suspending `pn` call returns to its handler like any other call in both tiers; the durable completions, handler fault states and carve-out are deleted. Value-producing handlers over possibly-suspending `pn` calls remain rejected. Lambda concurrency scripts 25/25 in both tiers, plain and under forced GC. |
 | S7.7.1–S7.7.6 | **Partial as of 2026-09-27, both tiers.** Interiors flow: a system function's rejected operand (S11.4.3) and a defect-capable call's value (TE-17 I3) are values, not early returns, and a declaration or reassignment whose contract excludes error skips when its value is one, however it arose. Fixtures `proc/defect_value_flow.ls`, `proc/rejected_error_value_flow.ls`, `proc/rejected_error_any_operand.ls`. Residue ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)): the skip target is the function, not the declaring block (S7.7.2, S7.7.5); a failed parameter admission returns from the caller instead of being the call's value (S7.7.3); the element-store report (S7.7.6) is not emitted. `for x: T in e` does not parse yet — case 1 is `let`/`var`-only until the grammar is extended. |
 | S7.8.1 | **TE-17 lane gating built 2026-09-27** on the D6.1.3 fact: a defect-capable call's value, and a member, element or arithmetic result of one, never enters a native lane, and a literal slot fed by one is boxed on both tiers. Known violation V1 is unchanged: `fn_array_set` silently despecializes a declared `int[]`, so the dominance invariant (S7.7.2) is false today. ([LR12-24](../vibe/Lambda_Issue_Ledger.md#lr12-24)) |
 | S7.10.5v2 (v1 residue) | RF5 audit: several vectorized ops return generic arrays where typed `ArrayNum` is required; a few error-channel violations open (`query`, `url_resolve`, invalid `push`/`splice`). |
@@ -2810,7 +2811,7 @@ findings B1–B13 cited as `[B#]`, and from the `OI-#` ledger in
 | S4 numerics | C3, C13, C14b/c, C16, C17; int v5 | `Lambda_Semantics_Formal2.md`, `Lambda_Semantics_Int_Type.md`, `Lambda_Semantics_Number_Model.md` |
 | S5 equality | C8, C8.5, C8.5a, C8.6, C8.6-R, C8.7, C9-4; OB4, OB10, OB16, OB19 | `Lambda_Semantics_Formal2.md`, `Lambda_Expr_Eq.md` (rationale only), `Lambda_Type_Object.md` |
 | S6 ordering | C11, C11.4, C11.5; OB13 | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md` |
-| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14 | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md` |
+| S7 absence/errors | C5, C5.3, C5.3b, C14, C14a, C15, C15a/b; TE-4, TE-9, TE-13, TE-15–TE-18; RF1–RF6; ER-D1–PD13; REH-D1–REH-D14; RA1 (S7.6.7v4, S7.11.2v2) | `Lambda_Design_Type_Enforcement.md`, `Lambda_Design_Sys_Func.md`, `Lambda_Design_Exec_Recovery.md`, `Lambda_Design_Runtime_Error_Handling.md`, `Lambda_Design_Runtime_Async.md` |
 | S8 membership | C5.3a, C5.3b; §8.0–8.3 records; OB4–OB5; Expr_Query §4.1 (S8.2.4v3) | `Lambda_Semantics_Formal2.md`, `Lambda_Type_Object.md`, `Lambda_Expr_Query.md` |
 | S9 mutability | C4, C4.2a/b/c/e, C4.3, C5.3b, C12; CW16–CW28; RG14 | `Lambda_Semantics_Formal.md`, `Lambda_Semantics_Formal2.md`, `Lambda_Design_Runtime_COW.md`, `Lambda_Design_Nested_Mutation.md`, `Lambda_Design_Runtime_Globals.md` |
 | S10 operators | C6, C6.2–C6.4, C10; Design_Syntax §7.27; PTH3, PTH5–PTH6, PTH9–PTH10, PTH25–PTH29; Expr_Pipe §F.1–§F.7 (`|:` filter stage, `that` proviso, result kind, implicit fields) | `Lambda_Semantics_Formal2.md`, `Lambda_Design_Syntax.md`, `Lambda_Type_Path.md`, `Lambda_Expr_Pipe.md` |

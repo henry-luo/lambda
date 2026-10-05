@@ -39,6 +39,7 @@ struct GrepMatcher {
     char* regex;             // the assembled RE2 source (mem-owned)
     size_t regex_len;
     int report_group;        // 0, or 1 when word mode wraps the pattern in a group
+    bool every_line;         // an unwrapped empty pattern: every line matches
     re2::RE2* re;            // compiled once to validate and plan; searchers compile their own
     GrepLiteralPlan plan;
 };

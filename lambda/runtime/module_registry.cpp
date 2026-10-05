@@ -246,8 +246,6 @@ void module_register_with_namespace_ops_for_runtime(
     desc->mir_ctx = mir_ctx;
     desc->initialized = true;
     desc->loading = false;
-    desc->async_eval_order = -1;
-    desc->saved_module_state_id = UINT32_MAX;
     module_descriptor_ensure_roots(desc);
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };
@@ -340,8 +338,6 @@ ModuleDescriptor* module_register_loading_with_namespace_ops_for_runtime(
     desc->mir_ctx = NULL;
     desc->initialized = false;
     desc->loading = true;
-    desc->async_eval_order = -1;
-    desc->saved_module_state_id = UINT32_MAX;
     module_descriptor_ensure_roots(desc);
 
     RegistryEntry entry = { .path = desc->path, .desc = desc };

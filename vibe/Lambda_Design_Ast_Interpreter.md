@@ -185,15 +185,15 @@ The full walker, by node family (the complete per-kind inventory is the P1 check
 | String patterns, path/query exprs, sys funcs | pattern constants from const pool (prepass-compiled patterns become plan-pass outputs, AIO12); `sys_func_defs[]` gives the C function pointer — direct call, same registry both tiers |
 | `pn` statements: `var`, assignment (incl. index/member), `while`/`do-while`, `break`/`continue`/`return` | `EvalSignal` channel; mutation through `cow_prepare_write`-family helpers so COW sharing stays unobservable (S9.1.2); out-of-bounds writes raise per SI11 |
 | Imports / module top-level | post-order module init under transaction barriers (§4.4); built-in `math`/`io` and Jube imports resolve at call sites as today (they produce no AST nodes) |
-| `start`, async, generators | **not interpreted in v1** — definitions whose analysis says `may_await` / `is_generator` / `needs_task_context` / contains `AST_NODE_START` promote at first call (threshold 0), because suspension today is a MIR-level state-machine transform; interpreter-level continuations (heapified frames à la `LambdaAsyncFrame`) are future work (AI11) |
+| `start`, async, generators | **interpreted (2026-10-05, AI11v2)** — T0 evaluates `start`, `wait`, `select` and scoped tasks directly; a task's body runs on its own activation and parks in place (`vibe/Lambda_Design_Runtime_Async.md` RA1, RA12). Definitions are no longer promoted for their colour (D8.1.1v16). *[v1: suspension-capable definitions promoted at first call, because suspension was a MIR state-machine transform.]* |
 | Views / templates | modules containing `AST_NODE_VIEW` keep whole-module eager compilation in v1 — registration reaches into the compiled context (`_view_<N>` lookup) (AI12) |
 | Error-recovery nodes | T0 refuses to execute a script with `error_count > 0`, same gate as lowering |
 
-Explicit `LAMBDA_EXEC_BACKEND=interp` is a strict T0 pin (**D8.1.1v15**, AI24,
-user ruling 2026-10-03). The support scan rejects any script or import that
-needs MIR, including a suspension-capable procedure that would otherwise
-receive a task satellite. It reports an unsupported-feature error before
-execution; the rejection is counted as `excluded`, never `fallback`.
+Explicit `LAMBDA_EXEC_BACKEND=interp` is a strict T0 pin (**D8.1.1v16**, AI24v2,
+user rulings 2026-10-03 and 2026-10-05). The support scan rejects any script or
+import that needs MIR; a suspension-capable procedure no longer does, because T0
+executes it. The scan reports an unsupported-feature error before execution;
+the rejection is counted as `excluded`, never `fallback`.
 Whole-module fallback and task satellites in the table above apply to AUTO.
 An AST template prepared by an import worker must obey the same pin when
 the execution runtime activates it.
@@ -790,7 +790,8 @@ Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes
 | **AI8v2** | Promotion trigger: per-definition-site ordinary-call and direct-self-tail-edge counters, threshold 5 (`LAMBDA_FUNC_JIT_THRESHOLD`); the fifth direct tail edge hands off at an entry-equivalent boundary; loop back-edges are counted per loop site against `LAMBDA_LOOP_JIT_THRESHOLD` (10000) and trigger AI23. Revised 2026-10-02; v1 in Appendix S | **confirmed** |
 | **AI9** | Promotion unit: satellite MIR module (function + `_b` wrapper) in the Script's `jit_context`, linked on demand via the existing import resolver, BSS pointers written post-link | **confirmed** |
 | **AI10** | Whole-module AST analyses (call sites, param narrowing, `FnVariantAnalysis`) run once per Script at first promotion and persist Script-scoped; lowering-session tables promoted to Script lifetime | **confirmed** |
-| **AI11** | Suspension-capable definitions (`may_await`/`is_generator`/`needs_task_context`/`START`) bypass T0 — compiled at first call; interpreter continuations are future work | **confirmed** |
+| **AI11** | Suspension-capable definitions (`may_await`/`is_generator`/`needs_task_context`/`START`) bypass T0 — compiled at first call; interpreter continuations are future work | **retired 2026-10-05 by AI11v2** |
+| **AI11v2** | T0 executes suspension-capable definitions: each task body runs on its own activation and parks in place, so there is no interpreter continuation to build (`vibe/Lambda_Design_Runtime_Async.md` RA1, RA12; D8.1.1v16) | **ratified (user, 2026-10-05); implemented** |
 | **AI12** | View/template-containing modules keep whole-module eager compilation in v1 | **confirmed** |
 | **AI13** | T0 error handling: error-as-value checks at lowering's check points; declaration-boundary skip per S7.7.1/S7.7.2; faults on recovery frames; only fault timing may differ across tiers (S7.11.4) | **confirmed** |
 | **AI14** | `return`/`break`/`continue` travel as `EvalSignal` through the walker; `longjmp` is fault-only | **confirmed** |
@@ -803,7 +804,8 @@ Each phase is landable and revertible behind `LAMBDA_EXEC_BACKEND`; P5 now makes
 | **AI21** | Stage 2 extends the tier model to LambdaJS over `JsAstNode`, sharing frames/tiering/hooks; JS semantics stay in the JS helper layer; the size-based interp policy is replaced | **confirmed** |
 | **AI22** | No bytecode IR; tree-walk over the typed AST is the only sub-MIR executable form; revisit only with T0 profiles | **confirmed** |
 | **AI23** | Loop-head handoff: a running T0 activation may enter its published image at a head test of the loop that triggered it, as a one-way whole-function continuation; eligibility is limited to loops whose live state is entirely named frame slots; the loop-owner first-entry trigger is retired (§5.1.1; D8.1.1v14) | **confirmed (user, 2026-10-02); partially implemented 2026-10-02** |
-| **AI24** | Explicit `interp` executes only T0. Unsupported modules/imports and task-backed bodies fail before execution; whole-module fallback and MIR satellites are AUTO-only (D8.1.1v15). | **confirmed (user, 2026-10-03)** |
+| **AI24** | Explicit `interp` executes only T0. Unsupported modules/imports and task-backed bodies fail before execution; whole-module fallback and MIR satellites are AUTO-only (D8.1.1v15). | **confirmed (user, 2026-10-03); revised by AI24v2** |
+| **AI24v2** | As AI24, minus the task-backed rejection: T0 runs task-backed bodies (D8.1.1v16) | **ratified (user, 2026-10-05); implemented** |
 
 ## 15. Spec impact
 

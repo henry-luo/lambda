@@ -852,10 +852,6 @@ typedef struct AstHandlerNode : AstNode {
     AstNode* body;
     AstNode* value_body; // optional non-error arm, with `~` bound to the operand
     bool is_statement;
-    // Async MIR reserves a dispatcher state for a statement pn handler's
-    // fault-only continuation. Zero means that this handler is not a
-    // suspension-capable procedural target.
-    int async_fault_state;
 } AstHandlerNode;
 
 typedef enum StartMode {
@@ -1792,8 +1788,9 @@ typedef struct FnAnalysis {
     int capture_count;
     int evidence_count;
     bool may_await;
-    bool needs_task_context;
-    bool has_indirect_pn_call;
+    // The body starts a non-escaping child, so its blocks enter task scopes
+    // that join children on exit (both tiers read this syntactic fact).
+    bool owns_task_scopes;
     // JavaScript profile observations are stored on the same function-owned
     // record so indexed MIR passes do not maintain a second fact table.
     bool js_has_direct_eval;
@@ -1838,8 +1835,6 @@ typedef struct FnAnalysis {
     ScalarReturnClass js_boxed_return_scalar_class;
     int js_formal_length;
     struct hashmap* js_cached_scope_slot_collisions;
-    int await_point_count;
-    int async_fault_handler_count;
     const char* may_await_cause;
     // Defect-origin scanning is invariant after a call-site round. Its atomic
     // epoch keeps retained-template compilation from reading another worker's

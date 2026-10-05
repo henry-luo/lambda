@@ -13,6 +13,7 @@
 #include "../runtime/runtime-state.h"
 #include "../runtime/async.h"
 #include "../runtime/root_vector.h"
+#include "../runtime/lambda-root-frame.hpp"
 #include "../../lib/hashmap.h"
 #include "../../lib/arraylist.h"
 #include "../../lib/line_framer.h"
@@ -21,8 +22,7 @@ struct JsFunction;
 struct JsCallableCode;
 struct JsRuntimeState;
 struct JsInterpEnv;
-struct JsInterpContinuation;
-struct JsInterpExpressionReplay;
+struct Activation;
 struct JsScript;
 struct AstNode;
 struct DomDocument;
@@ -596,7 +596,6 @@ enum JsModuleRuntimeSlot : int {
 struct JsModuleRuntimeState {
     RootVector values = {};
     int module_depth = 0;
-    int async_eval_order_counter = 0;
     int draining_depth = 0;
     int vm_source_text_identifier_counter = 0;
 };
@@ -614,6 +613,7 @@ struct JsPerformanceState {
 // The common durable part of generator and async execution. It owns exactly
 // the outliving activation edges; each state machine keeps its own semantic
 // tail (D5.1.1v2, D6.2.2v2; JSCU32).
+#include "../runtime/activation.h"
 struct JsSuspendedActivation : DurableActivation {
     Context* runtime_context = NULL;
     void* state_fn = NULL;
@@ -621,22 +621,23 @@ struct JsSuspendedActivation : DurableActivation {
     Item ast_arguments = {};
     JsInterpEnv* ast_function_env = NULL;
     JsInterpEnv* ast_body_env = NULL;
-    // Generator yields and async awaits replay through the same Item ledger.
-    Item ast_replay_values = {};
-    int64_t ast_replay_skip = 0;
-    // A suspended expression resumes from its last completed child. These
-    // records retain those child values so replay never repeats user-visible
-    // work before a yield or await.
-    JsInterpExpressionReplay* ast_expression_replay = NULL;
-    JsInterpExpressionReplay* ast_expression_recorded = NULL;
-    JsInterpContinuation* ast_loop_continuations = NULL;
+    // Every body, of either tier, runs once on its own stackful activation,
+    // parked in place at each yield/await; the carrier owns it weakly (RA1,
+    // RA8). `body` is its entry.
+    Activation* activation = NULL;
+    ActivationEntry body = NULL;
     bool ast_initialized = false;
-    // JSCU44: `with` scopes open at the suspension point. They outlive the
-    // native activation, so they spill here as a captured env and are entered
-    // again on resume instead of being re-pushed by replayed statements.
+    // JSCU44: the `with` scopes open where the generator or async function was
+    // created; its body enters this captured chain once, on its own stack.
     Item* with_env = NULL;
     int with_depth = 0;
 };
+
+extern "C" Item js_suspended_activation_step(JsSuspendedActivation* record,
+    ActivationEntry entry, Item arg, Item input, ActivationStatus* out_status);
+// The active module namespace slot once it exists; never allocates, so the
+// activation switch can carry the namespace.
+extern "C" Item* js_module_active_namespace_peek(void);
 
 struct JsGeneratorStateRecord : JsSuspendedActivation {
     bool done = false;
@@ -645,26 +646,7 @@ struct JsGeneratorStateRecord : JsSuspendedActivation {
     bool is_async = false;
     Item private_home_class = {};
     Item delegate = {};
-    int64_t delegate_resume = -1;
-    int delegate_idx = 0;
     Item ast_this = {};
-    // Async generators retain await completions separately from next() input:
-    // a single body can suspend at both await and yield sites.
-    Item ast_await_replay_values = {};
-    int64_t ast_await_replay_skip = 0;
-    bool ast_waiting_for_await = false;
-    // Terminal-yield loop continuations keep AST generators resumable without
-    // replaying completed iterations on every next().
-    JsInterpContinuation* ast_list_continuation = NULL;
-    // A destructuring target can suspend after IteratorStep. Retain its
-    // iterator/value cursor so replay does not advance the iterator twice.
-    JsInterpContinuation* ast_array_binding_continuations = NULL;
-    // A catch/finally clause that suspends must not replay the try's block.
-    JsInterpContinuation* ast_try_continuations = NULL;
-    // Retain an injected throw/return while a finally block yields before it
-    // can finish propagating that abrupt completion.
-    int64_t ast_pending_resume_yield = 0;
-    Item ast_pending_resume_input = {};
 };
 
 struct JsAsyncContextStateRecord : JsSuspendedActivation {
@@ -672,17 +654,18 @@ struct JsAsyncContextStateRecord : JsSuspendedActivation {
     // resumed MIR property names must use the module image that compiled the body.
     uint32_t module_state_id = UINT32_MAX;
     Item this_val = {};
-    // A module program uses the same durable carrier as an async function,
-    // but resumes its Script body in the module's existing lexical slab.
+    // The body is an async function of either tier, or a module program, which
+    // resumes in the module's existing lexical slab (an interpreted Script, or
+    // a MIR module's js_main in state_fn). It parks on the promise it awaits
+    // and returns its value, or its rejection as an error (RA1).
     JsScript* ast_module_script = NULL;
-    Item ast_module_specifier = {};
-    // Statement cursors for every list on the suspension path, so a resume
-    // re-enters the awaiting statement instead of replaying the completed
-    // statements of each enclosing block/loop body. This replaces the single
-    // `ast_resume_statement` pointer, which could only name the innermost list.
-    JsInterpContinuation* ast_list_continuation = NULL;
-    // A catch/finally clause that suspends must not replay the try's block.
-    JsInterpContinuation* ast_try_continuations = NULL;
+    Item module_specifier = {};
+    // JSCU25: the weak scheduler registration held while the body is parked
+    // (0 when not registered).
+    uint64_t weak_token = 0;
+    // The module's file, current while its body runs; owned by its module
+    // descriptor.
+    const char* module_path = NULL;
 };
 
 // JSCU44: the `with` activation boundary. `storage` is caller-owned POD (a
@@ -807,12 +790,6 @@ struct JsExecutionState {
     JsCallActivation* current_activation = NULL;
 };
 
-// Await's result handoff is the one realm-owned async Item that outlives the
-// native suspend check; activations themselves are GC-owned frame carriers.
-struct JsAsyncAwaitState : RootVector {
-    Item resolved_value = {};
-};
-
 struct JsArrayRuntimeItemsHeader;
 struct JsArrayImmortalPropsHeader;
 
@@ -895,9 +872,7 @@ struct JsRuntimeState {
     // Resumable code retains function environments after its creating native
     // frame has returned.  The fixed tables are context-owned so resumes never
     // consult process-global state or contend with another isolate.
-    // JSCU10: async activations are GC-owned frames, not a fixed table. The
-    // await handoff is its own precise owner.
-    JsAsyncAwaitState async_await = {};
+    // JSCU10: async activations are GC-owned frames, not a fixed table.
 
     // Test262 keeps its harness in one module slab while each script needs an
     // isolated copy of that binding prefix. These ids are per-runtime state,
@@ -953,6 +928,30 @@ static inline void js_call_activation_pop(JsCallActivation* activation) {
     if (!activation || js_active_runtime_state->execution.current_activation != activation) return;
     js_active_runtime_state->execution.current_activation = activation->previous;
 }
+
+// A generator or async body parked on its own activation must not keep reading
+// the call facts of whichever turn first resumed it: that chain is gone by the
+// next resume. Its entry copies them into a call activation on its own stack
+// (the private home class above all), which every later resume reinstates.
+class JsOwnedCallActivation {
+    RootFrame roots_;
+    JsCallActivation activation_;
+
+public:
+    JsOwnedCallActivation() : roots_(JS_CALL_ACTIVATION_ITEM_COUNT), activation_() {
+        JsCallActivation* current = js_call_activation_current();
+        for (int i = 0; i < JS_CALL_ACTIVATION_ITEM_COUNT; i++) {
+            uint64_t* home = roots_.slot((size_t)i);
+            *home = current->items[i] ? current->items[i]->item : ItemNull.item;
+            activation_.items[i] = (Item*)home;
+        }
+        activation_.args_is_strict = current->args_is_strict;
+        js_call_activation_push(&activation_);
+    }
+    ~JsOwnedCallActivation() { js_call_activation_pop(&activation_); }
+    JsOwnedCallActivation(const JsOwnedCallActivation&) = delete;
+    JsOwnedCallActivation& operator=(const JsOwnedCallActivation&) = delete;
+};
 bool js_runtime_state_init(EvalContext* context);
 bool js_runtime_state_thread_matches(const EvalContext* context);
 bool js_runtime_state_shutdown(EvalContext* context);
