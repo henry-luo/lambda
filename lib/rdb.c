@@ -302,9 +302,17 @@ static int rdb_host_conn_register(void* open_ctx, void* native_conn, const RdbCo
 }
 
 static void rdb_host_log(int level, const char* message) {
-    if (level == RDB_LOG_ERROR) log_error("rdb driver: %s", message ? message : "");
-    else if (level == RDB_LOG_INFO) log_info("rdb driver: %s", message ? message : "");
-    else log_debug("rdb driver: %s", message ? message : "");
+    // vendor messages (libpq) span lines; keep each driver message on one log line
+    char line[1024];
+    snprintf(line, sizeof(line), "%s", message ? message : "");
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == ' ')) line[--len] = '\0';
+    for (char* p = line; *p; p++) {
+        if (*p == '\n' || *p == '\t') *p = ' ';
+    }
+    if (level == RDB_LOG_ERROR) log_error("rdb driver: %s", line);
+    else if (level == RDB_LOG_INFO) log_info("rdb driver: %s", line);
+    else log_debug("rdb driver: %s", line);
 }
 
 /** RDB11: the host owns the upstream socket; only authorised targets qualify */

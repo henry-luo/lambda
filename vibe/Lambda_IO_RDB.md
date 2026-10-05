@@ -2208,11 +2208,20 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
   - no raw `socket`/`connect`/`open` calls appear in `lambda/module/rdb/*.o`
     (JA16.4: the exemption covers vendor archives only).
 - **Licence gate**, `make verify-rdb-module-licenses` (§13.8).
-- **Driver corpus**, `make test-rdb-drivers`:
-  - **Fixtures:** the `io_sqlite_*.ls` scenarios are generalised into
-    backend-parameterised scripts. Each backend loads the same fixture schema
-    and must produce the **same `.txt` golden**, with small per-backend
-    overlays for real backend differences.
+- **Driver corpus**, `make test-rdb-drivers` (`test/rdb/run_rdb_corpus.py`):
+  - **Fixtures:** `test/rdb/fixture/{postgresql,mysql}.sql` hold the same
+    schema and rows (authors, books, an FK, indexes, a view, a trigger,
+    decimal/datetime/JSON/BLOB columns). `utils/rdb-test-servers.sh up`
+    (`make rdb-test-servers-up`) runs both servers with TLS under Apple's
+    `container` tool, reloads the fixtures, and prints the URIs;
+    `make test-rdb-drivers-local` does both steps.
+  - **Scripts:** `test/rdb/*.ls` use a `{{RDB_URI}}` placeholder and must
+    produce the **same `.txt` golden** on every backend. A backend-specific
+    `<name>.<backend>.txt` exists only for real differences (today: declared
+    types and index names in `rdb_schema`). `--update` rewrites goldens.
+  - **Probes:** each backend's TLS modes (all five for PostgreSQL; the
+    TLS-guaranteed three for MySQL, since plaintext MySQL logins depend on the
+    server's auth cache), a wrong password and a wrong CA.
   - **PostgreSQL and MySQL** run against containers, with TLS enabled on the
     servers so the bridge's upgrade and verify paths are exercised. Locally
     they run when `LAMBDA_TEST_PG_URI` / `LAMBDA_TEST_MYSQL_URI` are set
@@ -2285,7 +2294,8 @@ further, since the host then owns the network socket itself.
 | R5 column batches | ✅ `rdb_result_schema()` / `rdb_fetch_batch()` with the host shredding adapter (`lib/rdb_batch.c`). DECIMAL/DATETIME/JSON columns are utf8 with Arrow field metadata `lambda.rdb_type`. |
 | R6 host TLS bridge | ✅ `lib/rdb_tunnel.c` (POSIX; Windows reports "not available yet"). PostgreSQL and MySQL negotiation paths without TLS are tested against fake servers. **The TLS handshake itself, verify-ca/full, and MySQL's sequence-shifted auth relay are untested until real servers run** (R8/R9). |
 | R7 build + module | ✅ `utils/build-rdb-deps.sh` (libpq 18.6, Connector/C 3.3.21, no patches), `make build-rdb-deps` / `build-rdb-drivers`, the `rdb-drivers` target (strict link, only `jube_module` exported, system-only imports). ⏳ architecture and licence gates, `LICENSES/`, `SOURCES.md`, archive overrides. |
-| R8 / R9 drivers | ✅ **live-tested 2026-10-05** against PostgreSQL 18 and MySQL 8.4.11 in Apple `container` VMs with TLS on (test CA, SAN `localhost`/`127.0.0.1`). On both backends: schema, views, indexes, triggers, forward and reverse FK navigation, `decimal`, JSON and `datetime` decoding through `input()`. TLS matrix: disable / prefer / require / verify-ca / verify-full all behave as specified, and a missing or wrong CA, a server-name mismatch (fails verify-full, passes verify-ca) and a wrong password all fail cleanly. MySQL `caching_sha2_password` full auth works over the bridge's TLS and is refused under `DISABLED`/`PREFERRED`; the cached fast-auth proof works over plaintext. No password reached `log.txt` in any case. ⏳ the scripted corpus (`make test-rdb-drivers`) with goldens. |
+| Corpus | ✅ `make test-rdb-drivers[-local]`: 4 scripts × 2 backends + 12 probes = **20 checks, all passing**, also under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. Without URIs both backends report SKIP. |
+| R8 / R9 drivers | ✅ **live-tested 2026-10-05** against PostgreSQL 18 and MySQL 8.4.11 in Apple `container` VMs with TLS on (test CA, SAN `localhost`/`127.0.0.1`). On both backends: schema, views, indexes, triggers, forward and reverse FK navigation, `decimal`, JSON and `datetime` decoding through `input()`. TLS matrix: disable / prefer / require / verify-ca / verify-full all behave as specified, and a missing or wrong CA, a server-name mismatch (fails verify-full, passes verify-ca) and a wrong password all fail cleanly. MySQL `caching_sha2_password` full auth works over the bridge's TLS and is refused under `DISABLED`/`PREFERRED`; the cached fast-auth proof works over plaintext. No password reached `log.txt` in any case. |
 | R10 bundling, R11 DuckDB | not started |
 
 **Defects found by the live test, fixed:**
