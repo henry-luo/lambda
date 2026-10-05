@@ -165,19 +165,58 @@ static Array* vector_to_plain_array(Item item, int64_t len) {
     return rooted_result.get();
 }
 
-static void stable_sort_items_by_total_order(Item* items, int64_t len, bool descending) {
-    for (int64_t i = 1; i < len; i++) {
-        Item value = items[i];
-        int64_t j = i - 1;
-        while (j >= 0) {
-            int cmp = total_cmp(items[j], value);
-            bool move = descending ? (cmp < 0) : (cmp > 0);
-            if (!move) break;
-            items[j + 1] = items[j];
-            j--;
+// Stable bottom-up merge sort of an index permutation by the total order of
+// each index's key. sort(), sort(v, key) and `order by` used insertion and
+// bubble sorts, so a reversed 65,536-element sort took 28 s; equal keys still
+// keep their input order, ascending or descending.
+typedef Item (*SortKeyAt)(const void* ctx, int64_t index);
+
+static void stable_sort_indices_by_total_order(int64_t* indices, int64_t len,
+        bool descending, SortKeyAt key_at, const void* ctx) {
+    if (len < 2) return;
+    int64_t* tmp = (int64_t*)mem_alloc(len * sizeof(int64_t), MEM_CAT_EVAL);
+    for (int64_t width = 1; width < len; width *= 2) {
+        for (int64_t lo = 0; lo < len; lo += 2 * width) {
+            int64_t mid = lo + width < len ? lo + width : len;
+            int64_t hi = lo + 2 * width < len ? lo + 2 * width : len;
+            int64_t i = lo, j = mid, k = lo;
+            while (i < mid && j < hi) {
+                int cmp = total_cmp(key_at(ctx, indices[j]), key_at(ctx, indices[i]));
+                bool right_first = descending ? (cmp > 0) : (cmp < 0);
+                tmp[k++] = right_first ? indices[j++] : indices[i++];
+            }
+            while (i < mid) tmp[k++] = indices[i++];
+            while (j < hi) tmp[k++] = indices[j++];
         }
-        items[j + 1] = value;
+        memcpy(indices, tmp, len * sizeof(int64_t));
     }
+    mem_free(tmp);
+}
+
+// apply a sorted permutation to an Item array in place
+static void permute_items(Item* items, const int64_t* indices, int64_t len) {
+    Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_EVAL);
+    for (int64_t i = 0; i < len; i++) temp[i] = items[indices[i]];
+    memcpy(items, temp, len * sizeof(Item));
+    mem_free(temp);
+}
+
+static int64_t* identity_indices(int64_t len) {
+    int64_t* indices = (int64_t*)mem_calloc(len > 0 ? len : 1, sizeof(int64_t), MEM_CAT_EVAL);
+    for (int64_t i = 0; i < len; i++) indices[i] = i;
+    return indices;
+}
+
+static Item sort_key_item_array(const void* ctx, int64_t index) {
+    return ((const Item*)ctx)[index];
+}
+
+static void stable_sort_items_by_total_order(Item* items, int64_t len, bool descending) {
+    if (len < 2) return;
+    int64_t* indices = identity_indices(len);
+    stable_sort_indices_by_total_order(indices, len, descending, sort_key_item_array, items);
+    permute_items(items, indices, len);
+    mem_free(indices);
 }
 
 // ArrayNum transforms used to fall back to generic Item arrays for the
@@ -2670,6 +2709,10 @@ Item fn_sort1(Item item) {
 
 // sort_by_keys(values, keys, descending) - sort values array in-place by corresponding keys
 // Keys are compared as doubles; values preserve their original Item type
+static Item sort_key_vector(const void* ctx, int64_t index) {
+    return vector_get(*(const Item*)ctx, index);
+}
+
 void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
     int64_t len = vector_length(values);
     int64_t key_len = vector_length(keys);
@@ -2682,33 +2725,12 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
     }
 
     // build index permutation array; keys stay as Items so sort/order by share total order.
-    int64_t* indices = (int64_t*)mem_calloc(len, sizeof(int64_t), MEM_CAT_EVAL);
-    for (int64_t i = 0; i < len; i++) {
-        indices[i] = i;
-    }
-
-    // stable bubble sort indices by total key order
-    for (int64_t i = 0; i < len - 1; i++) {
-        for (int64_t j = 0; j < len - i - 1; j++) {
-            int cmp = total_cmp(vector_get(keys, indices[j]), vector_get(keys, indices[j + 1]));
-            bool swap = descending ? (cmp < 0) : (cmp > 0);
-            if (swap) {
-                int64_t tmp = indices[j];
-                indices[j] = indices[j + 1];
-                indices[j + 1] = tmp;
-            }
-        }
-    }
+    int64_t* indices = identity_indices(len);
+    stable_sort_indices_by_total_order(indices, len, descending != 0, sort_key_vector, &keys);
 
     // rearrange values array in-place using the sorted index permutation
     // values must be an Array (LMD_TYPE_ARRAY) with items pointer
-    Array* arr = values.array;
-    Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_EVAL);
-    for (int64_t i = 0; i < len; i++) {
-        temp[i] = arr->items[indices[i]];
-    }
-    memcpy(arr->items, temp, len * sizeof(Item));
-    mem_free(temp);
+    permute_items(values.array->items, indices, len);
     mem_free(indices);
     // the stream keeps its kind: an ordered for-expression is still a list
     // (S2.5.2v2), finished by the caller
@@ -2720,6 +2742,10 @@ void fn_sort_by_keys(Item values, Item keys, int64_t descending) {
 //   function      → key extractor fn (ascending)
 //   map           → {dir: 'asc|'desc, by: key_fn}
 // string/symbol passthrough: strings are singular, not iterable
+static Item sort_key_slot(const void* ctx, int64_t index) {
+    return (Item){.item = *((uint64_t* const*)ctx)[index]};
+}
+
 Item fn_sort2(Item item, Item dir_item) {
     GUARD_ERROR2(item, dir_item);
     VECTOR_NDIM_ROWS(item, fn_sort2(item, dir_item));
@@ -2818,29 +2844,12 @@ Item fn_sort2(Item item, Item dir_item) {
             *key_slots[i] = key_result.item;
         }
 
-        // sort indices by key values using generic comparison (fn_lt/fn_gt)
-        for (int64_t i = 0; i < len - 1; i++) {
-            for (int64_t j = 0; j < len - i - 1; j++) {
-                Item left_key = (Item){.item = *key_slots[indices[j]]};
-                Item right_key = (Item){.item = *key_slots[indices[j + 1]]};
-                int cmp = total_cmp(left_key, right_key);
-                bool swap = descending ? (cmp < 0) : (cmp > 0);
-                if (swap) {
-                    int64_t tmp = indices[j];
-                    indices[j] = indices[j + 1];
-                    indices[j + 1] = tmp;
-                }
-            }
-        }
+        // sort indices by key values in total order
+        stable_sort_indices_by_total_order(indices, len, descending, sort_key_slot, key_slots);
 
         // rearrange items by sorted indices
-        Item* temp = (Item*)mem_alloc(len * sizeof(Item), MEM_CAT_EVAL);
         result = rooted_result.get();
-        for (int64_t i = 0; i < len; i++) {
-            temp[i] = result->items[indices[i]];
-        }
-        memcpy(result->items, temp, len * sizeof(Item));
-        mem_free(temp);
+        permute_items(result->items, indices, len);
         mem_free(indices);
         mem_free(key_homes);
         mem_free(key_slots);
