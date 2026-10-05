@@ -4,6 +4,7 @@
 #include "../runtime/lambda-error.h"
 #include "../runtime/lambda-stack.h"
 #include "../runtime/runtime-state.h"
+#include "../runtime/activation.h"
 #include "../lambda.hpp"
 #include "../input/input.hpp"
 #include "../jube/jube_registry.h"
@@ -15,6 +16,83 @@
 
 __thread JsRuntimeState* js_active_runtime_state = NULL;
 
+// The call-activation chain, the `with` chain and the per-call flags are LIFO
+// with the native stack, so an activation switch carries them (RA5). A fresh
+// activation keeps its first resumer's chain, which is live during that
+// resume; its entry immediately copies those facts onto its own stack
+// (JsOwnedCallActivation), so no later resume reads the first resumer's chain.
+typedef struct JsAmbient {
+    JsRuntimeState* state;
+    JsCallActivation* current_activation;
+    // Set only for a fresh activation: keep the resumer's chain on the first
+    // switch in. A saved NULL chain is the base activation, not "inherit".
+    bool inherit_call_chain;
+    JsWithFrame* with_head;
+    // Registry-rooted: a module namespace outlives every activation using it.
+    Item active_namespace;
+    int function_cache_suppress_depth;
+    bool with_memo_valid;
+    bool strict_mode;
+    bool private_field_initializing;
+    bool eval_initializer_context;
+    bool resolving_object_proto;
+} JsAmbient;
+
+static void js_ambient_init(void* storage) {
+    JsAmbient* ambient = (JsAmbient*)storage;
+    memset(ambient, 0, sizeof(*ambient));
+    JsRuntimeState* state = js_active_runtime_state;
+    ambient->state = state;
+    if (!state) return;
+    ambient->inherit_call_chain = true;
+    ambient->strict_mode = state->strict_mode;
+    Item* active_namespace = js_module_active_namespace_peek();
+    ambient->active_namespace = active_namespace ? *active_namespace : ItemNull;
+}
+
+static void js_ambient_save(void* storage) {
+    JsAmbient* ambient = (JsAmbient*)storage;
+    JsRuntimeState* state = js_active_runtime_state;
+    ambient->state = state;
+    ambient->inherit_call_chain = false;
+    if (!state) return;
+    ambient->current_activation = state->execution.current_activation;
+    ambient->with_head = state->with_head;
+    Item* active_namespace = js_module_active_namespace_peek();
+    ambient->active_namespace = active_namespace ? *active_namespace : ItemNull;
+    ambient->function_cache_suppress_depth = state->function_cache_suppress_depth;
+    ambient->with_memo_valid = state->with_memo_valid;
+    ambient->strict_mode = state->strict_mode;
+    ambient->private_field_initializing = state->private_field_initializing;
+    ambient->eval_initializer_context = state->eval_initializer_context;
+    ambient->resolving_object_proto = state->resolving_object_proto;
+}
+
+static void js_ambient_load(const void* storage) {
+    const JsAmbient* ambient = (const JsAmbient*)storage;
+    JsRuntimeState* state = ambient->state;
+    js_active_runtime_state = state;
+    if (!state) return;
+    if (!ambient->inherit_call_chain) {
+        state->execution.current_activation = ambient->current_activation;
+    }
+    state->with_head = ambient->with_head;
+    Item* active_namespace = js_module_active_namespace_peek();
+    if (active_namespace) *active_namespace = ambient->active_namespace;
+    state->function_cache_suppress_depth = ambient->function_cache_suppress_depth;
+    state->with_memo_valid = ambient->with_memo_valid;
+    state->strict_mode = ambient->strict_mode;
+    state->private_field_initializing = ambient->private_field_initializing;
+    state->eval_initializer_context = ambient->eval_initializer_context;
+    state->resolving_object_proto = ambient->resolving_object_proto;
+}
+
+static const ActivationAmbientHook js_ambient_hook = {
+    sizeof(JsAmbient), js_ambient_init, js_ambient_save, js_ambient_load,
+};
+[[maybe_unused]] static const bool js_ambient_registered =
+    activation_register_ambient_hook(&js_ambient_hook);
+
 extern "C" void js_runtime_owned_cache_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_prototype_snapshot_destroy_context(JsRuntimeState* state);
 extern "C" void js_runtime_regex_cache_destroy_context(JsRuntimeState* state);
@@ -23,8 +101,6 @@ extern "C" void js_history_reset(void);
 extern "C" void js_xhr_reset(void);
 extern void jm_compile_recovery_state_destroy_context(JsRuntimeState* state);
 extern void jm_destroy_p2_mir_contexts(JsRuntimeState* state);
-struct JsGeneratorStateRecord;
-void js_interp_generator_clear_continuations(JsGeneratorStateRecord* state);
 
 static void js_reset_cached_realm_objects(void) {
     // Cached realm objects all point into the batch heap and must be invalidated together.
@@ -742,8 +818,6 @@ static void js_runtime_state_visit_root_vectors(JsRuntimeState* state,
     visit(&state->promises, &state->promises.unhandled_storage, 2,
         "Promise unhandled queue and domain state", data);
     // the retired throw slot must not leave the following runtime IDs in the root span.
-    visit(&state->async_await, &state->async_await.resolved_value, 1,
-        "async await result handoff", data);
     if (state->async_hooks) {
         visit(state->async_hooks, &state->async_hooks->root_resource, 2,
             "async hooks current resources", data);

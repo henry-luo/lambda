@@ -1,16 +1,13 @@
 #pragma once
 
-// The common durable portion of any activation that can outlive its native
-// call. The slot spelling deliberately aliases JS's `env` and Lambda's
-// scheduler spill storage: both are destination-owned storage whose logical
-// extent survives a resume boundary. Allocation and trace policy remain a
-// profile tail because JS uses a GC environment while Lambda uses task roots.
+// The common durable portion of a JS generator or async activation that can
+// outlive its native call. Lambda tasks suspend on stackful activations
+// (activation.h) and need no durable frame of their own.
 
 #include "../lambda.hpp"
 
 enum DurableActivationKind : uint8_t {
     DURABLE_ACTIVATION_NONE = 0,
-    DURABLE_ACTIVATION_LAMBDA_ASYNC,
     DURABLE_ACTIVATION_JS_GENERATOR,
     DURABLE_ACTIVATION_JS_ASYNC,
 };
@@ -19,14 +16,8 @@ struct DurableActivation {
     TypeId type_id;
     DurableActivationKind kind;
     uint8_t reserved[6];
-    union {
-        Item* env;
-        Item* slots;
-    };
-    union {
-        int env_size;
-        int slot_count;
-    };
+    Item* env;
+    int env_size;
     int64_t state;
 };
 
@@ -39,10 +30,6 @@ static inline void durable_activation_init(DurableActivation* activation,
     activation->env = NULL;
     activation->env_size = 0;
     activation->state = 0;
-}
-
-static inline void durable_activation_reset(DurableActivation* activation) {
-    if (activation) activation->state = 0;
 }
 
 static inline bool durable_activation_uses_gc_environment(

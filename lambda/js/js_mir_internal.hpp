@@ -302,8 +302,6 @@ void jm_eval_cptn_reset(JsMirTranspiler* mt);
 void jm_push_loop_labels(JsMirTranspiler* mt, MIR_label_t continue_label, MIR_label_t break_label);
 JsWithLowering* jm_with_scope_at(JsMirTranspiler* mt, int index);
 void jm_emit_with_unwind_to(JsMirTranspiler* mt, int floor);
-void jm_emit_with_scope_save(JsMirTranspiler* mt);
-void jm_emit_with_scope_restore(JsMirTranspiler* mt);
 MIR_reg_t jm_emit_get_iterator(JsMirTranspiler* mt, MIR_reg_t iterable);
 MIR_reg_t jm_emit_get_iterator_lazy(JsMirTranspiler* mt, MIR_reg_t iterable);
 MIR_reg_t jm_emit_iterator_step(JsMirTranspiler* mt, MIR_reg_t iterator);
@@ -321,13 +319,8 @@ void jm_emit_iterator_close_on_error_lane_if_open(JsMirTranspiler* mt, MIR_reg_t
 void jm_emit_abrupt_jump_cleanup(JsMirTranspiler* mt, int target_loop_index);
 void jm_emit_break_completion(JsMirTranspiler* mt, JsBreakContinueNode* brk);
 void jm_emit_continue_completion(JsMirTranspiler* mt, JsBreakContinueNode* cont);
-int jm_next_resume_state(JsMirTranspiler* mt, JsMirSuspendKind kind);
 MIR_reg_t jm_emit_await_value_reg(JsMirTranspiler* mt, MIR_reg_t promise_val,
     JsMirSuspendKind kind, bool route_rejection = true);
-void jm_emit_suspend_env_save(JsMirTranspiler* mt);
-void jm_emit_resume_env_restore(JsMirTranspiler* mt);
-void jm_emit_try_state_save(JsMirTranspiler* mt);
-void jm_emit_try_state_restore(JsMirTranspiler* mt);
 void jm_emit_async_resume_refresh(JsMirTranspiler* mt);
 JsTryContext* jm_find_completion_context(JsMirTranspiler* mt, JsMirCompletionKind kind);
 JsErrorLaneTrack jm_error_lane_state(JsMirTranspiler* mt);
@@ -405,17 +398,9 @@ int jm_binding_cmp(const void* a, const void* b, void* udata);
 void jm_name_set_add(struct hashmap* set, const char* name);
 bool jm_name_set_has(struct hashmap* set, const char* name);
 bool jm_binding_set_has(struct hashmap* set, NameEntry* binding);
-int jm_count_yields(JsMirTranspiler* mt, JsAstNode* node);
-int jm_count_finally_inline_yields(JsAstNode* root);
-int jm_count_finally_inline_awaits(JsAstNode* root);
-int jm_gen_spill_reserve(JsMirTranspiler* mt);
-int jm_gen_spill_save(JsMirTranspiler* mt, MIR_reg_t reg);
-void jm_gen_spill_save_at(JsMirTranspiler* mt, MIR_reg_t reg, int slot);
-void jm_gen_spill_load(JsMirTranspiler* mt, MIR_reg_t reg, int slot);
-bool jm_has_yield(JsMirTranspiler* mt, JsAstNode* node);
 bool jm_can_suspend(JsMirTranspiler* mt, JsAstNode* node);
 bool jm_has_optional_chain(JsAstNode* node);
-int jm_count_awaits(JsMirTranspiler* mt, JsAstNode* node);
+bool jm_has_await(JsMirTranspiler* mt, JsAstNode* node);
 void jm_collect_indexed_func_assignments(JsMirTranspiler* mt, JsAstNode* node,
     struct hashmap* names);
 void jm_collect_indexed_body_refs(JsMirTranspiler* mt, JsFunctionNode* fn,

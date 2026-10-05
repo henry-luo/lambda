@@ -1354,6 +1354,10 @@ int gc_should_collect(gc_heap_t* gc) {
     return used >= gc->gc_threshold;
 }
 
+void gc_set_root_visitor(gc_heap_t* gc, gc_root_visitor_t visitor) {
+    if (gc) gc->root_visitor = visitor;
+}
+
 void gc_set_collect_callback(gc_heap_t* gc, gc_collect_callback_t callback) {
     if (!gc) return;
     gc->collect_callback = callback;
@@ -2677,6 +2681,8 @@ void gc_collect_with_root_region(gc_heap_t* gc, uint64_t* extra_roots,
             gc_mark_item(gc, root_base[i]);
         }
     }
+
+    if (gc->root_visitor) gc->root_visitor(gc);
 
     // Phase 1b: Mark explicit extra roots (caller-provided Items)
     uint64_t gc_extra_roots_token = GC_PROFILE_ENTER("gc_mark_extra_roots");

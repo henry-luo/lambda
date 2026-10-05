@@ -194,7 +194,6 @@ JsWithLowering* jm_with_scope_at(JsMirTranspiler* mt, int index) {
     if (!scope) {
         scope = (JsWithLowering*)mem_calloc(1, sizeof(JsWithLowering), MEM_CAT_JS_RUNTIME);
         if (!scope) return NULL;
-        scope->spill_slot = -1;
         arraylist_set(mt->with_stack, index, scope);
     }
     return scope;
@@ -242,8 +241,6 @@ JsTryContext* jm_try_context_push(JsMirTranspiler* mt) {
     if (!context) return NULL;
     memset(context, 0, sizeof(*context));
     context->end_label_error_lane_state = JS_ERROR_LANE_UNREACHABLE;
-    context->has_return_spill = -1;
-    context->return_val_spill = -1;
     context->loop_depth_at_push = mt->loop_depth;
     context->with_depth_at_push = mt->with_depth;
     mt->try_ctx_depth++;
@@ -414,9 +411,6 @@ void jm_destroy_mir_transpiler(JsMirTranspiler* mt) {
         if (mt->last_closure.captures) mem_free(mt->last_closure.captures);
         if (mt->last_closure.journal) mem_free(mt->last_closure.journal);
         if (mt->tdz_closure_captures) mem_free(mt->tdz_closure_captures);
-        if (mt->gen_state_labels) mem_free(mt->gen_state_labels);
-        mt->gen_state_labels = NULL;
-        mt->gen_state_label_capacity = 0;
         mt->tdz_closure_captures = NULL;
         mt->tdz_closure_capture_capacity = 0;
         mt->last_closure.captures = NULL;
@@ -779,10 +773,6 @@ void jm_emit_label(JsMirTranspiler* mt, MIR_label_t label) {
         return;
     }
     jm_clear_block_caches(mt);
-    // Async state-machine labels merge distinct resume activations, so the
-    // prior call result cannot dominate the label. Ordinary labels can be
-    // deliberate exception-rethrow targets and must retain their Item carrier.
-    if (mt->in_async && !mt->in_generator) mt->func_em->last_call_result = {};
     jm_error_lane_set_state(mt, JS_ERROR_LANE_UNKNOWN);
     em_emit_label(&mt->func_em->em, label);
 }
@@ -1137,7 +1127,6 @@ void jm_set_var(JsMirTranspiler* mt, const char* name, MIR_reg_t reg,
     entry.var.reg = reg;
     entry.var.root_slot = -1;
     entry.var.gc_home_id = 0;
-    entry.var.async_slot = -1;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
     entry.var.binding = binding;

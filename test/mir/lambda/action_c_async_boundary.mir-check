@@ -1,14 +1,11 @@
 {
   "schema_version": 1,
-  "description": "Action C async boundary: suspension stores/restores the async frame and does not let a pending companion enter the word spill protocol.",
+  "description": "RA1: a wait is an ordinary call. The suspending procedure emits no async-frame protocol and no pending-pair resolution around it; the caller still resolves the wide result it receives.",
   "checks": [
     {
       "in_func": "_delayed_value_#",
-      "expect": [
-        "lambda_async_frame_set_state",
-        "lambda_async_frame_get_word"
-      ],
       "forbid": [
+        "lambda_async_frame",
         "lambda_item_resolve_pending"
       ]
     },

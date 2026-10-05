@@ -17,6 +17,7 @@
 #include "../core/lambda-decimal.hpp"
 #include "lambda-stack.h"
 #include "side_stack.h"
+#include "activation.h"
 #include "sysinfo.h"
 #include "../core/binary.h"
 #include <math.h>
@@ -561,6 +562,7 @@ static void heap_finish_init(void) {
     context->heap->last_error_root = 0;
     gc_register_root(context->heap->gc, &context->heap->last_error_root);
     gc_set_collect_callback(context->heap->gc, heap_gc_collect);
+    gc_set_root_visitor(context->heap->gc, activation_gc_visit_roots);
     heap_configure_gc_force_schedule(context->heap->gc);
     heap_configure_gc_poisoning(context->heap->gc);
     context->heap->gc->vmap_trace = vmap_gc_trace;
@@ -1356,6 +1358,9 @@ void heap_destroy() {
             // payload with one shared duplicate-owner set.
             gc_heap_destroy(context->heap->gc);
         }
+        // Finalizers abandoned this heap's parked activations; their stacks
+        // are now idle in the pool.
+        activation_release_pool();
         lambda_region_destroy_caches(context->heap);
         if (context->heap->array_rep_cert_by_contract)
             hashmap_free(context->heap->array_rep_cert_by_contract);

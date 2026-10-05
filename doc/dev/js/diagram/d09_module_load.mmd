@@ -8,14 +8,21 @@ flowchart TD
     Wrap --> Mod["transpile_js_module_to_mir"]
     Raw --> Mod
     Mod --> Enter["js_tla_enter_module depth++"]
-    Enter --> Reg["register placeholder namespace"]
-    Reg --> Imports["jm_load_imports: recurse deps first"]
-    Imports --> Compile["jit_init, transpile_js_mir_ast, MIR_link"]
-    Compile --> Vars["js_alloc_module_vars, set active namespace/vars"]
-    Vars --> Pending{"pending_async_deps &gt; 0?"}
-    Pending -->|yes| Defer["stash deferred_main_ptr; wait for AEO drain"]
-    Pending -->|no| RunBody["js_main returns namespace object"]
-    RunBody --> DrainE["js_event_loop_drain, restore _lambda_rt"]
-    Defer --> Exit
-    DrainE --> Exit["js_tla_exit_module depth--; defer MIR cleanup"]
+    Enter --> Scope["one RuntimeExecutionScope for the graph; outermost inits the event loop"]
+    Scope --> Reg["register placeholder namespace"]
+    Reg --> Compile["lower module, detect top-level await"]
+    Compile --> Imports["jm_load_imports: recurse deps first, register async parents"]
+    Imports --> Link["js_mir_link_main; reserve and activate module state slab"]
+    Link --> Carrier{"TLA nested or dynamic, or pending_async_deps &gt; 0?"}
+    Carrier -->|no| RunBody["js_main returns namespace object"]
+    Carrier -->|yes| MakeCarrier["js_async_context_create_module"]
+    MakeCarrier --> Pending{"pending_async_deps &gt; 0?"}
+    Pending -->|yes| Defer["park carrier in descriptor; the ready scan starts it"]
+    Pending -->|no| Start2["js_async_start: js_main runs on the carrier, parks at each await"]
+    RunBody --> Entry{"entry module?"}
+    Defer --> Entry
+    Start2 --> Entry
+    Entry -->|yes| DrainE["flush microtasks, js_event_loop_drain"]
+    Entry -->|no| Exit
+    DrainE --> Exit["js_tla_exit_module depth--, ready scan at depth 0; defer MIR cleanup"]
     Exit --> Ret

@@ -190,13 +190,6 @@ struct MirDeferredNullBoundary {
     const char* site;
 };
 
-typedef struct AsyncRegSpill {
-    MIR_reg_t reg;
-    MIR_type_t mir_type;
-    JitValueClass value_class;
-    int slot;
-} AsyncRegSpill;
-
 typedef struct MirPropertyKeyEntry {
     NameRef name;
     NameId predefined_id;
@@ -609,27 +602,11 @@ struct MirTranspiler {
     AstNode* discarding_if_node;
     bool current_func_can_raise;
 
-    // Lambda concurrency state-machine context. Only procedures in the
-    // analyzer's task-context closure use these fields.
-    bool in_async_proc;
-    bool emitting_async_call;
-    int async_call_state;
-    int async_call_spill_count;
-    bool async_call_resume_emitted;
-    AstCallNode* async_call_target;
-    MIR_reg_t async_frame_reg;
-    MIR_reg_t async_scope_base_reg;
-    MIR_label_t* async_state_labels;
-    uint8_t* async_state_label_emitted;
-    AstCallNode** async_state_calls;
-    int async_state_count;
-    int async_next_state;
-    int async_next_slot;
-    AsyncRegSpill* async_spills;
-    int async_spill_count;
-    int async_spill_capacity;
-    bool async_tracking;
-    bool async_tracking_suppressed;
+    // The function lexically starts scoped child tasks, so its blocks enter
+    // and leave task scopes. A syntactic fact, not a colour: suspension itself
+    // needs no codegen (vibe/Lambda_Design_Runtime_Async.md RA1).
+    bool task_scopes;
+    MIR_reg_t task_scope_base_reg;
 
     // P4-3.2: Current function/script body for mutation analysis
     // Set to script->child at module level, fn_node->body inside functions
@@ -2031,53 +2008,8 @@ static bool mir_expr_is_owned_binding_alias(MirTranspiler* mt, AstNode* expr) {
 // Thin wrappers over the shared emitter primitives (P0.1). These delegate to
 // the em_* functions in mir_emitter_shared.hpp so the register/label/insn
 // emit logic lives once and JsMirTranspiler can adopt the same primitives.
-static void async_track_reg(MirTranspiler* mt, MIR_reg_t reg, MIR_type_t type,
-        JitValueClass value_class = JIT_VALUE_UNKNOWN) {
-    if (mt->async_tracking && !mt->async_tracking_suppressed) {
-        for (int i = 0; i < mt->async_spill_count; i++) {
-            AsyncRegSpill* existing = &mt->async_spills[i];
-            if (existing->reg != reg) continue;
-            if (existing->value_class == JIT_VALUE_UNKNOWN &&
-                    value_class != JIT_VALUE_UNKNOWN) {
-                existing->value_class = value_class;
-            }
-            return;
-        }
-        (void)lam::mem_grow_array(&mt->async_spills, &mt->async_spill_capacity,
-            mt->async_spill_count + 1, 64, MEM_CAT_EVAL);
-        if (mt->async_spill_count < mt->async_spill_capacity) {
-            AsyncRegSpill* spill = &mt->async_spills[mt->async_spill_count++];
-            spill->reg = reg;
-            spill->mir_type = type;
-            spill->value_class = value_class;
-            spill->slot = mt->async_next_slot++;
-        }
-    }
-}
-
-static void async_track_pending_reg(MirTranspiler* mt, MIR_reg_t reg) {
-    if (!mt || !mt->in_async_proc || !reg) return;
-    // physical-only: async spill bookkeeping preserves the emitted MIR class
-    // for later spill/reload instructions, not the Lambda ValueRep.
-    // Scope cleanup can suspend after the value-producing expression has run;
-    // preserve that final carrier even when it came from a shared MIR helper
-    // that allocated its register outside new_reg().
-    async_track_reg(mt, reg, MIR_reg_type(mt->ctx, reg, mt->em.func));
-}
-
-// A boxed Item must use the traced half of an async frame. A raw-word spill
-// can preserve arithmetic state, but it cannot keep a task handle alive while
-// the task is parked (D5.1.1v2, D5.3.4).
-static void async_track_boxed_item_reg(MirTranspiler* mt, MIR_reg_t reg) {
-    if (!mt || !mt->in_async_proc || !reg) return;
-    async_track_reg(mt, reg, MIR_reg_type(mt->ctx, reg, mt->em.func),
-        JIT_VALUE_BOXED_ITEM);
-}
-
 static MIR_reg_t new_reg(MirTranspiler* mt, const char* prefix, MIR_type_t type) {
-    MIR_reg_t reg = em_new_reg(&mt->em, prefix, type);
-    async_track_reg(mt, reg, type);
-    return reg;
+    return em_new_reg(&mt->em, prefix, type);
 }
 
 static MIR_label_t new_label(MirTranspiler* mt) {
@@ -2110,7 +2042,7 @@ static MirIndexedLoopFrame mir_begin_indexed_loop(MirTranspiler* mt, const char*
     if (mt->loop_depth < 31) {
         mt->loop_stack[mt->loop_depth].continue_label = frame.continue_label;
         mt->loop_stack[mt->loop_depth].break_label = frame.end;
-        mt->loop_stack[mt->loop_depth].task_scope_base = mt->in_async_proc
+        mt->loop_stack[mt->loop_depth].task_scope_base = mt->task_scopes
             ? em_call_0(&mt->em, "lambda_task_scope_current", MIR_T_P, false) : 0;
         mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
         mt->loop_stack[mt->loop_depth].nonnegative_upper_bound = NULL;
@@ -2322,7 +2254,6 @@ static MIR_reg_t emit_int_lane_to_double(MirTranspiler* mt, LaneReg lane);
 static MIR_reg_t emit_scalar_native_lane(MirTranspiler* mt,
         const MirValue& value, TypeId tid);
 static MIR_reg_t emit_unbox(MirTranspiler* mt, MIR_reg_t item_reg, TypeId type_id);
-static void async_store_var(MirTranspiler* mt, MirVarEntry* var);
 static void transpile_task_scope_unwind(MirTranspiler* mt, bool error_exit);
 
 // `contract` is the semantic Type* behind `type_id` when the caller has it.
@@ -3324,12 +3255,6 @@ static void lambda_call_root_value(void* owner, MIR_reg_t reg,
     }
 }
 
-static void lambda_after_call_result(void* owner, MIR_reg_t reg,
-        MIR_type_t type) {
-    MirTranspiler* mt = (MirTranspiler*)owner;
-    if (mt && reg) async_track_reg(mt, reg, type);
-}
-
 static int create_pointer_gc_root_slot(MirTranspiler* mt, MIR_reg_t ptr) {
     return create_gc_root_slot(mt, ptr, JIT_VALUE_RAW_GC_POINTER);
 }
@@ -3621,7 +3546,6 @@ static void mir_store_var_entry(MirTranspiler* mt, StrView name, MIR_reg_t reg,
     entry.name = name.str;
     entry.var.reg = reg;
     entry.var.root_slot = -1;
-    entry.var.async_slot = -1;
     entry.var.mir_type = mir_type;
     entry.var.type_id = type_id;
     entry.var.elem_type = LMD_TYPE_ANY;
@@ -6836,7 +6760,7 @@ static void emit_terminal_checked_null_rejection(MirTranspiler* mt,
 
 static bool emit_direct_terminal_checked_null_rejection(MirTranspiler* mt,
         Type* expected, const char* site) {
-    if (!mt || mt->in_async_proc ||
+    if (!mt ||
             mt->em.frame.return_type != MIR_T_I64 ||
             mt->em.frame.return_lane_kind != RETURN_LANE_NONE) {
         return false;
@@ -8013,7 +7937,7 @@ static MIR_reg_t emit_native_scalar_declaration_boundary(MirTranspiler* mt,
     MIR_label_t rejected = new_label(mt);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
         MIR_new_label_op(mt->ctx, rejected), MIR_new_reg_op(mt->ctx, is_null)));
-    if (!mt->in_async_proc && defer_terminal_checked_null_rejection(mt,
+    if (defer_terminal_checked_null_rejection(mt,
             rejected, expected, site)) {
         // The native success lane falls through without an inline may-GC
         // island. Keeping the known-null diagnostic at the terminal edge
@@ -8097,7 +8021,7 @@ static MIR_reg_t emit_parameter_boundary(MirTranspiler* mt, MIR_reg_t value,
 static bool mir_emit_int_lane_null_admission(MirTranspiler* mt, MIR_reg_t lane,
         TypeId value_type, ValueRep value_rep, Type* contract, const char* site) {
     Type* target = mir_unwrap_decl_type(contract);
-    if (!mt || mt->in_async_proc || value_type != LMD_TYPE_INT ||
+    if (!mt || value_type != LMD_TYPE_INT ||
             value_rep != VALUE_REP_INT_LANE || !target ||
             target->type_id != LMD_TYPE_INT || target->kind != TYPE_KIND_SIMPLE ||
             target->is_literal || lambda_type_accepts_null(contract)) {
@@ -8286,301 +8210,18 @@ static bool fn_has_parameter_default(AstFuncNode* fn_node) {
     return false;
 }
 
-static void async_store_var(MirTranspiler* mt, MirVarEntry* var) {
-    if (!mt || !var || !mt->in_async_proc || !mt->async_frame_reg ||
-            var->async_slot < 0) return;
-    bool saved_suppressed = mt->async_tracking_suppressed;
-    mt->async_tracking_suppressed = true;
-    MIR_reg_t boxed = emit_box(mt, var->reg, var->type_id);
-    emit_call_void_3(mt, "lambda_async_frame_set",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, var->async_slot),
-        MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed));
-    mt->async_tracking_suppressed = saved_suppressed;
-}
-
-// D5.1.1v2: a named binding needs frame storage only once control can really
-// leave this activation.  Slots are assigned at the suspension edge, after
-// all callee/argument effects have run, so locals introduced by a synchronous
-// continuation never become frame traffic merely because their pn may await.
-typedef struct AsyncBindingLiveScan {
-    const NameEntry* binding;
-    uint32_t after_byte;
-    bool used;
-} AsyncBindingLiveScan;
-
-static void async_scan_binding_after(AstNode* node, void* opaque) {
-    AsyncBindingLiveScan* scan = (AsyncBindingLiveScan*)opaque;
-    if (!node || !scan || scan->used) return;
-    if (node->node_type == AST_NODE_IDENT) {
-        AstIdentNode* ident = (AstIdentNode*)node;
-        if (ident->entry == scan->binding &&
-                node->source_span.start_byte >= scan->after_byte) {
-            scan->used = true;
-            return;
-        }
-    }
-    interp_visit_children(node, async_scan_binding_after, scan);
-}
-
-static bool async_binding_live_after(MirTranspiler* mt,
-        const MirVarEntry* var, uint32_t after_byte) {
-    if (!mt || !mt->func_body || !var || !var->binding) return true;
-    AsyncBindingLiveScan scan = {var->binding, after_byte, false};
-    async_scan_binding_after(mt->func_body, &scan);
-    return scan.used;
-}
-
-static void async_reserve_live_var_slots(MirTranspiler* mt,
-        const AstCallNode* suspension_call, int state) {
-    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
-    if (state > 0 && state <= mt->async_state_count && mt->async_state_calls) {
-        mt->async_state_calls[state] = (AstCallNode*)suspension_call;
-    }
-    uint32_t after_byte = suspension_call
-        ? suspension_call->source_span.end_byte : 0;
-    for (int scope = 0; scope <= mt->scope_depth; scope++) {
-        if (!mt->var_scopes[scope]) continue;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
-            VarScopeEntry* entry = (VarScopeEntry*)item;
-            MirVarEntry* var = &entry->var;
-            if (suspension_call && !async_binding_live_after(mt, var, after_byte)) {
-                continue;
-            }
-            if (var->async_slot < 0) var->async_slot = mt->async_next_slot++;
-        }
-    }
-}
-
-static void async_snapshot_live_vars(MirTranspiler* mt,
-        const AstCallNode* suspension_call, int state) {
-    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
-    // Normal call sites reserve before their resume label; retain this guard
-    // for suspension paths that do not materialize one through that helper.
-    async_reserve_live_var_slots(mt, suspension_call, state);
-    uint32_t after_byte = suspension_call
-        ? suspension_call->source_span.end_byte : 0;
-    for (int scope = 0; scope <= mt->scope_depth; scope++) {
-        if (!mt->var_scopes[scope]) continue;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
-            VarScopeEntry* entry = (VarScopeEntry*)item;
-            MirVarEntry* var = &entry->var;
-            if (suspension_call && !async_binding_live_after(mt, var, after_byte)) {
-                continue;
-            }
-            async_store_var(mt, var);
-        }
-    }
-}
-
-static void async_restore_vars(MirTranspiler* mt, int state) {
-    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
-    const AstCallNode* suspension_call = state > 0 &&
-            state <= mt->async_state_count && mt->async_state_calls
-        ? mt->async_state_calls[state] : NULL;
-    uint32_t after_byte = suspension_call
-        ? suspension_call->source_span.end_byte : 0;
-    bool saved_suppressed = mt->async_tracking_suppressed;
-    mt->async_tracking_suppressed = true;
-    for (int scope = 0; scope <= mt->scope_depth; scope++) {
-        if (!mt->var_scopes[scope]) continue;
-        size_t iter = 0;
-        void* item = NULL;
-        while (hashmap_iter(mt->var_scopes[scope], &iter, &item)) {
-            VarScopeEntry* entry = (VarScopeEntry*)item;
-            MirVarEntry* var = &entry->var;
-            // A slot owned by another resume state can hold an older value.
-            // Do not reload it over this state's operand spill (D5.1.1v2).
-            if (suspension_call && !async_binding_live_after(mt, var, after_byte)) {
-                continue;
-            }
-            if (var->async_slot < 0) continue;
-            MIR_reg_t saved = emit_call_2(mt, "lambda_async_frame_get", MIR_T_I64,
-                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, var->async_slot));
-            MIR_reg_t restored = var->type_id == LMD_TYPE_ANY ||
-                var->type_id == LMD_TYPE_NULL || var->type_id == LMD_TYPE_ERROR ||
-                var->type_id == LMD_TYPE_NUM_SIZED
-                ? saved : emit_unbox(mt, saved, var->type_id);
-            emit_insn(mt, MIR_new_insn(mt->ctx,
-                var->mir_type == MIR_T_D ? MIR_DMOV : MIR_MOV,
-                MIR_new_reg_op(mt->ctx, var->reg),
-                MIR_new_reg_op(mt->ctx, restored)));
-            update_gc_root_slot(mt, var);
-        }
-    }
-    mt->async_tracking_suppressed = saved_suppressed;
-}
-
-static void async_complete_frame(MirTranspiler* mt) {
-    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
-    emit_call_void_1(mt, "lambda_async_frame_complete",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-}
-
-static void finalize_async_frame_enter(MirTranspiler* mt) {
-    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
-    MIR_var_t arg = {MIR_T_I64, "slots", 0};
-    MirImportEntry* imported = ensure_import(mt, "lambda_async_frame_enter_current",
-        MIR_T_P, 1, &arg, 1);
-    MIR_insn_t enter = MIR_new_call_insn(mt->ctx, 4,
-        MIR_new_ref_op(mt->ctx, imported->proto),
-        MIR_new_ref_op(mt->ctx, imported->import),
-        MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
-        MIR_new_int_op(mt->ctx, mt->async_next_slot));
-    // async_next_slot is final only after lowering. Insert the exact-size frame
-    // allocation into the prologue once every named local and temporary is known.
-    MIR_insert_insn_before(mt->ctx, mt->em.func_item, mt->em.frame.anchor, enter);
-    em_profile_before_call(&mt->em, enter, "lambda_async_frame_enter_current",
-        LAMBDA_EXEC_CALL_HELPER);
-}
-
-static void async_save_spills(MirTranspiler* mt, int count) {
-    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
-    if (count > mt->async_spill_count) count = mt->async_spill_count;
-    bool saved_suppressed = mt->async_tracking_suppressed;
-    mt->async_tracking_suppressed = true;
-    MIR_reg_t pending_item = mt->em.pending_live_item;
-    MIR_reg_t resolved_pending = 0;
-    if (mt->em.pending_live_companion) {
-        // The async frame stores raw words and has no second lane for the
-        // companion.  Resolve the pair before saving it, and fail closed if
-        // the producer was not registered in this suspension's live set
-        // (D5.2.1v3, RV4.1).
-        bool pending_is_live = false;
-        for (int i = 0; i < count; i++) {
-            if (mt->async_spills[i].reg == pending_item) {
-                pending_is_live = true;
-                break;
-            }
-        }
-        if (!pending_is_live) {
-            log_error("concurrency MIR: pending companion crossed suspension "
-                "without an async spill slot");
-            abort();
-        }
-        resolved_pending = mir_materialize_pending_reg(mt, pending_item,
-            MIR_PENDING_REASON_SUSPEND);
-    }
-    for (int i = 0; i < count; i++) {
-        AsyncRegSpill* spill = &mt->async_spills[i];
-        MIR_reg_t bits = spill->reg == pending_item && resolved_pending
-            ? resolved_pending : spill->reg;
-        const char* setter = "lambda_async_frame_set_word";
-        if (spill->mir_type == MIR_T_D) {
-            bits = emit_box_float(mt, spill->reg);
-            setter = "lambda_async_frame_set";
-        } else if (spill->value_class == JIT_VALUE_BOXED_ITEM) {
-            setter = "lambda_async_frame_set";
-        }
-        emit_call_void_3(mt, setter,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, spill->slot),
-            MIR_T_I64, MIR_new_reg_op(mt->ctx, bits));
-    }
-    mt->async_tracking_suppressed = saved_suppressed;
-}
-
-static void async_restore_spills(MirTranspiler* mt, int count) {
-    if (!mt || !mt->in_async_proc || !mt->async_frame_reg) return;
-    if (count > mt->async_spill_count) count = mt->async_spill_count;
-    bool saved_suppressed = mt->async_tracking_suppressed;
-    mt->async_tracking_suppressed = true;
-    for (int i = 0; i < count; i++) {
-        AsyncRegSpill* spill = &mt->async_spills[i];
-        const char* getter = spill->mir_type == MIR_T_D ||
-            spill->value_class == JIT_VALUE_BOXED_ITEM
-            ? "lambda_async_frame_get" : "lambda_async_frame_get_word";
-        MIR_reg_t saved = emit_call_2(mt, getter, MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, spill->slot));
-        MIR_reg_t value = spill->mir_type == MIR_T_D
-            ? emit_unbox(mt, saved, LMD_TYPE_FLOAT) : saved;
-        emit_insn(mt, MIR_new_insn(mt->ctx,
-            spill->mir_type == MIR_T_D ? MIR_DMOV : MIR_MOV,
-            MIR_new_reg_op(mt->ctx, spill->reg),
-            MIR_new_reg_op(mt->ctx, value)));
-    }
-    mt->async_tracking_suppressed = saved_suppressed;
-}
-
-static void async_emit_suspended_return(
-    MirTranspiler* mt, MIR_reg_t result, int state, int spill_count,
-    const AstCallNode* suspension_call, bool snapshot_scope_vars) {
-    MIR_reg_t suspended = new_reg(mt, "async_suspended", MIR_T_I64);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-        MIR_new_reg_op(mt->ctx, suspended),
-        MIR_new_reg_op(mt->ctx, result),
-        MIR_new_uint_op(mt->ctx, ITEM_TASK_SUSPENDED)));
-    MIR_label_t ready = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-        MIR_new_label_op(mt->ctx, ready), MIR_new_reg_op(mt->ctx, suspended)));
-    if (snapshot_scope_vars) {
-        async_snapshot_live_vars(mt, suspension_call, state);
-    }
-    async_save_spills(mt, spill_count);
-    emit_call_void_2(mt, "lambda_async_frame_set_state",
-        MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
-        MIR_T_I64, MIR_new_int_op(mt->ctx, state));
-    log_debug("concurrency MIR: emitted park/resume state %d", state);
-    emit_function_return(mt, MIR_new_uint_op(mt->ctx, ITEM_TASK_SUSPENDED));
-    emit_label(mt, ready);
-}
-
-static void async_emit_invoke_resume_point(MirTranspiler* mt, AstCallNode* call) {
-    if (!mt || call != mt->async_call_target || mt->async_call_state <= 0 ||
-            mt->async_call_resume_emitted) return;
-    int state = mt->async_call_state;
-    if (!mt->async_state_labels || state > mt->async_state_count) return;
-
-    // The resume label belongs after callee and argument evaluation. Saving the
-    // prepared registers here prevents side effects in those expressions from
-    // running again when the awaited invocation is retried.
-    mt->async_call_spill_count = mt->async_spill_count;
-    // Reserve before emitting the label: the generated restore path must know
-    // its slots even though the suspension-edge stores are emitted later.
-    async_reserve_live_var_slots(mt, call, state);
-    MIR_label_t invoke = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, invoke)));
-    emit_label(mt, mt->async_state_labels[state]);
-    async_restore_spills(mt, mt->async_call_spill_count);
-    async_restore_vars(mt, state);
-    emit_label(mt, invoke);
-    mt->async_call_resume_emitted = true;
-}
-
+// Leaving a function or loop early joins (or, on an error exit, cancels and
+// joins) the children of every task scope opened since `scope_base`.
 static void transpile_task_scope_unwind_to(
     MirTranspiler* mt, MIR_reg_t scope_base, bool error_exit) {
-    if (!mt->in_async_proc || !scope_base) return;
-    int state = ++mt->async_next_state;
-    if (state > mt->async_state_count || !mt->async_state_labels) {
-        log_error("concurrency MIR: unwind-state count mismatch at state %d/%d",
-            state, mt->async_state_count);
-        return;
-    }
-    int spill_count = mt->async_spill_count;
-    // Scope cleanup may suspend without a source call to prune against.
-    async_reserve_live_var_slots(mt, NULL, state);
-    MIR_label_t invoke = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, invoke)));
-    emit_label(mt, mt->async_state_labels[state]);
-    async_restore_spills(mt, spill_count);
-    async_restore_vars(mt, state);
-    emit_label(mt, invoke);
-    MIR_reg_t result = emit_call_2(mt, "lambda_task_scope_unwind", MIR_T_I64,
+    if (!mt->task_scopes || !scope_base) return;
+    (void)emit_call_2(mt, "lambda_task_scope_unwind", MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, scope_base),
         MIR_T_I64, MIR_new_int_op(mt->ctx, error_exit ? 1 : 0));
-    async_emit_suspended_return(mt, result, state, spill_count, NULL, true);
 }
 
 static void transpile_task_scope_unwind(MirTranspiler* mt, bool error_exit) {
-    transpile_task_scope_unwind_to(mt, mt->async_scope_base_reg, error_exit);
+    transpile_task_scope_unwind_to(mt, mt->task_scope_base_reg, error_exit);
 }
 
 // ============================================================================
@@ -9537,12 +9178,7 @@ static MIR_reg_t mir_path_keys_span(MirTranspiler* mt) {
     // the anchor and the cached span belong to the active root frame only
     bool prologue = mt->em.frame.active && mt->em.frame.anchor;
     if (prologue && mt->path_keys_reg) return mt->path_keys_reg;
-    // never an async spill: every (re)entry reruns the prologue ALLOCA, and a
-    // restored copy would point into the suspended activation's dead stack
-    bool saved_suppressed = mt->async_tracking_suppressed;
-    mt->async_tracking_suppressed = true;
     MIR_reg_t span = new_reg(mt, "path_keys", MIR_T_I64);
-    mt->async_tracking_suppressed = saved_suppressed;
     MIR_insn_t alloca_insn = MIR_new_insn(mt->ctx, MIR_ALLOCA,
         MIR_new_reg_op(mt->ctx, span),
         MIR_new_int_op(mt->ctx, (int64_t)LAMBDA_PATH_KEYS_MAX * (int64_t)sizeof(Item)));
@@ -15146,7 +14782,7 @@ static bool mir_pure_native_index(MirTranspiler* mt, AstNode* node, int depth) {
 // for invalid indices (S4.1.2, S7.1.1v3, D2.6.2).
 static bool mir_emit_int_array_pair_compare(MirTranspiler* mt,
         AstBinaryNode* bi, MirValue* out) {
-    if (mt->in_async_proc || (bi->op != OPERATOR_EQ && bi->op != OPERATOR_NE)) {
+    if (bi->op != OPERATOR_EQ && bi->op != OPERATOR_NE) {
         return false;
     }
     AstNode* left = ast_unwrap_primary(bi->left);
@@ -15308,8 +14944,7 @@ static MIR_reg_t emit_constrained_type_test(MirTranspiler* mt,
 
 static bool mir_emit_local_versioned_tree(MirTranspiler* mt, AstBinaryNode* bi,
         bool native_int_out, MirValue* out) {
-    if (mt->local_reads_assumed || mt->typed_array_inbounds_assumed ||
-            mt->in_async_proc) return false;
+    if (mt->local_reads_assumed || mt->typed_array_inbounds_assumed) return false;
     if (bi->op != OPERATOR_ADD && bi->op != OPERATOR_SUB &&
             bi->op != OPERATOR_MUL && bi->op != OPERATOR_DIV) return false;
     AstFieldNode* reads[8];
@@ -16841,9 +16476,7 @@ static MIR_reg_t transpile_propagated_result(MirTranspiler* mt, MIR_reg_t result
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF, MIR_new_label_op(mt->ctx, l_ok),
         MIR_new_reg_op(mt->ctx, is_err)));
     // the propagated error exits before any enclosing native consumer sees it
-    async_track_pending_reg(mt, result);
     transpile_task_scope_unwind(mt, true);
-    async_complete_frame(mt);
     emit_function_error_return(mt, result);
     emit_label(mt, l_ok);
 
@@ -18648,7 +18281,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
     }
 
     // Index counter and break/continue labels
-    ArrayList* loop_scalars = mt->in_async_proc ? NULL : mir_loop_entry_scalars(mt);
+    ArrayList* loop_scalars = mir_loop_entry_scalars(mt);
     MirIndexedLoopFrame loop_frame = mir_begin_indexed_loop(mt, "idx");
     MIR_reg_t idx = loop_frame.index;
     MIR_label_t l_loop = loop_frame.loop;
@@ -18833,7 +18466,7 @@ static MIR_reg_t emit_for_result(MirTranspiler* mt, AstForNode* for_node,
     memcpy(mt->typed_array_inbounds_indices, saved_for_inbounds_indices,
         sizeof(saved_for_inbounds_indices));
     mt->typed_array_inbounds_index_count = saved_for_inbounds_index_count;
-    if (!mt->in_async_proc) em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end, loop_scalars);
+    em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end, loop_scalars);
     arraylist_free(loop_scalars);
     if (keys_al) {
         emit_call_void_1(mt, "symbol_key_list_free",
@@ -20666,7 +20299,7 @@ static void mir_emit_while_copy(MirTranspiler* mt, AstWhileNode* while_node,
 
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP, MIR_new_label_op(mt->ctx, l_loop)));
     emit_label(mt, l_end);
-    if (!mt->in_async_proc) em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end, loop_scalars);
+    em_hoist_loop_scalar_calls(&mt->em, l_loop, l_end, loop_scalars);
 }
 
 static void mir_profile_dense_fast_entry(MirTranspiler* mt) {
@@ -20725,7 +20358,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     if (mt->loop_depth < 31) {
         mt->loop_stack[mt->loop_depth].continue_label = l_loop;
         mt->loop_stack[mt->loop_depth].break_label = l_end;
-        mt->loop_stack[mt->loop_depth].task_scope_base = mt->in_async_proc
+        mt->loop_stack[mt->loop_depth].task_scope_base = mt->task_scopes
             ? emit_call_0(mt, "lambda_task_scope_current", MIR_T_P) : 0;
         mt->loop_stack[mt->loop_depth].nonnegative_counter = NULL;
         mt->loop_stack[mt->loop_depth].nonnegative_upper_bound = NULL;
@@ -20788,7 +20421,7 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     mir_prepare_typed_array_write_guard(mt, while_node);
     MIR_reg_t dense_guard = mir_prepare_dense_loop_guard(mt, while_node,
         compact_counter);
-    ArrayList* loop_scalars = mt->in_async_proc ? NULL : mir_loop_entry_scalars(mt);
+    ArrayList* loop_scalars = mir_loop_entry_scalars(mt);
 
     // Tune30 T30-1: the dense guard is loop-invariant, so branch on it once.
     // The fast copy runs with every proven access assumed in range: reads are
@@ -20797,7 +20430,6 @@ static MIR_reg_t transpile_while_core(MirTranspiler* mt, AstWhileNode* while_nod
     // copy is the unversioned loop. An accumulator plan owns its own loop
     // head transfer and keeps the single copy.
     bool version_loop = dense_guard && !mt->typed_array_inbounds_assumed &&
-        !mt->in_async_proc &&
         !mt->loop_head_degraded_exit && mt->accumulator_writer_count == 0 &&
         mt->loop_depth > 0 && mt->loop_depth <= 32;
     if (version_loop) {
@@ -21051,7 +20683,7 @@ static bool mir_accumulator_exempt_scan_node(AstNode* node, void* data) {
 static bool mir_loop_accumulator_plan(MirTranspiler* mt, AstWhileNode* while_node,
         MirLoopAccumulatorPlan* plan) {
     *plan = {};
-    if (!mt || mt->in_async_proc || !while_node || !while_node->body ||
+    if (!mt || !while_node || !while_node->body ||
             (while_node->body->node_type != AST_NODE_CONTENT &&
              while_node->body->node_type != AST_NODE_LIST)) return false;
     MirAccumulatorCandidate candidates[MIR_LOOP_ACCUMULATOR_MAX * 2];
@@ -21268,7 +20900,7 @@ static bool mir_binder_raw_loop_hoist_scan_node(AstNode* node, void* opaque) {
 
 static bool mir_binder_raw_loop_hoist_plan(MirTranspiler* mt,
         AstWhileNode* while_node, MirBinderRawLoopHoistPlan* plan) {
-    if (!mt || !while_node || !plan || mt->in_async_proc ||
+    if (!mt || !while_node || !plan ||
             mt->binder_raw_loop_hoist_depth || !mir_tg8_guard_hoist_enabled()) {
         return false;
     }
@@ -21872,6 +21504,9 @@ static MirValue transpile_local_fault_expression(MirTranspiler* mt,
         AstNode* expression) {
     const uint64_t item_error = (uint64_t)LMD_TYPE_ERROR << 56;
     MIR_reg_t result = new_reg(mt, "local_fault_result", MIR_T_I64);
+    // A landing abandons callee frames without running their scope exits;
+    // their scoped children are cancelled and joined before `^` is bound.
+    MIR_reg_t scope_mark = emit_call_0(mt, "lambda_task_scope_current", MIR_T_P);
     MIR_reg_t frame = emit_call_2(mt, "lambda_recovery_frame_begin_for", MIR_T_P,
         MIR_T_P, MIR_new_reg_op(mt->ctx, mt->em.frame.runtime),
         MIR_T_I64, MIR_new_int_op(mt->ctx, LAMBDA_RECOVERY_CAP_LOCAL_FAULT));
@@ -21977,6 +21612,9 @@ static MirValue transpile_local_fault_expression(MirTranspiler* mt,
         MIR_new_reg_op(mt->ctx, result), MIR_new_reg_op(mt->ctx, fault_item)));
     (void)emit_call_1(mt, "lambda_recovery_frame_end", MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, frame));
+    (void)emit_call_2(mt, "lambda_task_scope_unwind", MIR_T_I64,
+        MIR_T_P, MIR_new_reg_op(mt->ctx, scope_mark),
+        MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
     emit_label(mt, done);
     return mir_value_from_reg(mt, expression, result, VALUE_REP_ITEM,
         expression->type, LMD_TYPE_ERROR);
@@ -22005,16 +21643,10 @@ static bool handler_body_consumes_error_value(AstNode* node) {
 }
 
 static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler) {
-    bool durable_fault_target = mt->in_async_proc && handler->async_fault_state > 0;
-    if (durable_fault_target) {
-        emit_call_void_2(mt, "lambda_async_frame_set_fault_target",
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, handler->async_fault_state));
-    }
     bool saved_in_handler_operand = mt->in_handler_operand;
     mt->in_handler_operand = true;
     MIR_reg_t operand;
-    if (handler->is_statement && mt->in_proc && !mt->in_async_proc) {
+    if (handler->is_statement && mt->in_proc) {
         // Procedural handlers own the local fault regime.  The frame protects
         // only the operand; the recovery body runs after that frame is retired.
         operand = transpile_local_fault_expression(mt, handler->operand).reg;
@@ -22022,11 +21654,6 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
         operand = transpile_box_item(mt, handler->operand);
     }
     mt->in_handler_operand = saved_in_handler_operand;
-    // The native-fault landing resumes after the operand call, so it must
-    // restore the exact pre-handler spill set before entering cleanup or
-    // binding `^`.  Body-local spills are allocated later and are not part of
-    // the abandoned operand activation.
-    int fault_spill_count = mt->async_spill_count;
     MIR_reg_t type_tag = new_reg(mt, "handler_tag", MIR_T_I64);
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_RSH,
         MIR_new_reg_op(mt->ctx, type_tag), MIR_new_reg_op(mt->ctx, operand),
@@ -22050,10 +21677,6 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
     bool value_arm_exits = false;
     if (handler->value_body) {
         mt->block_returned = false;
-        if (durable_fault_target) {
-            emit_call_void_1(mt, "lambda_async_frame_clear_fault_target",
-                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-        }
         // The value arm binds `~` to one subject as T0's value_scope does:
         // `~key` and `~~` null, `~` its own root. Riding the pipe context lets
         // a nested pipe's `~` shadow it (S10.1.3); a flag that outranked the
@@ -22082,10 +21705,6 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
                     value_body_result)));
         }
     } else if (handler->is_statement) {
-        if (durable_fault_target) {
-            emit_call_void_1(mt, "lambda_async_frame_clear_fault_target",
-                MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-        }
         emit_handler_statement_result(mt, result);
     } else {
         emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
@@ -22095,10 +21714,6 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
         MIR_new_label_op(mt->ctx, done)));
 
     emit_label(mt, handle);
-    if (durable_fault_target) {
-        emit_call_void_1(mt, "lambda_async_frame_clear_fault_target",
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-    }
     MIR_reg_t saved_handler_error = mt->handler_error_reg;
     bool saved_in_handler = mt->in_handler;
     mt->handler_error_reg = operand;
@@ -22123,53 +21738,6 @@ static MIR_reg_t emit_handler_result(MirTranspiler* mt, AstHandlerNode* handler)
     // the one-arm form passes a non-error operand through, which never exits
     mt->block_returned = entry_returned ||
         (handler->value_body && value_arm_exits && error_arm_exits);
-    if (durable_fault_target) {
-        MIR_label_t after_fault = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, after_fault)));
-        emit_label(mt, mt->async_state_labels[handler->async_fault_state]);
-        mt->async_state_label_emitted[handler->async_fault_state] = 1;
-        async_restore_spills(mt, fault_spill_count);
-        async_restore_vars(mt, handler->async_fault_state);
-        // A native fault may have abandoned several generated activations.
-        // Their task scopes must be cancelled and joined before the target
-        // handler runs; otherwise a later poll would retain resources owned by
-        // the skipped native frames.  Re-entering this same state after a
-        // child completes makes the cleanup frame-by-frame and suspension-safe.
-        MIR_reg_t fault_scope_base = emit_call_1(mt,
-            "lambda_async_frame_fault_scope_base", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-        MIR_reg_t scope_result = emit_call_2(mt, "lambda_task_scope_unwind",
-            MIR_T_I64, MIR_T_P,
-            MIR_new_reg_op(mt->ctx, fault_scope_base),
-            MIR_T_I64, MIR_new_int_op(mt->ctx, 1));
-        async_emit_suspended_return(mt, scope_result,
-            handler->async_fault_state, fault_spill_count, NULL, true);
-        MIR_reg_t scope_tag = emit_item_tag(mt, scope_result);
-        MIR_reg_t scope_error = new_reg(mt, "handler_scope_error", MIR_T_I64);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_EQ,
-            MIR_new_reg_op(mt->ctx, scope_error),
-            MIR_new_reg_op(mt->ctx, scope_tag),
-            MIR_new_int_op(mt->ctx, LMD_TYPE_ERROR)));
-        MIR_label_t scope_ready = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BF,
-            MIR_new_label_op(mt->ctx, scope_ready),
-            MIR_new_reg_op(mt->ctx, scope_error)));
-        // Scope cleanup failure is a fresh ordinary outcome.  It cannot be
-        // routed back into the abandoned handler operand, whose fault target
-        // has already been consumed by this state.
-        async_complete_frame(mt);
-        emit_function_error_return(mt, scope_result);
-        emit_label(mt, scope_ready);
-        MIR_reg_t fault = emit_call_1(mt, "lambda_async_frame_take_fault",
-            MIR_T_I64, MIR_T_P,
-            MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, operand), MIR_new_reg_op(mt->ctx, fault)));
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-            MIR_new_label_op(mt->ctx, handle)));
-        emit_label(mt, after_fault);
-    }
     return result;
 }
 
@@ -22323,7 +21891,7 @@ static bool mir_binding_only_observed(MirTranspiler* mt, NameEntry* binding,
 }
 
 static bool mir_alias_is_readonly_borrow(MirTranspiler* mt, AstDeclaratorNode* declaration) {
-    if (!mt->ast_index || !mt->in_user_func || mt->in_async_proc || !declaration->entry ||
+    if (!mt->ast_index || !mt->in_user_func || !declaration->entry ||
             declaration->entry->is_mutable || declaration->next) return false;
     MirVarEntry* source = mir_direct_root_binding(mt, declaration->init);
     if (!source || !source->binding || source->from_env || source->is_state_var ||
@@ -24251,27 +23819,12 @@ static MirValue transpile_content_items(MirTranspiler* mt, AstListNode* content,
 
 static MIR_reg_t transpile_task_scope_leave(
     MirTranspiler* mt, MIR_reg_t scope, MIR_reg_t block_result, bool error_exit) {
-    if (!mt->in_async_proc || !scope) return block_result;
-    int state = ++mt->async_next_state;
-    if (state > mt->async_state_count || !mt->async_state_labels) {
-        log_error("concurrency MIR: scope-state count mismatch at state %d/%d",
-            state, mt->async_state_count);
-        return block_result;
-    }
-
-    int spill_count = mt->async_spill_count;
-    async_reserve_live_var_slots(mt, NULL, state);
-    MIR_label_t invoke = new_label(mt);
-    emit_insn(mt, MIR_new_insn(mt->ctx, MIR_JMP,
-        MIR_new_label_op(mt->ctx, invoke)));
-    emit_label(mt, mt->async_state_labels[state]);
-    async_restore_spills(mt, spill_count);
-    async_restore_vars(mt, state);
-    emit_label(mt, invoke);
-    MIR_reg_t leave_result = emit_call_2(mt, "lambda_task_scope_leave", MIR_T_I64,
+    if (!mt->task_scopes || !scope) return block_result;
+    // Joining the block's children may park this task; the block result is an
+    // ordinary register across that call.
+    (void)emit_call_2(mt, "lambda_task_scope_leave", MIR_T_I64,
         MIR_T_P, MIR_new_reg_op(mt->ctx, scope),
         MIR_T_I64, MIR_new_int_op(mt->ctx, error_exit ? 1 : 0));
-    async_emit_suspended_return(mt, leave_result, state, spill_count, NULL, false);
     return block_result;
 }
 
@@ -24289,7 +23842,7 @@ static MirValue transpile_content_finish(MirTranspiler* mt, AstListNode* content
 static bool mir_checked_int_tail_allowed(MirTranspiler* mt) {
     Type* contract = mt && mt->current_return_type
         ? mir_unwrap_decl_type(mt->current_return_type) : NULL;
-    return mt && !mt->in_proc && !mt->in_async_proc &&
+    return mt && !mt->in_proc &&
         mt->native_return_tid == LMD_TYPE_ANY &&
         !mt->current_func_can_raise && contract &&
         contract->kind == TYPE_KIND_SIMPLE &&
@@ -24311,12 +23864,12 @@ static MirValue transpile_content_value(MirTranspiler* mt, AstListNode* list_nod
     // firewall at the final iteration. Its braced block has no aggregate
     // publication after a recursive call (D8.2.6, S9.1.2).
     bool tail_position = mt->in_tail_position && mt->tco_func &&
-        !mt->in_proc && !mt->in_async_proc;
+        !mt->in_proc;
     tail_position = tail_position &&
         (mir_string_tail_accumulator(mt) || mir_array_tail_accumulator(mt) ||
          mir_checked_int_tail_allowed(mt));
     mt->in_tail_position = false;
-    MIR_reg_t task_scope = mt->in_async_proc
+    MIR_reg_t task_scope = mt->task_scopes
         ? emit_call_0(mt, "lambda_task_scope_enter", MIR_T_P) : 0;
 
     // Detect proc context: either we're inside a pn function (mt->in_proc),
@@ -26746,7 +26299,7 @@ static void mir_emit_small_array_length_guard(MirTranspiler* mt,
 // registers until the binding's flow scope ends (S9.1.2, D5.2, D8.2.5v3).
 static bool mir_try_scalar_array_binding(MirTranspiler* mt,
         AstDeclaratorNode* declaration) {
-    if (!mt->flow_scope || !mt->in_user_func || mt->in_async_proc ||
+    if (!mt->flow_scope || !mt->in_user_func ||
             declaration->is_type_definition || !declaration->declared_type) {
         return false;
     }
@@ -26947,7 +26500,7 @@ static bool mir_record_field_boundary_redundant(MirTranspiler* mt,
 }
 
 static bool mir_try_scalar_record_binding(MirTranspiler* mt, AstDeclaratorNode* declaration) {
-    if (!mt->flow_scope || !mt->in_user_func || mt->in_async_proc ||
+    if (!mt->flow_scope || !mt->in_user_func ||
             declaration->is_type_definition) return false;
     AstNode* init = ast_unwrap_primary(declaration->init);
     bool direct_literal = init && init->node_type == AST_NODE_MAP &&
@@ -28699,7 +28252,7 @@ static MIR_reg_t emit_checked_index_load(MirTranspiler* mt, MIR_reg_t arr_ptr,
     }
 
     // a proven in-bounds access has no branch to the out-of-bounds arm
-    bool deferred_oob = index_in_bounds || (policy.nonnull_boundary && !mt->in_async_proc &&
+    bool deferred_oob = index_in_bounds || (policy.nonnull_boundary &&
         defer_terminal_checked_null_rejection(mt, l_oob,
             policy.nonnull_boundary, policy.nonnull_boundary_site));
     if (!deferred_oob) {
@@ -30034,22 +29587,6 @@ static MirValue emit_index_result_value(MirTranspiler* mt, AstFieldNode* field_n
 // Call expressions
 // ============================================================================
 
-static bool mir_call_may_suspend(AstCallNode* call_node) {
-    if (!call_node) return false;
-    AstNode* function = ast_unwrap_primary(call_node->function);
-    if (function && function->node_type == AST_NODE_SYS_FUNC) {
-        SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
-        return info && info->is_async;
-    }
-    if (!function || !lambda_type_func_is_proc(function->type)) return false;
-    if (function->node_type != AST_NODE_IDENT) return true;
-    NameEntry* entry = ((AstIdentNode*)function)->entry;
-    AstNode* target = entry ? entry->node : NULL;
-    if (!target || target->node_type != AST_NODE_PROC) return true;
-    AstFuncNode* callee = (AstFuncNode*)target;
-    return callee->analysis && callee->analysis->may_await;
-}
-
 static MirValue mir_call_value_from_result(MirTranspiler* mt,
         AstCallNode* call_node, MIR_reg_t result, bool returned_boxed_item) {
     AstNode* node = (AstNode*)call_node;
@@ -30872,7 +30409,7 @@ static MirVarEntry* mir_inline_array_argument(MirTranspiler* mt,
 
 static bool mir_inline_call_ok(MirTranspiler* mt, AstCallNode* call,
         AstFuncNode* fn, NativeFuncInfo* info) {
-    if (mt->in_async_proc || mt->inline_frame ||
+    if (mt->inline_frame ||
             mir_expr_carrier_type(mt, (AstNode*)call) != info->return_type ||
             !mir_inline_callee_ok(mt, fn, info)) {
         return false;
@@ -30944,7 +30481,7 @@ static AstFuncNode* mir_inline_call_target(MirTranspiler* mt, AstCallNode* call,
 // its original rich error and leaving no partial local binding (S11.4.1v3).
 static bool mir_try_scalar_array_call_binding(MirTranspiler* mt,
         AstDeclaratorNode* declaration) {
-    if (!mt->flow_scope || !mt->in_user_func || mt->in_async_proc ||
+    if (!mt->flow_scope || !mt->in_user_func ||
             mt->inline_frame || declaration->is_type_definition ||
             !declaration->declared_type) return false;
     AstNode* init = ast_unwrap_primary(declaration->init);
@@ -31478,9 +31015,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             handles = load_gc_root_slot(mt, handles_root, "select_handles");
             MIR_reg_t handles_item = emit_call_1(mt, "array_end", MIR_T_I64,
                 MIR_T_P, MIR_new_reg_op(mt->ctx, handles));
-            async_track_boxed_item_reg(mt, handles_item);
-            async_track_boxed_item_reg(mt, timeout);
-            async_emit_invoke_resume_point(mt, call_node);
             RETURN_CALL_VALUE(emit_call_2(mt, "pn_select", MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, handles_item),
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, timeout)));
@@ -32344,7 +31878,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 returned_boxed_item = true; \
             } \
             if (info->fn != SYSFUNC_INT64 && !call_node->propagate && \
-                !mt->emitting_async_call && c_ret_tid == LMD_TYPE_ANY && \
+                c_ret_tid == LMD_TYPE_ANY && \
                 (mir_is_native_scalar_value_type(call_expr_tid) || \
                  is_text_type_id(call_expr_tid))) { \
                 result = call_expr_tid == LMD_TYPE_FLOAT && \
@@ -32362,8 +31896,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         // excluded so vector semantics keep the
         // boxed path — that exclusion is the whole safety argument here.
         if (info->native_c_name && info->native_func_ptr &&
-                info->native_returns_float && !mt->emitting_async_call &&
-                sysfunc_native_math_always_float(info->fn) &&
+                info->native_returns_float &&                 sysfunc_native_math_always_float(info->fn) &&
                 arg_count == info->native_arg_count &&
                 (arg_count == 1 || arg_count == 2)) {
             AstNode* nodes[2] = {call_node->argument, NULL};
@@ -32398,7 +31931,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
 
         // For 0-arg functions like datetime(), date() etc
         if (arg_count == 0) {
-            async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = emit_call_0(mt, sys_fn_name, mir_ret_type);
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
@@ -32437,12 +31969,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 }
                 rejected = emit_rejected_join_open(mt, items, ai);
             }
-            for (int i = 0; i < ai; i++) {
-                if (arg_reps[i] == VALUE_REP_ITEM) {
-                    async_track_boxed_item_reg(mt, arg_regs[i]);
-                }
-            }
-            async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = em_call_with_args(&mt->em, sys_fn_name, mir_ret_type,
                 ai, arg_types, arg_ops, false);
             if (rejected.value) {
@@ -32479,7 +32005,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     log_error("mir: variadic system function requires non-Item ABI argument");
                     abort();
                 }
-                async_track_boxed_item_reg(mt, abi_arg.reg);
                 arg_ops[ai++] = MIR_new_reg_op(mt->ctx, abi_arg.reg);
                 arg = arg->next;
             }
@@ -32502,7 +32027,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             ops[2] = MIR_new_reg_op(mt->ctx, result);
             for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
 
-            async_emit_invoke_resume_point(mt, call_node);
             emit_insn(mt, MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             POST_PROCESS_DTIME(result);
             POST_PROCESS_BOOL(result);
@@ -32669,7 +32193,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     ? MIR_new_reg_op(mt->ctx, wrapper_home)
                     : MIR_new_int_op(mt->ctx, 0);
 
-                async_emit_invoke_resume_point(mt, call_node);
                 em_emit_borrowed_call(&mt->em, trampoline_name,
                     MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
                 if (wrapper_home_id) {
@@ -32688,7 +32211,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                 ops[2] = MIR_new_reg_op(mt->ctx, result);
                 for (int i = 0; i < ai; i++) ops[3 + i] = arg_ops[i];
 
-                async_emit_invoke_resume_point(mt, call_node);
                 em_emit_borrowed_call(&mt->em, fn_import_name->str,
                     MIR_new_insn_arr(mt->ctx, MIR_CALL, nops, ops));
             }
@@ -32699,8 +32221,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
             // including its nullable lanes: an imported `float?` null read as
             // NaN and a `bool?` null as false.
             TypeId call_tid = mir_expr_carrier_type(mt, (AstNode*)call_node);
-            if (!mt->emitting_async_call &&
-                    (mir_is_native_scalar_value_type(call_tid) ||
+            if (                    (mir_is_native_scalar_value_type(call_tid) ||
                      call_tid == LMD_TYPE_STRING)) {
                 result = emit_unbox_contract_lane(mt, result, call_tid,
                     ((AstNode*)call_node)->type);
@@ -34016,7 +33537,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     &direct_capture_count);
             }
 
-            async_emit_invoke_resume_point(mt, call_node);
             MIR_reg_t result = 0;
             MirValue direct_value = {};
             // v3 shape 4: a direct call to a native `^E` body returns its error
@@ -34261,8 +33781,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
                     result = direct_value.reg;
                 }
                 if (!can_forward_pending && !call_error_lane && !call_node->propagate &&
-                        !mt->in_handler_operand && !mt->emitting_async_call &&
-                        (mir_is_native_scalar_value_type(call_tid) ||
+                        !mt->in_handler_operand &&                         (mir_is_native_scalar_value_type(call_tid) ||
                          call_tid == LMD_TYPE_STRING)) {
                     Type* call_return_contract = call_fn_type
                         ? call_fn_type->return_contract : NULL;
@@ -34468,7 +33987,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
             NULL, 0, 0);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
-        async_emit_invoke_resume_point(mt, call_node);
         dyn_result = emit_call_2(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_int_op(mt->ctx, 0));
@@ -34494,7 +34012,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
             args, arg_count, 0);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
-        async_emit_invoke_resume_point(mt, call_node);
         if (arg_count == 1) {
             dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
                 MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
@@ -34575,7 +34092,6 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
         MirColourGuard colour = mir_colour_guard_begin(mt, call_node, boxed_fn,
             NULL, 0, args_list);
         mt->module_rooted_reg = module_fn_rooted ? boxed_fn : 0;
-        async_emit_invoke_resume_point(mt, call_node);
         dyn_result = emit_call_3(mt, call_fn, MIR_T_I64,
             MIR_T_I64, MIR_new_reg_op(mt->ctx, boxed_fn),
             MIR_T_P, MIR_new_reg_op(mt->ctx, args_list),
@@ -34600,8 +34116,7 @@ static MirValue emit_call_value(MirTranspiler* mt, AstCallNode* call_node) {
     // Unbox to native type to match direct call behavior, so callers
     // can re-box consistently based on AST type.
     TypeId call_tid = mir_expr_carrier_type(mt, (AstNode*)call_node);
-    if (!call_node->propagate && !mt->emitting_async_call &&
-            (mir_is_native_scalar_value_type(call_tid) ||
+    if (!call_node->propagate &&             (mir_is_native_scalar_value_type(call_tid) ||
              is_text_type_id(call_tid))) {
         // A dynamic dispatcher can reject a valid Lambda signature for its
         // physical ABI. Preserve that ItemError before native unboxing, or an
@@ -34618,55 +34133,7 @@ static MirValue transpile_call(MirTranspiler* mt, AstCallNode* call_node) {
     MirValue value = {};
     // emit_call_value consumes the tail flag, so read it first (LR12-11 below)
     const bool call_in_tail_position = mt->in_tail_position;
-    bool split = mt->in_async_proc && mir_call_may_suspend(call_node);
-    if (!split) {
-        value = emit_call_value(mt, call_node);
-    } else {
-        int state = ++mt->async_next_state;
-        if (state > mt->async_state_count || !mt->async_state_labels) {
-            log_error("concurrency MIR: await-state count mismatch at state %d/%d",
-                state, mt->async_state_count);
-            value = emit_call_value(mt, call_node);
-        } else {
-
-            int saved_call_state = mt->async_call_state;
-            int saved_call_spill_count = mt->async_call_spill_count;
-            bool saved_resume_emitted = mt->async_call_resume_emitted;
-            AstCallNode* saved_call_target = mt->async_call_target;
-            mt->async_call_state = state;
-            mt->async_call_spill_count = -1;
-            mt->async_call_resume_emitted = false;
-            mt->async_call_target = call_node;
-            bool saved_async_call = mt->emitting_async_call;
-            mt->emitting_async_call = true;
-            value = emit_call_value(mt, call_node);
-            mt->emitting_async_call = saved_async_call;
-            int spill_count = mt->async_call_spill_count;
-            bool resume_emitted = mt->async_call_resume_emitted;
-            mt->async_call_state = saved_call_state;
-            mt->async_call_spill_count = saved_call_spill_count;
-            mt->async_call_resume_emitted = saved_resume_emitted;
-            mt->async_call_target = saved_call_target;
-            if (!resume_emitted || spill_count < 0) {
-                log_error("concurrency MIR: missing replay-safe invoke boundary at state %d", state);
-            } else {
-                async_emit_suspended_return(mt, value.reg, state, spill_count,
-                    call_node, true);
-
-                TypeId call_tid = mir_expr_carrier_type(mt, (AstNode*)call_node);
-                if (!call_node->propagate &&
-                        value.rep != VALUE_REP_ITEM &&
-                        (mir_is_native_scalar_value_type(call_tid) ||
-                         is_text_type_id(call_tid))) {
-                    value = mir_value_from_reg(mt, (AstNode*)call_node,
-                        emit_unbox(mt, value.reg, call_tid),
-                        lambda_canonical_rep_for_type_id(call_tid),
-                        ((AstNode*)call_node)->type,
-                        mir_expr_semantic_type((AstNode*)call_node));
-                }
-            }
-        }
-    }
+    value = emit_call_value(mt, call_node);
 
     if (call_node->propagate) {
         TypeId carrier_type = mir_expr_carrier_type(mt, (AstNode*)call_node);
@@ -35165,9 +34632,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
                 MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)raise_node->site_column));
         }
         // Return the error value from the function
-        async_track_pending_reg(mt, boxed);
         transpile_task_scope_unwind(mt, true);
-        async_complete_frame(mt);
         emit_function_error_return(mt, boxed);
         // A raise exits through the error lane just as `return` exits through
         // the normal lane. Its filler must never be consumed as a body value.
@@ -35182,9 +34647,7 @@ static MIR_reg_t transpile_raise(MirTranspiler* mt, AstRaiseNode* raise_node) {
     uint64_t ITEM_ERROR_VAL = (uint64_t)LMD_TYPE_ERROR << 56;
     emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV, MIR_new_reg_op(mt->ctx, r),
         MIR_new_int_op(mt->ctx, (int64_t)ITEM_ERROR_VAL)));
-    async_track_pending_reg(mt, r);
     transpile_task_scope_unwind(mt, true);
-    async_complete_frame(mt);
     emit_function_error_return(mt, r);
     mt->block_returned = true;
     return r;
@@ -35204,8 +34667,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
     AstNode* return_expr = ret_node && ret_node->value
         ? ast_unwrap_primary(ret_node->value) : NULL;
     bool pair_return_frame = mt->em.frame.return_lane_kind == RETURN_LANE_SCALAR &&
-        em_returns_result_pair(mt->em.frame.plan.companion) &&
-        !mt->in_async_proc;
+        em_returns_result_pair(mt->em.frame.plan.companion);
     // A direct call in a pair-returning function is eligible for RV6 tail
     // forwarding. Other return expressions remain ordinary consumers and must
     // resolve before the return firewall.
@@ -35283,7 +34745,6 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
             mt->em.pending_live_companion = 0;
             emit_vargs_restore();
             transpile_task_scope_unwind(mt, false);
-            async_complete_frame(mt);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, val));
             mt->in_tail_position = saved_tail;
             return val;
@@ -35348,9 +34809,7 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                     mt->current_return_type);
             }
             emit_vargs_restore();
-            async_track_pending_reg(mt, native_val);
             transpile_task_scope_unwind(mt, false);
-            async_complete_frame(mt);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, native_val));
         } else {
             // Standard: box and return through the shared representation
@@ -35361,16 +34820,13 @@ static MIR_reg_t transpile_return(MirTranspiler* mt, AstReturnNode* ret_node) {
                 VALUE_REP_ITEM).reg;
             boxed = emit_coerce_boxed_to_declared(mt, boxed, mt->current_return_type);
             emit_vargs_restore();
-            async_track_pending_reg(mt, boxed);
             transpile_task_scope_unwind(mt, false);
-            async_complete_frame(mt);
             emit_function_return(mt, MIR_new_reg_op(mt->ctx, boxed));
         }
     } else {
         // Return with no value
         emit_vargs_restore();
         transpile_task_scope_unwind(mt, false);
-        async_complete_frame(mt);
         if (native_ret == LMD_TYPE_FLOAT) {
             emit_function_return(mt, MIR_new_double_op(mt->ctx, 0.0));
         } else if (native_ret != LMD_TYPE_ANY) {
@@ -42640,11 +42096,9 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     MIR_func_t saved_func = mt->em.func;
     MIR_reg_t saved_consts = mt->consts_reg;
     MirFrameState saved_frame = em_frame_suspend(&mt->em);
-    bool saved_in_async_proc = mt->in_async_proc;
-    // The wrapper has no suspend/resume state of its own. Inheriting the raw
-    // async body's frame register would make wrapper parameter stores refer to
-    // registers owned by that different MIR function.
-    mt->in_async_proc = false;
+    bool saved_task_scopes = mt->task_scopes;
+    // The wrapper opens no task scopes of its own.
+    mt->task_scopes = false;
 
     // Create wrapper function
     MIR_type_t ret_type = MIR_T_I64;
@@ -43094,7 +42548,7 @@ static void emit_boxed_abi_wrapper(MirTranspiler* mt, const char* raw_name,
     mt->consts_reg = saved_consts;
     em_frame_dispose(&mt->em);
     em_frame_restore(&mt->em, saved_frame);
-    mt->in_async_proc = saved_in_async_proc;
+    mt->task_scopes = saved_task_scopes;
 
     strbuf_free(wrapper_name);
 }
@@ -43126,10 +42580,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
         ? (TypeFunc*)fn_as_node->type : NULL;
     bool is_variadic = fn_type && fn_type->is_variadic;
     bool is_proc_fn = (fn_as_node->node_type == AST_NODE_PROC);
-    bool needs_task_context = is_proc_fn && fn_node->analysis &&
-        fn_node->analysis->needs_task_context;
-    bool is_async_proc = is_proc_fn && fn_node->analysis &&
-        fn_node->analysis->may_await;
+    bool owns_task_scopes = is_proc_fn && fn_node->analysis &&
+        fn_node->analysis->owns_task_scopes;
     bool region_producer = mir_region_producer_candidate(fn_node);
     bool has_borrowed_params = mir_function_has_borrowed_params(fn_node);
     bool borrowed_raw_abi = false;
@@ -43199,8 +42651,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // only denies the function's *other* params their native carriers — an
     // `advance(bx: float[], ..., dt: float)` was passing `dt` boxed purely
     // because it shared a signature with an array.
-    if (!needs_task_context && !is_async_proc && !borrowed_raw_abi &&
-            !is_closure && !is_method && !is_variadic) {
+    if (!borrowed_raw_abi && !is_closure && !is_method && !is_variadic) {
         for (int i = 0; i < user_param_count; i++) {
             if (mir_param_uses_native_lane(fn_node, i)) {
                 generate_native = true;
@@ -43398,25 +42849,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     int saved_typed_array_write_root_count = mt->typed_array_write_root_count;
     int saved_finite_int_fact_count = mt->finite_int_fact_count;
     int saved_loop_generic_arm_depth = mt->loop_generic_arm_depth;
-    bool saved_in_async_proc = mt->in_async_proc;
-    bool saved_emitting_async_call = mt->emitting_async_call;
-    int saved_async_call_state = mt->async_call_state;
-    int saved_async_call_spill_count = mt->async_call_spill_count;
-    bool saved_async_call_resume_emitted = mt->async_call_resume_emitted;
-    AstCallNode* saved_async_call_target = mt->async_call_target;
-    MIR_reg_t saved_async_frame_reg = mt->async_frame_reg;
-    MIR_reg_t saved_async_scope_base_reg = mt->async_scope_base_reg;
-    MIR_label_t* saved_async_state_labels = mt->async_state_labels;
-    uint8_t* saved_async_state_label_emitted = mt->async_state_label_emitted;
-    AstCallNode** saved_async_state_calls = mt->async_state_calls;
-    int saved_async_state_count = mt->async_state_count;
-    int saved_async_next_state = mt->async_next_state;
-    int saved_async_next_slot = mt->async_next_slot;
-    AsyncRegSpill* saved_async_spills = mt->async_spills;
-    int saved_async_spill_count = mt->async_spill_count;
-    int saved_async_spill_capacity = mt->async_spill_capacity;
-    bool saved_async_tracking = mt->async_tracking;
-    bool saved_async_tracking_suppressed = mt->async_tracking_suppressed;
+    bool saved_task_scopes = mt->task_scopes;
+    MIR_reg_t saved_task_scope_base_reg = mt->task_scope_base_reg;
     mt->in_user_func = true;
     mt->binder_env_reg = 0;
     mt->binder_env_count = 0;
@@ -43442,35 +42876,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     memset(mt->var_param_home_regs, 0, sizeof(mt->var_param_home_regs));
     memset(mt->var_param_bindings, 0, sizeof(mt->var_param_bindings));
     memset(mt->var_param_home_contracts, 0, sizeof(mt->var_param_home_contracts));
-    mt->in_async_proc = is_async_proc;
-    mt->emitting_async_call = false;
-    mt->async_call_state = 0;
-    mt->async_call_spill_count = -1;
-    mt->async_call_resume_emitted = false;
-    mt->async_call_target = NULL;
-    mt->async_frame_reg = 0;
-    mt->async_scope_base_reg = 0;
-    mt->async_state_count = is_async_proc && fn_node->analysis
-        ? fn_node->analysis->await_point_count +
-            fn_node->analysis->async_fault_handler_count : 0;
-    mt->async_next_state = 0;
-    mt->async_next_slot = 0;
-    mt->async_spills = NULL;
-    mt->async_spill_count = 0;
-    mt->async_spill_capacity = 0;
-    mt->async_tracking = false;
-    mt->async_tracking_suppressed = false;
-    mt->async_state_labels = NULL;
-    mt->async_state_label_emitted = NULL;
-    mt->async_state_calls = NULL;
-    if (mt->async_state_count > 0) {
-        mt->async_state_labels = (MIR_label_t*)mem_calloc(
-            (size_t)(mt->async_state_count + 1), sizeof(MIR_label_t), MEM_CAT_EVAL);
-        mt->async_state_label_emitted = (uint8_t*)mem_calloc(
-            (size_t)(mt->async_state_count + 1), sizeof(uint8_t), MEM_CAT_EVAL);
-        mt->async_state_calls = (AstCallNode**)mem_calloc(
-            (size_t)(mt->async_state_count + 1), sizeof(AstCallNode*), MEM_CAT_EVAL);
-    }
+    mt->task_scopes = owns_task_scopes;
+    mt->task_scope_base_reg = 0;
 
     // Save original strdup pointers before MIR overwrites them
     char* param_name_copies[RAW_FUNCTION_PARAM_CAPACITY];
@@ -43515,7 +42922,7 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // boxed value so a rebind reaches the caller on this tier as it does on
     // T0 (S9.1.3, DO29). Excluding typed non-array params here left them no
     // home at all.
-    if (fn_as_node && fn_as_node->node_type == AST_NODE_PROC && !is_async_proc) {
+    if (fn_as_node && fn_as_node->node_type == AST_NODE_PROC) {
         int vh_index = 0;
         for (AstNamedNode* vp = fn_node->param; vp && vh_index < LAMBDA_MAX_FUNCTION_ARGS;
                 vp = (AstNamedNode*)((AstNode*)vp)->next, vh_index++) {
@@ -43592,86 +42999,9 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     // Set up parameter scope
     push_scope(mt);
 
-    if (needs_task_context) {
-        MIR_reg_t has_task = emit_call_0(mt, "lambda_task_has_current", MIR_T_I64);
-        MIR_label_t in_task = new_label(mt);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BT,
-            MIR_new_label_op(mt->ctx, in_task), MIR_new_reg_op(mt->ctx, has_task)));
-
-        MIR_reg_t launch_args = emit_call_0(mt, "list", MIR_T_P);
-        int launch_args_root = create_pointer_gc_root_slot(mt, launch_args);
-        AstNamedNode* launch_param = fn_node->param;
-        int launch_index = 0;
-        while (launch_param) {
-            char launch_name[32];
-            mir_format_backend_name(launch_name, sizeof(launch_name), 'p',
-                (uint64_t)(1 + ((is_closure || (is_method && !is_closure)) ? 1 : 0) + launch_index));
-            MIR_reg_t launch_value = MIR_reg(mt->ctx, launch_name, func);
-            launch_args = load_gc_root_slot(mt, launch_args_root, "launch_args");
-            // an argument list is stored verbatim: list_push would drop a null
-            // argument and splice a list one (D2.6.5v3)
-            emit_call_void_2(mt, "array_push_verbatim",
-                MIR_T_P, MIR_new_reg_op(mt->ctx, launch_args),
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, launch_value));
-            launch_param = (AstNamedNode*)launch_param->next;
-            launch_index++;
-        }
-        launch_args = load_gc_root_slot(mt, launch_args_root, "launch_args");
-
-        MIR_reg_t function_ptr = new_reg(mt, "async_root_fn", MIR_T_P);
-        StrBuf* task_wrapper_name = strbuf_new_cap(64);
-        write_fn_name_ex(task_wrapper_name, fn_node, NULL, "_b");
-        MIR_item_t task_wrapper = find_local_func(mt, task_wrapper_name->str);
-        emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-            MIR_new_reg_op(mt->ctx, function_ptr),
-            MIR_new_ref_op(mt->ctx, task_wrapper ? task_wrapper : func_item)));
-        strbuf_free(task_wrapper_name);
-        MIR_reg_t launch_env = new_reg(mt, "async_root_env", MIR_T_P);
-        if (is_closure) {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, launch_env),
-                MIR_new_reg_op(mt->ctx, MIR_reg(mt->ctx, "_env_ptr", func))));
-        } else if (is_method) {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, launch_env),
-                MIR_new_reg_op(mt->ctx, MIR_reg(mt->ctx, "_self", func))));
-        } else {
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_MOV,
-                MIR_new_reg_op(mt->ctx, launch_env), MIR_new_int_op(mt->ctx, 0)));
-        }
-        MIR_var_t launch_vars[4] = {
-            {MIR_T_P, "fn", 0}, {MIR_T_P, "env", 0},
-            {MIR_T_I64, "env_count", 0}, {MIR_T_P, "args", 0}
-        };
-        MirImportEntry* launch_import = ensure_import(mt, "lambda_task_run_root_raw",
-            MIR_T_I64, 4, launch_vars, 1);
-        MIR_reg_t launch_result = new_reg(mt, "async_root_result", MIR_T_I64);
-        emit_insn(mt, MIR_new_call_insn(mt->ctx, 7,
-            MIR_new_ref_op(mt->ctx, launch_import->proto),
-            MIR_new_ref_op(mt->ctx, launch_import->import),
-            MIR_new_reg_op(mt->ctx, launch_result),
-            MIR_new_reg_op(mt->ctx, function_ptr),
-            MIR_new_reg_op(mt->ctx, launch_env),
-            MIR_new_int_op(mt->ctx, fn_node->analysis ? fn_node->analysis->capture_count : 0),
-            MIR_new_reg_op(mt->ctx, launch_args)));
-        emit_function_return(mt, MIR_new_reg_op(mt->ctx, launch_result));
-        emit_label(mt, in_task);
-    }
-
-    if (is_async_proc) {
-        mt->async_frame_reg = new_reg(mt, "async_frame", MIR_T_P);
-        mt->async_scope_base_reg = emit_call_1(mt, "lambda_async_frame_scope_base", MIR_T_P,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-        MIR_reg_t frame_state = emit_call_1(mt, "lambda_async_frame_state", MIR_T_I64,
-            MIR_T_P, MIR_new_reg_op(mt->ctx, mt->async_frame_reg));
-        for (int state = 1; state <= mt->async_state_count; state++) {
-            mt->async_state_labels[state] = new_label(mt);
-            emit_insn(mt, MIR_new_insn(mt->ctx, MIR_BEQ,
-                MIR_new_label_op(mt->ctx, mt->async_state_labels[state]),
-                MIR_new_reg_op(mt->ctx, frame_state),
-                MIR_new_int_op(mt->ctx, state)));
-        }
-        mt->async_tracking = true;
+    if (owns_task_scopes) {
+        // Early exits unwind the scopes this activation opens back to here.
+        mt->task_scope_base_reg = emit_call_0(mt, "lambda_task_scope_current", MIR_T_P);
     }
 
     // Save and set closure context
@@ -44448,25 +43778,11 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
             field = typemap_next_field(owner, field);
         }
     }
-    // Conservative exit-edge analysis may reserve states for branches whose
-    // lowering proves they cannot suspend. MIR still requires every dispatcher
-    // target to be present, even though those states can never be stored.
-    for (int state = mt->async_next_state + 1; state <= mt->async_state_count; state++) {
-        if (!mt->async_state_label_emitted ||
-                !mt->async_state_label_emitted[state]) {
-            emit_label(mt, mt->async_state_labels[state]);
-            if (mt->async_state_label_emitted) {
-                mt->async_state_label_emitted[state] = 1;
-            }
-        }
-    }
-    async_complete_frame(mt);
     emit_function_return(mt, MIR_new_reg_op(mt->ctx, body_result));
     finish_function_epilogue(mt);
     finalize_gc_root_publication(mt, name_buf->str);
     finalize_side_root_frame(mt);
-    finalize_async_frame_enter(mt);
-    if (!mt->in_async_proc) mir_narrow_body_gc_effect(mt, fn_node);
+    mir_narrow_body_gc_effect(mt, fn_node);
 
     pop_scope(mt);
 
@@ -44556,29 +43872,8 @@ static void transpile_func_def(MirTranspiler* mt, AstFuncNode* fn_node) {
     mt->typed_array_write_root_count = saved_typed_array_write_root_count;
     mt->finite_int_fact_count = saved_finite_int_fact_count;
     mt->loop_generic_arm_depth = saved_loop_generic_arm_depth;
-    mem_free(mt->async_state_labels);
-    mem_free(mt->async_state_label_emitted);
-    mem_free(mt->async_state_calls);
-    mem_free(mt->async_spills);
-    mt->in_async_proc = saved_in_async_proc;
-    mt->emitting_async_call = saved_emitting_async_call;
-    mt->async_call_state = saved_async_call_state;
-    mt->async_call_spill_count = saved_async_call_spill_count;
-    mt->async_call_resume_emitted = saved_async_call_resume_emitted;
-    mt->async_call_target = saved_async_call_target;
-    mt->async_frame_reg = saved_async_frame_reg;
-    mt->async_scope_base_reg = saved_async_scope_base_reg;
-    mt->async_state_labels = saved_async_state_labels;
-    mt->async_state_label_emitted = saved_async_state_label_emitted;
-    mt->async_state_calls = saved_async_state_calls;
-    mt->async_state_count = saved_async_state_count;
-    mt->async_next_state = saved_async_next_state;
-    mt->async_next_slot = saved_async_next_slot;
-    mt->async_spills = saved_async_spills;
-    mt->async_spill_count = saved_async_spill_count;
-    mt->async_spill_capacity = saved_async_spill_capacity;
-    mt->async_tracking = saved_async_tracking;
-    mt->async_tracking_suppressed = saved_async_tracking_suppressed;
+    mt->task_scopes = saved_task_scopes;
+    mt->task_scope_base_reg = saved_task_scope_base_reg;
     mt->current_closure = saved_closure;
     mt->env_reg = saved_env_reg;
     mt->in_proc = saved_in_proc;
@@ -45674,14 +44969,9 @@ static bool mir_binder_raw_variant_callee_eligible(AstFuncNode* callee,
             callee->captures) {
         return false;
     }
-    AstNode* callee_as = (AstNode*)callee;
-    // A task-rooted procedure changes its entry protocol even without an
-    // explicit await, so only ordinary synchronous pn bodies may share TG8's
-    // direct raw ABI. `var` formals remain rejected per call below.
-    if (callee_as->node_type != AST_NODE_PROC) return true;
-    // A missing effect analysis cannot prove the task-free raw entry protocol.
-    return callee->analysis && !callee->analysis->may_await &&
-        !callee->analysis->needs_task_context;
+    // Every pn shares one entry protocol: suspension needs no special entry.
+    // `var` formals remain rejected per call below.
+    return true;
 }
 
 static bool mir_callsite_exact_raw_key(AstCallNode* call, AstFuncNode* callee,
@@ -46126,13 +45416,8 @@ static void prepass_forward_declare_one(MirTranspiler* mt, AstNode* node) {
                 TypeFunc* ft = (fn_as->type && fn_as->type->type_id == LMD_TYPE_FUNC)
                     ? (TypeFunc*)fn_as->type : NULL;
                 bool is_variadic = ft && ft->is_variadic;
-                bool needs_task_context = fn_as->node_type == AST_NODE_PROC &&
-                    fn_node->analysis && fn_node->analysis->needs_task_context;
-                bool is_async_proc = fn_as->node_type == AST_NODE_PROC &&
-                    fn_node->analysis && fn_node->analysis->may_await;
                 bool is_proc = (fn_as->node_type == AST_NODE_PROC);
-                if (!needs_task_context && !is_async_proc &&
-                        !is_closure &&
+                if (!is_closure &&
                         !is_variadic && !is_method) {
                     // Resolve all param types (matching transpile_func_def logic)
                     TypeId fwd_param_types[LAMBDA_MAX_FUNCTION_ARGS];
@@ -46429,8 +45714,8 @@ static bool mir_gc_plan_body_may_gc(MirTranspiler* mt, AstFuncNode* fn,
     TypeFunc* signature = fn && fn->type && fn->type->type_id == LMD_TYPE_FUNC
         ? (TypeFunc*)fn->type : NULL;
     if (!fn || !fn->body || fn->captures || fn->is_that_predicate ||
-            (fn->analysis && (fn->analysis->may_await ||
-                fn->analysis->needs_task_context)) ||
+            // a suspension lets other tasks allocate
+            (fn->analysis && fn->analysis->may_await) ||
             !signature || signature->is_variadic || signature->binder_count ||
             !signature->returned ||
             signature->returned->type_id != LMD_TYPE_BOOL) {
@@ -47241,7 +46526,6 @@ static void transpile_mir_ast_begin(MirModuleBuild* build, MIR_context_t ctx, As
     mt.em.helper_results_skip_rehome = true;
     mt.em.after_may_gc_call = lambda_after_may_gc_call;
     mt.em.root_call_value = lambda_call_root_value;
-    mt.em.after_call_result = lambda_after_call_result;
     mt.em.convert_rep = lambda_convert_rep;
     mt.em.lower_value = mir_profile_lower_value;
     mt.em.emit_condition = mir_profile_emit_condition;

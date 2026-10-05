@@ -3055,9 +3055,10 @@ JitImport jit_runtime_imports[] = {
     // v14: Generator runtime
     {"js_generator_create", FPTR(js_generator_create)},
     {"js_generator_create_mir", FPTR(js_generator_create_mir)},
-    {"js_gen_yield_result", FPTR(js_gen_yield_result)},
-    {"js_gen_await_result", FPTR(js_gen_await_result)},
-    {"js_gen_yield_delegate_result", FPTR(js_gen_yield_delegate_result)},
+    {"js_gen_park", FPTR(js_gen_park)},
+    {"js_await_park", FPTR(js_await_park)},
+    // Generator and async bodies park in place at each yield/await (RA1).
+    {"activation_suspend", FPTR(activation_suspend)},
     {"js_gen_is_return_signal", FPTR(js_gen_is_return_signal), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_gen_return_signal_value", FPTR(js_gen_return_signal_value)},
     {"js_gen_throw_signal", FPTR(js_gen_throw_signal)},
@@ -3115,20 +3116,13 @@ JitImport jit_runtime_imports[] = {
     {"js_module_set_awaited_target", FPTR(js_module_set_awaited_target), JIT_IMPORT_VOID_PRESERVES},
     {"js_module_get_awaited_target", FPTR(js_module_get_awaited_target)},
     {"js_module_inherit_awaited_target", FPTR(js_module_inherit_awaited_target), JIT_IMPORT_VOID_PRESERVES},
-    {"js_p5_module_await", FPTR(js_p5_module_await)},
     // Js57 P7d: per-module TLA evaluation tracking
     {"js_module_mark_has_tla", FPTR(js_module_mark_has_tla), JIT_IMPORT_VOID_PRESERVES},
     {"js_module_get_has_tla", FPTR(js_module_get_has_tla), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_module_needs_async_settle", FPTR(js_module_needs_async_settle), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_module_register_async_parent", FPTR(js_module_register_async_parent), JIT_IMPORT_VOID_PRESERVES},
-    {"js_module_set_deferred_main_ptr", FPTR(js_module_set_deferred_main_ptr), JIT_IMPORT_VOID_PRESERVES},
     {"js_module_pending_async_deps", FPTR(js_module_pending_async_deps), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_module_mark_post_await_pending", FPTR(js_module_mark_post_await_pending), JIT_IMPORT_VOID_PRESERVES},
-    {"js_module_get_body_state", FPTR(js_module_get_body_state), JIT_IMPORT_RAW_SCALAR_PRESERVES},
-    {"js_module_set_body_state", FPTR(js_module_set_body_state), JIT_IMPORT_VOID_PRESERVES},
-    {"js_module_assign_async_eval_order", FPTR(js_module_assign_async_eval_order), JIT_IMPORT_RAW_SCALAR_PRESERVES},
     {"js_module_complete_tla_body", FPTR(js_module_complete_tla_body), JIT_IMPORT_VOID_PRESERVES},
-    {"js_module_save_context", FPTR(js_module_save_context), JIT_IMPORT_VOID_PRESERVES},
     // CJS require() support
     {"js_require", FPTR(js_require)},
     // Dynamic import() support
@@ -3139,8 +3133,6 @@ JitImport jit_runtime_imports[] = {
     {"js_await_sync", FPTR(js_await_sync)},
     // Phase 6: Async state machine runtime
     {"js_async_wrap_return", FPTR(js_async_wrap_return)},
-    {"js_async_prepare_await", FPTR(js_async_prepare_await)},
-    {"js_async_get_resolved", FPTR(js_async_get_resolved)},
     {"js_async_context_create_mir", FPTR(js_async_context_create_mir)},
     {"js_async_start", FPTR(js_async_start)},
     {"js_async_get_promise", FPTR(js_async_get_promise)},
@@ -3561,45 +3553,15 @@ JitImport jit_runtime_imports[] = {
     {"bash_clear_heredoc_stdin", FPTR(bash_clear_heredoc_stdin)},
 #endif // LAMBDA_BASH
 
-    // select() is async-lowered, so its registry row carries no entry point;
-    // generated code reaches the C function through this import.
+    // select() packs its variadic handles and named timeout at the call site,
+    // so its registry row carries no entry point; generated code imports it.
     {"pn_select", FPTR(pn_select)},
-    {"lambda_async_frame_enter_current", FPTR(lambda_async_frame_enter_current)},
-    {"lambda_async_frame_get_raw", FPTR(lambda_async_frame_get_raw)},
-    {"lambda_async_frame_set_raw", FPTR(lambda_async_frame_set_raw)},
-    {"lambda_async_frame_get_word", FPTR(lambda_async_frame_get_word),
-     {JIT_EFFECT_NO_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"lambda_async_frame_set_word", FPTR(lambda_async_frame_set_word),
-     // Its debug ownership assertion can log before aborting, so generated
-     // code must publish roots before calling it in every build mode.
-     {JIT_EFFECT_MAY_GC, JIT_REENTRY_NO, JIT_VALUE_NON_GC_SCALAR,
-      JIT_ARG_CLASS(0, JIT_VALUE_RAW_NON_GC_POINTER) |
-      JIT_ARG_CLASS(1, JIT_VALUE_NON_GC_SCALAR) |
-      JIT_ARG_CLASS(2, JIT_VALUE_NON_GC_SCALAR),
-      JIT_IMPORT_NUMBER_STACK_PRESERVES |
-      JIT_IMPORT_ARGS_BORROWED_AUDITED}},
-    {"lambda_async_frame_scope_base", FPTR(lambda_async_frame_scope_base)},
     {"lambda_task_scope_enter", FPTR(lambda_task_scope_enter)},
     {"lambda_task_scope_current", FPTR(lambda_task_scope_current)},
     {"lambda_task_scope_leave", FPTR(lambda_task_scope_leave)},
     {"lambda_task_scope_unwind", FPTR(lambda_task_scope_unwind)},
-    {"lambda_async_frame_state", FPTR(lambda_async_frame_state)},
-    {"lambda_async_frame_set_state", FPTR(lambda_async_frame_set_state)},
-    {"lambda_async_frame_get", FPTR(lambda_async_frame_get)},
-    {"lambda_async_frame_set", FPTR(lambda_async_frame_set)},
-    {"lambda_async_frame_set_fault_target", FPTR(lambda_async_frame_set_fault_target)},
-    {"lambda_async_frame_clear_fault_target", FPTR(lambda_async_frame_clear_fault_target)},
-    {"lambda_async_frame_take_fault", FPTR(lambda_async_frame_take_fault)},
-    {"lambda_async_frame_fault_scope_base", FPTR(lambda_async_frame_fault_scope_base)},
-    {"lambda_async_frame_complete", FPTR(lambda_async_frame_complete)},
-    {"lambda_task_has_current", FPTR(lambda_task_has_current)},
     {"lambda_task_start_function", FPTR(lambda_task_start_function)},
     {"lambda_task_start_function_scoped", FPTR(lambda_task_start_function_scoped)},
-    {"lambda_task_run_root_raw", FPTR(lambda_task_run_root_raw)},
 
     // ========================================================================
     // Trampolines for calling _b boxed wrappers from MIR Direct
@@ -3875,7 +3837,6 @@ bool jit_import_validate_no_gc_allowlist(void) {
         "lambda_module_state_for_unit", "lambda_module_const_at_state",
         "lambda_module_name_id_at",
         "lambda_active_module_name_id", "lambda_active_module_name_item",
-        "lambda_async_frame_get_word",
         // Exact String-character equality reads only the already-rooted Item.
         "fn_string_char_eq_ascii", "fn_string_char_eq", "fn_string_ord_at",
         "fn_str_eq_ptr",

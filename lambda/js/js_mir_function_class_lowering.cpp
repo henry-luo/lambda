@@ -328,34 +328,8 @@ static bool jm_private_static_method_brand_seen(JsClassEntry* ce, int member_ind
 }
 
 static MIR_reg_t jm_emit_computed_method_key(JsMirTranspiler* mt,
-        JsClassMember* method, const JsMirClassMethodInstallPolicy* policy,
-        MIR_reg_t function_item) {
-    int destination_spill = -1;
-    int home_class_spill = -1;
-    int preserve_spill = -1;
-    int function_spill = -1;
-    if (jm_can_suspend(mt, method->key_expr)) {
-        destination_spill = jm_gen_spill_save(mt, policy->destination);
-        if (policy->home_class != policy->destination) {
-            home_class_spill = jm_gen_spill_save(mt, policy->home_class);
-        }
-        if (policy->preserve_reg && policy->preserve_reg != policy->destination &&
-            policy->preserve_reg != policy->home_class) {
-            preserve_spill = jm_gen_spill_save(mt, policy->preserve_reg);
-        }
-        if (function_item) function_spill = jm_gen_spill_save(mt, function_item);
-    }
+        JsClassMember* method) {
     MIR_reg_t method_key = jm_transpile_box_item(mt, method->key_expr);
-    if (destination_spill >= 0) {
-        jm_gen_spill_load(mt, policy->destination, destination_spill);
-        if (home_class_spill >= 0) {
-            jm_gen_spill_load(mt, policy->home_class, home_class_spill);
-        }
-        if (preserve_spill >= 0) {
-            jm_gen_spill_load(mt, policy->preserve_reg, preserve_spill);
-        }
-        if (function_spill >= 0) jm_gen_spill_load(mt, function_item, function_spill);
-    }
     // Class definition evaluates ToPropertyKey before creating the method; otherwise
     // an abrupt key conversion can be observed only after the method allocation.
     method_key = jm_callr_1(mt, "js_to_property_key", MIR_T_I64, method_key);
@@ -382,7 +356,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
     MIR_reg_t method_key = 0;
     if (method->computed && method->key_expr &&
         policy->computed_key_order == JS_MIR_COMPUTED_KEY_BEFORE_FUNCTION) {
-        method_key = jm_emit_computed_method_key(mt, method, policy, 0);
+        method_key = jm_emit_computed_method_key(mt, method);
     }
 
     MIR_reg_t function_item = JM_CAPTURE_COUNT(method->fc) > 0
@@ -413,7 +387,7 @@ bool jm_emit_class_method_install(JsMirTranspiler* mt,
     jm_emit_set_function_home_class(mt, function_item, policy->home_class);
 
     if (method->computed && method->key_expr && !method_key) {
-        method_key = jm_emit_computed_method_key(mt, method, policy, function_item);
+        method_key = jm_emit_computed_method_key(mt, method);
     }
     // A key evaluated before function creation is already authoritative; some
     // computed entries retain a parser name and must not replace that key.
@@ -1107,41 +1081,15 @@ static void jm_emit_resumable_this_arguments(JsMirTranspiler* mt,
     }
 }
 
-static MIR_label_t jm_emit_resumable_state_dispatch(JsMirTranspiler* mt,
-        int state_count, bool needs_error_lane) {
-    // states are 0..state_count inclusive, so the array must hold one more
-    int needed = state_count + 1;
-    int old_capacity = mt->gen_state_label_capacity;
-    if (!lam::mem_grow_array(&mt->gen_state_labels,
-            &mt->gen_state_label_capacity, needed, 16,
-            MEM_CAT_JS_RUNTIME)) {
-        log_error("js-mir: cannot size generator resume labels for %d states",
-                  state_count);
-        return 0;
-    }
-    memset(mt->gen_state_labels + old_capacity, 0,
-           (size_t)(mt->gen_state_label_capacity - old_capacity) *
-               sizeof(MIR_label_t));
-    for (int si = 0; si <= state_count; si++) {
-        mt->gen_state_labels[si] = jm_new_label(mt);
-    }
+// A resumable body runs once on its activation and parks in place at each
+// suspension, so it needs no resume dispatcher: only its completion labels.
+static MIR_label_t jm_begin_resumable_body(JsMirTranspiler* mt, bool needs_error_lane) {
     mt->gen_done_label = jm_new_label(mt);
     MIR_label_t error_lane_label = 0;
     if (needs_error_lane) {
         error_lane_label = jm_new_label(mt);
         mt->func_error_lane_label = error_lane_label;
     }
-    for (int si = 0; si <= state_count; si++) {
-        MIR_reg_t cmp = jm_new_reg(mt, "scmp", MIR_T_I64);
-        jm_emit_reg_binary_op(mt, MIR_EQS, cmp, mt->gen_state_reg,
-            MIR_new_int_op(mt->ctx, (int64_t)si));
-        jm_emit(mt, MIR_new_insn(mt->ctx, MIR_BT,
-            MIR_new_label_op(mt->ctx, mt->gen_state_labels[si]),
-            MIR_new_reg_op(mt->ctx, cmp)));
-    }
-    // Unknown state → done; only known resume states may re-enter the body.
-    jm_emit_jmp(mt, mt->gen_done_label);
-    jm_emit_label(mt, mt->gen_state_labels[0]);
     return error_lane_label;
 }
 
@@ -1153,14 +1101,13 @@ typedef struct JsMirResumableLayout {
     int this_slot;
     int args_slot;
     int dynamic_start;
-    int spill_start;
     int active_iterator_slot;
 } JsMirResumableLayout;
 
 static JsMirResumableLayout jm_resumable_layout(JsFuncCollected* fc,
         int param_count, int local_count, bool is_arrow, bool uses_arguments) {
     JsMirResumableLayout layout = {0, JM_CAPTURE_COUNT(fc),
-        JM_CAPTURE_COUNT(fc) + param_count, 0, -1, -1, 0, 0, -1};
+        JM_CAPTURE_COUNT(fc) + param_count, 0, -1, -1, 0, -1};
     layout.env_total_slots = layout.local_offset + local_count;
     if (!is_arrow) {
         layout.this_slot = layout.env_total_slots++;
@@ -1170,8 +1117,6 @@ static JsMirResumableLayout jm_resumable_layout(JsFuncCollected* fc,
     }
     layout.dynamic_start = layout.env_total_slots;
     layout.env_total_slots += 32;
-    layout.spill_start = layout.env_total_slots;
-    layout.env_total_slots += 128;
     layout.active_iterator_slot = layout.env_total_slots++;
     return layout;
 }
@@ -1200,7 +1145,7 @@ static JsMirResumableStateMachine jm_create_resumable_state_machine(
 
 static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
         JsFunctionNode* fn, JsFuncCollected* fc,
-        const JsMirResumableLayout* layout, int state_count, bool is_async,
+        const JsMirResumableLayout* layout, bool is_async,
         bool reset_eval_local_frame, MIR_item_t func_item, MIR_func_t func) {
     mt->func_em->em.func_item = func_item;
     mt->func_em->em.func = func;
@@ -1220,11 +1165,8 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
     mt->func_error_lane_label = 0;
     mt->in_generator = true;
     mt->in_async = is_async;
-    mt->gen_yield_index = 0;
-    mt->gen_yield_count = state_count;
     mt->gen_local_slot_count = layout->dynamic_start;
-    mt->gen_dynamic_slot_limit = layout->spill_start;
-    mt->gen_spill_slot_next = layout->spill_start;
+    mt->gen_dynamic_slot_limit = layout->active_iterator_slot;
     mt->gen_active_iterator_slot = layout->active_iterator_slot;
     mt->resumable_locals = NULL;
     if (reset_eval_local_frame) mt->eval_local_frame_reg = 0;
@@ -1235,7 +1177,6 @@ static void jm_begin_resumable_state_machine(JsMirTranspiler* mt,
     jm_push_scope(mt);
     mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", func);
     mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", func);
-    mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", func);
     jm_create_gc_root_slot(mt, mt->gen_env_reg);
     jm_register_owned_env(mt, mt->gen_env_reg);
 }
@@ -1479,20 +1420,6 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
     int gen_active_iterator_slot = -1;  // env slot for iterator cleanup on generator.return()
 
     if (fn->is_generator) {
-        // Count suspension points to determine number of states. Async
-        // generators share the generator state machine, so hidden awaits from
-        // `for await` need resume labels alongside source `yield` expressions.
-        // +1 for implicit "param binding" yield that separates param destructuring
-        // from body execution (ES spec: FunctionDeclarationInstantiation is eager)
-        int yield_count = jm_count_yields(mt, fn->body) +
-            jm_count_finally_inline_yields(fn->body) +
-            (fn->is_async ? jm_count_awaits(mt, fn->body) +
-                jm_count_finally_inline_awaits(fn->body) : 0) + 1;
-        // §9.3: the old `if (yield_count > 63) yield_count = 63;` safety cap
-        // matched a fixed 64-label array and truncated SILENTLY — a 100-yield
-        // generator ran only its first 62 states and returned a wrong result.
-        // The label array is exact-sized from this count now, so it stands.
-
         // Collect local variable names for env slot assignment
         struct hashmap* gen_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
             jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -1531,7 +1458,7 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         MIR_reg_t saved_eval_local_frame_reg_sm = mt->eval_local_frame_reg;
 
         jm_begin_resumable_state_machine(mt, fn, fc, &layout,
-            yield_count, fn->is_async, true, gen_sm_func_item, sm_func);
+            fn->is_async, true, gen_sm_func_item, sm_func);
         if (JM_JS_FACT(fc, has_direct_eval)) {
             // Only direct eval can publish caller-local bindings; ordinary
             // resumable bodies must not pay for a dormant eval frame.
@@ -1539,12 +1466,11 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             jm_emit_reg_op(mt, MIR_MOV, mt->eval_local_frame_reg, MIR_new_int_op(mt->ctx, 0));
         }
 
-        jm_emit_resumable_state_dispatch(mt, yield_count, false);
+        jm_begin_resumable_body(mt, false);
 
         // Get parameters from function signature
         mt->gen_env_reg = MIR_reg(mt->ctx, "gen_env", sm_func);
         mt->gen_input_reg = MIR_reg(mt->ctx, "gen_input", sm_func);
-        mt->gen_state_reg = MIR_reg(mt->ctx, "gen_state", sm_func);
         jm_create_gc_root_slot(mt, mt->gen_env_reg);
         jm_register_owned_env(mt, mt->gen_env_reg);
 
@@ -1598,27 +1524,19 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         // ES spec: FunctionDeclarationInstantiation (parameter binding including
         // destructuring) must happen synchronously at call time, not lazily on
         // first .next(). We emit an implicit yield here that separates param
-        // binding from body execution. js_generator_create eagerly runs state 0
-        // to execute param destructuring, and the generator starts at state 1.
+        // binding from body execution. Generator creation runs the body up to
+        // this park, so parameter destructuring errors throw at the call.
         {
             // Route an ERROR Item returned by parameter destructuring.
             jm_emit_error_lane_guard(mt, mt->gen_done_label);
 
-            jm_emit_suspend_env_save(mt);
-
-            // Return [undefined, 1] — implicit yield to separate param binding from body
-            MIR_reg_t pundef = jm_emit_undefined(mt);
-            MIR_reg_t pb_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, pundef),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)1));
+            // Park in place until the first next(): the implicit yield
+            // separating parameter binding from the body.
             jm_emit_eval_local_pop_if_needed(mt);
-            jm_emit_ret(mt, pb_result);
-
-            // State 1 label: body execution starts here (on first .next() call)
-            mt->gen_yield_index = 1;
-            jm_emit_label(mt, mt->gen_state_labels[1]);
-
-            jm_emit_resume_env_restore(mt);
+            MIR_reg_t pb_input = jm_call_2(mt, "js_gen_park", MIR_T_I64,
+                MIR_T_I64, MIR_new_reg_op(mt->ctx, jm_emit_undefined(mt)),
+                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)JS_GEN_PARK_YIELD));
+            jm_emit_mov(mt, mt->gen_input_reg, pb_input);
         }
 
         jm_emit_resumable_this_arguments(mt, fc, fn, gen_this_slot, gen_args_slot);
@@ -1678,29 +1596,17 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             } else {
                 MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
                 // Arrow-body generator (unusual, but handle it)
-                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+                MIR_reg_t done_result = val;
                 jm_emit_eval_local_pop_if_needed(mt);
                 jm_emit_ret(mt, done_result);
                 goto gen_sm_finish;
             }
         }
 
-        // Emit any state labels that were not emitted during body transpilation.
-        // This prevents MIR_link crashes from dangling label references when
-        // jm_count_yields over-counts the number of actual yield resume points.
-        for (int si = mt->gen_yield_index + 1; si <= yield_count; si++) {
-            jm_emit_label(mt, mt->gen_state_labels[si]);
-        }
-
         // Implicit return at end of generator → done
         jm_emit_label(mt, mt->gen_done_label);
         {
-            MIR_reg_t undef_val = jm_emit_undefined(mt);
-            MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val),
-                MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
+            MIR_reg_t done_result = jm_emit_undefined(mt);
             jm_emit_eval_local_pop_if_needed(mt);
             jm_emit_ret(mt, done_result);
         }
@@ -1725,18 +1631,13 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
         hashmap_free(gen_lexicals);
         hashmap_free(gen_locals);
 
-        log_debug("js-mir: generated generator state machine %s (yields: %d, env slots: %d)",
-            sm_name, yield_count, gen_env_total_slots);
+        log_debug("js-mir: generated generator body %s (env slots: %d)",
+            sm_name, gen_env_total_slots);
     }
 
     // --- Phase 6: Generate async state machine function if is_async with awaits ---
     if (fn->is_async && !fn->is_generator) {
-        int await_count = jm_count_awaits(mt, fn->body) +
-            jm_count_finally_inline_awaits(fn->body);
-        if (await_count > 0) {
-            // §9.3: same silent-truncation bug as the yield cap above; the
-            // resume-label array is exact-sized from this count now.
-
+        if (jm_has_await(mt, fn->body)) {
             // Collect local variable names for env slot assignment
             struct hashmap* async_locals = hashmap_new(sizeof(JsNameSetEntry), 16, 0, 0,
                 jm_name_hash, jm_name_cmp, NULL, NULL);
@@ -1772,11 +1673,10 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             MirValue saved_last_call_result_sm = mt->func_em->last_call_result;
             MIR_reg_t saved_func_error_lane_value_sm = mt->func_error_lane_value_reg;
 
-            jm_begin_resumable_state_machine(mt, fn, fc, &layout, await_count, true, false,
+            jm_begin_resumable_state_machine(mt, fn, fc, &layout, true, false,
                 gen_sm_func_item, sm_func);
 
-            MIR_label_t async_sm_catch_label = jm_emit_resumable_state_dispatch(
-                mt, await_count, true);
+            MIR_label_t async_sm_catch_label = jm_begin_resumable_body(mt, true);
 
             // Push the implicit try context before parameter instantiation. Its
             // catch label is also this machine's function-level error label, so
@@ -1855,45 +1755,18 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
                     s = s->next;
                 }
             } else if (fn->body) {
-                // Arrow-body async: evaluate expression, return [result, -1]
-                MIR_reg_t val = jm_transpile_box_item(mt, fn->body);
-                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, val),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
-                jm_emit_ret(mt, done_result);
+                // A concise async arrow completes with its expression's value.
+                jm_emit_ret(mt, jm_transpile_box_item(mt, fn->body));
             }
 
-            // Emit any state labels that were not emitted during body transpilation.
-            // This happens when jm_count_awaits over-counts (e.g. "await using" counts
-            // an await that the transpiler doesn't actually emit a resume point for).
-            // Without this, MIR_link crashes on dangling label references.
-            for (int si = mt->gen_yield_index + 1; si <= await_count; si++) {
-                jm_emit_label(mt, mt->gen_state_labels[si]);
-            }
-
-            // Done label: implicit return → [undefined, -1] (fulfilled)
+            // Done label: the implicit return fulfills with undefined.
             jm_emit_label(mt, mt->gen_done_label);
-            {
-                MIR_reg_t undef_val = jm_emit_null(mt);
-                MIR_reg_t done_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, undef_val),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-1));
-                jm_emit_ret(mt, done_result);
-            }
+            jm_emit_ret(mt, jm_emit_null(mt));
 
-            // Catch label: exception → [error, -2] (rejected)
+            // Catch label: the ERROR carrier is the rejection; the driver
+            // settles the promise with its thrown JavaScript payload.
             jm_emit_label(mt, async_sm_catch_label);
-            {
-                MIR_reg_t error_lane = jm_emit_error_lane_return(mt);
-                // Promise rejection observes the original thrown JavaScript
-                // value; the Lambda ERROR carrier is only an ABI transport
-                // across compiled frames and must not leak into .then().
-                MIR_reg_t error = jm_callr_1(mt, "js_error_lane_payload", MIR_T_I64, error_lane);
-                MIR_reg_t reject_result = jm_call_2(mt, "js_gen_yield_result", MIR_T_I64,
-                    MIR_T_I64, MIR_new_reg_op(mt->ctx, error),
-                    MIR_T_I64, MIR_new_int_op(mt->ctx, (int64_t)-2));
-                jm_emit_ret(mt, reject_result);
-            }
+            jm_emit_ret(mt, jm_emit_error_lane_return(mt));
 
             // Keep the implicit try context alive through its catch label so
             // jm_emit_error_lane_return can read the routed ERROR carrier;
@@ -1915,8 +1788,8 @@ void jm_define_function(JsMirTranspiler* mt, JsFuncCollected* fc) {
             hashmap_free(async_lexicals);
             hashmap_free(async_locals);
 
-            log_debug("js-mir P6: generated async state machine %s (awaits: %d, env slots: %d)",
-                sm_name, await_count, gen_env_total_slots);
+            log_debug("js-mir P6: generated async body %s (env slots: %d)",
+                sm_name, gen_env_total_slots);
         }
     }
 

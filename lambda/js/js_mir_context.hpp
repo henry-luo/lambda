@@ -178,14 +178,10 @@ struct JsLoopLabels {
     int with_depth_at_push;
 };
 
-// JSCU44: one open `with` during body lowering. A scope is state of the
-// suspending activation, exactly like a try's delayed return, so it parks its
-// coerced object in a generator env slot and the chain is rebuilt from those
-// slots on resume rather than being expected to survive the state machine's
-// return.
+// JSCU44: one open `with` during body lowering. A suspending body parks with
+// its `with` chain intact on its activation (RA1).
 struct JsWithLowering {
     MIR_reg_t object_reg;   // holds the coerced scope object
-    int spill_slot;         // env slot, reserved lazily at the first suspension
     int frame_slot;         // index into this function's `with` root suffix
 };
 
@@ -393,12 +389,6 @@ struct JsTryContext {
     MIR_label_t end_label;       // end of entire try statement
     MIR_reg_t return_val_reg;    // stores delayed return value
     MIR_reg_t has_return_reg;    // flag: 1 if return encountered in try/catch
-    // A delayed return is held in plain MIR registers, which do not survive a
-    // generator/async suspension. When the finally itself suspends, these env
-    // slots carry the pending return across it. -1 until first reserved, and
-    // -1 forever if the fixed spill region is already full.
-    int has_return_spill;
-    int return_val_spill;
     // Break-target stack depth when this try was entered. A break/continue
     // only unwinds the finally clauses entered inside its target, so this is
     // what separates "must run now" from "the try block continues".
@@ -633,29 +623,22 @@ struct JsMirTranspiler {
 
     // ES module support
     bool is_module;                  // true when compiling an ES module (not main script)
+    // A nested or dynamically imported module with a top-level await runs on
+    // its module carrier, so its top-level awaits park (RA1).
+    bool module_tla_carrier;
     bool is_global_strict;           // v20: true when top-level "use strict" directive present
     MIR_reg_t namespace_reg;         // register holding module namespace object (when is_module)
     const char* filename;            // path of current file being compiled
 
-    // v15: Generator state machine
-    bool in_generator;               // currently emitting a generator state machine body
+    // Generator and async bodies run once on an activation (RA1).
+    bool in_generator;               // currently emitting a generator or async body
     bool in_async;                   // currently emitting an async function body (Phase 5)
     MIR_reg_t gen_env_reg;           // register for env parameter (Item*)
-    MIR_reg_t gen_input_reg;         // register for input parameter (Item)
-    MIR_reg_t gen_state_reg;         // register for state parameter (int64_t)
-    int gen_yield_index;             // counter for next yield state assignment
-    int gen_yield_count;             // total yield count (from pre-scan)
-    // §9.3: exact-sized from the pre-scanned yield count. The fixed 64 entries
-    // were not a graceful cap: jm_next_resume_state refused states past 63, so
-    // a generator with more yields SILENTLY produced wrong results (a 100-yield
-    // generator summed only its first 62 values).
-    MIR_label_t* gen_state_labels;
-    int gen_state_label_capacity;
+    MIR_reg_t gen_input_reg;         // register for the latest resume input (Item)
     MIR_label_t gen_done_label;      // label for done state (function end)
     // Generator variable-to-env-slot mapping
     int gen_local_slot_count;        // total env slots (captures + params + locals)
-    int gen_dynamic_slot_limit;      // first spill slot; lexical homes stay below it
-    int gen_spill_slot_next;         // next available spill slot in env (for temporaries across yields)
+    int gen_dynamic_slot_limit;      // lexical homes stay below the active-iterator slot
     int gen_active_iterator_slot;    // iterator to close if generator.return interrupts destructuring
 
     // D8.4.3: route a returned ERROR Item outside a lexical try to this

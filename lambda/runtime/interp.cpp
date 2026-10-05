@@ -14,6 +14,7 @@
 #include "recovery_frame.h"
 #include "lambda-stack.h"
 #include "concurrency.h"
+#include "activation.h"
 #include "re2_wrapper.hpp"
 #include "heap_api.h"
 #include "type_contract.hpp"
@@ -2125,6 +2126,32 @@ static Item eval_call(InterpFrame* f, AstCallNode* node, const Item* injected) {
         return ItemNull;
     }
 
+    // `select` takes variadic handles and a named timeout; both tiers pack
+    // them into the same pn_select(handles, timeout) call.
+    if (callee && callee->node_type == AST_NODE_SYS_FUNC &&
+            ((AstSysFuncNode*)callee)->fn_info &&
+            ((AstSysFuncNode*)callee)->fn_info->fn == SYSPROC_SELECT) {
+        RootFrame roots(2);
+        Rooted<Item> handles(roots, interp_ptr_item(array()));
+        Rooted<Item> timeout(roots, (Item){.item = i2it(0)});
+        for (AstNode* a = node->argument; a; a = a->next) {
+            if (a->node_type == AST_NODE_NAMED_ARG) {
+                AstNamedNode* named = (AstNamedNode*)a;
+                if (named->name && named->name->len == 7 &&
+                        memcmp(named->name->chars, "timeout", 7) == 0) {
+                    timeout.set(eval_expr(f, named->as));
+                    if (interp_frame_pending(f)) return ItemNull;
+                    continue;
+                }
+            }
+            Item handle = eval_expr(f, a);
+            if (interp_frame_pending(f)) return ItemNull;
+            array_push_verbatim((Array*)(uintptr_t)handles.get().item, handle);
+        }
+        Item packed = array_end((Array*)(uintptr_t)handles.get().item);
+        return pn_select(packed, timeout.get());
+    }
+
     if (callee && callee->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* sinfo = ((AstSysFuncNode*)callee)->fn_info;
         AstNode* owner_arg = !injected ? ast_unwrap_primary(node->argument) : NULL;
@@ -2535,26 +2562,6 @@ Function* interp_make_closure(Script* module, const AstFuncNode* fn_node,
         // A definition materialized after the trigger should join the sealed
         // whole-module image when it has the same no-capture boxed contract.
         (void)interp_whole_script_publish_function(module, (AstFuncNode*)fn_node, fn);
-    }
-
-    // Task-backed procedures use MIR's resumable state machine at their first
-    // entry. T0 owns the surrounding module activation, but it must not turn
-    // an async procedure into a synchronous AST call: publish the generated
-    // boxed satellite before the function value escapes (D8.1.1v2 / D5.1.3).
-    // the strict T0 scan admits conservatively marked procedures only when
-    // their bodies were proved synchronous; they need no generated entry
-    if (lambda_tier_selected() != LAMBDA_TIER_INTERP &&
-            fn_node->node_type == AST_NODE_PROC && fn_node->analysis &&
-            (fn_node->analysis->may_await || fn_node->analysis->needs_task_context)) {
-        InterpState* st = interp_current_state();
-        void* entry = NULL;
-        if (st && st->runtime && compile_ast_function_satellite(
-                st->runtime, module, fn_node, &entry) && entry) {
-            lambda_function_publish_boxed_entry(fn, fn_node, entry);
-        } else {
-            log_error("interp: async procedure '%s' could not publish its MIR satellite",
-                fn_node->name ? fn_node->name->chars : "<anonymous>");
-        }
     }
 
     // Snapshot captures by value (D6.2.3).
@@ -3045,6 +3052,9 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
         return ItemError;
     }
 
+    // A landing skips the scope exits of every abandoned callee frame; their
+    // scoped children are cancelled and joined before `^` is bound.
+    LambdaTaskScope* saved_scope = lambda_task_scope_current();
     InterpFrame* saved_top = st->top;
     InterpContext* saved_contexts = st->contexts;
     InterpErrorContext* saved_errors = st->errors;
@@ -3076,7 +3086,10 @@ static Item interp_eval_local_fault_operand(InterpFrame* f, AstNode* expression)
         f->signal = saved_signal;
         f->slots[f->signal_index] = saved_signal_payload;
         f->cur = saved_cur;
-        return fault;
+        RootFrame fault_root(1);
+        Rooted<Item> held(fault_root, fault);
+        (void)lambda_task_scope_unwind(saved_scope, true);
+        return held.get();
     }
     if (!lambda_recovery_frame_arm(recovery)) {
         log_error("interp: failed to arm local fault recovery frame");
@@ -4104,6 +4117,54 @@ static Item eval_element(InterpFrame* f, AstElementNode* node) {
 // Mirrors transpile_content's split: declarations bind, side-effect statements
 // run for effect, and the value expressions form the block's result — one
 // value passes through, several accumulate into a list.
+// `start(target, args)` launches the procedure on its own activation; the
+// same runtime entry serves both tiers (S13.1.3v2).
+static Item eval_start(InterpFrame* f, AstStartNode* start_node) {
+    AstCallNode* call = start_node ? start_node->call : NULL;
+    if (!call) return ItemNull;
+    if (start_node->mode != START_MODE_TASK) {
+        // Worker modes require a separate isolate launcher; never degrade an
+        // accepted thread/process request into a same-context task.
+        log_error("concurrency start: unsupported launch mode %d", (int)start_node->mode);
+        return ItemNull;
+    }
+    RootFrame roots(2);
+    Rooted<Item> function(roots, eval_expr(f, call->function));
+    if (interp_frame_pending(f)) return ItemNull;
+    Rooted<Item> args(roots, ItemNull);
+    if (call->argument) {
+        args.set(eval_expr(f, call->argument));
+        if (interp_frame_pending(f)) return ItemNull;
+        // A packed ArrayNum literal is normalized to boxed items, as lowering does.
+        void* items = ensure_typed_array(args.get(), LMD_TYPE_ANY);
+        if (!items) return ItemError;
+        args.set((Item){.item = (uint64_t)(uintptr_t)items});
+    } else {
+        args.set(interp_ptr_item(list()));
+    }
+    return lambda_task_start_function_scoped(function.get(),
+        (List*)(uintptr_t)args.get().item, start_node->escapes);
+}
+
+// A block of a body that starts scoped children joins them when it exits.
+// T0 leaves blocks structurally, so one leave after the block covers return,
+// break, continue and error propagation alike.
+static Item eval_scoped_content(InterpFrame* f, AstListNode* list_node) {
+    if (!f->fn || !f->fn->analysis || !f->fn->analysis->owns_task_scopes) {
+        return eval_content(f, list_node, false);
+    }
+    LambdaTaskScope* scope = lambda_task_scope_enter();
+    RootFrame roots(1);
+    Rooted<Item> result(roots, eval_content(f, list_node, false));
+    if (scope) {
+        bool error_exit = f->signal == EvalSignal::ERROR_SKIP ||
+            (f->signal == EvalSignal::RETURNED &&
+             item_is_error((Item){.item = f->slots[f->signal_index]}));
+        (void)lambda_task_scope_leave(scope, error_exit);
+    }
+    return result.get();
+}
+
 static Item eval_content(InterpFrame* f, AstListNode* list_node, bool hoist_functions) {
     // A functional block is a list producer (S2.5.3): sequence append, finished
     // in its position's mode (S2.5.5v2). The script root (the only caller that
@@ -5746,7 +5807,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
         // transpile_expr defers it to transpile_content.
         return eval_for(f, (AstForNode*)node, true);
     case AST_NODE_CONTENT:
-        return eval_content(f, (AstListNode*)node, false);
+        return eval_scoped_content(f, (AstListNode*)node);
+    case AST_NODE_START:
+        return eval_start(f, (AstStartNode*)node);
     case AST_NODE_LIST:
         return eval_list(f, (AstListNode*)node);
     case AST_NODE_FUNC:
@@ -6346,8 +6409,7 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
 
     if (!st || !st->runtime || st->runtime->ui_mode) {
         why = "runtime";
-    } else if (def->captures || def->is_generator || def->is_async ||
-            def->analysis->may_await || def->analysis->needs_task_context) {
+    } else if (def->captures || def->is_generator || def->is_async) {
         why = "activation-kind";
     } else if (!signature || signature->type_id != LMD_TYPE_FUNC ||
             signature->binder_count > 0 || signature->is_variadic) {
@@ -7019,6 +7081,65 @@ extern "C" Item interp_call_borrowed(Function* fn, const Item* args, int argc) {
 
 static __thread InterpState* g_interp_state = NULL;
 static InterpState* interp_current_state(void) { return g_interp_state; }
+
+// The frame chain and every other LIFO list of the walker belong to the
+// native stack they were pushed on; an activation switch carries them (RA5).
+typedef struct InterpAmbient {
+    InterpState* st;
+    InterpFrame* top;
+    InterpContext* contexts;
+    InterpErrorContext* errors;
+    InterpViewBinding* view_bindings;
+    uint64_t* last_index_item;
+    AstNode* list_item_producer;
+    uint32_t depth;
+    bool depth_exhausted;
+} InterpAmbient;
+
+static void interp_ambient_init(void* storage) {
+    InterpAmbient* ambient = (InterpAmbient*)storage;
+    memset(ambient, 0, sizeof(*ambient));
+    ambient->st = g_interp_state;
+    // a fresh native stack starts with the whole recursion budget
+    ambient->depth = ambient->st ? ambient->st->depth_limit : 0;
+}
+
+static void interp_ambient_save(void* storage) {
+    InterpAmbient* ambient = (InterpAmbient*)storage;
+    InterpState* st = g_interp_state;
+    ambient->st = st;
+    if (!st) return;
+    ambient->top = st->top;
+    ambient->contexts = st->contexts;
+    ambient->errors = st->errors;
+    ambient->view_bindings = st->view_bindings;
+    ambient->last_index_item = st->last_index_item;
+    ambient->list_item_producer = st->list_item_producer;
+    ambient->depth = st->depth;
+    ambient->depth_exhausted = st->depth_exhausted;
+}
+
+static void interp_ambient_load(const void* storage) {
+    const InterpAmbient* ambient = (const InterpAmbient*)storage;
+    InterpState* st = ambient->st;
+    g_interp_state = st;
+    if (!st) return;
+    st->top = ambient->top;
+    st->contexts = ambient->contexts;
+    st->errors = ambient->errors;
+    st->view_bindings = ambient->view_bindings;
+    st->last_index_item = ambient->last_index_item;
+    st->list_item_producer = ambient->list_item_producer;
+    st->depth = ambient->depth;
+    st->depth_exhausted = ambient->depth_exhausted;
+}
+
+static const ActivationAmbientHook interp_ambient_hook = {
+    sizeof(InterpAmbient), interp_ambient_init, interp_ambient_save,
+    interp_ambient_load,
+};
+[[maybe_unused]] static const bool interp_ambient_registered =
+    activation_register_ambient_hook(&interp_ambient_hook);
 bool interp_has_active_state(void) { return interp_current_state() != NULL; }
 static uint32_t interp_depth_budget(void);
 
@@ -7667,9 +7788,7 @@ static bool interp_whole_script_publish_function(Script* script,
         AstFuncNode* def, Function* known_fn) {
     if (!script || !script->interp_whole_script_poc_active || !def ||
             !def->analysis || def->captures || def->is_generator ||
-            def->is_async || def->analysis->may_await ||
-            def->analysis->needs_task_context ||
-            !interp_satellite_supported(def)) {
+            def->is_async || !interp_satellite_supported(def)) {
         // Whole-module lowering still exposes each function through the same
         // boxed ABI as a satellite. Keep the established aggregate/mutable
         // parameter admission gate or a valid MIR image can silently narrow
@@ -8296,25 +8415,21 @@ static Item interp_execute_top_level_nodes(Runner* runner, InterpState* st,
                         (int)get_type_id(callee));
                     break;
                 }
-                bool task_root = proc->analysis &&
-                    (proc->analysis->may_await ||
-                     proc->analysis->needs_task_context);
-                // A task-aware `main` must enter through the scheduler so its
-                // task-only builtins have a current task (D6.3.1, S7.11.2).
-                // A synchronous T0 main stays on the direct path: an untyped
-                // dynamic callee can establish its own resumable task root,
-                // while this AST caller has no durable continuation.
-                if (task_root) {
-                    tail.set(lambda_task_run_root_function(callee, NULL));
-                } else {
-                    uint64_t result_home = 0;
-                    tail.set(fn_call_into((Function*)(uintptr_t)callee.item,
-                        NULL, &result_home));
-                }
+                // `main` runs on the base stack, which is the root task:
+                // task builtins see the same root at every tier (D6.3.1).
+                uint64_t result_home = 0;
+                tail.set(fn_call_into((Function*)(uintptr_t)callee.item,
+                    NULL, &result_home));
                 called_main = true;
                 break;
             }
             if (interp_frame_pending(frame)) break;
+        }
+        // Tasks that outlive their starter still run before the script ends,
+        // exactly as the MIR runner drains them (D6.3.1).
+        if (st && st->ctx && st->ctx->scheduler &&
+                (!runner || !runner->runtime || !runner->runtime->no_task_drain)) {
+            lambda_scheduler_drain(st->ctx->scheduler);
         }
     }
 

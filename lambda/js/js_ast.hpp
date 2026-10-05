@@ -206,6 +206,18 @@ struct JsAstFunctionFacts {
 // arrows contribute their lexical observations to the enclosing function.
 JsAstFunctionFacts js_ast_collect_function_facts(JsAstNode* params,
                                                   JsAstNode* body);
+
+// Suspension facts are indexed once with the function owner, so a nested
+// function's yield/await is never charged to its enclosing body.
+enum JsSuspensionKind {
+    JS_SUSPENSION_YIELD,
+    JS_SUSPENSION_AWAIT,
+};
+// Whether the body owning `root_id` can park at a node in [begin_id, end_id):
+// a yield, or an await, where a for-await loop awaits every step and close
+// even with no `await` written in the source.
+bool js_ast_index_can_suspend(const AstIndex* index, AstNodeId root_id,
+    AstNodeId begin_id, AstNodeId end_id, JsSuspensionKind kind);
 bool js_ast_is_proto_literal_key(JsAstNode* key);
 
 // Adapter for the shared AstIndex walker. Core-shaped JavaScript nodes are

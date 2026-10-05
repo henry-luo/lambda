@@ -7517,11 +7517,10 @@ static bool collect_concurrency_function(AstNode* node, void* data) {
 
 typedef struct MayAwaitScan {
     bool found;
-    bool indirect;
     const char* cause;
 } MayAwaitScan;
 
-static bool call_may_await(AstCallNode* call, bool* indirect, const char** cause) {
+static bool call_may_await(AstCallNode* call, const char** cause) {
     AstNode* function = call ? unwrap_primary_ast(call->function) : NULL;
     if (function && function->node_type == AST_NODE_SYS_FUNC) {
         SysFuncInfo* info = ((AstSysFuncNode*)function)->fn_info;
@@ -7534,7 +7533,6 @@ static bool call_may_await(AstCallNode* call, bool* indirect, const char** cause
     if (!function || !lambda_type_func_is_proc(function->type)) return false;
     AstFuncNode* callee = direct_pn_callee(call);
     if (!callee) {
-        if (indirect) *indirect = true;
         if (cause) *cause = "indirect pn call";
         return true;
     }
@@ -7562,30 +7560,25 @@ static bool scan_may_await_node(AstNode* node, void* data) {
             node->node_type == AST_NODE_PROC) return false;
     if (node->node_type != AST_NODE_CALL_EXPR) return true;
 
-    bool indirect = false;
     const char* cause = NULL;
-    if (call_may_await((AstCallNode*)node, &indirect, &cause)) {
+    if (call_may_await((AstCallNode*)node, &cause)) {
         scan->found = true;
-        scan->indirect = indirect;
         scan->cause = cause;
     }
     return !scan->found;
 }
 
-// The old concurrency planner independently walked each body for await
-// closure, task context, continuation count, and handler states. Keep the
-// AST traversal linear by recording the syntax facts once, then solve only
-// the direct-call dependency edges to a fixed point.
+// Record each body's syntax facts in one walk, then solve only the direct-call
+// dependency edges of the may-await closure to a fixed point. Suspension needs
+// no codegen (vibe/Lambda_Design_Runtime_Async.md RA1); the closure only
+// serves the handler diagnostic and GC planning.
 typedef struct ConcurrencyBodyFacts {
     AstFuncNode* function;
     ArrayList* calls;
-    ArrayList* async_handlers;
     bool static_may_await;
-    bool static_task_context;
-    bool indirect;
+    bool owns_task_scopes;
     bool failed;
     const char* cause;
-    int await_point_base;
 } ConcurrencyBodyFacts;
 
 static bool concurrency_record_node(ArrayList** nodes, AstNode* node) {
@@ -7600,67 +7593,28 @@ static bool scan_concurrency_body_node(AstNode* node, void* data) {
             node->node_type == AST_NODE_PROC) return false;
     if (node->node_type == AST_NODE_START) {
         AstStartNode* start = (AstStartNode*)node;
-        facts->static_task_context = true;
-        if (!start->escapes && !facts->static_may_await) {
-            facts->static_may_await = true;
-            facts->cause = "implicit scoped-task join";
+        // A non-escaping child is joined when its block exits, so the body's
+        // blocks enter task scopes (and the join can suspend).
+        if (!start->escapes) {
+            facts->owns_task_scopes = true;
+            if (!facts->static_may_await) {
+                facts->static_may_await = true;
+                facts->cause = "implicit scoped-task join";
+            }
         }
         return false;
     }
-    if (node->node_type == AST_NODE_HANDLER_STAM) {
-        AstHandlerNode* handler = (AstHandlerNode*)node;
-        if (handler->is_statement && handler_operand_is_proc(handler->operand) &&
-                !concurrency_record_node(&facts->async_handlers, node)) {
-            facts->failed = true;
-            return false;
-        }
-    }
     if (node->node_type == AST_NODE_CALL_EXPR) {
         AstCallNode* call = (AstCallNode*)node;
-        // Dynamic call and argument checks own continuation labels. The final
-        // suspend bit is added after the direct-call dependency closure.
-        facts->await_point_base++;
-        for (AstNode* arg = call->argument; arg; arg = arg->next) {
-            facts->await_point_base++;
-        }
-        if (call->propagate) facts->await_point_base++;
         if (!concurrency_record_node(&facts->calls, node)) {
             facts->failed = true;
             return false;
         }
-        bool indirect = false;
         const char* cause = NULL;
-        if (call_may_await(call, &indirect, &cause)) {
-            facts->static_task_context = true;
-            if (!facts->static_may_await) {
-                facts->static_may_await = true;
-                facts->indirect = indirect;
-                facts->cause = cause;
-            }
+        if (call_may_await(call, &cause) && !facts->static_may_await) {
+            facts->static_may_await = true;
+            facts->cause = cause;
         }
-    }
-    if (node->node_type == AST_NODE_LET_STAM ||
-            node->node_type == AST_NODE_VAR_STAM ||
-            node->node_type == AST_NODE_PUB_STAM) {
-        // A declared binding can lower to a runtime type check whose failure
-        // leaves the current task scope. Untyped bindings reserve an unused
-        // label, keeping this planner conservative and syntax-directed.
-        facts->await_point_base++;
-    }
-    if (node->node_type == AST_NODE_RETURN_STAM ||
-            node->node_type == AST_NODE_RAISE_STAM ||
-            node->node_type == AST_NODE_ASSIGN_STAM ||
-            node->node_type == AST_NODE_INDEX_ASSIGN_STAM ||
-            node->node_type == AST_NODE_MEMBER_ASSIGN_STAM ||
-            node->node_type == AST_NODE_PIPE_FILE_STAM) {
-        // These syntax edges can leave a lexical block before its tail, so
-        // each owns an unwind continuation in the resumable transform.
-        facts->await_point_base++;
-    }
-    if (node->node_type == AST_NODE_CONTENT) {
-        // Every lexical content block in a resumable pn has a synthetic scope
-        // leave. Empty scopes return immediately; owning scopes may park.
-        facts->await_point_base++;
     }
     return true;
 }
@@ -7679,21 +7633,10 @@ static bool concurrency_fact_calls_may_await(ConcurrencyBodyFacts* facts,
     return false;
 }
 
-static bool concurrency_fact_needs_task_context(ConcurrencyBodyFacts* facts) {
-    if (!facts || !facts->calls) return false;
-    for (int i = 0; i < facts->calls->length; i++) {
-        AstFuncNode* callee = direct_pn_callee((AstCallNode*)facts->calls->data[i]);
-        if (callee && callee->analysis && (callee->analysis->may_await ||
-                callee->analysis->needs_task_context)) return true;
-    }
-    return false;
-}
-
 static void concurrency_body_facts_destroy(ConcurrencyBodyFacts* facts,
         int count) {
     for (int i = 0; facts && i < count; i++) {
         arraylist_free(facts[i].calls);
-        arraylist_free(facts[i].async_handlers);
     }
 }
 
@@ -7750,9 +7693,10 @@ static bool validate_handler_await_node(AstNode* node, void* data) {
     bool proc_statement = handler->is_statement &&
         handler_operand_is_proc(handler->operand);
     if (scan.found && !proc_statement) {
-        // A statement pn handler consumes the call's explicit Item completion
-        // after the async resume point; only value handlers still require a
-        // live native result context that cannot span a scheduler yield.
+        // A statement pn handler may protect a call that parks: the call
+        // resumes in place and returns its completion to the handler
+        // (S7.6.7v4). `pn` handlers are statement-only, so a value handler
+        // over a suspending operand stays a compile error.
         record_semantic_error_span(validation->tp, node->source_span, ERR_INVALID_EXPR_CONTEXT,
             "error handler operand may suspend (%s); await before applying `^ { ... }`",
             scan.cause ? scan.cause : "possible await");
@@ -7775,10 +7719,7 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
         AstFuncNode* fn = (AstFuncNode*)functions->data[i];
         if (!fn->analysis) fn->analysis = (FnAnalysis*)pool_calloc(tp->pool, sizeof(FnAnalysis));
         fn->analysis->may_await = false;
-        fn->analysis->needs_task_context = false;
-        fn->analysis->has_indirect_pn_call = false;
-        fn->analysis->await_point_count = 0;
-        fn->analysis->async_fault_handler_count = 0;
+        fn->analysis->owns_task_scopes = false;
         fn->analysis->may_await_cause = NULL;
     }
 
@@ -7799,6 +7740,7 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
         if (facts[i].function->node_type == AST_NODE_PROC) {
             walk_lambda_ast(facts[i].function->body, scan_concurrency_body_node,
                 &facts[i], false);
+            facts[i].function->analysis->owns_task_scopes = facts[i].owns_task_scopes;
         }
         if (facts[i].failed) {
             log_error("concurrency planner could not record procedure body facts");
@@ -7820,7 +7762,6 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
             if (facts[i].static_may_await || concurrency_fact_calls_may_await(
                     &facts[i], &cause)) {
                 fn->analysis->may_await = true;
-                fn->analysis->has_indirect_pn_call = facts[i].indirect;
                 fn->analysis->may_await_cause = cause;
                 changed = true;
                 if (cause && strcmp(cause, "implicit scoped-task join") == 0) {
@@ -7840,43 +7781,6 @@ static void analyze_lambda_concurrency(Transpiler* tp, AstScript* script,
     HandlerAwaitValidation handler_validation = {.tp = tp};
     walk_lambda_ast((AstNode*)script, validate_handler_await_node,
         &handler_validation, true);
-
-    // A procedure that starts a child but never parks still needs a scheduler
-    // task so `self()` and scoped ownership have a concrete parent. Propagate
-    // that requirement independently from the may-await closure.
-    changed = true;
-    while (changed) {
-        changed = false;
-        for (int i = 0; i < functions->length; i++) {
-            AstFuncNode* fn = (AstFuncNode*)functions->data[i];
-            if (fn->node_type != AST_NODE_PROC || fn->analysis->needs_task_context) continue;
-            if (facts[i].static_task_context || concurrency_fact_needs_task_context(
-                    &facts[i])) {
-                fn->analysis->needs_task_context = true;
-                changed = true;
-            }
-        }
-    }
-
-    for (int i = 0; i < functions->length; i++) {
-        AstFuncNode* fn = (AstFuncNode*)functions->data[i];
-        if (fn->node_type != AST_NODE_PROC || !fn->analysis->may_await) continue;
-        int await_points = facts[i].await_point_base;
-        for (int call_index = 0; facts[i].calls && call_index < facts[i].calls->length;
-                call_index++) {
-            if (call_may_await((AstCallNode*)facts[i].calls->data[call_index],
-                    NULL, NULL)) await_points++;
-        }
-        fn->analysis->await_point_count = await_points;
-        fn->analysis->async_fault_handler_count = facts[i].async_handlers
-            ? facts[i].async_handlers->length : 0;
-        for (int handler_index = 0; facts[i].async_handlers &&
-                handler_index < facts[i].async_handlers->length; handler_index++) {
-            AstHandlerNode* handler = (AstHandlerNode*)facts[i].async_handlers->data[
-                handler_index];
-            handler->async_fault_state = await_points + handler_index + 1;
-        }
-    }
 
     concurrency_body_facts_destroy(facts, functions->length);
     if (owns_functions) arraylist_free(functions);

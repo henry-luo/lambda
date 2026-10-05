@@ -100,6 +100,20 @@ void lambda_stack_set_budget(size_t bytes);
  */
 uintptr_t lambda_stack_recoverable_limit(void);
 
+// The running native stack's bounds: `base` is its highest address and
+// `limit` the lowest address still above the guard's safety margin. Each
+// activation installs its own pair, so overflow classification and the
+// recoverable limit always describe the stack actually executing.
+typedef struct LambdaStackBounds {
+    uintptr_t base;
+    uintptr_t limit;
+} LambdaStackBounds;
+LambdaStackBounds lambda_stack_bounds_get(void);
+void lambda_stack_bounds_set(LambdaStackBounds bounds);
+// Bounds for a stack spanning [low, high), and its recoverable limit.
+LambdaStackBounds lambda_stack_bounds_for(uintptr_t low, uintptr_t high);
+uintptr_t lambda_stack_recoverable_limit_for(LambdaStackBounds bounds);
+
 // Native entries ask this leaf before their first user-code instruction. The
 // limit is already bound by the receiving Context; the helper only samples its
 // own frame address and therefore cannot allocate or re-enter Lambda.

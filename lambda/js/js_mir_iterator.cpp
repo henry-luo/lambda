@@ -102,13 +102,8 @@ void jm_emit_async_iterator_close_preserving_throw(JsMirTranspiler* mt,
         "js_async_iterator_close_needs_await", MIR_T_I64, raw_close));
     jm_emit_branch(mt, MIR_BF, rethrow_source, needs_await);
 
-    int thrown_spill = -1;
-    if (mt->in_generator && mt->gen_env_reg) {
-        thrown_spill = jm_gen_spill_save(mt, thrown_value);
-    }
     (void)jm_emit_await_value_reg(mt, raw_close,
         JS_MIR_SUSPEND_ASYNC_ITERATOR_CLOSE, false);
-    if (thrown_spill >= 0) jm_gen_spill_load(mt, thrown_value, thrown_spill);
     jm_emit_jmp(mt, rethrow_source);
 
     // Ignore a close rejection or invalid close result: the source throw has

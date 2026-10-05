@@ -494,3 +494,53 @@ void js_ast_visit_extension_children(AstNode* node, AstChildVisitor visitor,
         if (child) visitor((AstNode*)child, node, ctx);
     }
 }
+
+// A suspension is lowered into this body when it descends from it with no
+// function boundary in between. The indexed owner is the usual answer, but its
+// span-based recovery pulls a computed class-member key into the *method's*
+// function even though the key is a child of the member and is evaluated in the
+// enclosing scope. Trusting structure as well charges that key's `await` to the
+// function that actually evaluates it.
+static bool js_ast_suspension_is_lowered_here(const AstIndex* index,
+        AstNodeId node_id, AstNodeId root_id) {
+    AstNodeId id = node_id;
+    AstNode* from = NULL;
+    while (id != AST_NODE_ID_INVALID && id != root_id) {
+        AstNode* node = index->nodes[id];
+        if (from && ast_index_node_is_function(node)) {
+            // A computed method key is an AST child of the method node, yet it
+            // is evaluated — and lowered — in the enclosing scope. The walk
+            // passes through that one edge instead of stopping at it; every
+            // other function edge ends the search.
+            if (node->node_type != AST_NODE_METHOD ||
+                    ((AstMethodNode*)node)->key != from) {
+                return false;
+            }
+        }
+        from = node;
+        id = ast_index_parent_id(index, id);
+    }
+    return id == root_id;
+}
+
+bool js_ast_index_can_suspend(const AstIndex* index, AstNodeId root_id,
+        AstNodeId begin_id, AstNodeId end_id, JsSuspensionKind kind) {
+    if (!index || root_id == AST_NODE_ID_INVALID || begin_id == AST_NODE_ID_INVALID ||
+            end_id == AST_NODE_ID_INVALID) {
+        return false;
+    }
+    AstFunctionId owner = index->owner_functions[root_id];
+    for (uint32_t i = begin_id; i < end_id; i++) {
+        AstNode* node = index->nodes[i];
+        if (!node) continue;
+        bool suspends = kind == JS_SUSPENSION_YIELD
+            ? node->node_type == AST_NODE_YIELD
+            : node->node_type == AST_NODE_AWAIT ||
+              (node->node_type == AST_NODE_FOR_OF_STAM &&
+               ((JsForOfNode*)node)->is_await);
+        if (!suspends) continue;
+        if (index->owner_functions[i] == owner ||
+                js_ast_suspension_is_lowered_here(index, i, root_id)) return true;
+    }
+    return false;
+}

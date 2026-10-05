@@ -163,6 +163,15 @@ described here are gone. Current implementation status is in Appendix B.
 > sub-unit; they interlock (a GC-owned async frame's survival between create,
 > synchronous drive, and first suspend is exactly what the task's registration
 > provides), so they land together rather than split.
+>
+> **Status 2026-10-05:** JSCU10 landed (GC-owned async carriers). JSCU26 is
+> superseded: activations replaced the async frame (`Lambda_Design_Runtime_Async.md`,
+> D5.1.1v3). **JSCU25 implemented 2026-10-05 in a lean form**: a parked JS async
+> activation registers weakly with the Lambda scheduler and counts in its live
+> count until it settles or its carrier is collected; the carrier is the record
+> and its Promise the handle — there is no `LambdaTask` and no mailbox per JS
+> call. A drain left with only weak entries ends once nothing besides its
+> watchdog keeps the loop alive (`Lambda_Design_Runtime_Async.md` §10.1).
 
 ### 1.4 What does not change
 
@@ -1120,7 +1129,7 @@ explicit decision rather than being folded into the next slice.
 
 
 - **JSCUO1 — ratified 2026-09-07 as JSCU25** (item 1).
-- **JSCUO2 — ratified 2026-09-07 as JSCU26** (item 1); D5.1.1→v2 in
+- **JSCUO2 — ratified 2026-09-07 as JSCU26** (item 1); **superseded 2026-10-05** — `LambdaAsyncFrame` no longer exists, so there is nothing to move onto the env carrier (`vibe/Lambda_Design_Runtime_Async.md` §11, D5.1.1v3). D5.1.1→v2 in
   spec 1.51.0, SF20 addendum in `Lambda_Design_Stack_Frame.md`.
 - **JSCUO3 — Who constructs DOM capsules when no JS realm exists.** JSCU17
   says "whichever language first touches them"; the observer delivery path
@@ -1337,6 +1346,8 @@ micro-kernel required by D1.2 and D7.4.1v2–D7.4.2, and generalizes JSCU24
 instead of adding another JS resource mechanism beside it.
 
 ### 8.8 JSCU32 — one environment carrier and one suspension prefix
+
+*[Suspension half superseded 2026-10-05 (`vibe/Lambda_Design_Runtime_Async.md` §11): there is no Lambda async frame and no JS state-machine frame, so the shared suspension prefix reduces to the Activation each body runs on (`JsSuspendedActivation::activation`, RA8). Decision A (one environment carrier) is unaffected.]*
 
 **Decision A: environments.** Replace `GC_TYPE_JS_ENV` and
 `GC_TYPE_JS_INTERP_ENV` with one tail-bearing `GcEnvironment` allocation and

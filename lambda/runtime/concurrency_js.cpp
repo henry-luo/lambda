@@ -118,8 +118,6 @@ static Item lambda_wait_js_promise(Item promise, LambdaTask* waiter) {
         return err2it(err_create_heap(ERR_INVALID_OPERATION,
             "wait requires a Promise and a running Lambda task", NULL));
     }
-    Item resumed = ItemNull;
-    if (lambda_task_take_resume_value(waiter, &resumed)) return resumed;
     if (lambda_task_cancel_requested(waiter)) {
         return err2it(err_create_heap(ERR_CANCELLED,
             "task cancelled", NULL));
@@ -145,9 +143,10 @@ static Item lambda_wait_js_promise(Item promise, LambdaTask* waiter) {
     Rooted<Item> rejected_root(roots, on_rejected);
     // These reactions are unowned until Promise.then publishes them.
     js_promise_then(promise_root.get(), fulfilled_root.get(), rejected_root.get());
-    lambda_task_park(waiter);
     log_debug("concurrency JS: parked Lambda task on Promise");
-    return (Item){.item = ITEM_TASK_SUSPENDED};
+    // The reaction's resume value (fulfilment, or the rejection as an error)
+    // is this wait's result.
+    return lambda_task_suspend(waiter);
 }
 
 static Item lambda_js_procedure_call(Item env_item, Item rest_args) {

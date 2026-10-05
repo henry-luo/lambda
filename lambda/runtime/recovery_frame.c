@@ -201,6 +201,16 @@ LambdaRecoveryFrame* lambda_recovery_frame_begin_for(Context* runtime_context,
     return frame;
 }
 
+void lambda_recovery_frame_discard_chain(LambdaRecoveryFrame* top) {
+    // The chain belongs to a parked native stack that will never run again;
+    // its stack-resident frames vanish with the stack, heap frames do not.
+    while (top) {
+        LambdaRecoveryFrame* previous = top->previous;
+        if (top->heap_owned) mem_free(top);
+        top = previous;
+    }
+}
+
 bool lambda_recovery_frame_end(LambdaRecoveryFrame* frame) {
     if (!lambda_recovery_frame_pop(frame)) return false;
     mem_free(frame);

@@ -85,6 +85,7 @@ typedef void (*gc_collect_callback_t)(void);
  * this hook remains data-first for the generic runtime/test bridge.
  */
 typedef struct gc_heap gc_heap_t;  // forward declaration for function pointer types
+typedef void (*gc_root_visitor_t)(gc_heap_t* gc);
 
 // A non-local recovery resumes outside the C++ scopes that temporarily defer
 // collection or assert a no-GC section. Preserve their entry depths so the
@@ -319,6 +320,9 @@ typedef struct gc_heap {
     uint64_t data_pressure_last_cost_ns;    // mark-phase cost of that collection
     int collecting;                 // re-entrancy guard (1 = GC in progress)
     gc_collect_callback_t collect_callback;  // called when threshold exceeded
+    // Marks Item regions that are not the live side-root stack: the root
+    // segments of activations parked off the running stack (RA3).
+    gc_root_visitor_t root_visitor;
 
     // Collection statistics
     size_t collections;             // number of GC collections performed
@@ -634,6 +638,10 @@ int gc_should_collect(gc_heap_t* gc);
  * @param callback function to call for auto-collection (NULL to disable)
  */
 void gc_set_collect_callback(gc_heap_t* gc, gc_collect_callback_t callback);
+
+// Install the visitor that marks additional exact Item regions during the
+// root phase of every collection (NULL to clear).
+void gc_set_root_visitor(gc_heap_t* gc, gc_root_visitor_t visitor);
 
 // ============================================================================
 // Utility

@@ -4,6 +4,7 @@
 #include "jube_language.h"
 #include "../input/input-script-cache.h"
 #include "../runtime/ast.hpp"
+#include "../runtime/activation.h"
 #include "../runtime/module_registry.h"
 #include "../runtime/transpiler.hpp"
 #include "../runtime/mir_emitter_shared.hpp"
@@ -1424,6 +1425,16 @@ static Item jube_host_script_new_closure(JubeNativeFunctionSpec spec,
 #undef JUBE_NATIVE_CLOSURE_CASE
 }
 
+// A module's call back into script runs under the RA10 barrier: it may not
+// park the activation whose stack holds the module's frame (D7.4.2).
+static Item jube_host_call_function(Item function, Item this_value, Item* args,
+        int arg_count) {
+    activation_barrier_enter();
+    Item result = js_call_function(function, this_value, args, arg_count);
+    activation_barrier_leave();
+    return result;
+}
+
 static const JubeHostScriptAPI jube_host_script_api = {
     jube_host_script_new_function,
     js_function_set_prototype,
@@ -1436,7 +1447,7 @@ static const JubeHostScriptAPI jube_host_script_api = {
     js_reflect_own_keys,
     js_object_keys,
     js_reflect_delete_property,
-    js_call_function,
+    jube_host_call_function,
     js_is_truthy,
     js_get_intrinsic_prototype_for_class,
     js_make_number,
