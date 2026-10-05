@@ -27,6 +27,7 @@
 #include "concurrency.h"
 #include "module_registry.h"
 #include "../jube/jube_registry.h"
+#include "rdb_host.h"
 #include "../jube/jube_interface.h"
 #include "../js/js_runtime.h"
 #include "../js/js_runtime_state.hpp"
@@ -2827,6 +2828,7 @@ void runtime_init(Runtime* runtime) {
     // that selector never owns a module-registry allocation it cannot use;
     // module registration paths create it on their first real module.
     jube_register_builtin_modules();
+    rdb_host_install();  // RDB connections join the rid table; drivers resolve via Jube
     dom_set_runtime_cleanup_hook(runtime_cleanup);  // wire DOM-layer cleanup hook
 }
 

@@ -1,0 +1,21 @@
+T1: [\.test.input.fts_tree.'guide.md', \.test.input.fts_tree.'crlf.txt', \.test.input.fts_tree.'ranking.txt']   true
+T2: [{ file: \.test.input.fts_tree.'guide.md', score: 0.7569518956639444, index: 16, line: 3, text: "Full-text search ranks documents by relevance.\nSearch engines keep an inverted index."}]
+T3: [\.test.input.fts_tree.code.'parser.ls']
+T4: [\.test.input.fts_tree.code.'parser.ls']
+T5: []   [\.test.input.fts_tree.code.'parser.ls']
+T6: [\.test.input.fts_tree.'ranking.txt']
+T7: []
+T8: [{ file: \.test.input.fts_tree.'crlf.txt', index: 12, line: 2, text: "search on a CRLF line", line_ending: "\r\n", before: ["first line"], after: ["last"]}]
+T9: [{ file: \.test.input.fts_tree.'unicode.txt', index: 0, byte_offset: 0, text: "Café menu: café au lait.", matches: [{ value: "Café", index: 0, byte_offset: 0}, { value: "café", index: 11, byte_offset: 12}, { value: "lait", index: 19, byte_offset: 21}]}]
+T10: …no index to build
+T11: [\.test.input.fts_tree.'crlf.txt', \.test.input.fts_tree.'guide.md', \.test.input.fts_tree.'ranking.txt']
+T12: [{ file: \.test.input.fts_tree.'crlf.txt', count: 1}, { file: \.test.input.fts_tree.'guide.md', count: 3}, { file: \.test.input.fts_tree.'ranking.txt', count: 1}]
+T13: 2   3
+T14: 3   0
+T15: 0   1
+T16: [\.test.input.fts_tree.'unicode.txt']
+T17: [\.test.input.fts_tree.'guide.md']   []
+T18: 4   4
+T19: [\.test.input.fts_tree.'ranking.txt', \.test.input.fts_tree.code.'parser.ls']
+T20: true   true   true
+

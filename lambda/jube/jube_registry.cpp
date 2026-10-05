@@ -5490,6 +5490,58 @@ static bool jube_manifest_path_matches_selector(const char* manifest_path,
     return selected;
 }
 
+// RDB provider index (RDB4): `rdb:<driver>` entries from engine "rdb"
+// manifests. It is deliberately separate from the specifier index, so no
+// script import can resolve or activate a driver module.
+#define JUBE_RDB_PROVIDER_CAPACITY 16
+#define JUBE_RDB_DRIVER_NAME_CAPACITY 64
+
+struct JubeRdbProvider {
+    char driver[JUBE_RDB_DRIVER_NAME_CAPACITY];
+    char module_name[JUBE_SPECIFIER_MODULE_NAME_CAPACITY];
+    char manifest_path[JUBE_MANIFEST_PATH_CAPACITY];
+};
+
+static JubeRdbProvider jube_rdb_providers[JUBE_RDB_PROVIDER_CAPACITY];
+static int jube_rdb_provider_count = 0;
+
+static const JubeRdbProvider* jube_rdb_provider_find(const char* driver) {
+    for (int i = 0; i < jube_rdb_provider_count; i++) {
+        if (strcmp(jube_rdb_providers[i].driver, driver) == 0) return &jube_rdb_providers[i];
+    }
+    return NULL;
+}
+
+static bool jube_rdb_provider_add(const char* provided, const char* module_name,
+                                  const char* manifest_path) {
+    // `rdb:` followed by a lower-case driver identifier
+    if (strncmp(provided, "rdb:", 4) != 0) return false;
+    const char* driver = provided + 4;
+    size_t length = strlen(driver);
+    if (length == 0 || length >= JUBE_RDB_DRIVER_NAME_CAPACITY ||
+            strlen(module_name) >= JUBE_SPECIFIER_MODULE_NAME_CAPACITY ||
+            strlen(manifest_path) >= JUBE_MANIFEST_PATH_CAPACITY) {
+        return false;
+    }
+    for (size_t i = 0; i < length; i++) {
+        char c = driver[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_')) return false;
+    }
+    const JubeRdbProvider* existing = jube_rdb_provider_find(driver);
+    if (existing) {
+        if (strcmp(existing->module_name, module_name) == 0) return true;
+        log_error("JUBE_SPEC: rdb driver '%s' provided by both '%s' and '%s'", driver,
+                  existing->module_name, module_name);
+        return false;
+    }
+    if (jube_rdb_provider_count >= JUBE_RDB_PROVIDER_CAPACITY) return false;
+    JubeRdbProvider* entry = &jube_rdb_providers[jube_rdb_provider_count++];
+    strcpy(entry->driver, driver);
+    strcpy(entry->module_name, module_name);
+    strcpy(entry->manifest_path, manifest_path);
+    return true;
+}
+
 static bool jube_specifier_catalog_manifest_path(const char* manifest_path) {
     char* text = NULL;
     if (!jube_manifest_read_file(manifest_path, &text)) return true;
@@ -5505,11 +5557,15 @@ static bool jube_specifier_catalog_manifest_path(const char* manifest_path) {
         JUBE_SPECIFIER_CATALOG_CAPACITY, &provide_count);
     bool has_language = jube_manifest_string(text, "language", language, sizeof(language));
     bool ok = has_name && has_provides;
+    // known engines only: "js" provides script specifiers, "rdb" provides RDB
+    // drivers; any other engine still fails the catalog closed
+    bool rdb_engine = false;
     if (ok && provide_count > 0) {
         ok = jube_manifest_string(text, "kind", kind, sizeof(kind)) &&
             jube_manifest_string(text, "engine", engine, sizeof(engine)) &&
-            str_ieq_const(kind, strlen(kind), "runtime-library") &&
-            str_ieq_const(engine, strlen(engine), "js");
+            str_ieq_const(kind, strlen(kind), "runtime-library");
+        rdb_engine = ok && str_ieq_const(engine, strlen(engine), "rdb");
+        ok = ok && (rdb_engine || str_ieq_const(engine, strlen(engine), "js"));
     }
     if (ok && !has_language && provide_count == 0) {
         log_error("JUBE_SPEC: manifest '%s' declares neither language nor provides", manifest_path);
@@ -5522,6 +5578,16 @@ static bool jube_specifier_catalog_manifest_path(const char* manifest_path) {
         return false;
     }
     for (int i = 0; i < provide_count; i++) {
+        if (rdb_engine) {
+            if (!jube_rdb_provider_add(provides[i], module_name, manifest_path)) {
+                log_error("JUBE_SPEC: invalid rdb provider '%s' in '%s'", provides[i],
+                          manifest_path);
+                free(text);
+                jube_specifier_catalog_failed = true;
+                return false;
+            }
+            continue;
+        }
         char normalized[JUBE_SPECIFIER_NAME_CAPACITY];
         if (!jube_specifier_normalize(provides[i], normalized, sizeof(normalized)) ||
                 strcmp(provides[i], normalized) != 0 ||
@@ -5590,6 +5656,7 @@ static bool jube_specifier_catalog_scan_root(const char* root) {
 }
 
 static bool jube_specifier_catalog_build(void) {
+    jube_rdb_provider_count = 0;
     for (int i = 0; i < jube_static_modules_count; i++) {
         if (jube_specifier_index_module(jube_static_modules[i].module) != 0) {
             jube_specifier_catalog_failed = true;
@@ -5640,6 +5707,64 @@ static bool jube_specifier_catalog_ensure(void) {
     }
     __atomic_store_n(&jube_specifier_catalog_lock.v, 0, __ATOMIC_RELEASE);
     return !jube_specifier_catalog_failed;
+}
+
+static const RdbDriver* const* jube_module_rdb_drivers(const JubeModuleDef* module,
+                                                      int32_t* count) {
+    *count = 0;
+    size_t end = offsetof(JubeModuleDef, rdb_driver_count) + sizeof(module->rdb_driver_count);
+    if (!jube_module_has_field(module, end) || !module->rdb_drivers) return NULL;
+    *count = module->rdb_driver_count;
+    return module->rdb_drivers;
+}
+
+/** D7.3.4: the descriptor's drivers must equal the manifest's `rdb:` provides */
+static bool jube_rdb_module_matches_catalog(const JubeModuleDef* module) {
+    int32_t count = 0;
+    const RdbDriver* const* drivers = jube_module_rdb_drivers(module, &count);
+    int provided = 0;
+    for (int i = 0; i < jube_rdb_provider_count; i++) {
+        if (strcmp(jube_rdb_providers[i].module_name, module->name) == 0) provided++;
+    }
+    if (count != provided) return false;
+    for (int32_t i = 0; i < count; i++) {
+        const JubeRdbProvider* provider = drivers[i] && drivers[i]->name ?
+            jube_rdb_provider_find(drivers[i]->name) : NULL;
+        if (!provider || strcmp(provider->module_name, module->name) != 0) return false;
+    }
+    return true;
+}
+
+const RdbDriver* jube_rdb_resolve_driver(const char* name) {
+    if (!name || !jube_specifier_catalog_ensure()) return NULL;
+    const JubeRdbProvider* provider = jube_rdb_provider_find(name);
+    if (!provider) return NULL;
+    int transaction_start = jube_static_modules_count;
+    int index = jube_find_static_module_index(provider->module_name);
+    if (index < 0) {
+        if (jube_load_manifest_path_internal(provider->manifest_path, NULL,
+                                             provider->module_name) != 1) {
+            log_error("JUBE_RDB: driver module '%s' for '%s' is unavailable",
+                      provider->module_name, name);
+            return NULL;
+        }
+        index = jube_find_static_module_index(provider->module_name);
+        if (index < 0) return NULL;
+    }
+    const JubeModuleDef* module = jube_static_modules[index].module;
+    if (!jube_rdb_module_matches_catalog(module)) {
+        log_error("JUBE_RDB: module '%s' drivers do not match its manifest provides",
+                  module->name);
+        // activation is transactional: a mismatched image is never kept (D7.3.2)
+        if (index >= transaction_start) jube_rollback_registered_modules(transaction_start);
+        return NULL;
+    }
+    int32_t count = 0;
+    const RdbDriver* const* drivers = jube_module_rdb_drivers(module, &count);
+    for (int32_t i = 0; i < count; i++) {
+        if (strcmp(drivers[i]->name, name) == 0) return drivers[i];
+    }
+    return NULL;
 }
 
 static bool jube_scan_manifest_root(const char* root, const char* selector) {

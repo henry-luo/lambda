@@ -161,16 +161,17 @@ RdbExpr* rdb_expr_like(Pool* pool, const char* column_name, const char* pattern,
 /**
  * Build a parameterized SQL SELECT from a query descriptor.
  *
- * Validates all table/column names against the provided schema.
+ * Validates all table/column names against the connection's schema and
+ * renders identifiers and placeholders in its driver dialect (RDB5).
  * Returns RDB_OK on success, RDB_ERROR on validation failure.
  *
  * @param pool       allocation pool for temporaries
- * @param schema     database schema for name validation
+ * @param conn       connection whose schema and dialect apply
  * @param desc       query descriptor
  * @param out_query  output: built query with SQL string + params
  * @return RDB_OK or RDB_ERROR
  */
-int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
+int rdb_query_build(Pool* pool, const RdbConn* conn, const RdbQueryDesc* desc,
                     RdbBuiltQuery* out_query);
 
 /**

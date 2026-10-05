@@ -643,9 +643,10 @@ static constexpr bool view_slots_all_have_rows() {
 }
 static_assert(view_slots_all_have_rows(), "an element view slot has no teardown row");
 
-// The value of a view slot, for the debug check that a pointer-clearing
-// teardown left none behind.
 #ifndef NDEBUG
+// The value of a view slot, for the debug check that a pointer-clearing
+// teardown left none behind. Compiled with its only caller, which is
+// debug-only: release builds would otherwise reject an unused static.
 static const void* view_slot_value(const DomElement* elem, DomViewSlot slot) {
     const DomElementExt* ext = elem->ext;
     switch (slot) {

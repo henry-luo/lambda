@@ -468,9 +468,13 @@ static void search_block(GrepSearcher* s, const char* data, size_t len, size_t d
     if (o->char_offsets) s->char_at_done = char_offset_of(s, len);
 }
 
+bool grep_input_is_binary(const char* data, size_t length) {
+    return memchr(data, 0, length < GREP_SNIFF_BYTES ? length : GREP_SNIFF_BYTES) != NULL;
+}
+
 static bool looks_binary(const GrepSearcher* s, const char* data, size_t len) {
     if (s->m->options.binary_as_text) return false;
-    return memchr(data, 0, len < GREP_SNIFF_BYTES ? len : GREP_SNIFF_BYTES) != NULL;
+    return grep_input_is_binary(data, len);
 }
 
 static void report_file_done(GrepSearcher* s) {
