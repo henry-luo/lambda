@@ -3,6 +3,7 @@
 #include "../core/lambda-decimal.hpp"
 #include "../io/mark_builder.hpp"
 #include "../../lib/url.h"
+#include "../../lib/rdb.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mime-detect.h"
 #include "../../lib/arena.h"
@@ -1681,10 +1682,21 @@ static Input* input_from_target_impl(Target* target, String* type,
         return NULL;
     }
 
+    // network and embedded database URIs (postgresql://, mysql://, ...) go to
+    // the RDB layer before generic URL handling, which knows no such schemes
+    if (target->type == TARGET_TYPE_URL && target->original && strstr(target->original, "://")) {
+        const char* rdb_driver = rdb_detect_format(target->original, type ? type->chars : NULL);
+        if (rdb_driver && strcmp(rdb_driver, "sqlite") != 0) {
+            return input_rdb_from_path_with_name_parent(target->original, rdb_driver, name_parent);
+        }
+    }
+
     // For URL targets, use the existing URL-based dispatch
     if (target->type == TARGET_TYPE_URL && target->url) {
         Url* url = target->url;
-        log_debug("input_from_target: URL target, href=%s", url->href ? url->href->chars : "null");
+        char redacted_href[1024];
+        rdb_redact_uri(url->href ? url->href->chars : "null", redacted_href, sizeof(redacted_href));
+        log_debug("input_from_target: URL target, href=%s", redacted_href);
 
         // Handle different URL schemes
         if (target->scheme == TARGET_SCHEME_FILE) {

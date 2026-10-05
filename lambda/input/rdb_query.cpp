@@ -138,6 +138,7 @@ RdbExpr* rdb_expr_like(Pool* pool, const char* column_name, const char* pattern,
 
 typedef struct {
     StrBuf*   sql;
+    const RdbDialect* dialect;  /* placeholder + identifier style (RDB5) */
     int       param_count;
     RdbParam  params[RDB_MAX_PARAMS];
 } QueryBuilder;
@@ -153,11 +154,15 @@ static int qb_add_param(QueryBuilder* qb, const RdbParam* param) {
         qb->params[qb->param_count].str_val = mem_strdup(param->str_val, MEM_CAT_INPUT_OTHER);
     }
     qb->param_count++;
-    // append placeholder: ?1, ?2, etc.
-    char buf[16];
-    snprintf(buf, sizeof(buf), "?%d", qb->param_count);
-    strbuf_append_str(qb->sql, buf);
+    rdb_append_placeholder(qb->sql, qb->dialect, qb->param_count);
     return RDB_OK;
+}
+
+/** "(<ident><suffix>": opens a parenthesised predicate on a quoted column */
+static void qb_open_column(QueryBuilder* qb, const char* column, const char* suffix) {
+    strbuf_append_char(qb->sql, '(');
+    rdb_append_ident(qb->sql, qb->dialect, column);
+    strbuf_append_str(qb->sql, suffix);
 }
 
 /* ══════════════════════════════════════════════════════════════════════
@@ -196,7 +201,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                           expr->column_name, table->name);
                 return RDB_ERROR;
             }
-            strbuf_append_all(qb->sql, 3, "\"", expr->column_name, "\"");
+            rdb_append_ident(qb->sql, qb->dialect, expr->column_name);
             return RDB_OK;
 
         case RDB_EXPR_COMPARE: {
@@ -247,7 +252,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 strbuf_append_str(qb->sql, "(0)");
                 return RDB_OK;
             }
-            strbuf_append_all(qb->sql, 3, "(\"", expr->in_expr.column_name, "\" IN (");
+            qb_open_column(qb, expr->in_expr.column_name, " IN (");
             for (int i = 0; i < expr->in_expr.value_count; i++) {
                 if (i > 0) strbuf_append_str(qb->sql, ", ");
                 if (qb_add_param(qb, &expr->in_expr.values[i]) != RDB_OK) return RDB_ERROR;
@@ -261,7 +266,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 log_error("rdb query: unknown column '%s' in IS NULL", expr->null_check.column_name);
                 return RDB_ERROR;
             }
-            strbuf_append_all(qb->sql, 3, "(\"", expr->null_check.column_name, "\" IS NULL)");
+            qb_open_column(qb, expr->null_check.column_name, " IS NULL)");
             return RDB_OK;
 
         case RDB_EXPR_IS_NOT_NULL:
@@ -269,7 +274,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 log_error("rdb query: unknown column '%s' in IS NOT NULL", expr->null_check.column_name);
                 return RDB_ERROR;
             }
-            strbuf_append_all(qb->sql, 3, "(\"", expr->null_check.column_name, "\" IS NOT NULL)");
+            qb_open_column(qb, expr->null_check.column_name, " IS NOT NULL)");
             return RDB_OK;
 
         case RDB_EXPR_LIKE: {
@@ -277,7 +282,7 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
                 log_error("rdb query: unknown column '%s' in LIKE", expr->like.column_name);
                 return RDB_ERROR;
             }
-            strbuf_append_all(qb->sql, 3, "(\"", expr->like.column_name, "\" LIKE ");
+            qb_open_column(qb, expr->like.column_name, " LIKE ");
 
             // build LIKE pattern with appropriate wildcards
             StrBuf* pat = strbuf_new();
@@ -309,8 +314,11 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
             }
             strbuf_free(pat);
 
-            // add ESCAPE clause so our escaping of % and _ works
-            strbuf_append_all(qb->sql, 2, " ESCAPE '\\'", ")");
+            // add ESCAPE clause so our escaping of % and _ works; MySQL needs the
+            // backslash itself escaped inside a string literal (RDB5)
+            strbuf_append_str(qb->sql, " ESCAPE ");
+            strbuf_append_str(qb->sql, qb->dialect->like_escape ? qb->dialect->like_escape : "'\\'");
+            strbuf_append_char(qb->sql, ')');
             return RDB_OK;
         }
     }
@@ -321,15 +329,15 @@ static int emit_expr(QueryBuilder* qb, RdbTable* table, const RdbExpr* expr) {
  * Public: build parameterized SQL from query descriptor
  * ══════════════════════════════════════════════════════════════════════ */
 
-int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
+int rdb_query_build(Pool* pool, const RdbConn* conn, const RdbQueryDesc* desc,
                     RdbBuiltQuery* out_query) {
-    if (!schema || !desc || !out_query || !desc->table_name) {
+    if (!conn || !desc || !out_query || !desc->table_name) {
         log_error("rdb query: NULL argument to rdb_query_build");
         return RDB_ERROR;
     }
 
     // validate table name against schema
-    RdbTable* table = find_table(schema, desc->table_name);
+    RdbTable* table = find_table((RdbSchema*)&conn->schema, desc->table_name);
     if (!table) {
         log_error("rdb query: unknown table '%s'", desc->table_name);
         return RDB_ERROR;
@@ -338,9 +346,10 @@ int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
     QueryBuilder qb;
     memset(&qb, 0, sizeof(qb));
     qb.sql = strbuf_new();
+    qb.dialect = rdb_dialect(conn);
 
-    // SELECT * FROM "table"
-    strbuf_append_all(qb.sql, 3, "SELECT * FROM \"", desc->table_name, "\"");
+    strbuf_append_str(qb.sql, "SELECT * FROM ");
+    rdb_append_ident(qb.sql, qb.dialect, desc->table_name);
 
     // WHERE clause
     if (desc->where_expr) {
@@ -361,8 +370,8 @@ int rdb_query_build(Pool* pool, RdbSchema* schema, const RdbQueryDesc* desc,
                 strbuf_free(qb.sql);
                 return RDB_ERROR;
             }
-            strbuf_append_all(qb.sql, 4, "\"", desc->order_by[i].column_name,
-                              "\"", desc->order_by[i].descending ? " DESC" : " ASC");
+            rdb_append_ident(qb.sql, qb.dialect, desc->order_by[i].column_name);
+            strbuf_append_str(qb.sql, desc->order_by[i].descending ? " DESC" : " ASC");
         }
     }
 

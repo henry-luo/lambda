@@ -220,6 +220,36 @@
       "version": "v1.0-pre34"
     },
     {
+      "name": "rdb-pq",
+      "version": "18.6",
+      "description": "libpq, static and TLS-free (utils/build-rdb-deps.sh); rdb-drivers module only",
+      "include": "mac-deps/rdb/include",
+      "lib": "mac-deps/rdb/lib/libpq.a",
+      "link": "static"
+    },
+    {
+      "name": "rdb-pgcommon",
+      "version": "18.6",
+      "description": "PostgreSQL common code for libpq (PIC variant)",
+      "lib": "mac-deps/rdb/lib/libpgcommon_shlib.a",
+      "link": "static"
+    },
+    {
+      "name": "rdb-pgport",
+      "version": "18.6",
+      "description": "PostgreSQL portability code for libpq (PIC variant)",
+      "lib": "mac-deps/rdb/lib/libpgport_shlib.a",
+      "link": "static"
+    },
+    {
+      "name": "rdb-mariadbclient",
+      "version": "3.3.21",
+      "description": "MariaDB Connector/C, static and TLS-free (utils/build-rdb-deps.sh); rdb-drivers module only",
+      "include": "mac-deps/rdb/include/mariadb",
+      "lib": "mac-deps/rdb/lib/libmariadbclient.a",
+      "link": "static"
+    },
+    {
       "name": "glfw",
       "version": "3.4",
       "include": "/opt/homebrew/include",
@@ -400,6 +430,38 @@
     }
   ],
   "targets": [
+    {
+      "name": "rdb-drivers",
+      "description": "External RDB driver Jube module: PostgreSQL + MySQL/MariaDB (vibe/Lambda_IO_RDB.md section 13)",
+      "lang": "c++17",
+      "link": "dynamic",
+      "target_dir": "modules/rdb-drivers",
+      "target_name": "rdb-drivers",
+      "target_prefix": "",
+      "pic": true,
+      "single_project": true,
+      "source_files": [
+        "lambda/module/rdb/rdb_drivers_module.cpp",
+        "lambda/module/rdb/rdb_pg.cpp",
+        "lambda/module/rdb/rdb_mysql.cpp"
+      ],
+      "libraries": [
+        "rdb-pq",
+        "rdb-pgcommon",
+        "rdb-pgport",
+        "rdb-mariadbclient"
+      ],
+      "link_options_macos": [
+        "-Wl,-exported_symbol,_jube_module",
+        "-Wl,-dead_strip_dylibs",
+        "-liconv"
+      ],
+      "link_options_linux": [
+        "-Wl,--exclude-libs,ALL",
+        "-Wl,-Bsymbolic",
+        "-Wl,--no-undefined"
+      ]
+    },
     {
       "name": "lang-python",
       "description": "External hosted Python Jube language module",

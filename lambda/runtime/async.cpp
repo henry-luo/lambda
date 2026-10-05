@@ -224,6 +224,7 @@ static const RuntimeResourceDescriptor runtime_resource_descriptors[] = {
     {RUNTIME_RESOURCE_CHILD_PROCESS, RUNTIME_RESOURCE_GROUP_NONE, "ChildProcess"},
     {RUNTIME_RESOURCE_SPAWN_PROCESS, RUNTIME_RESOURCE_GROUP_NONE, "SpawnProcess"},
     {RUNTIME_RESOURCE_PROCESS_IPC, RUNTIME_RESOURCE_GROUP_NONE, "ProcessIpc"},
+    {RUNTIME_RESOURCE_RDB_CONNECTION, RUNTIME_RESOURCE_GROUP_DATABASE, "RdbConnection"},
 };
 
 extern "C" const RuntimeResourceDescriptor*
@@ -441,6 +442,39 @@ extern "C" void runtime_resource_table_destroy(RuntimeResourceTable* table) {
     root_vector_destroy(&table->owner_values);
 }
 
+/** a free slot (or a new one) with its generation advanced for a new rid */
+static RuntimeResourceSlot* runtime_resource_slot_acquire(RuntimeResourceTable* table,
+        int* out_index) {
+    if (!table->slots) {
+        table->slots = arraylist_new(8);
+        if (!table->slots) return NULL;
+    }
+    RuntimeResourceSlot* slot = NULL;
+    int index = -1;
+    for (int i = 0; i < table->slots->length; i++) {
+        RuntimeResourceSlot* candidate = (RuntimeResourceSlot*)table->slots->data[i];
+        if (candidate && !candidate->entry) {
+            slot = candidate;
+            index = i;
+            break;
+        }
+    }
+    if (!slot) {
+        if (table->slots->length >= (int)RUNTIME_RESOURCE_INDEX_MASK) return NULL;
+        slot = (RuntimeResourceSlot*)mem_calloc(1, sizeof(RuntimeResourceSlot),
+            MEM_CAT_SYSTEM);
+        if (!slot || !arraylist_append(table->slots, slot)) {
+            if (slot) mem_free(slot);
+            return NULL;
+        }
+        index = table->slots->length - 1;
+    }
+    slot->generation++;
+    if (slot->generation == 0) slot->generation++;
+    *out_index = index;
+    return slot;
+}
+
 extern "C" uint32_t runtime_resource_table_add_root_span_owned(
         RuntimeResourceTable* table, void* lifecycle_owner,
         const Item* root_values, int root_count,
@@ -470,28 +504,9 @@ extern "C" uint32_t runtime_resource_table_add_root_span_owned(
         }
     }
 
-    RuntimeResourceSlot* slot = NULL;
     int index = -1;
-    for (int i = 0; i < table->slots->length; i++) {
-        RuntimeResourceSlot* candidate = (RuntimeResourceSlot*)table->slots->data[i];
-        if (candidate && !candidate->entry) {
-            slot = candidate;
-            index = i;
-            break;
-        }
-    }
-    if (!slot) {
-        if (table->slots->length >= (int)RUNTIME_RESOURCE_INDEX_MASK) return 0;
-        slot = (RuntimeResourceSlot*)mem_calloc(1, sizeof(RuntimeResourceSlot),
-            MEM_CAT_SYSTEM);
-        if (!slot || !arraylist_append(table->slots, slot)) {
-            if (slot) mem_free(slot);
-            return 0;
-        }
-        index = table->slots->length - 1;
-    }
-    slot->generation++;
-    if (slot->generation == 0) slot->generation++;
+    RuntimeResourceSlot* slot = runtime_resource_slot_acquire(table, &index);
+    if (!slot) return 0;
 
     RuntimeResourceEntry* entry = (RuntimeResourceEntry*)mem_calloc(1,
         sizeof(RuntimeResourceEntry), MEM_CAT_SYSTEM);
@@ -541,6 +556,29 @@ extern "C" uint32_t runtime_resource_table_add_owned(RuntimeResourceTable* table
         bool is_handle) {
     return runtime_resource_table_add_root_span_owned(table, lifecycle_owner,
         &value, 1, descriptor, close_callback, close_user, is_handle);
+}
+
+extern "C" uint32_t runtime_resource_table_add_native_owned(RuntimeResourceTable* table,
+        void* lifecycle_owner, const RuntimeResourceDescriptor* descriptor,
+        RuntimeResourceCloseCallback close_callback, void* close_user) {
+    // a native-only row has no script owner to dedupe on or to root
+    if (!table || !descriptor || !close_callback) return 0;
+    int index = -1;
+    RuntimeResourceSlot* slot = runtime_resource_slot_acquire(table, &index);
+    if (!slot) return 0;
+    RuntimeResourceEntry* entry = (RuntimeResourceEntry*)mem_calloc(1,
+        sizeof(RuntimeResourceEntry), MEM_CAT_SYSTEM);
+    if (!entry) return 0;
+    entry->id = ((uint32_t)slot->generation << RUNTIME_RESOURCE_INDEX_BITS) |
+        (uint32_t)(index + 1);
+    entry->root_slot = -1;
+    entry->lifecycle_owner = lifecycle_owner;
+    entry->descriptor = descriptor;
+    entry->close_callback = close_callback;
+    entry->close_user = close_user;
+    slot->entry = entry;
+    table->active_count++;
+    return entry->id;
 }
 
 extern "C" void runtime_resource_table_close_group(RuntimeResourceTable* table,

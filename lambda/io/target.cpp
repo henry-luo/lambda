@@ -21,6 +21,7 @@
 #include "../../lib/log.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
+#include "../../lib/rdb.h"
 #include "../../lib/hashmap_helpers.h"
 #include "../../lib/file.h"
 
@@ -177,7 +178,10 @@ Target* item_to_target(uint64_t item, Url* cwd) {
             }
             url_str = str->chars;
         }
-        log_debug("item_to_target: parsing URL '%s'", url_str);
+        // RDB9: a URL may carry credentials (database URIs do); never log them
+        char redacted[1024];
+        rdb_redact_uri(url_str, redacted, sizeof(redacted));
+        log_debug("item_to_target: parsing URL '%s'", redacted);
 
         // Store original string for relative path preservation
         target->original = url_str;
@@ -188,7 +192,7 @@ Target* item_to_target(uint64_t item, Url* cwd) {
         if (owned_cwd) url_destroy(owned_cwd);
 
         if (!url) {
-            log_error("item_to_target: failed to parse URL '%s'", url_str);
+            log_error("item_to_target: failed to parse URL '%s'", redacted);
             mem_free(target);
             return NULL;
         }

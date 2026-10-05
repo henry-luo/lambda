@@ -615,7 +615,7 @@ tree-sitter-libs: tree-sitter-jube-libs
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-grammar generate-grammar test-grammar-s16 test-js-parser-diff generate-names debug release rebuild lambda-cst \
 	    test test-all test-all-baseline test-lambda-baseline test-lambda-interp interp-sweep interp-bench test-lambda-full test-gc-rooting test-gc-rooting-core test-mir-gc-stress test-gc-rooting-python test-bash-baseline test-input-baseline test-radiant-baseline test-layout-baseline test-page-load test-css-cascade-memory test-radiant-online test-pdf-render test-svg-export test-svg-paint test-svg-smil test-extended test-input run help \
-	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
+	    lambda lambda-cli build-cli lambda-headless build-headless lambda-jube build-jube build-lang-python build-node-core build-node-fs build-node-net build-node-crypto build-node-zlib build-rdb-deps build-rdb-drivers release-lang-python release-node-core release-node-fs release-node-net release-node-crypto release-node-zlib package-standard package-jube package-node-reduced package-minimal verify-jube-package verify-node-profile-packages test-jube-module-integrity test-jube-module-loader-negative test-jube-language-dispatch test-hosted-python-architecture-checker test-node-module-architecture-checker test-premake-generator test-jube-node-fs-async-work test-jube-node-fs-dynamic test-jube-node-fs-negative test-jube-node-net-negative test-jube-node-core-leaves test-jube-node-error-lane test-jube-node-core-dynamic test-jube-node-zlib-dynamic test-jube-node-zlib-negative test-jube-node-zlib-parity release-jube format lint lint-full check-doc-code check-code-dup check-lambda-dup check-radiant-dup hosted-python-coupling-inventory check-hosted-python-architecture check-hosted-python-module-boundary check-node-module-architecture hosted-node-coupling-inventory docs intellisense analyze-binary \
 	    build-debug build-release build-debug-asan build-release-profile clean-all distclean \
 	    tree-sitter-libs tree-sitter-jube-libs tree-sitter-cst-libs generate-tree-sitter-python-parser \
 	    generate-premake clean-premake build-lambda-data build-lambda-rt build-radiant build-lambda-static check-module-boundary build-test build-input-baseline build-lambda-baseline build-radiant-baseline build-pdf-render-test build-test-linux build-jube-test test-jube run-radiant-baseline run-layout-baseline-suites \
@@ -1048,6 +1048,21 @@ build-node-zlib: build build-windows-host-import
 	$(MAKE) -C build/premake config=debug_native node-zlib $(NODE_MODULE_BUILD_FLAGS) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	$(PYTHON) utils/update_jube_manifest_integrity.py modules/node-zlib
 	@ls -lh modules/node-zlib/node-zlib.dylib modules/node-zlib/node-zlib.so modules/node-zlib/node-zlib.dll 2>/dev/null || true
+
+# rdb-drivers: the PostgreSQL and MySQL/MariaDB drivers, with libpq and
+# Connector/C linked in statically (vibe/Lambda_IO_RDB.md section 13). The host
+# does the TLS, so neither client library is built with one.
+build-rdb-deps:
+	utils/build-rdb-deps.sh
+
+build-rdb-drivers: build
+	@test -f mac-deps/rdb/lib/libpq.a -a -f mac-deps/rdb/lib/libmariadbclient.a || $(MAKE) build-rdb-deps
+	@echo "Building external rdb-drivers Jube module..."
+	$(PYTHON) utils/generate_premake.py --output $(PREMAKE_FILE)
+	$(PREMAKE5) gmake --file=$(PREMAKE_FILE)
+	$(MAKE) -C build/premake config=debug_native rdb-drivers -j$(JOBS) CC="$(CC)" CXX="$(CXX)" --no-print-directory -s
+	$(PYTHON) utils/update_jube_manifest_integrity.py modules/rdb-drivers
+	@ls -lh modules/rdb-drivers/rdb-drivers.dylib modules/rdb-drivers/rdb-drivers.so 2>/dev/null || true
 
 define release_node_module
 release-node-$(1): release
