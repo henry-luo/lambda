@@ -10821,7 +10821,10 @@ static MapContractRelation runtime_map_contract_relation_cached(
 
 static ShapeEntry* runtime_named_map_field(Type* expected, Item key) {
     expected = runtime_boundary_unwrap_type(expected);
-    if (!expected || expected->type_id != LMD_TYPE_MAP) return NULL;
+    // The open `map` annotation is the plain TYPE_MAP singleton, not a TypeMap:
+    // it declares no fields, and reading it as one walked past the struct
+    // (`var m: map = {}; m["a"] = 1` segfaulted on the JIT).
+    if (!expected || expected->type_id != LMD_TYPE_MAP || expected == &TYPE_MAP) return NULL;
     const char* chars = NULL;
     uint32_t length = 0;
     TypeId key_type = get_type_id(key);
@@ -11086,6 +11089,16 @@ static bool map_extend_open_shape(Item map_item, Item key, Item value) {
 
 static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* expected,
         const char* boundary, bool publish_in_place) {
+    // The open `map` annotation admits every map, so a write needs no field or
+    // post-state check and therefore no cloned transaction: it is the untyped
+    // COW write. The transactional path cloned the whole map per store, which
+    // made a counting loop over a `var m: map` quadratic.
+    if (runtime_boundary_unwrap_type(expected) == &TYPE_MAP) {
+        TypeId owner_type = get_type_id(owner);
+        if (owner_type == LMD_TYPE_MAP || owner_type == LMD_TYPE_VMAP) {
+            return map_set_cow(owner, key, value);
+        }
+    }
     // A declared field write preserves every other field's established proof;
     // admit only the replacement, including T[] fields (D3.2.4v3/D3.3.3v3).
     Type* proven_contract = runtime_boundary_unwrap_type(expected);
@@ -11143,7 +11156,15 @@ static Item lambda_map_set_checked_impl(Item owner, Item key, Item value, Type* 
         rooted_candidate.set(vmap_clone_for_cow(rooted_owner.get()));
         if (get_type_id(rooted_candidate.get()) == LMD_TYPE_ERROR) return rooted_candidate.get();
     }
-    if (field) {
+    // An undeclared key the map already holds is an open member written before:
+    // update it in place. Extending the shape again stored a duplicate entry per
+    // write (S2.1.4 open instances), as the COW path writer below already avoids.
+    TypeId candidate_type = get_type_id(rooted_candidate.get());
+    bool open_member_present = !field &&
+        (candidate_type == LMD_TYPE_MAP || candidate_type == LMD_TYPE_ELEMENT) &&
+        runtime_named_map_field((Type*)lambda_attr_shape(candidate_type,
+            rooted_candidate.get().map), rooted_key.get());
+    if (field || open_member_present) {
         Item set_result = fn_map_set(rooted_candidate.get(), rooted_key.get(), rooted_value.get());
         if (get_type_id(set_result) == LMD_TYPE_ERROR) return set_result;
     } else if (!map_extend_open_shape(rooted_candidate.get(), rooted_key.get(),
