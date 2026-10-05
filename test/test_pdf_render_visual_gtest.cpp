@@ -2409,6 +2409,72 @@ TEST(RenderOutputParity, ColumnCombinatorStylesCellsAfterColumnMutation) {
     EXPECT_FALSE(file_contains_text(svg_path, "fill=\"rgb(0,0,255)\""));
 }
 
+TEST(RenderOutputParity, IndividualTransformsComposeBeforeTransformAndSurviveRestyle) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* individual =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;transform:translateX(4px);"
+        "scale:50% 200%;rotate:90deg;--move:25% 10px;translate:var(--move)}"
+        "#box.before{translate:0;rotate:0deg;scale:1}"
+        "</style><div id='box' class='before'></div><script>"
+        "document.querySelector('#box').className='';</script>";
+    const char* equivalent =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;"
+        "transform:translate(25%,10px) rotate(90deg) scale(.5,2) translateX(4px)}"
+        "</style><div id='box'></div>";
+    const char* actual = "temp/render_output_parity/individual_transforms.png";
+    const char* expected = "temp/render_output_parity/individual_transforms_reference.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms.html", actual, individual));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms_reference.html", expected, equivalent));
+    expect_pngs_exactly_equal(actual, expected);
+}
+
+TEST(RenderOutputParity, IndividualThreeDimensionalTransformsReuseFunctionMatrices) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* individual =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;perspective:500px;"
+        "scale:50% 200% 2;rotate:60deg 1 2 3;translate:25% 10px 20px}"
+        "</style><div id='box'></div>";
+    const char* equivalent =
+        "<!doctype html><style>html,body{margin:0;background:white}"
+        "#box{position:absolute;left:80px;top:80px;width:60px;height:40px;"
+        "background:red;transform-origin:0 0;perspective:500px;"
+        "transform:translate3d(25%,10px,20px) rotate3d(1,2,3,60deg) scale3d(.5,2,2)}"
+        "</style><div id='box'></div>";
+    const char* actual = "temp/render_output_parity/individual_transforms_3d.png";
+    const char* expected = "temp/render_output_parity/individual_transforms_3d_reference.png";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms_3d.html", actual, individual));
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transforms_3d_reference.html", expected, equivalent));
+    expect_pngs_exactly_equal(actual, expected);
+}
+
+TEST(RenderOutputParity, IndividualTransformsKeepIndependentResetAndInheritance) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    }
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html =
+        "<!doctype html><style>html,body{margin:0}"
+        "#parent{translate:10px;rotate:20deg;scale:2}"
+        "#box{width:40px;height:40px;background:red;transform-origin:0 0;"
+        "translate:inherit;translate:2foo;scale:inherit;rotate:initial;transform:none}"
+        "</style><div id='parent'><div id='box'></div></div>";
+    const char* svg = "temp/render_output_parity/individual_transform_reset.svg";
+    ASSERT_TRUE(render_html_fixture("temp/render_output_parity/individual_transform_reset.html", svg, html));
+    EXPECT_TRUE(file_contains_text(svg, "transform=\"matrix(2 0 0 2 10 0)\""));
+}
+
 TEST(RenderOutputParity, PercentageScaleMatchesNumericTransform) {
     if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0) {
         GTEST_SKIP() << "lambda.exe is unavailable";

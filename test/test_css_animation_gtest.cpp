@@ -107,6 +107,9 @@ TEST(CssPropTable, RowsAreUniqueAndSerializeSyntheticElement) {
 }
 
 TEST(CssPropTable, DirtyMutationDoesNotConsumePendingLayout) {
+    Pool* pool = pool_create();
+    ASSERT_NE(pool, nullptr);
+    ASSERT_TRUE(css_property_system_init(pool));
     DomDocument doc = {};
     DomElement element = {};
     element.node_type = DOM_NODE_ELEMENT;
@@ -123,8 +126,30 @@ TEST(CssPropTable, DirtyMutationDoesNotConsumePendingLayout) {
     // produce a used value; the next rendering checkpoint owns that commit.
     EXPECT_TRUE(css_prop_serialize_computed(
         &element, CSS_PROPERTY_OPACITY, 0, value, sizeof(value)));
-    EXPECT_STREQ(value, "");
+    // metadata must be initialized: a missing declaration computes to the initial opacity.
+    EXPECT_STREQ(value, "1");
     EXPECT_EQ(doc.js.mutation_count, 1);
+    pool_destroy(pool);
+}
+
+TEST(CssPropTable, CommittedStylesIgnoreRangeDocumentWrapper) {
+    DomDocument doc = {};
+    DomElement element = {}, document_wrapper = {};
+    element.node_type = document_wrapper.node_type = DOM_NODE_ELEMENT;
+    element.set_synthetic(true);
+    document_wrapper.set_synthetic(true);
+    document_wrapper.tag_name = lam::up("#document");
+    element.doc = lam::up(&doc);
+    element.parent = lam::up(static_cast<DomNode*>(&document_wrapper));
+    element.set_styles_resolved(true);
+    InlineProp in_line = INLINE_PROP_DEFAULT;
+    in_line.opacity = 0.3f;
+    element.in_line = lam::view_ref(&in_line);
+    doc.root = lam::up(&element);
+    char value[64];
+    EXPECT_TRUE(css_prop_serialize_computed(
+        &element, CSS_PROPERTY_OPACITY, 0, value, sizeof(value)));
+    EXPECT_STREQ(value, "0.3");
 }
 
 TEST(CssPropTable, VisibilityUsesRenderEnumNames) {

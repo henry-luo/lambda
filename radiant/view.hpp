@@ -1507,6 +1507,8 @@ typedef enum TransformFunctionOwner {
 // tier-2: view-pool, rebuilt each relayout
 typedef struct TransformProp {
     lam::Shared<TransformFunction> functions;    // Linked list of transform functions (applied in order)
+    // inline values survive transform-list replacement without borrowing another view's pool nodes.
+    TransformFunction individual[3];           // translate, rotate, scale; TRANSFORM_NONE means none
     // Keyframe samples borrow their immutable list from the document pool;
     // resolved CSS functions are owned by the mutable view-property pool.
     TransformFunctionOwner functions_owner;
@@ -1523,6 +1525,15 @@ typedef struct TransformProp {
     CssEnum transform_style;         // flat or preserve-3d
     CssEnum backface_visibility;     // visible or hidden
 } TransformProp;
+
+static inline bool transform_has_functions(const TransformProp* transform) {
+    if (!transform) return false;
+    if (transform->functions) return true;
+    for (const TransformFunction& function : transform->individual) {
+        if (function.type != TRANSFORM_NONE) return true;
+    }
+    return false;
+}
 
 /**
  * FilterFunction - Individual CSS filter function
@@ -3956,6 +3967,16 @@ extern RdtMatrix compute_transform_matrix(TransformFunction* functions,
                                           float perspective_origin_x = 0.0f,
                                           float perspective_origin_y = 0.0f);
 extern RdtMatrix4 compute_transform_matrix_3d(TransformFunction* functions,
+                                              float width, float height,
+                                              float origin_x, float origin_y,
+                                              float origin_z = 0.0f);
+extern RdtMatrix compute_transform_matrix(const TransformProp* transform,
+                                          float width, float height,
+                                          float origin_x, float origin_y,
+                                          float perspective_distance = 0.0f,
+                                          float perspective_origin_x = 0.0f,
+                                          float perspective_origin_y = 0.0f);
+extern RdtMatrix4 compute_transform_matrix_3d(const TransformProp* transform,
                                               float width, float height,
                                               float origin_x, float origin_y,
                                               float origin_z = 0.0f);

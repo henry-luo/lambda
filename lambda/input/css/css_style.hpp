@@ -683,12 +683,22 @@ typedef enum CssPropertyCode {
     CSS_PROPERTY_TEXT_DECORATION_SKIP_INK,
     CSS_PROPERTY_TEXT_UNDERLINE_POSITION,
 
+    CSS_PROPERTY_TRANSLATE,
+    CSS_PROPERTY_ROTATE,
+    CSS_PROPERTY_SCALE,
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
 
     CSS_PROPERTY_COUNT,
     CSS_PROPERTY_UNKNOWN = -1
 } CssPropertyCode;
+
+// individual transforms compose in this order, independently of declaration order.
+static inline int css_individual_transform_index(CssPropertyCode property) {
+    return property >= CSS_PROPERTY_TRANSLATE && property <= CSS_PROPERTY_SCALE
+        ? property - CSS_PROPERTY_TRANSLATE : -1;
+}
 
 // ============================================================================
 // CSS Value Structures

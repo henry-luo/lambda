@@ -7790,7 +7790,7 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
     bool viewport_clip = !overflow || strcmp(overflow, "visible") != 0;
     // visible SVG ink may extend beyond a viewport that lies outside the paint clip.
     if (viewport_clip && !rdcon->has_transform &&
-        !(view->transform && view->transformp()->functions) &&
+        !transform_has_functions(view->transform) &&
         !view_geometry_bounds_intersect(view_geometry_rect_to_bound(content_rect), rdcon->block.clip)) return;
 
     Element* svg_elem = dom_element_to_element(dom_elem);

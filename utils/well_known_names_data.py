@@ -102,6 +102,7 @@ scroll-snap-type transition-delay transition-duration transition-property transi
 wrap-flow wrap-through line-clamp -webkit-line-clamp contain-intrinsic-inline-size contain-intrinsic-block-size scrollbar-gutter content-visibility all zoom text-wrap text-wrap-mode text-underline-offset text-decoration-skip-ink text-underline-position overscroll-behavior-x overscroll-behavior-y
 scroll-margin-top scroll-margin-right scroll-margin-bottom scroll-margin-left scroll-margin-block scroll-margin-block-start scroll-margin-block-end scroll-margin-inline scroll-margin-inline-start scroll-margin-inline-end
 scroll-padding-top scroll-padding-right scroll-padding-bottom scroll-padding-left scroll-padding-block scroll-padding-block-start scroll-padding-block-end scroll-padding-inline scroll-padding-inline-start scroll-padding-inline-end
+translate rotate scale
 """.split()
 
 CSS_PROPERTY_ENTRIES = [

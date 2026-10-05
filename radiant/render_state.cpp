@@ -31,7 +31,7 @@ RenderTransformScope render_state_push_transform(RasterRenderContext* rdcon, Vie
             block->node_name(), rdcon->perspective_distance);
     }
 
-    if (!block->transform || !block->transformp()->functions) {
+    if (!transform_has_functions(block->transform)) {
         return scope;
     }
 
@@ -39,7 +39,7 @@ RenderTransformScope render_state_push_transform(RasterRenderContext* rdcon, Vie
         block->transformp(), elem_x, elem_y, block->width, block->height);
 
     RdtMatrix next_transform = radiant::compute_transform_matrix(
-        block->transformp()->functions, block->width, block->height, origin.x, origin.y,
+        block->transformp(), block->width, block->height, origin.x, origin.y,
         rdcon->perspective_distance, rdcon->perspective_origin_x, rdcon->perspective_origin_y);
     next_transform.e13 *= scale;
     next_transform.e23 *= scale;

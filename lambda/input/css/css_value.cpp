@@ -605,6 +605,8 @@ static const CssEnumInfo css_value_definitions[] = {
     {"from-font", 9, CSS_VALUE_FROM_FONT, CSS_VALUE_GROUP_MISC},
     {"chain", 5, CSS_VALUE_CHAIN, CSS_VALUE_GROUP_MISC},
     {"_replaced", 9, CSS_VALUE__REPLACED, CSS_VALUE_GROUP_RADINT},
+    {"col-resize", 10, CSS_VALUE_COL_RESIZE, CSS_VALUE_GROUP_CURSOR},
+    {"row-resize", 10, CSS_VALUE_ROW_RESIZE, CSS_VALUE_GROUP_CURSOR},
 };
 
 static const size_t css_value_definitions_count = sizeof(css_value_definitions) / sizeof(css_value_definitions[0]);

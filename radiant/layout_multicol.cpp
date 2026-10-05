@@ -1120,7 +1120,7 @@ bool multicol_spanner_can_escape_child(ViewBlock* child) {
     // css multicol: a spanner cannot escape an ancestor that establishes a
     // containing block for positioned descendants.
     if (child->blk && child->block()->contain_positioning) return false;
-    if (child->transform && child->transformp()->functions) return false;
+    if (transform_has_functions(child->transform)) return false;
     if (child->filter_prop() && child->filterp()->functions) return false;
     if (child->embed && (child->embedp()->flex || child->embedp()->grid)) return false;
     if (child->view_type == RDT_VIEW_INLINE_BLOCK || child->view_type == RDT_VIEW_TABLE) return false;
