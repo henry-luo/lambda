@@ -127,6 +127,23 @@ Writing them turned up Lambda defects.
 - Recursive helpers use statement-form loops, so they collect no values.
 - `jq_contains` short-circuits as jq's `jv_contains` does.
 
+### 1.4 V2: the typed Lambda translations (2026-10-05)
+
+`test/benchmark/text/jq_{mix,records,bf,tree}2.ls` plus
+`test/benchmark/jq_query_typed.ls`. They use the same algorithms as V3, with
+annotations where jq's values are uniform: `int`, `float`, `string`, `int[]`,
+`string[]`, a `BfState` record type for `bf.jq`'s state, and `map`/`array`
+for JSON values. All four match their goldens on JIT and AUTO. Debug-build
+times: mix 5.1 s, records 1.3 s, bf 0.10 s, tree 2.4 s.
+
+Typing the records row exposed three checked-map-setter defects, all fixed in
+`5ad5ef235`:
+- `var m: map = {}; m["a"] = 1` segfaulted.
+- An open member was re-appended on every write, so a key held earlier was
+  stored again each time.
+- A `map`-typed write cloned the whole map per store. The counting loop took
+  39 s.
+
 ## 2. Workloads
 
 Every row follows the suite's existing conventions (`test/benchmark/text/README.md`):
@@ -669,7 +686,7 @@ directory. Golden values are produced by jq 1.7.1 and confirmed by gojq.
 | P1 | **DONE.** Node (jqjs), Go (gojq) and Python (purejq) drivers. Runner registration | `run_benchmarks.py -s text -b jq` green on node/go/python, within the Q1 policy |
 | P2 | **DONE.** C2MIR jq-core VM, debugged against jq. Start with `jq_tree` (paths), then `jq_bf`, `jq_mix`, `jq_records` | the four C2MIR checksums match |
 | P3 | V1: typed Lambda VM (`jq_vm.ls` + `jq_*_vm.ls`), a translation of P2; recorded in the C2MIR cell (`c2mir_lambda_vm`) | checksums match on both tiers (`LAMBDA_EXEC_BACKEND=jit` and default) |
-| P4 | V2: typed hand translations `jq_*2.ls` + `jq_query_common.ls` | checksums match on both tiers |
+| P4 | **DONE.** V2: typed hand translations `jq_*2.ls` + `jq_query_typed.ls` | checksums match on both tiers |
 | P5 | **DONE (written before V2).** V3: `jq_*.ls`, the untyped translations | checksums match on both tiers |
 | P6 | LambdaJS: crash fixed (§4.3, done). Re-measure jqjs under LambdaJS on a **release** build and analyse the slowdown | the LambdaJS column runs within the row timeout |
 
