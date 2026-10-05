@@ -11072,7 +11072,91 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
         rooted_value.get(), inplace);
 }
 
+// D3.4.3v4: runtime-grown plain maps share their types through one transition
+// tree per context. It is a capsule extension rather than an EvalContext slot,
+// so the context layout that separately built modules read is unchanged.
+#define RUNTIME_SHAPE_TREE_OWNER 0x53485054u  // 'SHPT'
+// Every runtime-grown map shares this one tree, so its budget sits far above an
+// Input's 1,024 map types; past it a map keeps a private type (D3.4.3v4).
+static const int RUNTIME_SHAPE_GRAPH_BUDGET = 65536;
+
+static void runtime_shape_tree_destroy(void* capsule) {
+    // D4.2.6: the Input's arena holds every tree node, so it goes as a whole
+    input_release_document_resources((Input*)capsule);
+}
+
+static const ContextCapsuleOps runtime_shape_tree_ops = {
+    "runtime_shape_tree", CONTEXT_CAPSULE_LIFETIME_CONTEXT, 0, NULL, NULL,
+    runtime_shape_tree_destroy
+};
+
+static Input* runtime_shape_tree(void) {
+    if (!context || !context->pool) return NULL;
+    Input* tree = (Input*)context_capsule_extension(context, RUNTIME_SHAPE_TREE_OWNER, 0);
+    if (tree) return tree;
+    tree = Input::create(context->pool, nullptr, nullptr);
+    if (!tree || !tree->arena || !tree->type_list) return NULL;
+    tree->shape_graph_budget = RUNTIME_SHAPE_GRAPH_BUDGET;
+    if (!context_capsule_extension_install(context, RUNTIME_SHAPE_TREE_OWNER, 0, tree,
+            &runtime_shape_tree_ops)) {
+        input_release_document_resources(tree);
+        return NULL;
+    }
+    return tree;
+}
+
+// D3.4.3v4: an add to an empty plain map, or to one whose type is a node of the
+// runtime tree, follows (or mints) that tree's edge. Maps built by the same
+// sequence of adds then share one type and a path of n fields holds n entries;
+// copying the whole shape into the pool per add cost O(n²) entries that were
+// never reclaimed (LR03-38). Data grows by doubling. Any other type -- a
+// literal, contract, nominal or detached private type -- keeps the private path.
+static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
+    if (get_type_id(map_item) != LMD_TYPE_MAP || get_type_id(key) != LMD_TYPE_STRING) {
+        return false;
+    }
+    TypeId value_type = get_type_id(value);
+    Map* map = map_item.map;
+    if (!map || map->map_kind != MAP_KIND_PLAIN || value_type == LMD_TYPE_ERROR) return false;
+    TypeMap* old_type = (TypeMap*)map->type;
+    Input* tree = runtime_shape_tree();
+    if (!old_type || !tree) return false;
+    TypeMap* parent = NULL;  // the tree's root
+    bool empty_plain = old_type->length == 0 && !old_type->shape && !old_type->nominal &&
+        !old_type->is_trusted_contract && !old_type->has_spread;
+    if (!empty_plain) {
+        if (!type_tree_owns(tree, old_type)) return false;
+        parent = old_type;
+    }
+    ShapeEntry* entry = NULL;
+    TypeMap* target = type_tree_add_map_field(tree, parent, key.get_safe_string(),
+        value_type, &entry);
+    if (!target || !entry) return false;
+
+    int64_t old_size = empty_plain ? 0 : old_type->byte_size;
+    int64_t needed = target->byte_size;
+    if (!map->data || map->data_cap < needed) {
+        int64_t capacity = map->data_cap > 0 ? (int64_t)map->data_cap : 32;
+        while (capacity < needed) capacity *= 2;
+        if (capacity > INT_MAX) return false;
+        RootFrame roots(2);
+        Rooted<Map*> rooted_map(roots, map);
+        Rooted<Item> rooted_value(roots, value);
+        void* new_data = heap_data_calloc((size_t)capacity);
+        if (!new_data) return false;
+        map = rooted_map.get();
+        value = rooted_value.get();
+        if (map->data && old_size > 0) memcpy(new_data, map->data, (size_t)old_size);
+        map->data = new_data;
+        map->data_cap = (int)capacity;
+    }
+    map_field_store((char*)map->data + entry->byte_offset, value, value_type);
+    map->type = target;
+    return true;
+}
+
 static bool map_extend_open_shape(Item map_item, Item key, Item value) {
+    if (map_extend_via_runtime_tree(map_item, key, value)) return true;
     // S2.1.4 part 3: a nominal instance is OPEN — it may hold fields its type
     // does not declare. Element-shaped values are admitted too: since D2.6.6v2
     // every container shares Map's attribute face at the same offsets, so the
@@ -13887,6 +13971,21 @@ Item fn_map_set(Item map_item, Item key, Item value) {
     // find field in shape
     TypeId value_type = get_type_id(value);
     ShapeEntry* entry = map_type->shape;
+    // A1: the hash table answers a plain Lambda string key, so a member write
+    // no longer walks every field; building an n-key map was O(n²) on these
+    // lookups alone (LR03-38). A hit is the field. A miss is final only on a
+    // tree node, whose table holds every field by construction (D3.4.3v4); a
+    // private type can gain entries its table never saw (elmt_put), so it
+    // keeps the walk, as JS shapes and identity keys do.
+    bool table_answers = false;
+    if (!identity_key && !map_type->js_meta && key_len <= INT_MAX &&
+            typemap_hash_is_usable(map_type)) {
+        ShapeEntry* hit = typemap_hash_lookup(map_type, key_cstr, (int)key_len);
+        if (hit ? hit->key_kind == NAME_KEY_STRING : map_type->is_transition_shared_shape) {
+            table_answers = true;
+            entry = hit;
+        }
+    }
     while (entry) {
         bool name_matches = false;
         if (identity_key) {
@@ -13947,6 +14046,18 @@ Item fn_map_set(Item map_item, Item key, Item value) {
             }
             field_type = entry->type->type_id;
             void* field_ptr = (char*)*data_slot + entry->byte_offset;
+
+            // D3.2.4v4: an `any` field is a TypedItem lane that every value
+            // fits, so a write of another kind stores in place and the field
+            // keeps its declared contract. Comparing the wrapper's TypeId with
+            // the value's rebuilt the shape around the value's kind on every
+            // kind change, minting a pool shape each time (LR03-37).
+            const LaneStorageDesc* storage = shape_entry_storage(entry);
+            if (storage->kind == LANE_STORAGE_TYPED_ITEM &&
+                    storage->value_domain == LMD_TYPE_ANY && value_type != LMD_TYPE_ERROR) {
+                map_field_store(field_ptr, value, LMD_TYPE_ANY);
+                return ItemNull;
+            }
 
             if (field_type == LMD_TYPE_NULL && typemap_is_shared_shape(map_type)) {
                 // A shared constructor placeholder is a raw Item lane. Source
@@ -14064,7 +14175,7 @@ Item fn_map_set(Item map_item, Item key, Item value) {
                                         type_info[value_type].type, value);
             return ItemNull;
         }
-        entry = typemap_next_field(map_type, entry);
+        entry = table_answers ? NULL : typemap_next_field(map_type, entry);
     }
     // S2.1.4 part 3 / S9.1.6: a name is in a map's key domain, so an unknown
     // member write GROWS the shape rather than failing. Growth was previously

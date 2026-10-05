@@ -452,8 +452,10 @@ static TypeAlloc input_tree_alloc(Input* input) {
 }
 
 static bool transition_graph_has_room(Input* input, bool element) {
+    int map_budget = input->shape_graph_budget > 0
+        ? input->shape_graph_budget : MAX_SHAPE_GRAPH;
     return element ? input->element_transition_shapes < MAX_ELEMENT_SHAPE_GRAPH
-                   : input->shape_transition_shapes < MAX_SHAPE_GRAPH;
+                   : input->shape_transition_shapes < map_budget;
 }
 
 static void transition_graph_count(Input* input, bool element) {
@@ -693,6 +695,26 @@ static TypeMap* map_shape_transition_root(Input* input,
     root->js_meta = js_meta;
     input->shape_transition_root = root;
     return root;
+}
+
+// D3.4.3v4: one field added to a runtime-grown plain map through `input`'s
+// tree. A NULL `parent` starts at the tree's root; otherwise it must be a node
+// of this tree (type_tree_owns), since an edge lives as long as its parent.
+TypeMap* type_tree_add_map_field(Input* input, TypeMap* parent, String* key,
+        TypeId type_id, ShapeEntry** out_entry) {
+    if (out_entry) *out_entry = NULL;
+    if (!input || !key || property_key_requires_identity(key)) return NULL;
+    if (!parent) parent = map_shape_transition_root(input, NULL);
+    if (!parent) return NULL;
+    return map_transition_target_for_add(parent, key, type_id, input, out_entry);
+}
+
+bool type_tree_owns(const Input* input, const TypeMap* type) {
+    if (!input || !input->type_list || !type || type->type_index < 0 ||
+            type->type_index >= input->type_list->length) {
+        return false;
+    }
+    return input->type_list->data[type->type_index] == type;
 }
 
 static ShapeEntry* map_existing_shape_entry(TypeMap* map_type, String* key) {
@@ -1832,6 +1854,7 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     // Leaving this one uninitialized made map_put dereference pool garbage.
     input->shape_transition_root = nullptr;
     input->shape_transition_shapes = 0;
+    input->shape_graph_budget = 0;
     input->element_roots = nullptr;
     input->element_root_cap = 0;
     input->element_root_count = 0;

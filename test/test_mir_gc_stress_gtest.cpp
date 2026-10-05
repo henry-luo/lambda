@@ -68,6 +68,8 @@ static const char* kExtraLambdaScripts[] = {
     // an index write widens a packed array in place to hold containers; the
     // collector must trace it as an Array from then on
     "test/lambda/proc/ndim_row_assign.ls",
+    // runtime-grown maps share tree types and grow their data by doubling
+    "test/lambda/proc/map_runtime_shape_tree.ls",
     // a container evaluated once is held across its key's allocations
     "test/lambda/proc/subscript_last_scope.ls",
 };

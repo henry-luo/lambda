@@ -962,6 +962,14 @@ static inline void typemap_hash_insert_owned(TypeMap* tm, ShapeEntry* entry, Poo
     typemap_hash_insert(tm, entry);
 }
 
+// A1: whether the table answers a lookup, a miss included. Without one (or
+// when it is full) a lookup falls back to the shape chain.
+static inline bool typemap_hash_is_usable(TypeMap* tm) {
+    if (!tm || !typemap_hash_slots(tm)) return false;
+    int capacity = typemap_hash_capacity(tm);
+    return capacity > 0 && tm->field_count > 0 && tm->field_count < (uint16_t)capacity;
+}
+
 // A1: Lookup a ShapeEntry by name through the hash table.
 // Returns the ShapeEntry or NULL if not found.
 // A6: Uses pointer comparison first (interned strings via name pool share
@@ -1554,6 +1562,9 @@ typedef struct Input {
     NamePool* name_pool;        // centralized name management
     TypeMap* shape_transition_root;
     int shape_transition_shapes;      // graph size, bounded by MAX_SHAPE_GRAPH
+    // D3.4.3v4: the map graph's budget; 0 means MAX_SHAPE_GRAPH. The runtime
+    // tree raises it, since every runtime-grown map shares that one tree.
+    int shape_graph_budget;
     // D3.4.3v3: one empty root per element tag and namespace, a pool-owned
     // open-addressing table keyed by the pooled tag-name pointer; element
     // nodes (roots included) count against their own budget
