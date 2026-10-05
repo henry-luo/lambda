@@ -93,6 +93,40 @@ iteration short, so the VM's `frame_hop` broke under `c2m`. After the patch,
 C2MIR times on a quiet machine (`c2m -O2`, measured with the patched scratch
 driver before vendoring): mix 1.79 s, records 1.58 s, bf 3.26 s, tree 7.53 s.
 
+### 1.3 V3: the untyped Lambda translations (2026-10-05)
+
+`test/benchmark/text/jq_{mix,records,bf,tree}.ls` plus the shared
+`test/benchmark/jq_query_common.ls`. All four rows match their goldens on JIT
+and AUTO. Debug-build times are not yet benchmark numbers: mix 5.5 s, records
+1.1 s, bf 0.17 s, tree 2.5 s. `jq_records` uses a constant-key `m["k"] = v`
+that T0 cannot execute (LR12-36), so it runs on JIT and AUTO only.
+
+Writing them turned up Lambda defects.
+
+**Fixed:**
+- **GC:** a full data compaction released the old tenured zone before sweep,
+  while dead ArrayNum views' finalizers still read their shape side tables
+  there (`15d9fc9bb`).
+- **T0:** a compact numeric literal was built around a widened `var`
+  (`eb43c4dad`, partial).
+- **`sort()`, `sort(v, key)` and `order by`** were O(n²) insertion and bubble
+  sorts. A reversed 65,536-element sort took 28 s (`94af5e2bc`).
+
+**Ledgered:**
+- LR03-36: stale lanes in types derived before a `var` widens.
+- LR07-43: the JIT truncates an `any` value into an int-inferred `var`.
+- LR09-32: JSON `compact: true` is ignored.
+- LR10-18: a value-bound handler on a `pn ... T^` call yields `null`.
+- LR12-36: T0 cannot execute a constant-key index assignment.
+
+**Translation choices this forced:**
+- Float sums start at `0.0`. jq numbers are doubles, so this is faithful, and
+  it also avoids LR07-43.
+- A `pn` call's error is propagated with `^`, because its `^ { … }` handler is
+  statement-only.
+- Recursive helpers use statement-form loops, so they collect no values.
+- `jq_contains` short-circuits as jq's `jv_contains` does.
+
 ## 2. Workloads
 
 Every row follows the suite's existing conventions (`test/benchmark/text/README.md`):
@@ -636,7 +670,7 @@ directory. Golden values are produced by jq 1.7.1 and confirmed by gojq.
 | P2 | **DONE.** C2MIR jq-core VM, debugged against jq. Start with `jq_tree` (paths), then `jq_bf`, `jq_mix`, `jq_records` | the four C2MIR checksums match |
 | P3 | V1: typed Lambda VM (`jq_vm.ls` + `jq_*_vm.ls`), a translation of P2; recorded in the C2MIR cell (`c2mir_lambda_vm`) | checksums match on both tiers (`LAMBDA_EXEC_BACKEND=jit` and default) |
 | P4 | V2: typed hand translations `jq_*2.ls` + `jq_query_common.ls` | checksums match on both tiers |
-| P5 | V3: `jq_*.ls`, V2 with the annotations removed | checksums match on both tiers |
+| P5 | **DONE (written before V2).** V3: `jq_*.ls`, the untyped translations | checksums match on both tiers |
 | P6 | LambdaJS: crash fixed (§4.3, done). Re-measure jqjs under LambdaJS on a **release** build and analyse the slowdown | the LambdaJS column runs within the row timeout |
 
 ---

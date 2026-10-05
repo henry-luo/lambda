@@ -900,6 +900,9 @@ Possible fixes, independent and combinable:
 
 Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide.ls` on a debug build, then `wc -l temp/mir_dump.txt`, and count `lambda_async_frame_set_state` in `_main`. Analysis record: [`impl/Lambda_Impl_Interp_Tune2.md`](impl/Lambda_Impl_Interp_Tune2.md) §12.6.
 
+<a id="lr07-43"></a>**LR07-43 · JIT: an `any` value assigned to an int-inferred `var` is truncated to the int lane (S12.2.1) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
+`let data = parse("[1.5, 2.25]", 'json')^; var t = 0; ... t = t + data[j]` ends with `t` = 3 on the JIT and 3.75 on T0. The JSON orders' `total = total + qty * price` lost every fraction the same way. The declaration-time widening (`transpile_let_stam`'s `mir_nested_control_writes_binding` scan) boxes the binding only when an assignment's carrier is predicted `float`. An `any` right-hand side keeps the int lane, and each assigned value is coerced into it. S12.2.1 lets an unannotated `var` change type and forbids silent corruption, so an `any` assignment must either widen the binding or keep it int only behind a runtime proof. Boxing every such binding at the declaration costs untyped loops their int lanes, so it needs a performance decision before it is fixed. The jq translations sidestep it by starting float sums at `0.0`, which is faithful because jq numbers are doubles.
+
 ## 8. Memory management & GC (LR_08)
 
 
@@ -981,6 +984,9 @@ The markup formatters skip any text string above a size cap, log an error and ca
 - **Why filed here:** the formatters sit outside LR_09's scope (`lambda/format/`, which `lambda convert` also uses), but the wrong value is observed through the `format()` builtin.
 - **Fix:** needs a decision — remove the caps, or make an oversized string an error.
 
+<a id="lr09-32"></a>**LR09-32 · `format(x, {type: 'json', compact: true})` is documented but ignored · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
+`doc/Lambda_Sys_Func.md` gives `format(data, {type: 'json', compact: true})` as compact JSON. `lambda/format/format-json.cpp` has no compact path, so the output is indented exactly as with `indent: 2`. `indent: 0` is ignored as well. Either implement the option or drop it from the reference.
+
 ## 10. Error handling (LR_10)
 
 <a id="lr10-11"></a>**LR10-11 · T0 binds a stack overflow into a `let` instead of faulting · OPEN (found 2026-09-25)**
@@ -1034,6 +1040,9 @@ A stack overflow is a fault that lands on its boundary (S7.11.1v2, S7.11.2v2), a
 - **Not caused by RA6.** The same recursion reproduces with RA6's `activation_call_on_base` uninvolved, so this is a P0 gap. Through `activation_call_on_base` the same depth completes, because the work runs on the base stack.
 - **Script reachability.** Generated Lambda and JS code checks the recoverable stack limit at frame entry and faults softly, so a script overflow is not known to reach the guard page. Native recursion is the exposure: runtime C helpers, parsers, and hosted-module code running on an activation.
 - **Gate for the fix.** The probe above, run directly on an activation, must complete with `activation_fault()` set and the process alive. Record: `vibe/Lambda_Design_Runtime_Async.md` §10.1 (RA6 entry).
+
+<a id="lr10-18"></a>**LR10-18 · A one-arm handler bound from a non-suspending `pn ... T^` call yields `null` on success (S7.6.1v4, S7.6.7v4) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
+`pn p_str(x) string^ { if (x < 0) { raise error("neg") }; return "ab" }` then `let d = p_str(1) ^ { "ERR" }` binds `""` on both tiers. With `int^` and `map^` returns it binds `null`. S7.6.1v4 says a non-error operand passes through unchanged and that the binding's static type is never a lie. Propagation (`p_str(1)^`) and `fn ... T^` with a one-arm handler both give `"ab"`. S7.6.7v4 forbids value-producing handlers only over *possibly-suspending* `pn` calls. `doc/Lambda_Error_Handling.md` says more broadly that "a `pn` handler cannot be used in a binding or another value context". Whichever ruling governs, the form must either be rejected statically or yield the value. Today it compiles and silently binds a stand-in. Needs a ruling on whether non-suspending `pn` calls take value-producing handlers.
 
 ## 11. Mark data API (LR_11)
 
@@ -1329,6 +1338,9 @@ Reported by the LR12-14 investigation, reproduced 2026-09-25.
 
 <a id="lr12-35"></a>**LR12-35 · A binding from an expression that returns its operand aliases it (S9.1.2) · OPEN (found 2026-09-25)**
 `var xs = [1, 2, 3]; var y = xs or null; y[0] = 99` leaves `xs[0] == 99` on both tiers; so do `if (true) xs else null`, `match (1) { case 1: xs default: null }`, and the S10.1.5v3 proviso `xs that true`. A plain `var y = xs` marks its source and detaches on the write. The alias-bind test (`mir_expr_is_owned_binding_alias`, and T0's declaration bind) recognises only a bare name, so an operand returned through `or`, a branch, an arm, or a proviso is never marked. The same root as LR12-34's reassignment half. Found while implementing `|:` (S10.1.6), reproduced 2026-09-25.
+
+<a id="lr12-36"></a>**LR12-36 · T0 cannot execute `m["key"] = v` with a constant key on a `var` map · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
+`pn main() { var c = {}; c["a"] = 1 }` under `LAMBDA_EXEC_BACKEND=interp` stops with E501 "cannot execute AST_NODE_INDEX_ASSIGN_STAM; MIR fallback is disabled". The same assignment works with a variable key (`c[k] = 1`) and with `c.a = 1`. AUTO hides the gap by falling back to MIR. `test/benchmark/text/jq_records.ls` therefore runs on AUTO and JIT only.
 
 ## 13. Schema validator (LR_13)
 
