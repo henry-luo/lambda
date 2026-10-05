@@ -3,9 +3,12 @@
 //
 // The walk is lib/grep's (grep_walk_paths): one thread pool for traversal and
 // search, a file per job, per-slot state with no lock on the hot path. A file
-// is read once; the prefilter runs over that buffer, and on a hit the same
-// bytes are cut into documents (file, paragraphs or lines) and tokenised.
-// Per-file results are merged on the calling thread. BM25's statistics are
+// is streamed in windows of whole lines, as io.grep streams, so memory does
+// not grow with file size. The prefilter runs on each window; a paragraph or
+// line is tokenised only when a literal falls inside it, and a whole-file
+// document only when the file holds a literal (then in a second pass, since
+// one document needs all of its tokens). Per-file results are merged on the
+// calling thread. BM25's statistics are
 // exact (FTX8): a skipped file holds no query term, so it adds only to the
 // document count N and to the total length, which is measured in bytes and so
 // needs no tokenising; df counts every document holding a scored term, whether
@@ -45,11 +48,18 @@ struct FtsFileHits {
     size_t tf_cap;
 };
 
+#define FTS_WINDOW_BYTES (256 * 1024)
+
 // per walk slot: never shared while a visit runs
 struct FtsSlot {
     GrepSearcher* prefilter;
     FtsTokenizer tok;
     FtsEval eval;
+    char* window;             // the read window, kept across files (mem-owned)
+    size_t window_cap;
+    uint64_t* hits;           // prefilter hits in the current window, ascending
+    size_t hit_count, hit_cap;
+    bool hit_oom;
 };
 
 struct FtsSearch {
@@ -128,32 +138,19 @@ static void for_each_document(const char* data, size_t size, FtsUnit unit, Fn fn
 
 // ── the visitor ────────────────────────────────────────────────────────
 
-static GrepAction prefilter_hit(void* ud, const GrepMatch*) {
+static GrepAction prefilter_any(void* ud, const GrepMatch*) {
     *(bool*)ud = true;
     return GREP_STOP;
 }
 
-static bool search_begin(void* ud, int slot_count) {
-    FtsSearch* s = (FtsSearch*)ud;
-    s->slots = (FtsSlot*)mem_calloc((size_t)slot_count, sizeof(FtsSlot), MEM_CAT_TEMP);
-    if (!s->slots) return false;
-    s->slot_count = slot_count;
-    for (int i = 0; i < slot_count; i++) {
-        fts_tokenizer_init(&s->slots[i].tok, s->q->options.ignore_case, s->q->options.unaccent);
-        fts_eval_init(&s->slots[i].eval);
+static GrepAction prefilter_collect(void* ud, const GrepMatch* m) {
+    FtsSlot* slot = (FtsSlot*)ud;
+    if (!mem_grow_array_raw((void**)&slot->hits, sizeof(uint64_t), &slot->hit_cap, slot->hit_count + 1, 64, MEM_CAT_TEMP)) {
+        slot->hit_oom = true;
+        return GREP_STOP;
     }
-    return true;
-}
-
-static void release_slots(FtsSearch* s) {
-    for (int i = 0; i < s->slot_count; i++) {
-        if (s->slots[i].prefilter) grep_searcher_destroy(s->slots[i].prefilter);
-        fts_tokenizer_release(&s->slots[i].tok);
-        fts_eval_release(&s->slots[i].eval);
-    }
-    if (s->slots) mem_free(s->slots);
-    s->slots = NULL;
-    s->slot_count = 0;
+    slot->hits[slot->hit_count++] = m->byte_offset;
+    return GREP_CONTINUE;
 }
 
 static void free_file_hits(FtsFileHits* f) {
@@ -173,108 +170,295 @@ static bool record_doc(FtsFileHits* f, const FtsDocRec* doc, const uint32_t* tf,
     return true;
 }
 
+// ── reading in windows (FTX10) ─────────────────────────────────────────
+
+// A file read in windows that end on a line (or, for paragraphs, a blank
+// line), so no token, line or paragraph is cut. The window is the slot's.
+struct FtsReader {
+    FILE* file;
+    char* buf;
+    size_t cap, len;
+    uint64_t base;            // the file offset of buf[0]
+    bool eof;
+};
+
+// reads more, growing the window when it is full; false on memory or a read error
+static bool reader_fill(FtsReader* r) {
+    if (r->eof) return true;
+    if (r->len == r->cap &&
+        !mem_grow_array_raw((void**)&r->buf, 1, &r->cap, r->cap + 1, FTS_WINDOW_BYTES, MEM_CAT_TEMP)) return false;
+    size_t want = r->cap - r->len;
+    size_t n = fread(r->buf + r->len, 1, want, r->file);
+    r->len += n;
+    if (n < want) {
+        r->eof = true;
+        if (ferror(r->file)) return false;
+    }
+    return true;
+}
+
+static void reader_consume(FtsReader* r, size_t n) {
+    memmove(r->buf, r->buf + n, r->len - n);
+    r->len -= n;
+    r->base += (uint64_t)n;
+}
+
+// The end of the window's complete part: after its last newline, or for
+// paragraphs after its last blank line; at the end of the file, all of it.
+// 0 when no such end is in the window yet.
+static size_t window_cut(const FtsReader* r, FtsUnit unit) {
+    if (r->eof) return r->len;
+    size_t last = str_rfind_byte(r->buf, r->len, '\n');
+    if (last == STR_NPOS) return 0;
+    if (unit != FTS_UNIT_PARAGRAPH) return last + 1;
+    for (size_t line_end = last;;) {
+        size_t prev = line_end ? str_rfind_byte(r->buf, line_end, '\n') : STR_NPOS;
+        size_t start = prev == STR_NPOS ? 0 : prev + 1;
+        size_t content = line_end > start && r->buf[line_end - 1] == '\r' ? line_end - 1 : line_end;
+        if (blank_line(r->buf + start, content - start)) return line_end + 1;
+        if (start == 0) return 0;
+        line_end = start - 1;
+    }
+}
+
+// The next window: its complete part's length, 0 when the file is done.
+// false on memory or a read error.
+static bool next_window(FtsReader* r, FtsUnit unit, size_t* cut) {
+    for (;;) {
+        *cut = window_cut(r, unit);
+        if (*cut || r->eof) return true;
+        if (!reader_fill(r)) return false;
+    }
+}
+
+// ── one file ───────────────────────────────────────────────────────────
+
+struct FtsFileScan {
+    FtsSearch* s;
+    FtsSlot* slot;
+    const char* label;
+    uint64_t documents, length_sum;  // BM25 statistics this file adds
+    uint64_t* df;
+    FtsFileHits* hits;        // NULL until a document matches
+    size_t root_index;
+    bool oom;
+};
+
+static bool add_match(FtsFileScan* fs, const FtsDocRec* rec) {
+    const FtsQuery* q = fs->s->q;
+    if (!fs->hits) {
+        fs->hits = (FtsFileHits*)mem_calloc(1, sizeof(FtsFileHits), MEM_CAT_TEMP);
+        if (!fs->hits) return false;
+        fs->hits->root_index = fs->root_index;
+        fs->hits->path = mem_strdup(fs->label, MEM_CAT_TEMP);
+        if (!fs->hits->path) return false;
+    }
+    int items = q->item_count;
+    uint32_t tf_items[64];
+    uint32_t* tf = items <= 64 ? tf_items : (uint32_t*)mem_alloc((size_t)items * sizeof(uint32_t), MEM_CAT_TEMP);
+    if (!tf) return false;
+    for (int l = 0; l < q->leaf_count; l++) {
+        int item = q->leaves[l].item;
+        if (item >= 0) tf[item] = fs->slot->eval.tf[l];
+    }
+    bool ok = record_doc(fs->hits, rec, tf, items);
+    if (tf != tf_items) mem_free(tf);
+    return ok;
+}
+
+static void count_df(FtsFileScan* fs) {
+    const FtsQuery* q = fs->s->q;
+    for (int l = 0; l < q->leaf_count && fs->df; l++) {
+        int item = q->leaves[l].item;
+        if (item >= 0 && fs->slot->eval.tf[l] > 0) fs->df[item]++;
+    }
+}
+
+// The file as one document: a first pass looks for a literal, and only a
+// file holding one is read again and tokenised in full.
+static bool scan_whole_file(FtsFileScan* fs, FtsReader* r) {
+    const FtsQuery* q = fs->s->q;
+    FtsSlot* slot = fs->slot;
+    size_t cut = 0;
+    if (q->prefilter) {
+        bool hit = false;
+        while (!hit) {
+            if (!next_window(r, FTS_UNIT_FILE, &cut)) return false;
+            if (!cut) break;
+            GrepSink sink = {&hit, prefilter_any, NULL, NULL};
+            grep_search_buffer(slot->prefilter, fs->label, r->buf, cut, &sink);
+            reader_consume(r, cut);
+        }
+        if (!hit) {
+            fs->documents = 1;
+            fs->length_sum = r->base;
+            return true;
+        }
+        rewind(r->file);
+        r->len = 0;
+        r->base = 0;
+        r->eof = false;
+        if (!reader_fill(r)) return false;
+    }
+    if (!fts_eval_begin(q, &slot->eval)) return false;
+    uint32_t ntokens = 0;
+    for (;;) {
+        if (!next_window(r, FTS_UNIT_FILE, &cut)) return false;
+        if (!cut) break;
+        if (!fts_tokenize(&slot->tok, r->buf, cut)) return false;
+        fts_mark_stop(q, &slot->tok, 0, slot->tok.count);
+        if (!fts_eval_add(q, &slot->tok, 0, slot->tok.count, ntokens, &slot->eval)) return false;
+        ntokens += (uint32_t)slot->tok.count;
+        reader_consume(r, cut);
+    }
+    uint64_t size = r->base;
+    bool match = fts_eval_finish(q, &slot->eval, ntokens);
+    fs->documents = 1;
+    fs->length_sum = size;
+    count_df(fs);
+    FtsDocRec rec = {0, size, 0, 1, GREP_EOL_NONE};
+    return !match || add_match(fs, &rec);
+}
+
+// Paragraphs or lines: every document counts for BM25's statistics, but only
+// one with a literal inside is tokenised (a document without one can neither
+// match nor hold a scored term, §7.2).
+static bool scan_documents(FtsFileScan* fs, FtsReader* r) {
+    const FtsQuery* q = fs->s->q;
+    const FtsOptions* o = &q->options;
+    FtsSlot* slot = fs->slot;
+    bool stats = o->rank == FTS_RANK_BM25;
+    uint64_t line_base = 0, chars_base = 0;
+    size_t matched = 0;
+    bool full = false;
+    while (!full) {
+        size_t cut = 0;
+        if (!next_window(r, o->unit, &cut)) return false;
+        if (!cut) break;
+        slot->hit_count = 0;
+        if (q->prefilter) {
+            GrepSink sink = {slot, prefilter_collect, NULL, NULL};
+            grep_search_buffer(slot->prefilter, fs->label, r->buf, cut, &sink);
+            if (slot->hit_oom) return false;
+        }
+        if (stats || !q->prefilter || slot->hit_count) {
+            size_t h = 0, cursor = 0;
+            uint64_t chars = chars_base;
+            bool oom = false;
+            for_each_document(r->buf, cut, o->unit, [&](const FtsDocSpan& doc) -> bool {
+                fs->documents++;
+                fs->length_sum += doc.end - doc.start;
+                if (q->prefilter) {
+                    while (h < slot->hit_count && slot->hits[h] < doc.start) h++;
+                    if (h == slot->hit_count || slot->hits[h] >= doc.end) return true;
+                }
+                if (!fts_tokenize(&slot->tok, r->buf + doc.start, doc.end - doc.start)) {
+                    oom = true;
+                    return false;
+                }
+                fts_mark_stop(q, &slot->tok, 0, slot->tok.count);
+                bool eval_oom = false;
+                bool match = fts_eval_document(q, &slot->tok, 0, slot->tok.count, &slot->eval, &eval_oom);
+                if (eval_oom) {
+                    oom = true;
+                    return false;
+                }
+                count_df(fs);
+                if (!match) return true;
+                chars += str_utf8_count(r->buf + cursor, doc.start - cursor);
+                cursor = doc.start;
+                FtsDocRec rec = {r->base + doc.start, doc.end - doc.start, chars, line_base + doc.line, doc.line_ending};
+                if (!add_match(fs, &rec)) {
+                    oom = true;
+                    return false;
+                }
+                // without ranking a file can stop once it holds enough (FTX9)
+                full = o->rank == FTS_RANK_NONE && o->file_cap && ++matched >= o->file_cap;
+                return !full;
+            });
+            if (oom) return false;
+        }
+        // positions continue in the next window
+        line_base += str_count_byte(r->buf, cut, '\n');
+        chars_base += str_utf8_count(r->buf, cut);
+        reader_consume(r, cut);
+    }
+    return true;
+}
+
 static GrepAction search_visit(void* ud, int slot_index, const char* open_path, const char* label,
                                size_t root_index) {
     FtsSearch* s = (FtsSearch*)ud;
     const FtsQuery* q = s->q;
     const FtsOptions* o = &q->options;
     FtsSlot* slot = &s->slots[slot_index];
-    char* data = NULL;
-    size_t size = 0;
-    if (!file_read_all(open_path, MEM_CAT_TEMP, &data, &size)) {
+    FILE* file = file_open_regular_read(open_path);
+    if (!file) {
         log_error("fts: cannot read '%s'", open_path);
         return GREP_CONTINUE;
     }
-    if (!o->binary && grep_input_is_binary(data, size)) {
-        mem_free(data);
-        return GREP_CONTINUE;
+    FtsReader r = {file, slot->window, slot->window_cap, 0, 0, false};
+    FtsFileScan fs;
+    memset(&fs, 0, sizeof(fs));
+    fs.s = s;
+    fs.slot = slot;
+    fs.label = label;
+    fs.root_index = root_index;
+    bool ok = reader_fill(&r);
+    // the binary rule is io.grep's: a NUL in the first 8 KiB (the first window)
+    bool skip = ok && !o->binary && grep_input_is_binary(r.buf, r.len);
+    if (ok && !skip && q->root >= 0) {
+        int items = q->item_count;
+        fs.df = items ? (uint64_t*)mem_calloc((size_t)items, sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
+        if (q->prefilter && !slot->prefilter) slot->prefilter = grep_searcher_create(q->prefilter);
+        ok = (!items || fs.df) && (!q->prefilter || slot->prefilter);
+        if (ok) ok = o->unit == FTS_UNIT_FILE ? scan_whole_file(&fs, &r) : scan_documents(&fs, &r);
     }
-    bool hit = q->prefilter == NULL;
-    if (!hit) {
-        if (!slot->prefilter) slot->prefilter = grep_searcher_create(q->prefilter);
-        if (slot->prefilter) {
-            GrepSink sink = {&hit, prefilter_hit, NULL, NULL};
-            grep_search_buffer(slot->prefilter, label, data, size, &sink);
-        } else {
-            hit = true;  // no searcher: evaluate the file in full
-        }
-    }
-
-    // the statistics only BM25 needs: a skipped file adds documents and bytes
-    bool stats = o->rank == FTS_RANK_BM25;
-    int items = q->item_count;
-    uint64_t documents = 0, length_sum = 0;
-    uint64_t* df = NULL;
-    FtsFileHits* f = NULL;
-    bool oom = false;
-    if (hit && q->root >= 0) {
-        df = items ? (uint64_t*)mem_calloc((size_t)items, sizeof(uint64_t), MEM_CAT_TEMP) : NULL;
-        f = (FtsFileHits*)mem_calloc(1, sizeof(FtsFileHits), MEM_CAT_TEMP);
-        oom = !f || (items && !df);
-        if (f) {
-            f->path = mem_strdup(label, MEM_CAT_TEMP);
-            f->root_index = root_index;
-            oom = oom || !f->path;
-        }
-    }
-    size_t cursor = 0;
-    uint64_t chars = 0;
-    for_each_document(data, size, o->unit, [&](const FtsDocSpan& doc) -> bool {
-        documents++;
-        length_sum += doc.end - doc.start;
-        if (!f || oom) return true;
-        if (!fts_tokenize(&slot->tok, data + doc.start, doc.end - doc.start)) {
-            oom = true;
-            return false;
-        }
-        fts_mark_stop(q, &slot->tok, 0, slot->tok.count);
-        bool eval_oom = false;
-        bool match = fts_eval_document(q, &slot->tok, 0, slot->tok.count, &slot->eval, &eval_oom);
-        if (eval_oom) {
-            oom = true;
-            return false;
-        }
-        for (int l = 0; l < q->leaf_count && df; l++) {
-            int item = q->leaves[l].item;
-            if (item >= 0 && slot->eval.tf[l] > 0) df[item]++;
-        }
-        if (!match) return true;
-        chars += str_utf8_count(data + cursor, doc.start - cursor);
-        cursor = doc.start;
-        uint32_t tf_items[64];
-        uint32_t* tf = items <= 64 ? tf_items : (uint32_t*)mem_alloc((size_t)items * sizeof(uint32_t), MEM_CAT_TEMP);
-        if (!tf) {
-            oom = true;
-            return false;
-        }
-        for (int l = 0; l < q->leaf_count; l++) {
-            int item = q->leaves[l].item;
-            if (item >= 0) tf[item] = slot->eval.tf[l];
-        }
-        FtsDocRec rec = {doc.start, doc.end - doc.start, chars, doc.line, doc.line_ending};
-        if (!record_doc(f, &rec, tf, items)) oom = true;
-        if (tf != tf_items) mem_free(tf);
-        // without ranking a file can stop once it holds enough (FTX9)
-        return !oom && !(o->rank == FTS_RANK_NONE && o->file_cap && f->count >= o->file_cap);
-    });
-    mem_free(data);
+    slot->window = r.buf;
+    slot->window_cap = r.cap;
+    fclose(file);
 
     pthread_mutex_lock(&s->mu);
-    if (oom) s->failed = true;
-    if (stats) {
-        s->documents += documents;
-        s->length_sum += length_sum;
-        for (int i = 0; df && i < items; i++) s->df[i] += df[i];
+    if (!ok) s->failed = true;
+    if (ok && o->rank == FTS_RANK_BM25) {
+        s->documents += fs.documents;
+        s->length_sum += fs.length_sum;
+        for (int i = 0; fs.df && i < q->item_count; i++) s->df[i] += fs.df[i];
     }
-    if (f && !oom && f->count) {
-        if (arraylist_append(s->files, f)) f = NULL;
+    if (ok && fs.hits) {
+        if (arraylist_append(s->files, fs.hits)) fs.hits = NULL;
         else s->failed = true;
     }
     bool failed = s->failed;
     pthread_mutex_unlock(&s->mu);
-    free_file_hits(f);
-    if (df) mem_free(df);
+    free_file_hits(fs.hits);
+    if (fs.df) mem_free(fs.df);
     return failed ? GREP_STOP : GREP_CONTINUE;
+}
+
+static bool search_begin(void* ud, int slot_count) {
+    FtsSearch* s = (FtsSearch*)ud;
+    s->slots = (FtsSlot*)mem_calloc((size_t)slot_count, sizeof(FtsSlot), MEM_CAT_TEMP);
+    if (!s->slots) return false;
+    s->slot_count = slot_count;
+    for (int i = 0; i < slot_count; i++) {
+        fts_tokenizer_init(&s->slots[i].tok, s->q->options.ignore_case, s->q->options.unaccent);
+        fts_eval_init(&s->slots[i].eval);
+    }
+    return true;
+}
+
+static void release_slots(FtsSearch* s) {
+    for (int i = 0; i < s->slot_count; i++) {
+        if (s->slots[i].prefilter) grep_searcher_destroy(s->slots[i].prefilter);
+        if (s->slots[i].window) mem_free(s->slots[i].window);
+        if (s->slots[i].hits) mem_free(s->slots[i].hits);
+        fts_tokenizer_release(&s->slots[i].tok);
+        fts_eval_release(&s->slots[i].eval);
+    }
+    if (s->slots) mem_free(s->slots);
+    s->slots = NULL;
+    s->slot_count = 0;
 }
 
 // ── the API ────────────────────────────────────────────────────────────

@@ -2375,3 +2375,34 @@ TEST(StrKernelTest, ByteSetFindMatchesNaive) {
         ASSERT_EQ(str_find_not_byteset(buf, len, &with_x), naive_not_x) << "round " << round;
     }
 }
+
+// lib/fts finds ASCII word runs 16 bytes at a time (FTX3); the SIMD forms must
+// agree with a byte-at-a-time reference at every length and alignment
+TEST(StrKernelTest, AsciiWordSpansMatchNaive) {
+    // letters, digits, punctuation, both cases, and bytes >= 0x80
+    const char alphabet[] = "aZm09_-. \tQ\x80\xC3\xA9z";
+    char buf[96];
+    unsigned seed = 7;
+    for (int round = 0; round < 4000; round++) {
+        size_t len = (size_t)(round % 80);
+        for (size_t i = 0; i < len; i++) {
+            seed = seed * 1103515245u + 12345u;
+            // long runs of one class now and then, to cross 16-byte blocks
+            buf[i] = (round % 7 == 0) ? (char)('a' + (seed >> 16) % 26)
+                                      : alphabet[(seed >> 16) % (sizeof(alphabet) - 1)];
+        }
+        for (size_t at = 0; at <= len; at++) {
+            const unsigned char* p = (const unsigned char*)buf + at;
+            size_t n = len - at, word = 0, other = 0;
+            bool upper = false;
+            for (; word < n && p[word] < 0x80 && isalnum(p[word]); word++) {
+                if (isupper(p[word])) upper = true;
+            }
+            while (other < n && p[other] < 0x80 && !isalnum(p[other])) other++;
+            bool got_upper = !upper;
+            ASSERT_EQ(str_ascii_alnum_span(buf + at, n, &got_upper), word) << round << " " << at;
+            ASSERT_EQ(got_upper, upper) << round << " " << at;
+            ASSERT_EQ(str_ascii_nonalnum_span(buf + at, n), other) << round << " " << at;
+        }
+    }
+}

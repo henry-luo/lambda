@@ -12,6 +12,7 @@
 #include "../mem_grow.h"
 #include "../str.h"
 #include "../log.h"
+#include "../hash.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -112,7 +113,7 @@ static bool word_slots(Parser* p, const char* w, size_t n, IntList* slots) {
     FtsQuery* q = p->q;
     for (size_t i = 0; i < p->tok.count; i++) {
         const FtsToken* t = &p->tok.tokens[i];
-        const char* text = p->tok.norm + t->norm;
+        const char* text = fts_token_text(&p->tok, t);
         bool first = i == 0, last = i + 1 == p->tok.count;
         bool suffix = first && lead, prefix = last && trail;
         FtsAtomKind kind = suffix && prefix ? FTS_ATOM_CONTAINS
@@ -375,38 +376,100 @@ void fts_mark_stop(const FtsQuery* q, FtsTokenizer* t, size_t first, size_t last
     if (!q->stop_count) return;
     for (size_t i = first; i < last; i++) {
         FtsToken* tok = &t->tokens[i];
-        tok->stop = is_stop(q, t->norm + tok->norm, tok->norm_length);
+        tok->stop = is_stop(q, fts_token_text(t, tok), tok->norm_length);
     }
 }
 
-// positions of every atom among tokens [first, last)
-static bool collect_positions(const FtsQuery* q, const FtsTokenizer* t, size_t first, size_t last, FtsEval* e) {
-    if (!eval_reserve(e, q->atom_count, q->leaf_count)) return false;
-    for (int a = 0; a < q->atom_count; a++) e->count[a] = 0;
+static inline uint64_t length_bit(size_t n) { return (uint64_t)1 << (n < 63 ? n : 63); }
+
+// the exact atom equal to a token's text, or -1
+static int exact_atom(const FtsQuery* q, const char* text, size_t length) {
+    if (!(q->exact_lengths & length_bit(length))) return -1;
+    for (uint32_t h = hash_djb2(text, length) & q->exact_mask;; h = (h + 1) & q->exact_mask) {
+        int a = q->exact_table[h];
+        if (a < 0) return -1;
+        if (q->atoms[a].length == length && memcmp(q->atoms[a].text, text, length) == 0) return a;
+    }
+}
+
+static bool push_position(FtsEval* e, int a, uint32_t pos) {
+    if (!mem_grow_array_raw((void**)&e->positions[a], sizeof(uint32_t), &e->cap[a], e->count[a] + 1, 8, MEM_CAT_TEMP)) return false;
+    e->positions[a][e->count[a]++] = pos;
+    return true;
+}
+
+// positions of every atom among tokens [first, last), numbered from `base`:
+// exact atoms by one hash probe (most tokens fail the length filter before
+// it), the rest by a scan
+static bool collect_positions(const FtsQuery* q, const FtsTokenizer* t, size_t first, size_t last,
+                              uint32_t base, FtsEval* e) {
     for (size_t i = first; i < last; i++) {
         const FtsToken* tok = &t->tokens[i];
         if (tok->stop) continue;
-        const char* text = t->norm + tok->norm;
-        for (int a = 0; a < q->atom_count; a++) {
-            if (!atom_matches(&q->atoms[a], text, tok->norm_length)) continue;
-            if (!mem_grow_array_raw((void**)&e->positions[a], sizeof(uint32_t), &e->cap[a], e->count[a] + 1, 8, MEM_CAT_TEMP)) return false;
-            e->positions[a][e->count[a]++] = (uint32_t)(i - first);
+        const char* text = fts_token_text(t, tok);
+        uint32_t pos = base + (uint32_t)(i - first);
+        if (q->exact_count) {
+            int a = exact_atom(q, text, tok->norm_length);
+            if (a >= 0 && !push_position(e, a, pos)) return false;
+        }
+        for (int k = 0; k < q->affix_count; k++) {
+            int a = q->affix[k];
+            if (atom_matches(&q->atoms[a], text, tok->norm_length) && !push_position(e, a, pos)) return false;
         }
     }
     return true;
+}
+
+// the exact-atom hash table and the affix list (atoms are unique by text and kind)
+static bool build_atom_index(FtsQuery* q) {
+    for (int a = 0; a < q->atom_count; a++) q->exact_count += q->atoms[a].kind == FTS_ATOM_EXACT;
+    uint32_t size = 8;
+    while (size < 2 * (uint32_t)q->exact_count) size *= 2;
+    q->exact_table = (int*)mem_alloc(size * sizeof(int), MEM_CAT_TEMP);
+    q->affix = (int*)mem_alloc((size_t)(q->atom_count ? q->atom_count : 1) * sizeof(int), MEM_CAT_TEMP);
+    if (!q->exact_table || !q->affix) return false;
+    q->exact_mask = size - 1;
+    for (uint32_t i = 0; i < size; i++) q->exact_table[i] = -1;
+    for (int a = 0; a < q->atom_count; a++) {
+        const FtsAtom* atom = &q->atoms[a];
+        if (atom->kind != FTS_ATOM_EXACT) {
+            q->affix[q->affix_count++] = a;
+            continue;
+        }
+        q->exact_lengths |= length_bit(atom->length);
+        uint32_t h = hash_djb2(atom->text, atom->length) & q->exact_mask;
+        while (q->exact_table[h] >= 0) h = (h + 1) & q->exact_mask;
+        q->exact_table[h] = a;
+    }
+    return true;
+}
+
+bool fts_eval_begin(const FtsQuery* q, FtsEval* e) {
+    if (!eval_reserve(e, q->atom_count, q->leaf_count)) return false;
+    for (int a = 0; a < q->atom_count; a++) e->count[a] = 0;
+    return true;
+}
+
+bool fts_eval_add(const FtsQuery* q, const FtsTokenizer* t, size_t first, size_t last, uint32_t base,
+                  FtsEval* e) {
+    return collect_positions(q, t, first, last, base, e);
+}
+
+bool fts_eval_finish(const FtsQuery* q, FtsEval* e, uint32_t ntokens) {
+    if (q->root < 0) return false;
+    for (int l = 0; l < q->leaf_count; l++) e->tf[l] = leaf_tf(&q->leaves[l], e, ntokens);
+    return eval_node(q, q->root, e->tf);
 }
 
 bool fts_eval_document(const FtsQuery* q, const FtsTokenizer* t, size_t first, size_t last,
                        FtsEval* e, bool* oom) {
     *oom = false;
     if (q->root < 0) return false;
-    if (!collect_positions(q, t, first, last, e)) {
+    if (!fts_eval_begin(q, e) || !fts_eval_add(q, t, first, last, 0, e)) {
         *oom = true;
         return false;
     }
-    uint32_t ntokens = (uint32_t)(last - first);
-    for (int l = 0; l < q->leaf_count; l++) e->tf[l] = leaf_tf(&q->leaves[l], e, ntokens);
-    return eval_node(q, q->root, e->tf);
+    return fts_eval_finish(q, e, (uint32_t)(last - first));
 }
 
 // ── compiling ──────────────────────────────────────────────────────────
@@ -491,6 +554,8 @@ void fts_query_destroy(FtsQuery* q) {
     if (q->stop) mem_free(q->stop);
     if (q->stop_length) mem_free(q->stop_length);
     if (q->prefilter) grep_matcher_destroy(q->prefilter);
+    if (q->exact_table) mem_free(q->exact_table);
+    if (q->affix) mem_free(q->affix);
     if (q->options.language) mem_free((void*)q->options.language);
     mem_free(q);
 }
@@ -503,7 +568,7 @@ static bool add_stopwords(FtsQuery* q, FtsTokenizer* tok, const char* const* wor
         }
         for (size_t i = 0; i < tok->count; i++) {
             const FtsToken* t = &tok->tokens[i];
-            const char* text = tok->norm + t->norm;
+            const char* text = fts_token_text(tok, t);
             if (is_stop(q, text, t->norm_length)) continue;
             char** stop = (char**)mem_realloc(q->stop, (size_t)(q->stop_count + 1) * sizeof(char*), MEM_CAT_TEMP);
             if (!stop) return false;
@@ -551,6 +616,7 @@ FtsStatus fts_query_create(const char* text, size_t length, const FtsOptions* op
     }
     fts_tokenizer_release(&p.tok);
     if (ok && q->root >= 0) number_items(q, q->root, false);
+    if (ok) ok = build_atom_index(q);
     if (ok) ok = build_prefilter(q, error_buf, error_buf_len);
     if (!ok) {
         fts_query_destroy(q);

@@ -83,23 +83,22 @@ static bool norm_reserve(FtsTokenizer* t, size_t more) {
     return mem_grow_array_raw((void**)&t->norm, 1, &t->norm_cap, t->norm_length + more, 256, MEM_CAT_TEMP);
 }
 
-static bool push_rune(FtsTokenizer* t, uint32_t r) {
+static void push_rune(FtsTokenizer* t, uint32_t r) {
     if (t->fold) r = fts_fold_rune(r);
-    if (!norm_reserve(t, 4)) return false;
-    size_t n = str_utf8_encode(r, t->norm + t->norm_length, 4);
-    t->norm_length += n;
-    return true;
+    t->norm_length += str_utf8_encode(r, t->norm + t->norm_length, 4);
 }
 
-// the normal form of text[start, start + length), appended to t->norm
+// the normal form of a token's bytes, appended to t->norm; a token holds only
+// decoded code points, and a code point grows by at most 4 bytes in either step
 static bool normalize(FtsTokenizer* t, const char* text, size_t length) {
     if (!t->unaccent) {
+        if (!norm_reserve(t, 4 * length)) return false;
         size_t i = 0;
         while (i < length) {
             uint32_t r = 0;
             int n = str_utf8_decode(text + i, length - i, &r);
-            if (n <= 0) return false;  // a token holds only decoded code points
-            if (!push_rune(t, r)) return false;
+            if (n <= 0) return false;
+            push_rune(t, r);
             i += (size_t)n;
         }
         return true;
@@ -128,25 +127,43 @@ static bool normalize(FtsTokenizer* t, const char* text, size_t length) {
     }
     utf8proc_ssize_t composed = used ? utf8proc_normalize_utf32((utf8proc_int32_t*)t->runes, (utf8proc_ssize_t)used, UTF8PROC_COMPOSE) : 0;
     if (composed < 0) composed = (utf8proc_ssize_t)used;
-    for (utf8proc_ssize_t j = 0; j < composed; j++) {
-        if (!push_rune(t, (uint32_t)t->runes[j])) return false;
-    }
+    if (!norm_reserve(t, 4 * (size_t)composed)) return false;
+    for (utf8proc_ssize_t j = 0; j < composed; j++) push_rune(t, (uint32_t)t->runes[j]);
     return true;
 }
 
 bool fts_tokenize(FtsTokenizer* t, const char* text, size_t length) {
     t->count = 0;
     t->norm_length = 0;
+    t->source = text;
     size_t i = 0, chars = 0;
     // the token being built: none, a word, or a unigram (which takes marks only)
     enum { NONE, IN_WORD, IN_UNIGRAM } state = NONE;
     FtsToken* cur = NULL;
+    bool ascii = true, upper = false;  // what the current token holds
     auto close = [&](size_t end) -> bool {
         if (!cur) return true;
         cur->length = end - cur->start;
-        cur->norm = t->norm_length;
-        if (!normalize(t, text + cur->start, cur->length)) return false;
-        cur->norm_length = t->norm_length - cur->norm;
+        const char* bytes = text + cur->start;
+        if ((ascii && (!t->fold || !upper)) || (!t->fold && !t->unaccent)) {
+            // already in normal form: valid UTF-8 re-encodes to itself, ASCII
+            // has no marks, and folding leaves lowercase ASCII alone
+            cur->in_source = true;
+            cur->norm = cur->start;
+            cur->norm_length = cur->length;
+        } else if (ascii) {
+            if (!norm_reserve(t, cur->length)) return false;
+            cur->norm = t->norm_length;
+            for (size_t k = 0; k < cur->length; k++) {
+                unsigned char c = (unsigned char)bytes[k];
+                t->norm[t->norm_length++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+            }
+            cur->norm_length = cur->length;
+        } else {
+            cur->norm = t->norm_length;
+            if (!normalize(t, bytes, cur->length)) return false;
+            cur->norm_length = t->norm_length - cur->norm;
+        }
         cur = NULL;
         return true;
     };
@@ -156,22 +173,38 @@ bool fts_tokenize(FtsTokenizer* t, const char* text, size_t length) {
         memset(cur, 0, sizeof(*cur));
         cur->start = start;
         cur->chars = at_chars;
+        ascii = true;
+        upper = false;
         return true;
     };
     while (i < length) {
         unsigned char b = (unsigned char)text[i];
-        uint32_t r = b;
-        int n = 1;
-        FtsClass cls;
         if (b < 0x80) {
-            cls = classify(b);
-        } else {
-            n = str_utf8_decode(text + i, length - i, &r);
-            // an invalid byte separates; it counts as a code point unless it
-            // is a continuation byte, as str_utf8_count counts
-            cls = n > 0 ? classify(r) : FTS_SEP;
-            if (n <= 0) n = 1;
+            // ASCII: a whole run of letters and digits, or of other ASCII
+            // bytes, at a time; one code point per byte
+            bool up = false;
+            size_t n = str_ascii_alnum_span(text + i, length - i, &up);
+            if (n) {
+                if (state != IN_WORD) {
+                    if (!close(i) || !open(i, chars)) return false;
+                    state = IN_WORD;
+                }
+                upper = upper || up;
+            } else {
+                n = str_ascii_nonalnum_span(text + i, length - i);
+                if (!close(i)) return false;
+                state = NONE;
+            }
+            i += n;
+            chars += n;
+            continue;
         }
+        uint32_t r = 0;
+        int n = str_utf8_decode(text + i, length - i, &r);
+        // an invalid byte separates; it counts as a code point unless it is a
+        // continuation byte, as str_utf8_count counts
+        FtsClass cls = n > 0 ? classify(r) : FTS_SEP;
+        if (n <= 0) n = 1;
         size_t at = i, at_chars = chars;
         chars += (b & 0xC0) != 0x80 ? 1 : 0;
         i += (size_t)n;
@@ -185,16 +218,19 @@ bool fts_tokenize(FtsTokenizer* t, const char* text, size_t length) {
                 if (!close(at) || !open(at, at_chars)) return false;
                 state = IN_WORD;
             }
+            ascii = false;
             break;
         case FTS_MARK:
             if (state == NONE) {
                 if (!open(at, at_chars)) return false;
                 state = IN_WORD;
             }
+            ascii = false;
             break;
         case FTS_UNIGRAM:
             if (!close(at) || !open(at, at_chars)) return false;
             state = IN_UNIGRAM;
+            ascii = false;
             break;
         }
     }

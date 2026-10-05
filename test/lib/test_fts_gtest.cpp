@@ -37,7 +37,7 @@ void tokens_of(const char* text, char* out, size_t cap, bool fold = true, bool u
     out[0] = '\0';
     for (size_t i = 0; i < t.count; i++) {
         const FtsToken* tok = &t.tokens[i];
-        n += (size_t)snprintf(out + n, cap - n, "%s%.*s", i ? "|" : "", (int)tok->norm_length, t.norm + tok->norm);
+        n += (size_t)snprintf(out + n, cap - n, "%s%.*s", i ? "|" : "", (int)tok->norm_length, fts_token_text(&t, tok));
     }
     fts_tokenizer_release(&t);
 }
@@ -357,6 +357,79 @@ TEST_F(FtsSearchTest, MissingRootFails) {
     FtsSearch* s = fts_search_create(q);
     const char* roots[1] = {"temp/fts_gtest_tree/none"};
     EXPECT_EQ(fts_search_add(s, roots, 1, 0, NULL), FTS_ERR_IO);
+    fts_search_destroy(s);
+    fts_query_destroy(q);
+}
+
+// Files far larger than the 256 KiB read window: positions, line numbers and
+// code-point offsets must carry across windows (FTX10, streamed reading).
+TEST_F(FtsSearchTest, LargeFilesStreamAcrossWindows) {
+    // 30000 lines of "é line N filler text\n" (é is 2 bytes, 1 code point);
+    // every 1000th line holds the needle; a blank line every 10 lines
+    const int lines = 30000;
+    FILE* f = fopen(at("big.txt"), "wb");
+    ASSERT_NE(f, nullptr);
+    uint64_t bytes = 0, chars = 0;
+    uint64_t want_byte[64], want_char[64], want_line[64];
+    int wants = 0;
+    for (int i = 1; i <= lines; i++) {
+        char line[128];
+        int n = (i % 10 == 0) ? snprintf(line, sizeof(line), "\n")
+              : snprintf(line, sizeof(line), "\xC3\xA9 line %d %s filler text\n", i, i % 1000 == 1 ? "needle" : "plain");
+        if (i % 10 != 0 && i % 1000 == 1 && wants < 64) {
+            want_byte[wants] = bytes;
+            want_char[wants] = chars;
+            want_line[wants] = (uint64_t)i;
+            wants++;
+        }
+        fwrite(line, 1, (size_t)n, f);
+        bytes += (uint64_t)n;
+        chars += (uint64_t)n - (i % 10 == 0 ? 0 : 1);  // é is two bytes, one code point
+    }
+    // a last line far longer than the window, then the needle at the very end
+    for (int i = 0; i < 70000; i++) fwrite("abcd ", 1, 5, f);
+    fwrite("needle", 1, 6, f);
+    fclose(f);
+    ASSERT_GT(bytes, (uint64_t)3 * 256 * 1024);
+
+    FtsOptions o = fts_opts();
+    o.unit = FTS_UNIT_LINE;
+    o.rank = FTS_RANK_NONE;
+    FtsQuery* q;
+    FtsSearch* s = run("needle", o, &q);
+    const FtsHit* hits;
+    size_t n;
+    ASSERT_EQ(fts_search_finish(s, 0, 0, &hits, &n), FTS_OK);
+    ASSERT_EQ(n, (size_t)wants + 1);
+    for (int i = 0; i < wants; i++) {
+        EXPECT_EQ(hits[i].line, want_line[i]) << i;
+        EXPECT_EQ(hits[i].byte_offset, want_byte[i]) << i;
+        EXPECT_EQ(hits[i].char_offset, want_char[i]) << i;
+    }
+    EXPECT_EQ(hits[wants].line, (uint64_t)lines + 1);
+    EXPECT_EQ(hits[wants].byte_offset, bytes);
+    EXPECT_EQ(hits[wants].byte_length, (uint64_t)70000 * 5 + 6);
+    EXPECT_EQ(hits[wants].line_ending, GREP_EOL_NONE);
+    fts_search_destroy(s);
+    fts_query_destroy(q);
+
+    // paragraphs: nine lines each; the needle's paragraph starts 0..8 lines before it
+    o.unit = FTS_UNIT_PARAGRAPH;
+    s = run("needle", o, &q);
+    ASSERT_EQ(fts_search_finish(s, 0, 0, &hits, &n), FTS_OK);
+    ASSERT_EQ(n, (size_t)wants + 1);
+    for (int i = 0; i < wants; i++) EXPECT_EQ(hits[i].line, want_line[i]) << i;  // line 10k+1 starts a paragraph
+    fts_search_destroy(s);
+    fts_query_destroy(q);
+
+    // the whole file: a phrase over a line break, and the needle at the end
+    o.unit = FTS_UNIT_FILE;
+    o.rank = FTS_RANK_BM25;
+    s = run("\"text abcd\" needle", o, &q);
+    ASSERT_EQ(fts_search_finish(s, 0, 0, &hits, &n), FTS_OK);
+    ASSERT_EQ(n, 1u);
+    EXPECT_STREQ(hits[0].path, "temp/fts_gtest_tree/big.txt");
+    EXPECT_EQ(hits[0].byte_length, bytes + 70000 * 5 + 6);
     fts_search_destroy(s);
     fts_query_destroy(q);
 }

@@ -9,13 +9,15 @@
 struct FtsToken {
     size_t start, length;     // bytes in the tokenised text
     size_t chars;             // code points before the token, counted as str_utf8_count does
-    size_t norm, norm_length; // the normalised form, in FtsTokenizer.norm
+    size_t norm, norm_length; // the normalised form: in FtsTokenizer.norm, or in the text
+    bool in_source;           // the normal form is the token's own bytes (no copy)
     bool stop;                // a stop word: holds its position, matches nothing
 };
 
 struct FtsTokenizer {
     bool fold;                // S17.7.1 simple case folding
     bool unaccent;            // NFD, drop Mn, NFC
+    const char* source;       // the text last tokenised (borrowed)
     FtsToken* tokens;
     size_t count, cap;
     char* norm;               // every token's normalised form, back to back
@@ -26,8 +28,14 @@ struct FtsTokenizer {
 
 void fts_tokenizer_init(FtsTokenizer* t, bool fold, bool unaccent);
 void fts_tokenizer_release(FtsTokenizer* t);
-// Replaces the tokenizer's tokens with those of `text`; false on memory.
+// Replaces the tokenizer's tokens with those of `text`, which must outlive
+// their use (a token's normal form may point into it); false on memory.
 bool fts_tokenize(FtsTokenizer* t, const char* text, size_t length);
+
+// a token's normal form
+static inline const char* fts_token_text(const FtsTokenizer* t, const FtsToken* tok) {
+    return (tok->in_source ? t->source : t->norm) + tok->norm;
+}
 // The canonical member of r's simple case folding orbit (S17.7.1), lowered.
 uint32_t fts_fold_rune(uint32_t r);
 
@@ -79,6 +87,13 @@ struct FtsQuery {
     size_t* stop_length;
     int stop_count;
     GrepMatcher* prefilter;   // NULL when no literal is necessary (§7.2)
+    // matching tokens to atoms: exact atoms by hash, the rest by a scan
+    int* exact_table;         // open addressing: atom id or -1 (mem-owned)
+    uint32_t exact_mask;      // table size - 1
+    uint64_t exact_lengths;   // bit n: an exact atom n bytes long (bit 63: 63 or more)
+    int exact_count;
+    int* affix;               // the other atoms' ids (mem-owned)
+    int affix_count;
 };
 
 // Per-document evaluation scratch, one per worker.
@@ -100,3 +115,11 @@ void fts_mark_stop(const FtsQuery* q, FtsTokenizer* t, size_t first, size_t last
 // document matches. false with *oom set on memory failure.
 bool fts_eval_document(const FtsQuery* q, const FtsTokenizer* t, size_t first, size_t last,
                        FtsEval* e, bool* oom);
+// The same in steps, for a document whose tokens arrive in pieces (a file
+// read in windows): begin, add each piece with the count of tokens before it,
+// then finish with the document's token count. begin and add are false on
+// memory failure.
+bool fts_eval_begin(const FtsQuery* q, FtsEval* e);
+bool fts_eval_add(const FtsQuery* q, const FtsTokenizer* t, size_t first, size_t last, uint32_t base,
+                  FtsEval* e);
+bool fts_eval_finish(const FtsQuery* q, FtsEval* e, uint32_t ntokens);
