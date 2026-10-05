@@ -166,7 +166,7 @@ typedef struct {
 
 typedef enum {
     RDB_PLACEHOLDER_QNUM = 0,   /* ?1, ?2 (SQLite) */
-    RDB_PLACEHOLDER_DOLLAR,     /* $1, $2 (PostgreSQL, DuckDB) */
+    RDB_PLACEHOLDER_DOLLAR,     /* $1, $2 (PostgreSQL) */
     RDB_PLACEHOLDER_QMARK,      /* ?      (MySQL; positional) */
 } RdbPlaceholderStyle;
 

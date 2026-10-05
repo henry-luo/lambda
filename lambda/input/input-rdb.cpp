@@ -59,7 +59,7 @@ static void rdb_ensure_drivers(void) {
     if (rdb_drivers_registered) return;
     rdb_drivers_registered = true;
     rdb_sqlite_register();
-    // module drivers (postgresql, mysql, duckdb) arrive through the resolver (RDB4)
+    // module drivers (postgresql, mysql) arrive through the resolver (RDB4)
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

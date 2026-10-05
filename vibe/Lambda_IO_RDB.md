@@ -323,7 +323,7 @@ input(target, type_or_options)
 
 | Argument | Type | Description |
 |----------|------|-------------|
-| `target` | `string` | File path (for SQLite/DuckDB) or connection URI (for client-server databases). Supports `@` path literals (`@./relative`, `@/absolute`). |
+| `target` | `string` | File path (for SQLite) or connection URI (for client-server databases). Supports `@` path literals (`@./relative`, `@/absolute`). |
 | `type_or_options` | `string \| map` | Either a format string (`'sqlite'`, `'postgresql'`) or an options map (`{type: 'sqlite', ...}`). When omitted, auto-detected from file extension or URI scheme. |
 
 Internally this routes to `fn_input2(target_item, type)` — the same C++ function that handles all `input()` calls. When `type` is a map, the runtime extracts the `type` field (matching the existing options-map pattern used by other input formats like `{type: 'markdown', flavor: 'commonmark'}`).
@@ -339,7 +339,7 @@ let db = input(@./data.sqlite3)
 
 // 2. Explicit format string — required for non-standard extensions
 let db = input(@./myfile.dat, 'sqlite')
-let db = input(@./warehouse.ddb, 'duckdb')
+let db = input("host=db.local dbname=shop", 'postgresql')
 
 // 3. Options map — full control over connection parameters
 let db = input(@./library.db, {type: 'sqlite', cache_size: 5000})
@@ -419,13 +419,11 @@ When no explicit `type` is provided, the runtime selects a driver by:
 
 | Priority | Method | Example | Driver |
 |----------|--------|---------|--------|
-| 1 | URI scheme | `postgresql://...` | `"postgresql"` |
-| 2 | URI scheme | `mysql://...` | `"mysql"` |
-| 3 | URI scheme | `duckdb://...` | `"duckdb"` |
-| 4 | File extension | `.db`, `.sqlite`, `.sqlite3` | `"sqlite"` |
-| 5 | File extension | `.ddb`, `.duckdb` | `"duckdb"` |
-| 6 | Explicit type | `input(path, 'sqlite')` | `"sqlite"` |
-| 7 | Options map | `input(path, {type: 'sqlite'})` | `"sqlite"` |
+| 1 | URI scheme | `postgresql://...`, `postgres://...` | `"postgresql"` |
+| 2 | URI scheme | `mysql://...`, `mariadb://...` | `"mysql"` |
+| 3 | File extension | `.db`, `.sqlite`, `.sqlite3` | `"sqlite"` |
+| 4 | Explicit type | `input(path, 'sqlite')` | `"sqlite"` |
+| 5 | Options map | `input(path, {type: 'sqlite'})` | `"sqlite"` |
 
 If no driver is detected, `input()` returns an error: `"rdb: cannot detect driver for 'path'"`.
 
@@ -530,7 +528,7 @@ let more   = for (b in db.data.book where b.genre == "sci-fi") b    // cache hit
 
 ### 6.1 Design: Generic RDB Layer + Backend Drivers
 
-The implementation separates a **database-agnostic C+ API** (`lib/rdb.h`) from **backend-specific drivers** (SQLite first, PostgreSQL/MySQL/DuckDB later). All Lambda runtime code — the input plugin, the for-clause SQL compiler, the lazy-loading machinery — talks exclusively to the generic API. Backend-specific code is encapsulated behind a **driver vtable**.
+The implementation separates a **database-agnostic C+ API** (`lib/rdb.h`) from **backend-specific drivers** (SQLite in the host; PostgreSQL and MySQL/MariaDB in the `rdb-drivers` module, §13). All Lambda runtime code — the input plugin, the for-clause SQL compiler, the lazy-loading machinery — talks exclusively to the generic API. Backend-specific code is encapsulated behind a **driver vtable**.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1024,7 +1022,6 @@ static const char* rdb_detect_driver(const char* uri) {
     if (str_starts_with(uri, "postgresql://") || str_starts_with(uri, "postgres://"))
         return "postgresql";
     if (str_starts_with(uri, "mysql://"))    return "mysql";
-    if (str_starts_with(uri, "duckdb://"))   return "duckdb";
 
     // extension-based detection (file paths)
     if (str_ends_with(uri, ".db") || str_ends_with(uri, ".sqlite") || str_ends_with(uri, ".sqlite3"))
@@ -1492,7 +1489,6 @@ Adding a new backend requires only implementing the `RdbDriver` vtable — no ch
 |----------|------------|---------------|----------------|
 | PostgreSQL | `lambda/module/rdb/rdb_pg.cpp` | `libpq` 18 (TLS-free; the host does TLS) | `input("postgresql://user:pw@host/db")` |
 | MySQL / MariaDB | `lambda/module/rdb/rdb_mysql.cpp` | MariaDB Connector/C 3.3 (TLS-free) | `input("mysql://user:pw@host/db?ssl-mode=REQUIRED")` |
-| DuckDB (phase 2, RDB13) | `lambda/module/rdb/rdb_duckdb.cpp` | `libduckdb` | `input(@./data.duckdb)` |
 
 ### Phase 5: ADBC (Future)
 
@@ -1640,7 +1636,7 @@ Each `.ls` file paired with a `.txt` expected-output file.
 
 > **Status:** proposal, drafted 2026-10-02 and revised the same day after
 > review. Revised again 2026-10-05: TLS moves into the host (RDB11) and
-> DuckDB moves to phase 2 (RDB13). Not ratified. Implementation status is in
+> DuckDB is out of scope (RDB13v2). Not ratified. Implementation status is in
 > §13.14.
 > **Scope (phase 1):**
 > - ship PostgreSQL and MySQL/MariaDB support (§9 Phase 4) as one
@@ -1648,7 +1644,7 @@ Each `.ls` file paired with a `.txt` expected-output file.
 > - put connection lifecycle *and* TLS under the host;
 > - extend `RdbDriver` with a column-batch API for column-store databases.
 >
-> DuckDB, the first native columnar driver, is phase 2. ADBC is §9 Phase 5.
+> DuckDB is out of scope (RDB13v2). ADBC is §9 Phase 5.
 > **Spec linkage:**
 > - D7.3.2: modules are lazily loaded, transactionally registered and
 >   size-gated.
@@ -1674,8 +1670,7 @@ Each `.ls` file paired with a `.txt` expected-output file.
 
 1. **One module, two backends in phase 1.** `modules/rdb-drivers/` holds a
    single DSO (`rdb-drivers.dylib` / `.so` / `.dll`) that registers the
-   `postgresql` and `mysql` drivers. SQLite stays in the host (§10). DuckDB
-   joins the same module in phase 2 (RDB13).
+   `postgresql` and `mysql` drivers. SQLite stays in the host (§10).
 2. **Self-contained, and no TLS library in it.** libpq and MariaDB
    Connector/C (with its bundled zlib) are **statically linked into that
    DSO**, built *without* TLS. Its only dynamic imports are OS and system
@@ -1715,7 +1710,7 @@ Each `.ls` file paired with a `.txt` expected-output file.
 | **RDB8** | Vendor sources are built **unmodified** from pinned upstream releases (CLAUDE.md rule 16). The module lands with its **architecture gate**, **licence gate** and **driver corpus** wired into CI (D7.3.5, JA9). | proposed |
 | **RDB11** | **TLS is done by the host (route B).** The client libraries are built without TLS and connect in plaintext to a host-owned private Unix socket. For each local connection the host opens the upstream connection to an authorised target, performs the wire protocol's TLS upgrade with its own mbedTLS (PostgreSQL `SSLRequest`; MySQL's in-handshake upgrade), and relays bytes (§13.15). No vendor patch, and one TLS stack and one CA policy for the whole runtime. | proposed (user direction 2026-10-05) |
 | **RDB12** | **SHA-2 MySQL logins are Lambda-side plugins.** A TLS-free Connector/C has no crypto backend, so it has no `caching_sha2_password` / `sha256_password`. The module registers its own implementations through the public `mysql_client_register_plugin` API, hashing through `RdbHostAPI.sha256`. They send a cleartext password only when the host bridge guarantees TLS upstream. | proposed |
-| **RDB13** | **DuckDB is phase 2.** Phase 1 ships PostgreSQL and MySQL/MariaDB; the column-batch API (RDB7) is in place for DuckDB when it arrives. | proposed (user direction 2026-10-05) |
+| **RDB13v2** | **DuckDB is out of scope.** The module ships PostgreSQL and MySQL/MariaDB only; DuckDB's scheme and file extensions are not detected. The column-batch API (RDB7) stays as the interface any future column-store driver would use. | proposed (user direction 2026-10-05, revised the same day) |
 | **RDB9** | **Credentials never reach logs, errors or script values.** All URI text that leaves `lib/rdb.c` and the drivers goes through `rdb_redact_uri()`. The host retains no plaintext URI. Once `POOL` scope needs to reopen connections, the plaintext lives only in the registry entry's secret slot, zeroed on close (fix for problem 2, §13.9). | proposed |
 
 ### 13.3 Why one Jube module and not host linking
@@ -1911,7 +1906,7 @@ Each live native connection is one rid in the JA7 rid table (resource kind
 | redacted URI | logs, diagnostics, error text (RDB9) |
 | secret slot | *deferred with `POOL` scope (Q3).* Nothing reopens a connection yet, so the host retains no plaintext URI at all. |
 | pool key | *deferred with `POOL` scope (Q3):* digest of the normalised full URI + driver + read-only flag, so pool reuse never compares plaintext. |
-| `RdbConnInfo` | peer kind (TCP / Unix socket / file / memory), host, port or path, socket fd (`PQsocket`, `mysql_get_socket`; −1 for DuckDB), TLS status, server version, backend id (PG backend PID, MySQL thread id) |
+| `RdbConnInfo` | peer kind (TCP / Unix socket / file / memory), host, port or path, socket fd (−1: the network socket belongs to the host bridge), TLS status, server version, backend id (PG backend PID, MySQL thread id) |
 | state | `OPENING`, `IDLE`, `BUSY`, `DEAD`, `CLOSING` (atomic, because `cancel` can come from another thread) |
 | live statements | statement handles to finalize before close; close cascades to them |
 | timestamps | created and last used, for idle expiry and audit |
@@ -1979,8 +1974,8 @@ this out_conn; otherwise close + fail
   therefore deferred. libpq's cancel request (`PQcancelBlocking`) is a
   one-packet protocol message: it reaches the server as a second local
   connection through the same bridge, inside the host-initiated `cancel`.
-- **Files count too.** For an embedded engine (SQLite today, DuckDB in phase
-  2) the "target" is the database file path. Authorisation is a path check
+- **Files count too.** For an embedded engine (SQLite) the "target" is the
+  database file path. Authorisation is a path check
   under the JA16 file policy.
 
 #### 13.5.4 Connection ops per backend
@@ -2008,8 +2003,8 @@ is implemented (open question Q1, §13.13).
 
 ### 13.6 Column-batch API for column-store databases (RDB7)
 
-**Why.** DuckDB stores and executes column-wise. Reading it through
-`step`/`column_value` turns its columns into rows, only for
+**Why.** A column store keeps and executes data column-wise. Reading one
+through `step`/`column_value` turns its columns into rows, only for
 `frame(db.data.t)` (`Lambda_Design_DataFrame.md` Phase 5) to turn them back
 into columns. The DataFrame design already fixes the target layout: Arrow-
 shaped columns with a validity bitmap, exchanged through the **Arrow C Data
@@ -2028,7 +2023,7 @@ int (*fetch_batch)(void* stmt, int64_t max_rows, struct ArrowArray* out);
 
 | Bit | Meaning |
 |---|---|
-| `RDB_CAP_COLUMNAR` | native column batches. DuckDB (phase 2): yes. PG, MySQL, SQLite: no. |
+| `RDB_CAP_COLUMNAR` | native column batches. No in-scope driver has it; PG, MySQL and SQLite use the host adapter. |
 | `RDB_CAP_CANCEL` | `cancel` works on in-flight work |
 | `RDB_CAP_STATEMENT_TIMEOUT` | `set_timeout` is server-enforced |
 | `RDB_CAP_STREAMING` | rows or batches stream, not fully buffered |
@@ -2059,20 +2054,14 @@ int (*fetch_batch)(void* stmt, int64_t max_rows, struct ArrowArray* out);
 
   Nested types (`+l`, `+s`, `+m`) are a DataFrame open question. Until then
   they are surfaced as JSON text.
-- **DuckDB implementation (phase 2).** Use DuckDB's Arrow export where the pinned
-  version's C API has it. Otherwise build Arrow arrays from
-  `duckdb_fetch_chunk` vectors: fixed-width data and validity are already
-  Arrow-compatible, and strings are re-packed to offsets + data. DuckDB also
-  implements `step` (a cursor over the current chunk) so row consumers keep
-  working.
-- **Projection matters more on column stores.** `SELECT *` on a wide DuckDB or
-  Parquet-backed table throws away the columnar advantage. When the consumer is
+- **Projection matters more on column stores.** `SELECT *` on a wide
+  column-store table throws away the columnar advantage. When the consumer is
   a frame, or when the `for` body uses known fields, the query builder emits an
   explicit column list. For drivers with `RDB_CAP_COLUMNAR`, §9 Phase 2's
   "column projection pushdown" moves up to this phase.
 - **Writes are out of scope here.** A later `append_batch(conn, table,
-  ArrowArray*, ArrowSchema*)` op would serve DataFrame write-back (DuckDB
-  appender, PG binary `COPY`, batched MySQL `INSERT`). It arrives with §9
+  ArrowArray*, ArrowSchema*)` op would serve DataFrame write-back (PG binary
+  `COPY`, batched MySQL `INSERT`). It arrives with §9
   Phase 3, appended to the descriptor.
 
 ### 13.7 Static linking: the self-contained DSO
@@ -2108,11 +2097,15 @@ link therefore:
 | Linux | `libc`, `libm`, `libpthread`, `libdl`, `librt`, the dynamic loader |
 | Windows | `kernel32`, `advapi32`, `ws2_32`, `secur32`, `crypt32`, `bcrypt`, `user32`, the UCRT/VC runtime |
 
-**Size.** About 640 KB (macOS arm64, debug). The bundle placement decision
-(full only, or standard too) is open; the standard bundle can at least carry a
-manifest-only descriptor (the `lang-python` pattern), so
-`input('postgresql://…')` fails with "rdb driver module not installed" rather
-than "cannot detect driver".
+**Size and bundles.** About 0.6 MB (macOS arm64). `make release-rdb-drivers`
+builds the release image into `release/modules/rdb-drivers` together with
+`module.json`, `SOURCES.md` and `LICENSES/`. The **full bundle**
+(`package-jube` → `release-jube/modules/rdb-drivers`) ships it; the
+**standard bundle** carries a manifest-only descriptor (the `lang-python`
+pattern), so `postgresql://` and `mysql://` resolve to a known-but-absent
+module rather than "cannot detect driver". Whether the module should also
+ship in the standard bundle is Q6. `make verify-jube-package` runs both gates
+against the full bundle with its own release host.
 
 ### 13.8 Licensing: fix for problem 4 (LGPL)
 
@@ -2121,21 +2114,29 @@ than "cannot detect driver".
 | libpq | PostgreSQL Licence | keep the notice |
 | MariaDB Connector/C (+ bundled zlib) | **LGPL-2.1+** (zlib: zlib licence) | **The user must be able to relink the module against a modified Connector/C** (LGPL-2.1 §6) |
 
-**Fix:**
-1. **`modules/rdb-drivers/LICENSES/`** ships in every bundle that ships the
-   DSO. It contains each licence text.
-2. **`modules/rdb-drivers/SOURCES.md`** records:
-   - the exact upstream version, URL and SHA-256 of every tarball used;
-   - the Lambda commit the module was built from;
-   - the configure options from §13.7.
+**Fix** (implemented 2026-10-05):
+1. **`modules/rdb-drivers/LICENSES/`** (`PostgreSQL.txt`,
+   `MariaDB-Connector-C-LGPL-2.1.txt`, `zlib.txt`) is copied out of the
+   pinned source archives by `utils/build-rdb-deps.sh` and ships in every
+   bundle that ships the DSO.
+2. **`modules/rdb-drivers/SOURCES.md`** is written by the same script from
+   the same pinned variables: upstream version, URL and SHA-256 of each
+   archive, the bundled zlib version, the exact meson/cmake options, and the
+   relink instructions. Both are committed, so a change to the pinned
+   versions shows up as a diff. (The module's own source is this repository;
+   no per-build commit stamp is recorded.)
 3. **A real relink path.** `make release-rdb-drivers` accepts
-   `RDB_MARIADB_ARCHIVE=/path/to/libmariadbclient.a` (and the same for the
-   libpq archives). A user can rebuild the module against a modified
-   Connector/C with the published sources and script. This satisfies §6(a)'s
-   "allow relinking" in practice, not only on paper.
-4. **Licence gate.** `make verify-rdb-module-licenses` fails packaging if any
-   licence or the `SOURCES.md` entry is missing or stale (the version
-   recorded must match the archive built).
+   `RDB_MARIADB_ARCHIVE=/path/to/libmariadbclient.a` (and `RDB_PQ_ARCHIVE`,
+   `RDB_PGCOMMON_ARCHIVE`, `RDB_PGPORT_ARCHIVE`): each named archive replaces
+   the built one before the module is linked. A user can rebuild the module
+   against a modified Connector/C with the published sources and script. This
+   satisfies §6(a)'s "allow relinking" in practice, not only on paper.
+4. **Licence gate.** `make verify-rdb-module-licenses`
+   (`utils/verify_rdb_module_licenses.py`) fails when a licence text is
+   missing, when `SOURCES.md` no longer records the pinned versions and
+   checksum or lacks the relink instructions, or when the archives built
+   (`mac-deps/rdb/VERSIONS`) differ from the pinned versions.
+   `release-rdb-drivers` and `verify-jube-package` run it on the bundle copy.
 5. A licence review should confirm this reading before the first release.
    This plan is engineering, not legal advice.
 
@@ -2229,14 +2230,20 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
 
 ### 13.11 Conformance gates (RDB8, D7.3.5)
 
-- **Architecture gate**, `make check-rdb-module-architecture`:
-  - the exports are exactly `{jube_module}`;
+- **Architecture gate**, `make check-rdb-module-architecture`
+  (`utils/check_rdb_module_architecture.py`, macOS and Linux):
+  - the exports are exactly `{jube_module}` (`nm -gU` / `nm -D`);
   - dynamic dependencies are a subset of the §13.7 allowlist (`otool -L` /
-    `ldd` / `dumpbin /dependents`);
-  - no undefined host symbols remain (D7.3.3);
-  - the manifest `provides` equals the descriptor driver names;
-  - no raw `socket`/`connect`/`open` calls appear in `lambda/module/rdb/*.o`
-    (JA16.4: the exemption covers vendor archives only).
+    `readelf -d`);
+  - no import is bound by dynamic lookup, so nothing resolves against the
+    host (D7.3.3; `nm -m`);
+  - every `rdb:<driver>` in the manifest resolves through the module under
+    test, and an unknown driver does not (the loader's manifest-vs-descriptor
+    check, D7.3.4). The probe reads script output, not `log.txt`, so it also
+    works on release hosts; `--expect-absent` checks a manifest-only bundle;
+  - no `socket`/`connect`/`bind`/`listen`/`accept`/`getaddrinfo`/`open`/
+    `openat`/`fopen`/`creat` import in Lambda's driver objects (JA16.4: the
+    exemption covers vendor archives only).
 - **Licence gate**, `make verify-rdb-module-licenses` (§13.8).
 - **Driver corpus**, `make test-rdb-drivers` (`test/rdb/run_rdb_corpus.py`):
   - **Fixtures:** `test/rdb/fixture/{postgresql,mysql}.sql` hold the same
@@ -2290,7 +2297,6 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
 | R8 | PostgreSQL driver | PG corpus against a TLS-enabled container |
 | R9 | MySQL/MariaDB driver with the Lambda-side SHA-2 logins (RDB12) | MySQL corpus against a TLS-enabled container |
 | R10 | Bundle wiring: DSO + licences in the chosen bundle; manifest-only descriptor elsewhere | `verify-jube-package` extended |
-| R11 | Phase 2: DuckDB driver (rows + native `fetch_batch`) | DuckDB corpus; batch parity test |
 
 The fix for problem 3 (JA16) is R3 plus JA16.4's checker rule in R7; R6 goes
 further, since the host then owns the network socket itself.
@@ -2324,11 +2330,11 @@ further, since the host then owns the network socket itself.
 | R4 catalog fix (problem 1) + resolver | ✅ The catalog admits `engine: "rdb"` into a separate provider index, unknown engines still fail closed, and `jube_rdb_resolve_driver()` loads the providing module, checks its drivers against the manifest (D7.3.4) and rolls back a mismatch (D7.3.2). Exercised by the real module: `input("postgresql://…")` and `input("mysql://…")` catalog, activate and register their drivers lazily. |
 | R5 column batches | ✅ `rdb_result_schema()` / `rdb_fetch_batch()` with the host shredding adapter (`lib/rdb_batch.c`). DECIMAL/DATETIME/JSON columns are utf8 with Arrow field metadata `lambda.rdb_type`. |
 | R6 host TLS bridge | ✅ `lib/rdb_tunnel.c` (POSIX; Windows reports "not available yet"). PostgreSQL and MySQL negotiation paths without TLS are tested against fake servers. **The TLS handshake itself, verify-ca/full, and MySQL's sequence-shifted auth relay are untested until real servers run** (R8/R9). |
-| R7 build + module | ✅ `utils/build-rdb-deps.sh` (libpq 18.6, Connector/C 3.3.21, no patches), `make build-rdb-deps` / `build-rdb-drivers`, the `rdb-drivers` target (strict link, only `jube_module` exported, system-only imports). ⏳ architecture and licence gates, `LICENSES/`, `SOURCES.md`, archive overrides. |
+| R7 build + module + gates | ✅ `utils/build-rdb-deps.sh` (libpq 18.6, Connector/C 3.3.21, no patches; `mysql_clear_password` off), `make build-rdb-deps` / `build-rdb-drivers`, the `rdb-drivers` target (strict link, only `jube_module` exported, system-only imports). **Gates:** `make check-rdb-module-architecture` (`utils/check_rdb_module_architecture.py`: exports, OS-only dependencies, no dynamic-lookup imports, no raw IO in Lambda's driver objects, every provided driver activates) and `make verify-rdb-module-licenses`; both fail on seeded negatives. `LICENSES/`, `SOURCES.md` and the archive overrides are in place. |
 | OS trust store (Q5) | ✅ `lib/trust_store.{h,c}`: macOS keychain (system/admin/user trust settings), Linux bundles, Windows `ROOT`, `SSL_CERT_FILE` override; used by the bridge when the URI names no CA, and by curl for all HTTPS (`CURLOPT_SSL_CTX_FUNCTION`, TLS connections only). Unit test: the platform set includes ISRG Root X1. Verified live: `input("https://www.example.com/")` succeeds with the OS store and fails with `SSL_CERT_FILE` naming only the test CA. Windows path not compile-tested. |
 | Corpus | ✅ `make test-rdb-drivers[-local]`: 4 scripts × 2 backends + 16 probes = **24 checks, all passing**, also under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. Without URIs both backends report SKIP. |
 | R8 / R9 drivers | ✅ **live-tested 2026-10-05** against PostgreSQL 18 and MySQL 8.4.11 in Apple `container` VMs with TLS on (test CA, SAN `localhost`/`127.0.0.1`). On both backends: schema, views, indexes, triggers, forward and reverse FK navigation, `decimal`, JSON and `datetime` decoding through `input()`. TLS matrix: disable / prefer / require / verify-ca / verify-full all behave as specified, and a missing or wrong CA, a server-name mismatch (fails verify-full, passes verify-ca) and a wrong password all fail cleanly. MySQL `caching_sha2_password` full auth works over the bridge's TLS and is refused under `DISABLED`/`PREFERRED`; the cached fast-auth proof works over plaintext. No password reached `log.txt` in any case. |
-| R10 bundling, R11 DuckDB | not started |
+| R10 bundling | ✅ `make release-rdb-drivers` (release image 503 KB, with `module.json`, `SOURCES.md`, `LICENSES/`; licence gate on the copy), full bundle `release-jube/modules/rdb-drivers`, manifest-only descriptor in `release-standard`. Verified on the release bundles: licence gate ok; architecture gate ok against the release host (exports, OS-only dependencies, no dynamic lookup, both drivers resolve, an unknown one does not); `--expect-absent` ok for the standard bundle; standard and full hosts byte-identical. `make verify-jube-package` itself stops earlier at its pre-existing `require('zlib')` check in `release-standard`, which fails identically on master 89ce07f4c (not an RDB defect); its RDB lines were run directly. |
 
 **Defects found by the live test, fixed:**
 - the PostgreSQL SASL channel-binding offer (bridge filter above);
@@ -2439,7 +2445,8 @@ full-auth request (`0x04`) is answered with the password only when the mode is
   RDB11/RDB12: Connector/C 3.3.21 (the TLS-free-capable line), SHA-2 logins as
   Lambda-side plugins, ed25519 not built.
 - ~~§13.1/§13.7/§13.10 (2026-10-02): DuckDB as a phase-1 backend of the
-  module.~~ Superseded by RDB13 (2026-10-05): phase 2.
+  module; then RDB13 (2026-10-05): DuckDB as phase 2.~~ Superseded by RDB13v2
+  (2026-10-05): DuckDB is out of scope.
 
 - ~~§9 Phase 4: PostgreSQL via `libpq` (system); MySQL via `libmysqlclient`
   (system); DuckDB via `libduckdb` (vendored); one `lib/rdb_*.c` driver per

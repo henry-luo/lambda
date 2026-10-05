@@ -4,7 +4,7 @@
  *
  * Database-agnostic C API for connecting to relational databases,
  * introspecting schemas, and executing read-only queries. Each backend
- * (SQLite in-host; PostgreSQL, MySQL, DuckDB in the `rdb-drivers` Jube
+ * (SQLite in-host; PostgreSQL and MySQL/MariaDB in the `rdb-drivers` Jube
  * module) implements the RdbDriver table from rdb_abi.h; the rest of the
  * system works through this header exclusively.
  *

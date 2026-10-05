@@ -166,16 +166,15 @@ TEST_F(RdbTest, DetectDriver_MysqlScheme) {
     EXPECT_STREQ(rdb_detect_driver("mysql://localhost/mydb"), "mysql");
 }
 
-TEST_F(RdbTest, DetectDriver_DuckdbScheme) {
-    EXPECT_STREQ(rdb_detect_driver("duckdb://data.ddb"), "duckdb");
+TEST_F(RdbTest, DetectDriver_MariadbScheme) {
+    EXPECT_STREQ(rdb_detect_driver("mariadb://localhost/mydb"), "mysql");
 }
 
-TEST_F(RdbTest, DetectDriver_DuckdbExtDdb) {
-    EXPECT_STREQ(rdb_detect_driver("warehouse.ddb"), "duckdb");
-}
-
-TEST_F(RdbTest, DetectDriver_DuckdbExtDuckdb) {
-    EXPECT_STREQ(rdb_detect_driver("warehouse.duckdb"), "duckdb");
+TEST_F(RdbTest, DetectDriver_DuckdbNotSupported) {
+    // DuckDB is out of scope (RDB13): neither its scheme nor its files are claimed
+    EXPECT_EQ(rdb_detect_driver("duckdb://data.ddb"), nullptr);
+    EXPECT_EQ(rdb_detect_driver("warehouse.ddb"), nullptr);
+    EXPECT_EQ(rdb_detect_driver("warehouse.duckdb"), nullptr);
 }
 
 TEST_F(RdbTest, DetectDriver_Unknown) {

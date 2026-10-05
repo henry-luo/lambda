@@ -91,14 +91,11 @@ const char* rdb_detect_driver(const char* uri) {
     if (len > 11 && strncmp(uri, "postgres://", 11) == 0)   return "postgresql";
     if (len > 8  && strncmp(uri, "mysql://", 8) == 0)       return "mysql";
     if (len > 10 && strncmp(uri, "mariadb://", 10) == 0)    return "mysql";
-    if (len > 9  && strncmp(uri, "duckdb://", 9) == 0)      return "duckdb";
 
     // extension-based detection
     if (len > 3 && strcmp(uri + len - 3, ".db") == 0)        return "sqlite";
     if (len > 7 && strcmp(uri + len - 7, ".sqlite") == 0)    return "sqlite";
     if (len > 8 && strcmp(uri + len - 8, ".sqlite3") == 0)   return "sqlite";
-    if (len > 4 && strcmp(uri + len - 4, ".ddb") == 0)       return "duckdb";
-    if (len > 7 && strcmp(uri + len - 7, ".duckdb") == 0)    return "duckdb";
 
     return NULL;
 }
