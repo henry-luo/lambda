@@ -9,6 +9,7 @@
 #include "../../lib/log.h"
 #include "../../lib/file_utils.h"
 #include <curl/curl.h>
+#include "curl_trust.h"
 #include <string.h>
 #include "../../lib/mem.h"
 #include "../../lib/str.h"
@@ -221,6 +222,7 @@ bool network_download_resource(NetworkResource* res) {
     // SSL verification (always enabled for production)
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_use_host_trust_store(curl);
     
     // Compression support
     curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, RADIANT_HTTP_ACCEPT_ENCODING);
