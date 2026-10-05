@@ -22,10 +22,10 @@ full jq conformance.
 
 | Row | Kind | Filter source | What it exercises | Size | jq 1.7.1 user time |
 |---|---|---|---|---|---|
-| `jq_mix` | breadth | jaq `examples/benches/*.jq` (27 filters) | generators, `def` and recursion, `reduce`/`foreach`, `limit`/`repeat`/`recurse`/`nth`/`last`, `try`/`error`, sort/group/min/max/unique, object build/update, `tojson`/`fromjson`, string ×/slice/`explode`/`implode`, `contains`, `flatten`, `paths`, `|=`/`+=` | 3 rounds | **2.0 s** |
-| `jq_records` | breadth (data) | new, written for this suite | JSON fixture processing: `select`/`map`/`group_by`/`sort_by([..])`/`unique`/`first`, `//`, `//=`, `del`, `with_entries`/`to_entries`/`from_entries`, string interpolation, `join`/`split`/`ascii_upcase`, `paths(f)`, `..|objects|select(..)` `|=`, slices, `try`/`tonumber`, filter-argument `def`s | 4,000 orders × 6 rounds | **1.9 s** |
-| `jq_bf` | load | jaq `examples/bf.jq` (originally itchyny/brainfuck, by the gojq author) over `fib.bf` | an interpreter written in jq: `until`, `last(recurse(..))`, nested `def`s with filter args, path updates (`.memory |= assign(..)`, `.[i] |= f`), string slicing, `implode`, `limit`/`repeat`, `error` | 5 passes | **≈6.1 s** (4 passes measured 4.91 s) |
-| `jq_tree` | load | jaq `tree-update` + `tree-paths` + `tree-flatten` | path machinery at scale: `(.. | scalars) |= f` over 2^17 leaves, `[paths]`, `flatten`, `nth(recurse(..))` | depth 17 × 3 rounds | **5.6 s** |
+| `jq_mix` | breadth | jaq `examples/benches/*.jq` (27 filters) | generators, `def` and recursion, `reduce`/`foreach`, `limit`/`repeat`/`recurse`/`nth`/`last`, `try`/`error`, sort/group/min/max/unique, object build/update, `tojson`/`fromjson`, string ×/slice/`explode`/`implode`, `contains`, `flatten`, `paths`, `|=`/`+=` | 7 rounds | **1.9 s** |
+| `jq_records` | breadth (data) | new, written for this suite | JSON fixture processing: `select`/`map`/`group_by`/`sort_by([..])`/`unique`/`first`, `//`, `//=`, `del`, `with_entries`/`to_entries`/`from_entries`, string interpolation, `join`/`split`/`ascii_upcase`, `paths(f)`, `..|objects|select(..)` `|=`, slices, `try`/`tonumber`, filter-argument `def`s | 4,000 orders × 15 rounds | **1.8 s** |
+| `jq_bf` | load | jaq `examples/bf.jq` (originally itchyny/brainfuck, by the gojq author) over `fib.bf` | an interpreter written in jq: `until`, `last(recurse(..))`, nested `def`s with filter args, path updates (`.memory |= assign(..)`, `.[i] |= f`), string slicing, `implode`, `limit`/`repeat`, `error` | 10 passes | **6.3 s** |
+| `jq_tree` | load | jaq `tree-update` + `tree-paths` + `tree-flatten` | path machinery at scale: `(.. | scalars) |= f` over 2^17 leaves, `[paths]`, `flatten`, `nth(recurse(..))` | depth 17 × 7 rounds | **6.4 s** |
 
 Two breadth rows and two load rows, four in total. The two load rows meet the
 "jq version runs ≥ 5 s" requirement. All timings are jq *user* time on this
@@ -44,6 +44,23 @@ recalibrates them on a quiet machine.
 | LambdaJS | runs the Node driver | crash FIXED (§4.3); correct results, but very slow in the debug build (to re-measure in release) |
 
 ---
+
+### 1.1 Implemented state (P0 + P1, 2026-10-05)
+
+The final sizes were recalibrated on a quiet machine (load average about 3).
+The earlier numbers were taken at load average 19–26, when jq ran about 2×
+slower. The goldens are jq 1.7.1 output, and gojq agrees on all four.
+
+| Row | Golden | jq 1.7.1 | gojq (Go) | jqjs + patches (Node 22) | purejq (CPython 3.14) |
+|---|---|---|---|---|---|
+| `jq_mix` | 98172625 | 1.88 s | 1.05 s | 3.87 s | 10.3 s |
+| `jq_records` | 878885883 | 1.78 s | 1.13 s | 2.00 s | 6.5 s |
+| `jq_bf` | 478890292 | 6.31 s | 2.60 s | 2.96 s | 26.5 s |
+| `jq_tree` | 313746104 | 6.35 s | 4.37 s | 5.79 s | 37.5 s |
+
+The reference columns time evaluation only (`__TIMING__`); the jq column is
+the process's user time. Go 1.24 is now required: `go.mod` moved from
+`go 1.22` to `go 1.24.0` because gojq 0.12.19 needs it.
 
 ## 2. Workloads
 
@@ -583,8 +600,8 @@ directory. Golden values are produced by jq 1.7.1 and confirmed by gojq.
 
 | Phase | Work | Exit check |
 |---|---|---|
-| P0 | Commit the filters with sizes inside, the fixtures, the generator and `VENDOR.md`. Recalibrate sizes on a quiet machine (`hyperfine --warmup 1 'jq -n -f …'`, aiming for ≥ 5 s on `jq_bf`/`jq_tree`). Write the goldens | jq and gojq agree on all 4 |
-| P1 | Node (jqjs), Go (gojq) and Python (purejq) drivers. Runner registration | `run_benchmarks.py -s text -b jq` green on node/go/python, within the Q1 policy |
+| P0 | **DONE.** Commit the filters with sizes inside, the fixtures, the generator and `VENDOR.md`. Recalibrate sizes on a quiet machine (`hyperfine --warmup 1 'jq -n -f …'`, aiming for ≥ 5 s on `jq_bf`/`jq_tree`). Write the goldens | jq and gojq agree on all 4 |
+| P1 | **DONE.** Node (jqjs), Go (gojq) and Python (purejq) drivers. Runner registration | `run_benchmarks.py -s text -b jq` green on node/go/python, within the Q1 policy |
 | P2 | C2MIR jq-core VM, debugged against jq. Start with `jq_tree` (paths), then `jq_bf`, `jq_mix`, `jq_records` | the four C2MIR checksums match |
 | P3 | V1: typed Lambda VM (`jq_vm.ls` + `jq_*_vm.ls`), a translation of P2; recorded in the C2MIR cell (`c2mir_lambda_vm`) | checksums match on both tiers (`LAMBDA_EXEC_BACKEND=jit` and default) |
 | P4 | V2: typed hand translations `jq_*2.ls` + `jq_query_common.ls` | checksums match on both tiers |

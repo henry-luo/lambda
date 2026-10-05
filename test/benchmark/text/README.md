@@ -36,6 +36,34 @@ workloads for the Lambda and native reference columns.
 - log_pipeline.js: mixed structured and positional log parsing, filtering,
   service grouping, and aggregation over 12,000 records for 180 rounds.
 
+- jq_mix, jq_records, jq_bf, jq_tree: jq-language workloads
+  (`vibe/impl/Lambda_Impl_Jq_Tests.md`). The filters live in `jq/*.jq`, with
+  their sizes inside (`def rounds`, `def depth`), and are the single source of
+  truth: the Node/LambdaJS, Go and Python columns each run the *same filter
+  text* on an existing jq interpreter. Those are **jqjs + patches**
+  (`jq/vendor/`, see `jq/VENDOR.md`), **gojq** 0.12.19 (pinned in
+  `../go/go.mod`) and **purejq** 0.3.1 (`python/vendor/`, unmodified). jq
+  1.7.1 produced the goldens and gojq confirms them. Each filter reduces to
+  one integer, so object key order and float formatting never reach the
+  checksum.
+  - jq_mix: 27 of jaq's bench filters (MIT), 7 rounds. Breadth.
+  - jq_records: order processing over `jq/orders.json` (4,000 orders), 15
+    rounds. Breadth on JSON data.
+  - jq_bf: jaq's Brainfuck interpreter written in jq, over `jq/fib.bf`, 10
+    passes. Load: generators, `until`, path updates.
+  - jq_tree: `(.. | scalars) |= f`, `[paths]` and `flatten` over a 2^17-leaf
+    tree, 7 rounds. Load: path machinery.
+
+  The load rows run about 6.3 s on jq 1.7.1, and the interpreters differ a
+  lot in speed (purejq needs tens of seconds), so these rows carry a 600 s
+  per-row timeout floor in `run_benchmarks.py`. The Lambda MIR-U/MIR-T columns
+  run each filter *translated by hand* into a Lambda query (`jq_*.ls`,
+  `jq_*2.ls`). The C2MIR cell holds two values: the C jq VM, and a typed
+  Lambda port of the same VM (`jq_*_vm.ls`) shown as `/ λ-VM`.
+  `generate_jq_fixture.js` regenerates `jq/orders.json` and
+  `jq/jq_helper.js` (vendored jqjs without its ES exports, plus
+  `jq/jq_driver.js`).
+
 `prettier_ast_preprocess.js` parses `prettier_source.js` with the local Babel
 parser used by Prettier and writes the compact AST fixture. The JavaScript and
 Lambda printers consume that same JSON AST and are checked against Prettier's

@@ -93,7 +93,8 @@ def benchmark_entries(all_entries=False):
         return registry.build_benchmark_list(None, None)
     entries = []
     for suite, rows in registry.STANDARD_SUITES + [("text", registry.TEXT)]:
-        for name, category, ls, js, py in rows:
+        # text rows may carry a sixth field (a per-row timeout floor)
+        for name, category, ls, js, py, *_ in rows:
             entries.append({"suite": suite, "name": name, "category": category,
                             "js_path": js, "is_jetstream": False})
     for name, category, ls in registry.JETSTREAM_LS:

@@ -197,6 +197,14 @@ TEXT = [
     ("text_search", "search", "test/benchmark/text/text_search.ls", "test/benchmark/text/text_search.js", "test/benchmark/text/python/text_search.py"),
     ("three_way_merge", "merge", "test/benchmark/text/three_way_merge.ls", "test/benchmark/text/three_way_merge.js", "test/benchmark/text/python/three_way_merge.py"),
     ("log_pipeline", "log-processing", "test/benchmark/text/log_pipeline.ls", "test/benchmark/text/log_pipeline.js", "test/benchmark/text/python/log_pipeline.py"),
+    # jq workloads (vibe/impl/Lambda_Impl_Jq_Tests.md): the reference columns
+    # run jq interpreters, the Lambda columns hand-translated queries. The
+    # optional sixth field is a per-row timeout floor: interpreters such as
+    # purejq need minutes on the load rows sized for jq >= 5 s.
+    ("jq_mix", "jq-breadth", "test/benchmark/text/jq_mix.ls", "test/benchmark/text/jq_mix.js", "test/benchmark/text/python/jq_mix.py", 600),
+    ("jq_records", "jq-data", "test/benchmark/text/jq_records.ls", "test/benchmark/text/jq_records.js", "test/benchmark/text/python/jq_records.py", 600),
+    ("jq_bf", "jq-interpreter", "test/benchmark/text/jq_bf.ls", "test/benchmark/text/jq_bf.js", "test/benchmark/text/python/jq_bf.py", 600),
+    ("jq_tree", "jq-paths", "test/benchmark/text/jq_tree.ls", "test/benchmark/text/jq_tree.js", "test/benchmark/text/python/jq_tree.py", 600),
 ]
 
 JETSTREAM_LS = [
@@ -891,7 +899,7 @@ def build_benchmark_list(suite_filters, bench_filters, include_text=True):
     # still selects them normally; only the default changed.
     if include_text or (suite_filters and match_filter("text", suite_filters)):
         for entry in TEXT:
-            bench_name, category, ls_path, js_path, py_path = entry
+            bench_name, category, ls_path, js_path, py_path = entry[:5]
             if not match_filter(bench_name, bench_filters):
                 continue
             benchmarks.append({
@@ -903,6 +911,7 @@ def build_benchmark_list(suite_filters, bench_filters, include_text=True):
                 "py_path": py_path,
                 "is_jetstream": False,
                 "ref_js": None,
+                "timeout_s": entry[5] if len(entry) > 5 else None,
             })
 
     if match_filter("jetstream", suite_filters):
@@ -1167,6 +1176,8 @@ def mir_script_variants(b):
 
 def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=False):
     """Run one benchmark across selected engines in TIME mode. Updates results dict."""
+    # a row's own timeout is a floor under the command-line value
+    timeout_s = max(timeout_s, b.get("timeout_s") or 0)
     suite = b["suite"]
     name = b["name"]
     is_js = b["is_jetstream"]
