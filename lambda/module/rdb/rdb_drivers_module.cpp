@@ -65,6 +65,11 @@ char* rdb_mod_strdup(const char* s) {
     return copy;
 }
 
+void rdb_mod_wipe(void* p, size_t n) {
+    volatile unsigned char* bytes = (volatile unsigned char*)p;
+    while (n--) *bytes++ = 0;
+}
+
 char* rdb_mod_param_text(const RdbParam* param) {
     char buf[64];
     switch (param->type) {

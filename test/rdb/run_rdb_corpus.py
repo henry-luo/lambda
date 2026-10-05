@@ -7,8 +7,9 @@ real reason, else the shared <name>.txt. Backends come from
 LAMBDA_TEST_PG_URI / LAMBDA_TEST_MYSQL_URI (utils/rdb-test-servers.sh up
 prints them); an unset backend is reported as skipped, never as passed.
 
-Each backend also runs a TLS-mode matrix (RDB11/RDB12), and every run checks
-that the fixture password never reached log.txt (RDB9).
+Each backend also runs a TLS-mode matrix (RDB11/RDB12) and the live cancel
+gtest (RdbLiveCancel, when test/test_rdb_gtest.exe is built), and every run
+checks that the fixture password never reached log.txt (RDB9).
 
 usage: test/rdb/run_rdb_corpus.py [--update]   (--update rewrites goldens)
 """
@@ -24,7 +25,12 @@ CORPUS = ROOT / "test" / "rdb"
 WORK = ROOT / "temp" / "rdb-corpus"
 LAMBDA = ROOT / "lambda.exe"
 LOG = ROOT / "log.txt"
+GTEST = ROOT / "test" / "test_rdb_gtest.exe"
 TIMESTAMP = re.compile(r"^\d\d:\d\d:\d\d ")
+
+# gtest case per backend: cancel from another thread (§13.5.4)
+CANCEL_TESTS = {"postgresql": "RdbLiveCancel.PostgresqlInterruptsSleep",
+                "mysql": "RdbLiveCancel.MysqlInterruptsSleep"}
 
 BACKENDS = [
     ("postgresql", "LAMBDA_TEST_PG_URI", "sslmode",
@@ -130,6 +136,18 @@ def main() -> int:
                 failures.append(f"{label}: password reached log.txt")
             else:
                 passes += 1
+        if not GTEST.exists():
+            skipped.append(f"{backend} cancel ({GTEST.name} not built: make build-test)")
+            continue
+        proc = subprocess.run([str(GTEST), f"--gtest_filter={CANCEL_TESTS[backend]}"], cwd=ROOT,
+                              capture_output=True, text=True, timeout=120)
+        label = f"{backend}/cancel"
+        if proc.returncode != 0 or "[  PASSED  ] 1 test" not in proc.stdout:
+            failures.append(f"{label}: {CANCEL_TESTS[backend]} failed\n{proc.stdout[-2000:]}")
+        elif leaked(secret):
+            failures.append(f"{label}: password reached log.txt")
+        else:
+            passes += 1
     for f in failures:
         print(f"FAIL {f}")
     for s in skipped:

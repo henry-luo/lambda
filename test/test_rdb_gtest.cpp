@@ -2397,3 +2397,96 @@ TEST(TrustStore, LoadsPlatformRoots) {
     EXPECT_TRUE(found);
     EXPECT_EQ(trust_store_roots(), roots);      // loaded once, shared
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §37 Live cancel (§13.5.4): cancel from another thread interrupts an
+ *     in-flight query and leaves the session usable. Needs the built
+ *     rdb-drivers module and LAMBDA_TEST_PG_URI / LAMBDA_TEST_MYSQL_URI
+ *     (make test-rdb-drivers-local); skipped otherwise.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+#ifndef _WIN32
+
+#include "../lambda/jube/jube.h"
+#include <dlfcn.h>
+#include <time.h>
+
+static const JubeModuleDef* live_module = NULL;
+
+/** the module's drivers, loaded straight from the dylib (no Jube registry) */
+static const RdbDriver* live_resolver(const char* name) {
+    if (!live_module) {
+        void* image = dlopen("modules/rdb-drivers/rdb-drivers.dylib", RTLD_NOW | RTLD_LOCAL);
+        if (!image) image = dlopen("modules/rdb-drivers/rdb-drivers.so", RTLD_NOW | RTLD_LOCAL);
+        typedef const JubeModuleDef* (*EntryFn)(void);
+        EntryFn entry = image ? (EntryFn)dlsym(image, "jube_module") : NULL;
+        const JubeModuleDef* def = entry ? entry() : NULL;
+        if (!def || def->init(NULL) != 0) return NULL;   // the module ignores the Jube host
+        live_module = def;
+    }
+    for (size_t i = 0; i < live_module->rdb_driver_count; i++) {
+        if (strcmp(live_module->rdb_drivers[i]->name, name) == 0) return live_module->rdb_drivers[i];
+    }
+    return NULL;
+}
+
+static double live_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+struct LiveCancel {
+    RdbConn* conn;
+    int rc;
+};
+
+static void* live_cancel_main(void* arg) {
+    LiveCancel* lc = (LiveCancel*)arg;
+    usleep(500 * 1000);     // let the query reach the server first
+    lc->rc = rdb_cancel(lc->conn);
+    return NULL;
+}
+
+/** run a 30 s sleep, cancel it after 0.5 s, then check the session still answers */
+static void live_cancel_check(const char* env, const char* driver, const char* sleep_sql) {
+    const char* uri = getenv(env);
+    if (!uri) GTEST_SKIP() << env << " not set (make test-rdb-drivers-local)";
+    rdb_set_driver_resolver(live_resolver);
+    if (!rdb_get_driver(driver)) GTEST_SKIP() << "rdb-drivers module not built (make build-rdb-drivers)";
+    Pool* pool = pool_create();
+    RdbConn* conn = rdb_open(pool, uri, driver, true);
+    ASSERT_NE(conn, nullptr);
+    EXPECT_TRUE(conn->driver->caps & RDB_CAP_CANCEL);
+
+    RdbStmt* stmt = rdb_prepare(conn, sleep_sql);
+    ASSERT_NE(stmt, nullptr);
+    LiveCancel lc = { conn, RDB_ERROR };
+    pthread_t canceller;
+    ASSERT_EQ(pthread_create(&canceller, NULL, live_cancel_main, &lc), 0);
+    double start = live_now();
+    rdb_step(stmt);         // PostgreSQL fails with 57014; MySQL's SLEEP returns 1
+    double elapsed = live_now() - start;
+    pthread_join(canceller, NULL);
+    rdb_finalize(stmt);
+    EXPECT_EQ(lc.rc, RDB_OK);
+    EXPECT_LT(elapsed, 10.0) << "the query ran to completion instead of being cancelled";
+
+    RdbStmt* again = rdb_prepare(conn, "SELECT 1");
+    ASSERT_NE(again, nullptr);
+    EXPECT_EQ(rdb_step(again), RDB_ROW);
+    rdb_finalize(again);
+    rdb_close(conn);
+    pool_destroy(pool);
+    rdb_set_driver_resolver(NULL);
+}
+
+TEST(RdbLiveCancel, PostgresqlInterruptsSleep) {
+    live_cancel_check("LAMBDA_TEST_PG_URI", "postgresql", "SELECT pg_sleep(30)");
+}
+
+TEST(RdbLiveCancel, MysqlInterruptsSleep) {
+    live_cancel_check("LAMBDA_TEST_MYSQL_URI", "mysql", "SELECT SLEEP(30)");
+}
+
+#endif  // _WIN32

@@ -29,6 +29,9 @@ void rdb_mod_buf_free(RdbModBuf* b);
 
 char* rdb_mod_strdup(const char* s);
 
+// zero a secret in a way the compiler cannot drop as a dead store (RDB9)
+void rdb_mod_wipe(void* p, size_t n);
+
 // render a bound parameter as text (both wire protocols accept text values);
 // returns NULL for SQL NULL, else a malloc'd string
 char* rdb_mod_param_text(const RdbParam* param);

@@ -213,8 +213,8 @@ static bool mysql_parse_uri(const char* uri, MysqlUri* u) {
 
 static void mysql_uri_free(MysqlUri* u) {
     if (u->password) {
-        // RDB9: the plaintext password is not retained past the connect
-        memset(u->password, 0, strlen(u->password));
+        // RDB9: the driver keeps no copy of its own past the connect
+        rdb_mod_wipe(u->password, strlen(u->password));
         free(u->password);
         u->password = NULL;
     }
@@ -246,8 +246,12 @@ static int mysql_resolve_targets(const char* uri, RdbTarget* out, int cap, int* 
  * ══════════════════════════════════════════════════════════════════════ */
 
 typedef struct {
-    MYSQL* my;
-    bool   mariadb;
+    MYSQL*       my;
+    bool         mariadb;
+    // what a cancel helper session needs to reach the same server (§13.5.3)
+    char         endpoint[1024];    // the host bridge's local socket
+    bool         upstream_tls;      // the bridge guarantees TLS upstream
+    unsigned int connect_timeout_s;
 } MysqlConn;
 
 static const RdbDialect mysql_dialect = { RDB_PLACEHOLDER_QMARK, '`', "'\\\\'" };
@@ -256,6 +260,39 @@ static bool mysql_command(MYSQL* my, const char* sql) {
     if (mysql_query(my, sql) == 0) return true;
     rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: '%s' failed: %s", sql, mysql_error(my));
     return false;
+}
+
+/** Connector/C keeps the session's password until mysql_close, which frees it
+    unwiped; wipe it first so it does not linger in freed memory (RDB9) */
+static void mysql_close_wiped(MYSQL* my) {
+    if (my->passwd) rdb_mod_wipe(my->passwd, strlen(my->passwd));
+    mysql_close(my);
+}
+
+/** a Connector/C session to a bridge endpoint, or NULL (logged). The SHA-2
+    plugins read the bridge's TLS guarantee during the handshake (RDB12). */
+static MYSQL* mysql_connect_endpoint(const char* endpoint, const char* user, const char* password,
+                                     const char* database, unsigned int timeout_s,
+                                     bool upstream_tls) {
+    MYSQL* my = mysql_init(NULL);
+    if (!my) return NULL;
+    unsigned int protocol = MYSQL_PROTOCOL_SOCKET;
+    my_bool off = 0;
+    mysql_optionsv(my, MYSQL_OPT_PROTOCOL, &protocol);
+    // reconnects would bypass host registration (JA16.1); LOCAL INFILE reads client files
+    mysql_optionsv(my, MYSQL_OPT_RECONNECT, &off);
+    mysql_optionsv(my, MYSQL_OPT_LOCAL_INFILE, &off);
+    mysql_optionsv(my, MYSQL_SET_CHARSET_NAME, "utf8mb4");
+    if (timeout_s) mysql_optionsv(my, MYSQL_OPT_CONNECT_TIMEOUT, &timeout_s);
+    mysql_upstream_tls = upstream_tls;
+    MYSQL* connected = mysql_real_connect(my, "localhost", user, password, database, 0, endpoint, 0);
+    mysql_upstream_tls = false;
+    if (!connected) {
+        rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: connection failed: %s", mysql_error(my));
+        mysql_close_wiped(my);
+        return NULL;
+    }
+    return my;
 }
 
 static int mysql_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
@@ -281,33 +318,22 @@ static int mysql_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
         return RDB_ERROR;
     }
 
-    MYSQL* my = mysql_init(NULL);
-    unsigned int protocol = MYSQL_PROTOCOL_SOCKET;
-    my_bool off = 0;
-    unsigned int timeout = (unsigned int)(u.connect_timeout_ms / 1000);
-    mysql_optionsv(my, MYSQL_OPT_PROTOCOL, &protocol);
-    // reconnects would bypass host registration (JA16.1); LOCAL INFILE reads client files
-    mysql_optionsv(my, MYSQL_OPT_RECONNECT, &off);
-    mysql_optionsv(my, MYSQL_OPT_LOCAL_INFILE, &off);
-    mysql_optionsv(my, MYSQL_SET_CHARSET_NAME, "utf8mb4");
-    if (timeout) mysql_optionsv(my, MYSQL_OPT_CONNECT_TIMEOUT, &timeout);
-    mysql_upstream_tls = spec.tls >= RDB_TLS_REQUIRE;
-    MYSQL* connected = mysql_real_connect(my, "localhost", u.user, u.password ? u.password : "",
-                                          u.database[0] ? u.database : NULL, 0, endpoint, 0);
-    mysql_upstream_tls = false;
+    unsigned int timeout_s = (unsigned int)(u.connect_timeout_ms / 1000);
+    bool upstream_tls = spec.tls >= RDB_TLS_REQUIRE;
+    MYSQL* my = mysql_connect_endpoint(endpoint, u.user, u.password ? u.password : "",
+                                       u.database[0] ? u.database : NULL, timeout_s, upstream_tls);
     mysql_uri_free(&u);
-    if (!connected) {
-        rdb_mod_log(RDB_LOG_ERROR, "rdb mysql: connection failed: %s", mysql_error(my));
-        mysql_close(my);
-        return RDB_ERROR;
-    }
+    if (!my) return RDB_ERROR;
     if (opts->readonly && !mysql_command(my, "SET SESSION TRANSACTION READ ONLY")) {
-        mysql_close(my);
+        mysql_close_wiped(my);
         return RDB_ERROR;
     }
 
     MysqlConn* conn = (MysqlConn*)calloc(1, sizeof(MysqlConn));
     conn->my = my;
+    snprintf(conn->endpoint, sizeof(conn->endpoint), "%s", endpoint);
+    conn->upstream_tls = upstream_tls;
+    conn->connect_timeout_s = timeout_s;
     const char* version = mysql_get_server_info(my);
     conn->mariadb = version && strstr(version, "MariaDB");
     RdbConnInfo info;
@@ -317,7 +343,7 @@ static int mysql_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
     info.backend_id = (int64_t)mysql_thread_id(my);
     snprintf(info.server_version, sizeof(info.server_version), "%s", version ? version : "");
     if (host->conn_register(open_ctx, conn, &info) != RDB_OK) {
-        mysql_close(my);
+        mysql_close_wiped(my);
         free(conn);
         return RDB_ERROR;
     }
@@ -328,8 +354,26 @@ static int mysql_open(const RdbHostAPI* host, void* open_ctx, const char* uri,
 static void mysql_close_conn(void* conn) {
     MysqlConn* c = (MysqlConn*)conn;
     if (!c) return;
-    mysql_close(c->my);
+    mysql_close_wiped(c->my);
     free(c);
+}
+
+/** MySQL has no out-of-band cancel request: a second session on the same
+    bridge sends KILL QUERY for this one's thread, then closes before returning,
+    so it never outlives the host-initiated cancel (§13.5.3). It logs in with
+    the credentials Connector/C keeps for the parent session. KILL QUERY on an
+    idle session is a no-op; the session itself stays open. */
+static int mysql_cancel(void* conn) {
+    MysqlConn* c = (MysqlConn*)conn;
+    MYSQL* helper = mysql_connect_endpoint(c->endpoint, c->my->user,
+                                           c->my->passwd ? c->my->passwd : "", NULL,
+                                           c->connect_timeout_s, c->upstream_tls);
+    if (!helper) return RDB_ERROR;
+    char sql[64];
+    snprintf(sql, sizeof(sql), "KILL QUERY %lu", mysql_thread_id(c->my));
+    bool ok = mysql_command(helper, sql);
+    mysql_close_wiped(helper);
+    return ok ? RDB_OK : RDB_ERROR;
 }
 
 static int mysql_ping_conn(void* conn) {
@@ -723,13 +767,13 @@ const RdbDriver rdb_mysql_driver = {
     RDB_DRIVER_API_VERSION,
     "mysql",
     &mysql_dialect,
-    RDB_CAP_STATEMENT_TIMEOUT,
+    RDB_CAP_CANCEL | RDB_CAP_STATEMENT_TIMEOUT,
     mysql_resolve_targets,
     mysql_open,
     mysql_close_conn,
     mysql_ping_conn,
     mysql_reset_conn,
-    NULL,       // cancel: KILL QUERY needs a registered helper session (deferred)
+    mysql_cancel,
     mysql_set_timeout,
     mysql_load_schema,
     mysql_prepare_stmt,
