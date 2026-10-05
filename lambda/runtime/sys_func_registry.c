@@ -1135,6 +1135,14 @@ SysFuncInfo sys_func_defs[] = {
     {SYSPROC_IO_GREP, "io_grep", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_grep3", FPTR(pn_io_grep3), NULL, NULL, false, 0},
 
+    // io.search(source, query, options?) - ranked full-text search over files
+    // with lib/fts; a procedure since files change (FTX11, S12.1.1v2)
+    {SYSPROC_IO_SEARCH, "io_search", 2, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_search2", FPTR(pn_io_search2), NULL, NULL, false, 0},
+
+    {SYSPROC_IO_SEARCH, "io_search", 3, (Type*)&TYPE_ARRAY, true, true, false, LMD_TYPE_ANY, true,
+     C_RET_ITEM, NULL, "pn_io_search3", FPTR(pn_io_search3), NULL, NULL, false, 0},
+
     // io.http module
     {SYSPROC_IO_HTTP_CREATE_SERVER, "io_http_create_server", 1, &TYPE_ANY, true, false, false, LMD_TYPE_ANY, true,
      C_RET_ITEM, NULL, "pn_io_http_create_server", FPTR(pn_io_http_create_server), NULL, NULL, false, 0},
@@ -3988,11 +3996,23 @@ static const char* const io_grep_option_names[] = {
     NULL,
 };
 
+// io.grep's options where they apply, and its own (FTX12)
+static const char* const io_search_option_names[] = {
+    "ignore_case", "word", "line", "byte_offset", "text", "line_ending",
+    "context", "before", "after", "limit", "limit_per_file", "files", "count",
+    "include", "exclude", "max_depth", "max_size", "hidden", "ignore", "binary",
+    "unit", "rank", "language", "stopwords", "unaccent", "matches", "snippet",
+    NULL,
+};
+
 const char* const* sys_func_option_names(SysFunc fn, int* options_arg_index) {
     switch (fn) {
     case SYSPROC_IO_GREP:
         if (options_arg_index) *options_arg_index = 2;
         return io_grep_option_names;
+    case SYSPROC_IO_SEARCH:
+        if (options_arg_index) *options_arg_index = 2;
+        return io_search_option_names;
     default:
         return NULL;
     }

@@ -19,6 +19,7 @@
     "lib/font",
     "lib/font/woff2",
     "lib/grep",
+    "lib/fts",
     "lambda",
     "lambda/core",
     "lambda/io",
@@ -455,7 +456,8 @@
         "lib/font/*.cpp",
         "lib/font/woff2/*.c",
         "lib/font/woff2/*.cpp",
-        "lib/grep/*.cpp"
+        "lib/grep/*.cpp",
+        "lib/fts/*.cpp"
       ],
       "exclude_patterns": [
         "lib/clock_compat.c",
@@ -1246,6 +1248,7 @@
       "source_dirs": [
         "lib",
         "lib/grep",
+        "lib/fts",
         "lambda",
         "lambda/core",
         "lambda/io",
@@ -2189,6 +2192,19 @@
               "gtest_main"
             ],
             "binary": "test_grep_gtest.exe",
+            "icon": "\ud83d\udd0e"
+          },
+          {
+            "source": "lib/test_fts_gtest.cpp",
+            "name": "Full-Text Search Library Tests",
+            "dependencies": [
+              "lambda-data"
+            ],
+            "libraries": [
+              "gtest",
+              "gtest_main"
+            ],
+            "binary": "test_fts_gtest.exe",
             "icon": "\ud83d\udd0e"
           },
           {

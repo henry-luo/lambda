@@ -148,6 +148,32 @@ typedef struct GrepWalkOptions {
 GrepStatus grep_search_paths(const GrepMatcher* matcher, const char* const* paths, size_t count,
                              const GrepWalkOptions* walk, const GrepSink* sink);
 
+// The walk alone, shared with other per-file consumers such as lib/fts
+// (FTX10): the same roots, ignore layers (GRP14), filters (GRP22), symlink rule
+// (GRP19) and thread pool as grep_search_paths, which is built on it. `visit`
+// runs on a worker thread for each selected file, with `slot` in
+// [0, slot_count) held by no other visit while it runs, so per-slot state
+// (a searcher, a tokeniser) needs no lock. `begin`, when given, runs once on
+// the calling thread before any visit, with the slot count. A visit returning
+// GREP_STOP ends the walk; files not yet visited are skipped. The options'
+// max_matches_total and sorted are the consumer's, not the walk's.
+typedef struct GrepWalkVisitor {
+    void* user_data;
+    bool (*begin)(void* user_data, int slot_count);
+    GrepAction (*visit)(void* user_data, int slot, const char* open_path, const char* label,
+                        size_t root_index);
+} GrepWalkVisitor;
+
+GrepStatus grep_walk_paths(const char* const* paths, size_t count, const GrepWalkOptions* walk,
+                           const GrepWalkVisitor* visitor);
+
+// The path order sorted results use: component by component, '/' before any
+// other byte, so a directory's entries stay together (GRP25).
+int grep_path_order(const char* a, const char* b);
+
+// True when `data` is binary by the walk's rule: a NUL in its first 8 KiB.
+bool grep_input_is_binary(const char* data, size_t length);
+
 // Gitignore-style glob match (also used for include/exclude globs): `*` and
 // `?` stop at '/', `**` spans directories, `[...]` classes, `\` escapes.
 bool grep_glob_match(const char* pattern, size_t pattern_len, const char* text, size_t text_len);
