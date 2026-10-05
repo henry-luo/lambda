@@ -1967,13 +1967,24 @@ this out_conn; otherwise close + fail
 - **No hidden reconnects.** MariaDB's `MYSQL_OPT_RECONNECT` is pinned off and
   `PQreset` is not used. A reconnect is a new host-driven `open` that goes
   through authorisation and registration again.
-- **Helper connections register too.** MySQL query cancellation needs a
-  second session (`KILL QUERY <thread id>`). It must register as a
-  `CALL`-scoped helper whose parent is the cancelled rid, and it needs the
-  password again, which the driver does not retain (RDB9); MySQL `cancel` is
-  therefore deferred. libpq's cancel request (`PQcancelBlocking`) is a
-  one-packet protocol message: it reaches the server as a second local
-  connection through the same bridge, inside the host-initiated `cancel`.
+- **Cancel helpers live inside the parent's bridge.** Neither backend can
+  cancel over the busy session itself, so `cancel` opens a second local
+  connection to the parent's own bridge. The bridge is part of the
+  registered parent: its upstream goes only to the authorised target, and it
+  closes with the parent. The helper opens and closes inside the
+  host-initiated `cancel` call, so it is never left for the host to close and
+  needs no registry row of its own.
+  - PostgreSQL: libpq's cancel request (`PQcancelBlocking`), a one-packet
+    protocol message.
+  - MySQL: a short helper session that sends `KILL QUERY <thread id>`. It logs
+    in with the user and password Connector/C keeps in the parent `MYSQL` for
+    the session's life (Connector/C needs them for `mysql_change_user`). The
+    driver keeps no copy of its own. Because `mysql_close` frees that copy
+    without clearing it, the driver zeroes it first, on the parent and on the
+    helper (RDB9). `KILL QUERY` ends the statement, not the session. On an
+    idle session it does nothing. A cancel that races the statement's own end
+    can hit the next statement on that session; the host calls `cancel` only
+    on `BUSY` entries. Implemented 2026-10-05.
 - **Files count too.** For an embedded engine (SQLite) the "target" is the
   database file path. Authorisation is a path check
   under the JA16 file policy.
@@ -1985,7 +1996,7 @@ this out_conn; otherwise close + fail
 | `resolve_targets` | `PQconninfoParse`, `host`/`hostaddr`/`port` lists, Unix socket dirs | parse URI, `socket=` or host:port |
 | `ping` | `PQstatus` == `CONNECTION_OK` | `mysql_ping` (reconnect off) |
 | `reset` | `DISCARD ALL` | `mysql_reset_connection` |
-| `cancel` | `PQcancelCreate` + `PQcancelBlocking` | deferred (helper session `KILL QUERY`, see above) |
+| `cancel` | `PQcancelCreate` + `PQcancelBlocking` | helper session on the same bridge sends `KILL QUERY <thread id>` (see above) |
 | `set_timeout` | `SET statement_timeout` | `max_execution_time` (MySQL), `max_statement_time` (MariaDB) |
 
 #### 13.5.5 Relation to S12.4: lazy proxies (open question)
@@ -2226,7 +2237,7 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
 | Schema (§6.4 parity) | `pg_catalog`, `current_schema()` only; functions listed are that schema's own | `information_schema` for `DATABASE()`; functions listed are that database's own |
 | Types → `RdbType` | by result OID: int2/4/8, oid → INT; float4/8 → FLOAT; numeric → DECIMAL; bool → BOOL; date/timestamp(tz) → DATETIME; json/jsonb → JSON; bytea → BLOB (deferred like SQLite); else STRING | by field type: integers → INT; `TINYINT(1)` → BOOL; DECIMAL → DECIMAL; DATE/DATETIME/TIMESTAMP → DATETIME; JSON → JSON; binary BLOBs → BLOB (deferred); else STRING |
 | Logins | libpq's own (SCRAM-SHA-256, md5, password); SCRAM channel binding is unavailable (`channel_binding=require` rejected) | `mysql_native_password` built in; `caching_sha2_password` / `sha256_password` Lambda-side (RDB12) |
-| Known gaps | `.pgpass` lookups match the bridge directory, not the real host (use the URI or `PGPASSWORD`) | `cancel` deferred; full SHA-2 auth needs `ssl-mode=REQUIRED` or stronger |
+| Known gaps | `.pgpass` lookups match the bridge directory, not the real host (use the URI or `PGPASSWORD`) | full SHA-2 auth needs `ssl-mode=REQUIRED` or stronger |
 
 ### 13.11 Conformance gates (RDB8, D7.3.5)
 
@@ -2251,7 +2262,8 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
     decimal/datetime/JSON/BLOB columns). `utils/rdb-test-servers.sh up`
     (`make rdb-test-servers-up`) runs both servers with TLS under Apple's
     `container` tool, reloads the fixtures, and prints the URIs;
-    `make test-rdb-drivers-local` does both steps.
+    `make test-rdb-drivers-local` does both steps. Setup and day-to-day use:
+    `vibe/Lambda_Devop_DB_Containers.md`.
   - **Scripts:** `test/rdb/*.ls` use a `{{RDB_URI}}` placeholder and must
     produce the **same `.txt` golden** on every backend. A backend-specific
     `<name>.<backend>.txt` exists only for real differences (today: declared
@@ -2266,6 +2278,11 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
     they run when `LAMBDA_TEST_PG_URI` / `LAMBDA_TEST_MYSQL_URI` are set
     (Apple's `container` tool on macOS) and are reported as *skipped*
     otherwise.
+  - **Cancel:** for each backend the runner also runs the
+    `RdbLiveCancel` gtest, if `test/test_rdb_gtest.exe` is built. It
+    starts a 30 s sleep, cancels it from another thread after 0.5 s, and
+    checks the statement returns quickly and the session still answers.
+    The gtest skips without the module or the URIs.
   - The corpus also checks that no fixture password appears in `log.txt`
     (RDB9).
 - **Bridge tests** (GTest, fake servers on loopback, no TLS): PostgreSQL
@@ -2333,7 +2350,7 @@ further, since the host then owns the network socket itself.
 | R7 build + module + gates | ✅ `utils/build-rdb-deps.sh` (libpq 18.6, Connector/C 3.3.21, no patches; `mysql_clear_password` off), `make build-rdb-deps` / `build-rdb-drivers`, the `rdb-drivers` target (strict link, only `jube_module` exported, system-only imports). **Gates:** `make check-rdb-module-architecture` (`utils/check_rdb_module_architecture.py`: exports, OS-only dependencies, no dynamic-lookup imports, no raw IO in Lambda's driver objects, every provided driver activates) and `make verify-rdb-module-licenses`; both fail on seeded negatives. `LICENSES/`, `SOURCES.md` and the archive overrides are in place. |
 | OS trust store (Q5) | ✅ `lib/trust_store.{h,c}`: macOS keychain (system/admin/user trust settings), Linux bundles, Windows `ROOT`, `SSL_CERT_FILE` override; used by the bridge when the URI names no CA, and by curl for all HTTPS (`CURLOPT_SSL_CTX_FUNCTION`, TLS connections only). Unit test: the platform set includes ISRG Root X1. Verified live: `input("https://www.example.com/")` succeeds with the OS store and fails with `SSL_CERT_FILE` naming only the test CA. Windows path not compile-tested. |
 | Corpus | ✅ `make test-rdb-drivers[-local]`: 4 scripts × 2 backends + 16 probes = **24 checks, all passing**, also under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. Without URIs both backends report SKIP. |
-| R8 / R9 drivers | ✅ **live-tested 2026-10-05** against PostgreSQL 18 and MySQL 8.4.11 in Apple `container` VMs with TLS on (test CA, SAN `localhost`/`127.0.0.1`). On both backends: schema, views, indexes, triggers, forward and reverse FK navigation, `decimal`, JSON and `datetime` decoding through `input()`. TLS matrix: disable / prefer / require / verify-ca / verify-full all behave as specified, and a missing or wrong CA, a server-name mismatch (fails verify-full, passes verify-ca) and a wrong password all fail cleanly. MySQL `caching_sha2_password` full auth works over the bridge's TLS and is refused under `DISABLED`/`PREFERRED`; the cached fast-auth proof works over plaintext. No password reached `log.txt` in any case. |
+| R8 / R9 drivers | ✅ **live-tested 2026-10-05** against PostgreSQL 18 and MySQL 8.4.11 in Apple `container` VMs with TLS on (test CA, SAN `localhost`/`127.0.0.1`). On both backends: schema, views, indexes, triggers, forward and reverse FK navigation, `decimal`, JSON and `datetime` decoding through `input()`. TLS matrix: disable / prefer / require / verify-ca / verify-full all behave as specified, and a missing or wrong CA, a server-name mismatch (fails verify-full, passes verify-ca) and a wrong password all fail cleanly. MySQL `caching_sha2_password` full auth works over the bridge's TLS and is refused under `DISABLED`/`PREFERRED`; the cached fast-auth proof works over plaintext. `cancel` interrupts an in-flight sleep on both backends (MySQL through the `KILL QUERY` helper session) and leaves the session usable (`RdbLiveCancel`). No password reached `log.txt` in any case. |
 | R10 bundling | ✅ `make release-rdb-drivers` (release image 503 KB, with `module.json`, `SOURCES.md`, `LICENSES/`; licence gate on the copy), full bundle `release-jube/modules/rdb-drivers`, manifest-only descriptor in `release-standard`. Verified on the release bundles: licence gate ok; architecture gate ok against the release host (exports, OS-only dependencies, no dynamic lookup, both drivers resolve, an unknown one does not); `--expect-absent` ok for the standard bundle; standard and full hosts byte-identical. `make verify-jube-package` itself stops earlier at its pre-existing `require('zlib')` check in `release-standard`, which fails identically on master 89ce07f4c (not an RDB defect); its RDB lines were run directly. |
 
 **Defects found by the live test, fixed:**
@@ -2375,8 +2392,9 @@ every socket and certificate decision.
 3. returns the endpoint. The driver points its client library at it with TLS
    off locally.
 
-For every local connection (the main session and, for PostgreSQL, the
-separate connection a cancel request opens) the bridge connects upstream with
+For every local connection (the main session, and the short connection a
+`cancel` opens: libpq's cancel request or the MySQL `KILL QUERY` helper,
+§13.5.3) the bridge connects upstream with
 the URI's connect timeout, negotiates, and relays both ways. The bridge
 belongs to the connection's lifecycle record and closes right after the
 driver closes its connection.
