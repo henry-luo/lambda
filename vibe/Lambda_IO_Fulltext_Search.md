@@ -383,11 +383,50 @@ The one thing a database does that this proposal does not is answer quickly from
 
 ---
 
-## 11. Performance expectations
+## 11. Performance
 
-The cost of a call is the walk, plus the prefilter over every file, plus tokenising the candidates. For a selective query (rare words) almost all files are rejected by the prefilter, and the call runs at close to `io.grep {files: true}` speed. For an unselective query (a common word, or `unaccent`, or stemming without a usable literal) every file is tokenised, and tokenising is the cost to measure: classifying each code point is a table lookup, but it is far slower than a SIMD literal scan. Phase F1 has to establish that throughput on the repository's own `doc/` and `vibe/` trees against `io.grep` before the prefilter's value can be stated; no figure is claimed here.
+The cost of a call is the walk, plus the prefilter over every file, plus tokenising the candidates. For a selective query (rare words) almost all files are rejected by the prefilter, and the call costs about what `io.grep {files: true}` costs. For an unselective query (a common word, `unaccent`, a query of only negations) every file, or every candidate paragraph or line, is tokenised.
 
-Tokenising in the classifier's ASCII fast path (bytes below `0x80` decided by a 128-entry table, `utf8proc` only for the rest) is the obvious first optimisation and is part of F1.
+### 11.1 Measured (2026-10-05)
+
+The whole repository (~24,300 files selected by the walk, about 257 MB tracked), release `lambda-cli.exe` (the full `make release` was broken on master at the time by an unrelated Radiant warning), Apple M3, 8 cores, warm file cache. Two rounds were measured: the first build (F0–F6), and the build after the optimisation round of `vibe/impl/Lambda_Impl_Fulltext_Search.md` §3 (SIMD ASCII word runs, zero-copy tokens, hashed exact atoms, tokenising only paragraphs and lines that hold a literal, streamed windows). Both return byte-identical results.
+
+**Wall time, first build, lightly loaded machine** (one run each):
+
+| Query | Results | Time |
+|---|---|---|
+| `io.grep "tokenizer"`, files only (same walk, for reference) | 98 files | 363 ms |
+| `tokenizer` | 97 | 307 ms |
+| `garbage collection` | 70 | 347 ms |
+| `"garbage collection"` | 28 | 336 ms |
+| `the` | 5,253 | 423 ms |
+| `pars*` / `*alloc*` | 2,397 / 1,754 | 399 / 415 ms |
+| `unit: "line"` / `"paragraph"`, `limit: 20` | 20 | 351 / 357 ms |
+| `-zzqq…` (negation only: no file skipped) | 24,341 | 477 ms |
+| `unaccent: true` (no prefilter) | 97 | 634 ms |
+
+**CPU time per search, first build against optimised build.** The machine carried a load average of 45–95 from other builds during this round, so wall time was not comparable; user plus system CPU, the mean of two runs of three searches each:
+
+| Query | First build (CPU s) | Optimised (CPU s) | Speed-up |
+|---|---|---|---|
+| `io.grep "tokenizer"`, files only (reference) | 2.5 | 2.3 | |
+| `tokenizer` | 2.27 | 2.22 | 1.0x |
+| `garbage collection` | 2.68 | 2.33 | 1.15x |
+| `"garbage collection"` | 2.82 | 2.57 | 1.1x |
+| `the` | 3.52 | 2.82 | 1.25x |
+| `pars*` / `*alloc*` | 2.96 / 3.30 | 2.48 / 2.88 | 1.2x / 1.15x |
+| `unit: "line"` / `"paragraph"` | 2.94 / 2.90 | 2.22 / 2.52 | 1.3x / 1.15x |
+| `unaccent` (every file tokenised) | 5.60 | 2.94 | 1.9x |
+| negation only (every file tokenised) | 3.80 | 2.76 | 1.4x |
+
+### 11.2 What the numbers say
+
+- **A full-text search of the repository is a fraction of a second.** On a quiet machine the first build answered typical queries in 0.3–0.4 s and its worst case in 0.63 s; the optimised build brings the worst cases down to the level of the rest.
+- **Every query now costs within about 25% of the walk and the reads it shares with `io.grep`.** Tokenising, matching and ranking are no longer the cost; the walk (about 24,000 opens and reads, and the ignore files) is. Faster searches from here mean a faster shared walk, which `io.grep` would gain from too, or an index (§12).
+- **Ranking is nearly free.** BM25, `"tf"` and unranked searches cost the same.
+- **The prefilter decides selective queries.** A rare word costs what the walk costs; a common word or a query with no literal to look for costs tokenising, now at most about 25% more.
+
+The scripts that produced these figures are `temp/fts_bench.ls` (wall time, best of five) and `temp/fts_q/` (one query per script, three searches each, timed with `/usr/bin/time`) in the `fts` worktree; they are not part of the tree.
 
 ---
 
