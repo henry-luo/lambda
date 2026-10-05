@@ -1,0 +1,95 @@
+SIMD front-and-back prefix acceleration for SSE2 and NEON.
+
+PrefixAccel_FrontAndBack tests a literal prefix's first and last byte 32 bytes
+at a time, but only under __AVX2__, which Lambda never builds with; every
+Lambda target fell back to memchr on the first byte, stopping at every
+occurrence of it. This adds the same test 16 bytes at a time with SSE2
+(always available on x86-64) and NEON (ARM64), keeping AVX2 first for builds
+that enable it. Reach: every RE2 search whose pattern starts with a
+case-sensitive literal of two or more bytes (vibe/Lambda_Lib_Grep.md 6.1,
+GRP9v2). Covered by Re2PrefixAccel.MatchesNaiveSearchAtEveryAlignment in
+test/lib/test_grep_gtest.cpp.
+
+--- a/re2/prog.cc
++++ b/re2/prog.cc
+@@ -12,6 +12,10 @@
+ #ifdef _MSC_VER
+ #include <intrin.h>
+ #endif
++#elif defined(__SSE2__)
++#include <emmintrin.h>
++#elif defined(__ARM_NEON)
++#include <arm_neon.h>
+ #endif
+ #include <stdint.h>
+ #include <string.h>
+@@ -1103,7 +1107,7 @@
+   return NULL;
+ }
+ 
+-#if defined(__AVX2__)
++#if defined(__AVX2__) || defined(__SSE2__)
+ // Finds the least significant non-zero bit in n.
+ static int FindLSBSet(uint32_t n) {
+   DCHECK_NE(n, 0);
+@@ -1160,6 +1164,60 @@
+     } while (fp != endfp);
+     data = fp;
+     size = size%sizeof(__m256i);
++  }
++#elif defined(__SSE2__)
++  // Use SSE2 to look for prefix_front_ and prefix_back_ 16 bytes at a time.
++  if (size >= sizeof(__m128i)) {
++    const __m128i* fp = reinterpret_cast<const __m128i*>(
++        reinterpret_cast<const char*>(data));
++    const __m128i* bp = reinterpret_cast<const __m128i*>(
++        reinterpret_cast<const char*>(data) + prefix_size_-1);
++    const __m128i* endfp = fp + size/sizeof(__m128i);
++    const __m128i f_set1 = _mm_set1_epi8(static_cast<char>(prefix_front_));
++    const __m128i b_set1 = _mm_set1_epi8(static_cast<char>(prefix_back_));
++    do {
++      const __m128i f_loadu = _mm_loadu_si128(fp++);
++      const __m128i b_loadu = _mm_loadu_si128(bp++);
++      const __m128i fb_and = _mm_and_si128(_mm_cmpeq_epi8(f_set1, f_loadu),
++                                           _mm_cmpeq_epi8(b_set1, b_loadu));
++      const int fb_movemask = _mm_movemask_epi8(fb_and);
++      if (fb_movemask != 0) {
++        const int fb_ctz = FindLSBSet(static_cast<uint32_t>(fb_movemask));
++        return reinterpret_cast<const char*>(fp-1) + fb_ctz;
++      }
++    } while (fp != endfp);
++    data = fp;
++    size = size%sizeof(__m128i);
++  }
++#elif defined(__ARM_NEON)
++  // Use NEON to look for prefix_front_ and prefix_back_ 16 bytes at a time.
++  // NEON has no movemask: narrowing each 16-bit lane by 4 packs the 16
++  // compare bytes into 16 nibbles of one 64-bit word.
++  if (size >= 16) {
++    const uint8_t* fp = reinterpret_cast<const uint8_t*>(data);
++    const uint8_t* bp = fp + prefix_size_-1;
++    const uint8_t* endfp = fp + (size & ~static_cast<size_t>(15));
++    const uint8x16_t f_set1 = vdupq_n_u8(static_cast<uint8_t>(prefix_front_));
++    const uint8x16_t b_set1 = vdupq_n_u8(static_cast<uint8_t>(prefix_back_));
++    do {
++      const uint8x16_t fb_and = vandq_u8(vceqq_u8(f_set1, vld1q_u8(fp)),
++                                         vceqq_u8(b_set1, vld1q_u8(bp)));
++      const uint64_t fb_nibbles = vget_lane_u64(vreinterpret_u64_u8(
++          vshrn_n_u16(vreinterpretq_u16_u8(fb_and), 4)), 0);
++      if (fb_nibbles != 0) {
++#if defined(__GNUC__)
++        const int fb_ctz = __builtin_ctzll(fb_nibbles);
++#else
++        int fb_ctz = 0;
++        while (((fb_nibbles >> fb_ctz) & 1) == 0) fb_ctz++;
++#endif
++        return reinterpret_cast<const char*>(fp) + fb_ctz/4;
++      }
++      fp += 16;
++      bp += 16;
++    } while (fp != endfp);
++    data = fp;
++    size = size%16;
+   }
+ #endif
+ 

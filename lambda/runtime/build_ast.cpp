@@ -84,8 +84,6 @@ static int source_span_start_line(Transpiler* tp, SourceSpan span) {
 }
 
 static StaticBoundaryResult static_boundary_relation(Type* source, Type* target);
-bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
-    SourceSpan diagnostic_span, int arg_count);
 
 // Forward declaration for imported module resolution
 static const char* resolve_imported_module(Transpiler* tp, StrView* name);
@@ -1807,9 +1805,10 @@ static bool ast_call_may_defect(AstCallNode* call, AstFuncNode* self) {
     TypeFunc* signature = lambda_type_func_signature(((AstNode*)target)->type);
     if (target != self && (!signature || !signature->defect_known ||
             signature->may_defect)) return true;
-    int count = ast_linked_node_count(call->argument);
+    int source_count = ast_linked_node_count(call->argument);
+    int count = source_count + (call->pipe_inject ? 1 : 0);
     AstNode* args[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-    ast_resolve_call_args(call->argument, target, count, args);
+    ast_resolve_call_arguments(call, target, source_count, args);
     TypeParam* parameter = signature ? signature->param : NULL;
     for (int i = 0; i < count && i < LAMBDA_MAX_FUNCTION_ARGS; i++,
             parameter = parameter ? parameter->next : NULL) {
@@ -2871,6 +2870,36 @@ static SysFuncInfo* lookup_builtin_module_member(const char* module,
     return lookup_module_prefixed_sys_func(module, member, arg_count);
 }
 
+// S17.8.1: an option name a system function does not define is a compile-time
+// error where its options argument is a map literal at the call. Names the
+// literal cannot show (a spread) are left to the function's run-time warning.
+static void direct_check_literal_options(Transpiler* tp, SysFuncInfo* info,
+        AstNode* arguments, int injected) {
+    int index = -1;
+    if (!sys_func_option_names(info->fn, &index) || index < 0 ||
+            info->arg_count <= index) return;
+    AstNode* arg = arguments;
+    for (int i = injected; arg && i < index; i++) arg = arg->next;
+    AstNode* root = ast_unwrap_primary(arg);
+    if (!root || root->node_type != AST_NODE_MAP) return;
+    // registry names spell a module member with '_' (io_grep is io.grep)
+    const char* display = info->name;
+    char dotted[64];
+    if (strncmp(display, "io_", 3) == 0) {
+        snprintf(dotted, sizeof(dotted), "io.%s", display + 3);
+        display = dotted;
+    }
+    for (AstNode* item = ((AstMapNode*)root)->item; item; item = item->next) {
+        if (item->node_type != AST_NODE_KEY_EXPR) continue;
+        AstNamedNode* option = (AstNamedNode*)item;
+        if (!option->name || sys_func_option_known(info->fn, option->name->chars,
+                (size_t)option->name->len)) continue;
+        record_semantic_error_span(tp, item->source_span, ERR_INVALID_OPERATION,
+            "unknown option '%.*s' for %s (S17.8.1)",
+            (int)option->name->len, option->name->chars, display);
+    }
+}
+
 static bool start_option_name_is(AstNamedNode* option, const char* name) {
     size_t length = strlen(name);
     return option && option->name && option->name->len == (int)length &&
@@ -3109,7 +3138,7 @@ static bool report_missing_named_parameter(Transpiler* tp, AstCallNode* call,
 }
 
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
-        SourceSpan diagnostic_span, int arg_count) {
+        SourceSpan diagnostic_span, int arg_count, AstNode* injected) {
     // a `function`-typed callee has no signature to validate against
     TypeFunc* func_type = call && call->function
         ? lambda_type_func_signature(call->function->type) : NULL;
@@ -3129,12 +3158,14 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     // order was rejected with E207 (found with LR07-19). A parameter with no
     // argument, or a skipped one (ast_is_omitted_argument), has none to check.
     AstNode* by_param[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-    int slot_count = 0;
+    // S10.1.2v4: the pipe receiver fills slot zero outside the written argument list
+    int slot_count = call->pipe_inject ? 1 : 0;
+    if (slot_count) by_param[0] = injected;
     AstFuncNode* named_callee = ast_call_has_named_args(call)
         ? ast_direct_call_function(call) : NULL;
     if (named_callee) {
         ast_resolve_call_args(call->argument, named_callee,
-            ast_linked_node_count(call->argument), by_param);
+            ast_linked_node_count(call->argument), by_param, slot_count);
         slot_count = LAMBDA_MAX_FUNCTION_ARGS;
     } else {
         for (AstNode* a = call->argument; a && slot_count < LAMBDA_MAX_FUNCTION_ARGS;
@@ -3208,7 +3239,8 @@ bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
     for (int index = 0; named_param && index < LAMBDA_MAX_FUNCTION_ARGS;
             named_param = (AstNamedNode*)((AstNode*)named_param)->next, index++) {
         TypeParam* parameter = (TypeParam*)named_param->type;
-        if (by_param[index] || !parameter || parameter->is_optional) continue;
+        if (by_param[index] || (call->pipe_inject && index == 0) ||
+                !parameter || parameter->is_optional) continue;
         if (!report_missing_named_parameter(tp, call, diagnostic_span, named_param)) {
             return false;
         }
@@ -4842,6 +4874,9 @@ static Type* infer_if_result_type(Transpiler* tp, AstNode* then_branch,
         join->op = OPERATOR_UNION;
         return (Type*)join;
     }
+    // one branch's nominal record cannot certify the other branch (S11.3.1v2)
+    if (type_nominal_record(then_contrib) != type_nominal_record(else_contrib))
+        return lambda_type_union_normalized(tp->pool, then_contrib, else_contrib);
     // Reuse container types to retain their complete shape metadata.
     return then_contrib;
 }
@@ -8031,15 +8066,15 @@ static void colour_walk_poly_call(CallColourWalk* walk, AstCallNode* call,
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
     int argc = 0;
     for (AstNode* arg = call->argument; arg; arg = arg->next) argc++;
-    ast_resolve_call_args(call->argument, callee, argc, resolved);
     // a pipe-injected receiver fills slot 0, so the source arguments shift
     int shift = call->pipe_inject ? 1 : 0;
+    ast_resolve_call_arguments(call, callee, argc, resolved);
     uint32_t guard = 0;
     int index = 0;
     for (AstNamedNode* param = callee->param; param && index < LAMBDA_MAX_FUNCTION_ARGS;
             param = (AstNamedNode*)((AstNode*)param)->next, index++) {
         if (!lambda_type_param_is_colour_poly(lambda_type_param(param->type))) continue;
-        AstNode* value = index >= shift ? resolved[index - shift] : NULL;
+        AstNode* value = resolved[index];
         CallColour colour = value ? colour_walk_value(walk, value) :
             (index < shift ? CALL_COLOUR_UNKNOWN : CALL_COLOUR_FN);
         if (colour == CALL_COLOUR_PN) {
@@ -8811,8 +8846,14 @@ static Type* direct_pipe_call_result_type(Transpiler* tp, AstNode* source,
     if (!target || target->node_type != AST_NODE_CALL_EXPR) return NULL;
     AstCallNode* call = (AstCallNode*)target;
     if (!call->pipe_inject) return NULL;
+    call->pipe_receiver = source;
     AstNode* callee = ast_unwrap_primary(call->function);
-    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) return NULL;
+    if (!callee || callee->node_type != AST_NODE_SYS_FUNC) {
+        // validate the complete call once the aggregate pipe's receiver is known
+        if (!lambda_ast_validate_call_arguments(tp, call, call->source_span,
+                ast_linked_node_count(call->argument) + 1, source)) call->type = &TYPE_ERROR;
+        return call->type;
+    }
     SysFuncInfo* info = ((AstSysFuncNode*)callee)->fn_info;
     if (!info) return NULL;
 
@@ -9646,6 +9687,8 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
                 lookup_arg_count);
         }
     }
+    // user callees share the same injected parameter position as system callees
+    call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
     if (info && info->fn == SYSPROC_START) {
         direct_start_node(tp, call, arg_count);
         return;
@@ -9666,7 +9709,8 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             direct_note_place_copy_var_borrow(span, call->argument);
         }
         call->can_raise = info->can_raise;
-        call->pipe_inject = tp->pipe_inject_args > 0 && !method_call;
+        direct_check_literal_options(tp, info, call->argument,
+            call->pipe_inject ? tp->pipe_inject_args : 0);
         call->type = sys_func_call_result_type(tp, info,
             sys_func_call_may_return_error(tp, info, call->argument, NULL),
             call->argument, NULL);
@@ -9764,7 +9808,7 @@ static void resolve_call_body(Transpiler* tp, AstCallNode* call) {
             break;
         }
     }
-    if (!lambda_ast_validate_call_arguments(tp, call, span,
+    if (!call->pipe_inject && !lambda_ast_validate_call_arguments(tp, call, span,
             lookup_arg_count + (method_call ? 1 : 0))) {
         call->type = &TYPE_ERROR;
     }

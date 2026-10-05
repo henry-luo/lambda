@@ -1065,7 +1065,7 @@ protected:
         rect_hello.start_index = 0;
         rect_hello.length      = 5;
         rect_hello.next        = nullptr;
-        hello->rect = lam::own(&rect_hello);
+        hello->rect = lam::view_prop(&rect_hello);
     }
 };
 

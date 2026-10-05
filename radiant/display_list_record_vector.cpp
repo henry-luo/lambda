@@ -216,8 +216,27 @@ void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
     DisplayItem* item = dl_alloc_item(dl);
     item->op = DL_DRAW_IMAGE;
     dl_record_set_rect_bounds(item, dst_x, dst_y, dst_w, dst_h, transform, 1.0f);
-    item->draw_image.pixels = pixels;
-    item->draw_image.resource = resource_owner ? resource_owner->self : lam::Handle<ImageSurface>{};
+    // an owned item records where its region sits in the owner's pixels, which
+    // replay reads through the handle; anything else stays frame-local
+    const uint32_t* base = resource_owner ? (const uint32_t*)resource_owner->pixels : nullptr;
+    int owner_w = resource_owner ? (resource_owner->decoded_width > 0 ? resource_owner->decoded_width : resource_owner->width) : 0;
+    int owner_h = resource_owner ? (resource_owner->decoded_height > 0 ? resource_owner->decoded_height : resource_owner->height) : 0;
+    int owner_stride = resource_owner && resource_owner->pitch > 0 ? resource_owner->pitch / 4 : owner_w;
+    bool owned = !copy_pixels && resource_owner && !resource_owner->self.is_null() && base &&
+        owner_stride == src_stride && pixels >= base &&
+        pixels < base + (size_t)owner_stride * (size_t)owner_h;
+    item->draw_image.resource = lam::Handle<ImageSurface>{};
+    item->draw_image.local_pixels = nullptr;
+    if (owned) {
+        size_t offset = (size_t)(pixels - base);
+        item->draw_image.resource = resource_owner->self;
+        item->draw_image.src_x = (int)(offset % (size_t)owner_stride); // INT_CAST_OK: pixel column inside a surface row
+        item->draw_image.src_y = (int)(offset / (size_t)owner_stride); // INT_CAST_OK: pixel row inside a surface
+        item->draw_image.surface_w = owner_w;
+        item->draw_image.surface_h = owner_h;
+    } else {
+        item->draw_image.local_pixels = lam::up(pixels);
+    }
     item->draw_image.resource_generation = resource_generation;
     item->draw_image.src_w = src_w;
     item->draw_image.src_h = src_h;

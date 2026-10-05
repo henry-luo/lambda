@@ -326,17 +326,10 @@ fi
 # Build tree-sitter libraries for Windows
 echo "Building tree-sitter libraries for Windows..."
 
-# Ensure RE2 source is available (Makefile builds it, but needs the source)
-if [ ! -d "build_temp/re2-noabsl" ]; then
-    echo "Cloning RE2 (no-abseil version) for Makefile build..."
-    mkdir -p build_temp
-    if git clone --depth 1 --branch 2023-03-01 https://github.com/google/re2.git build_temp/re2-noabsl; then
-        echo "✅ RE2 source cloned to build_temp/re2-noabsl"
-    else
-        echo "❌ Failed to clone RE2 — regex support may not work"
-    fi
-else
-    echo "✅ RE2 source already available"
+# RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md); the Makefile
+# builds it on demand into build_temp/re2_build, so there is nothing to fetch.
+if [ ! -f "lib/re2/CMakeLists.txt" ]; then
+    echo "❌ Vendored RE2 source missing at lib/re2 — regex support will not build"
 fi
 
 # Build tree-sitter library (amalgamated, no ICU)

@@ -293,8 +293,9 @@ bool layout_measure_bidi_run(LayoutContext* lycon,
 struct IntrinsicFontScope {
     lam::Up<LayoutContext> lycon;
     FontBox saved_font;
-    lam::Up<FontProp> prop_a;
-    lam::Up<FontProp> prop_b;
+    // temporary font props, returned to the prop pool when the scope ends
+    lam::Own<FontProp> prop_a;
+    lam::Own<FontProp> prop_b;
 
     IntrinsicFontScope(LayoutContext* l, FontBox saved)
         : lycon(l), saved_font(saved), prop_a(nullptr), prop_b(nullptr) {}
@@ -4970,6 +4971,7 @@ HtmlVersion detect_html_version_from_lambda_element(Element* html_root, Input* i
 
 // Pass-local layout structs live on the Stack: their fields borrow (Up) or
 // hold scope-owned arrays (OwnArr); they may point at any Heap level.
+LAM_NODE_OF(radiant::LayoutCache, NodeViewTree);
 LAM_NODE_OF(IntrinsicFontScope, NodeStack);
 LAM_NODE_OF(LayoutContainingBlock, NodeStack);
 LAM_NODE_OF(radiant::LayoutProfileScope, NodeStack);

@@ -194,7 +194,7 @@ void lambda_ast_register_name(Transpiler* tp, AstNode* node);
 // Call-boundary validation belongs to semantic construction. The parser only
 // supplies a committed source span and already-built callee/argument nodes.
 bool lambda_ast_validate_call_arguments(Transpiler* tp, AstCallNode* call,
-        SourceSpan diagnostic_span, int arg_count);
+    SourceSpan diagnostic_span, int arg_count, AstNode* injected = NULL);
 
 // Collects the invocation-local contracts selected by a statically typed call
 // to a binder-carrying function.  MIR uses this semantic result to form an

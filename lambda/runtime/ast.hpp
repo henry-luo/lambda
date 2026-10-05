@@ -323,7 +323,7 @@ static inline bool ast_call_has_named_args(const AstCallNode* call) {
 }
 
 static inline void ast_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node,
-        int arg_count, AstNode** resolved_args) {
+        int arg_count, AstNode** resolved_args, int parameter_shift = 0) {
     if (!resolved_args) return;
     bool has_named_args = false;
     AstNode* arg = arg_list;
@@ -333,7 +333,7 @@ static inline void ast_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node
     }
 
     if (has_named_args && fn_node) {
-        int positional_idx = 0;
+        int positional_idx = parameter_shift;
         for (arg = arg_list; arg; arg = arg->next) {
             if (arg->node_type == AST_NODE_NAMED_ARG) {
                 AstNamedNode* named_arg = (AstNamedNode*)arg;
@@ -364,10 +364,19 @@ static inline void ast_resolve_call_args(AstNode* arg_list, AstFuncNode* fn_node
     }
 
     arg = arg_list;
-    for (int i = 0; i < arg_count && i < LAMBDA_MAX_FUNCTION_ARGS; i++) {
-        resolved_args[i] = arg;
+    for (int i = 0; i < arg_count && i + parameter_shift < LAMBDA_MAX_FUNCTION_ARGS; i++) {
+        resolved_args[i + parameter_shift] = arg;
         arg = arg->next;
     }
+}
+
+// the receiver remains in its pipe; argument proofs see its actual parameter position
+static inline int ast_resolve_call_arguments(AstCallNode* call, AstFuncNode* target,
+        int source_count, AstNode** resolved) {
+    int shift = call->pipe_inject ? 1 : 0;
+    ast_resolve_call_args(call->argument, target, source_count, resolved, shift);
+    if (shift) resolved[0] = call->pipe_receiver;
+    return source_count + shift;
 }
 
 // A `var` parameter borrows the caller's binding rather than receiving a
@@ -461,10 +470,10 @@ static inline bool ast_direct_call_var_parameter_entries(AstCallNode* call,
 
     int source_count = 0;
     for (AstNode* arg = call->argument; arg; arg = arg->next) source_count++;
-    if (source_count != signature->param_count) return false;
+    if (source_count + (call->pipe_inject ? 1 : 0) != signature->param_count) return false;
 
     AstNode* resolved[LAMBDA_MAX_FUNCTION_ARGS] = {0};
-    ast_resolve_call_args(call->argument, target, source_count, resolved);
+    ast_resolve_call_arguments(call, target, source_count, resolved);
     const TypeParam* param = signature->param;
     for (int index = 0; index < signature->param_count; index++, param = param->next) {
         entries[index] = NULL;
@@ -615,7 +624,13 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
             SysFuncInfo* sys = callee_node && callee_node->node_type == AST_NODE_SYS_FUNC
                 ? ((AstSysFuncNode*)callee_node)->fn_info : NULL;
             bool pure_sys = sys && !sys->is_proc;
-            for (AstNode* arg = call->argument; arg; arg = arg->next) {
+            AstNode* arguments[LAMBDA_MAX_FUNCTION_ARGS] = {};
+            int argument_count = ast_resolve_call_arguments(call, callee,
+                ast_linked_node_count(call->argument), arguments);
+            // pipe receivers and named arguments mutate their resolved parameter (S9.1.2).
+            for (int position = 0; position < LAMBDA_MAX_FUNCTION_ARGS &&
+                    (position < argument_count || param); position++) {
+                AstNode* arg = arguments[position];
                 AstIdentNode* arg_root = ast_compound_root_ident(arg);
                 if (arg_root && arg_root->entry == root && !pure_sys) {
                     TypeParam* pt = param ? (TypeParam*)((AstNode*)param)->type : NULL;
@@ -629,7 +644,8 @@ static inline bool ast_body_may_write_entry(AstNode* node, NameEntry* root,
                     }
                 }
                 // nested calls inside the argument expression
-                if (ast_body_may_write_entry(arg, root, include_rebind)) return true;
+                if (arg && ast_body_may_write_entry(arg, root, include_rebind,
+                        arg->next)) return true;
                 if (param) param = (AstNamedNode*)((AstNode*)param)->next;
             }
             if (ast_body_may_write_entry(call->function, root, include_rebind)) return true;

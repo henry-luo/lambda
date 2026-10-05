@@ -525,9 +525,9 @@ struct MirEmitter {
     // Shared structural lowering recurses into the owning language through
     // these two hooks (D8.2.1: operator semantics dispatch through the
     // profile; D8.2.6: the common layer owns demand). Both receive
-    // `call_owner`, so a structural helper never needs a caller-built record
-    // to re-enter language lowering.
-    MirValue (*lower_value)(void* owner, AstNode* node);
+    // `call_owner`; lowering sees demand before producing the value, so a
+    // branch can avoid materializing an intermediate representation.
+    MirValue (*lower_value)(void* owner, AstNode* node, uint32_t demand);
     MIR_reg_t (*emit_condition)(void* owner, MirValue value);
     // Hosted compilers provide their build-coupled catalog lookup. Core
     // transpilers leave this NULL and retain the existing registry path.
@@ -1859,7 +1859,7 @@ static inline MirValue em_lower_value(MirEmitter* em, AstNode* node,
         log_error("mir-lowering: missing value hook");
         abort();
     }
-    return em_apply_value_demand(em, em->lower_value(em->call_owner, node), demand);
+    return em_apply_value_demand(em, em->lower_value(em->call_owner, node, demand), demand);
 }
 
 static inline MirValue em_load_module_slot(const MirModuleSlotProfile* profile,

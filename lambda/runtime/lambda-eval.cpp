@@ -7725,7 +7725,7 @@ static int64_t split_utf8_part_count(const char* chars, size_t chars_len) {
 }
 
 static bool literal_type_pattern_item(Item type_item, Item* literal_item);
-static TypePattern* runtime_pattern_from_type(Type* type);
+// runtime_pattern_from_type is declared in re2_wrapper.hpp (shared with io.grep)
 
 // split(str, sep) - split string by separator; a constructor, so its result
 // is an array of strings (S2.5.7)
@@ -8349,7 +8349,7 @@ static bool literal_type_pattern_item(Item type_item, Item* literal_item) {
     return true;
 }
 
-static TypePattern* runtime_pattern_from_type(Type* type) {
+TypePattern* runtime_pattern_from_type(Type* type) {
     if (!type) return nullptr;
     if (type->kind == TYPE_KIND_PATTERN) return (TypePattern*)type;
     const char* error_msg = nullptr;
@@ -11521,16 +11521,22 @@ Item lambda_fill_for_contract(Item count, Item value, Type* expected, const char
     return lambda_array_admit_numeric_contract(built.get(), expected, boundary);
 }
 
-Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
-        const char* boundary) {
+Item lambda_fill_for_contract_int_lane_resolved(int64_t count, Item value,
+        Type* expected, const char* boundary, ArrayRepCert* cert) {
     // the compiler proved a plain primitive T[] destination and an int lane;
     // poison, negative counts and metadata misses retain the full diagnostic path
     if (count >= 0 && count <= INT53_MAX) {
-        ArrayRepCert* cert = lambda_array_rep_cert_resolve(expected);
         Item exact = ItemNull;
         if (runtime_try_primitive_fill_length(count, value, cert, &exact)) return exact;
     }
     return lambda_fill_for_contract({.item = i2it(count)}, value, expected, boundary);
+}
+
+Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
+        const char* boundary) {
+    ArrayRepCert* cert = count >= 0 && count <= INT53_MAX
+        ? lambda_array_rep_cert_resolve(expected) : NULL;
+    return lambda_fill_for_contract_int_lane_resolved(count, value, expected, boundary, cert);
 }
 
 // Tune29 §19.1 item 2: `[]` crossing a primitive T[] boundary (`return []`

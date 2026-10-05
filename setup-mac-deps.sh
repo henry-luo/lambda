@@ -281,7 +281,7 @@ cleanup_intermediate_files() {
     find . -name "*.o" -type f -delete 2>/dev/null || true
 
     # Clean dependency intermediate build files but keep final outputs
-    # Preserve build_temp/re2-noabsl/ (RE2 source) and build_temp/utf8proc/build/libutf8proc.a
+    # Preserve build_temp/utf8proc/build/libutf8proc.a (RE2 is vendored in lib/re2)
     if [ -d "build_temp" ]; then
         find build_temp -name "CMakeCache.txt" -type f -delete 2>/dev/null || true
         rm -rf build_temp/*/build/CMakeFiles 2>/dev/null || true
@@ -1113,21 +1113,11 @@ else
     fi
 fi
 
-# Clone RE2 source (no-abseil version) for building via Makefile
-echo "Setting up RE2..."
-RE2_SRC="build_temp/re2-noabsl"
-if [ -d "$RE2_SRC" ] && [ -f "$RE2_SRC/CMakeLists.txt" ]; then
-    echo "✅ RE2 source already available"
-else
-    echo "Cloning RE2 (2023-03-01, no-abseil version)..."
-    mkdir -p build_temp
-    rm -rf "$RE2_SRC"
-    if git clone --depth 1 --branch 2023-03-01 https://github.com/google/re2.git "$RE2_SRC"; then
-        echo "✅ RE2 source cloned to $RE2_SRC"
-    else
-        echo "❌ Failed to clone RE2 - required for regex support"
-        exit 1
-    fi
+# RE2 is vendored in-tree at lib/re2 (see lib/re2/VENDOR.md); the Makefile
+# builds it on demand into build_temp/re2_build, so there is nothing to fetch.
+if [ ! -f "lib/re2/CMakeLists.txt" ]; then
+    echo "❌ Vendored RE2 source missing at lib/re2 - required for regex support"
+    exit 1
 fi
 
 # Build utf8proc from source (static library required by build config)
@@ -1296,7 +1286,7 @@ echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Brotli: $([ -f "mac-deps/brotli/out/libbrotlidec.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- WOFF2: $([ -f "mac-deps/woff2/out/libwoff2dec.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- RE2: $([ -f "build_temp/re2-noabsl/CMakeLists.txt" ] && echo "✓ Source available" || echo "✗ Missing")"
+echo "- RE2: $([ -f "lib/re2/CMakeLists.txt" ] && echo "✓ Vendored (lib/re2)" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "build_temp/utf8proc/build/libutf8proc.a" ] && echo "✓ Built" || echo "✗ Missing")"
 # Clone GNU Bash test suite (optional, for bash transpiler conformance tests)
 if [ ! -d "ref/bash" ]; then

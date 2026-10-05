@@ -82,6 +82,20 @@ void pattern_destroy(TypePattern* pattern);
  */
 re2::RE2* pattern_get_unanchored(TypePattern* pattern);
 
+// The regex text the partial-match operations search with: the compiled
+// anchored source "^<regex>$" without its anchors. False when the pattern has
+// no usable source. (io.grep hands this text to lib/grep, GRP26.)
+bool pattern_unanchored_source(TypePattern* pattern, const char** out, size_t* out_len);
+
+// A pattern operand of find/replace/split/io.grep: a compiled pattern, or a
+// literal type a pattern is compiled from (defined in lambda-eval.cpp).
+TypePattern* runtime_pattern_from_type(Type* type);
+
+// A runtime map shape for builtin results (find's {value, index}, io.grep's
+// records): the given fields in order. It lives in the execution pool and is
+// never registered in a module type list (D8.5.1v7). `names` must be static.
+TypeMap* runtime_result_shape(const char* const* names, const TypeId* types, int count);
+
 /**
  * Find all non-overlapping matches of pattern in string.
  * Returns list of maps: [{value: "match", index: N}, ...]

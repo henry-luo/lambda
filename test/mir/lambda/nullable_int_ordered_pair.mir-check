@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "description": "S4.1.2/S6.1.2/D2.2.2: all nullable integer ordered relations use signed predicates with NaN exclusion and separate null absorption; no float conversion is required. Branch demand avoids forming the null marker; native int stores admit poison and guard only null (S3.1, D2.6.2-D2.6.3, D8.2.6). Inferred any parameters retain absence handling; a null-copy mutation must not acquire an int[] source contract.",
+  "checks": [
+    {
+      "in_func": "_compare_#",
+      "forbid": [
+        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "\tdlt\t",
+        "\tdle\t",
+        "\tdgt\t",
+        "\tdge\t"
+      ],
+      "expect": [
+        "\tlt\t",
+        "\tle\t",
+        "\tgt\t",
+        "\tge\t"
+      ]
+    },
+    {
+      "in_func": "_select_lt_#",
+      "forbid": [
+        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "mov\t{{r}}, 2"
+      ],
+      "expect": [
+        "\tlt\t"
+      ]
+    },
+    {
+      "in_func": "_select_float_lt_#",
+      "forbid": [
+        "mov\t{{r}}, 2"
+      ],
+      "expect": [
+        "\tdlt\t"
+      ]
+    },
+    {
+      "in_func": "_select_read_lt_#",
+      "forbid": [
+        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "mov\t{{r}}, 2"
+      ],
+      "expect": [
+        "\tlt\t",
+        "\tubge\t"
+      ]
+    },
+    {
+      "in_func": "_compare_read_#",
+      "forbid": [
+        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c"
+      ],
+      "expect": [
+        "\tlt\t",
+        "\tubge\t",
+        "mov\t{{r}}, 2"
+      ]
+    },
+    {
+      "in_func": "_store_poison_#",
+      "forbid": [
+        "\tubgt\t"
+      ],
+      "expect": [
+        "\tbeq\t",
+        "72057594037927936"
+      ]
+    },
+    {
+      "in_func": "_inferred_read_lt_#",
+      "forbid": [
+        "call\tlambda_int_lane_to_double_c_p, lambda_int_lane_to_double_c",
+        "mov\t{{r}}, 2"
+      ],
+      "expect": [
+        "\tlt\t"
+      ]
+    }
+  ]
+}

@@ -445,7 +445,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
 - Gates (2026-10-05): test262 MIR with the base's exact 278 failures; AST 40261 with 0 regressions; module/TLA/dynamic-import set 693/693; JS suite 484/484 (MIR and default); JS script gtests 191/191; MIR emission 32/32 (one anchor moved from the removed marker to `js_gen_park`); MIR ratchet 20/20; forced-promotion sweep identical to the base; Lambda baseline 6206/6206; Lambda concurrency scripts 25/25 in both tiers plain and under forced GC; JS async/generator scripts under forced GC unchanged (two failures that also fail on the base); wide doubles across yield/await match node in both tiers.
 - Net change after P5: about −4,040 tracked lines (−3,035 in `lambda/js`) against +1,123 new, roughly −2,920.
 
-**P6 — done (2026-10-05).** Ratification (user, 2026-10-05: "proceed to P6", plus two explicit rulings on the S7 rows and the D6.1.3 wording). The formal specs were revised in place, `Lambda_Formal_Design.md` 23.0.0 and `Lambda_Formal_Semantics.md` 56.0.0, as recorded in §11.
+**P6 — done (2026-10-05).** Ratification (user, 2026-10-05: "proceed to P6", plus two explicit rulings on the S7 rows and the D6.1.3 wording). The formal specs were revised in place, `Lambda_Formal_Design.md` 23.0.0 and `Lambda_Formal_Semantics.md` 57.0.0, as recorded in §11.
 - **Vibe records:**
   - Concurrency: K14v2, K15v2 and K17v2, with notes at §4.2.3–§4.6 and §10.5–§10.7.
   - Ast_Interpreter: AI11v2 and AI24v2.
@@ -486,7 +486,7 @@ The cost of a parked activation is now within about 6 KB of the replay interpret
 
 ## 11. Rulings this design revises
 
-Ratified by the user on 2026-10-05 ("proceed to P6"), and applied in place: `Lambda_Formal_Design.md` 22.0.0 → 23.0.0, `Lambda_Formal_Semantics.md` 55.0.0 → 56.0.0. The table keeps the original proposal; the column on the right records what was written. Rows below the rule were found during P6, where a ruling still described the retired mechanism; the two S rulings and the D6.1.3 wording were put to the user and ruled the same day.
+Ratified by the user on 2026-10-05 ("proceed to P6"), and applied in place: `Lambda_Formal_Design.md` 22.0.0 → 23.0.0, `Lambda_Formal_Semantics.md` 56.0.0 → 57.0.0 (master's 56.0.0 added S17.8.1 the day before). The table keeps the original proposal; the column on the right records what was written. Rows below the rule were found during P6, where a ruling still described the retired mechanism; the two S rulings and the D6.1.3 wording were put to the user and ruled the same day.
 
 | Ruling | Before | Revised to |
 |---|---|---|

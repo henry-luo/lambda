@@ -686,6 +686,7 @@ typedef enum SysFunc {
     SYSFUNC_INTERSECT3,
     SYSFUNC_INTERSECT4,
     SYSFUNC_EXCEPT,
+    SYSPROC_IO_GREP,         // io.grep(source, pattern, options?) - line-oriented file search (lib/grep, GRP26)
 } SysFunc;
 
 typedef struct Type {
@@ -2960,6 +2961,10 @@ extern "C" {
     // compile-proved plain primitive destination; preserve the count's native int lane
     Item lambda_fill_for_contract_int_lane(int64_t count, Item value, Type* expected,
         const char* boundary);
+    // activation-local metadata resolution; certificates belong to the current heap
+    ArrayRepCert* lambda_array_rep_cert_resolve(Type* contract);
+    Item lambda_fill_for_contract_int_lane_resolved(int64_t count, Item value,
+        Type* expected, const char* boundary, ArrayRepCert* cert);
     // shared construction kernel; count and scalar lane are admitted by the caller
     Item lambda_fill_primitive(int64_t count, Item value, ArrayNumElemType lane);
     bool lambda_try_fill_for_contract(Item count, Item value, Type* expected, Item* result);
@@ -3411,6 +3416,8 @@ extern "C" {
     Item pn_io_symlink(Item target, Item link);
     Item pn_io_chmod(Item path, Item mode);
     Item pn_io_rename(Item old_path, Item new_path);
+    Item pn_io_grep2(Item source, Item pattern);
+    Item pn_io_grep3(Item source, Item pattern, Item options);
     Item pn_io_fetch1(Item target);
     Item pn_io_fetch2(Item target, Item options);
 

@@ -310,6 +310,7 @@ TEST_F(DisplayListTest, DrawImageStoresGenerationOpacityAndTransformedBounds) {
     ImageSurface* owner = image_surface_alloc();
     ASSERT_NE(owner, nullptr);
     owner->generation = 42;
+    owner->pixels = pixels; owner->width = owner->height = 2; owner->pitch = 8;
     RdtMatrix transform = rdt_matrix_translate(5.0f, -2.0f);
 
     dl_draw_image(&dl, pixels, 2, 2, 2, 10.0f, 20.0f, 30.0f, 40.0f,
@@ -318,7 +319,11 @@ TEST_F(DisplayListTest, DrawImageStoresGenerationOpacityAndTransformedBounds) {
     ASSERT_EQ(dl.size(), 1u);
     const DisplayItem* item = &dl.data()[0];
     EXPECT_EQ(item->op, DL_DRAW_IMAGE);
-    EXPECT_EQ(item->draw_image.pixels, pixels);
+    // pixels inside the owner's buffer are recorded as a region of the owner
+    EXPECT_EQ(item->draw_image.local_pixels, nullptr);
+    EXPECT_EQ(item->draw_image.src_x, 0);
+    EXPECT_EQ(item->draw_image.src_y, 0);
+    EXPECT_EQ(item->draw_image.surface_w, 2);
     EXPECT_TRUE(item->draw_image.resource == owner->self);
     EXPECT_EQ(image_surface_lookup(item->draw_image.resource), owner);
     EXPECT_EQ(item->draw_image.resource_generation, 42u);
@@ -469,7 +474,8 @@ TEST_F(DisplayListTest, BlitAndExternalLayerCommandsStoreGenerations) {
 
     ASSERT_EQ(dl.size(), 3u);
     EXPECT_EQ(dl.data()[0].op, DL_BLIT_SURFACE_SCALED);
-    EXPECT_EQ(dl.data()[0].blit_surface_scaled.src_surface, &src);
+    // an unregistered source stays frame-local
+    EXPECT_EQ(dl.data()[0].blit_surface_scaled.local_source, &src);
     EXPECT_EQ(dl.data()[0].blit_surface_scaled.src_generation, 17u);
     EXPECT_EQ(dl.data()[0].blit_surface_scaled.opacity, 77);
     EXPECT_FLOAT_EQ(dl.data()[0].bounds[0], 10.0f);
@@ -743,7 +749,9 @@ static void expect_item_eq(const DisplayItem& a, const DisplayItem& b) {
     case DL_DRAW_IMAGE: {
         const DlDrawImage& x = a.draw_image;
         const DlDrawImage& y = b.draw_image;
-        EXPECT_EQ(x.pixels, y.pixels);
+        EXPECT_EQ(x.local_pixels, y.local_pixels);
+        EXPECT_TRUE(x.resource == y.resource);
+        EXPECT_EQ(x.src_x, y.src_x); EXPECT_EQ(x.src_y, y.src_y);
         EXPECT_EQ(x.src_w, y.src_w); EXPECT_EQ(x.src_h, y.src_h);
         EXPECT_EQ(x.src_stride, y.src_stride);
         EXPECT_FLOAT_EQ(x.dst_x, y.dst_x); EXPECT_FLOAT_EQ(x.dst_y, y.dst_y);
@@ -1096,7 +1104,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsBackgroundAndSolidBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1132,7 +1140,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsUniformRoundedBackground) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1161,7 +1169,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperEmitsOpaqueUniformRoundedBorder) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1204,7 +1212,7 @@ TEST_F(PaintIrParityTest, SimpleBoundaryHelperRejectsFallbackCases) {
     BackgroundProp bg = {};
     BorderProp border = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1261,7 +1269,7 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsLinearGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryLinearGradientPaint paint = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 100.0f;
     view.height = 50.0f;
     bound.background = lam::own(&bg);
@@ -1305,7 +1313,7 @@ TEST_F(PaintIrParityTest, BoundaryHelperBuildsRadialGradientPaint) {
     RdtGradientStop stops[2] = {};
     BoundaryRadialGradientPaint paint = {};
 
-    view.bound = lam::own(&bound);
+    view.bound = lam::view_prop(&bound);
     view.width = 120.0f;
     view.height = 80.0f;
     bound.background = lam::own(&bg);

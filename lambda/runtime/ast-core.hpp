@@ -793,6 +793,7 @@ typedef struct AstCallNode : AstNode {
         AstNode *arguments;
     };
     bool pipe_inject;
+    AstNode* pipe_receiver; // source metadata for the virtual first argument (S10.1.2v4)
     bool propagate;
     bool can_raise;
     bool optional;

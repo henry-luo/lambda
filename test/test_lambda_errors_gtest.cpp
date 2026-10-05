@@ -263,6 +263,33 @@ TEST(TypeContractMetadataTest, InternalTopExclusionsStayDistinctFromAny) {
         "any \\ {error, null}");
 }
 
+TEST(TypeContractMetadataTest, MapStorageDoesNotEstablishNominalIdentity) {
+    TypeNominal record = {};
+    TypeNominal foreign = {};
+    TypeNominal derived = {};
+    derived.base = &record;
+    TypeMap structural = {};
+    structural.type_id = LMD_TYPE_MAP;
+    TypeMap nominal = structural;
+    nominal.is_nominal = true;
+    nominal.is_trusted_contract = true;
+    nominal.nominal = &record;
+    TypeMap unrelated = nominal;
+    unrelated.nominal = &foreign;
+    TypeMap subtype = nominal;
+    subtype.nominal = &derived;
+
+    // S11.3.1v2: identical field bytes cannot replace record identity or inheritance.
+    EXPECT_EQ(lambda_map_contract_relation(&structural, &nominal), MAP_CONTRACT_INCOMPATIBLE);
+    EXPECT_EQ(lambda_map_contract_relation(&unrelated, &nominal), MAP_CONTRACT_INCOMPATIBLE);
+    EXPECT_EQ(lambda_map_contract_relation(&subtype, &nominal), MAP_CONTRACT_STORAGE_COMPATIBLE);
+    EXPECT_EQ(lambda_map_contract_relation(&nominal, &nominal), MAP_CONTRACT_EXACT_TRUSTED);
+    EXPECT_EQ(lambda_map_contract_relation(&nominal, &structural), MAP_CONTRACT_STORAGE_COMPATIBLE);
+    AstMapNode literal = {};
+    EXPECT_FALSE(ast_map_literal_keys_follow_contract(&literal, &nominal));
+    EXPECT_TRUE(ast_map_literal_keys_follow_contract(&literal, &structural));
+}
+
 TEST(TypeContractMetadataTest, RemovesAndNormalizesErrorAndNullConstituents) {
     Pool* pool = pool_create();
     ASSERT_NE(pool, nullptr);
@@ -1470,6 +1497,13 @@ TEST_F(NegativeScriptTest, RetiredCountAfterArraySuffixNamesItsReplacement) {
         "are retired: write `T{n+}` or `T{n,m}` for a run of T");
 }
 
+// S17.8.1: an unknown option name in a literal options map is a compile-time
+// error, naming the option and the function.
+TEST_F(NegativeScriptTest, IoGrepUnknownLiteralOptionIsCompileError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/io_grep_unknown_option.ls",
+        "unknown option 'linez' for io.grep (S17.8.1)");
+}
+
 // S12.3.2 / D6.2.2v2 (LR07-16): a dynamic call has no declaration to bind
 // names against; both tiers had silently passed named arguments by position.
 TEST_F(NegativeScriptTest, NamedArgumentsNeedStaticallyKnownCallee) {
@@ -2191,6 +2225,17 @@ TEST_F(NegativeScriptTest, SemanticError_ImmutableAssignment) {
 TEST_F(NegativeScriptTest, SemanticError_ImmutableInteriorAssignment) {
     ExpectErrorMessage("test/lambda/negative/semantic/immutable_interior_assignment.ls",
         "cannot mutate through immutable binding");
+}
+
+TEST_F(NegativeScriptTest, SemanticError_ImmutablePipeBorrow) {
+    const char* tiers[] = {"jit", "interp"};
+    for (const char* tier : tiers) {
+        ScriptResult result = run_lambda_script(
+            "test/lambda/negative/semantic/immutable_pipe_borrow.ls", true, tier);
+        EXPECT_NE(result.exit_code, 0);
+        EXPECT_NE(strstr(result.output.c_str(), "error[E211]"), nullptr);
+        EXPECT_NE(strstr(result.output.c_str(), "must be a mutable `var` binding"), nullptr);
+    }
 }
 
 TEST_F(NegativeScriptTest, SemanticError_ProcMethodRequiresMutableReceiver) {

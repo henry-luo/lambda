@@ -653,12 +653,16 @@ typedef struct {
 } DlFillRadialGradient;
 
 typedef struct {
-    // Owning surface, by handle: a retained list checks liveness through the
-    // slot table instead of reading a surface that may be gone. Null when the
-    // pixels have no registered owner (then the item is never retained).
+    // Owned image: the owner's handle, the drawn region's origin in the owner's
+    // pixels and the owner's decoded size when recorded. Replay resolves the
+    // handle (dl_draw_image_resolve) and reads the owner's pixels then: a stale
+    // handle draws nothing, a changed generation draws the current frame.
     lam::Handle<ImageSurface> resource;
     uint64_t resource_generation;
-    const uint32_t* pixels;  // borrowed — image lifetime must exceed display list
+    int src_x, src_y;
+    int surface_w, surface_h;
+    // Unowned image (null handle): frame-local pixels, never retained.
+    lam::Up<const uint32_t> local_pixels;
     int src_w, src_h, src_stride;
     float dst_x, dst_y, dst_w, dst_h;
     uint8_t opacity;
@@ -710,8 +714,8 @@ typedef struct {
 
 // Direct-pixel scaled blit (raster images via blit_surface_scaled)
 typedef struct {
-    ImageSurface* src_surface;           // borrowed for replay
-    lam::Handle<ImageSurface> src_resource;  // liveness for retained replay; may be null
+    lam::Handle<ImageSurface> src_resource;  // the source surface, resolved at replay
+    lam::Up<ImageSurface> local_source;  // unowned source (null handle) only: frame-local, never retained
     uint64_t src_generation;
     float dst_x, dst_y, dst_w, dst_h;
     int scale_mode;
@@ -988,6 +992,21 @@ void dl_fill_radial_gradient(DisplayList* dl, RdtPath* path,
                              RdtFillRule rule, const RdtMatrix* transform,
                              const RdtMatrix* gradient_transform,
                               const RdtGradientOptions* options = nullptr);
+
+// An image item's pixels for this replay, read inside an ImageSurfaceReadScope.
+typedef struct DlResolvedImage {
+    lam::Up<const uint32_t> pixels;  // valid until the enclosing read scope ends
+    int width, height, stride;
+    bool straight_alpha;
+    uint64_t generation;
+    lam::Up<ImageSurface> owner;   // null for an unowned item
+} DlResolvedImage;
+// Resolves the owner's current pixels (the recorded region, scaled when the
+// owner was re-decoded at another size) or an unowned item's frame-local
+// pixels. False when the owner is gone: the item draws nothing.
+bool dl_draw_image_resolve(const DlDrawImage* item, DlResolvedImage* out);
+// The source surface of a blit for this replay, or null when it is gone.
+ImageSurface* dl_blit_source_resolve(const DlBlitSurfaceScaled* item);
 
 void dl_draw_image(DisplayList* dl, const uint32_t* pixels,
                    int src_w, int src_h, int src_stride,

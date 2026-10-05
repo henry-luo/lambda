@@ -168,6 +168,7 @@ void WorkerState::init(Tile* tile) {
 
 static void* worker_thread_fn(void* arg) {
     RenderPool* pool = (RenderPool*)arg;
+    image_surface_mark_render_worker_thread();
 
     while (true) {
         pthread_mutex_lock(&pool->mutex);
@@ -317,6 +318,9 @@ void render_pool_destroy(RenderPool* pool) {
 }
 
 void render_pool_dispatch(RenderPool* pool, TileJob* jobs, int count) {
+    // the dispatcher's scope spans its workers, so the queue is released here
+    // after they finish rather than on a worker thread
+    ImageSurfaceReadScope read_scope;
     if (pool) pool->dispatch(jobs, count);
 }
 
@@ -328,6 +332,8 @@ void dl_replay_tile(DisplayList* dl, RdtVector* vec,
                     ImageSurface* tile_surface, ScratchArena* scratch,
                     float tile_x, float tile_y, float tile_w, float tile_h,
                     float scale, int first_item) {
+    // image owners resolved during this replay stay alive until it ends
+    ImageSurfaceReadScope read_scope;
     DisplayReplayBackdropStack backdrop_stack;
     dl_replay_backdrop_init(&backdrop_stack);
 

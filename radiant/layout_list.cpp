@@ -649,7 +649,7 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
                             marker_style == CSS_VALUE_DISCLOSURE_OPEN);
 
     if (!block->pseudo) {
-        block->pseudo = lam::own((PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp)));
+        block->pseudo = lam::view_prop((PseudoContentProp*)alloc_prop(lycon, sizeof(PseudoContentProp)));
         memset(block->pseudo, 0, sizeof(PseudoContentProp));
     }
 
@@ -662,8 +662,12 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
     DomElement* parent_elem = lam::dom_require<DOM_NODE_ELEMENT>(elmt);
     DomElement* current_marker = block->pseudo->marker_generated
         ? block->pseudo->marker : nullptr;
-    FontProp* marker_font_prop = current_marker && current_marker->font
-        ? current_marker->font : (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+    // fresh_font owns a new FontProp until a marker element takes it over
+    lam::Own<FontProp> fresh_font;
+    if (!current_marker || !current_marker->font) {
+        fresh_font = lam::own((FontProp*)alloc_prop(lycon, sizeof(FontProp)));
+    }
+    FontProp* marker_font_prop = fresh_font ? (FontProp*)fresh_font : (FontProp*)current_marker->font;
     FontHandle* marker_font_handle = resolve_marker_font_for_layout(
         lycon, parent_elem, &marker_font_size, marker_font_prop);
     // CSS Viewport 1 applies the effective zoom to the marker's used font and
@@ -715,7 +719,8 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
             marker_font_handle, image);
 
         if (marker_elem) {
-            marker_elem->font = marker_font_prop;
+            marker_elem->font = lam::view_prop(marker_font_prop);
+            fresh_font = nullptr;
             block->pseudo->marker = lam::up(marker_elem);
             block->pseudo->marker_generated = true;
             MarkerProp* marker_prop = marker_elem->marker_prop();
@@ -733,11 +738,12 @@ void process_list_item(LayoutContext* lycon, ViewBlock* block, DomNode* elmt,
         }
     }
     if (current_marker && !current_marker->font) {
-        current_marker->font = marker_font_prop;
-    } else if (!block->pseudo->marker && marker_font_prop) {
+        current_marker->font = lam::view_prop(marker_font_prop);
+        fresh_font = nullptr;
+    } else if (!block->pseudo->marker && fresh_font) {
         // A failed generated-node allocation must release its transient font.
-        font_prop_release_handle(marker_font_prop);
-        pool_free(lycon->doc->view_tree->prop_pool, marker_font_prop);
+        font_prop_release_handle(fresh_font);
+        lam::free_owned(lycon->doc->view_tree->prop_pool, fresh_font);
         marker_font_prop = nullptr;
     }
     // the marker's MarkerProp lives in its own field, not in blk

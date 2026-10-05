@@ -749,7 +749,7 @@ void jm_emit_class_static_named_field(JsMirTranspiler* mt, MIR_reg_t cls_obj,
 MIR_reg_t jm_transpile_box_item(JsMirTranspiler* mt, JsAstNode* item);
 MIR_reg_t jm_transpile_condition(JsMirTranspiler* mt, JsAstNode* expr);
 // JS side of the shared structural lowering hooks installed on MirEmitter.
-MirValue jm_profile_lower_value(void* owner, AstNode* node);
+MirValue jm_profile_lower_value(void* owner, AstNode* node, uint32_t demand);
 MIR_reg_t jm_profile_emit_condition(void* owner, MirValue value);
 MirValue jm_transpile_expression_value(JsMirTranspiler* mt, JsAstNode* item,
     uint32_t demand = MIR_VALUE_ANY, ValueRep required = VALUE_REP_NONE);

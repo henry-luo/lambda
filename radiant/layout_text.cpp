@@ -3959,12 +3959,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     if (!text_view) {
         text_view = lam::view_require<RDT_VIEW_TEXT>(set_view(lycon, RDT_VIEW_TEXT, text_node));
-        text_view->font = lam::shared(lycon->font.style.get());
+        text_view->font = lam::view_ref(lycon->font.style.get());
     }
 
     TextRect* rect = lycon->doc->view_tree->alloc_text_rect();
     if (!text_view->rect) {
-        text_view->rect = lam::own(rect);
+        text_view->rect = lam::view_prop(rect);
     } else {
         TextRect* last_rect = text_view->rect;
         while (last_rect && last_rect->next) { last_rect = last_rect->next; }

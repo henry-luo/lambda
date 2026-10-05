@@ -103,7 +103,7 @@ protected:
         init_block(parent, "div", width, height);
         // Cold element extensions require the document pool used in production.
         parent->doc = lam::up(&doc);
-        parent->blk = &parent_blk;
+        parent->blk = lam::view_prop(&parent_blk);
     }
 };
 
@@ -249,7 +249,7 @@ TEST_F(CustomLayoutTest, FlexEmbedImageDoesNotBecomeLinkIntrinsicSize) {
 
     init_block(&link, "a", 0.0f, 0.0f);
     link.display = {CSS_VALUE_BLOCK, CSS_VALUE_FLEX, false};
-    link.embed = lam::own(&embed);
+    link.embed = lam::view_prop(&embed);
     link.embed->img = lam::up(&image);
 
     EXPECT_FALSE(layout_replaced_image_surface_contributes(&link));
@@ -450,7 +450,7 @@ TEST_F(CustomLayoutTest, PercentWidthChildInAutoWidthParentStillUsesCustomPlacem
 
     init_parent(&parent, 0.0f, 0.0f);
     init_block(&child, "section", 40.0f, 10.0f);
-    child.blk = &child_blk;
+    child.blk = lam::view_prop(&child_blk);
     ASSERT_TRUE(parent.append_child(&child));
 
     lycon.available_space = AvailableSpace::make_width_definite(80.0f);

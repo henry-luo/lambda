@@ -198,7 +198,7 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     control->view_type = RDT_VIEW_BLOCK;
     FormControlProp original{}, rebuilt{};
     original.control_type = rebuilt.control_type = FORM_CONTROL_TEXT;
-    control->form = lam::own(&original);  // test-owned prop
+    control->form = lam::view_prop(&original);  // test-owned prop
     ASSERT_TRUE(form_control_store_text_value(doc.state, static_cast<View*>(control), "svg", 3, 3));
     ASSERT_TRUE(root->remove_child(control));
     // D4.5.1v3: layout properties are temporary; the registered DOM control owns its value.
@@ -208,7 +208,7 @@ TEST(StateStoreDomLifetimeTest, DetachedControlValueSurvivesLayoutReleaseUntilRe
     EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), &length), "svg");
     EXPECT_EQ(length, 3u);
     ASSERT_TRUE(static_cast<DomNode*>(root)->append_child(control));
-    control->view_type = RDT_VIEW_BLOCK; control->form = lam::own(&rebuilt);
+    control->view_type = RDT_VIEW_BLOCK; control->form = lam::view_prop(&rebuilt);
     state_store_prune_after_reflow(doc.state);
     EXPECT_STREQ(form_control_get_value(doc.state, static_cast<View*>(control), nullptr), "svg");
     control->form = nullptr;
@@ -272,7 +272,7 @@ TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebu
     FormControlProp* original_prop = new FormControlProp{};
     ASSERT_NE(original_prop, nullptr);
     original_prop->control_type = FORM_CONTROL_TEXT;
-    live->form = lam::own(original_prop);
+    live->form = lam::view_prop(original_prop);
     ASSERT_TRUE(form_control_store_text_value(doc_state, static_cast<View*>(live),
                                               "state-owned", 11, 11));
 
@@ -286,7 +286,7 @@ TEST_F(StateStoreDomMutationTest, TextControlValueIsViewStateOwnedAcrossPropRebu
     FormControlProp* rebuilt_prop = new FormControlProp{};
     ASSERT_NE(rebuilt_prop, nullptr);
     rebuilt_prop->control_type = FORM_CONTROL_TEXT;
-    live->form = lam::own(rebuilt_prop);
+    live->form = lam::view_prop(rebuilt_prop);
 
     // Reflow must rebind the newly pooled prop without allocating a second value.
     state_store_prune_after_reflow(doc_state);
@@ -308,7 +308,7 @@ TEST_F(StateStoreDomMutationTest, DetachedTextControlRetainsValueAcrossReflow) {
     orphan->tag_id = MARKUP_NAME_INPUT;
     FormControlProp* form = new FormControlProp{};
     form->control_type = FORM_CONTROL_TEXT;
-    orphan->form = lam::own(form);
+    orphan->form = lam::view_prop(form);
     ASSERT_TRUE(root->remove_child(orphan));
     ASSERT_TRUE(form_control_store_text_value(doc_state, static_cast<View*>(orphan),
                                                "detached value", 14, 14));

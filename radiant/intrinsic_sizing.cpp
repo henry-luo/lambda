@@ -32,6 +32,14 @@ IntrinsicFontScope::~IntrinsicFontScope() {
     font_prop_release_handle(prop_a);
     font_prop_release_handle(prop_b);
     if (lycon) lycon->font = saved_font;
+    // The temporaries were copied from the inherited font, so their text-shadow
+    // list is borrowed; only the blocks themselves are freed. Releasing only the
+    // handles left one FontProp per intrinsic measurement in the pool.
+    Pool* pool = layout_prop_pool(lycon);
+    if (pool) {
+        lam::free_owned(pool, prop_a);
+        lam::free_owned(pool, prop_b);
+    }
 }
 #include <cstdlib>
 
@@ -3080,7 +3088,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
         font_changed = true;
     } else if (element->specified_style && lycon->ui_context && lycon->font.style) {
         FontProp* temp_font_prop = alloc_font_prop(lycon);  // Allocates from pool
-        temp_font_guard.prop_a = lam::up(temp_font_prop);
+        temp_font_guard.prop_a = lam::own(temp_font_prop);
         bool need_font_setup = false;
         bool spacing_font_ready = false;
         const char* css_family = NULL;
@@ -3297,7 +3305,7 @@ IntrinsicSizes measure_element_intrinsic_widths(LayoutContext* lycon, DomElement
     if (!font_changed && !element->font && lycon->ui_context && lycon->font.style &&
         intrinsic_has_ua_font_defaults(element->tag())) {
         FontProp* ua_font = alloc_font_prop(lycon);
-        temp_font_guard.prop_b = lam::up(ua_font);
+        temp_font_guard.prop_b = lam::own(ua_font);
         if (intrinsic_apply_ua_font_defaults(element, ua_font, lycon->font.style)) {
             intrinsic_complete_inherited_font(
                 ua_font, lycon->font.style,
@@ -6328,7 +6336,7 @@ float calculate_max_content_height(LayoutContext* lycon, DomNode* node, float wi
             if (resolved_size >= 0.0f && fabsf(resolved_size - lycon->font.style->font_size) > 0.1f) {
                 FontProp* tfp = alloc_font_prop(lycon);
                 if (tfp) {
-                    temp_height_font_guard.prop_a = lam::up(tfp);
+                    temp_height_font_guard.prop_a = lam::own(tfp);
                     if (lycon->font.style) {
                         radiant_retain_font_family(tfp, lam::PoolPtr<char>(lycon->font.style->family));
                     }
