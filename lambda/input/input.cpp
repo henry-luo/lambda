@@ -1669,6 +1669,18 @@ static Input* input_from_target_impl(Target* target, String* type,
 
     log_debug("input_from_target: scheme=%d, type=%d", target->scheme, target->type);
 
+    // network database targets go to the RDB layer before generic URL/path
+    // handling, which neither knows their schemes nor may log their credentials:
+    // URIs (postgresql://, mysql://, ...) and, with an explicit driver type,
+    // libpq key/value strings ("host=... password=...")
+    if (target->type == TARGET_TYPE_URL && target->original &&
+            (strstr(target->original, "://") || type)) {
+        const char* rdb_driver = rdb_detect_format(target->original, type ? type->chars : NULL);
+        if (rdb_driver && strcmp(rdb_driver, "sqlite") != 0) {
+            return input_rdb_from_path_with_name_parent(target->original, rdb_driver, name_parent);
+        }
+    }
+
     // Check if target is a directory first (for local targets)
     if (target_is_dir(target)) {
         log_debug("input_from_target: directory detected, using directory listing");
@@ -1680,15 +1692,6 @@ static Input* input_from_target_impl(Target* target, String* type,
             return input;
         }
         return NULL;
-    }
-
-    // network and embedded database URIs (postgresql://, mysql://, ...) go to
-    // the RDB layer before generic URL handling, which knows no such schemes
-    if (target->type == TARGET_TYPE_URL && target->original && strstr(target->original, "://")) {
-        const char* rdb_driver = rdb_detect_format(target->original, type ? type->chars : NULL);
-        if (rdb_driver && strcmp(rdb_driver, "sqlite") != 0) {
-            return input_rdb_from_path_with_name_parent(target->original, rdb_driver, name_parent);
-        }
     }
 
     // For URL targets, use the existing URL-based dispatch

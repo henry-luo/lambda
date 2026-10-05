@@ -2285,8 +2285,24 @@ further, since the host then owns the network socket itself.
 | R5 column batches | ✅ `rdb_result_schema()` / `rdb_fetch_batch()` with the host shredding adapter (`lib/rdb_batch.c`). DECIMAL/DATETIME/JSON columns are utf8 with Arrow field metadata `lambda.rdb_type`. |
 | R6 host TLS bridge | ✅ `lib/rdb_tunnel.c` (POSIX; Windows reports "not available yet"). PostgreSQL and MySQL negotiation paths without TLS are tested against fake servers. **The TLS handshake itself, verify-ca/full, and MySQL's sequence-shifted auth relay are untested until real servers run** (R8/R9). |
 | R7 build + module | ✅ `utils/build-rdb-deps.sh` (libpq 18.6, Connector/C 3.3.21, no patches), `make build-rdb-deps` / `build-rdb-drivers`, the `rdb-drivers` target (strict link, only `jube_module` exported, system-only imports). ⏳ architecture and licence gates, `LICENSES/`, `SOURCES.md`, archive overrides. |
-| R8 / R9 drivers | ✅ written and built; reach the network through the bridge (smoke-tested to "connection refused"). ⏳ corpus against TLS-enabled PostgreSQL 18 and MySQL 8.4 containers. |
+| R8 / R9 drivers | ✅ **live-tested 2026-10-05** against PostgreSQL 18 and MySQL 8.4.11 in Apple `container` VMs with TLS on (test CA, SAN `localhost`/`127.0.0.1`). On both backends: schema, views, indexes, triggers, forward and reverse FK navigation, `decimal`, JSON and `datetime` decoding through `input()`. TLS matrix: disable / prefer / require / verify-ca / verify-full all behave as specified, and a missing or wrong CA, a server-name mismatch (fails verify-full, passes verify-ca) and a wrong password all fail cleanly. MySQL `caching_sha2_password` full auth works over the bridge's TLS and is refused under `DISABLED`/`PREFERRED`; the cached fast-auth proof works over plaintext. No password reached `log.txt` in any case. ⏳ the scripted corpus (`make test-rdb-drivers`) with goldens. |
 | R10 bundling, R11 DuckDB | not started |
+
+**Defects found by the live test, fixed:**
+- the PostgreSQL SASL channel-binding offer (bridge filter above);
+- drivers tagged decimal/datetime/JSON *payloads* with the column's logical
+  type, so the host dropped them. `RdbValue.type` is now documented as the
+  payload representation; text travels as `STRING` (RDB6);
+- PostgreSQL primary-key ordinals: `int2vector` casts to a 0-based array, so
+  `array_position` reported the first key column as "not a key", which also
+  disabled FK navigation;
+- libpq key/value strings with an explicit type (`input("host=… password=…",
+  'postgresql')`) were treated as relative file paths, and the path handling
+  logged them, password included; database targets now route to the RDB layer
+  first;
+- a pre-existing double free: `input-rdb.cpp` destroyed the URL its Input had
+  just taken ownership of, and `InputManager` freed it again at exit (SIGBUS
+  on the PostgreSQL run; SQLite runs survived by luck).
 
 Tests: `test_rdb_gtest` grew from 126 to 152 cases (redaction, dialect,
 batches, the registry contract against a fake driver, the resolver,
@@ -2320,7 +2336,12 @@ driver closes its connection.
 **PostgreSQL.** With TLS wanted, the bridge sends `SSLRequest` and reads one
 byte: `S` → TLS handshake; `N` → plaintext only under `prefer`, else fail.
 libpq connects with `sslmode=disable gssencmode=disable` and sends its startup
-packet as usual.
+packet as usual. Over a TLS upstream the server offers `SCRAM-SHA-256-PLUS`
+(channel binding), which libpq rejects on a plaintext socket as a downgrade.
+Until authentication ends (`AuthenticationOk` or an error), the bridge frames
+server messages and drops `-PLUS` from `AuthenticationSASL`, leaving plain
+`SCRAM-SHA-256`; afterwards it relays bytes unchanged. Found in the live test
+against PostgreSQL 18.
 
 **MySQL.** TLS starts inside the handshake, so the bridge speaks just enough
 protocol:

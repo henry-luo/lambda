@@ -449,8 +449,82 @@ done:
  * Session: connect, upgrade, relay
  * ══════════════════════════════════════════════════════════════════════ */
 
+/* ══════════════════════════════════════════════════════════════════════
+ * PostgreSQL authentication filter
+ *
+ * Over a TLS upstream the server offers SCRAM-SHA-256-PLUS (channel binding).
+ * libpq sees a plaintext socket and rejects that offer as a downgrade, and
+ * the binding could not reach it anyway: the host ends the TLS session. Until
+ * authentication finishes, the bridge therefore frames server messages and
+ * drops the -PLUS mechanism from AuthenticationSASL; afterwards it relays raw.
+ * ══════════════════════════════════════════════════════════════════════ */
+
+typedef struct {
+    bool     active;
+    uint8_t* data;
+    size_t   len;
+    size_t   cap;
+} PgAuthFilter;
+
+static uint32_t pg_be32(const uint8_t* p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+}
+
+static void pg_put_be32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v;
+}
+
+/** AuthenticationSASL without SCRAM-SHA-256-PLUS; returns the new message size */
+static size_t pg_strip_channel_binding(uint8_t* msg, size_t size) {
+    static const char plus[] = "SCRAM-SHA-256-PLUS";
+    size_t in = 9, out = 9;         // type, length, auth code 10
+    while (in < size && msg[in]) {
+        size_t n = strnlen((const char*)msg + in, size - in) + 1;
+        if (!(n == sizeof(plus) && memcmp(msg + in, plus, n) == 0)) {
+            memmove(msg + out, msg + in, n);
+            out += n;
+        }
+        in += n;
+    }
+    msg[out++] = 0;                 // list terminator
+    pg_put_be32(msg + 1, (uint32_t)(out - 1));
+    return out;
+}
+
+/** forward complete server messages; false when the client write fails */
+static bool pg_filter_forward(RdbTunnelSession* s, PgAuthFilter* f, const uint8_t* buf, size_t n) {
+    if (f->len + n > f->cap) {
+        f->cap = (f->len + n) * 2;
+        f->data = (uint8_t*)mem_realloc(f->data, f->cap, MEM_CAT_INPUT_OTHER);
+    }
+    memcpy(f->data + f->len, buf, n);
+    f->len += n;
+    size_t at = 0;
+    while (f->active && f->len - at >= 5) {
+        uint8_t* msg = f->data + at;
+        size_t size = 1 + (size_t)pg_be32(msg + 1);
+        if (f->len - at < size) break;
+        size_t out = size;
+        if (msg[0] == 'R' && size >= 9) {
+            uint32_t code = pg_be32(msg + 5);
+            if (code == 10) out = pg_strip_channel_binding(msg, size);
+            if (code == 0) f->active = false;       // AuthenticationOk
+        } else if (msg[0] == 'E') {
+            f->active = false;
+        }
+        if (!fd_write_all(s->client_fd, msg, out)) return false;
+        at += size;
+    }
+    // whatever follows authentication is relayed unchanged
+    bool ok = f->active || fd_write_all(s->client_fd, f->data + at, f->len - at);
+    memmove(f->data, f->data + at, f->active ? f->len - at : 0);
+    f->len = f->active ? f->len - at : 0;
+    return ok;
+}
+
 static void session_relay(RdbTunnelSession* s) {
     uint8_t* buf = (uint8_t*)mem_alloc(RDB_TUNNEL_BUF, MEM_CAT_INPUT_OTHER);
+    PgAuthFilter filter = { s->tls && s->tunnel->spec.protocol == RDB_WIRE_POSTGRES, NULL, 0, 0 };
     for (;;) {
         bool server_buffered = s->tls && mbedtls_ssl_get_bytes_avail(&s->ssl) > 0;
         struct pollfd fds[3] = {
@@ -463,7 +537,10 @@ static void session_relay(RdbTunnelSession* s) {
         if (fds[2].revents) break;
         if (server_buffered || (fds[1].revents & (POLLIN | POLLHUP | POLLERR))) {
             int r = up_read_some(s, buf, RDB_TUNNEL_BUF);
-            if (r <= 0 || !fd_write_all(s->client_fd, buf, (size_t)r)) break;
+            if (r <= 0) break;
+            bool sent = filter.active ? pg_filter_forward(s, &filter, buf, (size_t)r)
+                                      : fd_write_all(s->client_fd, buf, (size_t)r);
+            if (!sent) break;
             continue;
         }
         if (fds[0].revents & (POLLIN | POLLHUP | POLLERR)) {
@@ -472,6 +549,7 @@ static void session_relay(RdbTunnelSession* s) {
             if (r <= 0 || !up_write_all(s, buf, (size_t)r)) break;
         }
     }
+    mem_free(filter.data);
     mem_free(buf);
 }
 

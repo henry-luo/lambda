@@ -136,7 +136,10 @@ typedef struct {
     };
 } RdbParam;
 
-/** single cell value from current row */
+/** single cell value from current row. `type` is the payload representation
+    (NULL, INT, FLOAT, BOOL, STRING or BLOB), not the column's logical type:
+    decimal, datetime and JSON text arrive as STRING and the host decodes them
+    by the declared column type (RDB6). */
 typedef struct {
     RdbType type;
     bool    is_null;

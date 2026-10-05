@@ -538,6 +538,7 @@ static RdbValue mysql_column_value(void* stmt, int col) {
         case RDB_TYPE_BOOL:  v.bool_val = text[0] != '0'; break;
         case RDB_TYPE_BLOB:  v.is_null = true; break;   // binary columns arrive in Phase 2
         default:
+            v.type = RDB_TYPE_STRING;   // decimal/datetime/JSON travel as text (RDB6)
             v.str_val = text;
             v.str_len = (int)s->lengths[col];
             break;

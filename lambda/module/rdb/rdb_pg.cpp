@@ -373,6 +373,7 @@ static RdbValue pg_column_value(void* stmt, int col) {
         case RDB_TYPE_BOOL:  v.bool_val = text[0] == 't'; break;
         case RDB_TYPE_BLOB:  v.is_null = true; break;   // binary columns arrive in Phase 2, as for SQLite
         default:
+            v.type = RDB_TYPE_STRING;   // decimal/datetime/JSON travel as text (RDB6)
             v.str_val = text;
             v.str_len = PQgetlength(s->res, s->row, col);
             break;
@@ -505,8 +506,11 @@ static int pg_load_schema(void* conn, const RdbHostAPI* host, void* meta, RdbSch
     if (!tables) return RDB_ERROR;
     PGresult* columns = pg_catalog_query(pg,
         "SELECT c.relname, a.attname, format_type(a.atttypid, a.atttypmod), a.atttypid, "
-        "a.attnotnull, coalesce((SELECT array_position(i.indkey::int2[], a.attnum) "
-        "FROM pg_index i WHERE i.indrelid = c.oid AND i.indisprimary), 0) "
+        // int2vector casts to a 0-based array, so array_position would report the
+        // first key column as 0 ("not a key"); ORDINALITY is 1-based
+        "a.attnotnull, coalesce((SELECT k.ord FROM pg_index i, "
+        "unnest(i.indkey::int2[]) WITH ORDINALITY k(attnum, ord) "
+        "WHERE i.indrelid = c.oid AND i.indisprimary AND k.attnum = a.attnum), 0) "
         "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
         "JOIN pg_attribute a ON a.attrelid = c.oid WHERE " PG_SCHEMA_RELS
         " AND a.attnum > 0 AND NOT a.attisdropped ORDER BY c.relname, a.attnum");

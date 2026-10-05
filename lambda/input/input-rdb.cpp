@@ -600,8 +600,10 @@ Input* input_rdb_from_path_with_name_parent(const char* pathname,
     // create Input through InputManager
     Url* abs_url = url_parse(redacted);
     Input* input = InputManager::create_input_with_name_parent(abs_url, name_parent);
-    if (abs_url) url_destroy(abs_url);
+    // the Input owns abs_url (input->url) and InputManager destroys it; freeing
+    // it here left a dangling input->url that was freed twice at exit
     if (!input) {
+        if (abs_url) url_destroy(abs_url);
         log_error("rdb input: failed to create Input for '%s'", redacted);
         return NULL;
     }
