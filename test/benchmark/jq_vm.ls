@@ -252,20 +252,11 @@ pn jsort_indices(keys: array) int[] {
     idx
 }
 
-// a copy of object o with key set to v, keeping key order
+// a copy of object o with key set to v: the write detaches the binding from o
+// (copy-on-write), so o is unchanged and the key keeps its place
 pn obj_with(o, key: string, v) {
-    var r = {}
-    var found: bool = false
-    for (k, x at o) {
-        let name: string = string(k)
-        if (name == key) {
-            r[name] = v
-            found = true
-        } else {
-            r[name] = x
-        }
-    }
-    if (not found) { r[key] = v }
+    var r = o
+    r[key] = v
     r
 }
 

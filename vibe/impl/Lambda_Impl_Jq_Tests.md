@@ -1,8 +1,8 @@
 # Lambda Impl — jq workloads for the `text` benchmark suite (proposal)
 
 **Status:** v3, 2026-10-05, with the user's decisions recorded in §8. Done on
-branch `jq-bench`: P0, P1, P2, P4, P5 and the LambdaJS crash fix (§4.3). V1
-(P3) is written and verified but blocked at full size (§1.5). All four
+branch `jq-bench`: P0–P5 (V1 in §1.5) and the LambdaJS crash fix (§4.3); P6
+(LambdaJS speed) is open. All four
 filters below were prototyped under `./temp/jaq/` (uncommitted scratch) and
 cross-checked on jq 1.7.1, gojq 0.12.19, jqjs (git `f2894f6`) and purejq 0.3.1.
 **Scope:** add jq-language workloads to `test/benchmark/text/`. Most engine
@@ -38,7 +38,7 @@ recalibrates them on a quiet machine.
 | Go | **gojq** 0.12.19 (itchyny, MIT) as a library | runs all 4 rows unchanged |
 | Python | **purejq** 0.3.1 (MIT, zero dependencies, pure Python: it compiles to closures and does not wrap C) | runs all 4 rows; `jq_bf` needs a higher recursion limit (§4.2) |
 | C2MIR | **new**: a reduced jq VM in C, modelled on jq's own `src/execute.c`/`compile.c`/`jv.c` | DONE (§1.2) |
-| Lambda VM (V1), **shown in the C2MIR cell** | **new**: typed Lambda port of the C2MIR VM, the like-for-like comparison with C2MIR | written and verified (§1.5); all four rows blocked at full size by LR03-37/38 |
+| Lambda VM (V1), **shown in the C2MIR cell** | **new**: typed Lambda port of the C2MIR VM, the like-for-like comparison with C2MIR | DONE (§1.5): all four rows at full size, about 20–40× C2MIR |
 | Lambda **MIR-T** (V2) | **new**: each filter translated by hand into typed Lambda that works on the JSON directly (no VM) | DONE (§1.4) |
 | Lambda **MIR-U** (V3) | **new**: V2 without type annotations | DONE (§1.3) |
 | LambdaJS | runs the Node driver | crash FIXED (§4.3); correct results, but `jq_mix` exceeds the 600 s row timeout even in release (§4.3, P6) |
@@ -144,7 +144,7 @@ Typing the records row exposed three checked-map-setter defects, all fixed in
 - A `map`-typed write cloned the whole map per store. The counting loop took
   39 s.
 
-### 1.5 V1: the typed Lambda jq VM (2026-10-05, blocked at full size)
+### 1.5 V1: the typed Lambda jq VM (2026-10-05)
 
 `test/benchmark/jq_vm.ls` (about 2,700 lines) ports the C2MIR VM (§1.2)
 structure for structure:
@@ -165,16 +165,31 @@ than heap cells:
 `jq_vm_benchmark(name, input_kind, input_path, expected)` runs one row with
 the same `.jq` file and input as the C2MIR driver. Each row's entry is an
 eight-line `text/jq_<row>_vm.ls` that imports `~~.jq_vm` and calls it. The
-runner already times any `<bench>_vm.ls` it finds as `c2mir_lambda_vm`, and
-`gen_overall_result.py` appends ` / λ-VM <time>` to the C2MIR cell (§5.5). The
-entries are not committed yet (see Blocked below).
+runner times any `<bench>_vm.ls` it finds as `c2mir_lambda_vm`, and
+`gen_overall_result.py` appends ` / λ-VM <time>` to the C2MIR cell (§5.5).
 
 **Verification.** The same 109 differential filters as P2, run through
 `jq_vm_eval` and compared with jq 1.7.1. The only differences are the same
-two as C2MIR's (a compile-error case and `splits`). The 27 `jq_mix` filters
-run one at a time at full size and all match jq.
+two as C2MIR's (a compile-error case and `splits`). All four rows match their
+goldens at full size on release.
 
-**Runtime defects found, fixed on this branch:**
+**Release times** (one run each, 2026-10-05, on a machine shared with other
+builds, so ±20%):
+
+| Row | V1 (λ-VM) | Peak RSS | C2MIR (§1.2) |
+|---|---|---|---|
+| `jq_mix` | 45–55 s | 0.67 GB | 1.79 s |
+| `jq_records` | 41–46 s | 0.94 GB | 1.58 s |
+| `jq_bf` | 133 s | 1.02 GB | 3.26 s |
+| `jq_tree` | 147–186 s | 2.97 GB | 7.53 s |
+
+V1 is about 20–40× slower than the same design in C. The remaining cost is spread
+across the runtime rather than in one defect: copy-on-write writes through the
+`Vm` record's nested arrays (each relinks its spine), the boxed `_b` call path
+that every `var vm: Vm` helper call takes, and the GC. `jq_tree`'s peak comes
+from holding several 2^17-leaf trees (one Lambda container per node) at once.
+
+**Runtime defects found and fixed on this branch:**
 - An N-D array index write `m[0] = [9, 2]` widened the flat leaves, giving
   `[[9, 2], 2, 1, 2]`. S1.6 makes the N-D representation invisible, so it now
   replaces the row (`6745b2443`).
@@ -182,32 +197,27 @@ run one at a time at full size and all match jq.
   GC tag. The collector traced it as raw numbers and freed the containers it
   held, which corrupted the VM's trees under forced collection.
   `convert_specialized_to_generic` and the new N-D widening now retag the
-  header (`heap_retag_container`) in the same step (D4.3.1). Pinned by
-  `proc/ndim_row_assign.ls` in the forced-collection sweep.
+  header (`heap_retag_container`) in the same step (D4.3.1), `54e4385de`.
+- [LR03-37](<../Lambda_Issue_Ledger (fixed).md#lr03-37>): a kind-changing write
+  to a typed record's `any` field rebuilt the shape into the never-reclaimed
+  pool; it now stores in place (`2934a4ea8`).
+- [LR03-38](<../Lambda_Issue_Ledger (fixed).md#lr03-38>), user ruling: runtime-grown
+  plain maps share through a per-context transition tree (D3.4.3v4), and
+  member writes and reads answer plain keys from the type's hash table
+  (`2934a4ea8`, and the read side with LR07-44).
+- [LR07-44](<../Lambda_Issue_Ledger (fixed).md#lr07-44>): a record reified field by
+  field kept a private storage-compatible `TypeMap`, so every typed parameter
+  boundary and nested write missed the inline contract-identity guard and ran
+  the runtime checks. Admission now adopts the contract's own `TypeMap`.
+- [LR12-37](<../Lambda_Issue_Ledger (fixed).md#lr12-37>),
+  [LR07-45](<../Lambda_Issue_Ledger (fixed).md#lr07-45>),
+  [LR12-38](<../Lambda_Issue_Ledger (fixed).md#lr12-38>): an index write after a
+  copy was lost, a name key on an `any` object was written positionally, and
+  `var r = param` aliased the caller's container (`7b25edc73`). V1's
+  `obj_with` relies on the last two: `var r = o; r[key] = v` is one
+  copy-on-write copy where it used to rebuild the object key by key.
 
-**Blocked: V1 cannot finish any row at full size.** `jq_bf` and `jq_records`
-passed 4 GB of RSS within about 10 s and were stopped, and `jq_mix` and
-`jq_tree` were killed by the OS. Three runtime defects, ledgered for a ruling
-or a separate fix:
-- [LR03-37](../Lambda_Issue_Ledger.md#lr03-37): a write that changes the kind
-  of value in a typed record's `any` field rebuilds the whole shape into the
-  never-reclaimed pool. The `Vm` record's `vat`/`err` change kind on every
-  path step, so `jq_tree` and the path filters passed 10 GB and were killed.
-- [LR03-38](../Lambda_Issue_Ledger.md#lr03-38): each new key on a runtime-grown
-  map copies its whole shape, O(n²) pool memory per n-key object.
-  `b_kv_update` (2,048 keys) passed 11 GB. Small objects leak too: every
-  object update rebuilds the map, so `jq_bf`'s five-key state leaks fresh
-  shapes on each step.
-- [LR07-44](../Lambda_Issue_Ledger.md#lr07-44): every call that passes the
-  `Vm` record to a `var vm: Vm` parameter, and every nested write through it,
-  re-validates all 39 fields. That is the largest CPU cost once memory is
-  bounded (`b_try_catch` 8,192: 5.7 s).
-
-Per-filter release times (one process each, `jq_mix` sizes) show the shape:
-`b_reverse` 0.16 s, `b_sort` 0.71 s and `b_reduce` 0.67 s on 65,536 elements
-are in range. `b_ack` takes 10.8 s and `b_try_catch` 14.8 s. `b_tree_update`
-(35.8 s), `b_tree_paths` (24.2 s) and `b_kv_update` (did not finish) are
-dominated by LR03-37 and LR03-38.
+Before these fixes, the rows passed 4–11 GB of RSS and were killed.
 
 ## 2. Workloads
 
@@ -756,7 +766,7 @@ directory. Golden values are produced by jq 1.7.1 and confirmed by gojq.
 | P0 | **DONE.** Commit the filters with sizes inside, the fixtures, the generator and `VENDOR.md`. Recalibrate sizes on a quiet machine (`hyperfine --warmup 1 'jq -n -f …'`, aiming for ≥ 5 s on `jq_bf`/`jq_tree`). Write the goldens | jq and gojq agree on all 4 |
 | P1 | **DONE.** Node (jqjs), Go (gojq) and Python (purejq) drivers. Runner registration | `run_benchmarks.py -s text -b jq` green on node/go/python, within the Q1 policy |
 | P2 | **DONE.** C2MIR jq-core VM, debugged against jq. Start with `jq_tree` (paths), then `jq_bf`, `jq_mix`, `jq_records` | the four C2MIR checksums match |
-| P3 | **WRITTEN, BLOCKED (§1.5).** V1: typed Lambda VM (`jq_vm.ls` + `jq_*_vm.ls`), a translation of P2; recorded in the C2MIR cell (`c2mir_lambda_vm`). Differential tests match; the full-size rows wait on LR03-37 and LR03-38 (and LR07-44 for speed). The four `jq_*_vm.ls` entries are held back until then, because the runner would start processes that exhaust memory | checksums match on both tiers (`LAMBDA_EXEC_BACKEND=jit` and default) |
+| P3 | **DONE (§1.5).** V1: typed Lambda VM (`jq_vm.ls` + `jq_*_vm.ls`), a translation of P2; recorded in the C2MIR cell (`c2mir_lambda_vm`). Took the runtime fixes listed in §1.5 | checksums match on both tiers (`LAMBDA_EXEC_BACKEND=jit` and default) |
 | P4 | **DONE.** V2: typed hand translations `jq_*2.ls` + `jq_query_typed.ls` | checksums match on both tiers |
 | P5 | **DONE (written before V2).** V3: `jq_*.ls`, the untyped translations | checksums match on both tiers |
 | P6 | LambdaJS: crash fixed (§4.3, done). Re-measure jqjs under LambdaJS on a **release** build and analyse the slowdown | the LambdaJS column runs within the row timeout |
