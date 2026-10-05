@@ -207,6 +207,8 @@ Search files for a pattern, line by line, like grep. Runs on `lib/grep`, the lin
 
 **Rulings (USER, 2026-10-04).** **GRP30: `count: true` returns one `{file, count}` per file instead of match maps,** where `count` is the number of the file's lines with a match (with `invert`, without one) — what `rg -c` prints. Files with no such line are left out. **GRP31: `line_ending: true` adds `line_ending` to each match map:** `"\n"`, `"\r\n"`, or `null` for a last line with no terminator. Since the `"\r"` of a `"\r\n"` is never content (GRP18), this field is how a caller tells the two kinds of line apart; what to do with it is the caller's. The option is named after the field it adds, as `line`, `byte_offset` and `text` are, and has no effect together with `count`.
 
+**Ruling (GRP32, USER, 2026-10-05). `io.grep` does not replace.** Like the `grep` command and ripgrep, it only searches: it never changes a file and has no replace option (ripgrep's `--replace` rewrites only its printed output). Changing text stays with the in-memory `replace()`: read the file with `input()`, apply `replace()`, write it back with `output()`.
+
 **Type:** Procedure (it reads only, but its result depends on the file system; `fn` must be deterministic, S12.1.1v2)
 
 **Parameters:**

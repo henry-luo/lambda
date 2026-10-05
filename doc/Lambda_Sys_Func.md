@@ -1433,6 +1433,8 @@ Matching is **line-oriented**: a match never spans a line terminator, so a patte
 
 `io.grep` is a procedure: its result depends on the file system. It runs on `lib/grep`, a line-oriented search library on RE2 (`vibe/Lambda_Lib_Grep.md`).
 
+`io.grep` only searches. Like `grep` and ripgrep, it never changes a file and has no replace option (ripgrep's `--replace` changes only what ripgrep prints). To change text in a file, read it with `input()`, apply `replace()`, and write the result back with `output()`.
+
 #### cmd(command, args?)
 
 Execute a shell command and return its output as a string. The optional

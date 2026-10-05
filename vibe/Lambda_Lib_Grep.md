@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 
-**Status:** Ruled and implemented (2026-10-04, worktree `lib-grep`): G-pre, G0–G5, G5A, G6 (packed pair, and Teddy per GRP29) and G7 are built; G5B waits on the caching proposal. Implementation record, decisions taken during the build, measurements and a draft `io.grep` ruling: `vibe/impl/Lambda_Impl_Lib_Grep.md`. **Ruled by the user, 2026-10-04:** GRP3 (vendor-free public API), GRP4 (results are matches, line number optional), GRP6 (one RE2 object per worker), GRP7 (internal use of `re2/regexp.h`), GRP8 (SIMD kernels in `lib/`), GRP9v2 (no RE2 patch for grep's own acceleration; one RE2 patch, the NEON + SSE2 prefix kernel, is in scope for in-memory `find`/`replace`/`split`), GRP14 (ignore defaults), GRP15 (vendor RE2 at `lib/re2/`), GRP16 (stay on RE2 `2023-03-01`), GRP17 (UTF-8 only in v1), GRP18 (`\n` and `\r\n` terminators), GRP19 (symlinks not followed), GRP20–GRP23 (line text, per-file sink control, walk filters, whole-line match, all in v1), GRP24 (inverted match and context lines, after GRP20), GRP25 (per-file and total match limits), GRP26 (`io.grep()` system function, procedural), GRP27 (file-based `find()` stays an `fn` and calls `lib/grep` underneath; its session caching is a separate proposal), GRP28 (unknown option names; ratified as S17.8.1), GRP30 (a count mode, as `grep -c`) and GRP31 (records report their line's terminator), both built the same day. The remaining decisions are proposals; §11 lists the open ones.
+**Status:** Ruled and implemented (2026-10-04, worktree `lib-grep`): G-pre, G0–G5, G5A, G6 (packed pair, and Teddy per GRP29) and G7 are built; G5B waits on the caching proposal. Implementation record, decisions taken during the build, measurements and a draft `io.grep` ruling: `vibe/impl/Lambda_Impl_Lib_Grep.md`. **Ruled by the user, 2026-10-04:** GRP3 (vendor-free public API), GRP4 (results are matches, line number optional), GRP6 (one RE2 object per worker), GRP7 (internal use of `re2/regexp.h`), GRP8 (SIMD kernels in `lib/`), GRP9v2 (no RE2 patch for grep's own acceleration; one RE2 patch, the NEON + SSE2 prefix kernel, is in scope for in-memory `find`/`replace`/`split`), GRP14 (ignore defaults), GRP15 (vendor RE2 at `lib/re2/`), GRP16 (stay on RE2 `2023-03-01`), GRP17 (UTF-8 only in v1), GRP18 (`\n` and `\r\n` terminators), GRP19 (symlinks not followed), GRP20–GRP23 (line text, per-file sink control, walk filters, whole-line match, all in v1), GRP24 (inverted match and context lines, after GRP20), GRP25 (per-file and total match limits), GRP26 (`io.grep()` system function, procedural), GRP27 (file-based `find()` stays an `fn` and calls `lib/grep` underneath; its session caching is a separate proposal), GRP28 (unknown option names; ratified as S17.8.1), GRP30 (a count mode, as `grep -c`) and GRP31 (records report their line's terminator), both built the same day; and, on 2026-10-05, GRP32 (`io.grep` does not replace). The remaining decisions are proposals; §11 lists the open ones.
 
 **Scope:** a line-oriented text search library under `./lib/grep`, built on the RE2 that Lambda already links, and the Lambda system function `io.grep()` that exposes it to scripts (§9B). The library covers pattern compilation, literal acceleration, single-buffer and streaming search, and parallel directory search. Other consumers (file-based `find(path, pattern)`, a CLI command, the editor's find panel) keep their own design docs.
 
@@ -447,7 +447,7 @@ The design is not a full grep. This table states what v1 covers and what it leav
 | Backreferences, lookaround (`-P`) | out of scope | GRP12 |
 | Other encodings (`-E`), UTF-16 | out of scope for v1 | GRP17 |
 | Follow symlinks (`-L` in ripgrep) | out of scope for v1 | GRP19 |
-| Replacement (`--replace`) | out of scope | §8; belongs to the `replace` consumer |
+| Replacement (`--replace`) | out of scope | §8; belongs to the `replace` consumer, and `io.grep` does not replace (GRP32) |
 | NUL-separated records (`-z`), compressed files (`-z` in ripgrep), POSIX basic/extended syntax (`-G`, `-E`) | no | No consumer needs them |
 
 **GRP20 (USER, 2026-10-04). Optional line text.** A `line_text` option fills two more fields of the match record with the enclosing line's span, without its terminator (GRP18). Tier 1 already has the bounds; tier 0 and tier 2 compute them only when asked. Several matches in one line report the same line span.
@@ -556,6 +556,8 @@ Each option maps onto a library option already ruled. The names are ruled (USER,
 
 **Results are in a stable order.** The function asks the library for sorted results, so an unchanged tree gives the same array on every run and thread count, with or without a limit (GRP25). As a `pn` it is not required to be deterministic, but a result order that depends on thread timing would make scripts and tests flaky for no benefit.
 
+**GRP32 (USER, 2026-10-05). It does not replace.** Like the `grep` command, which has no replace option, and ripgrep, whose `--replace` rewrites only its printed output ("Neither this flag nor any other ripgrep flag will modify your files"), `io.grep` only searches and never changes a file. Changing text stays with the in-memory `replace()` (S17.6.1): read the file with `input()`, apply `replace()`, write it back with `output()`.
+
 **Errors.** The function returns an error value in the `T^E` style of `input()`: a source that does not exist or cannot be read, a line over the size cap, a wrongly typed option value. An unreadable file met *during* a directory walk is skipped and logged, as grep does, and is not an error of the call.
 
 ### 9B.4 Relation to file-based `find()`
@@ -626,7 +628,7 @@ Counting (GRP30) against `rg -c` on the same 265 MB file, 6.06 million lines, ev
 
 ## 11. Open questions for the user
 
-None. Every decision GRP1 to GRP31 is ruled or an unchallenged part of the design those rulings build on.
+None. Every decision GRP1 to GRP32 is ruled or an unchallenged part of the design those rulings build on.
 
 Work this doc creates outside its own phases: migrating existing system functions to S17.8.1 (Appendix C), and the separate caching proposal that file-based `find` waits on (GRP27).
 
