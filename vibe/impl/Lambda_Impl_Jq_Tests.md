@@ -38,7 +38,7 @@ recalibrates them on a quiet machine.
 | Go | **gojq** 0.12.19 (itchyny, MIT) as a library | runs all 4 rows unchanged |
 | Python | **purejq** 0.3.1 (MIT, zero dependencies, pure Python: it compiles to closures and does not wrap C) | runs all 4 rows; `jq_bf` needs a higher recursion limit (§4.2) |
 | C2MIR | **new**: a reduced jq VM in C, modelled on jq's own `src/execute.c`/`compile.c`/`jv.c` | DONE (§1.2) |
-| Lambda VM (V1), **shown in the C2MIR cell** | **new**: typed Lambda port of the C2MIR VM, the like-for-like comparison with C2MIR | DONE (§1.5): all four rows at full size, about 20–40× C2MIR |
+| Lambda VM (V1), **shown in the C2MIR cell** | **new**: typed Lambda port of the C2MIR VM, the like-for-like comparison with C2MIR | DONE (§1.5): all four rows at full size, about 35–60× C2MIR |
 | Lambda **MIR-T** (V2) | **new**: each filter translated by hand into typed Lambda that works on the JSON directly (no VM) | DONE (§1.4) |
 | Lambda **MIR-U** (V3) | **new**: V2 without type annotations | DONE (§1.3) |
 | LambdaJS | runs the Node driver | crash FIXED (§4.3); correct results, but `jq_mix` exceeds the 600 s row timeout even in release (§4.3, P6) |
@@ -173,21 +173,18 @@ runner times any `<bench>_vm.ls` it finds as `c2mir_lambda_vm`, and
 two as C2MIR's (a compile-error case and `splits`). All four rows match their
 goldens at full size on release.
 
-**Release times** (one run each, 2026-10-05, on a machine shared with other
-builds, so ±20%):
+**Release runner times** (`run_benchmarks.py -s text -b jq_ -e mir,c2mir,go,nodejs,python --typed -n 1`, 2026-10-05, branch head `815c8a181`; one run on a machine shared with other builds, so treat ±20% as noise). Evaluation time only (`__TIMING__`); the C2MIR cell shows `C2MIR / λ-VM`:
 
-| Row | V1 (λ-VM) | Peak RSS | C2MIR (§1.2) |
-|---|---|---|---|
-| `jq_mix` | 45–55 s | 0.67 GB | 1.79 s |
-| `jq_records` | 41–46 s | 0.94 GB | 1.58 s |
-| `jq_bf` | 133 s | 1.02 GB | 3.26 s |
-| `jq_tree` | 147–186 s | 2.97 GB | 7.53 s |
+| Row | MIR-U | MIR-U auto | MIR-T | MIR-T auto | C2MIR / λ-VM | Go | Node.js | Python |
+|---|---|---|---|---|---|---|---|---|
+| `jq_mix` | 5.38 s | 6.18 s | 5.50 s | 5.56 s | 1.49 s / 50.95 s | 1.16 s | 4.37 s | 11.59 s |
+| `jq_records` | 0.88 s | 5.65 s | 0.62 s | 5.61 s | 1.01 s / 37.54 s | 1.24 s | 2.43 s | 8.93 s |
+| `jq_bf` | 0.19 s | 0.26 s | 0.14 s | 0.20 s | 2.04 s / 122.29 s | 2.51 s | 2.90 s | 22.80 s |
+| `jq_tree` | 1.97 s | 2.24 s | 1.58 s | 1.71 s | 4.04 s / 148.49 s | 4.59 s | 6.13 s | 51.91 s |
 
-V1 is about 20–40× slower than the same design in C. The remaining cost is spread
-across the runtime rather than in one defect: copy-on-write writes through the
-`Vm` record's nested arrays (each relinks its spine), the boxed `_b` call path
-that every `var vm: Vm` helper call takes, and the GC. `jq_tree`'s peak comes
-from holding several 2^17-leaf trees (one Lambda container per node) at once.
+LambdaJS was left out: `jq_mix` alone exceeded the 600 s row timeout (§4.3, P6). Peak RSS of the λ-VM rows, measured separately: `jq_mix` 0.67 GB, `jq_records` 0.94 GB, `jq_bf` 1.02 GB, `jq_tree` 2.97 GB.
+
+V1 is about 35–60× slower than the same design in C. The remaining cost is spread across the runtime rather than in one defect: copy-on-write writes through the `Vm` record's nested arrays (each relinks its spine), the boxed `_b` call path that every `var vm: Vm` helper call takes, and the GC. `jq_tree`'s peak comes from holding several 2^17-leaf trees (one Lambda container per node) at once. One observation outside V1: `jq_records` runs 6× slower on AUTO than on the JIT in both Lambda columns (0.88 vs 5.65 s untyped), where the other rows stay within 30%.
 
 **Runtime defects found and fixed on this branch:**
 - An N-D array index write `m[0] = [9, 2]` widened the flat leaves, giving
