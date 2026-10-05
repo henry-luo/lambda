@@ -2788,11 +2788,29 @@ static Item map_read_field_for_owner(Container* owner, ShapeEntry* field,
 // and threaded through the recursion. The previous shape re-ran strlen(key) for
 // every ShapeEntry compared, so a miss on an n-field map cost n strlens; the
 // name-id compare now rejects non-matching fields with a single int test.
+// A1: a spread-free tree node or trusted contract indexes every field it holds
+// (D3.4.3v4; the builder indexes declared shapes), so its table answers a read,
+// hit or miss. The walk below cost O(n) per read: a 2,048-key object lookup
+// walked every field (LR03-38), a 39-field record every member read.
+static inline bool map_table_answers_reads(TypeMap* map_type) {
+    return map_type && !map_type->has_spread && !map_type->js_meta &&
+        (map_type->is_transition_shared_shape || map_type->is_trusted_contract) &&
+        typemap_hash_is_usable(map_type);
+}
+
 static Item map_get_for_owner_keyed(Container* owner, TypeMap* map_type, void* map_data,
                                     const char* key, int key_len, uint32_t key_id,
                                     bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
+    if (map_table_answers_reads(map_type)) {
+        ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
+        if (field && field->key_kind == NAME_KEY_STRING) {
+            *is_found = true;
+            return map_read_field_for_owner(owner, field, map_data);
+        }
+        if (!field) return result;
+    }
     FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) {
             Map* nested_map = map_shape_field_to_map(map_data, field);
@@ -2828,6 +2846,14 @@ static Item _map_get_keyed(TypeMap* map_type, void* map_data, const char* key,
                            int key_len, uint32_t key_id, bool* is_found) {
     Item result = ItemNull;
     *is_found = false;
+    if (map_table_answers_reads(map_type)) {
+        ShapeEntry* field = typemap_hash_lookup_by_hash(map_type, key, key_len, key_id);
+        if (field && field->key_kind == NAME_KEY_STRING) {
+            *is_found = true;
+            return _map_read_field(field, map_data);
+        }
+        if (!field) return result;
+    }
     FOR_EACH_MAP_FIELD(map_type, field) {
         if (!field->name) {
             // spread/nested map — search recursively

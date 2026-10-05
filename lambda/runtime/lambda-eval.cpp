@@ -13164,13 +13164,22 @@ static bool runtime_type_admit_map_env(Item value, Type* expected, Type** env,
     // The loop converts each field where it lies; fields written in another
     // order still sit at other offsets, so the contract's layout is reached
     // only by moving them (D3.2.4v4).
-    if (lambda_map_contract_relation((TypeMap*)admitted->type, expected_map) ==
-            MAP_CONTRACT_NEEDS_REIFICATION) {
+    TypeMap* reified = (TypeMap*)admitted->type;
+    MapContractRelation final_relation = lambda_map_contract_relation(reified, expected_map);
+    // the buffer's real size: a zero cap means the current type's byte size
+    int64_t data_size = admitted->data_cap > 0 ? admitted->data_cap : reified->byte_size;
+    if (final_relation == MAP_CONTRACT_NEEDS_REIFICATION) {
         if (!map_relayout_to_contract(admitted, expected_map)) return false;
-    } else if (relation_proven && admitted->data_cap >= expected_map->byte_size) {
+    } else if (data_size >= expected_map->byte_size && (relation_proven ||
+            (final_relation == MAP_CONTRACT_STORAGE_COMPATIBLE &&
+             reified->length == expected_map->length))) {
         // Reification constructed the expected lane layout field by field; use
         // the canonical contract descriptor so later exact admissions remain
-        // O(1) instead of validating this freshly converted root again.
+        // O(1) instead of validating this freshly converted root again. A root
+        // that ends storage-compatible with no open extras adopts it too
+        // (D3.2.4v4): kept on its private copy, every typed write missed the
+        // direct store's shape guard and took the checked setter (LR07-44).
+        admitted->data_cap = (int)data_size;
         admitted->type = expected_map;
     }
     *converted = rooted_candidate.get();
