@@ -38,12 +38,12 @@ BACKENDS = [
 ]
 
 
-def run_script(source: str, name: str) -> str:
+def run_script(source: str, name: str, env: dict = None) -> str:
     WORK.mkdir(parents=True, exist_ok=True)
     script = WORK / name
     script.write_text(source)
     proc = subprocess.run([str(LAMBDA), str(script)], cwd=ROOT, capture_output=True,
-                          text=True, timeout=120)
+                          text=True, timeout=120, env={**os.environ, **(env or {})})
     # results are stdout; stderr carries diagnostics already recorded in log.txt
     lines = [l for l in proc.stdout.splitlines() if not TIMESTAMP.match(l)]
     return "\n".join(lines).strip() + "\n"
@@ -106,13 +106,22 @@ def main() -> int:
             netloc=parts.netloc.replace(f":{secret}@", ":not-the-password@")))
         # a CA that did not sign the server certificate must fail verification
         wrong_ca = "/etc/ssl/cert.pem"
-        cases = [(f"tls {mode_key}={m}", with_mode(uri, mode_key, m), e) for m, e in modes.items()]
-        cases.append(("wrong password", wrong_password, "FAILED"))
+        cases = [(f"tls {mode_key}={m}", with_mode(uri, mode_key, m), e, None) for m, e in modes.items()]
+        cases.append(("wrong password", wrong_password, "FAILED", None))
+        verify_uri = with_mode(uri, mode_key, verify_mode)
         cases.append((f"wrong CA ({verify_mode})", re.sub(r"(sslrootcert|ssl-ca)=[^&]*",
-                      r"\1=" + wrong_ca, with_mode(uri, mode_key, verify_mode)), "FAILED"))
-        for name, case_uri, expected in cases:
+                      r"\1=" + wrong_ca, verify_uri), "FAILED", None))
+        # no CA in the URI: the bridge uses the OS trust store (Q5). The test CA
+        # is not an OS root, so verification fails, unless SSL_CERT_FILE names it
+        test_ca = re.search(r"(?:sslrootcert|ssl-ca)=([^&]*)", uri)
+        no_ca_uri = re.sub(r"&?(sslrootcert|ssl-ca)=[^&]*", "", verify_uri).replace("?&", "?")
+        cases.append(("OS trust store, test CA untrusted", no_ca_uri, "FAILED", {"SSL_CERT_FILE": ""}))
+        if test_ca:
+            cases.append(("OS trust store via SSL_CERT_FILE", no_ca_uri, "ok",
+                          {"SSL_CERT_FILE": test_ca.group(1)}))
+        for name, case_uri, expected, env in cases:
             out = run_script(probe.replace("{{URI}}", case_uri),
-                             f"tls_probe.{backend}.ls").strip().splitlines()
+                             f"tls_probe.{backend}.ls", env).strip().splitlines()
             got = out[-1].strip('"') if out else ""
             label = f"{backend}/{name}"
             if got != expected:

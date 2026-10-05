@@ -2092,6 +2092,12 @@
           "link": "dynamic"
         },
         {
+          "name": "Security",
+          "include": "",
+          "lib": "-framework Security",
+          "link": "dynamic"
+        },
+        {
           "name": "Cocoa",
           "include": null,
           "lib": "-framework Cocoa",
@@ -2307,6 +2313,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -2594,12 +2601,14 @@
               "gtest",
               "gtest_main",
               "CoreFoundation",
+              "Security",
               "CoreGraphics",
               "CoreText"
             ],
             "windows": {
               "exclude_libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreGraphics",
                 "CoreText"
               ]
@@ -2607,6 +2616,7 @@
             "linux": {
               "exclude_libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreGraphics",
                 "CoreText"
               ]
@@ -3166,6 +3176,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -3219,6 +3230,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -3397,6 +3409,7 @@
               ],
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "AVFoundation",
                 "CoreMedia",
                 "CoreVideo",
@@ -4880,6 +4893,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -4972,6 +4986,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -5007,6 +5022,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -5084,6 +5100,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -5176,6 +5193,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -5211,6 +5229,7 @@
             "macos": {
               "libraries": [
                 "CoreFoundation",
+                "Security",
                 "CoreServices",
                 "SystemConfiguration",
                 "Cocoa",
@@ -5467,17 +5486,20 @@
               "zlib",
               "pthread",
               "CoreFoundation",
+              "Security",
               "SystemConfiguration"
             ],
             "linux": {
               "exclude_libraries": [
                 "CoreFoundation",
+                "Security",
                 "SystemConfiguration"
               ]
             },
             "windows": {
               "exclude_libraries": [
                 "CoreFoundation",
+                "Security",
                 "SystemConfiguration"
               ]
             },

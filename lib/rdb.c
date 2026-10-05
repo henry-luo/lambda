@@ -341,11 +341,6 @@ static bool rdb_host_sha256(const void* data, size_t len, uint8_t out[32]) {
     return digest_sha256(data, len, out);
 }
 
-static const char* rdb_host_ca_bundle_path(void) {
-    // no host CA store is published yet; drivers fall back to URI-named CAs
-    return NULL;
-}
-
 static const RdbHostAPI rdb_host_api = {
     sizeof(RdbHostAPI),
     RDB_HOST_API_VERSION,
@@ -353,7 +348,6 @@ static const RdbHostAPI rdb_host_api = {
     rdb_host_meta_strdup,
     rdb_host_conn_register,
     rdb_host_log,
-    rdb_host_ca_bundle_path,
     rdb_host_tunnel_open,
     rdb_host_sha256,
 };

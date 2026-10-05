@@ -1836,7 +1836,6 @@ typedef struct RdbHostAPI {
     int   (*conn_register)(void* open_ctx, void* native_conn,
                            const RdbConnInfo* info);        // JA16.1; refusal => driver closes
     void  (*log)(int level, const char* message);          // modules can't call log_*
-    const char* (*ca_bundle_path)(void);                   // RDB9
     int   (*tunnel_open)(void* open_ctx, const RdbTarget* target,
                          const RdbTunnelSpec* spec,
                          char* out_endpoint, size_t cap);   // RDB11, §13.15
@@ -2165,10 +2164,24 @@ URIs, **`postgresql://user:secret@host/db` would be written to `log.txt`.**
    live only in the registry entry's secret slot (§13.5.1), zeroed on close,
    and the pool key is a digest.
 4. **CA trust is the host's.** The host bridge verifies certificates with
-   mbedTLS (RDB11), using the CA file the URI names (`sslrootcert`,
-   `ssl-ca`). Without one, `verify-ca` / `verify-full` fail until the host
-   publishes an OS trust store through `ca_bundle_path()` (macOS keychain,
-   Linux `/etc/ssl/certs`, Windows certificate store): open item Q5.
+   mbedTLS (RDB11). A CA file named in the URI (`sslrootcert`, `ssl-ca`)
+   wins; otherwise the bridge uses the **OS trust store** (`lib/trust_store`,
+   resolving Q5), so `verify-full` works against publicly certified servers
+   and `sslrootcert=system` means what libpq means by it:
+   - `SSL_CERT_FILE`, when set, replaces the platform store (the OpenSSL
+     convention);
+   - **macOS:** the Keychain trust settings of the system, admin and user
+     domains via the Security framework, later domains overriding earlier
+     ones, so admin/user-installed roots are trusted and a root marked Deny is
+     dropped (157 roots on the development machine);
+   - **Linux/BSD:** the first distribution bundle found
+     (`/etc/ssl/certs/ca-certificates.crt`,
+     `/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem`, …);
+   - **Windows:** the system `ROOT` store.
+
+   The roots load once per process into one read-only mbedTLS chain shared
+   by every bridged session. The host API's former `ca_bundle_path()` was
+   removed: trust is decided inside the host, not handed to drivers.
 5. `PGPASSFILE`/`.pgpass` and the MariaDB option files keep working, so users
    can keep passwords out of scripts entirely.
 
@@ -2221,7 +2234,9 @@ reverse FKs, row counts) stays in `lib/rdb.c`. Connection ops are in §13.5.4.
     types and index names in `rdb_schema`). `--update` rewrites goldens.
   - **Probes:** each backend's TLS modes (all five for PostgreSQL; the
     TLS-guaranteed three for MySQL, since plaintext MySQL logins depend on the
-    server's auth cache), a wrong password and a wrong CA.
+    server's auth cache), a wrong password, a wrong CA, and the OS trust
+    store: with no CA in the URI the throwaway test CA must be rejected, and
+    accepted once `SSL_CERT_FILE` names it.
   - **PostgreSQL and MySQL** run against containers, with TLS enabled on the
     servers so the bridge's upgrade and verify paths are exercised. Locally
     they run when `LAMBDA_TEST_PG_URI` / `LAMBDA_TEST_MYSQL_URI` are set
@@ -2277,9 +2292,10 @@ further, since the host then owns the network socket itself.
 4. **Q4: nested Arrow types.** Mapping `LIST`/`STRUCT`/`MAP` columns into the
    DataFrame is deferred to the DataFrame design. Until then they are surfaced
    as JSON text.
-5. **Q5: OS trust store.** `verify-ca` / `verify-full` currently need a CA
-   file in the URI. The host should publish the platform trust store through
-   `ca_bundle_path()` (or load it into the bridge directly).
+5. ~~**Q5: OS trust store.**~~ Resolved 2026-10-05: `lib/trust_store` (§13.9).
+   Still open: the host's HTTPS client (curl over mbedTLS) verifies with
+   curl's compiled-in default CA path rather than this store; sharing it would
+   give HTTP and databases one trust policy.
 6. **Q6: bundle placement.** At ~0.6 MB the module could ship in the standard
    bundle rather than only the full one.
 
@@ -2294,7 +2310,8 @@ further, since the host then owns the network socket itself.
 | R5 column batches | ✅ `rdb_result_schema()` / `rdb_fetch_batch()` with the host shredding adapter (`lib/rdb_batch.c`). DECIMAL/DATETIME/JSON columns are utf8 with Arrow field metadata `lambda.rdb_type`. |
 | R6 host TLS bridge | ✅ `lib/rdb_tunnel.c` (POSIX; Windows reports "not available yet"). PostgreSQL and MySQL negotiation paths without TLS are tested against fake servers. **The TLS handshake itself, verify-ca/full, and MySQL's sequence-shifted auth relay are untested until real servers run** (R8/R9). |
 | R7 build + module | ✅ `utils/build-rdb-deps.sh` (libpq 18.6, Connector/C 3.3.21, no patches), `make build-rdb-deps` / `build-rdb-drivers`, the `rdb-drivers` target (strict link, only `jube_module` exported, system-only imports). ⏳ architecture and licence gates, `LICENSES/`, `SOURCES.md`, archive overrides. |
-| Corpus | ✅ `make test-rdb-drivers[-local]`: 4 scripts × 2 backends + 12 probes = **20 checks, all passing**, also under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. Without URIs both backends report SKIP. |
+| OS trust store (Q5) | ✅ `lib/trust_store.{h,c}`: macOS keychain (system/admin/user trust settings), Linux bundles, Windows `ROOT`, `SSL_CERT_FILE` override; used by the bridge when the URI names no CA. Unit test checks the platform set includes ISRG Root X1. Windows path not compile-tested. |
+| Corpus | ✅ `make test-rdb-drivers[-local]`: 4 scripts × 2 backends + 16 probes = **24 checks, all passing**, also under `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`. Without URIs both backends report SKIP. |
 | R8 / R9 drivers | ✅ **live-tested 2026-10-05** against PostgreSQL 18 and MySQL 8.4.11 in Apple `container` VMs with TLS on (test CA, SAN `localhost`/`127.0.0.1`). On both backends: schema, views, indexes, triggers, forward and reverse FK navigation, `decimal`, JSON and `datetime` decoding through `input()`. TLS matrix: disable / prefer / require / verify-ca / verify-full all behave as specified, and a missing or wrong CA, a server-name mismatch (fails verify-full, passes verify-ca) and a wrong password all fail cleanly. MySQL `caching_sha2_password` full auth works over the bridge's TLS and is refused under `DISABLED`/`PREFERRED`; the cached fast-auth proof works over plaintext. No password reached `log.txt` in any case. |
 | R10 bundling, R11 DuckDB | not started |
 

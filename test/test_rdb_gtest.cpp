@@ -2373,3 +2373,28 @@ TEST(RdbTunnel, RejectsFileTargets) {
 }
 
 #endif  // _WIN32
+
+/* ══════════════════════════════════════════════════════════════════════
+ * §36 OS trust store (Q5): the platform roots load once and include a
+ *     well-known public root
+ * ══════════════════════════════════════════════════════════════════════ */
+
+#include "../lib/trust_store.h"
+#include <mbedtls/x509_crt.h>
+
+TEST(TrustStore, LoadsPlatformRoots) {
+    if (getenv("SSL_CERT_FILE")) GTEST_SKIP() << "SSL_CERT_FILE replaces the platform store";
+    struct mbedtls_x509_crt* roots = trust_store_roots();
+    ASSERT_NE(roots, nullptr);
+    EXPECT_GT(trust_store_root_count(), 50);
+    // ISRG Root X1 (Let's Encrypt) ships in every current platform store
+    bool found = false;
+    char subject[512];
+    for (const mbedtls_x509_crt* c = roots; c && c->raw.len && !found; c = c->next) {
+        if (mbedtls_x509_dn_gets(subject, sizeof(subject), &c->subject) > 0) {
+            found = strstr(subject, "ISRG Root X1") != NULL;
+        }
+    }
+    EXPECT_TRUE(found);
+    EXPECT_EQ(trust_store_roots(), roots);      // loaded once, shared
+}

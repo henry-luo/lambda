@@ -9,6 +9,7 @@
  */
 
 #include "rdb_tunnel.h"
+#include "trust_store.h"
 #include "log.h"
 #include "memtrack.h"
 #include <stdio.h>
@@ -236,16 +237,23 @@ static bool tls_start(RdbTunnelSession* s) {
     mbedtls_ssl_conf_rng(&s->conf, mbedtls_ctr_drbg_random, &s->drbg);
     bool verify = t->spec.tls >= RDB_TLS_VERIFY_CA;
     if (verify) {
-        if (!t->ca_file[0]) {
-            log_error("rdb-tunnel: certificate verification for %s needs a CA bundle", t->target.host);
-            return false;
+        // a CA named in the URI wins; otherwise the roots the OS trusts (Q5)
+        if (t->ca_file[0]) {
+            ret = mbedtls_x509_crt_parse_file(&s->ca, t->ca_file);
+            if (ret < 0) {
+                tls_log_error(t, "loading the CA bundle", ret);
+                return false;
+            }
+            mbedtls_ssl_conf_ca_chain(&s->conf, &s->ca, NULL);
+        } else {
+            mbedtls_x509_crt* roots = trust_store_roots();
+            if (!roots) {
+                log_error("rdb-tunnel: verifying %s needs a CA file or an OS trust store",
+                          t->target.host);
+                return false;
+            }
+            mbedtls_ssl_conf_ca_chain(&s->conf, roots, NULL);
         }
-        ret = mbedtls_x509_crt_parse_file(&s->ca, t->ca_file);
-        if (ret < 0) {
-            tls_log_error(t, "loading the CA bundle", ret);
-            return false;
-        }
-        mbedtls_ssl_conf_ca_chain(&s->conf, &s->ca, NULL);
         mbedtls_ssl_conf_authmode(&s->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
         if (t->spec.tls == RDB_TLS_VERIFY_CA) {
             mbedtls_ssl_conf_verify(&s->conf, tls_verify_chain_only, NULL);

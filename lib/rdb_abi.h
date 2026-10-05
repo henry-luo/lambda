@@ -308,8 +308,6 @@ typedef struct RdbHostAPI {
     int   (*conn_register)(void* open_ctx, void* native_conn, const RdbConnInfo* info);
     /* drivers never call log_* directly (D7.3.3); messages must be redacted */
     void  (*log)(int level, const char* message);
-    /* CA bundle for TLS when the URI names none; NULL when unknown (RDB9) */
-    const char* (*ca_bundle_path)(void);
     /* RDB11: open a host-owned upstream to an authorised target and return
        the local endpoint the client library connects to in plaintext:
        PostgreSQL gets a socket directory (".s.PGSQL.<port>" inside), MySQL a
