@@ -115,6 +115,10 @@ SUITES = {
         ("text_search", "text_search: CHECKSUM:91395120"),
         ("three_way_merge", "three_way_merge: CHECKSUM:342313356"),
         ("log_pipeline", "log_pipeline: CHECKSUM:292634526"),
+        ("jq_mix", "jq_mix: CHECKSUM:98172625"),
+        ("jq_records", "jq_records: CHECKSUM:878885883"),
+        ("jq_bf", "jq_bf: CHECKSUM:478890292"),
+        ("jq_tree", "jq_tree: CHECKSUM:313746104"),
     ],
 }
 

@@ -62,6 +62,37 @@ The reference columns time evaluation only (`__TIMING__`); the jq column is
 the process's user time. Go 1.24 is now required: `go.mod` moved from
 `go 1.22` to `go 1.24.0` because gojq 0.12.19 needs it.
 
+### 1.2 P2: the C2MIR jq-core VM (2026-10-05)
+
+`test/benchmark/text/c2mir/jq_value.h`, `jq_parse.h`, `jq_vm.h` and
+`jq_core.h` (about 2,400 lines) implement §5, plus four thin drivers
+`jq_*.c`. Values are NaN-boxed and immutable, collected by a mark-and-sweep GC
+at the VM's safe point. The data stack is forkable, and fork records cover
+EACH, RANGE, try/label and the try-exit marker. Path tracking and heap frames
+with closures follow jq, and tail calls reuse frames. The prelude is jq 1.7.1's
+`builtin.jq` definitions. `add`, `join`, `flatten` and `from_entries` are
+native, because jq's own definitions rely on in-place mutation.
+
+**Verification.**
+- 109 differential filters against jq 1.7.1, compiled natively with clang
+  under ASan + UBSan and also under `c2m`. The only differences are a
+  compile-error case and `splits`, which is outside the subset.
+- GC stress: `-DJQ_GC_MIN_THRESHOLD=65536` under ASan, all four workloads.
+- All four rows match the goldens under `run_c2mir_benchmarks.py --suite text`.
+
+**MIR bug found and fixed** (user-approved, rule 16):
+`patches/mir-conventional-ssa-self-loop.patch`, recorded in
+`lambda/mir/VENDOR.md`. At `-O2`/`-O3`, `make_conventional_ssa` placed the
+back-edge phi move before a single-block loop's terminating branch, which
+still read the phi result. As a result, `while (hops-- > 0) f = f->env;` ran one
+iteration short, so the VM's `frame_hop` broke under `c2m`. After the patch,
+`make verify-mir-patches` passes and `make test-lambda-baseline` gives
+6216/6217; the one failure is the worktree-only
+`pdf_svg_page_resources`, whose ignored PDF is missing.
+
+C2MIR times on a quiet machine (`c2m -O2`, measured with the patched scratch
+driver before vendoring): mix 1.79 s, records 1.58 s, bf 3.26 s, tree 7.53 s.
+
 ## 2. Workloads
 
 Every row follows the suite's existing conventions (`test/benchmark/text/README.md`):
@@ -602,7 +633,7 @@ directory. Golden values are produced by jq 1.7.1 and confirmed by gojq.
 |---|---|---|
 | P0 | **DONE.** Commit the filters with sizes inside, the fixtures, the generator and `VENDOR.md`. Recalibrate sizes on a quiet machine (`hyperfine --warmup 1 'jq -n -f …'`, aiming for ≥ 5 s on `jq_bf`/`jq_tree`). Write the goldens | jq and gojq agree on all 4 |
 | P1 | **DONE.** Node (jqjs), Go (gojq) and Python (purejq) drivers. Runner registration | `run_benchmarks.py -s text -b jq` green on node/go/python, within the Q1 policy |
-| P2 | C2MIR jq-core VM, debugged against jq. Start with `jq_tree` (paths), then `jq_bf`, `jq_mix`, `jq_records` | the four C2MIR checksums match |
+| P2 | **DONE.** C2MIR jq-core VM, debugged against jq. Start with `jq_tree` (paths), then `jq_bf`, `jq_mix`, `jq_records` | the four C2MIR checksums match |
 | P3 | V1: typed Lambda VM (`jq_vm.ls` + `jq_*_vm.ls`), a translation of P2; recorded in the C2MIR cell (`c2mir_lambda_vm`) | checksums match on both tiers (`LAMBDA_EXEC_BACKEND=jit` and default) |
 | P4 | V2: typed hand translations `jq_*2.ls` + `jq_query_common.ls` | checksums match on both tiers |
 | P5 | V3: `jq_*.ls`, V2 with the annotations removed | checksums match on both tiers |
