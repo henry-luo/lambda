@@ -1155,6 +1155,24 @@ def run_native_engine(engine, suite, name, num_runs, timeout_s, results, row):
     print(f" {fmt_ms(e if e is not None else w)}" if ok else f" --- ({status})")
 
 
+def time_c2mir_lambda_vm(suite, name, ls_path, num_runs, timeout_s, results, row):
+    """Time `<bench>_vm.ls`, a Lambda port of the C2MIR port's design.
+
+    A row with one (the jq rows: a typed Lambda jq VM mirroring c2mir/jq_vm.h)
+    reports it inside the C2MIR cell, not as a column of its own
+    (vibe/impl/Lambda_Impl_Jq_Tests.md §5.5).
+    """
+    vm_path = ls_path[:-len(".ls")] + "_vm.ls"
+    if not os.path.exists(vm_path):
+        return
+    print(f"  λ-VM     ", end="", flush=True)
+    w, e, ok, status, detail = time_run_benchmark(
+        lambda_run_cmd(vm_path, "jit"), num_runs, timeout_s)
+    record_time_result(results, row, suite, name, "c2mir_lambda_vm",
+                       w, e, ok, status, detail)
+    print(f" {fmt_ms(e if e is not None else w)}" if ok else f" --- ({status})")
+
+
 def variant_desc(args):
     """One-line description of which Lambda variant(s) TIME mode will measure."""
     if args.typed:
@@ -1265,6 +1283,8 @@ def time_run_single(b, engines, num_runs, timeout_s, results, include_typed=Fals
     for native_engine in ("c2mir", "go", "julia"):
         if native_engine in engines and ls_path:
             run_native_engine(native_engine, suite, name, num_runs, timeout_s, results, row)
+            if native_engine == "c2mir":
+                time_c2mir_lambda_vm(suite, name, ls_path, num_runs, timeout_s, results, row)
 
     if not is_js:
         bundle_path = js_path.replace("2.js", "2_bundle.js") if js_path else None

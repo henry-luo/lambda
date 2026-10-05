@@ -58,8 +58,11 @@ workloads for the Lambda and native reference columns.
   lot in speed (purejq needs tens of seconds), so these rows carry a 600 s
   per-row timeout floor in `run_benchmarks.py`. The Lambda MIR-U/MIR-T columns
   run each filter *translated by hand* into a Lambda query (`jq_*.ls`,
-  `jq_*2.ls`). The C2MIR cell holds two values: the C jq VM, and a typed
-  Lambda port of the same VM (`jq_*_vm.ls`) shown as `/ λ-VM`.
+  `jq_*2.ls`). The C2MIR cell is built to hold two values: the C jq VM, and
+  a typed Lambda port of the same VM (`../jq_vm.ls`, run by `jq_*_vm.ls`)
+  shown as `/ λ-VM`. The `_vm` entries are held back until two runtime
+  defects that exhaust memory are fixed (LR03-37, LR03-38; see the proposal
+  §1.5).
   `generate_jq_fixture.js` regenerates `jq/orders.json` and
   `jq/jq_helper.js` (vendored jqjs without its ES exports, plus
   `jq/jq_driver.js`).

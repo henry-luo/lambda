@@ -162,6 +162,10 @@ def display_ms(bench_data, engine):
     if engine in ("mir_typed", "mir_typed_auto") and \
             status_of(bench_data, engine) == "untyped_fallback":
         return value + "*" if value != "---" else value
+    # a row with a Lambda port of the C2MIR design (`<bench>_vm.ls`, the jq
+    # rows) shows it in the C2MIR cell rather than in a column of its own
+    if engine == "c2mir" and "c2mir_lambda_vm" in bench_data:
+        value += f" / λ-VM {fmt_ms(value_of(bench_data.get('c2mir_lambda_vm')))}"
     return value
 
 
