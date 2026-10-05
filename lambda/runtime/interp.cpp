@@ -4476,8 +4476,11 @@ static void exec_declaration(InterpFrame* f, AstNode* node) {
                 bool declared_open_any_array =
                     ast_declared_type_is_open_any_array(named->declared_type);
                 // LR12-10 (S9.1.2): a `var` parameter's root is written in
-                // place, so an alias of it is an ownership boundary too
-                if (src && (src->cow_owned || src->is_var_param) && (declared_open_any_array ||
+                // place, so an alias of it is an ownership boundary too, and
+                // so is a plain parameter's: its value is the caller's
+                if (src && (src->cow_owned || src->is_var_param ||
+                        ast_parameter_alias_marks(src, named->entry)) &&
+                        (declared_open_any_array ||
                         ast_expr_may_return_container(named->init, init_tid, var_tid))) {
                     // cow_bind_var may detach a copy, so it is a safepoint: the
                     // operand has to be reachable from a frame slot, not a C++
@@ -5971,7 +5974,9 @@ static Item eval_expr(InterpFrame* f, AstNode* node) {
                     ? assign->value->type->type_id : LMD_TYPE_ANY;
                 TypeId target_tid = target->declared_type
                     ? target->declared_type->type_id : LMD_TYPE_ANY;
-                if (src && src != target && (src->cow_owned || src->is_var_param) &&
+                if (src && src != target &&
+                        (src->cow_owned || src->is_var_param ||
+                            ast_parameter_alias_marks(src, target)) &&
                         ast_expr_may_return_container(assign->value, value_tid, target_tid)) {
                     // a safepoint: keep the operand in a frame slot
                     Scratch alias_slot(f);
