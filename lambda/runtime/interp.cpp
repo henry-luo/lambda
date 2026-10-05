@@ -2653,6 +2653,20 @@ static bool interp_array_has_spread(AstArrayNode* node, bool* pipe_spread) {
     return spreadable;
 }
 
+// An unannotated var that an assignment widens reads as `any` only from that
+// assignment on (build_ast); reads typed earlier -- the RHS of `w = [w, w]`, or
+// anything above it in a loop body -- keep the initializer's lane, which is no
+// proof of the value at run time (S12.2.1). MIR's literal sites make the same
+// `type_widened` check before trusting a member's lane.
+static bool interp_item_type_is_lane_proof(AstNode* item) {
+    AstNode* node = ast_unwrap_primary(item);
+    if (node && node->node_type == AST_NODE_IDENT) {
+        NameEntry* entry = ((AstIdentNode*)node)->entry;
+        if (entry && entry->type_widened) return false;
+    }
+    return true;
+}
+
 static InterpArrayKind interp_array_kind(AstArrayNode* node,
                                          ArrayNumElemType* sized_elem) {
     TypeArray* arr_type = (TypeArray*)node->type;
@@ -2666,7 +2680,9 @@ static InterpArrayKind interp_array_kind(AstArrayNode* node,
     for (AstNode* item = node->item; item; item = item->next) {
         TypeId item_type = item->type ? item->type->type_id : LMD_TYPE_ANY;
         if (item_type == LMD_TYPE_ANY || item_type == LMD_TYPE_NULL ||
-                item_type == LMD_TYPE_ERROR) return INTERP_ARRAY_GENERIC;
+                item_type == LMD_TYPE_ERROR || !interp_item_type_is_lane_proof(item)) {
+            return INTERP_ARRAY_GENERIC;
+        }
     }
     switch (arr_type->nested->type_id) {
     case LMD_TYPE_INT:   return INTERP_ARRAY_INT;
