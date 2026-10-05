@@ -275,6 +275,10 @@ typedef struct gc_heap {
     gc_object_zone_t* object_zone;  // non-moving object struct allocator
     gc_data_zone_t* data_zone;      // bump-pointer data buffer allocator (nursery)
     gc_data_zone_t* tenured_data;   // data zone for survivors (promoted on GC)
+    // A full data compaction retires the old tenured zone, but dead objects'
+    // finalizers still read their data-zone side tables (an ArrayNum view's
+    // shape) during sweep, so the zone is released only after sweep.
+    gc_data_zone_t* retired_tenured_data;
     size_t total_allocated;         // total bytes allocated (including headers)
     size_t object_count;            // number of live objects
 
