@@ -253,11 +253,11 @@ pn todo_report() {
 
 ---
 
-### io.search(source, query, options?)
+### io.text_search(source, query, options?)
 
 Ranked full-text search over files, with no index: every call reads the files (FTX1). Runs on `lib/fts`, which reuses `lib/grep`'s walk and literal search; designed in `vibe/Lambda_IO_Fulltext_Search.md`.
 
-**Rulings (FTX5, FTX10, FTX12, FTX13, USER, 2026-10-05; the rest of FTX1–FTX13 proposed; nothing ratified into `doc/Lambda_Formal_Semantics.md`).** **`io.search(source, query, options?)` returns the documents that match a web-search query, best first, and is a procedure** (FTX11). A document is a file, or with `unit` a paragraph or a line (FTX2); a token is a run of letters, digits and marks, each Han, kana or Hangul character its own (FTX3); tokens compare under S17.7.1 folding while `ignore_case` is on (FTX4). The query never fails to parse: words, `"phrases"`, `or`, `-`, grouping, and `pre*` / `*suf` / `*mid*` part-of-token terms (FTX6, FTX13). Results rank by BM25 with statistics exact over the documents searched, lengths in bytes (FTX7, FTX8). It takes `io.grep`'s options where they apply, with the same meaning, but `ignore_case`, `word` and `text` default to true; `limit` keeps the best documents (FTX12). Walk and search run in parallel as `io.grep`'s do, on its walk (FTX10). Only English stems, and stemming is not yet built (FTX5). [S12.1.1v2, S17.4.1, S17.7.1, S17.8.1; FTX1–FTX13; GRP14, GRP22]
+**Rulings (FTX5, FTX10, FTX12, FTX13, USER, 2026-10-05; the rest of FTX1–FTX13 proposed; nothing ratified into `doc/Lambda_Formal_Semantics.md`).** **`io.text_search(source, query, options?)` returns the documents that match a web-search query, best first, and is a procedure** (FTX11). A document is a file, or with `unit` a paragraph or a line (FTX2); a token is a run of letters, digits and marks, each Han, kana or Hangul character its own (FTX3); tokens compare under S17.7.1 folding while `ignore_case` is on (FTX4). The query never fails to parse: words, `"phrases"`, `or`, `-`, grouping, and `pre*` / `*suf` / `*mid*` part-of-token terms (FTX6, FTX13). Results rank by BM25 with statistics exact over the documents searched, lengths in bytes (FTX7, FTX8). It takes `io.grep`'s options where they apply, with the same meaning, but `ignore_case`, `word` and `text` default to true; `limit` keeps the best documents (FTX12). Walk and search run in parallel as `io.grep`'s do, on its walk (FTX10). Only English stems, and stemming is not yet built (FTX5). [S12.1.1v2, S17.4.1, S17.7.1, S17.8.1; FTX1–FTX13; GRP14, GRP22]
 
 **Type:** Procedure (its result depends on the file system; `fn` must be deterministic, S12.1.1v2)
 
@@ -271,8 +271,8 @@ Ranked full-text search over files, with no index: every call reads the files (F
 **Example:**
 ```lambda
 pn find_docs() {
-    let hits = io.search(/.doc, "memory ownership -draft", {limit: 10})^
-    let paras = io.search(/.vibe, "\"line join\"", {unit: "paragraph", snippet: 24})^
+    let hits = io.text_search(/.doc, "memory ownership -draft", {limit: 10})^
+    let paras = io.text_search(/.vibe, "\"line join\"", {unit: "paragraph", snippet: 24})^
 }
 ```
 

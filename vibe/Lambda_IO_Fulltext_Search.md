@@ -1,12 +1,12 @@
-# Lambda IO Full-Text Search — ranked word search over files without an index (`io.search`)
+# Lambda IO Full-Text Search — ranked word search over files without an index (`io.text_search`)
 
 **Date:** 2026-10-05
 
-**Status:** Phases F0–F6 implemented on branch `fts` (2026-10-05); F7 (English stemming, stop-word lists) and F8 (stemmer Jube module) not started. Implementation record: `vibe/impl/Lambda_Impl_Fulltext_Search.md`. Q7 ruled: format extractors are phase 2. FTX5 (stemmers), FTX12 (options aligned with `io.grep`), FTX13 (part-of-token terms, `word`), FTX10 (parallel execution, reused walk) and the `ignore_case` default of FTX4 were ruled by the user on 2026-10-05; every other `FTX#` decision is *proposed*, and §13 lists the questions that need the user's ruling.
+**Status:** Phases F0–F6 implemented and optimised, on master since 2026-10-05 (573618215; renamed from `io.search` to `io.text_search` the same day); F7 (English stemming, stop-word lists) and F8 (stemmer Jube module) not started. Implementation record: `vibe/impl/Lambda_Impl_Fulltext_Search.md`. Q7 ruled: format extractors are phase 2. FTX5 (stemmers), FTX12 (options aligned with `io.grep`), FTX13 (part-of-token terms, `word`), FTX10 (parallel execution, reused walk) and the `ignore_case` default of FTX4 and the name `io.text_search` (Q1, FTX11) were ruled by the user on 2026-10-05; every other `FTX#` decision is *proposed*, and §13 lists the questions that need the user's ruling.
 
-**Scope:** a full-text search over a directory of text files, with the query language, tokenising and relevance ranking of a relational database's full-text search (SQLite FTS5, PostgreSQL `tsvector`/`tsquery`, MySQL `FULLTEXT`), executed the way PostgreSQL runs `to_tsvector(body) @@ query` on a column with no index: every call scans the documents, so results are always current and nothing has to be built or kept in sync. The directory walk, ignore layers, filters and literal acceleration are the ones `io.grep` already has (`lib/grep`, `vibe/Lambda_Lib_Grep.md`). The proposal covers a C+ library under `lib/fts/` and the Lambda system function `io.search()` that exposes it.
+**Scope:** a full-text search over a directory of text files, with the query language, tokenising and relevance ranking of a relational database's full-text search (SQLite FTS5, PostgreSQL `tsvector`/`tsquery`, MySQL `FULLTEXT`), executed the way PostgreSQL runs `to_tsvector(body) @@ query` on a column with no index: every call scans the documents, so results are always current and nothing has to be built or kept in sync. The directory walk, ignore layers, filters and literal acceleration are the ones `io.grep` already has (`lib/grep`, `vibe/Lambda_Lib_Grep.md`). The proposal covers a C+ library under `lib/fts/` and the Lambda system function `io.text_search()` that exposes it.
 
-**Spec linkage:** no `S#`/`D#` ruling covers full-text search, so this doc opens the ledger series `FTX#` (FTX, not FTS, so that FTX5 is never read as SQLite FTS5). `io.search()` would be a new system function in the one registry of S17.2.1 and, once ruled and implemented, needs its own ruling in §17 of the semantics spec. Existing rulings that bind it: **S12.1.1v2** (its result depends on the file system, so it is a `pn`, as `io.grep` is under GRP26), **S17.4.1** (a text position is a code-point index into its source), **S17.7.1** (case-insensitive matching folds by Unicode simple case folding, which FTX4 uses for token normalisation), **S17.8.1** (unknown option names). The `io.grep` rulings it reuses unchanged: GRP14 (ignore defaults), GRP17 (UTF-8 only), GRP18 (`\n` and `\r\n` terminators), GRP19 (symlinks not followed), GRP22 (walk filters), GRP3 (vendor-free library API).
+**Spec linkage:** no `S#`/`D#` ruling covers full-text search, so this doc opens the ledger series `FTX#` (FTX, not FTS, so that FTX5 is never read as SQLite FTS5). `io.text_search()` would be a new system function in the one registry of S17.2.1 and, once ruled and implemented, needs its own ruling in §17 of the semantics spec. Existing rulings that bind it: **S12.1.1v2** (its result depends on the file system, so it is a `pn`, as `io.grep` is under GRP26), **S17.4.1** (a text position is a code-point index into its source), **S17.7.1** (case-insensitive matching folds by Unicode simple case folding, which FTX4 uses for token normalisation), **S17.8.1** (unknown option names). The `io.grep` rulings it reuses unchanged: GRP14 (ignore defaults), GRP17 (UTF-8 only), GRP18 (`\n` and `\r\n` terminators), GRP19 (symlinks not followed), GRP22 (walk filters), GRP3 (vendor-free library API).
 
 **Related docs:** `vibe/Lambda_Lib_Grep.md` (the walk, prefilter and kernels this builds on), `vibe/Lambda_IO_Shell.md` (`io.*` module, `io.grep` ruling), `vibe/Lambda_IO_RDB.md` (§12 item 7: FTS5 virtual tables in the RDB input, still open), `vibe/idea/Semantic Search.md` (keyword BM25 as the lexical half of a hybrid semantic search).
 
@@ -16,7 +16,7 @@
 
 `io.grep` answers "where does this pattern occur". A full-text search answers "which documents are about these words, best first". The two differ in four ways, and this proposal adds exactly those four on top of the `io.grep` machinery:
 
-| | `io.grep` | `io.search` (this proposal) |
+| | `io.grep` | `io.text_search` (this proposal) |
 |---|---|---|
 | Unit of a result | a match (a span in a line) | a document (a file, or a paragraph or line of one, FTX2) |
 | What is compared | a regex or literal against raw text | normalised words (tokens) against query terms (FTX3–FTX5) |
@@ -66,7 +66,7 @@ For files the scan model fits better than the index model: a directory changes u
 
 ## 3. Execution model
 
-**FTX1 (proposed). `io.search` scans; it builds and keeps no index.** Each call walks the source, reads candidate files and evaluates the query on them, so the result always reflects the files as they are, and there is nothing to create, refresh or invalidate. Repeated searches over a large, unchanging tree would benefit from an index; that is deferred to a separate proposal (§12), alongside the session caching GRP27 already defers for file-based `find`.
+**FTX1 (proposed). `io.text_search` scans; it builds and keeps no index.** Each call walks the source, reads candidate files and evaluates the query on them, so the result always reflects the files as they are, and there is nothing to create, refresh or invalidate. Repeated searches over a large, unchanging tree would benefit from an index; that is deferred to a separate proposal (§12), alongside the session caching GRP27 already defers for file-based `find`.
 
 ---
 
@@ -96,7 +96,7 @@ Each token records its code-point offset and its length, so match positions (§9
 
 ### 4.3 Normalisation
 
-**FTX4 (proposed; `ignore_case` default USER, 2026-10-05). Tokens are compared after Unicode simple case folding (S17.7.1), and nothing else by default. Folding is the `ignore_case` option, as in `io.grep`, but it defaults to true.** Full-text search is case-insensitive in every engine of §2, so `io.search` folds unless asked not to; `{ignore_case: false}` compares tokens exactly, and the prefilter of §7 then searches case-sensitively. The folding is the one every case-insensitive search in Lambda uses, so `io.search` and `io.grep {ignore_case: true}` agree on which words are equal; it also keeps the prefilter sound, because `lib/grep` folds the same way. Like S17.7.1, folding does not normalise: a precomposed `é` and `e` followed by a combining accent are different tokens unless `unaccent` is on.
+**FTX4 (proposed; `ignore_case` default USER, 2026-10-05). Tokens are compared after Unicode simple case folding (S17.7.1), and nothing else by default. Folding is the `ignore_case` option, as in `io.grep`, but it defaults to true.** Full-text search is case-insensitive in every engine of §2, so `io.text_search` folds unless asked not to; `{ignore_case: false}` compares tokens exactly, and the prefilter of §7 then searches case-sensitively. The folding is the one every case-insensitive search in Lambda uses, so `io.text_search` and `io.grep {ignore_case: true}` agree on which words are equal; it also keeps the prefilter sound, because `lib/grep` folds the same way. Like S17.7.1, folding does not normalise: a precomposed `é` and `e` followed by a combining accent are different tokens unless `unaccent` is on.
 
 Three options change normalisation:
 
@@ -164,7 +164,7 @@ Anything the grammar does not recognise is read as words: an unbalanced quote cl
 
 Query text is tokenised and normalised exactly as documents are, so a quoted phrase may become more tokens than it shows (`"don't"` is the phrase `don t`) and a stop word inside a phrase still takes its position. A term that becomes no token at all (only punctuation, or only stop words) is dropped. A query that has only negated terms matches every document without them, as in PostgreSQL.
 
-**FTX13 (USER, 2026-10-05). A term can match part of a token: `pre*` a start, `*suf` an end, `*mid*` any part; and `io.grep`'s `word` option, default true, decides what a bare term matches.** With `word: true` a bare term `port` matches the token `port` only; with `word: false` it matches any token containing `port`, as `*port*` does, so `io.search {word: false}` finds what `io.grep` finds by default, word by word. A term written with `*` means the same under either setting. Matched tokens are folded first when `ignore_case` is on (FTX4).
+**FTX13 (USER, 2026-10-05). A term can match part of a token: `pre*` a start, `*suf` an end, `*mid*` any part; and `io.grep`'s `word` option, default true, decides what a bare term matches.** With `word: true` a bare term `port` matches the token `port` only; with `word: false` it matches any token containing `port`, as `*port*` does, so `io.text_search {word: false}` finds what `io.grep` finds by default, word by word. A term written with `*` means the same under either setting. Matched tokens are folded first when `ignore_case` is on (FTX4).
 
 - **Why a scan can afford it.** An index engine stores whole tokens in sorted order, so a prefix is a range lookup but a suffix or infix means visiting every token in the vocabulary; that is why PostgreSQL needs `pg_trgm` and FTS5 a `trigram` tokeniser for `LIKE '%mid%'`. A scan tokenises each candidate document anyway, and testing a token for a suffix or a substring costs about what testing it for equality does.
 - **No stemming.** A term with `*`, and a bare term under `word: false`, is matched unstemmed, also when `language` is set: a stemmed affix has no stable meaning (`*ing` would never match a stemmed token).
@@ -198,7 +198,7 @@ idf(t)   = ln(1 + (N − df(t) + 0.5) / (df(t) + 0.5))
 Two consequences, which the function's documentation has to state:
 
 1. **A score is relative to the documents searched.** The same file scores differently when it is searched within a different directory, because `N`, `df` and `avglen` change. FTS5 scores are relative to the whole index in the same way; a scan's corpus is simply the source of the call.
-2. **A ranked search reads its whole source before returning anything**, because `idf` is only known at the end. `limit` caps the result, not the work. (No `io.search` call stops its walk early, ranked or not: FTX9.)
+2. **A ranked search reads its whole source before returning anything**, because `idf` is only known at the end. `limit` caps the result, not the work. (No `io.text_search` call stops its walk early, ranked or not: FTX9.)
 
 **FTX9 (proposed). `rank` chooses the order: `"bm25"` (the default), `"tf"`, or `false`.** `"tf"` is the BM25 formula with `idf = 1`, the per-document scoring PostgreSQL's `ts_rank` stands for: it needs no corpus statistics, so the prefilter may require all ANDed terms, which is faster on large trees. `false` returns matching documents in path order with no `score`. With `limit`, it does what `io.grep` does under GRP25 (corrected 2026-10-05; an earlier draft said the walk stops early): every file is still visited, each file stops evaluating after `limit` matching documents, since no file can contribute more, and the merge keeps the first `limit` in path order. The saving is within files, and only for `unit: "paragraph"` or `"line"`. Stopping the walk itself once enough documents are found is §13, Q11.
 
@@ -242,7 +242,7 @@ When any positive term has no literal, the prefilter is off and every file is to
 
 ### 7.3 Parallel execution and library shape
 
-**FTX10 (USER, 2026-10-05; library split proposed). `io.search` runs in parallel the way `io.grep` does, for both the walk and the search, and the walk is `io.grep`'s own, reused, not copied.** What `lib/grep` does today (`lib/grep/grep_walk.cpp`), and so what `io.search` does:
+**FTX10 (USER, 2026-10-05; library split proposed). `io.text_search` runs in parallel the way `io.grep` does, for both the walk and the search, and the walk is `io.grep`'s own, reused, not copied.** What `lib/grep` does today (`lib/grep/grep_walk.cpp`), and so what `io.text_search` does:
 
 - **One thread pool for walking and searching** (GRP13). A directory job lists its entries and submits a job per subdirectory and a job per file, so traversal and search overlap with no separate work queue.
 - **Threads:** one per core, at most 8 by default (`GREP_DEFAULT_MAX_THREADS`); a pool only when there is a directory or more than one path, otherwise the calling thread does the work.
@@ -267,13 +267,13 @@ GrepStatus grep_walk_paths(const char* const* paths, size_t count, const GrepWal
 
 ---
 
-## 8. The Lambda surface: `io.search()`
+## 8. The Lambda surface: `io.text_search()`
 
-**FTX11 (proposed). `io.search(source, query, options?)` is a procedure (`pn`).** It only reads, but its result depends on the file system, so S12.1.1v2 keeps it out of `fn`, exactly as GRP26 rules for `io.grep`. A missing source raises E401, as `io.grep` does.
+**FTX11 (proposed; name USER, 2026-10-05). `io.text_search(source, query, options?)` is a procedure (`pn`).** It only reads, but its result depends on the file system, so S12.1.1v2 keeps it out of `fn`, exactly as GRP26 rules for `io.grep`. A missing source raises E401, as `io.grep` does.
 
 ```lambda
-io.search(source, query)             // [{file, score}, ...]^E
-io.search(source, query, options)
+io.text_search(source, query)             // [{file, score}, ...]^E
+io.text_search(source, query, options)
 ```
 
 | Argument | Accepts | Meaning |
@@ -284,11 +284,11 @@ io.search(source, query, options)
 
 ### 8.1 Options
 
-**FTX12 (USER, 2026-10-05). `io.search` takes `io.grep`'s options wherever they apply, with the same names, types and meaning; three defaults differ, `ignore_case`, `text` and `word`, all true.** A user who knows one function knows the other's walk, limits, output fields and result shapes. The differences follow what full-text search is: it is case-insensitive in every engine of §2 (FTX4), it matches words rather than substrings (FTX13), and a paragraph or line result is read for its text. `limit` keeps its name although it selects differently: `io.grep` keeps the first matches in path order, `io.search` the highest-ranked documents (the first in path order under `rank: false`), and both mean "at most this many".
+**FTX12 (USER, 2026-10-05). `io.text_search` takes `io.grep`'s options wherever they apply, with the same names, types and meaning; three defaults differ, `ignore_case`, `text` and `word`, all true.** A user who knows one function knows the other's walk, limits, output fields and result shapes. The differences follow what full-text search is: it is case-insensitive in every engine of §2 (FTX4), it matches words rather than substrings (FTX13), and a paragraph or line result is read for its text. `limit` keeps its name although it selects differently: `io.grep` keeps the first matches in path order, `io.text_search` the highest-ranked documents (the first in path order under `rank: false`), and both mean "at most this many".
 
 Options shared with `io.grep` (§9B.2 of `vibe/Lambda_Lib_Grep.md`):
 
-| Option | Type | Default | Meaning in `io.search` | `io.grep` |
+| Option | Type | Default | Meaning in `io.text_search` | `io.grep` |
 |---|---|---|---|---|
 | `ignore_case` | bool | **true** | fold case by S17.7.1 (FTX4) | same, default false |
 | `word` | bool | **true** | a bare term matches whole tokens; `false`: any part of a token, as `*term*` (FTX13) | a match must not touch a letter, digit or `_`; default false |
@@ -307,9 +307,9 @@ Options shared with `io.grep` (§9B.2 of `vibe/Lambda_Lib_Grep.md`):
 | `ignore` | bool | true | honour ignore files and skip dependency directories (GRP14) | same |
 | `binary` | bool | false | search files with a NUL in their first 8 KiB instead of skipping them | same |
 
-`io.grep` options that do not apply, and so are unknown names to `io.search` (S17.8.1): `whole_line` (no pattern to anchor) and `invert` (a `-term` in the query excludes).
+`io.grep` options that do not apply, and so are unknown names to `io.text_search` (S17.8.1): `whole_line` (no pattern to anchor) and `invert` (a `-term` in the query excludes).
 
-Options of `io.search` only:
+Options of `io.text_search` only:
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
@@ -347,16 +347,16 @@ Highlighting is not built in: `matches` gives the spans, and marking them up (HT
 ```lambda
 pn main() {
     // the ten files most about memory ownership
-    let hits = io.search(/.doc, "memory ownership -draft", {limit: 10})^
+    let hits = io.text_search(/.doc, "memory ownership -draft", {limit: 10})^
     for (h in hits) print(h.file, " ", h.score, "\n")
 
     // paragraphs in the design docs, with a short excerpt
-    let paras = io.search(/.vibe, "\"line delimiter\" or \"line join\"",
+    let paras = io.text_search(/.vibe, "\"line delimiter\" or \"line join\"",
                           {unit: "paragraph", line: true, snippet: 24, include: "*.md"})^
     for (p in paras) print(p.file, ":", p.line, "  ", p.snippet, "\n")
 
     // stemmed English: finds "parsing", "parsed", "parser" — and every file that has one
-    let any = io.search(/.src, "parse", {language: "english", rank: false})^
+    let any = io.text_search(/.src, "parse", {language: "english", rank: false})^
 }
 ```
 
@@ -364,7 +364,7 @@ pn main() {
 
 ## 10. Coverage against the database engines and `io.grep`
 
-| Feature | FTS5 | PostgreSQL | `io.search` v1 | `io.grep` |
+| Feature | FTS5 | PostgreSQL | `io.text_search` v1 | `io.grep` |
 |---|---|---|---|---|
 | Works with no index | no | yes | **yes** | yes |
 | Boolean, phrase, prefix | yes | yes | yes | alternation only |
@@ -443,7 +443,7 @@ Either way the scan stays the reference behaviour: an index is an acceleration t
 
 ## 13. Open questions for the user
 
-1. **Name.** `io.search`, or `io.fts`, or `io.find_text`? `search` is the plain word but is generic; it would also be the natural name for a later semantic search (`vibe/idea/Semantic Search.md`).
+1. ~~**Name.**~~ Ruled (USER, 2026-10-05): `io.text_search`, which says what it does — a search of text, as against `io.grep`'s pattern search and a later semantic search (`vibe/idea/Semantic Search.md`), which keeps the plain `search` free. The first build shipped as `io.search` and was renamed the same day.
 2. **Query form.** FTX6 proposes a web-search string only. Should there also be a structured form built from Lambda values (for example an array is AND, a map `{or: [...]}`, `{not: …}`, `{phrase: "…"}`), so a program that builds a query never escapes quotes? `io.grep` precedent: no regex syntax appears at the Lambda surface, and patterns are Lambda syntax.
 3. ~~**Stemmer.**~~ Ruled as FTX5 (USER, 2026-10-05): only English (Porter2, UTF-8) is in the engine, vendored from `libstemmer_c`; the other languages are a Jube module. Measurements in §4.4.
 4. **Prefilter for stemmed terms.** Accept "the stem minus its last character" as the guaranteed literal for Porter2 (to be verified per suffix rule, with a test per rule, as §5.4 of `vibe/Lambda_Lib_Grep.md` does for literal extraction), or turn the prefilter off whenever `language` is set?
@@ -452,8 +452,8 @@ Either way the scan stays the reference behaviour: an index is an acceleration t
 7. ~~**Markup.**~~ Ruled (USER, 2026-10-05): v1 searches every file as plain text; format extractors (HTML, Markdown, PDF and others through Lambda's input parsers) are phase 2. Open for phase 2: positions in extracted text vs mapped to the source, format selection, and paragraphs from document structure.
 8. **Proximity.** Add `NEAR(a b, n)` in v1, or later?
 9. **CJK bigrams.** FTX3 makes each Han, kana and Hangul character a token (unigrams). Should v1 (or an option such as `cjk: "bigram"`) index overlapping pairs instead, as MySQL's `ngram` parser (default size 2) and Lucene's `CJKAnalyzer` do? Bigrams rank much better, because a pair is a far rarer term than a character, and a two-character word, the most common length in Chinese and Korean, becomes one exact term. The costs: about twice the terms per CJK text; a one-character query needs a prefix-style lookup over the bigrams; a match can straddle a word boundary (`검색` inside `전문검색엔진` is right, but a pair across two words is noise); and `index` and phrase positions must be defined for overlapping tokens. Dictionary-based analysers (jieba for Chinese, MeCab or Sudachi for Japanese, Nori or mecab-ko for Korean) give the best results but bring dictionaries of tens of MB and a new vendored dependency each; they are not proposed.
-10. **Stemmer module registration.** How does the Jube module that carries the other Snowball languages (FTX5) provide them to `lib/fts`? The `rdb-drivers` proposal (`vibe/Lambda_IO_RDB.md` §13, RDB2–RDB4, not yet ruled) is the nearest model: a host-subsystem provider that registers versioned driver tables, discovered lazily from its manifest. What should `io.search` do when `language` names a language that no installed module provides: raise an error, or search unstemmed with a warning?
-11. **Early stop under `rank: false`.** With `limit`, `io.search` (like `io.grep`) visits every file and keeps the first `limit` results in path order (FTX9). Stopping the walk once enough are found needs the walk to know that no unvisited file sorts before the ones already done, which `lib/grep`'s parallel walk cannot say today. Worth adding to the shared walk, for both functions, or not?
+10. **Stemmer module registration.** How does the Jube module that carries the other Snowball languages (FTX5) provide them to `lib/fts`? The `rdb-drivers` proposal (`vibe/Lambda_IO_RDB.md` §13, RDB2–RDB4, not yet ruled) is the nearest model: a host-subsystem provider that registers versioned driver tables, discovered lazily from its manifest. What should `io.text_search` do when `language` names a language that no installed module provides: raise an error, or search unstemmed with a warning?
+11. **Early stop under `rank: false`.** With `limit`, `io.text_search` (like `io.grep`) visits every file and keeps the first `limit` results in path order (FTX9). Stopping the walk once enough are found needs the walk to know that no unvisited file sorts before the ones already done, which `lib/grep`'s parallel walk cannot say today. Worth adding to the shared walk, for both functions, or not?
 
 ---
 
@@ -464,12 +464,12 @@ Either way the scan stays the reference behaviour: an index is an acceleration t
 | F0 | Promote the walk to `grep_walk_paths` with per-worker slots; re-express `grep_search_paths` on it (FTX10) | `lib/grep` and `io.grep` tests unchanged |
 | F1 | Tokeniser and normaliser (FTX3, FTX4 folding, `unaccent`), ASCII fast path | unit tests on Latin, Greek, Cyrillic, Chinese, Japanese, Korean (eojeol with particles), combining marks, Hangul under `unaccent`; throughput measured against `io.grep` |
 | F2 | Query parser and compiler (FTX6), never failing | a parse table of every construct and malformed input |
-| F3 | Evaluator, BM25 and tf ranking, `rank: false` with early stop, file unit; `io.search` with the walk options | gtest corpus with hand-computed scores; Lambda `.ls` tests with expected `.txt` |
+| F3 | Evaluator, BM25 and tf ranking, `rank: false` with early stop, file unit; `io.text_search` with the walk options | gtest corpus with hand-computed scores; Lambda `.ls` tests with expected `.txt` |
 | F4 | Literal prefilter (§7.2) | same results with the prefilter on and off over the corpus; speed-up measured |
 | F5 | `matches`, `snippet` (second pass over returned documents) | tests on spans and snippet windows |
 | F6 | `unit: "paragraph"` and `"line"` | tests on unit boundaries, `index`, `line` |
 | F7 | Vendor the English subset of `libstemmer_c` (`lib/snowball/`, FTX5); English stemming and stop words (after Q4) | Snowball English test vectors |
-| F8 | Stemmer Jube module with the other Snowball languages (after Q10) | test vectors per language; `io.search` stems a non-English language only with the module installed |
+| F8 | Stemmer Jube module with the other Snowball languages (after Q10) | test vectors per language; `io.text_search` stems a non-English language only with the module installed |
 
 ---
 
@@ -487,6 +487,6 @@ Either way the scan stays the reference behaviour: an index is an acceleration t
 | FTX8 | Exact corpus statistics in the scan: any-term prefilter, byte lengths | proposed (Q5) |
 | FTX9 | `rank`: `"bm25"`, `"tf"`, `false`; `limit` caps each file and the merge, never stops the walk | proposed (Q11) |
 | FTX10 | Parallel like `io.grep`: one pool for walk and search, a file per job, per-worker state, per-file results merged in path order; walk reused through `grep_walk_paths`; `lib/fts` vendor-free | USER, 2026-10-05 (split proposed) |
-| FTX11 | `io.search` is a `pn`; E401 on a missing source | proposed (Q1) |
+| FTX11 | `io.text_search` is a `pn`; E401 on a missing source | proposed; name USER, 2026-10-05 (Q1) |
 | FTX12 | `io.grep`'s options where they apply, same names and meaning; `ignore_case`, `text` and `word` default to true; `limit` keeps the highest-ranked | USER, 2026-10-05 |
 | FTX13 | Part-of-token terms `pre*`, `*suf`, `*mid*`; `word` option, default true, `false` makes a bare term match any part; unstemmed | USER, 2026-10-05 |

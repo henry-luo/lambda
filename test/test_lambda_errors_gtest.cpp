@@ -1504,10 +1504,10 @@ TEST_F(NegativeScriptTest, IoGrepUnknownLiteralOptionIsCompileError) {
         "unknown option 'linez' for io.grep (S17.8.1)");
 }
 
-// FTX12: io.search takes io.grep's options only where they apply.
-TEST_F(NegativeScriptTest, IoSearchUnknownLiteralOptionIsCompileError) {
-    ExpectErrorMessage("test/lambda/negative/semantic/io_search_unknown_option.ls",
-        "unknown option 'whole_line' for io.search (S17.8.1)");
+// FTX12: io.text_search takes io.grep's options only where they apply.
+TEST_F(NegativeScriptTest, IoTextSearchUnknownLiteralOptionIsCompileError) {
+    ExpectErrorMessage("test/lambda/negative/semantic/io_text_search_unknown_option.ls",
+        "unknown option 'whole_line' for io.text_search (S17.8.1)");
 }
 
 // S12.3.2 / D6.2.2v2 (LR07-16): a dynamic call has no declaration to bind

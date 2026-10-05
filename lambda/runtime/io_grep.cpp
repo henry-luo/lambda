@@ -22,7 +22,7 @@
 namespace {
 
 struct IoGrepOptions {
-    IoFsCommonOptions c;      // the options io.search shares (FTX12)
+    IoFsCommonOptions c;      // the options io.text_search shares (FTX12)
     GrepOptions grep;
 };
 

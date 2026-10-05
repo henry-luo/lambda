@@ -1,4 +1,4 @@
-// io_file_search.cpp — helpers io.grep and io.search share (see the header).
+// io_file_search.cpp — helpers io.grep and io.text_search share (see the header).
 
 #include "io_file_search.hpp"
 #include "lambda-number-runtime.hpp"

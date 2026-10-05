@@ -1,4 +1,4 @@
-// io_file_search.hpp — what io.grep and io.search share: option reading,
+// io_file_search.hpp — what io.grep and io.text_search share: option reading,
 // sources, the walk options of GRP14/GRP22, and result values naming files
 // (vibe/Lambda_Lib_Grep.md §9B, vibe/Lambda_IO_Fulltext_Search.md FTX12).
 #pragma once
@@ -31,7 +31,7 @@ bool io_fs_option_count(const IoFsOptionMap* m, const char* name, int64_t* out, 
 // the option's value, or ItemNull when absent
 Item io_fs_option_get(const IoFsOptionMap* m, const char* name);
 
-// The options io.grep and io.search share (FTX12). Callers preset the
+// The options io.grep and io.text_search share (FTX12). Callers preset the
 // defaults that differ (ignore_case, word, text); reading only overrides.
 struct IoFsCommonOptions {
     GrepWalkOptions walk;     // hidden, ignore, include/exclude, max_depth, max_size

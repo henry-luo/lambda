@@ -1,4 +1,4 @@
-# Lambda Impl — Full-Text Search (`lib/fts`, `io.search`)
+# Lambda Impl — Full-Text Search (`lib/fts`, `io.text_search`)
 
 **Date:** 2026-10-05
 
@@ -13,12 +13,12 @@
 | F0 | The walk promoted to `grep_walk_paths` with worker slots; `grep_search_paths` is now a visitor on it, behaviour unchanged. `grep_path_order` and `grep_input_is_binary` exported for reuse. | `lib/grep/grep.h`, `lib/grep/grep_walk.cpp`, `lib/grep/grep_searcher.cpp` |
 | F1 | Tokeniser and normal form: letters, digits, marks; Han, kana and Hangul unigrams; S17.7.1 folding through RE2's fold table; `unaccent` as NFD, drop Mn, NFC | `lib/fts/fts_token.cpp` |
 | F2 | Query parser and compiler: words, phrases, `or`, `-`, grouping, `pre*`/`*suf`/`*mid*`, `word`, stop words as phrase positions; never fails | `lib/fts/fts_query.cpp` |
-| F3 | Evaluation per document; BM25, tf and unranked order; per-file and total limits; `io.search` | `lib/fts/fts_search.cpp`, `lambda/runtime/io_search.cpp` |
+| F3 | Evaluation per document; BM25, tf and unranked order; per-file and total limits; `io.text_search` | `lib/fts/fts_search.cpp`, `lambda/runtime/io_text_search.cpp` |
 | F4 | Literal prefilter over each file's buffer | `lib/fts/fts_query.cpp` (`build_prefilter`), `fts_search.cpp` |
-| F5 | `matches` and `snippet`, from a second read of the returned documents' files | `fts_document_matches`, `fts_document_snippet`, `io_search.cpp` |
-| F6 | `unit: "paragraph"` and `"line"`, with `line_ending` and context lines | `fts_search.cpp` (`for_each_document`), `io_search.cpp` |
+| F5 | `matches` and `snippet`, from a second read of the returned documents' files | `fts_document_matches`, `fts_document_snippet`, `io_text_search.cpp` |
+| F6 | `unit: "paragraph"` and `"line"`, with `line_ending` and context lines | `fts_search.cpp` (`for_each_document`), `io_text_search.cpp` |
 
-`io.grep` and `io.search` share option reading, sources and result values through `lambda/runtime/io_file_search.{hpp,cpp}`, moved out of `io_grep.cpp` (CLAUDE.md rule 13); `io_grep.cpp` keeps only what is grep's.
+`io.grep` and `io.text_search` share option reading, sources and result values through `lambda/runtime/io_file_search.{hpp,cpp}`, moved out of `io_grep.cpp` (CLAUDE.md rule 13); `io_grep.cpp` keeps only what is grep's.
 
 ## 2. Decisions taken during the build
 
@@ -63,7 +63,7 @@ Every query now costs within about 25% of the walk and reads it shares with `io.
 
 - `test/lib/test_fts_gtest.cpp`: tokens (separators, unigrams, fold orbits, marks, `unaccent`, offsets against `str_utf8_count`), queries (boolean, phrase, grouping, part-of-token, `word`, leniency, stop words, language), BM25 against the formula over byte lengths, paragraph and line documents, limits, prefilter soundness under KELVIN SIGN, prefilter off when absence can match, 1 vs 8 threads bit-identical, missing root, matches and snippet.
 - `test/lib/test_grep_gtest.cpp`: `WalkVisitsEachSelectedFileOnce` (every selected file once, slots exclusive).
-- `test/lambda/proc/io_search.ls` with fixture `test/input/fts_tree`; `test/lambda/negative/semantic/io_search_unknown_option.ls`.
+- `test/lambda/proc/io_text_search.ls` with fixture `test/input/fts_tree`; `test/lambda/negative/semantic/io_text_search_unknown_option.ls`.
 
 ## 5. Open
 

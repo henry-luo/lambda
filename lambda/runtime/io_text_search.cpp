@@ -1,4 +1,4 @@
-// io_search.cpp — io.search(source, query, options?) over lib/fts
+// io_text_search.cpp — io.text_search(source, query, options?) over lib/fts
 // (vibe/Lambda_IO_Fulltext_Search.md, FTX11).
 //
 // A procedure, as io.grep is: its result depends on the file system, and fn
@@ -45,7 +45,7 @@ bool read_unit(const IoFsOptionMap* m, FtsUnit* unit, Item* error) {
     else if (text_equals(v, "paragraph")) *unit = FTS_UNIT_PARAGRAPH;
     else if (text_equals(v, "line")) *unit = FTS_UNIT_LINE;
     else {
-        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.search: option 'unit' must be \"file\", \"paragraph\" or \"line\"");
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.text_search: option 'unit' must be \"file\", \"paragraph\" or \"line\"");
         return false;
     }
     return true;
@@ -59,7 +59,7 @@ bool read_rank(const IoFsOptionMap* m, FtsRank* rank, Item* error) {
     else if (text_equals(v, "bm25")) *rank = FTS_RANK_BM25;
     else if (text_equals(v, "tf")) *rank = FTS_RANK_TF;
     else {
-        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.search: option 'rank' must be \"bm25\", \"tf\" or false");
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.text_search: option 'rank' must be \"bm25\", \"tf\" or false");
         return false;
     }
     return true;
@@ -72,7 +72,7 @@ bool read_text_list(const IoFsOptionMap* m, const char* name, ArrayList** out, I
     if (tid == LMD_TYPE_BOOL) {
         // FTX4: `true` is the stop-word list of `language`; the lists come with
         // the stemmers (FTX5), which are not built yet
-        *error = io_fs_error(ERR_NOT_IMPLEMENTED, "io.search: no built-in stop-word list yet; give the words as an array");
+        *error = io_fs_error(ERR_NOT_IMPLEMENTED, "io.text_search: no built-in stop-word list yet; give the words as an array");
         return false;
     }
     ArrayList* list = arraylist_new(8);
@@ -90,7 +90,7 @@ bool read_text_list(const IoFsOptionMap* m, const char* name, ArrayList** out, I
     if (!ok) {
         for (int i = 0; list && i < arraylist_length(list); i++) mem_free(arraylist_get(list, i));
         if (list) arraylist_free(list);
-        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.search: option '%s' must be a bool, a string or an array of strings", name);
+        *error = io_fs_error(ERR_TYPE_MISMATCH, "io.text_search: option '%s' must be a bool, a string or an array of strings", name);
         return false;
     }
     *out = list;
@@ -116,7 +116,7 @@ bool parse_options(Item options, IoSearchOptions* o, Item* error) {
     o->fts.unit = FTS_UNIT_FILE;
     o->fts.rank = FTS_RANK_BM25;
     IoFsOptionMap m;
-    if (!io_fs_options_open(options, "io.search", SYSPROC_IO_SEARCH, &m, error)) return false;
+    if (!io_fs_options_open(options, "io.text_search", SYSPROC_IO_TEXT_SEARCH, &m, error)) return false;
     bool ok = io_fs_common_read(&m, &o->c, error) &&
         read_unit(&m, &o->fts.unit, error) &&
         read_rank(&m, &o->fts.rank, error) &&
@@ -128,7 +128,7 @@ bool parse_options(Item options, IoSearchOptions* o, Item* error) {
     Item lang = io_fs_option_get(&m, "language");
     if (get_type_id(lang) != LMD_TYPE_NULL) {
         if (!is_text_type_id(get_type_id(lang))) {
-            *error = io_fs_error(ERR_TYPE_MISMATCH, "io.search: option 'language' must be a string");
+            *error = io_fs_error(ERR_TYPE_MISMATCH, "io.text_search: option 'language' must be a string");
             return false;
         }
         o->language = mem_dup_n(lang.get_chars(), lang.get_len(), MEM_CAT_TEMP);
@@ -366,9 +366,9 @@ bool emit_documents(const IoSearchRun* run, const FtsHit* hits, size_t count, Ro
 
 }  // namespace
 
-static Item io_search_impl(Item source, Item query, Item options) {
+static Item io_text_search_impl(Item source, Item query, Item options) {
     GUARD_ERROR3(source, query, options);
-    if (g_dry_run) { log_debug("dry-run: fabricated io.search()"); return (Item){.array = array()}; }
+    if (g_dry_run) { log_debug("dry-run: fabricated io.text_search()"); return (Item){.array = array()}; }
     Item error = ItemError;
     IoSearchOptions o;
     if (!parse_options(options, &o, &error)) {
@@ -377,11 +377,11 @@ static Item io_search_impl(Item source, Item query, Item options) {
     }
     if (!is_text_type_id(get_type_id(query))) {
         release_options(&o);
-        return io_fs_error(ERR_TYPE_MISMATCH, "io.search: the query must be a string");
+        return io_fs_error(ERR_TYPE_MISMATCH, "io.text_search: the query must be a string");
     }
     IoFsSource* sources = NULL;
     int nsources = 0;
-    bool ok = io_fs_resolve_sources("io.search", source, &sources, &nsources, &error);
+    bool ok = io_fs_resolve_sources("io.text_search", source, &sources, &nsources, &error);
 
     // a files or count result is about files, in path order (GRP21, GRP30)
     uint64_t limit = o.c.limit, per_file = o.c.limit_per_file;
@@ -397,8 +397,8 @@ static Item io_search_impl(Item source, Item query, Item options) {
         char detail[256];
         FtsStatus st = fts_query_create(query.get_chars(), query.get_len(), &o.fts, &q, detail, sizeof(detail));
         if (st != FTS_OK) {
-            error = st == FTS_ERR_LANGUAGE ? io_fs_error(ERR_INVALID_OPERATION, "io.search: %s", detail)
-                                           : io_fs_error(ERR_IO_ERROR, "io.search: cannot compile the query");
+            error = st == FTS_ERR_LANGUAGE ? io_fs_error(ERR_INVALID_OPERATION, "io.text_search: %s", detail)
+                                           : io_fs_error(ERR_IO_ERROR, "io.text_search: cannot compile the query");
             ok = false;
         }
     }
@@ -412,7 +412,7 @@ static Item io_search_impl(Item source, Item query, Item options) {
         FtsStatus st = fts_search_add(search, roots_os, 1, (size_t)i, &walk);
         if (st != FTS_OK) {
             error = io_fs_error(st == FTS_ERR_IO ? ERR_FILE_NOT_FOUND : ERR_IO_ERROR,
-                                "io.search: search failed in '%s'", src->os->str);
+                                "io.text_search: search failed in '%s'", src->os->str);
             ok = false;
         }
     }
@@ -508,10 +508,10 @@ static Item io_search_impl(Item source, Item query, Item options) {
     return (Item){.array = result.get()};
 }
 
-extern "C" Item pn_io_search2(Item source, Item query) {
-    return io_search_impl(source, query, ItemNull);
+extern "C" Item pn_io_text_search2(Item source, Item query) {
+    return io_text_search_impl(source, query, ItemNull);
 }
 
-extern "C" Item pn_io_search3(Item source, Item query, Item options) {
-    return io_search_impl(source, query, options);
+extern "C" Item pn_io_text_search3(Item source, Item query, Item options) {
+    return io_text_search_impl(source, query, options);
 }

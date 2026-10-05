@@ -1,6 +1,6 @@
 # Code statistics for Lambda: an scc-style line counter (idea)
 
-- **Status:** Idea, 2026-10-04; §5.7 and CNT13 added 2026-10-05. Nothing here is ruled; the decisions it needs are CNT1–CNT13 (§9). Phase L0's walker interface has since been built for `io.search`: `grep_walk_paths` (`vibe/Lambda_IO_Fulltext_Search.md`, FTX10).
+- **Status:** Idea, 2026-10-04; §5.7 and CNT13 added 2026-10-05. Nothing here is ruled; the decisions it needs are CNT1–CNT13 (§9). Phase L0's walker interface has since been built for `io.text_search`: `grep_walk_paths` (`vibe/Lambda_IO_Fulltext_Search.md`, FTX10).
 - **Origin:** after `count: true` landed in `io.grep` (GRP30), the user asked whether the grep library could count lines while ignoring blank lines and C comment lines, then asked what tokei and scc offer, and then whether grep could do what `wc` does (§2.1, §5.6).
 - **Authorities:** `doc/Lambda_Formal_Semantics.md` (S#) and `doc/Lambda_Formal_Design.md` (D#). It builds on the grep library (`vibe/Lambda_Lib_Grep.md`, GRP#) and the `io` module (`vibe/Lambda_IO_Shell.md`).
 - **Prior art read for it (2026-10-04):** scc's README, `processor/workers.go`, `processor/structs.go` and `languages.json` (github.com/boyter/scc), its author's design write-up (boyter.org/posts/sloc-cloc-code), and tokei's README (github.com/XAMPPRocky/tokei).
@@ -218,15 +218,15 @@ io.loc(/.src, {wc: true})^
 
 Done in C in one sweep over cached blocks, these counts should run at `wc`'s speed or better — against the 2.9 s that counting words through grep takes on the 265 MB file (§2.1), and `wc -w`'s 0.36 s.
 
-### 5.7 What a word is: `wc`, `io.search`, and Unicode word boundaries
+### 5.7 What a word is: `wc`, `io.text_search`, and Unicode word boundaries
 
 Three definitions of a word are in play, and they disagree:
 
 - **`wc -w`**: a maximal run of non-whitespace (§5.6). Simple and checkable against `wc` itself, but punctuation sticks to words (`search,` and `(search)` are words, and so is a lone `—`), and text written without spaces is one word per run (`全文检索很快` is 1).
-- **`io.search`'s token** (FTX3): a run of letters, digits and marks, with each Han, kana or Hangul character a token of its own. It is built for matching and splits on purpose — `don't` is `don` + `t`, `3.14` is `3` + `14`, `snake_case_name` is three tokens, a URL five — because the query is split the same way, so `"don't"` still matches. As a count it inflates prose with contractions and code with identifiers, and it should not be reused for counting: making it count well (keeping `don't` whole) would make search worse (`don` would stop finding `don't`).
-- **Unicode word boundaries (UAX #29)**, what word processors use: `don't`, `3.14` and `e.g.` stay whole, punctuation-only segments are not words, `_` joins (`snake_case_name` is one word), a Hangul word is one word. Ideographs still split one per character, as in `io.search`; real counts for Chinese and Japanese need dictionary segmentation, which nothing here proposes.
+- **`io.text_search`'s token** (FTX3): a run of letters, digits and marks, with each Han, kana or Hangul character a token of its own. It is built for matching and splits on purpose — `don't` is `don` + `t`, `3.14` is `3` + `14`, `snake_case_name` is three tokens, a URL five — because the query is split the same way, so `"don't"` still matches. As a count it inflates prose with contractions and code with identifiers, and it should not be reused for counting: making it count well (keeping `don't` whole) would make search worse (`don` would stop finding `don't`).
+- **Unicode word boundaries (UAX #29)**, what word processors use: `don't`, `3.14` and `e.g.` stay whole, punctuation-only segments are not words, `_` joins (`snake_case_name` is one word), a Hangul word is one word. Ideographs still split one per character, as in `io.text_search`; real counts for Chinese and Japanese need dictionary segmentation, which nothing here proposes.
 
-| Text | `wc -w` | `io.search` tokens | UAX #29 words |
+| Text | `wc -w` | `io.text_search` tokens | UAX #29 words |
 |---|---|---|---|
 | `don't stop` | 2 | 3 | 2 |
 | `pi is 3.14` | 3 | 4 | 3 |
@@ -250,7 +250,7 @@ The proposal (CNT13) is two counts: `words` exactly as `wc -w`, so a result can 
 
 About 400–550 hand-written lines and a generated table. For comparison, Rust's `unicode-segmentation` implements the word rules in about 700–800 lines, with its generated tables in a separate, larger file; a C version needing only word boundaries and a forward iterator is smaller.
 
-The table cannot be avoided: nothing in the tree has the Word_Break property. `utf8proc` has general categories and grapheme-cluster breaks only, RE2 has none, and there is no ICU. Deriving it from general categories gets letters and digits roughly right but misclassifies the characters the rules turn on (apostrophes, middle dots, Hebrew letters, Katakana, emoji), and the conformance test would fail. So the table comes from Unicode's data files (`WordBreakProperty.txt`, `emoji-data.txt`, `WordBreakTest.txt`, a few hundred KB under the Unicode licence), which have to be downloaded — the user's call, as for `libstemmer_c` (FTX5). The code would sit in `lib/` beside `lib/fts`'s tokeniser, with an ASCII fast path (letters, digits, `'`, `.` and spaces decided by a small table, as `str_ascii_alnum_span` does for `io.search`), so only non-ASCII text pays for the table, and it would serve the counter here and any later word segmentation in Lambda.
+The table cannot be avoided: nothing in the tree has the Word_Break property. `utf8proc` has general categories and grapheme-cluster breaks only, RE2 has none, and there is no ICU. Deriving it from general categories gets letters and digits roughly right but misclassifies the characters the rules turn on (apostrophes, middle dots, Hebrew letters, Katakana, emoji), and the conformance test would fail. So the table comes from Unicode's data files (`WordBreakProperty.txt`, `emoji-data.txt`, `WordBreakTest.txt`, a few hundred KB under the Unicode licence), which have to be downloaded — the user's call, as for `libstemmer_c` (FTX5). The code would sit in `lib/` beside `lib/fts`'s tokeniser, with an ASCII fast path (letters, digits, `'`, `.` and spaces decided by a small table, as `str_ascii_alnum_span` does for `io.text_search`), so only non-ASCII text pays for the table, and it would serve the counter here and any later word segmentation in Lambda.
 
 ## 6. Performance expectations
 
@@ -268,7 +268,7 @@ A directory count should be bound by walking and opening files, as directory gre
 
 | Phase | Content | Gate |
 |---|---|---|
-| L0 | per-file job interface in the walker; grep moved onto it — done for `io.search` as `grep_walk_paths` (FTX10) | grep tests unchanged |
+| L0 | per-file job interface in the walker; grep moved onto it — done for `io.text_search` as `grep_walk_paths` (FTX10) | grep tests unchanged |
 | L1 | engine and C-family table; C API | fixtures; chunk-size and CRLF independence; fuzzing |
 | L2 | `io.loc` | script tests on all three tiers; differential run against scc and tokei |
 | L3 | the rest of the v1 table; minified and generated flags; `wc` counts | fixtures per language; counts against `wc` |
@@ -292,4 +292,4 @@ A directory count should be bound by walking and opening files, as directory gre
 | CNT10 | Performance gate | counts equal to scc's and tokei's except documented improvements; wall time within 1.5× of scc's |
 | CNT11 | `wc` counts: where and when | an option `{wc: true}` on `io.loc` that adds `words`, `chars` and `max_line` (`lines` and `bytes` always present); a separate `io.wc` on the same engine is the alternative |
 | CNT12 | `wc` definitions | `lines` counts an unterminated last line (as `grep -c ''` and scc, not `wc -l`); `chars` are code points by `str_utf8_count`; `max_line` in code points, not display width; whitespace for `words`: Unicode White_Space, to match `wc -w` in a UTF-8 locale, or ASCII as RE2's `\s` and the C locale |
-| CNT13 | Word definitions for counting | `words` exactly as `wc -w` (runs of non-whitespace; whitespace per CNT12), and a separate UAX #29 word count (an option, e.g. `uwords`) on a generated Word_Break table, checked against `WordBreakTest.txt` (§5.7); `io.search`'s tokens are not used for counting |
+| CNT13 | Word definitions for counting | `words` exactly as `wc -w` (runs of non-whitespace; whitespace per CNT12), and a separate UAX #29 word count (an option, e.g. `uwords`) on a generated Word_Break table, checked against `WordBreakTest.txt` (§5.7); `io.text_search`'s tokens are not used for counting |
