@@ -2708,6 +2708,12 @@ static void build_ssa (gen_ctx_t gen_ctx, int rename_p) {
   }
 }
 
+static int bb_self_pred_p (bb_t bb) {
+  for (edge_t e = DLIST_HEAD (in_edge_t, bb->in_edges); e != NULL; e = DLIST_NEXT (in_edge_t, e))
+    if (e->src == bb) return TRUE;
+  return FALSE;
+}
+
 static void make_conventional_ssa (gen_ctx_t gen_ctx) { /* requires life info */
   MIR_context_t ctx = gen_ctx->ctx;
   MIR_type_t type;
@@ -2760,7 +2766,12 @@ static void make_conventional_ssa (gen_ctx_t gen_ctx) { /* requires life info */
         e = DLIST_NEXT (in_edge_t, e);
       }
       for (se = insn->ops[0].data; se != NULL; se = se->next_use)
-        if (se->use->bb != bb) break;
+        if (se->use->bb != bb
+            /* in a block that is its own predecessor, the moves above were put before the
+               block's terminating branch: a branch use of r must still see the old value */
+            || (se->use == DLIST_TAIL (bb_insn_t, bb->bb_insns)
+                && MIR_any_branch_code_p (se->use->insn->code) && bb_self_pred_p (bb)))
+          break;
       if (se == NULL) { /* we should do this only after adding moves at the end of bbs */
         /* r=phi(...), all r uses in the same bb: change new_r = phi(...) and all uses by new_r */
         insn->ops[0].u.var = dest_var;
