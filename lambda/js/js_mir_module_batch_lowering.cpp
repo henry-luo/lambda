@@ -3557,17 +3557,29 @@ static void js_p2_remap_module_vars(JsAstNode* node, void* opaque) {
     js_ast_visit_children(node, js_p2_remap_module_vars, opaque);
 }
 
+// A refused satellite still owns the module js_mir_open_compile_unit opened.
+// Close it before the caller's failure cleanup calls MIR_finish: MIR reports an
+// open module through its error hook after freeing the module's name, which
+// crashed promotion of a hot function that the remap or plan check refused.
+static bool js_mir_refuse_function_satellite(JsMirTranspiler* mt) {
+    MIR_finish_module(mt->ctx);
+    return false;
+}
+
 static bool js_mir_lower_function_satellite(JsMirTranspiler* mt, JsScript* script,
         AstFunctionId function_id, const char** out_name) {
-    if (!mt || !out_name || function_id >= mt->tp->ast_index.function_count) return false;
+    if (!mt || !out_name) return false;
+    if (function_id >= mt->tp->ast_index.function_count) {
+        return js_mir_refuse_function_satellite(mt);
+    }
     // set before analysis: inferred local and return types must not assume a
     // direct callee the satellite does not define
     mt->p2_satellite_node = (JsFunctionNode*)mt->tp->ast_index.functions[function_id].node;
-    if (!js_mir_run_analysis_plan(mt)) return false;
+    if (!js_mir_run_analysis_plan(mt)) return js_mir_refuse_function_satellite(mt);
     JsFuncCollected* function = jm_collected_func_by_id(mt, function_id);
     if (!function || !function->node || JM_CAPTURE_COUNT(function) != 0) {
         log_error("js-p2: selected definition lacks a closed MIR plan");
-        return false;
+        return js_mir_refuse_function_satellite(mt);
     }
     JsP2ModuleVarRemap remap = {mt, mt->tp->global_scope, script->global_scope, NULL};
     for (JsAstNode* param = (JsAstNode*)function->node->params; param;
@@ -3577,7 +3589,7 @@ static bool js_mir_lower_function_satellite(JsMirTranspiler* mt, JsScript* scrip
     js_p2_remap_module_vars((JsAstNode*)function->node->body, &remap);
     if (remap.failure) {
         log_info("js-p2: satellite refused: %s", remap.failure);
-        return false;
+        return js_mir_refuse_function_satellite(mt);
     }
     jm_define_function(mt, function);
     MIR_finish_module(mt->ctx);
