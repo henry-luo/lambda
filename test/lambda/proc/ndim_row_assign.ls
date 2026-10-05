@@ -1,6 +1,9 @@
 // S1.6: an N-D array is invisibly the sequence of its leading-axis rows, so
 // `m[i] = v` replaces row i. The open write path used to widen the flat
 // leaves, turning [[1, 2], [1, 2]] into [[9, 2], 2, 1, 2] on `m[0] = [9, 2]`.
+// A widened packed array must also be traced as an Array: it kept its
+// ArrayNum GC tag, so under the forced-collection sweep the rows it held
+// were freed and read back null.
 pn main() {
     var same = [[1, 2], [1, 2]]
     same[0] = [9, 2]
@@ -30,4 +33,7 @@ pn main() {
     var through = [for (x in built) x]
     through[0] = [9, 2]
     print("for copy: " ++ format(through, 'json') ++ "\n")
+    var flat = [1, 2, 3]
+    flat[1] = {k: [2, "x"]}
+    print("flat widen: " ++ format(flat, 'json') ++ "\n")
 }

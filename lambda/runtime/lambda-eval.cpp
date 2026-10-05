@@ -9106,6 +9106,18 @@ static bool array_rebuild_native_lane(Item source, const LaneStorageDesc* desc,
     return true;
 }
 
+// The collector traces an object by its header tag, not by Container.type_id,
+// so an ArrayNum widened in place must be retagged in the same no-safepoint
+// step that installs its Items. Left tagged ArrayNum, it was traced as raw
+// numbers and the containers it now held were freed (D4.3.1).
+static void retag_widened_array_num(Array* arr) {
+    if (arr->is_heap) {
+        heap_retag_container((Container*)arr, LMD_TYPE_ARRAY_NUM, LMD_TYPE_ARRAY);
+    } else {
+        arr->type_id = LMD_TYPE_ARRAY;
+    }
+}
+
 static void convert_specialized_to_generic(Array* arr) {
     TypeId old_type = arr->type_id;
     int64_t len = arr->length;
@@ -9163,7 +9175,7 @@ static void convert_specialized_to_generic(Array* arr) {
 
     arr->items = new_items;
     arr->capacity = new_capacity;
-    arr->type_id = LMD_TYPE_ARRAY;
+    if (old_type == LMD_TYPE_ARRAY_NUM) retag_widened_array_num(arr);
     if (native_lane) array_native_lane_clear(arr);
     // Widening through an open write abandons the exact declared-array proof.
     arr->rep_cert = NULL;
@@ -9247,7 +9259,7 @@ static bool convert_ndim_to_generic_rows(Array* arr) {
     arr->capacity = capacity;
     arr->extra = 0;
     arr->is_ndim = 0;
-    arr->type_id = LMD_TYPE_ARRAY;
+    retag_widened_array_num(arr);
     arr->rep_cert = NULL;
     return true;
 }
