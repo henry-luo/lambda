@@ -703,14 +703,15 @@ logical `var_count` stays exact for interpreter and satellite slot checks
 AST/build/plan rejection or an error Item restores the name-scope tail,
 const/type-list lengths, source length, AST index, and slab values, then drops
 the fragment tree. `clear` releases the old module's exact root and Script
-before constructing a clean session. Imports after the session begins are
-deliberately rejected: the incremental REPL transaction has no cone
-load/initialization-and-rollback protocol yet, even though a fully planned T0
-module can now supply a P2 satellite binding (D7.2.2).
+before constructing a clean session. *(Superseded 2026-10-06 by D8.1.1v17:
+this paragraph had said imports after the session began were rejected; in fact
+they were accepted and never initialized. An entry's import cone now
+initializes before the entry runs — see `vibe/Lambda_Design_Repl_Interp.md`
+§8.)*
 
-This is a REPL vertical slice, not P5: unset and `LAMBDA_TIER=jit` retain the
-historical whole-history REPL, and no latency table is claimed until the
-release-build C3 driver measures it. The normal interpreter differential gate
+This was a REPL vertical slice, not P5. *(Superseded 2026-10-06: the
+whole-history REPL is deleted and every tier uses this session, D8.1.1v17.)* No
+latency table is claimed until the release-build C3 driver measures it. The normal interpreter differential gate
 also remains an independent P1 status signal, not evidence for this stateful
 interactive path.
 

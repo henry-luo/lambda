@@ -1,10 +1,10 @@
 # REPL — Finishing the Interpreter-Backed Session
 
-**Date:** 2026-10-06 (rev 2 — RULED by user, nothing implemented)
-**Status:** **DECIDED 2026-10-06 (user ruling RI1–RI6, §5); implementation not started.** The persistent T0 session (AST-interpreter P4, `interp_repl_session_*`) is already the shipped REPL path; this doc makes it the *only* path, closes the behavioural gaps found in a verification session, and builds the REPL services on top of it. Rulings landed as **S16.7.4–S16.7.6** (semantics 57.1.0) and **D8.1.1v17** (design 25.0.0).
+**Date:** 2026-10-06 (rev 3 — RULED and IMPLEMENTED)
+**Status:** **DECIDED 2026-10-06 (user ruling RI1–RI6, §5); Phases A–C implemented 2026-10-06 on branch `worktree-repl-interp` (§8).** The persistent T0 session (`interp_repl_session_*`) is the only REPL engine. Rulings: **S16.7.4–S16.7.6** (semantics 57.1.0) and **D8.1.1v17** (design 25.0.0).
 **Design authority:** `doc/Lambda_Formal_Design.md` — D8.1.1v17 (tiers, selector, C parser, the REPL session), D7.2.1/D7.2.2 (module unit, import binding), D5.3.3 (module slab root), D4.6.2v2 (REPL shares module table + NamePool); `doc/Lambda_Formal_Semantics.md` — S16.7.1 (top level is content), S16.7.4–S16.7.6 (echo, no rebinding, session kinds), S16.2.3v3 (entry separation), S2.5.4v2 (declarations produce no item).
 **Working design:** `vibe/Lambda_Design_Ast_Interpreter.md` §8 (AI20), `vibe/impl/Lambda_Impl_Ast_Interp (done).md` P4, `vibe/Lambda_Repl.md` (stale — describes the retired replay model), `vibe/idea/Clojure_REPL.md` Part 2 (ergonomics roadmap).
-**Ledger:** closes LR01-7, LR01-18 when landed.
+**Ledger:** LR01-7 and LR01-18 FIXED 2026-10-06 and moved to the fixed ledger.
 
 ---
 
@@ -186,3 +186,28 @@ Everything below reads the session's `NameScope` + slab, which replay could neve
 - `vibe/Lambda_Issue_Ledger.md` — LR01-7 (replay) and LR01-18 (echo) close; `vibe/impl/Lambda_Impl_Ast_Interp (done).md` P4 text "imports are deliberately rejected" corrected.
 - **Landed 2026-10-06 with the rulings:** `doc/Lambda_Formal_Design.md` D8.1.1v17 (25.0.0) — the REPL session, replay retired, the D8.5.1v7 reference-parser carve-out struck, RI4–RI6; `doc/Lambda_Formal_Semantics.md` S16.7.4–S16.7.6 (57.1.0) — echo, no rebinding, session kinds. Both carry `*` footnotes until Phases A–B land; flip them then.
 - `doc/Lambda_Reference.md` / tutorial REPL samples — the website quickstart avoids `let` because of LR01-18; it can stop avoiding it.
+
+## 8. Implementation record (2026-10-06)
+
+| Gap | Resolution | Site |
+|---|---|---|
+| G1 | Replay and the init-failure fallback deleted; `jit` becomes `auto` with first-call promotion (`interp_set_func_jit_threshold_default`) | `main.cpp` `run_repl` |
+| G2 | `ReplEntryStatus`; one transaction (`ReplEntryTxn`) with a single rollback; each diagnostic printed once by the session; unsupported constructs and imports named | `runner.cpp` |
+| G3 | E209 kept (S16.7.5). The double report was a builder defect: predeclare and function resolution identified a declaration by start byte, so a duplicate registered twice — and in the REPL two entries' `fn f` both start at byte 0, so a duplicate was not reported at all and the entry spun. Now identified by node (`lookup_declaration_in_current_scope`) | `build_ast.cpp` |
+| G4 | State 2 of §3.5: entry imports initialize their cone first; initialized modules are recorded per session | `interp.cpp` `interp_init_repl_fragment_imports` |
+| G5 | Procedural session: scope `is_proc`, colour walk `module_is_proc`, top-level frame `proc_handler` | `runner.cpp`, `build_ast.cpp`, `interp.cpp` |
+| G6 | Bracket fast path, then the parser's INCOMPLETE | `main-repl.cpp`, `runner.cpp` |
+| G7 | SIGINT armed per entry; `LAMBDA_FAULT_INTERRUPTED` raised at call entry, every back-edge and both fast integer loops | `interp.cpp`, `main.cpp` |
+| G8 | Echo unless every item is a declaration or statement | `runner.cpp` |
+| §3.9 | `.env`, `.type`, `.time`, `.load`, `.save`; Tab completion through the editor's existing request/reply protocol; history file | `main.cpp`, `main-repl.cpp`, `terminal_host.cpp`, `lmd/package/io/terminal.ls` |
+
+Defects found and fixed on the way:
+
+- The error formatter left its buffer unterminated after a caret line on the source's last line, so diagnostics printed stray bytes (`lambda-error.cpp`).
+- A grown module slab is sealed; restoring the plan count after a failed entry made the next entry fail with "sealed layout changed". The transaction keeps the grown count.
+
+Not done, and why:
+
+- Undefined names and some operator type errors complete with a bare error that carries no diagnostic, in files too; whether an unbound name is a compile error needs a ruling.
+- Member completion after `.` needs the receiver's static shape.
+- §3.10 snapshot cost was left as designed; the release C3 latency table is still to be measured.

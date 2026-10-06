@@ -13,6 +13,8 @@
 
 struct TerminalSession {
     TemplateHostSession* mounted;
+    TerminalCompleter completer;
+    void* completer_opaque;
     char* submitted_line;
     int64_t frame_id;
     int wait_ms;
@@ -25,15 +27,72 @@ static Item terminal_model(TerminalSession* session) {
     return {.item = template_host_session_root_word(session->mounted)};
 }
 
-static Item terminal_active_frame(TerminalSession* session) {
+// One `state` field of the mounted <readline_terminal> view.
+static Item terminal_state(TerminalSession* session, const char* name) {
     Item model = terminal_model(session);
     TemplateEntry* entry = template_registry_match(g_template_registry,
         model, false, nullptr);
-    const char* active_name = template_entry_state_name(entry, "active_frame");
-    Item active = active_name
-        ? tmpl_state_get(model, entry->template_ref, active_name) : ItemNull;
+    const char* state_name = template_entry_state_name(entry, name);
+    return state_name ? tmpl_state_get(model, entry->template_ref, state_name)
+                      : ItemNull;
+}
+
+static Item terminal_active_frame(TerminalSession* session) {
+    Item active = terminal_state(session, "active_frame");
     return get_type_id(active) == LMD_TYPE_NULL
-        ? item_attr(model, "frame") : active;
+        ? item_attr(terminal_model(session), "frame") : active;
+}
+
+static Item terminal_string_item(const char* text, size_t length) {
+    return {.item = s2it(heap_strcpy(text, length))};
+}
+
+static void terminal_map_set(Item map, const char* key, Item value) {
+    RootFrame roots(2);
+    Rooted<Item> held(roots, value);
+    Rooted<Item> name(roots, terminal_string_item(key, strlen(key)));
+    vmap_set(map, name.get(), held.get());
+}
+
+typedef struct TerminalCompletionSink {
+    Rooted<Item>* matches;
+} TerminalCompletionSink;
+
+static void terminal_completion_add(void* sink, const char* text, size_t length) {
+    TerminalCompletionSink* target = (TerminalCompletionSink*)sink;
+    RootFrame roots(1);
+    Rooted<Item> candidate(roots, terminal_string_item(text, length));
+    array_push_verbatim((Array*)(uintptr_t)target->matches->get().item, candidate.get());
+}
+
+// lambda.io.terminal's frame asks for candidates on Tab (frame.ls); the reply
+// goes back to that frame, which owns insertion, the common prefix and undo.
+static Item terminal_complete(TerminalSession* session, Item request) {
+    String* line = item_attr(request, "line").get_string();
+    if (!session->completer || !line) return ItemNull;
+    // the completer may allocate, so it reads a private copy of the line
+    size_t length = (size_t)line->len;
+    char* text = (char*)mem_alloc(length + 1, MEM_CAT_SYSTEM);
+    if (!text) return ItemError;
+    memcpy(text, line->chars, length);
+    text[length] = '\0';
+    RootFrame roots(3);
+    Rooted<Item> held_request(roots, request);
+    Rooted<Item> matches(roots, {.item = (uint64_t)(uintptr_t)array_plain()});
+    Rooted<Item> reply(roots, vmap_new());
+    TerminalCompletionSink sink = {&matches};
+    size_t word = session->completer(session->completer_opaque, text, length,
+        terminal_completion_add, &sink);
+    if (word > length) word = length;
+    terminal_map_set(reply.get(), "frame_id", item_attr(held_request.get(), "frame_id"));
+    terminal_map_set(reply.get(), "generation", item_attr(held_request.get(), "generation"));
+    terminal_map_set(reply.get(), "complete_on",
+        terminal_string_item(text + length - word, word));
+    terminal_map_set(reply.get(), "matches", matches.get());
+    mem_free(text);
+    bool handled = false;
+    return template_dispatch_event(terminal_active_frame(session), true,
+        "completion_reply", reply.get(), &handled);
 }
 
 static Item terminal_emit(void* receiver, Item event_name, Item event_data) {
@@ -60,6 +119,9 @@ static Item terminal_emit(void* receiver, Item event_name, Item event_data) {
         session->submitted_line = copied;
         return ItemNull;
     }
+    if (strcmp(event, "readline_completion_request") == 0) {
+        return terminal_complete(session, event_data);
+    }
     if (strcmp(event, "readline_close") == 0) {
         session->ended = true;
         return ItemNull;
@@ -75,7 +137,8 @@ static Item terminal_emit(void* receiver, Item event_name, Item event_data) {
     return ItemNull;
 }
 
-static Item terminal_event_map(int64_t frame_id, const char* prompt) {
+static Item terminal_event_map(int64_t frame_id, const char* prompt,
+                               bool completer) {
     RootFrame roots(3);
     Rooted<Item> event(roots, vmap_new());
     Rooted<Item> key(roots, ItemNull);
@@ -85,6 +148,9 @@ static Item terminal_event_map(int64_t frame_id, const char* prompt) {
     vmap_set(event.get(), key.get(), value.get());
     key.set({.item = s2it(heap_strcpy("prompt", 6))});
     value.set({.item = s2it(heap_strcpy(prompt, strlen(prompt)))});
+    vmap_set(event.get(), key.get(), value.get());
+    key.set({.item = s2it(heap_strcpy("completer", 9))});
+    value.set({.item = b2it(completer)});
     vmap_set(event.get(), key.get(), value.get());
     return event.get();
 }
@@ -181,7 +247,8 @@ TerminalReadResult terminal_session_readline(TerminalSession* session,
         return {TERMINAL_READ_ERROR, nullptr};
     TemplateHostBinding binding(session->mounted);
     if (!binding.valid()) return {TERMINAL_READ_ERROR, nullptr};
-    Item next = terminal_event_map(++session->frame_id, prompt);
+    Item next = terminal_event_map(++session->frame_id, prompt,
+        session->completer != nullptr);
     if (!terminal_simple_event(session, "readline_next", next))
         return {TERMINAL_READ_ERROR, nullptr};
     if (transport->is_tty && transport->set_raw &&
@@ -259,6 +326,58 @@ TerminalReadResult terminal_session_readline(TerminalSession* session,
                            : interrupted ? TERMINAL_READ_INTERRUPTED
                                          : TERMINAL_READ_EOF
                     : TERMINAL_READ_ERROR, line};
+}
+
+void terminal_session_set_completer(TerminalSession* session,
+                                    TerminalCompleter completer, void* opaque) {
+    if (!session) return;
+    session->completer = completer;
+    session->completer_opaque = opaque;
+}
+
+bool terminal_session_load_history(TerminalSession* session, const char* text) {
+    if (!session || !session->ready || !text) return false;
+    TemplateHostBinding binding(session->mounted);
+    if (!binding.valid()) return false;
+    RootFrame roots(2);
+    Rooted<Item> entries(roots, {.item = (uint64_t)(uintptr_t)array_plain()});
+    Rooted<Item> entry(roots, ItemNull);
+    for (const char* line = text; *line;) {
+        const char* end = strchr(line, '\n');
+        size_t length = end ? (size_t)(end - line) : strlen(line);
+        if (length > 0) {
+            entry.set(terminal_string_item(line, length));
+            array_push_verbatim((Array*)(uintptr_t)entries.get().item, entry.get());
+        }
+        line += length + (end ? 1 : 0);
+    }
+    return terminal_simple_event(session, "readline_history_load", entries.get());
+}
+
+char* terminal_session_history_text(TerminalSession* session) {
+    if (!session || !session->ready) return nullptr;
+    TemplateHostBinding binding(session->mounted);
+    if (!binding.valid()) return nullptr;
+    Item history = terminal_state(session, "history");
+    if (get_type_id(history) != LMD_TYPE_ARRAY) return nullptr;
+    Array* entries = (Array*)(uintptr_t)history.item;
+    size_t total = 1;
+    for (int64_t i = 0; i < entries->length; i++) {
+        String* line = entries->items[i].get_string();
+        if (line) total += (size_t)line->len + 1;
+    }
+    char* text = (char*)mem_alloc(total, MEM_CAT_SYSTEM);
+    if (!text) return nullptr;
+    size_t at = 0;
+    for (int64_t i = 0; i < entries->length; i++) {
+        String* line = entries->items[i].get_string();
+        if (!line) continue;
+        memcpy(text + at, line->chars, (size_t)line->len);
+        at += (size_t)line->len;
+        text[at++] = '\n';
+    }
+    text[at] = '\0';
+    return text;
 }
 
 void terminal_session_close(TerminalSession* session) {

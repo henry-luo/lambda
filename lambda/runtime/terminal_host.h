@@ -30,7 +30,22 @@ typedef struct TerminalTransport {
     int64_t (*write)(void* device, const char* bytes, size_t length);
 } TerminalTransport;
 
+// Completion provider (D8.1.1v17 session services). Given the text before the
+// caret, returns how many trailing bytes form the word being completed and
+// reports each candidate replacement for that word through `add`.
+typedef void (*TerminalCompletionAdd)(void* sink, const char* text, size_t length);
+typedef size_t (*TerminalCompleter)(void* opaque, const char* line, size_t length,
+                                    TerminalCompletionAdd add, void* sink);
+
 TerminalSession* terminal_session_open(bool is_tty, int columns);
+// Later frames offer Tab completion through `completer` (NULL turns it off).
+void terminal_session_set_completer(TerminalSession* session,
+                                    TerminalCompleter completer, void* opaque);
+// Replaces the editor's history with newline-separated entries, oldest first.
+bool terminal_session_load_history(TerminalSession* session, const char* text);
+// The editor's history as newline-separated entries, oldest first; the caller
+// mem_free()s it. NULL when the history cannot be read.
+char* terminal_session_history_text(TerminalSession* session);
 TerminalReadResult terminal_session_readline(TerminalSession* session,
                                              const TerminalTransport* transport,
                                              const char* prompt);

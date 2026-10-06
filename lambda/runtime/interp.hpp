@@ -30,6 +30,15 @@ typedef enum LambdaTier {
 // Safe to call before any parse.
 LambdaTier lambda_tier_selected(void);
 void lambda_tier_set(LambdaTier tier);
+// Default AUTO function-entry promotion threshold (5); LAMBDA_FUNC_JIT_THRESHOLD
+// overrides it. A `jit` REPL session sets 1 (D8.1.1v17).
+void interp_set_func_jit_threshold_default(uint32_t threshold);
+
+// REPL entry interrupt (D8.1.1v17). `request` is async-signal-safe; T0 raises
+// LAMBDA_FAULT_INTERRUPTED at its next call entry or loop back-edge until the
+// session clears the request.
+void interp_interrupt_request(void);
+void interp_interrupt_clear(void);
 // Parses "auto" | "interp" | "jit"; returns false on an unrecognized value.
 bool lambda_tier_parse(const char* text, LambdaTier* out);
 
@@ -122,9 +131,10 @@ struct InterpFrame {
     uint32_t            var_marked_mask;
     InterpFrame*        caller;
     const AstNode*      cur;         // currently evaluating node (backtrace/step)
-    // An `on` handler activation: it has no `fn` node, yet its body is
-    // procedural (S12.1.3), so its blocks yield their last value (S2.5.3)
-    // exactly as MIR's `in_proc` handler functions do.
+    // An `on` handler activation, or a procedural REPL session's top level
+    // (S16.7.6): it has no `fn` node, yet its body is procedural (S12.1.3), so
+    // its blocks yield their last value (S2.5.3) exactly as MIR's `in_proc`
+    // handler functions do.
     bool                proc_handler;
     // D8.1.1v14: the top-level handoff loop now executing in this activation
     // (back-edges of its nested loops count toward it), and the definition's
@@ -219,16 +229,26 @@ typedef struct InterpRunStats {
 } InterpRunStats;
 
 // P4 owns one Script for the lifetime of an interactive session. New inputs
-// append only their own typed AST fragment and execute only that fragment.
+// append only their own typed AST fragment and execute only that fragment
+// (D8.1.1v17: the persistent T0 session is the only REPL engine).
+typedef enum ReplEntryStatus {
+    REPL_ENTRY_OK = 0,      // built, ran, and published
+    REPL_ENTRY_INCOMPLETE,  // the parser needs more input; session untouched
+    REPL_ENTRY_REJECTED,    // parse/build/plan/T0-support failure; restored
+    REPL_ENTRY_FAILED,      // ran and produced an error or fault; restored
+} ReplEntryStatus;
+
 typedef struct InterpReplSession {
     Runner runner;
     bool initialized;
-    // True when the last eval REJECTED the fragment and restored the session
-    // (parse/type failure), false when evaluation ran to completion — even if
-    // it produced an error VALUE. Both return ItemError, but only the first is
-    // a rollback: an error value is an ordinary result the REPL should print,
-    // which is what the JIT REPL path does.
-    bool last_input_rejected;
+    // S16.7.6: a procedural session's entries are statements of one persistent
+    // implicit procedure body (`lambda run` without a script).
+    bool procedural;
+    // S16.7.4: set by each OK eval when every top-level item of the entry is a
+    // declaration or statement, which produce no item and so echo nothing.
+    bool declarations_only;
+    // Script*: imported modules whose initializers ran in this session
+    ArrayList* initialized_modules;
 } InterpReplSession;
 
 InterpRunStats* interp_run_stats(void);
@@ -347,7 +367,18 @@ bool interp_promote_function_if_hot(Function* fn);
 Item interp_run_script(Runner* runner, bool run_main);
 // Executes one already planned P4 REPL fragment against the Script's existing
 // persistent module slab; earlier top-level nodes are not re-run.
-Item interp_run_repl_fragment(Runner* runner, AstNode* fragment);
+// One REPL entry. `initialized_modules` (Script*) is the session's record of
+// imported modules whose initializers already ran; newly reached cone modules
+// run first and are appended. `procedural` runs the top level as a `pn` body.
+typedef struct InterpReplFragmentRun {
+    AstNode* fragment;
+    ArrayList* initialized_modules;
+    bool procedural;
+} InterpReplFragmentRun;
+Item interp_run_repl_fragment(Runner* runner, const InterpReplFragmentRun* run);
+// The first module in an entry's import cones that T0 cannot initialize, or
+// NULL when every one is planned for the interpreter.
+Script* interp_repl_fragment_unsupported_import(AstNode* fragment);
 
 // Calls an initialized public module function from a native document loader.
 // The module's own slab and T0 dispatch state remain authoritative; a module
@@ -382,9 +413,27 @@ typedef Item (*InterpLargeStackCall)(void* opaque);
 Item interp_run_on_large_stack(EvalContext* eval, InterpLargeStackCall call,
                                void* opaque);
 
-bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime);
+bool interp_repl_session_init(InterpReplSession* session, Runtime* runtime,
+                              bool procedural);
 void interp_repl_session_destroy(InterpReplSession* session);
-Item interp_repl_session_eval(InterpReplSession* session, const char* source);
+// Every non-OK status except INCOMPLETE has already printed its diagnostic on
+// stderr exactly once; the caller only reports the rollback.
+ReplEntryStatus interp_repl_session_eval(InterpReplSession* session,
+                                         const char* source, Item* out);
+// Session services (D8.1.1v17). They read the live scope and slab, or build an
+// entry without running it; none re-runs a prior entry.
+// The accepted entries, newline-joined (a failed entry was rolled back).
+const char* interp_repl_session_source(const InterpReplSession* session);
+typedef void (*InterpReplBindingVisitor)(void* opaque, const char* name,
+                                         size_t length, Item value, bool imported);
+void interp_repl_session_each_binding(InterpReplSession* session,
+                                      InterpReplBindingVisitor visit, void* opaque);
+// Builds `source` as an entry and reports its static type, then rolls back.
+ReplEntryStatus interp_repl_session_type(InterpReplSession* session,
+                                         const char* source, const char** out_type);
+typedef void (*InterpReplCompletionAdd)(void* sink, const char* text, size_t length);
+void interp_repl_session_complete(InterpReplSession* session, const char* word,
+                                  size_t length, InterpReplCompletionAdd add, void* sink);
 
 // Creates a cold Function value for a definition site: entry_abi
 // LAMBDA_INTERPRETED, ptr NULL, def = fn_node. Captures are snapshotted by
