@@ -542,9 +542,13 @@ static_assert(offsetof(TypeMap, byte_size) == LAMBDA_GC_OFF_TYPE_MAP_BYTE_SIZE &
 
 typedef struct TypeMapTransition {
     NameId name_id;
-    uint8_t key_kind;
-    const char* name; // retained only for the explicit id-less Input seam
+    // D3.4.4v4: a STRING edge keeps its spelling and its routing hash, since an
+    // id proves a STRING name equal but never different; identity kinds match
+    // by name_id alone
+    uint32_t name_hash;
+    const char* name;
     uint32_t name_len;
+    uint8_t key_kind;
     TypeId value_type;
     uint8_t flags;
     TypeMap* target;
@@ -797,14 +801,18 @@ static inline bool typemap_shape_name_equals_hash(ShapeEntry* e, const char* key
            memcmp(e->name->str, key, (size_t)key_len) == 0;
 }
 
+// D3.4.4v4: a JS Symbol or private name is its record; a STRING name is its
+// spelling, of which equal ids are only a fast proof -- ids are per name pool,
+// and an unpooled key has none, so two entries with different ids may still
+// name one field, and a shared table must not take both.
 static inline bool typemap_shape_entries_equal(ShapeEntry* left, ShapeEntry* right) {
     if (!left || !right) return false;
-    if (left->name_id != NAME_ID_NONE && right->name_id != NAME_ID_NONE) {
-        return left->name_id == right->name_id;
+    if (left == right) return true;
+    if (left->key_kind != right->key_kind) return false;
+    if (left->key_kind != NAME_KEY_STRING) {
+        return left->name_id != NAME_ID_NONE && left->name_id == right->name_id;
     }
-    if (left->key_kind != NAME_KEY_STRING || right->key_kind != NAME_KEY_STRING) {
-        return false;
-    }
+    if (left->name_id != NAME_ID_NONE && left->name_id == right->name_id) return true;
     if (!left->name || !right->name) return !left->name && !right->name;
     return typemap_shape_name_equals_hash(left, right->name->str,
         (int)right->name->length,
@@ -1572,6 +1580,12 @@ typedef struct Input {
     int element_root_cap;
     int element_root_count;
     int element_transition_shapes;    // bounded by MAX_ELEMENT_SHAPE_GRAPH
+    // D3.4.3v5: the runtime tree also grows from parents it does not own -- a
+    // literal's, contract's, nominal, parsed or private type. Their edges live
+    // here, keyed by the parent's address, so the parent is never written.
+    // Only the runtime tree sets `keeps_external_edges`; the table is lazy.
+    bool keeps_external_edges;
+    struct hashmap* external_edges;
     ArrayList* type_list;       // list of types
     Item root;
     Input* parent;              // parent Input for hierarchical ownership (nullable)

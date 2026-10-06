@@ -1081,6 +1081,13 @@ Every CSV read logs `[ERR!] Parse errors (0 errors):` followed by "CSV has 2 col
 
 ## 12. Procedural runtime (LR_12)
 
+<a id="lr12-40"></a>**LR12-40 · A `var` bound to a container member read aliases it, so an index write through the `var` changes the source (S9.1.2) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
+`let lit = {arr: [1, 2]}; var b = lit.arr; b[0] = 10` leaves `lit.arr == [10, 2]` on JIT and auto; the same holds for a parsed document (`let d = parse("{\"arr\": [1, 2]}", 'json')^; var a = d.arr; a[0] = 10` changes `d.arr`). A `let` binding's value, and a parsed document, are changed in place, which S9.1.2's value semantics forbid. LR12-38 fixed the parameter form (`var r = o` with `o` a parameter); this is the member-read form, where the declaration binds a child container of another value without marking it shared, and the index write takes the unique in-place path.
+
+<a id="lr12-41"></a>**LR12-41 · An index write on a copy of a parsed element is lost (S9.1.6) · OPEN (found 2026-10-06, while writing the D3.4.3v5 fixture; reproduces on the master build)**
+`let x = parse("<r><i k=\"1\"/></r>", 'xml')^; var e = x[0]; e["z"] = "4"` reads `e.z` back as `null` on JIT and auto, while `e.z = "4"` keeps it, and an index write on an element literal (`var e = <div k: "1">; e["z"] = "4"`) keeps it too. LR12-39's `is_immortal` fix does not change it. The index-assign lowering for an element-typed `var` seen through a parsed document's content does not republish, or does not reach, the copy the write makes; it needs the MIR of the write traced as LR12-39's was.
+
+
 <a id="lr12-1"></a>**LR12-1 · `fetch_response_to_item` returns a bare String · OPEN**
 `// TODO: Implement proper map structure when the complex type system is
 working` (`lambda/runtime/lambda-proc.cpp:513`–`514`) — `pn_fetch` hands back

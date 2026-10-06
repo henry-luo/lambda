@@ -1376,15 +1376,22 @@ Item map_field_to_item(void* field_ptr, TypeId type_id) {
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
     case LMD_TYPE_PATH:
         memcpy(&ptr_val, field_ptr, sizeof(void*));
+        // A null written into a container slot of a SHARED shape keeps the
+        // slot's container tag (shape_entry_retag_is_safe), so a zero word is
+        // that null. Return the canonical ItemNull: the raw 0 word typed as
+        // null but failed the JIT's `== null` bit compare, once runtime-grown
+        // maps and spreads came to share tree types (D3.4.3v4/v5).
+        if (!ptr_val) return ItemNull;
         result.container = (Container*)ptr_val;
-        if (result.container && result.container->type_id == LMD_TYPE_RAW_POINTER) {
+        if (result.container->type_id == LMD_TYPE_RAW_POINTER) {
             result.container->type_id = type_id;
         }
         break;
     case LMD_TYPE_VMAP: case LMD_TYPE_VARRAY: case LMD_TYPE_VELMT:
         // Virtual carriers are direct pointers with their physical tag in the
-        // common Container prefix.
+        // common Container prefix; a zero word is null, as above.
         memcpy(&ptr_val, field_ptr, sizeof(void*));
+        if (!ptr_val) return ItemNull;
         result.vmap = (VMap*)ptr_val;
         break;
     case LMD_TYPE_ANY: {

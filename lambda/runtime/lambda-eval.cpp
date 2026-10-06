@@ -9863,6 +9863,12 @@ static void clone_mutable_container_flags(Container* dst, Container* src) {
     dst->is_heap = 1;
     dst->is_static = 0;
     dst->is_data_migrated = 0;
+    // The copy's storage is heap data written in the mutable encoding, never
+    // the input arena or const pool. Inheriting `is_immortal` from a parsed
+    // document made cow_prepare_write treat the copy as shared again, so every
+    // later write copied it once more and a write the compiler (rightly) did
+    // not republish was lost (LR12-39).
+    dst->is_immortal = 0;
 }
 
 static Item clone_mutable_array(Array* src, MutableCloneContext* clone_ctx) {
@@ -11112,35 +11118,66 @@ static Input* runtime_shape_tree(void) {
         return NULL;
     }
     tree->shape_graph_budget = RUNTIME_SHAPE_GRAPH_BUDGET;
+    // D3.4.3v5: maps grow from literal, contract, nominal, parsed and private
+    // types too, through edges this tree keeps in its own table
+    tree->keeps_external_edges = true;
     return tree;
 }
 
-// D3.4.3v4: an add to an empty plain map, or to one whose type is a node of the
-// runtime tree, follows (or mints) that tree's edge. Maps built by the same
-// sequence of adds then share one type and a path of n fields holds n entries;
-// copying the whole shape into the pool per add cost O(n²) entries that were
-// never reclaimed (LR03-38). Data grows by doubling. Any other type -- a
-// literal, contract, nominal or detached private type -- keeps the private path.
+// D3.4.3v5: an add to a plain map or an element follows (or mints) an edge of
+// the runtime tree. An empty plain map starts at the root; a node of the tree
+// follows its own edges; any other type -- a literal's, a contract's, a
+// nominal type's, a parsed document's or a private type -- is an external
+// parent, which the tree grows from without writing it. Maps built from the
+// same start by the same adds then share one type, and a path of n fields
+// holds n entries; copying the whole shape into the pool per add cost O(n²)
+// entries that were never reclaimed (LR03-38). Data grows by doubling. A type
+// the tree declines -- fan-out, budget, JS shape metadata, spread slots --
+// keeps the private path.
 static bool map_extend_via_runtime_tree(Item map_item, Item key, Item value) {
-    if (get_type_id(map_item) != LMD_TYPE_MAP || get_type_id(key) != LMD_TYPE_STRING) {
+    TypeId container_type = get_type_id(map_item);
+    TypeId key_type = get_type_id(key);
+    if ((container_type != LMD_TYPE_MAP && container_type != LMD_TYPE_ELEMENT) ||
+            (key_type != LMD_TYPE_STRING && key_type != LMD_TYPE_SYMBOL)) {
         return false;
     }
+    // S8.2.2v4: a Lambda symbol without a namespace is the global STRING name
+    // of its characters, so `m['k'] = v` and every spread key share the edges
+    // `m["k"] = v` takes. A qualified symbol keeps the private path until keys
+    // carry their namespace (LR03-40); a JS Symbol never reaches a plain
+    // Lambda map's growth path.
+    String* key_string = NULL;
+    Symbol* key_symbol = NULL;
+    if (key_type == LMD_TYPE_STRING) {
+        key_string = key.get_safe_string();
+        if (!key_string) return false;
+    } else {
+        key_symbol = key.get_safe_symbol();
+        if (!key_symbol || !symbol_is_lambda_name(key_symbol) ||
+                symbol_lambda_namespace(key_symbol)) return false;
+    }
     TypeId value_type = get_type_id(value);
+    bool is_element = container_type == LMD_TYPE_ELEMENT;
+    // D2.6.6v2: an element shares Map's attribute face (type, data, data_cap)
     Map* map = map_item.map;
-    if (!map || map->map_kind != MAP_KIND_PLAIN || value_type == LMD_TYPE_ERROR) return false;
+    if (!map || value_type == LMD_TYPE_ERROR) return false;
+    if (!is_element && map->map_kind != MAP_KIND_PLAIN) return false;
+    // UI-mode elements keep their attribute buffers in the context arena, which
+    // only the private path allocates from
+    if (is_element && context && context->ui_mode && context->arena) return false;
     TypeMap* old_type = (TypeMap*)map->type;
     Input* tree = runtime_shape_tree();
     if (!old_type || !tree) return false;
-    TypeMap* parent = NULL;  // the tree's root
-    bool empty_plain = old_type->length == 0 && !old_type->shape && !old_type->nominal &&
-        !old_type->is_trusted_contract && !old_type->has_spread;
-    if (!empty_plain) {
-        if (!type_tree_owns(tree, old_type)) return false;
-        parent = old_type;
-    }
+    // `{}`, a fresh map and a computed-key literal all start at the root, so
+    // they share one path; every other type is the parent itself
+    bool empty_plain = !is_element && old_type->length == 0 && !old_type->shape &&
+        !old_type->nominal && !old_type->is_trusted_contract && !old_type->has_spread;
+    TypeMap* parent = empty_plain ? NULL : old_type;
     ShapeEntry* entry = NULL;
-    TypeMap* target = type_tree_add_map_field(tree, parent, key.get_safe_string(),
-        value_type, &entry);
+    TypeMap* target = key_string
+        ? type_tree_add_map_field(tree, parent, key_string, value_type, &entry)
+        : type_tree_add_map_field_chars(tree, parent, key_symbol->chars,
+            key_symbol->len, value_type, &entry);
     if (!target || !entry) return false;
 
     int64_t old_size = empty_plain ? 0 : old_type->byte_size;

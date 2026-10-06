@@ -2020,3 +2020,313 @@ TEST(TransitionTreePrefixSharingTest, WideObjectKeepsOneChain) {
     EXPECT_EQ(MapReader(map.map).get("key_0999").asInt(), 999);
     mem_pool_destroy(pool);
 }
+
+// ============================================================================
+// Key identity on transition edges (S8.2.2v4, D3.4.4v4): a STRING name is its
+// spelling, so a pooled key with a NameId, an unpooled key and a key given by
+// its characters (a Lambda Symbol) take one edge; a JS Symbol or private name
+// is its record and never matches by its description bytes.
+// ============================================================================
+
+namespace {
+struct KeyIdentityFixture {
+    Pool* pool = nullptr;
+    Input* input = nullptr;
+    NamePool* names = nullptr;  // assigns NameIds, unlike an Input's own pool
+    KeyIdentityFixture(const char* label) {
+        log_init(NULL);
+        pool = mem_pool_create(NULL, MEM_ROLE_INPUT, label);
+        input = pool ? Input::create(pool, nullptr) : nullptr;
+        names = pool ? name_pool_create_runtime(pool) : nullptr;
+    }
+    ~KeyIdentityFixture() {
+        if (names) name_pool_release(names);
+        if (pool) mem_pool_destroy(pool);
+    }
+};
+
+int edge_count(const TypeMap* node) {
+    int count = 0;
+    for (TypeMapTransition* tr = node ? node->transitions : nullptr; tr; tr = tr->next) count++;
+    return count;
+}
+}  // namespace
+
+TEST(TransitionTreeKeyIdentityTest, PooledUnpooledAndCharsTakeOneEdge) {
+    KeyIdentityFixture f("test.tree.key.spelling");
+    ASSERT_NE(f.input, nullptr);
+    ASSERT_NE(f.names, nullptr);
+    MarkBuilder builder(f.input);
+    String* pooled = name_pool_create_len(f.names, "alpha", 5);
+    String* unpooled = builder.createString("alpha");
+    ASSERT_NE(pooled, nullptr);
+    ASSERT_NE(unpooled, nullptr);
+    // the test only means something if the two spellings differ in identity
+    ASSERT_TRUE(string_is_pooled(pooled));
+    ASSERT_NE(name_ref_id(pooled), NAME_ID_NONE);
+    ASSERT_FALSE(string_is_pooled(unpooled));
+
+    ShapeEntry* e1 = nullptr;
+    ShapeEntry* e2 = nullptr;
+    ShapeEntry* e3 = nullptr;
+    TypeMap* t1 = type_tree_add_map_field(f.input, nullptr, pooled, LMD_TYPE_INT, &e1);
+    TypeMap* t2 = type_tree_add_map_field(f.input, nullptr, unpooled, LMD_TYPE_INT, &e2);
+    TypeMap* t3 = type_tree_add_map_field_chars(f.input, nullptr, "alpha", 5,
+        LMD_TYPE_INT, &e3);
+    ASSERT_NE(t1, nullptr);
+    EXPECT_EQ(t2, t1);
+    EXPECT_EQ(t3, t1);
+    EXPECT_EQ(edge_count(f.input->shape_transition_root), 1);
+
+    // the other order: the first edge is minted id-less, then a pooled key finds it
+    String* unpooled_b = builder.createString("beta");
+    String* pooled_b = name_pool_create_len(f.names, "beta", 4);
+    TypeMap* u1 = type_tree_add_map_field(f.input, t1, unpooled_b, LMD_TYPE_STRING, nullptr);
+    TypeMap* u2 = type_tree_add_map_field(f.input, t1, pooled_b, LMD_TYPE_STRING, nullptr);
+    ASSERT_NE(u1, nullptr);
+    EXPECT_EQ(u2, u1);
+    EXPECT_EQ(edge_count(t1), 1);
+    // a different value type is a different edge
+    TypeMap* u3 = type_tree_add_map_field(f.input, t1, pooled_b, LMD_TYPE_INT, nullptr);
+    EXPECT_NE(u3, u1);
+    EXPECT_EQ(edge_count(t1), 2);
+}
+
+TEST(TransitionTreeKeyIdentityTest, JsSymbolsMatchByRecordNotDescription) {
+    KeyIdentityFixture f("test.tree.key.symbol");
+    ASSERT_NE(f.input, nullptr);
+    ASSERT_NE(f.names, nullptr);
+    StrView description = {"alpha", 5};
+    String* sym1 = name_pool_create_unique_symbol(f.names, description);
+    String* sym2 = name_pool_create_unique_symbol(f.names, description);
+    String* priv = name_pool_create_unique_private(f.names, description);
+    String* name = name_pool_create_len(f.names, "alpha", 5);
+    ASSERT_NE(sym1, nullptr);
+    ASSERT_NE(sym2, nullptr);
+    ASSERT_NE(priv, nullptr);
+    ASSERT_EQ(property_key_kind(sym1), NAME_KEY_SYMBOL);
+    ASSERT_EQ(property_key_kind(priv), NAME_KEY_PRIVATE);
+
+    // identity keys now take edges at all (the requires-identity gate is gone)
+    ShapeEntry* e_sym1 = nullptr;
+    TypeMap* t_sym1 = type_tree_add_map_field(f.input, nullptr, sym1, LMD_TYPE_INT, &e_sym1);
+    ASSERT_NE(t_sym1, nullptr);
+    ASSERT_NE(e_sym1, nullptr);
+    EXPECT_EQ(e_sym1->key_kind, NAME_KEY_SYMBOL);
+    EXPECT_EQ(e_sym1->name_id, name_ref_id(sym1));
+    // the same record finds its edge again
+    EXPECT_EQ(type_tree_add_map_field(f.input, nullptr, sym1, LMD_TYPE_INT, nullptr), t_sym1);
+    // equal descriptions are not equal keys, and neither is the STRING name
+    TypeMap* t_sym2 = type_tree_add_map_field(f.input, nullptr, sym2, LMD_TYPE_INT, nullptr);
+    TypeMap* t_priv = type_tree_add_map_field(f.input, nullptr, priv, LMD_TYPE_INT, nullptr);
+    TypeMap* t_name = type_tree_add_map_field(f.input, nullptr, name, LMD_TYPE_INT, nullptr);
+    TypeMap* t_chars = type_tree_add_map_field_chars(f.input, nullptr, "alpha", 5,
+        LMD_TYPE_INT, nullptr);
+    ASSERT_NE(t_sym2, nullptr);
+    ASSERT_NE(t_priv, nullptr);
+    ASSERT_NE(t_name, nullptr);
+    EXPECT_NE(t_sym2, t_sym1);
+    EXPECT_NE(t_priv, t_sym1);
+    EXPECT_NE(t_name, t_sym1);
+    EXPECT_NE(t_name, t_priv);
+    EXPECT_EQ(t_chars, t_name);
+    EXPECT_EQ(edge_count(f.input->shape_transition_root), 4);
+}
+
+TEST(TransitionTreeKeyIdentityTest, EntriesOfOneSpellingAreEqual) {
+    KeyIdentityFixture f("test.tree.key.entries");
+    ASSERT_NE(f.input, nullptr);
+    ASSERT_NE(f.names, nullptr);
+    MarkBuilder builder(f.input);
+    TypeAlloc alloc = type_alloc_of_pool(f.pool);
+    ShapeEntry* pooled = alloc_shape_entry_in(alloc,
+        name_pool_create_len(f.names, "gamma", 5), LMD_TYPE_INT, nullptr);
+    ShapeEntry* unpooled = alloc_shape_entry_in(alloc,
+        builder.createString("gamma"), LMD_TYPE_INT, nullptr);
+    ShapeEntry* other = alloc_shape_entry_in(alloc,
+        builder.createString("delta"), LMD_TYPE_INT, nullptr);
+    ShapeEntry* symbol = alloc_shape_entry_in(alloc,
+        name_pool_create_unique_symbol(f.names, {"gamma", 5}), LMD_TYPE_INT, nullptr);
+    ASSERT_NE(pooled->name_id, NAME_ID_NONE);
+    ASSERT_EQ(unpooled->name_id, NAME_ID_NONE);
+    EXPECT_TRUE(typemap_shape_entries_equal(pooled, unpooled));
+    EXPECT_TRUE(typemap_shape_entries_equal(unpooled, pooled));
+    EXPECT_FALSE(typemap_shape_entries_equal(pooled, other));
+    EXPECT_FALSE(typemap_shape_entries_equal(pooled, symbol));
+    EXPECT_FALSE(typemap_shape_entries_equal(symbol, unpooled));
+    EXPECT_TRUE(typemap_shape_entries_equal(symbol, symbol));
+}
+
+// ============================================================================
+// External parents (D3.4.3v5): the runtime tree grows from types it does not
+// own -- here maps and elements built in another Input -- keeping their edges
+// in its own table. The parent is never written, the child owns copies of the
+// parent's names, and a cached child is reused only while it still matches
+// the live parent in full.
+// ============================================================================
+
+namespace {
+struct ExternalParentFixture {
+    Pool* tree_pool = nullptr;
+    Input* tree = nullptr;
+    Pool* doc_pool = nullptr;
+    Input* doc = nullptr;
+    ExternalParentFixture(const char* label) {
+        log_init(NULL);
+        tree_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, label);
+        tree = tree_pool ? Input::create(tree_pool, nullptr) : nullptr;
+        if (tree) tree->keeps_external_edges = true;
+        doc_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "test.tree.external.doc");
+        doc = doc_pool ? Input::create(doc_pool, nullptr) : nullptr;
+    }
+    void release_doc() {
+        if (doc_pool) mem_pool_destroy(doc_pool);
+        doc_pool = nullptr;
+        doc = nullptr;
+    }
+    ~ExternalParentFixture() {
+        release_doc();
+        if (tree_pool) mem_pool_destroy(tree_pool);
+    }
+};
+
+bool field_named(const ShapeEntry* field, const char* name) {
+    return field && field->name && field->name->length == strlen(name) &&
+        memcmp(field->name->str, name, field->name->length) == 0;
+}
+}  // namespace
+
+TEST(TransitionTreeExternalParentTest, LiteralLikeParentIsSharedAndNeverWritten) {
+    ExternalParentFixture f("test.tree.external.shared");
+    ASSERT_NE(f.tree, nullptr);
+    ASSERT_NE(f.doc, nullptr);
+    MarkBuilder builder(f.doc);
+    Item made = builder.map().put("a", (int64_t)1).put("b", "x").final();
+    TypeMap* parent = (TypeMap*)made.map->type;
+    ASSERT_NE(parent, nullptr);
+    ASSERT_FALSE(type_tree_owns(f.tree, parent));
+    TypeMapTransition* parent_edges = parent->transitions;
+    ShapeEntry* parent_tail_link = parent->last ? parent->last->chain_next : nullptr;
+    ShapeEntry** parent_table = parent->field_index;
+    uint16_t parent_table_count = parent->field_count;
+
+    MarkBuilder tree_builder(f.tree);
+    ShapeEntry* added = nullptr;
+    TypeMap* child = type_tree_add_map_field(f.tree, parent,
+        tree_builder.createString("c"), LMD_TYPE_INT, &added);
+    ASSERT_NE(child, nullptr);
+    ASSERT_NE(added, nullptr);
+    EXPECT_TRUE(type_tree_owns(f.tree, child));
+    EXPECT_TRUE(child->is_transition_shared_shape);
+    EXPECT_EQ(child->length, parent->length + 1);
+    EXPECT_EQ(added->byte_offset, parent->byte_size);
+    // the same add from the same parent finds the cached child
+    EXPECT_EQ(type_tree_add_map_field_chars(f.tree, parent, "c", 1, LMD_TYPE_INT, nullptr),
+        child);
+    // the parent is untouched: no edge, no chain link, no table entry
+    EXPECT_EQ(parent->transitions, parent_edges);
+    EXPECT_EQ(parent->last ? parent->last->chain_next : nullptr, parent_tail_link);
+    EXPECT_EQ(parent->field_index, parent_table);
+    EXPECT_EQ(parent->field_count, parent_table_count);
+    // the child's prefix is a copy: same layout, names owned by the tree
+    ShapeEntry* p = typemap_first_field(parent);
+    ShapeEntry* c = typemap_first_field(child);
+    for (; p; p = typemap_next_field(parent, p), c = typemap_next_field(child, c)) {
+        ASSERT_NE(c, nullptr);
+        EXPECT_NE(c, p);
+        EXPECT_NE(c->name, p->name);
+        EXPECT_TRUE(arena_owns(f.tree->arena, (void*)c->name->str));
+        EXPECT_EQ(c->byte_offset, p->byte_offset);
+        EXPECT_EQ(c->type, p->type);
+    }
+    EXPECT_EQ(c, added);
+    // the child keeps working once the parent's owner is gone
+    f.release_doc();
+    EXPECT_TRUE(field_named(typemap_first_field(child), "a"));
+    EXPECT_NE(typemap_hash_lookup(child, "b", 1), nullptr);
+    EXPECT_EQ(typemap_hash_lookup(child, "c", 1), added);
+    // and it grows on as an ordinary node of the tree
+    TypeMap* grandchild = type_tree_add_map_field_chars(f.tree, child, "d", 1,
+        LMD_TYPE_STRING, nullptr);
+    ASSERT_NE(grandchild, nullptr);
+    EXPECT_EQ(child->transitions ? child->transitions->target : nullptr, grandchild);
+}
+
+TEST(TransitionTreeExternalParentTest, CachedChildMustMatchTheLiveParent) {
+    ExternalParentFixture f("test.tree.external.stale");
+    ASSERT_NE(f.tree, nullptr);
+    // a parent whose address a later type reuses is simulated by changing it in
+    // place: the cached child no longer matches, so a new one is minted
+    TypeMap* parent = (TypeMap*)alloc_type(f.doc_pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    ASSERT_NE(parent, nullptr);
+    MarkBuilder builder(f.doc);
+    ShapeEntry* a = alloc_shape_entry(f.doc_pool, builder.createString("a"), LMD_TYPE_INT, nullptr);
+    parent->shape = a;
+    parent->last = a;
+    parent->length = 1;
+    parent->byte_size = shape_entry_storage_size(a);
+    TypeMap* first = type_tree_add_map_field_chars(f.tree, parent, "b", 1, LMD_TYPE_INT, nullptr);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(type_tree_add_map_field_chars(f.tree, parent, "b", 1, LMD_TYPE_INT, nullptr), first);
+
+    shape_entry_set_type(a, type_info[LMD_TYPE_STRING].type);
+    parent->byte_size = shape_entry_storage_size(a);
+    TypeMap* retyped = type_tree_add_map_field_chars(f.tree, parent, "b", 1, LMD_TYPE_INT, nullptr);
+    ASSERT_NE(retyped, nullptr);
+    EXPECT_NE(retyped, first);
+
+    // record identity is part of the match too: a nominal parent's child
+    // carries the record, and a structural twin at the same address does not
+    TypeNominal record = {};
+    parent->nominal = &record;
+    parent->is_nominal = 1;
+    TypeMap* nominal_child = type_tree_add_map_field_chars(f.tree, parent, "b", 1,
+        LMD_TYPE_INT, nullptr);
+    ASSERT_NE(nominal_child, nullptr);
+    EXPECT_NE(nominal_child, retyped);
+    EXPECT_EQ(nominal_child->nominal, &record);
+    EXPECT_TRUE(nominal_child->is_nominal);
+    TypeMap* nominal_grandchild = type_tree_add_map_field_chars(f.tree, nominal_child, "c", 1,
+        LMD_TYPE_INT, nullptr);
+    ASSERT_NE(nominal_grandchild, nullptr);
+    EXPECT_EQ(nominal_grandchild->nominal, &record);
+}
+
+TEST(TransitionTreeExternalParentTest, ElementParentKeepsItsTag) {
+    ExternalParentFixture f("test.tree.external.element");
+    ASSERT_NE(f.tree, nullptr);
+    MarkBuilder builder(f.doc);
+    Item made = builder.element("div").attr("class", "box").final();
+    TypeElmt* parent = (TypeElmt*)made.element->type;
+    ASSERT_NE(parent, nullptr);
+    TypeMap* child = type_tree_add_map_field_chars(f.tree, (TypeMap*)parent, "id", 2,
+        LMD_TYPE_STRING, nullptr);
+    ASSERT_NE(child, nullptr);
+    ASSERT_EQ(child->type_id, LMD_TYPE_ELEMENT);
+    TypeElmt* element_child = (TypeElmt*)child;
+    EXPECT_EQ(element_child->name.length, (size_t)3);
+    EXPECT_EQ(memcmp(element_child->name.str, "div", 3), 0);
+    EXPECT_NE(element_child->name.str, parent->name.str);  // the tag spelling is copied
+    EXPECT_EQ(element_child->name_id, parent->name_id);
+    EXPECT_EQ(element_child->ns, parent->ns);
+    EXPECT_EQ(child->length, 2);
+    f.release_doc();
+    EXPECT_EQ(memcmp(element_child->name.str, "div", 3), 0);
+}
+
+TEST(TransitionTreeExternalParentTest, InadmissibleParentsAreDeclined) {
+    ExternalParentFixture f("test.tree.external.declined");
+    ASSERT_NE(f.tree, nullptr);
+    TypeMap* spread = (TypeMap*)alloc_type(f.doc_pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    ASSERT_NE(spread, nullptr);
+    spread->has_spread = true;
+    EXPECT_EQ(type_tree_add_map_field_chars(f.tree, spread, "a", 1, LMD_TYPE_INT, nullptr),
+        nullptr);
+    // an Input that keeps no external edges grows only from its own nodes
+    TypeMap* plain = (TypeMap*)alloc_type(f.doc_pool, LMD_TYPE_MAP, sizeof(TypeMap));
+    ASSERT_NE(plain, nullptr);
+    EXPECT_EQ(type_tree_add_map_field_chars(f.doc, plain, "a", 1, LMD_TYPE_INT, nullptr),
+        nullptr);
+    EXPECT_NE(type_tree_add_map_field_chars(f.tree, plain, "a", 1, LMD_TYPE_INT, nullptr),
+        nullptr);
+}

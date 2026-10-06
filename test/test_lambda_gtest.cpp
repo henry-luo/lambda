@@ -482,6 +482,13 @@ static const TierParityFixture kTune27TierParity[] = {
     // S11.4.1v3 (LR03-13): a call through a declared function-type contract
     // checks its result; the JIT had read a string as 0.
     {"test/lambda/contract_return_check.ls", "test/lambda/contract_return_check.txt"},
+    // D3.4.3v5 / D3.4.4v4: maps grow through the runtime tree from symbol
+    // keys and from external parents (literal, parsed, contract, nominal,
+    // retyped, element types); the parsed copy also pins LR12-39
+    {"test/lambda/proc/map_symbol_key_tree.ls", "test/lambda/proc/map_symbol_key_tree.txt",
+     "AST_NODE_INDEX_ASSIGN_STAM"},
+    {"test/lambda/proc/map_external_parent.ls", "test/lambda/proc/map_external_parent.txt",
+     "AST_NODE_INDEX_ASSIGN_STAM"},
 };
 
 // explicit exclusions used to pass this test by silently executing MIR

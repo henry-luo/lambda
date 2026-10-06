@@ -1,0 +1,28 @@
+sym: {
+  "k0": 0,
+  "k1": 1,
+  "k2": 2,
+  "k3": 3
+}
+str: {
+  "k0": 10,
+  "k1": 11,
+  "k2": 12,
+  "k3": 13
+}
+mixed: {
+  "k0": 0,
+  "k1": -1,
+  "k2": -2,
+  "k3": 3
+} len=4 k1=-1 k2=-2
+spread: {
+  "x": 1,
+  "y": 20,
+  "z": 3,
+  "w": 4
+} len=4
+order: x y z w 
+null over list: true true null
+wide: len=301 k299=299 c1.extra=1 c2.extra=2 source=300
+
