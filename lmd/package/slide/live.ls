@@ -48,9 +48,7 @@ pn patch_visual(owner, v, key, previous = null) {
         if (v == previous) { return null }
         let node = dom.get_element_by_id(owner, key ++ "-" ++ v.dom_key)
         if (node != null) {
-            let properties = html.effect_properties(v)
-            let old = if (previous == null) {} else html.effect_properties(previous)
-            for (property, value in properties where old[property] != value)
+            for (property, value in html.effect_properties(v, previous))
                 set_style(node, string(property), value)^
             let hidden = v.visible < 0.5 or v.opacity <= 0.0
             let was_hidden = previous != null and (previous.visible < 0.5 or previous.opacity <= 0.0)

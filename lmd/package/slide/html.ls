@@ -16,18 +16,26 @@ html, body { margin: 0; width: 100%; min-height: 100%; }
 .slide-controls button { font: inherit; padding: 6px 14px; }
 "
 
-pub fn effect_properties(v) {
+// compare sampled channels before formatting; steady channels need no CSS patch.
+pub fn effect_properties(v, previous = null) {
     let invisible = v.visible < 0.5 or v.opacity <= 0.0
-    let clip_css = if (v.clip <= 0.0) "none" else {
+    let visibility_changed = previous == null or invisible != (previous.visible < 0.5 or previous.opacity <= 0.0)
+    let clip_changed = previous == null or v.clip != previous.clip or
+        (v.clip > 0.0 and v.clip_direction != previous.clip_direction)
+    let clip_css = if (not clip_changed) null else if (v.clip <= 0.0) "none" else {
         let amount = c.fmt(v.clip * 100.0) ++ "%"
         "inset(" ++ (if (v.clip_direction == 'left') "0 0 0 " ++ amount
             else if (v.clip_direction == 'right') "0 " ++ amount ++ " 0 0"
             else if (v.clip_direction == 'top') amount ++ " 0 0 0" else "0 0 " ++ amount ++ " 0") ++ ")"
     }
-    {opacity: c.fmt(v.opacity), visibility: if (invisible) "hidden" else "visible",
-        ["pointer-events"]: if (invisible) "none" else "auto", transform: "translate(" ++
-        c.px(v.tx) ++ "," ++ c.px(v.ty) ++ ") rotate(" ++ c.fmt(v.rotation) ++ "deg) scale(" ++
-        c.fmt(v.sx) ++ "," ++ c.fmt(v.sy) ++ ")", ["clip-path"]: clip_css}
+    {*: if (previous == null or v.opacity != previous.opacity) {opacity: c.fmt(v.opacity)} else {},
+        *: if (visibility_changed) {visibility: if (invisible) "hidden" else "visible",
+            ["pointer-events"]: if (invisible) "none" else "auto"} else {},
+        *: if (previous == null or v.tx != previous.tx or v.ty != previous.ty or
+            v.rotation != previous.rotation or v.sx != previous.sx or v.sy != previous.sy)
+            {transform: "translate(" ++ c.px(v.tx) ++ "," ++ c.px(v.ty) ++ ") rotate(" ++
+                c.fmt(v.rotation) ++ "deg) scale(" ++ c.fmt(v.sx) ++ "," ++ c.fmt(v.sy) ++ ")"} else {},
+        *: if (clip_changed) {["clip-path"]: clip_css} else {}}
 }
 
 pub fn effect_style(v) => join([for (key, value in effect_properties(v)) string(key) ++ ":" ++ value ++ ";"], "")

@@ -7,6 +7,60 @@
 > pure transformations and procedural event handlers; S2.6.3 element splicing;
 > D4.5.1v4/D5.3.3 ownership and precise roots; D7.2.2 boxed import entries; D2.1.3 tagged string leaves.
 
+## Current progress — 2026-10-07
+
+Proposal milestones **13.1–13.4 are implemented within their documented scope**.
+Milestone **13.5 remains open**: release playback exceeds the 16.67 ms frame
+budget, and repeated navigation has not demonstrated bounded storage. Functional
+success and clean forced-GC diagnostics do not close those acceptance gates.
+PPTX import/export remains outside the authorized phase.
+
+Merge `971779a27` is complete with no unresolved index entries. Integration
+included dynamic transition-track ownership and retirement. The latest package
+change compares sampled channels before CSS formatting in `html.ls`; `live.ls`
+applies those deltas directly. The static projection still emits a full map.
+These package changes and their new regression fixture remain uncommitted at
+this update; the merge is committed. No native font-family ownership fix has
+been implemented yet.
+
+| Latest verification | Result and boundary |
+|---|---|
+| Package scripts | 11 fixtures × JIT/interpreter = 22 matching expected-output runs |
+| Focused UI | 11 fixtures, 74 assertions pass with forced collection and freed-memory poisoning |
+| Merged native checks | 405 cases pass, including transition-track retirement |
+| Full Lambda baseline | 6,294/6,294 pass on the merged tree, before the subsequent Lambda CSS-delta change |
+| Full Radiant baseline | 4,028 pass, 350 partial, 4 fail; two HTTP setup failures pass on an escalated rerun; Tetris smoke and LaTeX iframe navigation remain failed |
+| Navigation stress | Normal and forced-GC/poison runs each pass 40 assertions over 20 rounds / 120 callbacks; forced run has no raw-pointer or inconsistent-focus-ancestry diagnostics |
+| Latest lint / diff | Radiant float/int-cast lint and whitespace checks pass |
+
+All layout, render, DOM UI and memory baseline gates pass. Full baseline counts
+above describe the merged verification round; the subsequent package change has
+focused coverage, not a newly repeated full baseline. Older rounds below are
+retained as history and do not describe the current failure set.
+
+Latest release measurements use `temp/slide/lambda_release_merged`, an Apple M4,
+and 100 mixed text/image/SVG targets, with 60 aligned callback/paint pairs per
+viewport. After CSS deltas, paired callback plus paint is **23.693 / 27.139 ms
+(p50 / p95) at 1280 × 720** and **23.910 / 26.627 ms at 1920 × 1080**. The
+measurement excludes GUI presentation/event-pump latency. Script plus host
+median improves modestly, while tails remain inconsistent; this does not meet
+the frame budget. Detailed comparisons and artifact paths are recorded below.
+
+| Outstanding issue | Evidence | Next action / completion condition |
+|---|---|---|
+| Computed font-family ownership | Opacity-only reduced probe: a family list adds 106,200 bytes beyond a single family over 60 callbacks, exactly 59 × 100 × 18 bytes | Give computed family storage explicit ownership across inheritance, copies, temporary fonts and secondary views; prove release and borrower safety with native regressions, then rerun the reduced probe |
+| Other view-pool growth | Single-family probe still grows 48,648 bytes; full mixed-target build grows about 215 KB | Attribute remaining live allocations and demonstrate a plateau after warm-up; fixing joined names alone is insufficient |
+| Published-fragment / navigation retention | Normal Input/DOM end at 10,889,024 / 28,935,841 bytes; forced-GC run ends at 7,801,088 / 8,221,595 bytes; neither proves a bound | Audit publication and every surviving Mark/DOM owner, implement a compliant lifetime fix, and repeat long navigation with pool and arena accounting |
+| Per-frame cost | About 24 ms callback plus paint; layout alone remains about 7.7 ms | Investigate generic style invalidation and avoid unnecessary reflow only where used-value, overflow, paint and hit-test behavior remain correct; repeat release measurements at both viewports |
+| Final acceptance | Retention and timing gates open; two previously observed baseline failures remain | Repeat relevant regressions after each fix, then sequential full baselines; report remaining failures and map final evidence to proposal milestones |
+
+The next implementation task is the computed-family ownership fix. It follows
+D4.5.1v4's **“pin, gen-check, copy-as-value”** seam contract and D4.1.4v5's
+**“Pool = individual allocation + individual free”** rule. Published Input
+storage requires a separate boundary audit under D4.1.3; D4.1.1v2 says tracing
+stops at non-managed pointers. An ownership change must preserve that boundary
+and D5.3.3 precise roots. No formal ruling changes are proposed.
+
 ## Delivered package
 
 The explicit entry module is `lmd/package/slide.ls`, resolved as `lambda.slide`.
@@ -96,9 +150,11 @@ an unrelated markup guard that assumed eight-byte `String` alignment. It now
 checks the actual `String` ABI alignment, with a focused four-byte-aligned string
 escaping regression; valid static MIR strings are no longer discarded.
 
-## Verification so far
+## Earlier verification rounds
 
-These are observations of the named verification rounds; retention acceptance
+These observations precede the merged-tree verification in the current progress
+summary. Failure counts and investigations here are historical; consult the
+summary and later merge results for the current state. Retention acceptance
 is still open.
 
 | Check | Recorded result |
@@ -611,15 +667,110 @@ always null and it repeated writes; only the corrected runs above describe the
 shipped package. Artifacts are `temp/slide/frame_cache_{before,after}_{1280,1920}`
 and `frame_cache_summary.json`.
 
-Outstanding acceptance work:
+After integrating merge `971779a27`, all 405 focused native cases pass, including
+dynamic transition-track retirement. The full Lambda baseline passes 6,294/6,294.
+The Radiant baseline records 4,028 passes, 350 partial passes and four failures:
+the previously observed Tetris smoke and LaTeX iframe navigation cases, and two
+loopback HTTP fixture setup failures. Both HTTP cases pass outside the sandbox
+that denies loopback bind with EPERM. All layout, render, DOM UI and memory gates
+pass. Logs are under `temp/merge-slide/`.
 
-1. Audit remaining reconcile/view pool growth and repeat long-session/navigation
-   probes after the journal, matcher and draft-lifetime fixes.
-2. Reduce measured frame cost through generic mechanisms where justified;
-   repeat both release viewports after ownership changes, including measured paint.
-3. Complete the latest native/UI checks, lint and sequential full baselines;
-   investigate every regression attributable to these changes.
-4. Finish the implementation/validation report against the proposal.
+The Lambda adapter now compares sampled channels before formatting CSS rather
+than formatting both complete property maps on every changed object. Static
+projection still emits the complete map. Visibility and pointer routing share
+the opacity/visibility threshold; a zero clip ignores direction changes. The new
+delta regression checks that applying a patch equals a fresh static projection,
+including hide/show, each transform channel, clip reset and clip direction.
+All eleven package fixtures match their expected outputs in JIT and interpreter
+tiers (22 runs), and eleven focused UI fixtures pass 74 assertions under explicit
+forced GC and freed-memory poisoning. No native mechanism changes in this step.
+
+Paired release measurements use the same merged executable on the Apple M4
+machine and the existing 100-target mixed text/image/SVG deck. Each row has
+60 aligned callback/paint samples, excluding the first callback and two initial
+paints as above. The same two frame-request slots are reused; idle waits emit no
+callbacks.
+
+| p50 / p95 milliseconds | 1280 before → after | 1920 before → after |
+|---|---:|---:|
+| Script + synchronous host | 4.983 / 5.422 → 4.745 / 5.201 | 4.909 / 5.339 → 4.690 / 6.951 |
+| Layout | 7.659 / 7.913 → 7.692 / 8.339 | 7.603 / 7.898 → 7.661 / 8.066 |
+| Paint total | 9.329 / 9.720 → 9.360 / 10.024 | 9.744 / 10.101 → 9.820 / 10.122 |
+| Paired turn + paint | 23.831 / 25.543 → 23.693 / 27.139 | 24.140 / 25.269 → 23.910 / 26.627 |
+
+The median script reduction is modest; the tail does not improve consistently.
+Host load is uncontrolled, and the earlier measurement limitations still apply.
+The result does not establish 60 Hz playback. Input grows 32 bytes at completion
+and DOM grows about 42 KB in both versions, but merged view-pool usage grows
+about 215 KB during these 60 callbacks. Artifacts are
+`temp/slide/property_delta_{before,after}_{1280,1920}` and
+`property_delta_summary.json`.
+
+A separate 60-callback reproducer changes only opacity on 100 text wrappers.
+Using `font-family:Arial` grows view-pool live bytes by 48,648; using
+`Arial,sans-serif` grows them by 154,848. The 106,200-byte difference is exactly
+59 turns × 100 names × 18 bytes for the joined family string. Inspection finds
+`css_join_font_family_parts` allocating in the view pool while
+`radiant_retain_font_family` stores a borrowed pointer and font teardown releases
+no family storage. This identifies one contributor, not all growth. A fix must
+preserve inherited borrowers and secondary-view ownership (D4.5.1v4); freeing
+the pointer indiscriminately would be invalid. The temporary reproducer is
+`temp/slide/family_growth_{single,list}.{ls,json,log}`.
+
+The merged release also passes 40 assertions over 20 navigation rounds and 120
+callbacks, while Input grows 936,864 → 10,889,024 bytes and DOM grows
+3,165,518 → 28,935,841 bytes. Node arena usage stays at 496 bytes and two request
+slots are reused. This does not satisfy the navigation retention bound; the
+published-fragment ownership audit remains necessary (D4.1.3, D4.1.4v5).
+Artifacts are `temp/slide/merged_navigation.{log,result.json}`.
+The 20-round repeat under forced collection and freed-memory poisoning also
+passes 40 assertions and 120 callbacks, with no raw-pointer or inconsistent
+focus-ancestry diagnostics. Input grows 936,864 → 7,801,088 bytes and DOM grows
+3,165,518 → 8,221,595 bytes. View-pool usage reaches the same 1,154,374 bytes as
+the ordinary run, so GC does not reclaim that native growth. Neither repeat
+establishes a retention bound. Artifacts are `merged_navigation_gc.log`, its
+result JSON and `merged_navigation_gc_summary.json` under `temp/slide/`.
+
+## Remaining implementation and acceptance plan
+
+1. **Repair computed font-family ownership.** Audit `css_join_font_family_parts`,
+   family selection and shorthand paths, `FontProp` copies, inherited values,
+   pseudo/placeholder fonts, intrinsic-sizing temporaries and secondary views.
+   Computed strings need an explicit lifetime shared by valid borrowers;
+   authored/static names remain borrowed. Handle replacement and full font
+   teardown have different responsibilities. Add a native regression covering
+   repeated resolution and borrowers surviving parent restyle/view retirement.
+   Rerun both reduced opacity probes and account for the remaining single-family
+   growth before claiming view retention is bounded (D4.5.1v4, D4.1.4v5).
+2. **Bound published-fragment retention.** Trace Input, Mark and DOM ownership
+   across repeated scene replacement. DOM retirement alone cannot authorize
+   releasing a fragment that escaped into another Mark parent or script value.
+   A move to GC-owned values needs owned strings/type metadata and an audit of
+   non-managed parents that hide managed children from tracing. Ordinary arena
+   blocks cannot be individually discarded (D4.1.1v2, D4.1.2, D4.1.3,
+   D4.1.4v5, D5.3.3). Repeat normal and forced-GC/poison navigation; require a
+   sustained plateau in live owners after warm-up, not just passing assertions.
+3. **Reduce measured frame cost.** Investigate
+   `post_html_handler_incremental_rebuild`, which still invokes layout after
+   style mutations. The mutation journal currently lacks property IDs; repaint
+   classification alone does not establish that layout can be skipped.
+   Visibility collapse, transforms, containing blocks and scroll overflow need
+   correct handling. Reuse existing cascade/paint helpers and verify transformed
+   bounds, clipping, retained paint and hit testing. Timing and effect policy
+   remain in Lambda (D7.5.3). Repeat aligned release callback/paint measurements
+   at 1280 × 720 and 1920 × 1080; the 16.67 ms gate remains open until measured.
+4. **Revalidate changed ownership and invalidation paths.** Run meaningful
+   native regressions, all package scripts in both execution tiers, and focused
+   live/pixel fixtures with explicit forced GC and poisoning. Inspect diagnostics
+   as well as assertions. Run lint and required full baselines sequentially after
+   native changes. Investigate regressions attributable to the implementation;
+   retain explicit results for the existing Tetris/LaTeX failures and HTTP setup
+   constraints rather than treating them as passes.
+5. **Close the proposal with evidence.** Map results to milestones 13.1–13.5,
+   document timing method and retention bounds, update the public API if behavior
+   changes, and mark the implementation complete only when required acceptance
+   work is fulfilled. Existing focus-event rooting and owned-root ancestry fixes
+   are delivered; storage retention and performance remain independent open gates.
 
 The package excludes arbitrary masks, SVG path deformation, text reshaping,
 automatic paragraph measurement, PPTX and new PDF pagination. Morph requires
