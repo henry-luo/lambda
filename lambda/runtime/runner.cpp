@@ -51,6 +51,7 @@
 #include "../../lib/uv_loop.h"
 #endif
 #include "../dom/dom.h"
+#include "context_capsule.h"
 
 extern "C" Item js_get_key_default(Item object, Item key);
 struct DomDocument;
@@ -3483,6 +3484,9 @@ void runtime_reset_heap(Runtime* runtime) {
             dom_batch_reset();
         }
 
+        // native owners belong to the evaluator even when no JS realm exists.
+        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
+
 #ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             lambda_scheduler_destroy(runtime_scheduler(runtime));
@@ -3604,13 +3608,8 @@ void runtime_cleanup(Runtime* runtime) {
         render_map_destroy();
         tmpl_state_destroy();
 
-        if (js_runtime_state_for(cleanup_context)) {
-            // Cancel host tasks while their roots and native owners are still
-            // valid; scheduler teardown only drains their inert completions.
-#ifndef LAMBDA_NO_TASKS
-            runtime_resource_table_clear(js_runtime_resource_table());
-#endif
-        }
+        // cancel native owners while their heap is valid, including Lambda DOM loads.
+        runtime_resource_table_clear(runtime_resource_table_context(cleanup_context));
 #ifndef LAMBDA_NO_TASKS
         if (runtime_scheduler(runtime)) {
             cleanup_context->scheduler = runtime_scheduler(runtime);
@@ -3716,6 +3715,8 @@ void runtime_cleanup(Runtime* runtime) {
         }
         js_runtime_state_destroy_context();
         lambda_module_state_destroy();
+        // core capsules are evaluator-owned, independently of the optional JS capsule.
+        context_capsule_destroy_all(retiring_context);
         if (!eval_context_shutdown(retiring_context)) return;
         mem_free(runtime->eval_context);
         runtime->eval_context = NULL;

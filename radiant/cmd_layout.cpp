@@ -899,6 +899,7 @@ static void resolve_stylesheet_imports(CssStylesheet* stylesheet, const char* st
             // importing rule's source position.
             imported->is_import_child = true;
             imported->parent_stylesheet = stylesheet;
+            imported->owner_rule = rule;
             rule->data.import_rule.stylesheet = imported;
         }
         if (!imported || imported->rule_count == 0) {

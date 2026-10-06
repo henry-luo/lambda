@@ -5,6 +5,7 @@
 #include "../../lambda/input/css/css_engine.hpp"
 #include "../../lambda/input/css/dom_element.hpp"
 #include "../../lambda/input/css/css_formatter.hpp"
+#include "../../lambda/input/css/css_paged_media.hpp"
 #include "../../lib/mempool.h"
 
 class CssParserTest : public ::testing::Test {
@@ -74,6 +75,25 @@ TEST_F(CssParserTest, ParseMultipleRules) {
 TEST_F(CssParserTest, ParseInvalidCSS) {
     const char* css = "invalid { css } syntax";
     validateTokenization(css, 3); // Should still tokenize even if semantically invalid
+}
+
+TEST_F(CssParserTest, PropertyValueFragmentsKeepNestedTokensAndRejectDeclarationPunctuation) {
+    const struct { const char* property; const char* value; bool valid; } cases[] = {
+        {"width", " 10px ", true}, {"width", "10px;", false},
+        {"width", "10px !important", false}, {"width", "10px !/*x*/important", false},
+        {"width", "10px; height: 20px", false}, {"width", "invalid", false},
+        {"--value", "\"!important\"", true}, {"--value", "{ a: b; }", true},
+        {"--value", "fn(a;b)", true}, {"--value", "fn(!important)", true},
+        {"--value", "x !important", false}, {"--value", "x;", false},
+        {"--value", "[x)", false}, {"--value", "]", false},
+    };
+    for (const auto& entry : cases) {
+        SCOPED_TRACE(entry.value);
+        CssDeclaration* declaration = css_parse_property_value_declaration(entry.property,
+            strlen(entry.property), entry.value, strlen(entry.value), pool);
+        EXPECT_EQ(declaration != nullptr, entry.valid);
+        if (declaration) EXPECT_FALSE(declaration->important);
+    }
 }
 
 TEST_F(CssParserTest, VarReferencePreservesEmptyAndNestedFallbacks) {
@@ -1903,4 +1923,47 @@ TEST_F(CssEngineParserTest, ComputedColorSerializationRetainsCurrentColorAndMiss
             EXPECT_EQ(a, 0);
         }
     }
+}
+
+TEST_F(CssEngineParserTest, PageSelectorFragmentsRetainCanonicalPreludeAndSpecificity) {
+    struct Case { const char* source; const char* expected; };
+    const Case cases[] = {
+        {"", ""}, {"  :LEFT , Invoice:first:first  ", ":left, Invoice:first:first"},
+        {"foo\\.bar:left", "foo\\.bar:left"},
+        {"\\31 invoice:blank", "\\31 invoice:blank"},
+        {"Report:first/**/:right", "Report:first:right"},
+    };
+    for (const Case& test : cases) {
+        CssPageRule* page = css_page_selectors_parse_text(test.source, strlen(test.source), pool);
+        ASSERT_NE(page, nullptr) << test.source;
+        EXPECT_STREQ(page->selector_text, test.expected) << test.source;
+    }
+    CssPageRule* repeated = css_page_selectors_parse_text(":first:first", 12, pool);
+    ASSERT_NE(repeated, nullptr);
+    EXPECT_EQ(repeated->selectors[0].state_specificity, 2u);
+    const char* invalid[] = {":unknown", "auto", ":first,", ":first {}", "Foo :left", "@page :left"};
+    for (const char* source : invalid)
+        EXPECT_EQ(css_page_selectors_parse_text(source, strlen(source), pool), nullptr) << source;
+}
+
+TEST_F(CssEngineParserTest, IdentifierSerializationPreservesFullInputAndRoundTripEscapes) {
+    struct Case { const char* source; size_t length; const char* expected; };
+    const Case cases[] = {
+        {"-1x", 3, "-\\31 x"},
+        {"1a", 2, "\\31 a"}, {"a b.c:d\\e", 9, "a\\ b\\.c\\:d\\\\e"},
+        {"-", 1, "\\-"}, {"a\0b", 3, "a\xef\xbf\xbd" "b"},
+        {"\x01\x7f", 2, "\\1 \\7f "}, {"caf\xc3\xa9", 5, "caf\xc3\xa9"},
+    };
+    for (const Case& test : cases) {
+        StringBuf* buffer = stringbuf_new(pool);
+        css_append_identifier(buffer, test.source, test.length);
+        String* result = stringbuf_to_string(buffer);
+        EXPECT_STREQ(result->chars, test.expected) << test.source;
+    }
+    char long_name[2049];
+    memset(long_name, 'a', 2048);
+    long_name[2048] = '\0';
+    StringBuf* buffer = stringbuf_new(pool);
+    css_append_identifier(buffer, long_name, 2048);
+    EXPECT_EQ(stringbuf_to_string(buffer)->len, 2048u);
 }

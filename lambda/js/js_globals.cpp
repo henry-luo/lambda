@@ -5870,9 +5870,11 @@ static Item js_reflect_set_define_receiver(Item receiver, Item key, Item value, 
     Rooted<Item> receiver_root(roots, receiver);
     Rooted<Item> key_root(roots, key);
     Rooted<Item> value_root(roots, value);
-    if (js_virtual_define_uses_exotic_storage(receiver_root.get())) {
-        // Branded virtual carriers expose DefineOwn through their named Set
-        // hook; none has ordinary Map descriptor storage (D4.6.1v2/D7.4.5v2).
+    const JsClassMeta* receiver_meta = js_object_meta(receiver_root.get());
+    if (js_virtual_define_uses_exotic_storage(receiver_root.get()) &&
+            (!receiver_meta || !receiver_meta->ops || !receiver_meta->ops->define_own)) {
+        // carriers with DefineOwn callbacks must reach them; raw storage drops
+        // Promise expando writes just as it bypasses declared host descriptors.
         Item stored = js_define_own_key_storage(receiver_root.get(),
             key_root.get(), value_root.get());
         return item_is_error(stored) ? stored : (Item){.item = b2it(true)};
@@ -6265,8 +6267,7 @@ extern "C" Item js_set_completion_with_key(Item target, Item key, Item value,
         if (js_dispatch_property_op(JS_EXOTIC_SET, target_root.get(), 0,
                 key_root.get(), receiver_root.get(), ItemNull, value_root.get(),
                 false, &exotic_result)) {
-            if (item_is_error(exotic_result)) return exotic_result;
-            return (Item){.item = b2it(true)};
+            return exotic_result;
         }
     }
     // If receiver != target, fall back to OrdinarySetWithOwnDescriptor below.

@@ -38,6 +38,12 @@ int g_js_force_document_interp = 0;
 bool js_runtime_state_init(EvalContext* context) { (void)context; return true; }
 bool js_runtime_state_shutdown(EvalContext* context) { (void)context; return true; }
 bool js_runtime_state_thread_matches(const EvalContext* context) { (void)context; return false; }
+bool js_runtime_context_enter_turn(Runtime* runtime, EvalContext* owner) {
+    (void)runtime; (void)owner;
+    // document turns require the JS realm excluded by this profile.
+    no_js_unavailable("js_runtime_context_enter_turn");
+    return false;
+}
 void js_runtime_state_destroy_context(void) {}
 void js_runtime_state_release_heap_resources(void) {}
 uint64_t js_get_heap_epoch(void) { return 0; }
@@ -162,6 +168,7 @@ void jube_interface_runtime_reset(void) {}
 void jube_notify_heap_cleanup(void* heap) { (void)heap; }
 // 0 = receiver is not a declared host object
 int jube_member_get(Item receiver, Item key, Item* out) { (void)receiver; (void)key; (void)out; return 0; }
+int jube_member_get_js(Item target, Item key, Item receiver, Item* out) { (void)target; (void)receiver; (void)key; (void)out; return 0; }
 int jube_member_projected_get(Item receiver, Item key, Item* out) {
     (void)receiver; (void)key; (void)out;
     return 0;
@@ -170,6 +177,7 @@ int jube_member_set(Item receiver, Item key, Item value, Item* out) {
     (void)receiver; (void)key; (void)value; (void)out;
     return 0;
 }
+int jube_member_set_js(Item target, Item key, Item value, Item receiver, Item* out) { (void)target; (void)receiver; (void)key; (void)value; (void)out; return 0; }
 int jube_member_projection_keys(Item receiver, Item* out) { (void)receiver; (void)out; return 0; }
 
 #endif // LAMBDA_NO_JUBE

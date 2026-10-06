@@ -85,7 +85,7 @@ const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
-String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+String* css_prop_serialize_custom_property(Pool* pool, DomElement* element,
     const char* name, size_t name_length);
 
 // Refresh one dynamic element's stylesheet declarations without constructing a

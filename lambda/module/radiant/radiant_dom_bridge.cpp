@@ -145,94 +145,8 @@ RADIANT_C_API Item dom_dataset_property(Item elem_item);
 #define dom_document_exec_command_bridge radiant_host_api->dom_catalog->exec_command
 #define dom_document_query_command_bridge radiant_host_api->dom_catalog->query_command
 
-static const int RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE = 4096;
 static const char s_radiant_dom_vmap_type_marker = 0;
-
-struct RadiantDomWrapperCacheEntry {
-    DomNodeRef node_ref;
-    DomDocument* owner_doc;
-    Context* owner_context;
-    uint64_t owner_generation;
-    uint64_t item;
-    RadiantDomWrapperCacheEntry* next_free;
-    RadiantDomWrapperCacheEntry* next_sweep;
-};
-
-struct RadiantDomWrapperCacheIndexEntry {
-    DomNode* node;
-    Context* owner_context;
-    uint64_t owner_generation;
-    RadiantDomWrapperCacheEntry* entry;
-};
-
-struct RadiantDomWrapperCacheChunk {
-    RadiantDomWrapperCacheEntry entries[RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE];
-    int count;
-    RadiantDomWrapperCacheChunk* next;
-};
-
-static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_head = nullptr;
-static __thread RadiantDomWrapperCacheChunk* s_radiant_dom_wrapper_cache_tail = nullptr;
-static __thread HashMap* s_radiant_dom_wrapper_index = nullptr;
-static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_free = nullptr;
-static __thread RadiantDomWrapperCacheEntry* s_radiant_dom_wrapper_sweep = nullptr;
-static __thread bool s_radiant_dom_cache_owner_set = false;
-static __thread pthread_t s_radiant_dom_cache_owner;
 static __thread bool s_radiant_dom_geometry_layout_active;
-
-static void* radiant_dom_cache_malloc(size_t size) {
-    return mem_alloc(size, MEM_CAT_JS_RUNTIME);
-}
-static void* radiant_dom_cache_realloc(void* ptr, size_t size) {
-    return mem_realloc(ptr, size, MEM_CAT_JS_RUNTIME);
-}
-
-static void radiant_dom_cache_free(void* ptr) {
-    mem_free(ptr);
-}
-
-static uint64_t radiant_dom_cache_index_hash(const void* item, uint64_t seed0, uint64_t seed1) {
-    const RadiantDomWrapperCacheIndexEntry* entry = (const RadiantDomWrapperCacheIndexEntry*)item;
-    return hashmap_hash_bytes(&entry->node,
-        sizeof(entry->node) + sizeof(entry->owner_context) + sizeof(entry->owner_generation),
-        seed0, seed1);
-}
-
-static int radiant_dom_cache_index_compare(const void* a, const void* b, void* udata) {
-    (void)udata;
-    const RadiantDomWrapperCacheIndexEntry* ea = (const RadiantDomWrapperCacheIndexEntry*)a;
-    const RadiantDomWrapperCacheIndexEntry* eb = (const RadiantDomWrapperCacheIndexEntry*)b;
-    return ea->node == eb->node && ea->owner_context == eb->owner_context &&
-        ea->owner_generation == eb->owner_generation ? 0 : 1;
-}
-
-static RadiantDomWrapperCacheIndexEntry radiant_dom_cache_index_key(
-        DomNode* node, Context* owner, uint64_t generation,
-        RadiantDomWrapperCacheEntry* cache_entry = nullptr) {
-    RadiantDomWrapperCacheIndexEntry key = {};
-    key.node = node;
-    key.owner_context = owner;
-    key.owner_generation = generation;
-    key.entry = cache_entry;
-    return key;
-}
-
-static void radiant_dom_cache_check_owner(const char* op) {
-    pthread_t current = pthread_self();
-    if (!s_radiant_dom_cache_owner_set) {
-        s_radiant_dom_cache_owner = current;
-        s_radiant_dom_cache_owner_set = true;
-        return;
-    }
-    if (!pthread_equal(s_radiant_dom_cache_owner, current)) {
-        // wrapper cache slots are rooted per runtime thread; cross-thread use
-        // would unregister or mutate roots owned by a different JS runtime.
-        log_error("RDOM_CACHE_THREAD_MISMATCH: %s on non-owner thread", op ? op : "unknown");
-#ifndef NDEBUG
-        assert(false && "Radiant DOM wrapper cache used from non-owner thread");
-#endif
-    }
-}
 
 static bool radiant_dom_is_node_host_type(const void* host_type) {
     // ESO102: unwrapping `document` must yield the #document stub, not null.
@@ -289,24 +203,6 @@ static const void* radiant_dom_host_type_for_node(DomNode* node) {
     default:
         return radiant_dom_html_element_host_type();
     }
-}
-
-static HashMap* radiant_dom_wrapper_index() {
-    if (!s_radiant_dom_wrapper_index) {
-        s_radiant_dom_wrapper_index = hashmap_new_with_allocator(
-            radiant_dom_cache_malloc,
-            radiant_dom_cache_realloc,
-            radiant_dom_cache_free,
-            sizeof(RadiantDomWrapperCacheIndexEntry),
-            4096,
-            0x726164646f6d3032ULL,
-            0x7772617063616368ULL,
-            radiant_dom_cache_index_hash,
-            radiant_dom_cache_index_compare,
-            nullptr,
-            nullptr);
-    }
-    return s_radiant_dom_wrapper_index;
 }
 
 static Item radiant_dom_string_item(const char* value) {
@@ -486,106 +382,20 @@ static int64_t radiant_dom_utf16_length(const char* text) {
     return units;
 }
 
-static bool radiant_dom_is_generated_pseudo_node(DomNode* node) {
-    if (!node || !node->is_element()) return false;
-    DomElement* elem = node->as_element();
-    return elem->tag_name && elem->tag_name[0] == ':' && elem->tag_name[1] == ':';
+static DomNode* radiant_dom_visible_child(DomElement* elem, bool first) {
+    return (DomNode*)radiant_host_api->dom_catalog->visible_child(elem, first);
 }
 
-static bool radiant_dom_is_anonymous_table_wrapper(DomNode* node) {
-    if (!node || !node->is_element()) return false;
-    DomElement* elem = node->as_element();
-    return elem->tag_name && strncmp(elem->tag_name, "::anon-", 7) == 0;
-}
-
-static DomNode* radiant_dom_first_script_visible_child(DomElement* elem);
-static DomNode* radiant_dom_last_script_visible_child(DomElement* elem);
-
-static DomNode* radiant_dom_next_script_visible_sibling(DomNode* node) {
-    DomNode* sibling = node ? node->next_sibling : nullptr;
-    while (sibling) {
-        if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
-        if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
-            DomNode* child = radiant_dom_first_script_visible_child(sibling->as_element());
-            if (child) return child;
-        }
-        sibling = sibling->next_sibling;
-    }
-    DomNode* parent = node ? node->parent : nullptr;
-    while (radiant_dom_is_anonymous_table_wrapper(parent)) {
-        sibling = parent->next_sibling;
-        while (sibling) {
-            if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
-            if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
-                DomNode* child = radiant_dom_first_script_visible_child(sibling->as_element());
-                if (child) return child;
-            }
-            sibling = sibling->next_sibling;
-        }
-        parent = parent->parent;
-    }
-    return nullptr;
-}
-
-static DomNode* radiant_dom_prev_script_visible_sibling(DomNode* node) {
-    DomNode* sibling = node ? node->prev_sibling : nullptr;
-    while (sibling) {
-        if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
-        if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
-            DomNode* child = radiant_dom_last_script_visible_child(sibling->as_element());
-            if (child) return child;
-        }
-        sibling = sibling->prev_sibling;
-    }
-    DomNode* parent = node ? node->parent : nullptr;
-    while (radiant_dom_is_anonymous_table_wrapper(parent)) {
-        sibling = parent->prev_sibling;
-        while (sibling) {
-            if (!radiant_dom_is_generated_pseudo_node(sibling)) return sibling;
-            if (radiant_dom_is_anonymous_table_wrapper(sibling)) {
-                DomNode* child = radiant_dom_last_script_visible_child(sibling->as_element());
-                if (child) return child;
-            }
-            sibling = sibling->prev_sibling;
-        }
-        parent = parent->parent;
-    }
-    return nullptr;
-}
-
-static DomNode* radiant_dom_first_script_visible_child(DomElement* elem) {
-    DomNode* child = elem ? elem->first_child : nullptr;
-    while (child) {
-        if (!radiant_dom_is_generated_pseudo_node(child)) return child;
-        if (radiant_dom_is_anonymous_table_wrapper(child)) {
-            // layout-only anonymous wrappers must stay transparent to DOM scripts.
-            DomNode* nested = radiant_dom_first_script_visible_child(child->as_element());
-            if (nested) return nested;
-        }
-        child = child->next_sibling;
-    }
-    return nullptr;
-}
-
-static DomNode* radiant_dom_last_script_visible_child(DomElement* elem) {
-    DomNode* child = elem ? elem->last_child : nullptr;
-    while (child) {
-        if (!radiant_dom_is_generated_pseudo_node(child)) return child;
-        if (radiant_dom_is_anonymous_table_wrapper(child)) {
-            DomNode* nested = radiant_dom_last_script_visible_child(child->as_element());
-            if (nested) return nested;
-        }
-        child = child->prev_sibling;
-    }
-    return nullptr;
+static DomNode* radiant_dom_visible_sibling(DomNode* node, bool forward) {
+    return (DomNode*)radiant_host_api->dom_catalog->visible_sibling(node, forward);
 }
 
 static int64_t radiant_dom_script_visible_element_child_count(DomElement* elem) {
     int64_t count = 0;
-    DomNode* child = radiant_dom_first_script_visible_child(elem);
+    DomNode* child = radiant_dom_visible_child(elem, true);
     while (child) {
         if (child->is_element()) count++;
-        child = radiant_dom_next_script_visible_sibling(child);
+        child = radiant_dom_visible_sibling(child, true);
     }
     return count;
 }
@@ -683,8 +493,8 @@ static int64_t radiant_dom_velmt_child_count(void* data) {
     DomNode* node = (DomNode*)data;
     DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
     int64_t count = 0;
-    for (DomNode* child = radiant_dom_first_script_visible_child(elem); child;
-         child = radiant_dom_next_script_visible_sibling(child)) count++;
+    for (DomNode* child = radiant_dom_visible_child(elem, true); child;
+         child = radiant_dom_visible_sibling(child, true)) count++;
     return count;
 }
 
@@ -693,8 +503,8 @@ static VirtualOpStatus radiant_dom_velmt_child_get(void* data, int64_t index,
     DomNode* node = (DomNode*)data;
     DomElement* elem = node && node->is_element() ? node->as_element() : nullptr;
     if (!out || index < 0) return out ? VIRTUAL_OP_MISSING : VIRTUAL_OP_ERROR;
-    DomNode* child = radiant_dom_first_script_visible_child(elem);
-    while (child && index-- > 0) child = radiant_dom_next_script_visible_sibling(child);
+    DomNode* child = radiant_dom_visible_child(elem, true);
+    while (child && index-- > 0) child = radiant_dom_visible_sibling(child, true);
     if (!child) return VIRTUAL_OP_MISSING;
     *out = radiant_dom_node_item(child);
     return VIRTUAL_OP_OK;
@@ -801,14 +611,9 @@ static Item radiant_dom_labels_item(DomElement* control) {
 }
 
 static DomDocument* radiant_dom_node_document(DomNode* node, bool active_fallback) {
-    DomNode* current = node;
-    while (current) {
-        if (current->is_element()) {
-            DomElement* elem = current->as_element();
-            if (elem && elem->doc) return elem->doc;
-        }
-        current = current->parent;
-    }
+    DomDocument* owner = radiant_host_api
+        ? (DomDocument*)radiant_host_api->dom_catalog->node_owner_document(node) : nullptr;
+    if (owner) return owner;
     if (active_fallback) {
         return (DomDocument*)dom_get_document();
     }
@@ -886,14 +691,14 @@ static DomElement* radiant_dom_selector_group_find_first(SelectorMatcher* matche
     if (!matcher || !group || !elem) return nullptr;
     if (include_elem && selector_matcher_matches_group(matcher, group, elem, nullptr)) return elem;
 
-    DomNode* child = elem->first_child;
+    DomNode* child = radiant_dom_visible_child(elem, true);
     while (child) {
         if (child->is_element()) {
             DomElement* found = radiant_dom_selector_group_find_first(
                 matcher, group, child->as_element(), true);
             if (found) return found;
         }
-        child = child->next_sibling;
+        child = radiant_dom_visible_sibling(child, true);
     }
     return nullptr;
 }
@@ -917,73 +722,22 @@ static void radiant_dom_selector_group_collect_all(SelectorMatcher* matcher,
         arraylist_append(results, elem);
     }
 
-    DomNode* child = elem->first_child;
+    DomNode* child = radiant_dom_visible_child(elem, true);
     while (child) {
         if (child->is_element()) {
             radiant_dom_selector_group_collect_all(
                 matcher, group, child->as_element(), results, true);
         }
-        child = child->next_sibling;
+        child = radiant_dom_visible_sibling(child, true);
     }
 }
 
 static Item radiant_dom_lookup_wrapper(DomNode* node) {
-    radiant_dom_cache_check_owner("lookup_wrapper");
-    HashMap* index = s_radiant_dom_wrapper_index;
-    if (!index || !node) return ItemNull;
-    // The same native node may be projected into several document heaps;
-    // returning another heap's wrapper leaves a dangling Item after teardown.
-    Context* active = (Context*)context;
-    RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
-        node, active, heap_generation_for(active));
-    const RadiantDomWrapperCacheIndexEntry* found =
-        (const RadiantDomWrapperCacheIndexEntry*)hashmap_get(index, &probe);
-    if (found && found->entry && found->entry->item != 0 &&
-        dom_node_ref_validate(found->entry->owner_doc, found->entry->node_ref)) {
-        return (Item){.item = found->entry->item};
-    }
-    return ItemNull;
+    return radiant_host_api ? radiant_host_api->dom_catalog->cached_node_wrapper(node) : ItemNull;
 }
 
 RADIANT_C_API Item radiant_dom_lookup_cached_node(void* dom_node) {
     return radiant_dom_lookup_wrapper((DomNode*)dom_node);
-}
-
-static RadiantDomWrapperCacheChunk* radiant_dom_alloc_wrapper_cache_chunk() {
-    radiant_dom_cache_check_owner("alloc_wrapper_cache_chunk");
-    RadiantDomWrapperCacheChunk* chunk = (RadiantDomWrapperCacheChunk*)mem_alloc(
-        sizeof(RadiantDomWrapperCacheChunk), MEM_CAT_JS_RUNTIME);
-    if (!chunk) return nullptr;
-    memset(chunk, 0, sizeof(*chunk));
-    if (!s_radiant_dom_wrapper_cache_head) {
-        s_radiant_dom_wrapper_cache_head = chunk;
-        s_radiant_dom_wrapper_cache_tail = chunk;
-    } else {
-        s_radiant_dom_wrapper_cache_tail->next = chunk;
-        s_radiant_dom_wrapper_cache_tail = chunk;
-    }
-    return chunk;
-}
-
-static void radiant_dom_weak_wrapper_cleared(uint64_t*, void* context) {
-    RadiantDomWrapperCacheEntry* entry = (RadiantDomWrapperCacheEntry*)context;
-    radiant_dom_cache_check_owner("weak_wrapper_cleared");
-    if (!entry || !entry->owner_doc || !entry->node_ref.address) return;
-    DomNode* address = entry->node_ref.address;
-    if (s_radiant_dom_wrapper_index) {
-        RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
-            address, entry->owner_context, entry->owner_generation);
-        hashmap_delete(s_radiant_dom_wrapper_index, &probe);
-    }
-    // The wrapper pin guarantees the generation is still registered. Weak
-    // cleanup uses only the validated token and never inspects detached bytes.
-    dom_node_unpin(entry->owner_doc, entry->node_ref, DOM_NODE_PIN_WRAPPER);
-    entry->node_ref = {nullptr, 0};
-    entry->item = 0;
-    // Do not recycle the cache slot until the collector completes all weak
-    // callbacks; the owner document is needed for one post-batch DOM sweep.
-    entry->next_sweep = s_radiant_dom_wrapper_sweep;
-    s_radiant_dom_wrapper_sweep = entry;
 }
 
 void dom_retire_release_render_result(DomDocument* doc, Item result) {
@@ -994,177 +748,22 @@ void dom_retire_release_render_result(DomDocument* doc, Item result) {
 }
 
 extern "C" void gc_weak_slots_processed(void) {
-    if (!s_radiant_dom_wrapper_sweep) return;
-    radiant_dom_cache_check_owner("weak_slots_processed");
-    for (RadiantDomWrapperCacheEntry* entry = s_radiant_dom_wrapper_sweep;
-         entry; entry = entry->next_sweep) {
-        bool already_swept = false;
-        for (RadiantDomWrapperCacheEntry* prior = s_radiant_dom_wrapper_sweep;
-             prior != entry; prior = prior->next_sweep) {
-            if (prior->owner_doc == entry->owner_doc) {
-                already_swept = true;
-                break;
-            }
-        }
-        if (!already_swept && entry->owner_doc) {
-            dom_retire_sweep(entry->owner_doc);
-        }
-    }
-    while (s_radiant_dom_wrapper_sweep) {
-        RadiantDomWrapperCacheEntry* entry = s_radiant_dom_wrapper_sweep;
-        s_radiant_dom_wrapper_sweep = entry->next_sweep;
-        entry->owner_doc = nullptr;
-        entry->next_sweep = nullptr;
-        entry->next_free = s_radiant_dom_wrapper_free;
-        s_radiant_dom_wrapper_free = entry;
-    }
-}
-
-static void radiant_dom_cache_wrapper(DomNode* node, Item wrapper) {
-    radiant_dom_cache_check_owner("cache_wrapper");
-    if (!node || wrapper.item == ITEM_NULL) return;
-    RadiantDomWrapperCacheEntry* entry = s_radiant_dom_wrapper_free;
-    if (entry) {
-        s_radiant_dom_wrapper_free = entry->next_free;
-    } else {
-        RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_tail;
-        if (!chunk || chunk->count >= RADIANT_DOM_WRAPPER_CACHE_CHUNK_SIZE) {
-            chunk = radiant_dom_alloc_wrapper_cache_chunk();
-            if (!chunk) return;
-        }
-        entry = &chunk->entries[chunk->count++];
-    }
-    entry->owner_doc = radiant_dom_node_document(node, true);
-    entry->node_ref = dom_node_ref(node);
-    entry->owner_context = (Context*)context;
-    entry->owner_generation = heap_generation_for(entry->owner_context);
-    if (!entry->owner_doc ||
-        !dom_node_ref_validate(entry->owner_doc, entry->node_ref)) {
-        entry->node_ref = {nullptr, 0};
-        entry->owner_doc = nullptr;
-        entry->owner_context = nullptr;
-        entry->owner_generation = 0;
-        entry->item = 0;
-        entry->next_free = s_radiant_dom_wrapper_free;
-        s_radiant_dom_wrapper_free = entry;
-        return;
-    }
-    entry->item = wrapper.item;
-    entry->next_free = nullptr;
-    entry->next_sweep = nullptr;
-
-    HashMap* index = radiant_dom_wrapper_index();
-    if (index) {
-        // The hash table stores pointers to stable chunk slots; GC root slots
-        // never move when the index grows or rehashes.
-        RadiantDomWrapperCacheIndexEntry index_entry = radiant_dom_cache_index_key(
-            node, entry->owner_context, entry->owner_generation, entry);
-        hashmap_set(index, &index_entry);
-    }
-    // Wrapper identity is weak: live JS reaches the wrapper naturally; this
-    // slot only observes death so the matching native pin can be released.
-    dom_node_pin(entry->owner_doc, entry->node_ref, DOM_NODE_PIN_WRAPPER);
-    radiant_host_api->gc->register_weak(
-        &entry->item, radiant_dom_weak_wrapper_cleared, entry);
-}
-
-static void radiant_dom_clear_cache_entry(RadiantDomWrapperCacheEntry* entry) {
-    radiant_dom_cache_check_owner("clear_cache_entry");
-    if (!entry || entry->item == 0) return;
-    DomNode* node = entry->node_ref.address;
-    if (s_radiant_dom_wrapper_index && node) {
-        RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
-            node, entry->owner_context, entry->owner_generation);
-        hashmap_delete(s_radiant_dom_wrapper_index, &probe);
-    }
-    DomNode* live_node = dom_node_ref_validate(entry->owner_doc, entry->node_ref);
-    // Form state belongs to the native node and can outlive one realm's weak
-    // wrapper; document and detached-node teardown release it separately.
-    Item wrapper = (Item){.item = entry->item};
-    // document teardown frees arena-owned DOM nodes; retained wrappers must
-    // keep their JS identity but lose the native payload through the husk protocol.
-    if (virtual_host_type(wrapper)) {
-        radiant_dom_host_invalidate(wrapper);
-    }
-    radiant_host_api->gc->unregister_weak(&entry->item);
-    if (live_node) {
-        dom_node_unpin(entry->owner_doc, entry->node_ref, DOM_NODE_PIN_WRAPPER);
-    }
-    entry->node_ref = {nullptr, 0};
-    entry->owner_doc = nullptr;
-    entry->owner_context = nullptr;
-    entry->owner_generation = 0;
-    entry->item = 0;
-    entry->next_sweep = nullptr;
-    entry->next_free = s_radiant_dom_wrapper_free;
-    s_radiant_dom_wrapper_free = entry;
-}
-
-static bool radiant_dom_wrapper_cache_has_live_entries(void) {
-    for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
-        for (int i = 0; i < chunk->count; i++) {
-            if (chunk->entries[i].item != 0) return true;
-        }
-    }
-    return false;
+    if (radiant_host_api) radiant_host_api->dom_catalog->wrapper_weak_slots_processed();
 }
 
 RADIANT_C_API void radiant_dom_invalidate_document(DomDocument* doc) {
-    radiant_dom_cache_check_owner("invalidate_document");
-    if (!doc) return;
-    for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
-        for (int i = 0; i < chunk->count; i++) {
-            RadiantDomWrapperCacheEntry* entry = &chunk->entries[i];
-            if (entry->owner_doc == doc) radiant_dom_clear_cache_entry(entry);
-        }
-    }
-    // Reclaim the shared cache only after the last document's weak slots have
-    // been removed; another live document may still use its wrapper identity.
-    if (!radiant_dom_wrapper_cache_has_live_entries() && !s_radiant_dom_wrapper_sweep) {
-        radiant_dom_reset_wrapper_cache();
-    }
+    if (radiant_host_api) radiant_host_api->dom_catalog->invalidate_document_wrappers(doc);
 }
 
 RADIANT_C_API void radiant_dom_reset_wrapper_cache_current_heap(void) {
-    radiant_dom_cache_check_owner("reset_wrapper_cache_current_heap");
-    Context* active = (Context*)context;
-    uint64_t generation = heap_generation_for(active);
-    for (RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head; chunk; chunk = chunk->next) {
-        for (int i = 0; i < chunk->count; i++) {
-            RadiantDomWrapperCacheEntry* entry = &chunk->entries[i];
-            if (entry->owner_context == active && entry->owner_generation == generation) {
-                radiant_dom_clear_cache_entry(entry);
-            }
-        }
-    }
-    // A nested realm may retire while other realms still own cache entries.
-    if (!radiant_dom_wrapper_cache_has_live_entries() && !s_radiant_dom_wrapper_sweep) {
-        radiant_dom_reset_wrapper_cache();
-    }
+    if (radiant_host_api) radiant_host_api->dom_catalog->release_document_wrappers();
 }
 
 RADIANT_C_API void radiant_dom_reset_wrapper_cache(void) {
-    radiant_dom_cache_check_owner("reset_wrapper_cache");
-    RadiantDomWrapperCacheChunk* chunk = s_radiant_dom_wrapper_cache_head;
-    while (chunk) {
-        for (int i = 0; i < chunk->count; i++) {
-            radiant_dom_clear_cache_entry(&chunk->entries[i]);
-        }
-        RadiantDomWrapperCacheChunk* next = chunk->next;
-        mem_free(chunk);
-        chunk = next;
-    }
-    if (s_radiant_dom_wrapper_index) {
-        hashmap_free(s_radiant_dom_wrapper_index);
-    }
-    s_radiant_dom_wrapper_cache_head = nullptr;
-    s_radiant_dom_wrapper_cache_tail = nullptr;
-    s_radiant_dom_wrapper_index = nullptr;
-    s_radiant_dom_wrapper_free = nullptr;
+    radiant_dom_reset_wrapper_cache_current_heap();
 }
 
 RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
-    radiant_dom_cache_check_owner("wrap_node");
     if (!dom_elem) return ItemNull;
 
     DomNode* node = (DomNode*)dom_elem;
@@ -1178,7 +777,12 @@ RADIANT_C_API Item radiant_dom_wrap_node(void* dom_elem) {
     if (get_type_id(wrapper) == LMD_TYPE_VELMT && wrapper.velmt) {
         // Cache identity before initialization because inline handlers and
         // native DOM state attach expandos to this same wrapper recursively.
-        radiant_dom_cache_wrapper(node, wrapper);
+        // context-owned weak identity survives the interpreter worker's handoff.
+        if (!radiant_host_api->dom_catalog->cache_node_wrapper(node,
+                radiant_dom_node_document(node, true), wrapper)) {
+            radiant_dom_host_invalidate(wrapper);
+            return ItemNull;
+        }
         radiant_host_api->gc->register_root(&wrapper.item);
         dom_initialize_node_wrapper(dom_elem);
         radiant_host_api->gc->unregister_root(&wrapper.item);
@@ -1208,20 +812,9 @@ RADIANT_C_API DomDocument* radiant_dom_item_document(Item item) {
             !radiant_dom_is_node_host_type(virtual_host_type(item))) {
         return nullptr;
     }
-    DomNode* node = (DomNode*)virtual_host_data(item);
-    if (!node || !s_radiant_dom_wrapper_index) return nullptr;
-    Context* active = (Context*)context;
-    RadiantDomWrapperCacheIndexEntry probe = radiant_dom_cache_index_key(
-        node, active, heap_generation_for(active));
-    const RadiantDomWrapperCacheIndexEntry* found =
-        (const RadiantDomWrapperCacheIndexEntry*)hashmap_get(
-            s_radiant_dom_wrapper_index, &probe);
-    RadiantDomWrapperCacheEntry* entry = found ? found->entry : nullptr;
-    if (!entry || entry->item != item.item || !entry->owner_doc ||
-            dom_node_ref_validate(entry->owner_doc, entry->node_ref) != node) {
-        return nullptr;
-    }
-    return entry->owner_doc;
+    return radiant_host_api
+        ? (DomDocument*)radiant_host_api->dom_catalog->cached_node_wrapper_document(item)
+        : nullptr;
 }
 
 // ES24/F17: this is the only native state for an in-flight DOM Event. Payload
@@ -1761,11 +1354,11 @@ static bool radiant_dom_get_character_data_property(DomNode* node,
         return true;
     }
     if (strcmp(prop, "nextSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling(node));
+        *out = radiant_dom_node_item(radiant_dom_visible_sibling(node, true));
         return true;
     }
     if (strcmp(prop, "previousSibling") == 0) {
-        *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling(node));
+        *out = radiant_dom_node_item(radiant_dom_visible_sibling(node, false));
         return true;
     }
     if (strcmp(prop, "childNodes") == 0) {
@@ -2749,14 +2342,14 @@ RADIANT_C_API int radiant_dom_member_is_connected_any(Item receiver, Item* out) 
 RADIANT_C_API int radiant_dom_member_next_sibling_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !out) return 0;
-    *out = radiant_dom_node_item(radiant_dom_next_script_visible_sibling(node));
+    *out = radiant_dom_node_item(radiant_dom_visible_sibling(node, true));
     return 1;
 }
 
 RADIANT_C_API int radiant_dom_member_previous_sibling_any(Item receiver, Item* out) {
     DomNode* node = (DomNode*)radiant_dom_unwrap_node(receiver);
     if (!node || !out) return 0;
-    *out = radiant_dom_node_item(radiant_dom_prev_script_visible_sibling(node));
+    *out = radiant_dom_node_item(radiant_dom_visible_sibling(node, false));
     return 1;
 }
 

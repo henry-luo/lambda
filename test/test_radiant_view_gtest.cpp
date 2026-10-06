@@ -1834,6 +1834,42 @@ TEST(RadiantViewTest, RapidLocalIframeNavigationCommitsLatestScriptPage) {
     shell_result_free(&result);
 }
 
+TEST(RadiantViewTest, LambdaLoadedDocumentsReleaseNativeStorageAtExit) {
+    const char* cases[] = {
+        "test/lambda/dom_stylesheet.ls",
+        "test/lambda/proc/dom_stylesheet_declaration.ls",
+        "test/lambda/proc/dom_document_ownership.ls",
+        "test/lambda/proc/dom_css_rule_interface_projection.ls",
+        "test/lambda/proc/dom_css_rule_mixed_projection.ls",
+    };
+    const ShellEnvEntry env[] = {
+        {"VIEW_MEM_STAGES", "1"},
+        {"MEMTRACK_MODE", "DEBUG"},
+        {"LAMBDA_GC_FORCE_EVERY", "1"},
+        {"LAMBDA_GC_POISON_FREED", "1"},
+        {NULL, NULL},
+    };
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    for (const char* path : cases) {
+        SCOPED_TRACE(path);
+        ASSERT_TRUE(test_radiant_view_file_readable(path));
+        const char* args[5] = {"./lambda.exe", "run", path, "--no-log", NULL};
+        // the existing functional fixture has no procedural entry point.
+        if (strcmp(path, cases[0]) == 0) {
+            args[1] = path;
+            args[2] = "--no-log";
+            args[3] = NULL;
+        }
+        ShellResult result = shell_exec("./lambda.exe", args, &options);
+        const char* output = result.stdout_buf ? result.stdout_buf : "";
+        EXPECT_EQ(result.exit_code, 0) << output;
+        EXPECT_NE(strstr(output, "[MEMTRACK_LIVE] bytes=0 count=0"), nullptr) << output;
+        shell_result_free(&result);
+    }
+}
+
 TEST(RadiantViewTest, LatexIframeNavigationAcceptsParentClickWithoutScroll) {
     const char* page = "test/html/index.html";
     const char* events = "test/html/latex_navigation_events.json";
@@ -2049,6 +2085,25 @@ TEST(RadiantViewTest, BatchLoaderRuntimeMatchesFreshRuntimes) {
         EXPECT_TRUE(test_radiant_view_same_view_tree(batch_path, single_path))
             << loader_case.path << " lays out differently on the shared loader runtime";
     }
+}
+
+TEST(RadiantViewTest, RenderBatchReleasesImageCacheAfterDocumentOwner) {
+    const char* jobs = "test/html/render_batch_image_cleanup.tsv";
+    ASSERT_TRUE(test_radiant_view_file_readable(jobs));
+    test_radiant_view_ensure_temp_dir();
+    const char* args[] = {"./lambda.exe", "render-batch", "--no-log", nullptr};
+    ShellOptions options = {};
+    options.stdin_path = jobs;
+    options.merge_stderr = true;
+    ShellResult result = shell_exec("./lambda.exe", args, &options);
+    const char* output = result.stdout_buf ? result.stdout_buf : "";
+    // image-cache cleanup must finish after each document, including reuse of the same UI context.
+    EXPECT_EQ(result.exit_code, 0) << output;
+    EXPECT_NE(strstr(output, "OK\ttest/render/page/bg_image_01.html"), nullptr) << output;
+    EXPECT_NE(strstr(output, "OK\ttest/render/page/enhance5_svg_data_uri_image_stack_01.html"), nullptr) << output;
+    EXPECT_TRUE(test_radiant_view_file_readable("temp/render_batch_image_cleanup_raster.png"));
+    EXPECT_TRUE(test_radiant_view_file_readable("temp/render_batch_image_cleanup_svg.png"));
+    shell_result_free(&result);
 }
 
 TEST(RadiantViewTest, BatchDocumentFontFaceOverridesSystemCache) {

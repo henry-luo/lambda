@@ -145,6 +145,50 @@ Continuing the DOM-stage decision ledger (DOM3 used D0a–D0d):
   (`f = el.appendChild`) still returns the cached function object — only the immediate-call
   form takes the direct entry.
 
+  **CSSOM implementation note, 2026-10-07:** This optimization applies to the default
+  projected-member contract above. CSS rule and rule-style declaration bindings opt into
+  `JUBE_MEMBER_PROTOTYPE`: JS reads/writes use ordinary prototype operations,
+  instance expandos can shadow members, and declared accessor descriptors live on
+  their interface prototypes. The JS ordinal get/set/call entries return 0 for
+  those records and continue through the observable Get/Call path required by
+  **D6.2.2v2**. Inherited methods reuse the declaring record; CSS grouping methods
+  also declare their required JS argument count independently of Lambda arity.
+  Callers select the Lambda or JS surface explicitly; a derived JS capsule
+  can exist while Lambda reads declared fields or obtains a bound method.
+  Native object creation activates the registered type's owning module under
+  **D7.3.2**, including engine seams reached through `import dom` alone.
+  Lambda projection continues to use the declared record under **D7.4.1v2**.
+  JS Get/Set hooks retain the supplied receiver separately from the target, and
+  metadata Set callbacks return the boolean/error completion; assignment callers
+  retain the right-hand value and enforce their explicit strictness policy.
+  Receiver writes reach a declared DefineOwn callback before raw carrier storage.
+  Native-map indexed bounds use an optional length callback in the retired
+  binding slot; a pointer-size assertion preserves its ABI. Descriptor, own-key,
+  membership and deletion operations share the same indexed count under **D7.3.3**.
+  Native-only index adapters opt out of the JS indexed surface through type
+  metadata; unmarked adapters preserve their existing contract. Getter-only
+  WebIDL index definitions opt into a separate type capability, independently
+  of the presence of an adapter. Getter-only indexed hosts reject numeric
+  definitions even outside their current bounds, after observable descriptor
+  conversion. Same-receiver writes reuse
+  that DefineOwn rejection. JS Symbol descriptions do not select declared string
+  members or numeric indices; Lambda named symbols retain their projection.
+  Fixed-key accessor bindings opt into shared named-adapter dispatch using their
+  metadata key, with registration-time validation of both adapters. Native-only
+  named adapters retain Lambda projection while JS uses inherited accessors and
+  ordinary expandos; exact-JS-name metadata keeps declared Lambda aliases off
+  that JS surface. Unmarked bindings preserve their existing dispatch contract.
+  Large declared interfaces use the library's growable member storage rather
+  than a fixed parse limit, preserving declaration/binding validation under
+  **D7.3.2–D7.3.4**.
+  Captured Lambda methods store the receiver and tagged member ordinal in two
+  traced Item slots. Compaction copies the declared slots exactly; native pointer
+  tails cannot carry method records. Invocation resolves the ordinal through the
+  receiver's inherited record prefix under **D7.4.4** and D4a.
+  Arguments and lookup objects retain precise roots under **D5.3.3**. No Lambda semantic
+  ruling changes. The CSSOM implementation tracker records regression and baseline
+  evidence; complete WebIDL reflection and cross-realm behavior remain open.
+
 - **D4e — Receiver typing is a flow lattice seeded and propagated by the interface
   declarations themselves.** No hand-maintained type tables on the JS side. Seeds:
   `document` / `window` globals (only when the module provably never rebinds them and the
