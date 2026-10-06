@@ -7,6 +7,12 @@
 #include "../runtime/activation.h"
 #include "../runtime/module_registry.h"
 #include "../runtime/transpiler.hpp"
+#include "../runtime/template_host.h"
+#include "../runtime/template_registry.h"
+#include "../runtime/template_state.h"
+#include "../runtime/radiant_event_hook.h"
+#include "../runtime/lambda-root-frame.hpp"
+#include "../runtime/heap_api.h"
 #include "../runtime/mir_emitter_shared.hpp"
 #include "../runtime/mir_dump.h"
 #include "../runtime/sys_func_registry.h"
@@ -3692,6 +3698,7 @@ static int jube_host_node_resolve_host_namespace(void* session, const char* spec
     static const JubeHostNamespaceEntry entries[] = {
         {"module", js_get_node_module_namespace},
         {"url", node_url_namespace},
+        {"events", node_events_namespace},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); i++) {
         if (strcmp(specifier, entries[i].specifier) == 0) {
@@ -4070,6 +4077,216 @@ static const JubeHostLangAPI jube_host_lang_api = {
     &jube_host_root_api,
 };
 
+static Item jube_template_value_copy(const JubeTemplateValue* value, int depth) {
+    if (!value || depth > 32) return ItemError;
+    switch (value->kind) {
+    case JUBE_TEMPLATE_NULL: return ItemNull;
+    case JUBE_TEMPLATE_BOOL: return {.item = b2it(value->boolean)};
+    case JUBE_TEMPLATE_INT: return {.item = i2it(value->integer)};
+    case JUBE_TEMPLATE_STRING:
+        if (!value->bytes && value->byte_length) return ItemError;
+        return {.item = s2it(heap_strcpy(value->bytes ? value->bytes : "",
+            value->byte_length))};
+    case JUBE_TEMPLATE_BINARY: {
+        if (!value->bytes && value->byte_length) return ItemError;
+        Binary* binary = heap_binary_from_bytes(value->bytes ? value->bytes : "",
+            (int64_t)value->byte_length);
+        return binary ? (Item){.item = x2it(binary)} : ItemError;
+    }
+    case JUBE_TEMPLATE_MAP: {
+        if (value->field_count && !value->fields) return ItemError;
+        RootFrame roots(3);
+        Rooted<Item> map(roots, vmap_new());
+        Rooted<Item> key(roots, ItemNull);
+        Rooted<Item> child(roots, ItemNull);
+        for (size_t i = 0; i < value->field_count; i++) {
+            const JubeTemplateField* field = &value->fields[i];
+            if (!field->name) return ItemError;
+            key.set({.item = s2it(heap_strcpy(field->name, strlen(field->name)))});
+            child.set(jube_template_value_copy(field->value, depth + 1));
+            if (get_type_id(child.get()) == LMD_TYPE_ERROR) return ItemError;
+            vmap_set(map.get(), key.get(), child.get());
+        }
+        return map.get();
+    }
+    case JUBE_TEMPLATE_ARRAY: {
+        if (value->element_count && !value->elements) return ItemError;
+        RootFrame roots(2);
+        Rooted<Item> array_item(roots, {.array = array()});
+        Rooted<Item> child(roots, ItemNull);
+        for (size_t i = 0; i < value->element_count; i++) {
+            child.set(jube_template_value_copy(&value->elements[i], depth + 1));
+            if (get_type_id(child.get()) == LMD_TYPE_ERROR) return ItemError;
+            array_push(array_item.get().array, child.get());
+        }
+        return array_item.get();
+    }
+    default: return ItemError;
+    }
+}
+
+static Item jube_template_target_item(TemplateHostSession* session,
+                                      const JubeTemplateTarget* target) {
+    Item model{.item = template_host_session_root_word(session)};
+    if (!target || !target->state_name) return model;
+    TemplateEntry* entry = template_registry_match(g_template_registry,
+        model, false, nullptr);
+    const char* name = template_entry_state_name(entry, target->state_name);
+    Item child = name ? tmpl_state_get(model, entry->template_ref, name) : ItemNull;
+    if (get_type_id(child) == LMD_TYPE_NULL && target->fallback_attr)
+        child = item_attr(model, target->fallback_attr);
+    return child;
+}
+
+typedef struct JubeTemplateEmitBridge {
+    TemplateHostSession* session;
+    JubeTemplateEmitCallback callback;
+    void* user;
+} JubeTemplateEmitBridge;
+
+class JubeTemplateActivationBarrier {
+public:
+    JubeTemplateActivationBarrier() { activation_barrier_enter(); }
+    ~JubeTemplateActivationBarrier() { activation_barrier_leave(); }
+    JubeTemplateActivationBarrier(const JubeTemplateActivationBarrier&) = delete;
+    JubeTemplateActivationBarrier& operator=(
+        const JubeTemplateActivationBarrier&) = delete;
+};
+
+static Item jube_template_emit(void* receiver, Item event_name, Item event_data) {
+    JubeTemplateEmitBridge* bridge = (JubeTemplateEmitBridge*)receiver;
+    if (!bridge->callback) return ItemNull;
+    RootFrame roots(2);
+    Rooted<Item> name(roots, event_name);
+    Rooted<Item> data(roots, event_data);
+    return bridge->callback(bridge->user, bridge->session,
+        name.get(), data.get());
+}
+
+static int jube_template_dispatch_item(void* opaque, const JubeTemplateTarget* target,
+        const char* event_name, Item event_data, JubeTemplateEmitCallback emit,
+        void* user) {
+    TemplateHostSession* session = (TemplateHostSession*)opaque;
+    if (!session || !event_name) return -1;
+    TemplateHostBinding binding(session);
+    if (!binding.valid()) return -1;
+    JubeTemplateActivationBarrier barrier;
+    RootFrame roots(3);
+    Rooted<Item> model(roots, jube_template_target_item(session, target));
+    Rooted<Item> data(roots, event_data);
+    Rooted<Item> result(roots, ItemNull);
+    if (get_type_id(model.get()) != LMD_TYPE_ELEMENT) return -1;
+    JubeTemplateEmitBridge bridge = {session, emit, user};
+    LambdaEmitScope scope = {};
+    lambda_emit_scope_enter(&scope, jube_template_emit, &bridge);
+    bool handled = false;
+    result.set(template_dispatch_event(model.get(),
+        target && target->edit_mode, event_name, data.get(), &handled));
+    lambda_emit_scope_leave(&scope);
+    if (!handled || get_type_id(result.get()) == LMD_TYPE_ERROR)
+        log_error("jube-template-dispatch: event=%s handled=%d result_type=%d",
+            event_name, handled, (int)get_type_id(result.get()));
+    return handled && get_type_id(result.get()) != LMD_TYPE_ERROR ? 0 : -1;
+}
+
+static int jube_template_dispatch(void* opaque, const JubeTemplateTarget* target,
+        const char* event_name, const JubeTemplateValue* event_data,
+        JubeTemplateEmitCallback emit, void* user) {
+    TemplateHostSession* session = (TemplateHostSession*)opaque;
+    if (!session || !event_name || !event_data) return -1;
+    TemplateHostBinding binding(session);
+    if (!binding.valid()) return -1;
+    JubeTemplateActivationBarrier barrier;
+    RootFrame roots(1);
+    Rooted<Item> payload(roots, jube_template_value_copy(event_data, 0));
+    if (get_type_id(payload.get()) == LMD_TYPE_ERROR) return -1;
+    return jube_template_dispatch_item(session, target, event_name,
+        payload.get(), emit, user);
+}
+
+static Item jube_template_attribute(Item value, const char* name) {
+    return name ? item_attr(value, name) : ItemNull;
+}
+
+static bool jube_template_string_copy(Item value, char* out, size_t capacity,
+                                      size_t* out_length) {
+    String* source = value.get_string();
+    if (out_length) *out_length = source ? source->len : 0;
+    if (!source || !out || capacity <= source->len) return false;
+    memcpy(out, source->chars, source->len);
+    out[source->len] = '\0';
+    return true;
+}
+
+static int jube_template_render_json(void* opaque, char** out_bytes,
+                                     size_t* out_length) {
+    if (out_bytes) *out_bytes = NULL;
+    if (out_length) *out_length = 0;
+    TemplateHostSession* session = (TemplateHostSession*)opaque;
+    if (!session || !out_bytes || !out_length) return -1;
+    TemplateHostBinding binding(session);
+    if (!binding.valid()) return -1;
+    JubeTemplateActivationBarrier barrier;
+    RootFrame roots(1);
+    Rooted<Item> snapshot(roots, fn_apply1({.item =
+        template_host_session_root_word(session)}));
+    if (get_type_id(snapshot.get()) != LMD_TYPE_ELEMENT) return -1;
+    Pool* pool = mem_pool_create(NULL, MEM_ROLE_TEMP, "jube.template.render");
+    if (!pool) return -1;
+    String* formatted = format_json(pool, snapshot.get());
+    if (formatted) {
+        *out_bytes = (char*)mem_alloc((size_t)formatted->len + 1, MEM_CAT_SYSTEM);
+        if (*out_bytes) {
+            memcpy(*out_bytes, formatted->chars, formatted->len);
+            (*out_bytes)[formatted->len] = '\0';
+            *out_length = formatted->len;
+        }
+    }
+    pool_destroy(pool);
+    return *out_bytes ? 0 : -1;
+}
+
+static int jube_template_render_item(void* opaque,
+        JubeTemplateRenderCallback callback, void* user) {
+    TemplateHostSession* session = (TemplateHostSession*)opaque;
+    if (!session || !callback) return -1;
+    TemplateHostBinding binding(session);
+    if (!binding.valid()) return -1;
+    JubeTemplateActivationBarrier barrier;
+    RootFrame roots(1);
+    Rooted<Item> snapshot(roots, fn_apply1({.item =
+        template_host_session_root_word(session)}));
+    if (get_type_id(snapshot.get()) != LMD_TYPE_ELEMENT) return -1;
+    return callback(user, session, snapshot.get());
+}
+
+static const JubeHostTemplateAPI jube_host_template_api = {
+    JUBE_HOST_SERVICE_API_VERSION,
+    sizeof(JubeHostTemplateAPI),
+    [](const char* source, const char* reference) -> void* {
+        JubeTemplateActivationBarrier barrier;
+        const TemplateHostActivationHooks hooks = {
+            [](EvalContext* owner, bool* was_active) -> bool {
+                *was_active = js_runtime_state_thread_matches(owner);
+                return !*was_active || js_runtime_state_shutdown(owner);
+            },
+            [](EvalContext* owner, bool was_active) -> bool {
+                return !was_active || js_runtime_state_init(owner);
+            },
+        };
+        return template_host_session_open_with_hooks(source, reference, &hooks);
+    },
+    [](void* session) { template_host_session_close((TemplateHostSession*)session); },
+    jube_template_dispatch,
+    jube_template_dispatch_item,
+    jube_template_attribute,
+    jube_template_string_copy,
+    jube_template_render_json,
+    [](char* bytes) { mem_free(bytes); },
+    jube_template_render_item,
+    [](Item value, int64_t index) -> Item { return item_at(value, index); },
+};
+
 static JubeHostAPI jube_host_api = {
     JUBE_HOST_API_VERSION,
     sizeof(JubeHostAPI),
@@ -4078,7 +4295,8 @@ static JubeHostAPI jube_host_api = {
         JUBE_HOST_CAP_RUNTIME_CATALOG |
         JUBE_HOST_CAP_MODULE_GRAPH |
         JUBE_HOST_CAP_GUEST_EXECUTION |
-        JUBE_HOST_CAP_NODE_RUNTIME,
+        JUBE_HOST_CAP_NODE_RUNTIME |
+        JUBE_HOST_CAP_TEMPLATE_SESSION,
     JUBE_HOST_BUILD_ID,
     &jube_host_lang_api,
     &jube_host_gc_api,
@@ -4089,6 +4307,7 @@ static JubeHostAPI jube_host_api = {
     &jube_host_runtime_catalog_api,
     &jube_host_data_api,
     &jube_host_node_api,
+    &jube_host_template_api,
 };
 
 extern "C" const JubeHostAPI* jube_internal_host_api(void) {

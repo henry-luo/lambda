@@ -729,6 +729,12 @@ SysFuncInfo sys_func_defs[] = {
      C_RET_ITEM, NULL, "fn_chr", FPTR(fn_chr), NULL, NULL, false, 0,
      /* is_async */ false, /* success */ &TYPE_STRING, /* may_error */ true},
 
+    // Terminal layout and word policy share utf8proc's scalar metadata.
+    {SYSFUNC_IO_CELL_WIDTH, "io_cell_width", 1, &TYPE_ANY, false, false, false, LMD_TYPE_INT, false,
+     C_RET_ITEM, NULL, "fn_io_cell_width", FPTR(fn_io_cell_width), NULL, NULL, false, 0},
+    {SYSFUNC_IO_UNICODE_CATEGORY, "io_unicode_category", 1, &TYPE_ANY, false, false, false, LMD_TYPE_INT, false,
+     C_RET_ITEM, NULL, "fn_io_unicode_category", FPTR(fn_io_unicode_category), NULL, NULL, false, 0},
+
     // ========================================================================
     // Vector/array functions — math module
     // ========================================================================

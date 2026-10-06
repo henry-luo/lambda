@@ -1178,8 +1178,16 @@ Functions that have side effects (I/O, state changes). These are only available 
 | `io.rename(src, dst)` | Rename file or directory | `io.rename(/.'a.txt', /.'b.txt')` |
 | `io.fetch(url, options?)` | HTTP fetch; `fetch(url, options)` is the bare spelling | `io.fetch(https.'api.example.com', {method: 'POST'})` |
 | `io.grep(source, pattern, options?)` | Search files line by line, like grep | `io.grep(/.src, "TODO", {line: true})` |
+| `io.cell_width(codepoint)` | Terminal cell width from Unicode metadata; `null` for an invalid scalar | `io.cell_width(ord("界"))` |
+| `io.unicode_category(codepoint)` | Two-letter Unicode general category; `null` for an invalid scalar | `io.unicode_category(ord("界"))` |
 | `cmd(command, args?)` | Execute a shell command; `args` is one array (or string) | `cmd("ls", ["-la"])` |
 | `clock()` | Monotonic clock in seconds | `clock()` |
+
+`io.cell_width` returns `-1` for a control scalar and uses the runtime's
+utf8proc width table for printable scalars. These are metadata queries; callers
+decide wrapping and word boundaries in Lambda. String offsets remain Unicode
+code-point offsets (S2.5.8), while `lambda.io.terminal` is a shipped package
+under the module path rules of D7.2.4.
 
 #### print(args...)
 

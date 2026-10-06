@@ -531,6 +531,8 @@ typedef enum SysFunc {
     SYSFUNC_FIND3,          // find(str, pattern, options) - with options
     SYSFUNC_ORD,            // ord(str) - Unicode code point of first character
     SYSFUNC_CHR,            // chr(int) - character from Unicode code point
+    SYSFUNC_IO_CELL_WIDTH,  // io.cell_width(int) - terminal cell width of a scalar
+    SYSFUNC_IO_UNICODE_CATEGORY, // io.unicode_category(int) - Unicode general category
     // vector functions
     SYSFUNC_PROD,
     SYSFUNC_CUMSUM,
@@ -3310,6 +3312,8 @@ extern "C" {
     int64_t fn_ord_str(String* str);    // native raw variant with C/JS -1 sentinel
     Item fn_ord_str_item(String* str);  // native Lambda-facing nullable result
     Item fn_chr(Item codepoint);        // chr(int) - 1-char string from Unicode code point
+    Item fn_io_cell_width(Item codepoint);
+    Item fn_io_unicode_category(Item codepoint);
     Item fn_join2(Item list, Item sep);
     Item fn_replace(Item str, Item old_str, Item new_str);
     Item fn_replace3(Item str, Item old_str, Item new_str);  // overloaded alias for fn_replace

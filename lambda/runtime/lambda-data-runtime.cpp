@@ -2662,13 +2662,26 @@ Map* map_with_region_type_tl(LambdaRegion* region, TypeMap* map_type,
     return map_alloc_for_type(map_type, region, 0);
 }
 
+// Empty map types have no field storage. Root the new map while allocating
+// nonempty storage because the data-zone allocation can collect and move it.
+static Map* map_fill_reserve_data(Map* map) {
+    if (!map || map->data) return map;
+    TypeMap* map_type = (TypeMap*)map->type;
+    if (map_type->byte_size == 0) return map;
+    RootFrame roots(1);
+    Rooted<Map*> rooted_map(roots, map);
+    void* data = heap_data_calloc(map_type->byte_size);
+    map = rooted_map.get();
+    if (!data) return NULL;
+    map->data = data;
+    return map;
+}
+
 // zig cc has problem compiling this function, it seems to align the pointers to 8 bytes
 Map* map_fill(Map* map, ...) {
+    map = map_fill_reserve_data(map);
+    if (!map) return NULL;
     TypeMap *map_type = (TypeMap*)map->type;
-    // skip data allocation if already set (combined allocation via map_with_data)
-    if (!map->data) {
-        map->data = heap_data_calloc(map_type->byte_size);
-    }
     // set map fields
     va_list args;
     va_start(args, map);
@@ -2681,11 +2694,9 @@ Map* map_fill(Map* map, ...) {
 // rooted Item span rather than in varargs (the T0 walker). Same shape walk,
 // same per-field store.
 Map* map_fill_items(Map* map, const Item* values, int value_count) {
+    map = map_fill_reserve_data(map);
     if (!map) return NULL;
     TypeMap *map_type = (TypeMap*)map->type;
-    if (!map->data) {
-        map->data = heap_data_calloc(map_type->byte_size);
-    }
     set_fields_items(map_type, map->data, values, value_count);
     return map;
 }

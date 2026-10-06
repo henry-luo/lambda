@@ -580,9 +580,22 @@ extern "C" Item js_ee_off(Item emitter, Item event_name, Item listener) {
 // ─── emitter.emit(event, ...args) ───────────────────────────────────────────
 // Calls each listener with args. Returns true if had listeners.
 extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
-    if (emitter.item == 0 || !node_events_attached()) return (Item){.item = b2it(false)};
+    if (emitter.item == 0 || !node_events_host) return (Item){.item = b2it(false)};
+    // Listener lookup and snapshot construction allocate. All three incoming
+    // JS values must remain live from entry through listener delivery.
+    JubeScopedRoots roots(node_events_host, 7);
+    uint64_t* emitter_root = roots.slot(emitter);
+    uint64_t* event_root = roots.slot(event_name);
+    uint64_t* rest_root = roots.slot(args_rest);
+    if (!emitter_root || !event_root || !rest_root)
+        return (Item){.item = b2it(false)};
+    if (!node_events_attached()) return (Item){.item = b2it(false)};
     Item map = get_events_map(emitter);
+    uint64_t* map_root = roots.slot(map);
+    if (!map_root) return (Item){.item = b2it(false)};
     Item arr = js_get_key_default(map, event_name);
+    uint64_t* arr_root = roots.slot(arr);
+    if (!arr_root) return (Item){.item = b2it(false)};
 
     bool has_listeners = (arr.item != 0 && get_type_id(arr) != LMD_TYPE_UNDEFINED &&
                           js_array_length(arr) > 0);
@@ -655,6 +668,9 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
 
     // call each listener — snapshot the array first since once-listeners modify it
     Item snapshot = js_array_new(0);
+    uint64_t* snapshot_root = roots.slot(snapshot);
+    uint64_t* new_set_root = roots.slot(ItemNull);
+    if (!snapshot_root || !new_set_root) return (Item){.item = b2it(false)};
     for (int64_t i = 0; i < len; i++) {
         js_array_push(snapshot, js_elements_get_int(arr, i));
     }
@@ -669,6 +685,7 @@ extern "C" Item js_ee_emit(Item emitter, Item event_name, Item args_rest) {
             Item set = get_once_set(emitter);
             int64_t slen = js_array_length(set);
             Item new_set = js_array_new(0);
+            *new_set_root = new_set.item;
             for (int64_t j = 0; j < slen; j++) {
                 Item f = js_elements_get_int(set, j);
                 if (f.item != fn.item && !listener_matches(f, listener_record_fn(fn))) {

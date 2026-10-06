@@ -349,6 +349,7 @@
         "lambda/module/node_core/node_process.cpp",
         "lambda/module/node_core/node_punycode.cpp",
         "lambda/module/node_core/node_querystring.cpp",
+        "lambda/module/node_core/node_readline.cpp",
         "lambda/module/node_core/node_string_decoder.cpp",
         "lambda/module/node_core/node_timers.cpp",
         "lambda/module/node_core/node_trace_events.cpp",
@@ -2644,21 +2645,6 @@
             "icon": "\ud83c\udf10"
           },
           {
-            "source": "lib/test_cmdedit_gtest.cpp",
-            "name": " Command Line Editor Tests",
-            "dependencies": [
-              "lambda-data"
-            ],
-            "libraries": [
-              "gtest",
-              "gtest_main",
-              "utf8proc"
-            ],
-            "binary": "test_cmdedit_gtest.exe",
-            "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC",
-            "icon": "\u2328\ufe0f"
-          },
-          {
             "source": "lib/test_mempool_gtest.cpp",
             "name": "Unified Memory Pool Tests",
             "disable_sanitizer": true,
@@ -4836,6 +4822,46 @@
               ]
             },
             "icon": "\ud83d\udd00"
+          },
+          {
+            "source": "test/test_io_terminal_gtest.cpp",
+            "name": "IO Terminal Template Host Tests",
+            "dependencies": [
+              "lambda-rt",
+              "node-core",
+              "radiant"
+            ],
+            "additional_sources": [
+              "lambda/runtime/concurrency.cpp",
+              "lib/uv_loop.c"
+            ],
+            "binary": "test_io_terminal_gtest.exe",
+            "libraries": [
+              "gtest",
+              "gtest_main",
+              "libuv"
+            ],
+            "macos": {
+              "libraries": [
+                "CoreFoundation",
+                "CoreServices",
+                "SystemConfiguration",
+                "Cocoa",
+                "IOKit",
+                "CoreVideo",
+                "AVFoundation",
+                "CoreMedia",
+                "GL",
+                "Foundation",
+                "CoreGraphics",
+                "Accelerate",
+                "CoreText",
+                "AppKit",
+                "Carbon",
+                "WebKit"
+              ]
+            },
+            "icon": "⌨"
           },
           {
             "source": "test/test_mir_gc_stress_gtest.cpp",

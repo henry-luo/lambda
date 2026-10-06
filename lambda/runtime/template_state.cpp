@@ -172,3 +172,18 @@ void tmpl_state_set_map(struct hashmap* map) {
     s_template_state_map = map;
     s_owns_map = false;
 }
+
+void tmpl_state_visit_roots(void* visitor_context,
+                            void (*visit)(void* visitor_context, uint64_t item)) {
+    if (!context || !visit) return;
+    TemplateStateStore* store = (TemplateStateStore*)context_capsule(
+        context, CONTEXT_CAPSULE_TEMPLATE_STATE);
+    if (!store || !store->map) return;
+    size_t cursor = 0;
+    TemplateStateEntry* entry = NULL;
+    while (TemplateStateMap::next(store->map, &cursor, &entry)) {
+        // The hashmap is native storage; the collector cannot see either Item.
+        visit(visitor_context, entry->key.model_item.item);
+        visit(visitor_context, entry->value.item);
+    }
+}

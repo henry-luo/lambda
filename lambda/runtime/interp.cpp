@@ -8129,6 +8129,7 @@ static void interp_register_view_template(Script* script, AstViewNode* view,
     TemplateEntry* entry = g_template_registry->last;
     if (!entry) return;
     template_registry_set_element_pattern(entry, match_elmt);
+    template_registry_set_state_declarations(entry, view);
     entry->interp_body_func = interp_eval_view_template;
     const char* generated_ref = view->name ? view->name->chars : NULL;
     if (!generated_ref) {

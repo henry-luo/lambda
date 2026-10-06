@@ -48013,6 +48013,7 @@ void lambda_register_mir_view_templates(Script* script) {
                         // get the just-added entry (it's the last one)
                         TemplateEntry* tmpl_entry = g_template_registry->last;
                         template_registry_set_element_pattern(tmpl_entry, match_elmt);
+                        template_registry_set_state_declarations(tmpl_entry, view);
 
                         // set template_ref for state store keying
                         // func_name is stack-local, so we need a persistent copy

@@ -54,6 +54,11 @@ struct hashmap* tmpl_state_get_map(void);
 // Inject an external hashmap (e.g., from DocState). Caller owns the map.
 void tmpl_state_set_map(struct hashmap* map);
 
+// Trace state values held in native storage without linking the state store
+// itself to a particular collector implementation.
+void tmpl_state_visit_roots(void* visitor_context,
+                            void (*visit)(void* visitor_context, uint64_t item));
+
 #ifdef __cplusplus
 }
 #endif
