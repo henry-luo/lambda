@@ -1131,6 +1131,19 @@ In `test/benchmark/jq_vm.ls`, `vm_run` holds `var vm: Vm = {...}` and calls help
 <a id="lr07-45"></a>**LR07-45 · JIT: a name-key index write on an `any` object was lowered as a positional array write · FIXED 2026-10-05 (found the same day, while writing the jq benchmark VM)**
 `pn make() { {a: 1} }; var c = make(); c["a"] = "x"` left `c` unchanged and logged `fn_array_set: index 0 out of bounds` on the JIT; so did `var r = o; r[k] = v` with `o` an untyped parameter. The index-assign lowering routed a map or element object to the member setter, but an object typed `any` with a `string` key matched neither that route nor the generic-key route, fell to the positional path, unboxed the key to index 0 and called `fn_array_set` on the map. **Fix:** a name key on an `any` object takes the member route (`route_member` in the `AST_NODE_INDEX_ASSIGN_STAM` lowering). Covered by `test/lambda/proc/param_alias_write.ls` (`by_index`).
 
+<a id="lr07-46"></a>**LR07-46 · JIT: a map filter loop rewound the root-stack top beneath the map's key list, so `test/lambda/pipe_filter.ls` crashed in `item_attr` (D5.3.3) · FIXED 2026-10-06 (found 2026-10-05, in the JIT golden sweep; reproduced on the master build)**
+`LAMBDA_EXEC_BACKEND=jit ./lambda.exe test/lambda/pipe_filter.ls` exited with SIGSEGV in `strlen` under `item_attr`; the auto tier runs the script in T0, so the baseline never saw it. The first record blamed an interaction between statements. In fact `{a: 1, b: 2, c: 3} |: ~ != 2` alone crashes; a lone filter ending in `;` had been rejected by the parser before it could run. `{a: "x", b: "y", c: "z"} |: ~ != "y"` does not crash but silently returns `["x", null, null]`.
+**Root cause:** the side-root publication frontier (`em_compute_root_publication_frontier`, shared by the Lambda and JS emitters). A frame publishes `side_root_top = root_end` lazily, at the first may-GC call on each path. A frontier that some path has already published must instead use the non-rewinding guard, because a native `RootFrame` may sit above `root_end` by then. `item_keys` is such a frame: it keeps a map's key `Symbol`s in side-stack chunks until `symbol_key_list_free`. The analysis got both properties wrong:
+- It iterated "every incoming path has published" up from zero, which is the least fixpoint. A loop with one call-free path through its body (the inline fast path of `~ != 2`) never proved its header published.
+- It then chose the guard only when an *immediate* predecessor was proven published.
+
+So the filter loop re-stored `root_end` before `pipe_map_val` on every pass, and the callee's own frames overwrote the key chunk. `symbol_key_list_at` then returned an int Item as a `Symbol*`.
+**Fix:** "all paths published" is now the greatest fixpoint over the blocks reachable from the entry, so such loops need no publication code at all. A separate any-path analysis (least fixpoint) decides between store and guard: a block stores outright only if no path into it has published.
+- The filter's loop now has no stores.
+- Emission elsewhere grows where stores became guards (deltablue +243 instructions, prettier_ast +194, js_tune6 +387). Budgets were lifted with notes in the same commit (D8.6.1).
+
+Covered by fixture `test/mir/lambda/root_publication_map_keys.ls`, checked on all three tiers by `LambdaRootPublicationTests.MapKeyLoopAgreesOnEveryTier`, by the forced-GC sweep, and by its `.mir-check`, which forbids any store into the runtime context between `item_keys` and `symbol_key_list_free`.
+
 ## 8. Memory management & GC (LR_08)
 
 <a id="lr08-r3"></a>**LR08-R3 · JIT rooting hinged on dishonest static types · RESOLVED 2026-09-13**

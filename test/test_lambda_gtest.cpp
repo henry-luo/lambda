@@ -561,6 +561,18 @@ TEST(LambdaTierParityTests, SatellitePublicationKeepsTailCallIdentity) {
     }
 }
 
+// LR07-46 (D5.3.3): a map filter loop re-stored its frame top beneath the key
+// list's RootFrame on the JIT only (a crash, or lost string members), while the
+// auto tier ran it in T0 and printed the golden.
+TEST(LambdaRootPublicationTests, MapKeyLoopAgreesOnEveryTier) {
+    static const char* const tiers[] = {"interp", "jit", "auto"};
+    for (size_t t = 0; t < 3; t++) {
+        SCOPED_TRACE(tiers[t]);
+        test_lambda_script_against_file("test/mir/lambda/root_publication_map_keys.ls",
+            "test/mir/lambda/root_publication_map_keys.txt", true, tiers[t]);
+    }
+}
+
 // Tune31 T31-1: a nested counter initialized from the compact outer counter
 // must retain its native arithmetic in every execution tier (S4.1.1-S4.1.5).
 TEST(LambdaTune31Tests, NestedCounterAgreesOnEveryTier) {

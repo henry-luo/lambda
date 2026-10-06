@@ -903,9 +903,6 @@ Repro: `LAMBDA_EXEC_BACKEND=jit ./lambda.exe run test/benchmark/beng/knucleotide
 <a id="lr07-43"></a>**LR07-43 · JIT: an `any` value assigned to an int-inferred `var` is truncated to the int lane (S12.2.1) · OPEN (found 2026-10-05, while writing the jq benchmark translations)**
 `let data = parse("[1.5, 2.25]", 'json')^; var t = 0; ... t = t + data[j]` ends with `t` = 3 on the JIT and 3.75 on T0. The JSON orders' `total = total + qty * price` lost every fraction the same way. The declaration-time widening (`transpile_let_stam`'s `mir_nested_control_writes_binding` scan) boxes the binding only when an assignment's carrier is predicted `float`. An `any` right-hand side keeps the int lane, and each assigned value is coerced into it. S12.2.1 lets an unannotated `var` change type and forbids silent corruption, so an `any` assignment must either widen the binding or keep it int only behind a runtime proof. Boxing every such binding at the declaration costs untyped loops their int lanes, so it needs a performance decision before it is fixed. The jq translations sidestep it by starting float sums at `0.0`, which is faithful because jq numbers are doubles.
 
-<a id="lr07-46"></a>**LR07-46 · JIT: `test/lambda/pipe_filter.ls` segfaults in `item_attr` with an Item passed as the key · OPEN (found 2026-10-05, in the JIT golden sweep; reproduces on the master build)**
-`LAMBDA_EXEC_BACKEND=jit ./lambda.exe test/lambda/pipe_filter.ls` exits with SIGSEGV; the default tier passes, so the gtest baseline does not see it. The fault is `strlen` in `_map_get` under `item_attr`, whose `key` is `0x0500000000000010`, a tagged int Item rather than a `char*`. The file's first 25 lines are enough to crash it, but each `|:` expression in them passes on its own, so the trigger is an interaction between statements, not one filter form.
-
 ## 8. Memory management & GC (LR_08)
 
 
