@@ -483,15 +483,6 @@ typedef struct ShapeTreeStats {
 static ShapeTreeStats g_shape_tree_stats[2];
 static const char* g_shape_tree_stats_path = NULL;
 static int g_shape_tree_stats_state = -1;  // -1 unread, 0 off, 1 on
-static int g_shape_tree_fanout_table = -1;  // LAMBDA_SHAPE_TREE_FANOUT
-static int g_shape_tree_fanout_nodes = -1;  // LAMBDA_SHAPE_TREE_FANOUT_NODES
-
-static int shape_tree_env_int(const char* name) {
-    const char* value = getenv(name);
-    if (!value || !value[0]) return -1;
-    long parsed = strtol(value, NULL, 10);
-    return parsed < 0 ? -1 : (parsed > INT_MAX ? INT_MAX : (int)parsed);
-}
 
 static void shape_tree_stats_flush(void) {
     static const char* const kClass[2] = {"runtime", "other"};
@@ -499,13 +490,12 @@ static void shape_tree_stats_flush(void) {
         const ShapeTreeStats* s = &g_shape_tree_stats[c];
         char line[768];
         snprintf(line, sizeof(line),
-            "shape_tree_stats tree=%s fanout_table=%d fanout_nodes=%d hits=%llu mints=%llu "
+            "shape_tree_stats tree=%s hits=%llu mints=%llu "
             "declined_fanout=%llu declined_budget=%llu ext_hits=%llu ext_mints=%llu "
             "ext_declined_fanout=%llu edges_walked=%llu max_walk=%llu "
             "decline_degree=%llu/%llu/%llu/%llu private_types=%llu private_copies=%llu "
             "private_entries=%llu peak_nodes=%llu\n",
-            kClass[c], g_shape_tree_fanout_table, g_shape_tree_fanout_nodes,
-            (unsigned long long)s->hits, (unsigned long long)s->mints,
+            kClass[c], (unsigned long long)s->hits, (unsigned long long)s->mints,
             (unsigned long long)s->declined_fanout, (unsigned long long)s->declined_budget,
             (unsigned long long)s->external_hits, (unsigned long long)s->external_mints,
             (unsigned long long)s->external_declined_fanout,
@@ -524,8 +514,6 @@ static bool shape_tree_stats_on(void) {
     const char* path = getenv("LAMBDA_SHAPE_TREE_STATS");
     int next = path && path[0] ? 1 : 0;
     g_shape_tree_stats_path = path;
-    g_shape_tree_fanout_table = shape_tree_env_int("LAMBDA_SHAPE_TREE_FANOUT");
-    g_shape_tree_fanout_nodes = shape_tree_env_int("LAMBDA_SHAPE_TREE_FANOUT_NODES");
     int expected = -1;
     if (__atomic_compare_exchange_n(&g_shape_tree_stats_state, &expected, next, false,
             __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
@@ -556,15 +544,13 @@ void shape_tree_stats_note_private_copy(int64_t entries) {
     shape_tree_stat_add(&g_shape_tree_stats[0].private_entries, (uint64_t)(entries > 0 ? entries : 0));
 }
 
-// The edge cap for a step from `parent`. P1.5's measurement-only overrides
-// apply to the runtime tree alone (0 = no cap); every other tree keeps its own.
-static int shape_tree_fanout_cap(const Input* input, const TypeMap* parent, bool external) {
-    int cap = parent->length == 0 ? 256 : 16;
-    if (!input->keeps_external_edges || !shape_tree_stats_on()) return cap;
-    int override = external ? g_shape_tree_fanout_table
-        : (parent->length > 0 ? g_shape_tree_fanout_nodes : -1);
-    if (override < 0) return cap;
-    return override == 0 ? INT_MAX : override;
+// The edge cap for a step from `parent`, for every tree and for external-table
+// edges alike: each list is walked linearly per add (the table only finds a
+// parent's list). Impl_Map_Transition_Coverage P1.5 measured it (Q5): no
+// benchmark or corpus script reached 16 below the root, and lifting the root's
+// 256 to share jq_mix's 2,048 one-key objects cost 9-10% CPU in edge walks.
+static int shape_tree_fanout_cap(const TypeMap* parent) {
+    return parent->length == 0 ? 256 : 16;
 }
 
 // D4.1.4v4: a tree node and its edge are never freed on their own, so they
@@ -927,7 +913,7 @@ static TypeMap* transition_target_via(TypeMap* parent, TypeMapTransition** edges
     // a far larger budget than an interior shape needs. Capping it at 16 let it
     // saturate after a few hundred objects, after which every map fell back to
     // a private shape and the sharing bought nothing.
-    const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(input, parent, external);
+    const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(parent);
     ShapeTreeStats* stats = shape_tree_stats_for(input);
     int transition_count = 0;
     for (TypeMapTransition* tr = *edges; tr; tr = tr->next) {
@@ -1195,7 +1181,7 @@ TypeMap* type_tree_retype_field(Input* input, TypeMap* parent, const ShapeEntry*
     if (!edges) return NULL;
 
     ShapeTreeStats* stats = shape_tree_stats_for(input);
-    const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(input, parent, true);
+    const int MAX_SHAPE_TRANSITIONS = shape_tree_fanout_cap(parent);
     int transition_count = 0;
     for (TypeMapTransition* tr = *edges; tr; tr = tr->next) {
         transition_count++;
