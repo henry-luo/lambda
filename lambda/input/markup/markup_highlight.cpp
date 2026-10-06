@@ -271,8 +271,57 @@ static int64_t restart_line(const RestartRules& rules, const HighlightLines* src
 // Span sink
 // ============================================================================
 
+// The parser reads either the window's own lines or a container's copy whose
+// whole ancestry maps to them.
 static bool sink_active(MarkupParser* parser) {
-    return parser && parser->span_sink && parser->lines == parser->span_sink->root_lines;
+    MarkupSpanSink* sink = parser ? parser->span_sink : nullptr;
+    if (!sink) return false;
+    if (parser->lines == sink->root_lines) return true;
+    size_t n = sink->line_maps.length();
+    return n > 0 && sink->line_maps[n - 1].lines == parser->lines;
+}
+
+// A position in `lines` (the root array or a container's copy) as a root
+// line and byte column, through the container column maps.
+static bool sink_root_position(MarkupSpanSink* sink, char** lines, int64_t* line, int64_t* col) {
+    size_t k = sink->line_maps.length();
+    while (lines != sink->root_lines) {
+        if (k == 0) return false;
+        const MarkupSpanSink::LineMap& map = sink->line_maps[--k];
+        if (map.lines != lines || *line < 0 || *line >= map.count || map.offset[*line] < 0) return false;
+        *col += map.offset[*line];
+        *line += map.parent_first;
+        lines = map.parent;
+    }
+    return true;
+}
+
+void highlight_push_lines(MarkupParser* parser, char** lines, size_t count, int64_t parent_first) {
+    // a container inside an unmapped one stays unmapped too
+    if (!sink_active(parser) || !lines) return;
+    int32_t* offset = (int32_t*)mem_alloc(sizeof(int32_t) * (count ? count : 1), MEM_CAT_INPUT_MARKUP);
+    if (!offset) return;
+    for (size_t i = 0; i < count; i++) {
+        int64_t p = parent_first + (int64_t)i;
+        offset[i] = -1;
+        if (p < 0 || p >= parser->line_count || !lines[i]) continue;
+        size_t parent_len = strlen(parser->lines[p]);
+        size_t copy_len = strlen(lines[i]);
+        if (copy_len <= parent_len &&
+            memcmp(parser->lines[p] + parent_len - copy_len, lines[i], copy_len) == 0) {
+            offset[i] = (int32_t)(parent_len - copy_len); // INT_CAST_OK: byte offset within one line
+        }
+    }
+    parser->span_sink->line_maps.push_back(
+        MarkupSpanSink::LineMap{lines, parser->lines, parent_first, (int64_t)count, offset});
+}
+
+void highlight_pop_lines(MarkupParser* parser, char** lines) {
+    MarkupSpanSink* sink = parser ? parser->span_sink : nullptr;
+    size_t n = sink ? sink->line_maps.length() : 0;
+    if (n == 0 || sink->line_maps[n - 1].lines != lines) return;
+    mem_free(sink->line_maps[n - 1].offset);
+    sink->line_maps.remove(n - 1);
 }
 
 static int32_t sink_kind(MarkupSpanSink* sink, const char* kind) {
@@ -291,9 +340,14 @@ void highlight_note_block(MarkupParser* parser, const char* kind, int first, int
     if (!sink_active(parser) || !kind || end <= first) return;
     // trailing blank lines a block parser consumed separate blocks
     while (end > first + 1 && line_blank(parser->lines[end - 1])) end--;
-    MarkupSpan span = {sink_kind(parser->span_sink, kind), 1, first, 0, end - 1,
-                       (int32_t)strlen(parser->lines[end - 1])}; // INT_CAST_OK: line byte length
-    parser->span_sink->spans.push_back(span);
+    MarkupSpanSink* sink = parser->span_sink;
+    int64_t line = first, col = 0;
+    int64_t end_line = end - 1, end_col = (int64_t)strlen(parser->lines[end - 1]);
+    if (!sink_root_position(sink, parser->lines, &line, &col) ||
+        !sink_root_position(sink, parser->lines, &end_line, &end_col)) return;
+    MarkupSpan span = {sink_kind(sink, kind), 1, (int32_t)line, (int32_t)col, // INT_CAST_OK: window line, byte column
+                       (int32_t)end_line, (int32_t)end_col}; // INT_CAST_OK: window line, byte column
+    sink->spans.push_back(span);
 }
 
 void highlight_begin_inline(MarkupParser* parser) {
@@ -303,8 +357,16 @@ void highlight_begin_inline(MarkupParser* parser) {
 }
 
 void highlight_add_segment(MarkupParser* parser, int64_t text_off, int line, int col) {
-    if (!parser || !parser->span_sink || !parser->span_sink->segments_valid) return;
-    parser->span_sink->segments.push_back(MarkupSpanSink::Segment{text_off, line, col});
+    MarkupSpanSink* sink = parser ? parser->span_sink : nullptr;
+    if (!sink || !sink->segments_valid) return;
+    int64_t root_line = line, root_col = col;
+    // an unmappable line would misplace every span after it: drop the text's spans
+    if (!sink_root_position(sink, parser->lines, &root_line, &root_col)) {
+        sink->segments_valid = false;
+        return;
+    }
+    sink->segments.push_back(MarkupSpanSink::Segment{text_off, (int32_t)root_line, // INT_CAST_OK: window line
+                                                     (int32_t)root_col}); // INT_CAST_OK: byte column
 }
 
 void highlight_end_inline(MarkupParser* parser) {
@@ -405,6 +467,8 @@ static void markdown_window_parse(Input* input, const char* text, size_t len, Ma
     if (!parser) return;
     parser->span_sink = sink;
     parser->parseContent(text);
+    // every container pops its map; one left by an early return is freed here
+    while (sink->line_maps.length() > 0) highlight_pop_lines(parser, sink->line_maps[sink->line_maps.length() - 1].lines);
     markup_parser_destroy(parser);
 }
 

@@ -1,7 +1,7 @@
 # Radiant Source Editor — Implementation Plan and Record
 
 **Date:** 2026-10-06
-**Status:** P0 committed (`9007c54b3`) and P1, Markdown highlighting, committed (`8c477c3a8`), both on branch `worktree-source-editor`. P2, HTML highlighting, is implemented in the same worktree (§6). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5).
+**Status:** P0 committed (`9007c54b3`) and P1, Markdown highlighting, committed (`8c477c3a8`), both on branch `worktree-source-editor`. P2, HTML highlighting, committed (`1ca09a3d5`, §6). P3, parity and polish, is implemented in the same worktree (§7). OQ15 and OQ16 were decided by the user on 2026-10-07 (§5.5).
 **Design:** [Radiant Source Editor](../radiant/Radiant_Design_Source_Editor.md) (CED11–CED22, CED14v2, CED16v2).
 
 ## 1. What P0 has built
@@ -51,7 +51,7 @@ The host is `contenteditable="true"`, not `plaintext-only` as CED19 says: `radia
 
 ## 3. Remaining P0
 
-- Copy of an off-window selection: needs an author-reachable clipboard write (P3 or an engine follow-up).
+- ~~Copy of an off-window selection: needs an author-reachable clipboard write.~~ Done in P3 (§7.1): the model's edit result names the clipboard text.
 
 ## 4. OQ14 — resolved by ES23v2 (user, 2026-10-06)
 
@@ -140,3 +140,52 @@ Fidelity: `test/lambda/edit/source_highlight_html.ls` slides 30-line windows eve
 | all `test/ui/edit/edit_src_*.json` | P0 and P1 behavior with HTML highlighting added | 10/10 |
 | all `test/ui/edit/*.json` | the edit application | 27/29; `edit_md_save_as` and `edit_md_scroll_chrome` fail before this work too |
 | `make test-lambda-baseline` | including the HTML5 WPT parser suite (364/364) | 6274/6274 |
+
+## 7. P3 — parity and polish
+
+### 7.1 What was built
+
+| Item | How | Files |
+|---|---|---|
+| Model clipboard | A model edit result may carry `clipboard_text`; for a copy or cut Radiant writes it, and without it copies the DOM selection (Lambda_Design_DOM_Editable §4.5). The source surface returns its whole model selection, so copy and cut work past the window. Copy did nothing on model surfaces before: the intent went to the model handler, which declined, and nothing copied natively. | `radiant/event.cpp`, `lmd/package/dom/edit_result.ls`, `source.ls` |
+| Paste and the native selection | A key the surface does not handle writes no state: a render would replace the rows the key's native default (paste) targets, and the editaction that follows adopts the DOM selection itself. Every handler that renders without an edit (save, Escape, a no-op Tab or undo) projects the selection again. Paste failed after a click or a save before. | `source.ls` |
+| Shift+click | The surface extends the model selection from its own anchor to the press's source position; the native extension starts from the clamped DOM anchor. | `source.ls` |
+| Off-window selection | No `tok-selected` runs: the clamped DOM range paints every rendered row between the ends (checked by render). | — |
+| Indent, dedent | Tab over lines indents them (empty lines stay empty); Shift+Tab dedents one unit or one tab from the caret's line or each selected line. One delta, one undo step; the selection keeps its text. A dedent with nothing to remove keeps focus. | `source.ls` |
+| Find | Cmd/Ctrl+F opens a bar floating over the text's top right, seeded with a one-line selection; it takes focus through `autofocus` after `clear_editing_focus`. Matches ignore case. The open query lives in the paint state, so `row_leaves` lays match runs over the tokens (`syn.overlay`) and selection mapping stays consistent. The count is per chunk, one native `find` over each chunk's joined lines, about 19 ms for 100,000 lines in a debug build. It is recounted after edits while the bar is open. Enter, Shift+Enter, Cmd/Ctrl+G and the buttons step and wrap; typing searches as you type; Escape returns to the selected match. | `source.ls`, `source_highlight.ls` |
+| Soft wrap | Design §6.4 "As built": one view record `{handle, top, row, rows, cols, wrap}` replaces `top` and the measured surface; Alt+Z toggles; character wrapping keeps row arithmetic exact; rows scroll inside a line taller than the view. | `source.ls` |
+| Column maps (CED17, OQ10) | Containers register their stripped line copies with the span sink (`highlight_push_lines` / `highlight_pop_lines`); a copy line maps to its parent line at the byte offset where it is a suffix, and an unmappable line drops its paragraph's spans. Block and segment positions map through the stack to the window's lines. Inline constructs inside list items, quotes and lazy lines are colored. | `markup_highlight.{hpp,cpp}`, `block/block_quote.cpp`, `block/block_list.cpp` |
+| Source↔Rich switch (OQ7) | Design §10: the `edit_doc` root in `edit.ls`, a view button in each toolbar, Cmd/Ctrl+/; the dirty state carries over; a text the rich format cannot keep stays in Source. | `edit.ls`, `shell.ls`, `source.ls`, `toolbar.ls` |
+
+### 7.2 Findings worth keeping
+
+- **Array literals with spreads were typed by the spread operand, not its elements.** `[*[2, 7], *[5, 9]]` was an array of arrays to the type checker, so `{s: c[0]}` chose an array lane and stored null, on both back ends. `resolve_array` (`lambda/runtime/build_ast.cpp`) now takes a spread item's element type from its operand. Regression test: `test/lambda/array_spread_element_type.ls`.
+- **One template per result element.** The render map records a single template for each element, so a template whose output is directly another template's output hides the inner template's handlers: its clicks and emitted events reach the outer one. The edit root renders `<html>` and each surface its `<body>` for this reason. A fix in the render map (a template chain per element) would let any template render another directly.
+- **Unnamed templates get `_interp_view_<n>` with `n` counted per module.** Lookups compare pointers, so this only makes logs ambiguous: every module's first template is `_interp_view_0`.
+- **`view` is a reserved word** (it introduces view templates), and a branch that mixes a statement block with a value (`if … { x = 1 } else { emit(…) }`) is rejected (E312).
+- **The UI simulator did not know punctuation key names.** `key_combo` with `"key": "/"` sent no key; one-character names now fall back to the typing table (`radiant/event_sim.cpp`).
+- **Fixture runner:** a fixture whose document fails to load prints no Result line, so grepping for failures reads as success; `temp/run_src_fixtures.sh` now reports every fixture explicitly.
+
+### 7.3 Tests
+
+| Test | Covers | Status |
+|---|---|---|
+| `test/ui/edit/edit_src_clipboard.json` | copy in the window; copy and cut of a 93-line selection past the window; paste back exactly; paste right after a click | 14/14 |
+| `test/ui/edit/edit_src_shift_click.json` | Shift+click with the anchor above the window; the selection renders over every visible row | 4/4 |
+| `test/ui/edit/edit_src_indent.json` | Tab over lines, Shift+Tab twice, undo per step, focus kept on a no-op Shift+Tab | 8/8 |
+| `test/ui/edit/edit_src_find.json` | find as you type, count, Enter and Shift+Enter, no results, a far match scrolled into view, Escape and typing over the match | 16/16 |
+| `test/ui/edit/edit_src_wrap.json` | wrapped heights for text and gutter, the caret at the end of a 43-row line, the wheel inside it, unwrap | 13/13 |
+| `test/ui/edit/edit_src_toggle.json` | Source button, edit in source, Cmd+/ back to rich, dirty kept, save, switch again clean | 15/15 |
+| `test/lambda/edit/source_highlight.ls` | inline spans inside list items, continuation lines, quotes, a list in a quote, a lazy line, an item after a tab | pass |
+| `test/lambda/array_spread_element_type.ls` | spread element typing, both back ends | pass |
+| all `test/ui/edit/edit_src_*.json` | P0–P2 with P3 | 16/16 |
+| all `test/ui/edit/*.json` | the edit application under the new root | 33/35; `edit_md_save_as` and `edit_md_scroll_chrome` fail before this work too |
+
+Markdown fidelity over the corpus (window versus full parse, 60,255 lines): 166 lines differ (0.28%), up from 113. Every difference is still a reference link whose definition lies outside the window. There are more of them because links inside list items are now colored in the full parse.
+
+### 7.4 Not done
+
+- Reference links defined outside the window (the remaining fidelity gap); a per-chunk definition-label cache would close it.
+- Nested blocks inside containers (a heading in a quote, a fence in a list item) take only the container's marks; their inline spans are colored.
+- Caret motion by wrapped rows, word-boundary wrapping, and re-measuring on window resize.
+- Pass 2 on the next frame waits for `dom.request_frame` (OQ16).

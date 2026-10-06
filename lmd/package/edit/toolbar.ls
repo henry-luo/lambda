@@ -17,6 +17,11 @@ pub let file_group = [
   {cmd: "redo", label: "Redo", title: "Redo (Shift+Cmd/Ctrl+Z)", input_type: "historyRedo", payload: {}, history: 'redo'}
 ]
 
+// The view switch (Radiant_Design_Source_Editor OQ7): each surface offers
+// the other view of the same file.
+pub let source_view_group = [{cmd: "view_source", label: "Source", title: "Show the source (Cmd/Ctrl+/)", app: true}]
+pub let rich_view_group = [{cmd: "view_rich", label: "Rich", title: "Show the rich view (Cmd/Ctrl+/)", app: true}]
+
 fn block_button(tag, label, title) =>
   {cmd: string(tag), label: label, title: title, input_type: "formatBlock", payload: {tag: tag}, block: tag}
 

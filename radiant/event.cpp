@@ -1884,6 +1884,17 @@ static View* rich_keyboard_target_from_selection(DocState* state,
     return nullptr;
 }
 
+static void log_clipboard_copy(DocState* state, View* surface_target, const char* prefix,
+                               uint32_t text_len, uint32_t html_len) {
+    EditingSurface surface;
+    EditingSurface* surface_ptr = nullptr;
+    if (editing_surface_from_target(surface_target, &surface)) {
+        surface_ptr = &surface;
+    }
+    const char* op = (prefix && strstr(prefix, "cut")) ? "cut" : "copy";
+    event_log_editing_clipboard(state, surface_ptr, op, text_len, html_len);
+}
+
 static bool copy_current_selection_to_clipboard(DocState* state, const char* prefix) {
     if (!state) return false;
     View* surface_target = canonical_selection_focus_target(state);
@@ -1902,17 +1913,27 @@ static bool copy_current_selection_to_clipboard(DocState* state, const char* pre
         copied = true;
     }
     if (copied) {
-        EditingSurface surface;
-        EditingSurface* surface_ptr = nullptr;
-        if (editing_surface_from_target(surface_target, &surface)) {
-            surface_ptr = &surface;
-        }
-        const char* op = (prefix && strstr(prefix, "cut")) ? "cut" : "copy";
-        event_log_editing_clipboard(state, surface_ptr, op,
-                                    text ? (uint32_t)strlen(text) : 0,
-                                    html ? (uint32_t)strlen(html) : 0);
+        log_clipboard_copy(state, surface_target, prefix,
+                           text ? (uint32_t)strlen(text) : 0,
+                           html ? (uint32_t)strlen(html) : 0);
     }
     arena_destroy(temp_arena);
+    return copied;
+}
+
+// A model-bound surface chooses what a copy or cut puts on the clipboard (its
+// selection may reach past what the DOM shows); Radiant only transports it
+// (D7.2.5). Returns false when the model supplied no text.
+static bool copy_model_text_to_clipboard(DocState* state, Item result, const char* prefix) {
+    char* text = radiant_edit_result_string_copy(result, "clipboard_text");
+    bool copied = text && text[0];
+    if (copied) {
+        clipboard_copy_text(text);
+        log_debug("%s: copied model text=%zu", prefix, strlen(text));
+        log_clipboard_copy(state, canonical_selection_focus_target(state), prefix,
+                           (uint32_t)strlen(text), 0);
+    }
+    mem_free(text);
     return copied;
 }
 
@@ -7804,6 +7825,14 @@ static bool dispatch_contenteditable_plain_event(EventContext* evcon,
             action_snapshot.model_item, action_snapshot.template_ref,
             nullptr, &raw_result);
         action_result_root.set(raw_result);
+        // Copy is the model's to fill as well; without its text the DOM
+        // selection is copied, as cut did before the action.
+        if (intent->type == INPUT_INTENT_COPY || intent->type == INPUT_INTENT_DELETE_BY_CUT) {
+            if (!copy_model_text_to_clipboard(state, action_result_root.get(), "model clipboard") &&
+                intent->type == INPUT_INTENT_COPY) {
+                copy_current_selection_to_clipboard(state, "model copy");
+            }
+        }
         bool claimed = radiant_edit_result_bool(action_result_root.get(), "claimed");
         bool changed = radiant_edit_result_bool(action_result_root.get(), "changed");
         model_edit_surface_accept_result(

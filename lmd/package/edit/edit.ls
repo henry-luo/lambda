@@ -15,6 +15,8 @@ import svg: lambda.edit.svg
 import shell: lambda.edit.shell
 import src: lambda.edit.source
 import sess: lambda.edit.session
+import files: lambda.edit.files
+import tools: lambda.edit.toolbar
 import lambda.editor.mod_editor
 
 // Every editable format, in lookup order. The source surface opens the text
@@ -44,8 +46,35 @@ pub pn open_document(path, options) element^ {
   if (mismatch != null) {
     raise error("the " ++ format.name ++ " editor cannot keep this document exactly: " ++ mismatch)
   }
-  let session = sess.new_session(path, format, source, loaded)
+  // the rich format behind the view switch, null for plain text
+  let named = format_for_path(path)
+  let rich_format = if (named != null and named.surface != 'source') named else null
+  let session = {*: sess.new_session(path, format, source, loaded), rich_format: rich_format}
   let status = "Opened " ++ session.name ++ "."
-  if (format.surface == 'source') src.page(session, loaded.doc, status)
-  else shell.page(session, edit_open(loaded.doc, format.schema, null), status)
+  page(if (format.surface == 'source') {mode: 'source', session: session, doc: loaded.doc, status: status}
+       else {mode: 'rich', session: session, doc: edit_open(loaded.doc, format.schema, null), status: status})
 }
+
+// The application root: the rich (or drawing) surface or the source surface
+// over one file (Radiant_Design_Source_Editor OQ7, CED20). Each surface keeps
+// its own state; switching hands the other the view it builds from the
+// current text, `shown` = {mode, session, doc, status}.
+edit <edit_doc> state shown: ~.shown {
+  // The root renders <html> and the surface renders <body>: each template
+  // needs an element of its own, since the render map records one template
+  // per result element and a shared one would hide the surface's handlers.
+  <html lang: "en",
+    <head
+      <meta charset: "UTF-8">
+      <title sess.window_title(shown.session, false)>
+      <style files.css ++ tools.css ++ shell.surface_css ++ src.surface_css>
+    >
+    if (shown.mode == 'source') src.app(shown.session, shown.doc, shown.status)
+    else shell.app(shown.session, shown.doc, shown.status)
+  >
+}
+on edit_switch(next) {
+  shown = next
+}
+
+fn page(shown) => apply(<edit_doc shown: shown>, {mode: "edit"})

@@ -1,0 +1,31 @@
+{
+  "name": "the Source button shows a Markdown file's source, an edit there carries back to the rich view with Cmd+/, stays unsaved across the switch, and saves",
+  "command": "edit",
+  "html": "test/ui/edit/sample.md",
+  "working_copy": "temp/edit-ui/edit_src_toggle.md",
+  "viewport": {"width": 1000, "height": 720},
+  "events": [
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 0},
+    {"type": "click", "target": {"selector": ".edit-btn-view_source"}},
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".tok-strong"}, "equals": "**bold text**"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "click", "target": {"text": "short paragraph"}},
+    {"type": "key_press", "key": "End"},
+    {"type": "type", "text": " Added in source."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "/", "mods_str": "super"},
+    {"type": "assert_count", "target": {"selector": ".src-text"}, "count": 0},
+    {"type": "assert_count", "target": {"selector": ".edit-surface"}, "count": 1},
+    {"type": "assert_text", "target": {"selector": ".edit-surface"}, "contains": "testing the editor. Added in source."},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": "*"},
+    {"type": "key_combo", "key": "s", "mods_str": "super"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_toggle.md", "contains": "testing the editor. Added in source.\n"},
+    {"type": "assert_file", "path": "temp/edit-ui/edit_src_toggle.md", "contains": "Some **bold text** and *italic text*"},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "click", "target": {"selector": ".edit-btn-view_source"}},
+    {"type": "assert_text", "target": {"selector": ".edit-dirty"}, "equals": ""},
+    {"type": "assert_text", "target": {"selector": "#edit-surface"}, "contains": "Added in source."}
+  ]
+}

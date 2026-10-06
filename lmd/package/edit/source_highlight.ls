@@ -203,6 +203,24 @@ fn inline_runs(text, line, spans, i, runs) {
   }
 }
 
+// Lay `marks` ({s, e}, sorted, disjoint) over a line's runs: covered columns
+// gain the class `cls`, so a find match inside a token keeps the token's color.
+pub fn overlay(runs, marks, cls) {
+  if (len(marks) == 0) runs
+  else {
+    let cuts = sort(unique([*[for (r in runs) r.s], *[for (r in runs) r.e],
+                            *[for (m in marks) m.s], *[for (m in marks) m.e]]))
+    let pieces = [for (i in 0 to len(cuts) - 2) {s: cuts[i], e: cuts[i + 1]}]
+    let parts = [for (p in pieces)
+                   {s: p.s, e: p.e,
+                    base: [for (r in runs where r.s <= p.s and p.e <= r.e) r.c],
+                    marked: len([for (m in marks where m.s <= p.s and p.e <= m.e) m]) > 0}]
+    merge([for (p in parts where p.marked or len(p.base) > 0)
+             {s: p.s, e: p.e,
+              c: if (not p.marked) p.base[0] else if (len(p.base) == 0) cls else p.base[0] ++ " " ++ cls}])
+  }
+}
+
 // Parse the window [first, last] of a buffer in `lang` and build its runs.
 // `scan` is the restart cache {states, valid} the previous call returned.
 pub fn highlight(b, first, final, scan, lang) {
@@ -234,7 +252,7 @@ pub fn covers(hl, b, first, final) =>
 // next frame swaps in exact runs.
 // ---------------------------------------------------------------------------
 
-fn clip(runs, s, e) => [for (r in runs where r.e > s and r.s < e) run(max(r.s, s), min(r.e, e), r.c)]
+fn clip_runs(runs, s, e) => [for (r in runs where r.e > s and r.s < e) run(max(r.s, s), min(r.e, e), r.c)]
 fn shift(runs, d) => [for (r in runs) run(r.s + d, r.e + d, r.c)]
 
 // `n` inserted columns at `col` join the run ending there (the token being
@@ -255,8 +273,8 @@ fn merge(runs) {
 // The runs of the lines one delta replaces, from the old first and last lines.
 fn edited_lines(first_runs, last_runs, d) {
   let n = len(d.insert)
-  let head = clip(first_runs, 0, d.from.col)
-  let tail = clip(last_runs, d.to.col, 1000000000)
+  let head = clip_runs(first_runs, 0, d.from.col)
+  let tail = clip_runs(last_runs, d.to.col, 1000000000)
   let width_first = len(d.insert[0])
   let width_last = len(d.insert[n - 1]);
   if (n == 1) [merge([*grow_left(head, d.from.col, width_first), *shift(tail, d.from.col + width_first - d.to.col)])]

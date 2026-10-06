@@ -16,6 +16,7 @@ import files: lambda.edit.files
 import tools: lambda.edit.toolbar
 import rich: lambda.edit.rich_text
 import dr: lambda.edit.drawing
+import src: lambda.edit.source
 import .model
 
 // ---------------------------------------------------------------------------
@@ -35,18 +36,19 @@ let shell_css = "
                  color: #57606a; background: #f6f8fa; border-top: 1px solid #d0d7de; }
 "
 
-// The page the loader returns: the session model applied in edit mode. The
-// application template renders <body> itself, so a key or close request that
-// no element claims (it targets <body>, as in a browser) still reaches it.
-pub fn page(session, editor, status) =>
-  <html lang: "en",
-    <head
-      <meta charset: "UTF-8">
-      <title sess.window_title(session, false)>
-      <style files.css ++ shell_css ++ tools.css ++ rich.css ++ dr.css>
-    >
-    apply(<edit_app session: session, editor: editor, status: status>, {mode: "edit"})
-  >
+// The surfaces' own stylesheets; the edit application adds the shared ones.
+pub let surface_css = shell_css ++ rich.css ++ dr.css
+
+// The rich or drawing surface as the edit application's body. The template
+// renders <body> itself, so a key or close request that no element claims (it
+// targets <body>, as in a browser) still reaches it.
+pub fn app(session, editor, status) =>
+  apply(<edit_app session: session, editor: editor, status: status>, {mode: "edit"})
+
+// The source view of the document (Radiant_Design_Source_Editor OQ7).
+fn source_view(session, editor) =>
+  src.source_view(session, session.format.export_text(editor.doc, session.envelope),
+                  sess.is_dirty(session, editor.doc))
 
 // ---------------------------------------------------------------------------
 // Dialogs
@@ -229,6 +231,7 @@ fn toolbar_children(session, editor, dirty, ds) {
   let drawing = if (is_drawing(session)) ds else null;
   [files.file_label(session, dirty), tools.group(tools.file_group, editor, dirty, drawing),
    *[for (g in format_groups(session)) tools.group(g, editor, dirty, drawing)],
+   tools.group(tools.source_view_group, editor, dirty, drawing),
    *(if (drawing == null) [] else [<span class: "edit-zoom", dr.fmt(ds.zoom * 100.0) ++ "%">])]
 }
 
@@ -289,6 +292,10 @@ on selectionchange(evt) {
 on edit_cmd(req) {
   editor = mounted(editor, req.node, session.format)
   let cmd = req.cmd
+  if (cmd == "view_source") {
+    emit("edit_switch", source_view(session, editor))
+    return
+  }
   if (cmd == "save") {
     let saved = files.save_now(session, editor.doc, req.node)
     session = saved.session
@@ -436,6 +443,11 @@ on keydown(evt) {
   if (evt.key == "Escape" and dialog != null) {
     dialog = null
     after_save = null
+    return 'prevent-default'
+  }
+  // Cmd/Ctrl+/ switches to the source view (OQ7)
+  if (primary_key(evt) and evt.key == "/" and dialog == null) {
+    emit("edit_switch", source_view(session, editor))
     return 'prevent-default'
   }
   if (not is_drawing(session) or dialog != null) { return 'pass' }

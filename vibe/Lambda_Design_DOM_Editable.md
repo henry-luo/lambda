@@ -442,9 +442,18 @@ EditResult = {
     selection_after,
     selection_space,            // live-dom | source | none
     model_revision,
-    api_input, api_input_type, api_input_data
+    api_input, api_input_type, api_input_data,
+    clipboard_text              // model backend: copy/cut payload, or null
 }
 ```
+
+`clipboard_text` (added 2026-10-07, Radiant_Design_Source_Editor P3) lets a
+model backend name what a copy or cut puts on the clipboard. A model's
+selection can reach past what the DOM shows (the source editor renders only
+a window of lines), so the DOM selection is not always the text to copy. The
+transport stays native (D7.2.5): Radiant writes the text after the handler
+returns. When the field is null, a copy falls back to the DOM selection, as a
+cut already did before its model action.
 
 For the DOM backend, the invocation owns the live post-edit selection and
 `selection_after` may be null with `selection_space: live-dom`. For the model

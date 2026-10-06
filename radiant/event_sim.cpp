@@ -422,6 +422,8 @@ static SimEvent* event_sim_alloc_event(EventSimContext* ctx) {
 }
 
 // Map key name string to GLFW key code
+static int sim_physical_key_for_codepoint(uint32_t codepoint, int* out_mods);
+
 static int key_name_to_glfw(const char* name) {
     if (!name) return GLFW_KEY_UNKNOWN;
 
@@ -433,6 +435,10 @@ static int key_name_to_glfw(const char* name) {
         if (c >= 'a' && c <= 'z') return GLFW_KEY_A + (c - 'a');
         if (c >= 'A' && c <= 'Z') return GLFW_KEY_A + (c - 'A');
         if (c >= '0' && c <= '9') return GLFW_KEY_0 + (c - '0');
+        // punctuation ("/" in a key_combo): the key that types it; the
+        // fixture's mods_str supplies any modifier
+        int punct = sim_physical_key_for_codepoint((uint32_t)(unsigned char)c, nullptr);
+        if (punct != GLFW_KEY_UNKNOWN) return punct;
     }
 
     // Special keys

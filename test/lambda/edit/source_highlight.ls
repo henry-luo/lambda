@@ -45,3 +45,13 @@ let e1 = hl.highlight(a1.buf, 0, a1.buf.count - 1, m1.scan, 'markdown');
 "scan_after:";
 [hl.scan_after({states: [0,0,0, 1,96,3, 0,0,0, 0,0,0], valid: 4}, {chunk: 1, removed: 1, added: 2}),
  hl.scan_after({states: [0,0,0, 1,96,3, 0,0,0, 0,0,0], valid: 4}, {chunk: 0, removed: 2, added: 1})]
+
+// inline spans inside containers map back through the column maps (CED17,
+// OQ10): list items, their continuation lines, quotes, a list inside a quote,
+// a lazy line, and an item after a tab (its stripped copy is still a suffix
+// of the source line; a copy whose tab was expanded would stay plain)
+"containers:";
+let nest = "- a **b** item\n  continued `c`\n\n> quoted *e*\n> - in **list**\nlazy `f`\n\n-\t*tab*\n"
+let nb = buf.from_text(nest)
+let nh = hl.highlight(nb, 0, nb.count - 1, hl.empty_scan(), 'markdown');
+[for (l in 0 to nb.count - 1) [buf.line(nb, l), show(hl.runs_for(nh.hl, nb, l))]]

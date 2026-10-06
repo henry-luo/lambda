@@ -76,6 +76,14 @@ struct MarkupSpanSink {
     lam::ArrayList<Segment> segments;
     bool segments_valid = false;
 
+    // Containers (list items, block quotes) parse stripped copies of their
+    // lines: the column map of CED17. Copy line i is parent line
+    // `parent_first + i` from byte `offset[i]`; -1 when the copy is not a
+    // suffix of its parent line (a tab was expanded), so positions on it
+    // cannot be mapped and its inline spans fall back to none (OQ10).
+    struct LineMap { char** lines; char** parent; int64_t parent_first; int64_t count; int32_t* offset; };
+    lam::ArrayList<LineMap> line_maps;  // innermost last
+
     // Nested inline parses copy exact substrings; each call knows where its
     // buffer starts within the root text (-1: unknown, record nothing).
     const char* inline_base = nullptr;
@@ -85,8 +93,12 @@ struct MarkupSpanSink {
 };
 
 // Record a block span in parser coordinates: lines [first, end) of the
-// current line array, which must be the root array.
+// current line array.
 void highlight_note_block(MarkupParser* parser, const char* kind, int first, int end);
+// Around a container's parse of its stripped `lines`, which came from the
+// current array starting at `parent_first`, one line each.
+void highlight_push_lines(MarkupParser* parser, char** lines, size_t count, int64_t parent_first);
+void highlight_pop_lines(MarkupParser* parser, char** lines);
 // Start a root inline text: the block that built it adds its segments.
 void highlight_begin_inline(MarkupParser* parser);
 void highlight_add_segment(MarkupParser* parser, int64_t text_off, int line, int col);
