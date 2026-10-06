@@ -1,0 +1,22 @@
+<!doctype html><button id="inspect">inspect</button><div id="target"></div><script>
+document.getElementById('inspect').addEventListener('click', function () {
+    var button = this;
+    var cases = [
+        ['empty', '*', ''], ['space', '*', ' '], ['wide', '*', 'initial'],
+        ['inherit', '*', 'inherit'], ['revert', '*', 'revert-layer'],
+        ['var', '*', 'var(--other)'], ['env', '*', 'env(safe-area-inset-top)'],
+        ['relative', '*', '2em'], ['current', '*', 'currentColor'],
+        ['important', '*', 'red !important'], ['bad-block', '*', ')'],
+        ['semicolon', '*', 'red;blue'], ['null', '*', null],
+        ['typed-wide', '<length>', 'initial'], ['typed-percent', '<percentage>', '20%'],
+        ['unclosed', '*', 'foo('], ['nul', '*', 'a\u0000b']
+    ];
+    cases.forEach(function (entry) {
+        var name = '--edge-' + entry[0];
+        try {
+            CSS.registerProperty({name:name, syntax:entry[1], inherits:false, initialValue:entry[2]});
+            button.setAttribute('data-' + entry[0], 'ok|' + getComputedStyle(document.getElementById('target')).getPropertyValue(name));
+        } catch (error) {button.setAttribute('data-' + entry[0], error.name);}
+    });
+});
+</script>

@@ -10,6 +10,8 @@
 #include <cstring>
 
 #include "../radiant/view.hpp"
+#include "../radiant/layout.hpp"
+#include "../radiant/event.hpp"
 #include "../lambda/input/input.hpp"
 #include "../lambda/input/css/css_engine.hpp"
 #include "../lambda/input/css/dom_node.hpp"
@@ -23,10 +25,19 @@ extern "C" {
 
 // Stubs for unresolved symbols in standalone test builds
 void dirty_mark_rect(DirtyTracker*, float, float, float, float) {}
-void radiant_dispatch_css_event(UiContext*, DomElement*, const char*,
-                                const char*, const char*, double) {
-    // The standalone interpolation tests have no JS event context; production
-    // links event.cpp, while this isolated target only verifies animation state.
+// the isolated target has no reflow loop; the live fixture checks this consumer.
+void doc_state_request_reflow(DocState*) {}
+static struct {
+    unsigned starts, ends, iterations, cancels;
+    double elapsed;
+} animation_events;
+void radiant_dispatch_css_event(UiContext*, DomElement*, const char* type,
+                                const char*, const char*, double elapsed) {
+    if (strcmp(type, "animationstart") == 0) animation_events.starts++;
+    if (strcmp(type, "animationend") == 0) animation_events.ends++;
+    if (strcmp(type, "animationiteration") == 0) animation_events.iterations++;
+    if (strcmp(type, "animationcancel") == 0) animation_events.cancels++;
+    animation_events.elapsed = elapsed;
 }
 
 TEST(CssCascade, SelectorListUsesStrongestMatchingBranch) {
@@ -152,6 +163,88 @@ TEST(CssPropTable, CommittedStylesIgnoreRangeDocumentWrapper) {
     EXPECT_STREQ(value, "0.3");
 }
 
+class MotionCascadeTest : public ::testing::Test {
+protected:
+    Pool* pool = nullptr;
+    CssEngine* engine = nullptr;
+    DomDocument doc = {};
+    DomElement element = {};
+    void SetUp() override {
+        pool = pool_create();
+        ASSERT_NE(pool, nullptr);
+        engine = css_engine_create(pool);
+        ASSERT_NE(engine, nullptr);
+        element.node_type = DOM_NODE_ELEMENT;
+        element.set_synthetic(true);
+        element.set_styles_resolved(true);
+        element.doc = lam::up(&doc);
+        doc.document_pool = lam::own(pool);
+        doc.root = lam::up(&element);
+        element.specified_style = lam::shared(style_tree_create(pool));
+    }
+    void TearDown() override {
+        css_engine_destroy(engine);
+        pool_destroy(pool);
+    }
+    void apply(const char* text) {
+        CssDeclaration* declaration = css_parse_declaration_text(text, strlen(text), pool);
+        ASSERT_NE(declaration, nullptr);
+        ASSERT_NE(style_tree_apply_declaration(element.specified_style, declaration), nullptr);
+    }
+};
+
+TEST_F(MotionCascadeTest, AnimationShorthandProjectsWinningLonghands) {
+    const char* declarations[] = {
+        "animation-duration: 9s", "animation: fade 2s linear -1s 1.5 alternate both paused, grow 4s",
+        "animation-duration: 3000ms, 5s"
+    };
+    for (const char* text : declarations) apply(text);
+    const CssPropertyCode properties[] = {CSS_PROPERTY_ANIMATION_NAME, CSS_PROPERTY_ANIMATION_DURATION,
+        CSS_PROPERTY_ANIMATION_DELAY, CSS_PROPERTY_ANIMATION_ITERATION_COUNT,
+        CSS_PROPERTY_ANIMATION_DIRECTION, CSS_PROPERTY_ANIMATION_FILL_MODE, CSS_PROPERTY_ANIMATION_PLAY_STATE};
+    const char* expected[] = {"fade, grow", "3s, 5s", "-1s, 0s", "1.5, 1", "alternate, normal", "both, none", "paused, running"};
+    for (unsigned i = 0; i < sizeof(properties) / sizeof(*properties); i++) {
+        char value[128];
+        ASSERT_TRUE(css_prop_serialize_computed(&element, properties[i], 0, value, sizeof(value)));
+        EXPECT_STREQ(value, expected[i]);
+    }
+    apply("animation: 1s linear Ease");
+    char name[64];
+    ASSERT_TRUE(css_prop_serialize_computed(&element, CSS_PROPERTY_ANIMATION_NAME, 0, name, sizeof(name)));
+    EXPECT_STREQ(name, "Ease");
+    apply("animation-name: EASE, Red, BLOCK");
+    ASSERT_TRUE(css_prop_serialize_computed(&element, CSS_PROPERTY_ANIMATION_NAME, 0, name, sizeof(name)));
+    EXPECT_STREQ(name, "EASE, Red, BLOCK");
+}
+
+TEST_F(MotionCascadeTest, TransitionListsCycleAndLastPropertyEntryWinsBeyondEight) {
+    apply("transition-duration: 9s");
+    apply("transition: opacity 2s linear -1s, width 4s ease-in");
+    apply("transition-property: first, second, third, fourth, fifth, sixth, seventh, eighth, opacity, width");
+    apply("transition-duration: 3000ms, 5s");
+    char serialized[128];
+    ASSERT_TRUE(css_prop_serialize_computed(&element, CSS_PROPERTY_TRANSITION_DURATION, 0,
+        serialized, sizeof(serialized)));
+    EXPECT_STREQ(serialized, "3s, 5s");
+    CssTransitionList list;
+    CssTransitionProp config;
+    css_transition_resolve_config(&element, pool, &list);
+    ASSERT_TRUE(css_transition_select_config(&list, CSS_PROPERTY_OPACITY, &config));
+    EXPECT_FLOAT_EQ(config.duration, 3.0f);
+    EXPECT_FLOAT_EQ(config.delay, -1.0f);
+    EXPECT_EQ(config.timing.type, TIMING_LINEAR);
+    ASSERT_TRUE(css_transition_select_config(&list, CSS_PROPERTY_WIDTH, &config));
+    EXPECT_FLOAT_EQ(config.duration, 5.0f);
+    EXPECT_FLOAT_EQ(config.delay, 0.0f);
+    apply("transition-property: all, opacity");
+    css_transition_resolve_config(&element, pool, &list);
+    ASSERT_TRUE(css_transition_select_config(&list, CSS_PROPERTY_OPACITY, &config));
+    EXPECT_FLOAT_EQ(config.duration, 5.0f);
+    apply("transition: none");
+    css_transition_resolve_config(&element, pool, &list);
+    EXPECT_FALSE(css_transition_select_config(&list, CSS_PROPERTY_OPACITY, &config));
+}
+
 TEST(CssPropTable, VisibilityUsesRenderEnumNames) {
     DomDocument doc = {};
     DomElement element = {};
@@ -204,6 +297,42 @@ static void setup_keyframes_sheet(DomDocument* doc, CssStylesheet* sheet,
     doc->stylesheet_count = 1;
 }
 
+TEST_F(MotionCascadeTest, ExtendingExpiredDurationResumesTheRetainedTimeline) {
+    CssStylesheet sheet;
+    CssRule rule;
+    CssRule* rule_ptr;
+    CssStylesheet* sheet_ptr;
+    setup_keyframes_sheet(&doc, &sheet, &rule, &rule_ptr, &sheet_ptr,
+        "fade { from { opacity: 0; } to { opacity: 1; } }");
+    InlineProp in_line = INLINE_PROP_DEFAULT;
+    element.in_line = lam::view_ref(&in_line);
+    DocState state = {};
+    state.animation_scheduler = animation_scheduler_create(pool);
+    doc.state = lam::up(&state);
+    UiContext ui = {};
+    ui.document = lam::up(&doc);
+    LayoutContext context = {};
+    context.pool = lam::up(pool);
+    context.ui_context = lam::up(&ui);
+    apply("animation: fade 1s linear forwards");
+    css_animation_resolve(&element, &context);
+    AnimationInstance* instance = state.animation_scheduler->first;
+    ASSERT_NE(instance, nullptr);
+    animation_scheduler_tick(state.animation_scheduler, 2.0, nullptr);
+    ASSERT_EQ(instance->play_state, ANIM_PLAY_FINISHED);
+    apply("animation-duration: 4s");
+    css_animation_resolve(&element, &context);
+    EXPECT_EQ(state.animation_scheduler->first, instance);
+    EXPECT_EQ(instance->play_state, ANIM_PLAY_RUNNING);
+    EXPECT_DOUBLE_EQ(instance->start_time, 0.0);
+    EXPECT_TRUE(state.animation_scheduler->has_active_animations);
+    EXPECT_FLOAT_EQ(in_line.opacity, 0.5f);
+    animation_scheduler_tick(state.animation_scheduler, 3.0, nullptr);
+    EXPECT_FLOAT_EQ(in_line.opacity, 0.75f);
+    animation_scheduler_destroy(state.animation_scheduler);
+    doc.state = nullptr;
+}
+
 // ============================================================================
 // Float Interpolation Tests
 // ============================================================================
@@ -234,6 +363,61 @@ TEST(CssTransform, Translate3dPercentagesUseTransformReferenceBox) {
 
     EXPECT_FLOAT_EQ(matrix.e13, 100.0f);
     EXPECT_FLOAT_EQ(matrix.e23, 83.6f);
+}
+
+TEST(CssTransform, GroupingEffectsFlattenUsedTransformStyle) {
+    DomElement element = {};
+    DomElementExt extension = {};
+    TransformProp transform = TRANSFORM_PROP_DEFAULT;
+    ScrollProp scroll = SCROLL_PROP_DEFAULT;
+    InlineProp inline_prop = INLINE_PROP_DEFAULT;
+    BlockProp block = BLOCK_PROP_DEFAULT;
+    FilterProp filter = {};
+    FilterFunction function = {};
+    element.set_synthetic(true);
+    element.ext = lam::own(&extension);
+    element.transform = lam::view_prop(&transform);
+    element.scroller = lam::view_prop(&scroll);
+    element.in_line = lam::view_ref(&inline_prop);
+    element.blk = lam::view_prop(&block);
+    extension.filter = lam::view_prop(&filter);
+    transform.transform_style = CSS_VALUE_PRESERVE_3D;
+    EXPECT_TRUE(radiant::transform_preserves_3d(&element));
+    scroll.overflow_x = CSS_VALUE_CLIP;
+    EXPECT_TRUE(radiant::transform_preserves_3d(&element));
+    scroll.overflow_y = CSS_VALUE_HIDDEN;
+    EXPECT_FALSE(radiant::transform_preserves_3d(&element));
+    scroll.overflow_y = CSS_VALUE_VISIBLE;
+    inline_prop.opacity = 0.5f;
+    EXPECT_FALSE(radiant::transform_preserves_3d(&element));
+    inline_prop.opacity = 1.0f;
+    inline_prop.mix_blend_mode = CSS_VALUE_MULTIPLY;
+    EXPECT_FALSE(radiant::transform_preserves_3d(&element));
+    inline_prop.mix_blend_mode = CSS_VALUE_NORMAL;
+    filter.functions = lam::own(&function);
+    EXPECT_FALSE(radiant::transform_preserves_3d(&element));
+    filter.functions = nullptr;
+    block.contain_paint = true;
+    EXPECT_FALSE(radiant::transform_preserves_3d(&element));
+    block.contain_paint = false;
+    EXPECT_TRUE(radiant::transform_preserves_3d(&element));
+    EXPECT_EQ(transform.transform_style, CSS_VALUE_PRESERVE_3D);
+}
+
+TEST(CssTransform, BackfaceNormalUsesInverseTranspose) {
+    RdtMatrix4 matrix = rdt_matrix4_identity();
+    EXPECT_FALSE(rdt_matrix4_backface_visible(&matrix));
+    matrix.values[0] = -1.0f;
+    EXPECT_FALSE(rdt_matrix4_backface_visible(&matrix));
+    matrix = rdt_matrix4_identity();
+    matrix.values[10] = -1.0f;
+    EXPECT_TRUE(rdt_matrix4_backface_visible(&matrix));
+    matrix = rdt_matrix4_identity();
+    matrix.values[2] = matrix.values[8] = 2.0f;
+    // m33 remains positive, but the transformed normal points away from the viewer.
+    EXPECT_TRUE(rdt_matrix4_backface_visible(&matrix));
+    matrix.values[0] = 4.0f;
+    EXPECT_FALSE(rdt_matrix4_backface_visible(&matrix));
 }
 
 // ============================================================================
@@ -329,6 +513,24 @@ TEST_F(KeyframeParsingTest, SimpleOpacityFromTo) {
     EXPECT_EQ(kf->stops[1].property_count, 1);
     EXPECT_EQ(kf->stops[1].properties[0].property_code, CSS_PROPERTY_OPACITY);
     EXPECT_FLOAT_EQ(kf->stops[1].properties[0].value.f, 1.0f);
+}
+
+TEST_F(KeyframeParsingTest, QuotedNamesAndLaterDefinitionsUseSharedNameGrammar) {
+    setupKeyframes("\"quoted { name\" { from { opacity: 0; } to { opacity: 1; } }");
+    KeyframeRegistry* registry = keyframe_registry_create(&doc, pool);
+    ASSERT_NE(registry, nullptr);
+    ASSERT_EQ(registry->count, 1);
+    CssKeyframes* keyframes = keyframe_registry_find(registry, "quoted { name");
+    ASSERT_NE(keyframes, nullptr);
+    CssKeyframes replacement = *keyframes;
+    CssKeyframes* entries[] = {keyframes, &replacement};
+    registry->entries = lam::own_arr(entries);
+    registry->count = 2;
+    EXPECT_EQ(keyframe_registry_find(registry, "quoted { name"), &replacement);
+    setupKeyframes("Ease { from { opacity: 0; } to { opacity: 1; } }");
+    registry = keyframe_registry_create(&doc, pool);
+    ASSERT_NE(keyframe_registry_find(registry, "Ease"), nullptr);
+    EXPECT_EQ(keyframe_registry_find(registry, "ease"), nullptr);
 }
 
 TEST_F(KeyframeParsingTest, PercentageStops) {
@@ -437,6 +639,7 @@ protected:
 
     void SetUp() override {
         timing_init_presets();
+        animation_events = {};
         pool = pool_create();
         scheduler = animation_scheduler_create(pool);
         memset(&doc, 0, sizeof(doc));
@@ -510,6 +713,42 @@ TEST_F(AnimationTickTest, OpacityAnimation) {
 
     css_animation_tick(inst, 1.0f);
     EXPECT_FLOAT_EQ(mock.in_line.opacity, 1.0f);
+
+    animation_events = {};
+    ap.delay = 1.0f;
+    ap.fill_mode = ANIM_FILL_BOTH;
+    AnimationInstance* delayed = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
+    animation_instance_sample(delayed, 0.0);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, 0.0f);
+    EXPECT_EQ(animation_events.starts, 0u);
+    animation_instance_sample(delayed, 1.5);
+    EXPECT_FLOAT_EQ(mock.in_line.opacity, 0.5f);
+    EXPECT_EQ(animation_events.starts, 1u);
+    animation_instance_pause(delayed, 1.5);
+    animation_scheduler_cancel(scheduler, delayed);
+    EXPECT_EQ(animation_events.cancels, 1u);
+    EXPECT_DOUBLE_EQ(animation_events.elapsed, 0.5);
+
+    animation_events = {};
+    ap.duration = 2.0f;
+    ap.delay = -1.5f;
+    AnimationInstance* negative = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
+    animation_instance_sample(negative, 0.0);
+    EXPECT_EQ(animation_events.starts, 1u);
+    EXPECT_DOUBLE_EQ(animation_events.elapsed, 1.5);
+    animation_scheduler_cancel(scheduler, negative);
+
+    animation_events = {};
+    ap.duration = 0.0f;
+    ap.delay = 0.0f;
+    ap.fill_mode = ANIM_FILL_NONE;
+    AnimationInstance* instant = css_animation_create(scheduler, element, &ap, &kf, 0.0, pool);
+    animation_instance_sample(instant, 0.0);
+    css_animation_finish(instant);
+    EXPECT_EQ(animation_events.starts, 1u);
+    EXPECT_EQ(animation_events.ends, 1u);
+    EXPECT_EQ(animation_events.iterations, 0u);
+    EXPECT_DOUBLE_EQ(animation_events.elapsed, 0.0);
 }
 
 TEST_F(AnimationTickTest, ColorAnimation) {

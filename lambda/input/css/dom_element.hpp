@@ -210,6 +210,7 @@ struct DomDocumentServices {
     void* mem_ctx;
     void* cached_css_engine;
     void* keyframe_registry;
+    void* registered_property_set; // document-owned CSS.registerProperty definitions
     uint32_t element_count;
     uint32_t ext_allocations;
     uint32_t layout_cache_allocations;
@@ -224,7 +225,7 @@ struct DomDocumentServices {
     bool svg_image_document; // SVG image processing forbids external subordinate resources
 
     DomDocumentServices() : mem_ctx(nullptr), cached_css_engine(nullptr),
-        keyframe_registry(nullptr), element_count(0), ext_allocations(0),
+        keyframe_registry(nullptr), registered_property_set(nullptr), element_count(0), ext_allocations(0),
         layout_cache_allocations(0), node_registry(nullptr),
         style_epoch_manager(nullptr), canvas_registry(nullptr),
         svg_layer_registry(nullptr), svg_filter_registry(nullptr), svg_animation_registry(nullptr), svg_use_resource_cache(nullptr), preferred_languages(nullptr), svg_image_document(false) {}
@@ -680,6 +681,7 @@ struct CssSelectionCascadeValue {
     lam::Up<CssDeclaration> source;
     CssSpecificity specificity;
     CssOrigin origin;
+    uint32_t scope_proximity;
 };
 
 struct CssSelectionStyle {
@@ -1516,7 +1518,8 @@ void log_dom_element_timing();
  * @param specificity Selector specificity for cascade resolution
  * @return Number of declarations applied
  */
-int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity);
+int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity specificity,
+                            uint32_t scope_proximity = 0);
 
 /**
  * Apply a CSS rule to a pseudo-element (::before or ::after)
@@ -1527,7 +1530,8 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
  * @return Number of declarations applied
  */
 int dom_element_apply_pseudo_element_rule(DomElement* element, CssRule* rule,
-                                          CssSpecificity specificity, int pseudo_element);
+                                          CssSpecificity specificity, int pseudo_element,
+                                          uint32_t scope_proximity = 0);
 
 /**
  * Get the specified value for a CSS property
@@ -1623,5 +1627,7 @@ void dom_element_get_style_stats(DomElement* element, int* specified_count,
  * @return Cloned element or NULL on failure
  */
 DomElement* dom_element_clone(DomElement* source, Pool* pool);
+
+DomElement* dom_parent_element(DomElement* element);
 
 #endif // DOM_ELEMENT_H

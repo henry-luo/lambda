@@ -3709,6 +3709,7 @@ void render_svg_filter_resample_source(const RdtSvgFilterRun* run, const ImageSu
     Bound source_bounds, Bound grid, ImageSurface* output);
 bool render_svg_filter_spend_work(const RdtSvgFilterRun* run, size_t work);
 bool render_memory_allow_allocation(MemContext* memory, size_t bytes);
+bool render_surface_allocation_size(float width, float height, size_t* bytes);
 ImageSurface* render_surface_create_budgeted(MemContext* memory, float width, float height);
 
 // ===== render_background.hpp =====
@@ -3843,6 +3844,22 @@ ImageSurface* render_display_list_snapshot(DisplayList* list, MemContext* memory
     Bound physical_bounds, float raster_scale, Color backdrop = Color{0});
 ImageSurface* render_secondary_view_snapshot(ViewTree* tree, float raster_scale = 1.0f,
     Color backdrop = Color{0xffe8e8e8u});
+// physical page numbers ignore the preview root's selection, placement and scale.
+ImageSurface* render_secondary_page_snapshot(ViewTree* tree, uint32_t page_number,
+    float raster_scale = 1.0f, Color backdrop = Color{0});
+struct RenderPageSnapshotCache;
+struct RenderPageSnapshotCacheStats {
+    size_t entries, bytes;
+    uint64_t hits, renders, evictions;
+};
+// caches own raster copies only; they neither retain nor borrow a tree or its arenas between calls.
+RenderPageSnapshotCache* render_page_snapshot_cache_create(size_t max_entries, size_t max_bytes);
+void render_page_snapshot_cache_clear(RenderPageSnapshotCache* cache);
+void render_page_snapshot_cache_destroy(RenderPageSnapshotCache* cache);
+RenderPageSnapshotCacheStats render_page_snapshot_cache_stats(const RenderPageSnapshotCache* cache);
+// the returned surface is borrowed until the next cache mutation; callers must not destroy it.
+const ImageSurface* render_page_snapshot_cache_get(RenderPageSnapshotCache* cache, ViewTree* tree,
+    uint32_t page_number, float raster_scale = 1.0f, Color backdrop = Color{0});
 bool render_secondary_view_to_png(ViewTree* tree, const char* filename,
     float raster_scale = 1.0f, Color backdrop = Color{0xffe8e8e8u});
 void save_surface_to_png(ImageSurface* surface, const char* filename);

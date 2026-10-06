@@ -24,6 +24,78 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
+
+bool css_parse_property_syntax(const char* syntax, Pool* pool, CssPropertyRegistration* result) {
+    if (!syntax || !pool || !result) return false;
+    const char* cursor = syntax;
+    while (css_is_whitespace(*cursor)) cursor++;
+    if (*cursor == '*') {
+        cursor++;
+        while (css_is_whitespace(*cursor)) cursor++;
+        if (*cursor) return false;
+        result->syntax = syntax;
+        result->universal = true;
+        result->components = nullptr;
+        result->component_count = 0;
+        return true;
+    }
+    static const char* types[] = {"length", "number", "percentage", "length-percentage",
+        "string", "color", "image", "url", "integer", "angle", "time", "resolution",
+        "transform-function", "transform-list", "custom-ident"};
+    CssPropertySyntaxComponent* components = nullptr;
+    int count = 0, capacity = 0;
+    while (*cursor) {
+        CssPropertySyntaxComponent component = {};
+        if (*cursor == '<') {
+            const char* begin = ++cursor;
+            while (*cursor && *cursor != '>') cursor++;
+            if (*cursor != '>') return false;
+            bool found = false;
+            for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
+                if (strlen(types[i]) != (size_t)(cursor - begin) ||
+                    memcmp(types[i], begin, (size_t)(cursor - begin)) != 0) continue;
+                component.type = (CssPropertySyntaxType)(CSS_SYNTAX_LENGTH + i);
+                found = true;
+                break;
+            }
+            if (!found) return false;
+            cursor++;
+        } else {
+            // The tokenizer performs CSS identifier and escape consumption.
+            CssTokenizer* tokenizer = css_tokenizer_create(pool);
+            CssToken* tokens = nullptr;
+            int token_count = css_tokenizer_tokenize(tokenizer, cursor, strlen(cursor), &tokens);
+            if (token_count < 1 || (tokens[0].type != CSS_TOKEN_IDENT &&
+                tokens[0].type != CSS_TOKEN_CUSTOM_PROPERTY)) return false;
+            component.type = CSS_SYNTAX_IDENT;
+            component.identifier = css_token_value_dup(&tokens[0], pool);
+            CssValue ident = {};
+            ident.type = CSS_VALUE_TYPE_CUSTOM;
+            ident.data.custom_property.name = component.identifier;
+            if (!css_value_is_custom_ident(&ident)) return false;
+            cursor += tokens[0].length;
+        }
+        if (*cursor == '+' || *cursor == '#') {
+            if (component.type == CSS_SYNTAX_TRANSFORM_LIST) return false;
+            component.multiplier = *cursor++;
+        }
+        if (!lam::pool_copy_grow_array(pool, &components, &capacity, count, count + 1, 4, false))
+            return false;
+        components[count++] = component;
+        while (css_is_whitespace(*cursor)) cursor++;
+        if (!*cursor) break;
+        if (*cursor++ != '|') return false;
+        while (css_is_whitespace(*cursor)) cursor++;
+        if (!*cursor) return false;
+    }
+    if (!count) return false;
+    result->syntax = syntax;
+    result->components = components;
+    result->component_count = (size_t)count;
+    result->universal = false;
+    return true;
+}
 
 // Selector and declaration traces are per-token diagnostics, not routine debug output.
 #define log_debug(...) log_trace(__VA_ARGS__)
@@ -961,6 +1033,43 @@ const CssValue* css_font_shorthand_longhand(const CssValue* value, const char* p
     return families;
 }
 
+const CssValue* css_motion_shorthand_longhand(const CssValue* value,
+    CssPropertyCode property, Pool* pool) {
+    int index = css_animation_longhand_index(property);
+    CssPropertyCode shorthand = CSS_PROPERTY_ANIMATION;
+    if (index < 0) {
+        index = css_transition_longhand_index(property);
+        shorthand = CSS_PROPERTY_TRANSITION;
+    }
+    if (!value || index < 0 || !pool) return nullptr;
+    if (css_value_is_global_keyword(value)) return value;
+    int count = css_value_comma_count(value);
+    if (count < 1) return nullptr;
+    CssValue* output = count > 1 ? (CssValue*)pool_calloc(pool, sizeof(CssValue)) : nullptr;
+    CssValue** items = count > 1 ? (CssValue**)pool_calloc(pool, count * sizeof(CssValue*)) : nullptr;
+    if (count > 1 && (!output || !items)) return nullptr;
+    for (int i = 0; i < count; i++) {
+        CssMotionShorthandParts parts;
+        if (!css_parse_motion_shorthand(shorthand, css_value_comma_at(value, i), &parts)) return nullptr;
+        const CssValue* selected = parts.values[index];
+        if (!selected) {
+            const CssProperty* metadata = css_property_get_by_code(property);
+            if (!metadata) return nullptr;
+            CssDeclaration* initial = css_parse_property_declaration(metadata->name, strlen(metadata->name),
+                metadata->initial_value, strlen(metadata->initial_value), pool);
+            if (!initial) return nullptr;
+            selected = initial->value;
+        }
+        if (count == 1) return selected;
+        items[i] = const_cast<CssValue*>(selected);
+    }
+    output->type = CSS_VALUE_TYPE_LIST;
+    output->data.list.values = items;
+    output->data.list.count = count;
+    output->data.list.comma_separated = true;
+    return output;
+}
+
 // Helper: Parse a CSS function with its arguments from tokens
 // Returns a CssValue of type CSS_VALUE_TYPE_FUNCTION
 // *pos should point to the CSS_TOKEN_FUNCTION token; on return, *pos points past the closing paren
@@ -1004,12 +1113,8 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
 
     (*pos)++;  // Skip FUNCTION token
 
-    CssValue* func_value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    CssValue* func_value = css_value_create_function(pool, func_name, nullptr, 0);
     if (!func_value) return NULL;
-
-    func_value->type = CSS_VALUE_TYPE_FUNCTION;
-    func_value->data.function = (CssFunction*)pool_calloc(pool, sizeof(CssFunction));
-    if (!func_value->data.function) return NULL;
 
     if (func_name && strcmp(func_name, "url") == 0) {
         int url_start_pos = *pos;
@@ -1089,7 +1194,6 @@ static CssValue* css_parse_function_from_tokens(const CssToken* tokens, int* pos
         arg_count++;  // commas + 1 = number of arguments
     }
 
-    func_value->data.function->name = func_name;
     func_value->data.function->arg_count = arg_count;
 
     if (arg_count > 0) {
@@ -1262,6 +1366,8 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool, Css
                 if (enum_id != CSS_VALUE__UNDEF && (grammar == CSS_IDENT_KEYWORD || reserved)) {
                     value->type = CSS_VALUE_TYPE_KEYWORD;
                     value->data.keyword = enum_id;
+                    value->data.keyword_token.spelling = pool_strdup(pool, token_val);
+                    value->has_keyword_spelling = value->data.keyword_token.spelling != nullptr;
                 } else {
                     value->type = CSS_VALUE_TYPE_CUSTOM;
                     value->data.custom_property.name = pool_strdup(pool, token_val);
@@ -1339,10 +1445,11 @@ static CssValue* css_parse_token_to_value(const CssToken* token, Pool* pool, Css
                     &value->data.color.data.rgba.g,
                     &value->data.color.data.rgba.b,
                     &value->data.color.data.rgba.a)) {
-                value->data.color.data.rgba.r = 0;
-                value->data.color.data.rgba.g = 0;
-                value->data.color.data.rgba.b = 0;
-                value->data.color.data.rgba.a = 255;
+                // Invalid hashes remain custom tokens; color validation must reject them.
+                value->type = CSS_VALUE_TYPE_CUSTOM;
+                value->data.custom_property.name = token->start
+                    ? pool_dup_n(pool, token->start, token->length) : pool_strdup(pool, hex_str ? hex_str : "");
+                value->data.custom_property.fallback = nullptr;
             }
             break;
         }
@@ -2462,6 +2569,8 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
             // Skip function arguments until closing paren
             int paren_depth = 1;
             while (*pos < token_count && paren_depth > 0) {
+                // EOF implicitly closes a CSS function; leave the sentinel for complete-input validation.
+                if (tokens[*pos].type == CSS_TOKEN_EOF) break;
                 if (tokens[*pos].type == CSS_TOKEN_LEFT_PAREN || tokens[*pos].type == CSS_TOKEN_FUNCTION) {
                     paren_depth++;
                 } else if (tokens[*pos].type == CSS_TOKEN_RIGHT_PAREN) {
@@ -2491,12 +2600,12 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
         (*pos)++;
     }
 
-    if (value_count == 0) {
+    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
+    bool accepts_empty = is_custom_prop || strcmp(property_name, "initial-value") == 0;
+    if (value_count == 0 && !accepts_empty) {
         log_debug("[CSS Parser] No value tokens found");
         return NULL;
     }
-
-    bool is_custom_prop = (property_name[0] == '-' && property_name[1] == '-');
 
     // CSS Syntax permits a single var-bearing block as a deferred value.
     // Other blocks remain invalid for standard properties after consumption.
@@ -2555,6 +2664,12 @@ CssDeclaration* css_parse_declaration_from_tokens_mode(const CssToken* tokens,
     decl->important = is_important;
     decl->valid = true;
     decl->ref_count = 1;
+    if (value_count == 0) {
+        // An empty token sequence is a valid value, distinct from the guaranteed-invalid default.
+        decl->value = css_value_create_list(pool, nullptr, 0);
+        decl->value_text = pool_strdup(pool, "");
+        return decl->value && decl->value_text ? decl : nullptr;
+    }
 
     // Special handling for font-family: combine multi-word font names
     if (decl->property_code == CSS_PROPERTY_FONT_FAMILY && value_count > 1) {
@@ -3013,7 +3128,7 @@ static bool css_parse_import_modifiers(const CssToken* tokens, int start,
 static char* css_expand_nested_selector(const CssToken* tokens, int start, int end,
                                          const char* parent_text, Pool* pool,
                                          bool implicit_parent,
-                                         char** out_authored) {
+                                         char** out_authored, bool scoped = false) {
     if (!tokens || start >= end || !parent_text || !pool) return NULL;
     StrBuf* expanded = strbuf_new();
     StrBuf* authored = out_authored ? strbuf_new() : NULL;
@@ -3043,11 +3158,19 @@ static char* css_expand_nested_selector(const CssToken* tokens, int start, int e
             if (authored) strbuf_append_str(authored, ", ");
         }
         bool has_ampersand = false;
+        bool has_scope = false;
         for (int j = first; j < last; j++) {
             if (tokens[j].type == CSS_TOKEN_DELIM &&
                 tokens[j].data.delimiter == '&') has_ampersand = true;
+            if (scoped && tokens[j].type == CSS_TOKEN_IDENT && tokens[j].value &&
+                str_icmp_cstr(tokens[j].value, "scope") == 0 && j > first &&
+                tokens[j - 1].type == CSS_TOKEN_COLON) has_scope = true;
         }
-        if (!has_ampersand && implicit_parent) {
+        bool leading_combinator = tokens[first].type == CSS_TOKEN_DELIM &&
+            (tokens[first].data.delimiter == '>' || tokens[first].data.delimiter == '+' ||
+             tokens[first].data.delimiter == '~');
+        bool prefix = implicit_parent && ((!has_ampersand && !has_scope) || leading_combinator);
+        if (prefix) {
             strbuf_append_str(expanded, ":is(");
             strbuf_append_str(expanded, parent_text);
             strbuf_append_str(expanded, ") ");
@@ -3055,7 +3178,7 @@ static char* css_expand_nested_selector(const CssToken* tokens, int start, int e
         const char* cursor = tokens[first].start;
         const char* finish = tokens[last - 1].start + tokens[last - 1].length;
         if (authored) {
-            if (!has_ampersand && implicit_parent)
+            if (prefix)
                 strbuf_append_str(authored, "& ");
             strbuf_append_str_n(authored, cursor, (size_t)(finish - cursor));
         }
@@ -3110,13 +3233,84 @@ static bool css_nesting_flush_declarations(Pool* pool, CssRule*** nested_rules,
 static int css_parse_nested_style_rule(const CssToken* tokens, int token_count,
                                        Pool* pool, const char* parent_text,
                                        CssRule** out_rule, bool implicit_parent,
-                                       bool quirks_mode);
+                                       bool quirks_mode, bool scoped = false);
+
+static bool css_scope_selector_has_pseudo_element(const CssSelector* selector) {
+    if (!selector) return false;
+    for (size_t i = 0; i < selector->compound_selector_count; i++) {
+        CssCompoundSelector* compound = selector->compound_selectors[i];
+        for (size_t j = 0; j < compound->simple_selector_count; j++) {
+            CssSimpleSelector* simple = compound->simple_selectors[j];
+            if (simple->type == CSS_SELECTOR_PSEUDO_SLOTTED ||
+                (simple->type >= CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE &&
+                 simple->type <= CSS_SELECTOR_PSEUDO_ELEMENT_GENERIC)) return true;
+            for (size_t k = 0; k < simple->function_selector_count; k++)
+                if (css_scope_selector_has_pseudo_element(simple->function_selectors[k])) return true;
+        }
+    }
+    return false;
+}
+
+static bool css_parse_scope_prelude(const CssToken* tokens, int start, int end,
+                                    CssRule* rule, Pool* pool, const char* parent_text,
+                                    bool scoped) {
+    int pos = css_skip_whitespace_tokens(tokens, start, end);
+    for (size_t part = 0; part < 2; part++) {
+        if (part == 1) {
+            if (pos == end) break;
+            if (tokens[pos].type != CSS_TOKEN_IDENT || !tokens[pos].value ||
+                str_icmp_cstr(tokens[pos].value, "to") != 0) return false;
+            pos = css_skip_whitespace_tokens(tokens, pos + 1, end);
+        } else if (pos == end || tokens[pos].type != CSS_TOKEN_LEFT_PAREN) continue;
+        if (pos >= end || tokens[pos].type != CSS_TOKEN_LEFT_PAREN) return false;
+        int first = ++pos, depth = 1;
+        while (pos < end && depth) {
+            if (tokens[pos].type == CSS_TOKEN_LEFT_PAREN || tokens[pos].type == CSS_TOKEN_FUNCTION) depth++;
+            else if (tokens[pos].type == CSS_TOKEN_RIGHT_PAREN) depth--;
+            if (depth) pos++;
+        }
+        if (depth || first == pos) return false;
+        const char* authored = pool_dup_n(pool, tokens[first].start,
+            (size_t)(tokens[pos].start - tokens[first].start));
+        const char* context = part ? ":where(:scope)" : parent_text;
+        const char* text = context
+            ? css_expand_nested_selector(tokens, first, pos, context, pool, true, nullptr,
+                part || scoped)
+            : pool_dup_n(pool, tokens[first].start,
+                (size_t)(tokens[pos].start - tokens[first].start));
+        CssSelectorGroup* group = text ? css_parse_selector_group_text(text, strlen(text), pool, true) : nullptr;
+        if (!group) return false;
+        for (size_t i = 0; i < group->selector_count; i++)
+            if (css_scope_selector_has_pseudo_element(group->selectors[i])) return false;
+        if (part) {
+            rule->data.conditional_rule.scope_end = group;
+            rule->data.conditional_rule.scope_end_text = authored;
+        } else {
+            rule->data.conditional_rule.scope_start = group;
+            rule->data.conditional_rule.scope_start_text = authored;
+        }
+        pos = css_skip_whitespace_tokens(tokens, pos + 1, end);
+    }
+    return pos == end;
+}
+
+bool css_scope_rebind_prelude(CssRule* rule, const char* parent_text, Pool* pool, bool scoped) {
+    if (!rule || rule->type != CSS_RULE_SCOPE || !pool) return false;
+    const char* source = rule->data.conditional_rule.condition;
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(source ? source : "", source ? strlen(source) : 0, pool, &count);
+    bool valid = tokens && count && css_parse_scope_prelude(tokens, 0, (int)count - 1,
+        rule, pool, parent_text, scoped);
+    css_token_array_release(pool, tokens, count);
+    rule->data.conditional_rule.invalid_scope = !valid;
+    return valid;
+}
 
 // Enhanced rule parsing from tokens (returns number of tokens consumed, or 0 on error)
 static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
     int token_count, Pool* pool, CssRule** out_rule,
     const char* nesting_parent_text, CssSelectorGroup* nesting_parent_group,
-    bool quirks_mode) {
+    bool quirks_mode, bool scoped = false) {
     if (!tokens || token_count <= 0 || !pool || !out_rule) return 0;
     static thread_local int css_rule_depth = 0;
     lam::RecursionGuard depth_guard(&css_rule_depth, MAX_CSS_RULE_DEPTH);
@@ -3159,12 +3353,14 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
         if (keyword_name && (strcmp(keyword_name, "media") == 0 ||
                           strcmp(keyword_name, "supports") == 0 ||
                           strcmp(keyword_name, "container") == 0 ||
+                          strcmp(keyword_name, "scope") == 0 ||
                           strcmp(keyword_name, "layer") == 0)) {
             // Nested at-rules retain their rules for the cascade. @layer's
             // prelude is its layer name rather than a boolean condition.
             rule->type = strcmp(keyword_name, "media") == 0 ? CSS_RULE_MEDIA :
                         strcmp(keyword_name, "supports") == 0 ? CSS_RULE_SUPPORTS :
                         strcmp(keyword_name, "container") == 0 ? CSS_RULE_CONTAINER :
+                        strcmp(keyword_name, "scope") == 0 ? CSS_RULE_SCOPE :
                         CSS_RULE_LAYER;
             int cond_start = pos;
             while (pos < token_count &&
@@ -3213,6 +3409,16 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
 
             // Parse block with nested rules
             if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                if (rule->type == CSS_RULE_SCOPE) {
+                    rule->data.conditional_rule.invalid_scope = !css_parse_scope_prelude(
+                        tokens, cond_start, pos, rule, pool, nesting_parent_text, scoped);
+                    // scoped declarations and implicit relatives target the root with zero specificity.
+                    nesting_parent_text = ":where(:scope)";
+                    nesting_parent_group = css_parse_selector_group_text(nesting_parent_text,
+                        strlen(nesting_parent_text), pool);
+                    rule->data.conditional_rule.scope_selector = nesting_parent_group;
+                    scoped = true;
+                }
                 if (rule->type == CSS_RULE_LAYER) {
                     rule->data.conditional_rule.invalid_layer =
                         !css_parse_layer_prelude(tokens, cond_start, pos,
@@ -3268,11 +3474,11 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
                         tokens[pos].type != CSS_TOKEN_AT_KEYWORD
                         ? css_parse_nested_style_rule(tokens + pos,
                             token_count - pos, pool, nesting_parent_text,
-                            &nested_rule, true, quirks_mode)
+                            &nested_rule, true, quirks_mode, scoped)
                         : css_parse_rule_from_tokens_with_context(tokens + pos,
                             token_count - pos, pool, &nested_rule,
                             nesting_parent_text, nesting_parent_group,
-                            quirks_mode);
+                            quirks_mode, scoped);
 
                     if (nested_consumed > 0) {
                         pos += nested_consumed;
@@ -3326,9 +3532,66 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
                 }
             }
 
-            *out_rule = rule;
+            *out_rule = rule->type == CSS_RULE_SCOPE && rule->data.conditional_rule.invalid_scope ? NULL : rule;
             log_debug(" Parsed conditional @-rule with %zu nested rules",
                 rule->data.conditional_rule.rule_count);
+            return pos - start_pos;
+
+        } else if (keyword_name && strcmp(keyword_name, "property") == 0) {
+            rule->type = CSS_RULE_PROPERTY;
+            pos = css_skip_whitespace_tokens(tokens, pos, token_count);
+            bool valid = pos < token_count && tokens[pos].type == CSS_TOKEN_CUSTOM_PROPERTY;
+            if (valid) rule->data.property_rule.name = css_token_value_dup(&tokens[pos++], pool);
+            pos = css_skip_whitespace_tokens(tokens, pos, token_count);
+            valid = valid && rule->data.property_rule.name &&
+                strlen(rule->data.property_rule.name) > 2 &&
+                pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE;
+            // Keep recovery independent of descriptor validity so the next rule survives.
+            while (pos < token_count && tokens[pos].type != CSS_TOKEN_LEFT_BRACE &&
+                   tokens[pos].type != CSS_TOKEN_SEMICOLON) pos++;
+            bool has_syntax = false, has_inherits = false;
+            if (pos < token_count && tokens[pos].type == CSS_TOKEN_LEFT_BRACE) {
+                pos++;
+                while (pos < token_count && tokens[pos].type != CSS_TOKEN_RIGHT_BRACE) {
+                    pos = css_skip_whitespace_tokens(tokens, pos, token_count);
+                    if (pos >= token_count || tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) break;
+                    int before = pos;
+                    CssDeclaration* descriptor = css_parse_declaration_from_tokens(tokens, &pos,
+                        token_count, pool);
+                    if (descriptor && !descriptor->important && descriptor->value) {
+                        if (strcmp(descriptor->property_name, "syntax") == 0 &&
+                            descriptor->value->type == CSS_VALUE_TYPE_STRING) {
+                            CssPropertyRegistration parsed = {};
+                            if (css_parse_property_syntax(descriptor->value->data.string, pool, &parsed)) {
+                                rule->data.property_rule.syntax = parsed.syntax;
+                                rule->data.property_rule.components = parsed.components;
+                                rule->data.property_rule.component_count = parsed.component_count;
+                                rule->data.property_rule.universal = parsed.universal;
+                                has_syntax = true;
+                            }
+                        } else if (strcmp(descriptor->property_name, "inherits") == 0) {
+                            const char* name = css_value_identifier_name(descriptor->value);
+                            if (name && (str_ieq_cstr(name, "true") || str_ieq_cstr(name, "false"))) {
+                                rule->data.property_rule.inherits = str_ieq_cstr(name, "true");
+                                has_inherits = true;
+                            }
+                        } else if (strcmp(descriptor->property_name, "initial-value") == 0) {
+                            rule->data.property_rule.initial_value = descriptor->value;
+                            rule->data.property_rule.initial_text = descriptor->value_text;
+                            rule->data.property_rule.initial_text_length = descriptor->value_text_len;
+                        }
+                    }
+                    if (pos == before) pos++;
+                    if (pos < token_count && tokens[pos].type == CSS_TOKEN_SEMICOLON) pos++;
+                }
+                if (pos < token_count && tokens[pos].type == CSS_TOKEN_RIGHT_BRACE) pos++;
+            } else if (pos < token_count) pos++;
+            CssPropertyRegistration* registration = &rule->data.property_rule;
+            valid = valid && has_syntax && has_inherits && css_property_registration_is_valid(registration);
+            if (valid && registration->initial_text)
+                valid = css_parse_property_initial_value(registration, registration->initial_text,
+                    registration->initial_text_length, pool);
+            *out_rule = valid ? rule : nullptr;
             return pos - start_pos;
 
         } else if (keyword_name && strcmp(keyword_name, "namespace") == 0) {
@@ -3569,11 +3832,12 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
                     return pos - start_pos;
                 }
 
-                if (rule->type == CSS_RULE_FONT_FACE && brace_depth == 0 &&
+                if ((rule->type == CSS_RULE_FONT_FACE || rule->type == CSS_RULE_KEYFRAMES) &&
+                    brace_depth == 0 &&
                     tokens[opening_brace].start && tokens[content_end].start) {
-                    // Descriptor values such as U+3000-30FF require the original
-                    // token spacing; the generic formatter inserts invalid spaces.
-                    const char* raw_start = tokens[opening_brace].start;
+                    // preserve quoted keyframe names and descriptor/value token spacing.
+                    const char* raw_start = tokens[rule->type == CSS_RULE_KEYFRAMES
+                        ? prefix_start : opening_brace].start;
                     const char* raw_end = tokens[content_end].start + tokens[content_end].length;
                     rule->data.generic_rule.content = pool_dup_n(
                         pool, raw_start, (size_t)(raw_end - raw_start));
@@ -3917,7 +4181,7 @@ static int css_parse_rule_from_tokens_with_context(const CssToken* tokens,
 static int css_parse_nested_style_rule(const CssToken* tokens, int token_count,
                                        Pool* pool, const char* parent_text,
                                        CssRule** out_rule, bool implicit_parent,
-                                       bool quirks_mode) {
+                                       bool quirks_mode, bool scoped) {
     if (!tokens || token_count <= 0 || !pool || !parent_text || !out_rule) return 0;
     *out_rule = NULL;
     int block_start = 0;
@@ -3945,7 +4209,7 @@ static int css_parse_nested_style_rule(const CssToken* tokens, int token_count,
     char* authored = NULL;
     char* expanded = css_expand_nested_selector(tokens, 0, block_start,
                                                  parent_text, pool,
-                                                 implicit_parent, &authored);
+                                                 implicit_parent, &authored, scoped);
     if (!expanded) return end;
     StrBuf* source = strbuf_new();
     if (!source) return end;
@@ -4004,7 +4268,8 @@ static bool css_declaration_parse_consumed_all(const CssToken* tokens, int pos, 
     return pos < token_count && tokens[pos].type == CSS_TOKEN_EOF;
 }
 
-CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool) {
+CssRule* css_parse_rule_text_in_context(const char* text, size_t length, Pool* pool,
+                                       const char* parent_text, CssSelectorGroup* parent_group, bool scoped) {
     if (!text || length == 0 || !pool) return NULL;
 
     size_t token_count = 0;
@@ -4014,8 +4279,11 @@ CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool) {
     int start = css_skip_whitespace_tokens(tokens, 0, (int)token_count);
     CssRule* rule = NULL;
     if (start < (int)token_count) {
-        int consumed = css_parse_rule_from_tokens_internal(
-            tokens + start, (int)token_count - start, pool, &rule);
+        int consumed = parent_text && tokens[start].type != CSS_TOKEN_AT_KEYWORD
+            ? css_parse_nested_style_rule(tokens + start, (int)token_count - start,
+                pool, parent_text, &rule, true, false, scoped)
+            : css_parse_rule_from_tokens_with_context(tokens + start, (int)token_count - start,
+                pool, &rule, parent_text, parent_group, false, scoped);
         if (consumed <= 0 || !rule) {
             rule = NULL;
         } else {
@@ -4028,6 +4296,10 @@ CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool) {
     }
     css_token_array_release(pool, tokens, token_count);
     return rule;
+}
+
+CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool) {
+    return css_parse_rule_text_in_context(text, length, pool, NULL, NULL);
 }
 
 bool css_resolve_selector_namespaces(CssSelector* selector,
@@ -4083,7 +4355,8 @@ bool css_resolve_selector_namespaces(CssSelector* selector,
     return true;
 }
 
-CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool) {
+CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool,
+                                               bool deferred_namespace_binding) {
     if (!text || length == 0 || !pool) return NULL;
 
     size_t token_count = 0;
@@ -4114,7 +4387,7 @@ CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length,
     CssSelectorGroup* group = css_parse_selector_group_from_tokens(
         tokens, &pos, (int)token_count, pool);
     bool valid_namespace = true;
-    if (group) {
+    if (group && !deferred_namespace_binding) {
         for (size_t i = 0; i < group->selector_count; i++) {
             if (!css_resolve_selector_namespaces(group->selectors[i], NULL, NULL)) {
                 valid_namespace = false;
@@ -4296,4 +4569,71 @@ CssDeclaration* css_parse_property_declaration(const char* property, size_t prop
     char* text = pool_join3(pool, property, property_length, ": ", 2, value, value_length);
     if (!text) return NULL;
     return css_parse_declaration_text(text, length, pool);
+}
+
+static bool css_initial_value_token_span(const CssToken* tokens, size_t count,
+    const char* text, size_t length, Pool* pool, const char** start, size_t* span_length) {
+    CssTokenType* closers = (CssTokenType*)pool_alloc(pool, count * sizeof(CssTokenType));
+    if (!closers) return false;
+    size_t depth = 0, first = count, last = 0;
+    bool valid = true;
+    for (size_t i = 0; i < count && valid; i++) {
+        CssTokenType type = tokens[i].type;
+        if (type == CSS_TOKEN_EOF) break;
+        if (type == CSS_TOKEN_WHITESPACE || type == CSS_TOKEN_COMMENT) continue;
+        if (first == count) first = i;
+        last = i;
+        if (type == CSS_TOKEN_BAD_STRING || type == CSS_TOKEN_BAD_URL ||
+            (!depth && (type == CSS_TOKEN_SEMICOLON ||
+             (type == CSS_TOKEN_DELIM && tokens[i].data.delimiter == '!')))) valid = false;
+        else if (type == CSS_TOKEN_FUNCTION || type == CSS_TOKEN_LEFT_PAREN)
+            closers[depth++] = CSS_TOKEN_RIGHT_PAREN;
+        else if (type == CSS_TOKEN_LEFT_BRACKET) closers[depth++] = CSS_TOKEN_RIGHT_BRACKET;
+        else if (type == CSS_TOKEN_LEFT_BRACE) closers[depth++] = CSS_TOKEN_RIGHT_BRACE;
+        else if (type == CSS_TOKEN_RIGHT_PAREN || type == CSS_TOKEN_RIGHT_BRACKET || type == CSS_TOKEN_RIGHT_BRACE) {
+            if (!depth || closers[--depth] != type) valid = false;
+        }
+    }
+    pool_free(pool, closers);
+    if (!valid) return false;
+    *start = text;
+    *span_length = 0;
+    if (first == count) return true;
+    size_t begin = (size_t)(tokens[first].start - tokens[0].start);
+    size_t end = (size_t)(tokens[last].start + tokens[last].length - tokens[0].start);
+    if (tokens[0].start != text) {
+        // Map preprocessed token boundaries back to the DOM string; each NUL expands to three UTF-8 bytes.
+        size_t raw_begin = length, raw_end = length, normalized = 0;
+        for (size_t i = 0; i <= length; i++) {
+            if (normalized == begin) raw_begin = i;
+            if (normalized == end) {raw_end = i; break;}
+            if (i < length) normalized += text[i] == '\0' ? 3 : 1;
+        }
+        begin = raw_begin;
+        end = raw_end;
+    }
+    if (begin > end || end > length) return false;
+    *start = text + begin;
+    *span_length = end - begin;
+    return true;
+}
+
+bool css_parse_property_initial_value(CssPropertyRegistration* registration,
+    const char* text, size_t length, Pool* pool) {
+    if (!registration || !text || !pool) return false;
+    size_t count = 0;
+    CssToken* tokens = css_tokenize(text, length, pool, &count);
+    if (!tokens || !count) return false;
+    const char* raw = nullptr;
+    size_t raw_length = 0;
+    // Parse a value, not a declaration: a trailing semicolon or top-level ! cannot be consumed as punctuation.
+    bool valid = css_initial_value_token_span(tokens, count, text, length, pool, &raw, &raw_length);
+    css_token_array_release(pool, tokens, count);
+    if (!valid) return false;
+    CssDeclaration* declaration = css_parse_property_declaration("--initial", 9, raw, raw_length, pool);
+    if (!declaration || declaration->important) return false;
+    registration->initial_value = declaration->value;
+    registration->initial_text = pool_dup_n(pool, raw, raw_length);
+    registration->initial_text_length = raw_length;
+    return registration->initial_text && css_property_registration_is_valid(registration);
 }

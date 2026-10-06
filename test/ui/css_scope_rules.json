@@ -1,0 +1,250 @@
+{
+  "name": "Scoped rules obey roots, limits, proximity, nesting and live mutations",
+  "html": "test/ui/css_scope_rules.html",
+  "viewport": {
+    "width": 480,
+    "height": 260
+  },
+  "events": [
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#root"
+      },
+      "attribute": "data-start",
+      "equals": ".scope-root"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#root"
+      },
+      "attribute": "data-end",
+      "equals": ".limit"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#root"
+      },
+      "attribute": "data-scope-length",
+      "equals": "6"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#direct"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#direct"
+      },
+      "property": "outline-color",
+      "equals": "rgb(0, 0, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#deep"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 0, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#near"
+      },
+      "property": "background-color",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#strong"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 165, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#excluded"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#root"
+      },
+      "property": "border-top-color",
+      "equals": "rgb(0, 0, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#root"
+      },
+      "property": "color",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#outside"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#implicit"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 0, 255)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#implicit-outside"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#excluded"
+      },
+      "property": "color",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#limit"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 128, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "color",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#unroot"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#direct"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#deep"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#live"
+      },
+      "property": "background-color",
+      "equals": "rgb(255, 0, 0)"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#near"
+      },
+      "property": "background-color",
+      "equals": "rgb(128, 0, 128)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#insert-scope"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#root"
+      },
+      "attribute": "data-scope-length",
+      "equals": "7"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#direct"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 255, 255)"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#delete-scope"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#root"
+      },
+      "attribute": "data-scope-length",
+      "equals": "6"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#direct"
+      },
+      "property": "background-color",
+      "equals": "rgb(0, 128, 0)"
+    }
+  ]
+}

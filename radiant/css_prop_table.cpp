@@ -1,5 +1,6 @@
 #include "view.hpp"
 #include "../lambda/input/css/css_formatter.hpp"
+#include "../lambda/input/css/css_engine.hpp"
 #include "../lib/log.h"
 #include "../lib/str.h"
 #include "../lib/math_utils.h"
@@ -148,7 +149,7 @@ static bool format_color(char* out, size_t out_size, Color color) {
     } else {
         snprintf(out, out_size, "rgba(%u, %u, %u, %.3g)",
                  (unsigned)color.r, (unsigned)color.g, (unsigned)color.b,
-                 color.a / 255.0);
+                 css_color_legacy_alpha(color.a));
     }
     return true;
 }
@@ -171,6 +172,7 @@ static const void* prop_group_base(const DomElement* element, PropGroupKind grou
         case PROP_GROUP_INLINE: return element->inl();
         case PROP_GROUP_SCROLL: return element->scroll();
         case PROP_GROUP_POSITION: return element->positionp();
+        case PROP_GROUP_TRANSFORM: return element->transformp();
         case PROP_GROUP_FLEX_ITEM:
             return element->flex_item() ? element->flex_item() : &FLEX_ITEM_PROP_DEFAULT;
         case PROP_GROUP_GRID_ITEM:
@@ -231,17 +233,19 @@ static CssDeclaration* computed_decl(DomElement* element, CssPropertyCode id, in
     return declaration;
 }
 
-static const CssValue* computed_spacing_side_value(DomElement* element,
+static const CssValue* computed_box_side_value(DomElement* element,
                                                    CssPropertyCode id,
                                                    int pseudo_type,
                                                    CssDeclaration** declaration) {
     if (!element || pseudo_type != 0 || !declaration) return nullptr;
     bool margin = id >= CSS_PROPERTY_MARGIN_TOP && id <= CSS_PROPERTY_MARGIN_LEFT;
     bool padding = id >= CSS_PROPERTY_PADDING_TOP && id <= CSS_PROPERTY_PADDING_LEFT;
-    if (!margin && !padding) return nullptr;
+    bool border_color = id >= CSS_PROPERTY_BORDER_TOP_COLOR && id <= CSS_PROPERTY_BORDER_LEFT_COLOR;
+    if (!margin && !padding && !border_color) return nullptr;
 
     CssDeclaration* shorthand = computed_decl(
-        element, margin ? CSS_PROPERTY_MARGIN : CSS_PROPERTY_PADDING, pseudo_type);
+        element, margin ? CSS_PROPERTY_MARGIN : padding ? CSS_PROPERTY_PADDING
+            : CSS_PROPERTY_BORDER_COLOR, pseudo_type);
     if (!shorthand || !shorthand->value ||
         (*declaration && css_declaration_cascade_compare(shorthand, *declaration) <= 0)) {
         return nullptr;
@@ -252,37 +256,19 @@ static const CssValue* computed_spacing_side_value(DomElement* element,
 
 static bool format_decl_color(DomElement* element, const CssValue* value,
                               char* out, size_t out_size) {
-    if (!value) return false;
-    if (value->type == CSS_VALUE_TYPE_KEYWORD) {
-        uint8_t r, g, b, a;
-        if (css_named_color_to_rgba(value->data.keyword, &r, &g, &b, &a)) {
-            return format_color(out, out_size, rgba_color(r, g, b, a));
-        }
-        if (value->data.keyword == CSS_VALUE_CURRENTCOLOR && element) {
-            return format_color(out, out_size, element->inl()->color);
-        }
-    }
-    if (value->type != CSS_VALUE_TYPE_COLOR) return false;
-    switch (value->data.color.type) {
-        case CSS_COLOR_HEX:
-        case CSS_COLOR_RGB:
-            return format_color(out, out_size, rgba_color(
-                value->data.color.data.rgba.r, value->data.color.data.rgba.g,
-                value->data.color.data.rgba.b, value->data.color.data.rgba.a));
-        case CSS_COLOR_TRANSPARENT:
-            return format_color(out, out_size, rgba_color(0, 0, 0, 0));
-        case CSS_COLOR_CURRENT:
-        case CSS_COLOR_CURRENTCOLOR:
-            return element
-                ? format_color(out, out_size, element->inl()->color)
-                : false;
-        default:
-            return false;
-    }
+    CssComputedColor color;
+    if (!css_color_compute(value, &color)) return false;
+    if (color.type == CSS_COLOR_COLOR || color.missing) return false;
+    if (color.type == CSS_COLOR_CURRENTCOLOR)
+        return element && element->in_line ? format_color(out, out_size, element->inl()->color) : false;
+    Color rgba;
+    return css_color_to_rgba(&color, &rgba.r, &rgba.g, &rgba.b, &rgba.a)
+        ? format_color(out, out_size, rgba) : false;
 }
 
 static bool format_css_value(DomElement* element, CssPropertyCode id,
-                             const CssValue* value, char* out, size_t out_size) {
+                             const CssValue* value, char* out, size_t out_size,
+                             Pool* scratch = nullptr) {
     if (!value) return copy_text(out, out_size, property_initial(id));
     if (id == CSS_PROPERTY_COLOR || id == CSS_PROPERTY_BACKGROUND_COLOR ||
         id == CSS_PROPERTY_BORDER_TOP_COLOR || id == CSS_PROPERTY_BORDER_RIGHT_COLOR ||
@@ -292,18 +278,16 @@ static bool format_css_value(DomElement* element, CssPropertyCode id,
         // cascade resolver with an invalid context.
         if (format_decl_color(element, value, out, out_size)) return true;
     }
-    Pool* pool = element && element->doc ? element->doc->document_pool : nullptr;
+    Pool* pool = scratch ? scratch : element && element->doc ? element->doc->document_pool : nullptr;
     if (!pool) return false;
     CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
     if (!formatter) return false;
+    CssComputedColor color;
+    const CssProperty* property = css_property_get_by_code(id);
+    formatter->options.computed_colors = property && property->type == PROP_TYPE_COLOR && css_color_compute(value, &color);
     css_format_value(formatter, (CssValue*)value);
     String* result = stringbuf_to_string(formatter->output);
     return copy_text(out, out_size, result ? result->chars : "");
-}
-
-static DomElement* parent_element(DomElement* element) {
-    return element && element->parent && element->parent->is_element()
-        ? static_cast<DomElement*>(element->parent) : nullptr;
 }
 
 static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
@@ -322,50 +306,90 @@ static bool format_legacy_font_color(DomElement* element, CssPropertyCode id,
 
 static bool serialize_decl_recursive(DomElement* element, CssPropertyCode id,
                                      int pseudo_type, int depth,
-                                     char* out, size_t out_size) {
+                                     char* out, size_t out_size, Pool* scratch,
+                                     bool preserve_color_model = false) {
     if (!element || depth > 16) return false;
     CssDeclaration* declaration = computed_decl(element, id, pseudo_type);
     const CssValue* value = declaration ? declaration->value : nullptr;
+    if (pseudo_type == 0 && (css_animation_longhand_index(id) >= 0 ||
+        css_transition_longhand_index(id) >= 0)) {
+        const CssValue* animation_value = css_motion_computed_value(scratch, element, id);
+        return format_css_value(element, id, animation_value, out, out_size, scratch);
+    }
     // Legacy presentational attributes participate before inherited color is
     // consulted, including for dynamic computed-style reads without layout.
     if (!value && format_legacy_font_color(element, id, pseudo_type, out, out_size)) {
+        if (preserve_color_model) return false;
         return true;
     }
     // The specified-style tree keeps shorthands intact for CSSOM mutation.
     // Resolve their winning physical component before serializing a longhand.
-    const CssValue* shorthand_value = computed_spacing_side_value(
+    const CssValue* shorthand_value = computed_box_side_value(
         element, id, pseudo_type, &declaration);
     if (shorthand_value) value = shorthand_value;
+    bool background_shorthand = false;
+    if (id == CSS_PROPERTY_BACKGROUND_COLOR) {
+        CssDeclaration* background = computed_decl(element, CSS_PROPERTY_BACKGROUND, pseudo_type);
+        if (background && (!declaration || css_declaration_cascade_compare(background, declaration) > 0)) {
+            value = background->value;
+            background_shorthand = true;
+        }
+    }
+    if (css_value_contains_pending_substitution(value)) {
+        // A live declaration read can precede layout; use the same substitution and validation as layout.
+        value = css_resolve_element_var_value(scratch, element, value,
+            background_shorthand ? CSS_PROPERTY_BACKGROUND : id);
+        if (!value || !css_property_validate_value(background_shorthand ? CSS_PROPERTY_BACKGROUND : id, value)) {
+            DomElement* parent = css_property_is_inherited(id) ? dom_parent_element(element) : nullptr;
+            return parent ? serialize_decl_recursive(parent, id, 0, depth + 1, out, out_size, scratch, preserve_color_model)
+                          : !preserve_color_model && copy_text(out, out_size, property_initial(id));
+        }
+    }
     if (value && value->type == CSS_VALUE_TYPE_KEYWORD) {
         CssEnum keyword = value->data.keyword;
         if (keyword == CSS_VALUE_INHERIT ||
             (keyword == CSS_VALUE_UNSET && css_property_is_inherited(id))) {
-            DomElement* parent = parent_element(element);
-            return parent ? serialize_decl_recursive(parent, id, 0, depth + 1, out, out_size)
-                          : copy_text(out, out_size, property_initial(id));
+            DomElement* parent = dom_parent_element(element);
+            return parent ? serialize_decl_recursive(parent, id, 0, depth + 1, out, out_size, scratch, preserve_color_model)
+                          : !preserve_color_model && copy_text(out, out_size, property_initial(id));
         }
         if (keyword == CSS_VALUE_INITIAL || keyword == CSS_VALUE_REVERT ||
             keyword == CSS_VALUE_UNSET) {
-            return copy_text(out, out_size, property_initial(id));
+            return !preserve_color_model && copy_text(out, out_size, property_initial(id));
         }
     }
     if (!value && css_property_is_inherited(id)) {
-        DomElement* parent = parent_element(element);
-        if (parent) return serialize_decl_recursive(parent, id, 0, depth + 1, out, out_size);
+        DomElement* parent = dom_parent_element(element);
+        if (parent) return serialize_decl_recursive(parent, id, 0, depth + 1, out, out_size, scratch, preserve_color_model);
+    }
+    if (background_shorthand) value = css_background_color_component(value);
+    if (preserve_color_model) {
+        CssComputedColor color;
+        // A byte paint snapshot cannot serialize a predefined color space or missing channels.
+        if (!css_color_compute(value, &color) || (color.type != CSS_COLOR_COLOR && !color.missing)) return false;
     }
     if (id == CSS_PROPERTY_CONTENT && pseudo_type != 0 &&
         (!value || (value->type == CSS_VALUE_TYPE_KEYWORD &&
                     value->data.keyword == CSS_VALUE_NORMAL))) {
         return copy_text(out, out_size, "none");
     }
-    return value ? format_css_value(element, id, value, out, out_size)
-                 : copy_text(out, out_size, property_initial(id));
+    return value ? format_css_value(element, id, value, out, out_size, scratch)
+                 : !preserve_color_model && copy_text(out, out_size, property_initial(id));
+}
+
+static bool serialize_decl_value(DomElement* element, CssPropertyCode id,
+                                 int pseudo_type, char* out, size_t out_size,
+                                 bool preserve_color_model = false) {
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    bool result = serialize_decl_recursive(element, id, pseudo_type, 0, out, out_size, scratch, preserve_color_model);
+    pool_destroy(scratch);
+    return result;
 }
 
 static bool serialize_decl(const CssPropAccessor* accessor, DomElement* element,
                            int pseudo_type, char* out, size_t out_size) {
-    return accessor && serialize_decl_recursive(element, accessor->id, pseudo_type, 0,
-                                                out, out_size);
+    return accessor && serialize_decl_value(element, accessor->id, pseudo_type, out, out_size);
 }
 
 static const CssValue* inherited_decl_value(DomElement* element, CssPropertyCode id,
@@ -378,7 +402,7 @@ static const CssValue* inherited_decl_value(DomElement* element, CssPropertyCode
         CssEnum keyword = value->data.keyword;
         if (keyword == CSS_VALUE_INHERIT ||
             (keyword == CSS_VALUE_UNSET && css_property_is_inherited(id))) {
-            DomElement* parent = parent_element(element);
+            DomElement* parent = dom_parent_element(element);
             return parent ? inherited_decl_value(parent, id, 0, depth + 1,
                                                  declaring_element) : nullptr;
         }
@@ -392,7 +416,7 @@ static const CssValue* inherited_decl_value(DomElement* element, CssPropertyCode
         return value;
     }
     if (css_property_is_inherited(id)) {
-        DomElement* parent = parent_element(element);
+        DomElement* parent = dom_parent_element(element);
         return parent ? inherited_decl_value(parent, id, 0, depth + 1,
                                              declaring_element) : nullptr;
     }
@@ -403,7 +427,7 @@ static bool cssom_font_size_px(DomElement* element, int pseudo_type,
                                float* font_size) {
     if (!element || !font_size) return false;
     char serialized[64];
-    if (!serialize_decl_recursive(element, CSS_PROPERTY_FONT_SIZE, pseudo_type, 0,
+    if (!serialize_decl_value(element, CSS_PROPERTY_FONT_SIZE, pseudo_type,
                                   serialized, sizeof(serialized))) {
         return false;
     }
@@ -432,51 +456,38 @@ static const CssValue* cssom_font_size_decl_value(DomElement* element,
     return longhand ? longhand->value : nullptr;
 }
 
-static const CssValue* cssom_lookup_custom_property(DomElement* element,
-                                                    const char* name) {
-    for (DomElement* current = element; current; current = parent_element(current)) {
-        for (CssCustomProp* prop = current->css_variables; prop; prop = prop->next) {
-            if (css_custom_property_name_matches(prop->name, name)) return prop->value;
-        }
-    }
-    return nullptr;
-}
+static bool cssom_resolve_font_size_value(DomElement* element,
+    const CssValue* value, float parent_font_size, float root_font_size, float* font_size,
+    bool math_operand = false);
 
-static const CssValue* cssom_resolve_font_size_var(DomElement* element,
-                                                    const CssValue* value,
-                                                    int depth) {
-    if (!value || depth > 64) return nullptr;
-    const char* name = nullptr;
-    const CssValue* fallback = nullptr;
-    if (value->type == CSS_VALUE_TYPE_VAR && value->data.var_ref) {
-        name = value->data.var_ref->name;
-        fallback = value->data.var_ref->fallback;
-    } else if (value->type == CSS_VALUE_TYPE_FUNCTION && value->data.function &&
-               value->data.function->name &&
-               strcmp(value->data.function->name, "var") == 0) {
-        CssFunction* function = value->data.function;
-        if (function->arg_count > 0 && function->args) {
-            name = css_value_identifier_name(function->args[0]);
-        }
-        if (function->arg_count > 1 && function->args) fallback = function->args[1];
-    } else {
-        return value;
-    }
-    const CssValue* resolved = cssom_lookup_custom_property(element, name);
-    if (!resolved) resolved = fallback;
-    return resolved ? cssom_resolve_font_size_var(element, resolved, depth + 1) : nullptr;
+struct CssomFontMathContext {DomElement* element; float parent_size; float root_size;};
+
+static bool cssom_font_math_leaf(void* data, const CssValue* value, double* result) {
+    CssomFontMathContext* context = (CssomFontMathContext*)data;
+    float size = 0.0f;
+    if (!cssom_resolve_font_size_value(context->element, value, context->parent_size,
+        context->root_size, &size, true)) return false;
+    *result = size;
+    return true;
 }
 
 static bool cssom_resolve_font_size_value(DomElement* element,
-                                          const CssValue* raw_value,
+                                          const CssValue* value,
                                           float parent_font_size,
                                           float root_font_size,
-                                          float* font_size) {
-    if (!element || !raw_value || !font_size) return false;
-    const CssValue* value = cssom_resolve_font_size_var(element, raw_value, 0);
-    if (!value) return false;
+                                          float* font_size, bool math_operand) {
+    if (!element || !value || !font_size) return false;
     float resolved = -1.0f;
-    if (value->type == CSS_VALUE_TYPE_LENGTH) {
+    if (value->type == CSS_VALUE_TYPE_FUNCTION) {
+        // Font math uses the parent's percentage/em basis before registered descendants inherit lengths.
+        CssomFontMathContext leaf_context = {element, parent_font_size, root_font_size};
+        CssMathEvaluationContext context = {cssom_font_math_leaf, &leaf_context, 1.0, false};
+        CssMathResult math = css_math_evaluate(value, &context);
+        if (!math.resolved || (math.type != CSS_MATH_LENGTH && math.type != CSS_MATH_PERCENT &&
+            math.type != CSS_MATH_LENGTH_PERCENT && !(math.type == CSS_MATH_NUMBER && math.value == 0.0)))
+            return false;
+        resolved = isnan(math.value) ? 0.0 : math_operand ? math.value : fmax(0.0, math.value);
+    } else if (value->type == CSS_VALUE_TYPE_LENGTH) {
         double absolute_pixels = 0.0;
         if (css_absolute_length_to_px(value->data.length.unit,
                                       value->data.length.value, &absolute_pixels)) {
@@ -518,7 +529,7 @@ static bool cssom_resolve_font_size_value(DomElement* element,
             resolved = css_font_size_keyword_px(keyword);
         }
     }
-    if (!isfinite(resolved) || resolved < 0.0f) return false;
+    if (!isfinite(resolved) || (!math_operand && resolved < 0.0f)) return false;
     *font_size = resolved;
     return true;
 }
@@ -526,26 +537,37 @@ static bool cssom_resolve_font_size_value(DomElement* element,
 static bool cssom_resolve_font_size_recursive(DomElement* element,
                                               int pseudo_type, int depth,
                                               float* root_font_size,
-                                              float* font_size) {
+                                              float* font_size, bool refresh_cascade) {
     if (!element || !root_font_size || !font_size || depth > 64) return false;
-    DomElement* parent = parent_element(element);
+    DomElement* parent = dom_parent_element(element);
     float parent_font_size = 16.0f;
     if (parent && !cssom_resolve_font_size_recursive(
-            parent, 0, depth + 1, root_font_size, &parent_font_size)) {
+            parent, 0, depth + 1, root_font_size, &parent_font_size, refresh_cascade)) {
         return false;
     }
     // Resolve this element before using its font as the next inherited basis;
     // CSSOM reads run before layout creates a ViewTree or LayoutContext.
-    radiant_cascade_styles_for_element(element);
+    if (refresh_cascade) radiant_cascade_styles_for_element(element);
     const CssValue* value = cssom_font_size_decl_value(element, pseudo_type);
     if (!value) {
         *font_size = parent_font_size;
         return true;
     }
-    if (!cssom_resolve_font_size_value(element, value, parent_font_size,
-                                       *root_font_size, font_size)) return false;
+    Pool* scratch = pool_create();
+    if (!scratch) return false;
+    value = css_resolve_element_var_value(scratch, element, value, CSS_PROPERTY_FONT_SIZE);
+    bool resolved = cssom_resolve_font_size_value(element, value, parent_font_size,
+                                                  *root_font_size, font_size);
+    pool_destroy(scratch);
+    if (!resolved) *font_size = parent_font_size;
     if (!parent) *root_font_size = *font_size;
     return true;
+}
+
+bool css_compute_cascaded_font_size(DomElement* element, float* font_size) {
+    float root_font_size = 16.0f;
+    // Layout has already matched this tree; reading its font must not invalidate the cascade.
+    return cssom_resolve_font_size_recursive(element, 0, 0, &root_font_size, font_size, false);
 }
 
 static bool serialize_cssom_font_size(DomElement* element, int pseudo_type,
@@ -553,7 +575,7 @@ static bool serialize_cssom_font_size(DomElement* element, int pseudo_type,
     float root_font_size = 16.0f;
     float font_size = 0.0f;
     if (!cssom_resolve_font_size_recursive(element, pseudo_type, 0,
-                                           &root_font_size, &font_size)) {
+                                           &root_font_size, &font_size, true)) {
         return false;
     }
     return format_number(out, out_size, font_size, "px");
@@ -635,7 +657,7 @@ static bool serialize_place_alignment(
     CssSelfAlignment justify = {initial_value};
     if (shorthand && (!shorthand->value ||
         !shorthand_parser(shorthand->value, &align, &justify))) {
-        return serialize_decl_recursive(element, shorthand_id, 0, 0, out, out_size);
+        return serialize_decl_value(element, shorthand_id, 0, out, out_size);
     }
     // CSS Cascade expands a shorthand before constituent longhands compete.
     if (!resolve_place_component(shorthand, computed_decl(element, align_id, 0),
@@ -745,34 +767,31 @@ static bool serialize_edge(const CssPropAccessor* accessor, DomElement* element,
     return format_number(out, out_size, value, "px");
 }
 
-static bool serialize_border_width(const CssPropAccessor* accessor,
-                                   DomElement* element, int pseudo_type,
-                                   char* out, size_t out_size) {
+static bool serialize_border_component(const CssPropAccessor* accessor,
+                                       DomElement* element, int pseudo_type,
+                                       char* out, size_t out_size) {
     if (!accessor || !element || pseudo_type != 0) return false;
     const BoundaryProp* boundary = element->boundary();
-    if (!boundary || !boundary->border) {
-        // CSS 2.1 §8.5.1: none/hidden borders have a zero computed edge width.
-        return copy_text(out, out_size, "0px");
+    RadiantBorderSide side = radiant_border_side(boundary ? boundary->border : nullptr,
+                                                 radiant_css_box_side(accessor->id));
+    switch (accessor->id) {
+        case CSS_PROPERTY_BORDER_TOP_WIDTH:
+        case CSS_PROPERTY_BORDER_RIGHT_WIDTH:
+        case CSS_PROPERTY_BORDER_BOTTOM_WIDTH:
+        case CSS_PROPERTY_BORDER_LEFT_WIDTH:
+            // resolved edge widths include none/hidden and UA border defaults.
+            return format_number(out, out_size, side.width ? *side.width : 0.0f, "px");
+        case CSS_PROPERTY_BORDER_TOP_STYLE:
+        case CSS_PROPERTY_BORDER_RIGHT_STYLE:
+        case CSS_PROPERTY_BORDER_BOTTOM_STYLE:
+        case CSS_PROPERTY_BORDER_LEFT_STYLE: {
+            const CssEnumInfo* info = side.style ? css_enum_info(*side.style) : nullptr;
+            return copy_text(out, out_size, info && info->name ? info->name : "none");
+        }
+        default:
+            // colors come from the computed side, including winning shorthands.
+            return format_color(out, out_size, side.color ? *side.color : element->inl()->color);
     }
-    RadiantBorderSide side = radiant_border_side(
-        boundary->border, radiant_css_box_side(accessor->id));
-    if (!side.width) return false;
-    // CSSOM computed widths expose the resolved border edge, including UA styles.
-    return format_number(out, out_size, *side.width, "px");
-}
-
-static bool serialize_border_style(const CssPropAccessor* accessor,
-                                   DomElement* element, int pseudo_type,
-                                   char* out, size_t out_size) {
-    if (!accessor || !element || pseudo_type != 0) return false;
-    const BoundaryProp* boundary = element->boundary();
-    if (!boundary || !boundary->border) return copy_text(out, out_size, "none");
-    RadiantBorderSide side = radiant_border_side(
-        boundary->border, radiant_css_box_side(accessor->id));
-    if (!side.style) return false;
-    const CssEnumInfo* info = css_enum_info(*side.style);
-    return copy_text(out, out_size,
-        info && info->name ? info->name : property_initial(accessor->id));
 }
 
 static bool serialize_inset(const CssPropAccessor* accessor, DomElement* element,
@@ -885,50 +904,6 @@ static bool serialize_outline(const CssPropAccessor* accessor, DomElement* eleme
         return format_color(out, out_size, outline->color);
     }
     return false;
-}
-
-static bool serialize_transition(const CssPropAccessor* accessor, DomElement* element,
-                                 int pseudo_type, char* out, size_t out_size) {
-    if (!accessor || !element || pseudo_type != 0) return false;
-    CssTransitionProp transition = {};
-    CssPropertyCode properties[8];
-    CssDeclaration* shorthand = computed_decl(element, CSS_PROPERTY_TRANSITION, 0);
-    CssDeclaration* duration = computed_decl(element, CSS_PROPERTY_TRANSITION_DURATION, 0);
-    CssDeclaration* delay = computed_decl(element, CSS_PROPERTY_TRANSITION_DELAY, 0);
-    CssDeclaration* property = computed_decl(element, CSS_PROPERTY_TRANSITION_PROPERTY, 0);
-    CssDeclaration* timing = computed_decl(
-        element, CSS_PROPERTY_TRANSITION_TIMING_FUNCTION, 0);
-    css_transition_resolve_values(
-        shorthand ? shorthand->value : nullptr,
-        duration ? duration->value : nullptr,
-        delay ? delay->value : nullptr,
-        property ? property->value : nullptr,
-        timing ? timing->value : nullptr,
-        &transition, properties, 8);
-    if (accessor->id == CSS_PROPERTY_TRANSITION_DURATION ||
-        accessor->id == CSS_PROPERTY_TRANSITION_DELAY) {
-        float seconds = accessor->id == CSS_PROPERTY_TRANSITION_DURATION
-            ? transition.duration : transition.delay;
-        return format_number(out, out_size, seconds, "s");
-    }
-    if (transition.property_count < 0) return copy_text(out, out_size, "all");
-    if (transition.property_count == 0) return copy_text(out, out_size, "none");
-    out[0] = '\0';
-    size_t used = 0;
-    for (int i = 0; i < transition.property_count && used + 1 < out_size; i++) {
-        const CssProperty* item = css_property_get_by_code(transition.properties[i]);
-        if (!item || !item->name) continue;
-        int count = snprintf(out + used, out_size - used, "%s%s",
-                             used ? ", " : "", item->name);
-        if (count < 0) return false;
-        size_t written = (size_t)count;
-        if (written >= out_size - used) {
-            out[out_size - 1] = '\0';
-            break;
-        }
-        used += written;
-    }
-    return true;
 }
 
 static const char* scroll_snap_axis_name(ScrollSnapAxis axis) {
@@ -1121,28 +1096,38 @@ static const CssPropAccessor CSS_PROP_ROWS[] = {
     // This longhand can be supplied by the retained background shorthand.
     DERIVED_ROW(CSS_PROPERTY_BACKGROUND_COLOR, serialize_background_color,
                 CSS_PROP_ACCESSOR_CASCADE_RESOLVED),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH, serialize_border_width, 0),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_WIDTH, serialize_border_width, 0),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, serialize_border_width, 0),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_WIDTH, serialize_border_width, 0),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_STYLE, serialize_border_style, 0),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_STYLE, serialize_border_style, 0),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_STYLE, serialize_border_style, 0),
-    DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_STYLE, serialize_border_style, 0),
-    DECL_ROW(CSS_PROPERTY_BORDER_TOP_COLOR),
-    DECL_ROW(CSS_PROPERTY_BORDER_RIGHT_COLOR),
-    DECL_ROW(CSS_PROPERTY_BORDER_BOTTOM_COLOR),
-    DECL_ROW(CSS_PROPERTY_BORDER_LEFT_COLOR),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_WIDTH, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_WIDTH, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_WIDTH, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_WIDTH, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_STYLE, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_STYLE, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_STYLE, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_STYLE, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_TOP_COLOR, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_RIGHT_COLOR, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_BOTTOM_COLOR, serialize_border_component, 0),
+    DERIVED_ROW(CSS_PROPERTY_BORDER_LEFT_COLOR, serialize_border_component, 0),
     DECL_ROW(CSS_PROPERTY_TRANSFORM),
+    DIRECT_ROW(CSS_PROPERTY_BACKFACE_VISIBILITY, PROP_GROUP_TRANSFORM, TransformProp,
+        backface_visibility, CSS_PROP_VALUE_ENUM, 0),
+    DIRECT_ROW(CSS_PROPERTY_TRANSFORM_STYLE, PROP_GROUP_TRANSFORM, TransformProp,
+        transform_style, CSS_PROP_VALUE_ENUM, 0),
     DERIVED_ROW(CSS_PROPERTY_TRANSLATE, serialize_individual_transform, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_ROTATE, serialize_individual_transform, CSS_PROP_ACCESSOR_USED_VALUE),
     DERIVED_ROW(CSS_PROPERTY_SCALE, serialize_individual_transform, CSS_PROP_ACCESSOR_USED_VALUE),
     DECL_ROW(CSS_PROPERTY_FILTER),
+    DECL_ROW(CSS_PROPERTY_ANIMATION_NAME),
     DECL_ROW(CSS_PROPERTY_ANIMATION_DURATION),
+    DECL_ROW(CSS_PROPERTY_ANIMATION_TIMING_FUNCTION),
     DECL_ROW(CSS_PROPERTY_ANIMATION_DELAY),
-    DERIVED_ROW(CSS_PROPERTY_TRANSITION_DURATION, serialize_transition, 0),
-    DERIVED_ROW(CSS_PROPERTY_TRANSITION_DELAY, serialize_transition, 0),
-    DERIVED_ROW(CSS_PROPERTY_TRANSITION_PROPERTY, serialize_transition, 0),
+    DECL_ROW(CSS_PROPERTY_ANIMATION_ITERATION_COUNT),
+    DECL_ROW(CSS_PROPERTY_ANIMATION_DIRECTION),
+    DECL_ROW(CSS_PROPERTY_ANIMATION_FILL_MODE),
+    DECL_ROW(CSS_PROPERTY_ANIMATION_PLAY_STATE),
+    DECL_ROW(CSS_PROPERTY_TRANSITION_DURATION),
+    DECL_ROW(CSS_PROPERTY_TRANSITION_DELAY),
+    DECL_ROW(CSS_PROPERTY_TRANSITION_PROPERTY),
     DECL_ROW(CSS_PROPERTY_TRANSITION_TIMING_FUNCTION),
     DECL_ROW(CSS_PROPERTY_DIRECTION),
     DECL_ROW(CSS_PROPERTY_CONTENT),
@@ -1231,8 +1216,12 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
         // tree exists but has not yet propagated inherited font properties.
         return serialize_cssom_font_size(element, pseudo_type, out, out_size);
     }
-    if (!dom_ensure_computed(element,
-            (accessor->flags & CSS_PROP_ACCESSOR_USED_VALUE) != 0)) {
+    bool computed = dom_ensure_computed(element,
+        (accessor->flags & CSS_PROP_ACCESSOR_USED_VALUE) != 0);
+    const CssProperty* property = css_property_get_by_code(id);
+    if (property && property->type == PROP_TYPE_COLOR &&
+        serialize_decl_value(element, id, pseudo_type, out, out_size, true)) return true;
+    if (!computed) {
         // Before the first UiContext exists, loader scripts can only observe
         // the already-cascaded declaration tree; keep this compatibility seam
         // inside the table instead of reviving a second JS serializer.
@@ -1247,4 +1236,27 @@ bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
     if (pseudo_type != 0) return serialize_decl(accessor, element, pseudo_type, out, out_size);
     return accessor->serialize && accessor->serialize(accessor, element, pseudo_type,
                                                       out, out_size);
+}
+
+String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+    const char* name, size_t name_length) {
+    if (!pool || !element || !element->doc) return nullptr;
+    DomDocument* doc = element->doc;
+    const CssPropertyRegistration* registration = css_find_document_property_registration(doc, name, name_length);
+    if (!registration) return nullptr;
+    dom_ensure_computed(element, false);
+    Pool* scratch = pool_create();
+    if (!scratch) return nullptr;
+    const CssValue* value = css_compute_element_custom_property(scratch, element, name, name_length);
+    const CssPropertySyntaxComponent* matched = css_match_property_syntax(registration, value);
+    CssFormatter* formatter = css_formatter_create(pool, CSS_FORMAT_COMPACT);
+    if (!formatter) {pool_destroy(scratch); return nullptr;}
+    formatter->options.computed_colors = matched && matched->type == CSS_SYNTAX_COLOR;
+    if (registration->universal && value == registration->initial_value && registration->initial_text) {
+        // Universal defaults retain their original token spelling and length, including embedded NUL.
+        stringbuf_append_str_n(formatter->output, registration->initial_text, registration->initial_text_length);
+    } else if (value) css_format_value(formatter, (CssValue*)value);
+    String* result = stringbuf_to_string(formatter->output);
+    pool_destroy(scratch);
+    return result;
 }

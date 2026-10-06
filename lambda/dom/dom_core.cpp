@@ -373,6 +373,7 @@ extern "C" Item dom_core_invoke(Item n, Item op, Item args) {
 extern "C" Item dom_dispatch_event_bridge(Item target, Item event);
 extern "C" Item dom_css_supports_operation(Item* args, int argc);
 extern "C" Item dom_css_escape_operation(Item* args, int argc);
+extern "C" Item dom_css_register_property_operation(Item definition);
 extern "C" Item dom_dataset_set_property(Item elem_item, Item prop_name, Item value);
 extern "C" void dom_event_handler_property_set(Item target, const char* property_name,
                                                 int property_name_len, Item value);
@@ -390,6 +391,10 @@ extern "C" Item dom_core_css_supports(Item property, Item value) {
 extern "C" Item dom_core_css_escape(Item text) {
     Item args[1] = { text };
     return dom_absent_to_null(dom_css_escape_operation(args, 1));
+}
+
+extern "C" Item dom_core_css_register_property(Item definition) {
+    return dom_absent_to_null(dom_css_register_property_operation(definition));
 }
 
 // element.dataset.foo = v is a data-* attribute write. The row takes the
@@ -665,4 +670,3 @@ extern "C" Item dom_fp_has_attribute(Item n, Item name) {
     Item value = dom_core_get_attribute(n, name);
     return (Item){.item = b2it(get_type_id(value) != LMD_TYPE_NULL)};
 }
-

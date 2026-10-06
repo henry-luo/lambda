@@ -13507,6 +13507,13 @@ JS_RUNTIME_ARGS_BODY(js_intrinsic_css_supports_body,
 JS_RUNTIME_ARGS_BODY(js_intrinsic_css_escape_body,
     jube_internal_host_api()->dom_catalog->css_escape(argc > 0 ? args[0] : ItemNull))
 
+Item js_intrinsic_css_register_property_body(Item callee, Item this_value, Item* args,
+        int argc, uint64_t* result_home) {
+    (void)callee; (void)this_value; (void)result_home;
+    JS_RETURN_IF_ERROR(jube_internal_host_api()->dom_catalog->css_register_property(js_intrinsic_arg(args, argc, 0)));
+    return make_js_undefined();
+}
+
 #undef JS_RUNTIME_BINARY_BODY
 #undef JS_RUNTIME_THIS_UNARY_BODY
 #undef JS_RUNTIME_UNARY_BODY

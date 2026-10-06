@@ -1,0 +1,26 @@
+{
+  "name": "Backface visibility controls 3D paint, hit testing and containing blocks",
+  "html": "test/ui/backface_visibility.html",
+  "viewport": {"width": 1000, "height": 180},
+  "events": [
+    {"type": "assert_attribute", "target": {"selector": "#local"}, "attribute": "data-hit", "equals": "local"},
+    {"type": "assert_attribute", "target": {"selector": "#visible"}, "attribute": "data-hit", "equals": "visible-child"},
+    {"type": "assert_attribute", "target": {"selector": "#preserved"}, "attribute": "data-hit", "equals": "preserved-child"},
+    {"type": "assert_attribute", "target": {"selector": "#flattened"}, "attribute": "data-hit", "equals": "flattened"},
+    {"type": "assert_attribute", "target": {"selector": "#parent-hidden"}, "attribute": "data-hit", "equals": ""},
+    {"type": "assert_attribute", "target": {"selector": "#zscale"}, "attribute": "data-hit", "equals": "zscale"},
+    {"type": "assert_attribute", "target": {"selector": "#opacity"}, "attribute": "data-hit", "equals": "opacity"},
+    {"type": "assert_attribute", "target": {"selector": "#overflow-hidden"}, "attribute": "data-hit", "equals": "overflow-hidden"},
+    {"type": "assert_attribute", "target": {"selector": "#overflow-clip"}, "attribute": "data-hit", "equals": "overflow-clip-child"},
+    {"type": "assert_attribute", "target": {"selector": "#filtered"}, "attribute": "data-hit", "equals": "filtered"},
+    {"type": "assert_attribute", "target": {"selector": "#paint-contained"}, "attribute": "data-hit", "equals": "paint-contained"},
+    {"type": "assert_style", "target": {"selector": "#opacity"}, "property": "transform-style", "equals": "preserve-3d"},
+    {"type": "assert_attribute", "target": {"selector": "#host"}, "attribute": "data-fixed-x", "equals": "65"},
+    {"type": "assert_style", "target": {"selector": "#local-child"}, "property": "backface-visibility", "equals": "hidden"},
+    {"type": "assert_style", "target": {"selector": "#preserved"}, "property": "transform-style", "equals": "preserve-3d"},
+    {"type": "click", "target": {"selector": "#show"}},
+    {"type": "click", "target": {"selector": "#sample"}},
+    {"type": "assert_attribute", "target": {"selector": "#local"}, "attribute": "data-hit", "equals": "local-child"},
+    {"type": "assert_style", "target": {"selector": "#local-child"}, "property": "backface-visibility", "equals": "visible"}
+  ]
+}

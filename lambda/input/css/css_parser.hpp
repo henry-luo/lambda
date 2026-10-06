@@ -539,7 +539,13 @@ bool css_is_valid_css_function(const char* name);
 // length-aware fragment parsing used by DOM/CSSOM bridges. These helpers own
 // tokenization, strict end-of-input validation, and pool-backed allocations.
 CssRule* css_parse_rule_text(const char* text, size_t length, Pool* pool);
-CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool);
+CssRule* css_parse_rule_text_in_context(const char* text, size_t length, Pool* pool,
+                                       const char* parent_text, CssSelectorGroup* parent_group,
+                                       bool scoped = false);
+bool css_scope_rebind_prelude(CssRule* rule, const char* parent_text, Pool* pool,
+                              bool scoped = false);
+CssSelectorGroup* css_parse_selector_group_text(const char* text, size_t length, Pool* pool,
+                                               bool deferred_namespace_binding = false);
 CssSelectorGroup* css_parse_nested_selector_group_text(const char* text,
     size_t length, const char* parent_selector_text, Pool* pool,
     char** authored_text);
@@ -553,6 +559,8 @@ CssDeclaration** css_parse_declaration_list_text(const char* text, size_t length
 CssDeclaration* css_parse_property_declaration(const char* property, size_t property_length,
                                                const char* value, size_t value_length,
                                                Pool* pool);
+bool css_parse_property_initial_value(CssPropertyRegistration* registration,
+    const char* text, size_t length, Pool* pool);
 
 typedef struct CssFontShorthandParts {
     const CssValue* group;
@@ -568,6 +576,9 @@ typedef struct CssFontShorthandParts {
 bool css_parse_font_shorthand(const CssValue* value, CssFontShorthandParts* parts);
 bool css_font_shorthand_contains_property(const char* property);
 const CssValue* css_font_shorthand_longhand(const CssValue* value, const char* property, Pool* pool);
+
+const CssValue* css_motion_shorthand_longhand(const CssValue* value,
+    CssPropertyCode property, Pool* pool);
 
 bool css_parse_unicode_range_bounds(const char* input, size_t length,
                                     uint32_t* out_start, uint32_t* out_end);

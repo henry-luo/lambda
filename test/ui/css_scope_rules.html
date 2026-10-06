@@ -1,0 +1,55 @@
+<!doctype html>
+<style>
+html,body{margin:0}button{height:20px}.scope-root{position:absolute;left:20px;top:40px;width:220px;border:2px solid red}
+.item{width:20px;height:20px;display:inline-block;background:red}
+</style>
+<style id="scoped-rules">
+@scope (.scope-root) to (.limit) {
+    .item { background: green; color: green; }
+    > .direct { outline-color: blue; }
+    :scope { border-color: blue; }
+    & { color: green; }
+    color: purple;
+    @scope (.inner) { .deep { background: blue; } }
+}
+@scope (.near) { .item { background: purple; } }
+@scope (.scope-root) { .item { background: green; } }
+</style>
+<style>
+.item{background:red}.strong .item{background:orange}
+</style>
+<button id="limit">add limit</button><button id="unroot">remove root</button>
+<button id="insert-scope">insert scope rule</button><button id="delete-scope">delete scope rule</button>
+<div id="root" class="scope-root">
+  <div id="direct" class="item direct"></div>
+  <div class="inner"><div id="deep" class="item deep"></div></div>
+  <div class="near"><div id="near" class="item"></div></div>
+  <div class="strong"><div id="strong" class="item"></div></div>
+  <div class="limit"><div id="excluded" class="item"></div></div>
+  <div id="live-limit"><div id="live" class="item"></div></div>
+</div>
+<div id="outside" class="item"></div>
+<div id="implicit-owner">
+  <style>@scope { .implicit { background: blue; } }</style>
+  <div id="implicit" class="item implicit"></div>
+</div>
+<div id="implicit-outside" class="item implicit"></div>
+<script>
+var scopeRule = document.getElementById('scoped-rules').sheet.cssRules[0];
+var scopeLive = scopeRule.cssRules;
+var scopeRoot = document.getElementById('root');
+scopeRoot.setAttribute('data-start',scopeRule.start);
+scopeRoot.setAttribute('data-end',scopeRule.end);
+scopeRoot.setAttribute('data-scope-length',String(scopeLive.length));
+document.getElementById('limit').addEventListener('click',function(){document.getElementById('live-limit').className='limit';});
+document.getElementById('unroot').addEventListener('click',function(){document.getElementById('root').className='';});
+document.getElementById('insert-scope').addEventListener('click',function(){
+    scopeRoot.className='scope-root';
+    scopeRule.insertRule('> #direct { background: cyan; }',scopeLive.length);
+    scopeRoot.setAttribute('data-scope-length',String(scopeLive.length));
+});
+document.getElementById('delete-scope').addEventListener('click',function(){
+    scopeRule.deleteRule(scopeLive.length-1);
+    scopeRoot.setAttribute('data-scope-length',String(scopeLive.length));
+});
+</script>

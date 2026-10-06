@@ -1,0 +1,14 @@
+<!doctype html>
+<style>
+body { margin: 0; }
+#box {
+    width: 80px; height: 40px; background: red; opacity: 1;
+    --motion: opacity 9s ease, width 9s ease-in;
+    transition: var(--motion);
+    transition-property: first, second, third, fourth, fifth, sixth, seventh, eighth, opacity, width;
+    transition-duration: 2s, 4s;
+    transition-timing-function: linear;
+}
+#box:hover { width: 160px; opacity: 0; }
+</style>
+<div id="box"></div>

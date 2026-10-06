@@ -33,16 +33,6 @@ typedef struct CssLayerRegistry {
     bool valid;
 } CssLayerRegistry;
 
-static bool css_import_rule_is_active(CssRule* rule, CssEngine* engine) {
-    if (!rule || rule->type != CSS_RULE_IMPORT ||
-        rule->data.import_rule.invalid) return false;
-    if (rule->data.import_rule.supports &&
-        !css_evaluate_supports_condition(engine,
-            rule->data.import_rule.supports)) return false;
-    return !rule->data.import_rule.media ||
-        css_evaluate_media_query(engine, rule->data.import_rule.media);
-}
-
 static CssLayerNode* css_layer_child(CssLayerRegistry* registry,
                                      CssLayerNode* parent, const char* name) {
     if (!registry || !parent) return nullptr;
@@ -143,6 +133,8 @@ static void css_layer_collect_rule(CssLayerRegistry* registry,
     } else if (rule->type == CSS_RULE_SUPPORTS) {
         if (!css_evaluate_supports_condition(engine,
                 rule->data.conditional_rule.condition)) return;
+    } else if (rule->type == CSS_RULE_SCOPE) {
+        if (rule->data.conditional_rule.invalid_scope) return;
     } else {
         return;
     }
@@ -196,12 +188,34 @@ static void css_layer_rank_stylesheets(DomDocument* doc,
 
 static void apply_rule_to_element_with_nested(DomElement* element, CssRule* rule,
                                               SelectorMatcher* matcher, Pool* pool,
-                                              CssEngine* engine, int depth);
+                                              CssEngine* engine, int depth,
+                                              uint32_t scope_proximity = 0);
+
+struct CssScopeApplyContext {
+    DomElement* element;
+    CssRule* rule;
+    SelectorMatcher* matcher;
+    Pool* pool;
+    CssEngine* engine;
+};
+
+static void apply_scope_root(void* data, uint32_t scope_proximity) {
+    CssScopeApplyContext* context = (CssScopeApplyContext*)data;
+    CssRuleChildList children = css_rule_child_list(context->rule);
+    for (size_t i = 0; children.count && i < *children.count; i++)
+        apply_rule_to_element_with_nested(context->element, (*children.rules)[i],
+            context->matcher, context->pool, context->engine, 0, scope_proximity);
+}
 
 static void apply_rule_to_element(DomElement* element, CssRule* rule,
                                   SelectorMatcher* matcher, Pool* pool,
-                                  CssEngine* engine) {
+                                  CssEngine* engine, uint32_t scope_proximity = 0) {
     if (!element || !rule || !matcher || !pool) return;
+    if (rule->type == CSS_RULE_SCOPE) {
+        CssScopeApplyContext context = {element, rule, matcher, pool, engine};
+        css_scope_visit_roots(rule, element, matcher, apply_scope_root, &context);
+        return;
+    }
 
     if (rule->type == CSS_RULE_IMPORT) {
         if (!css_import_rule_is_active(rule, engine)) return;
@@ -229,7 +243,7 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
             for (size_t i = 0; i < rule->data.conditional_rule.rule_count; i++) {
                 CssRule* nested = rule->data.conditional_rule.rules[i];
                 if (nested) apply_rule_to_element_with_nested(element, nested,
-                    matcher, pool, engine, 0);
+                    matcher, pool, engine, 0, scope_proximity);
             }
         }
         return;
@@ -257,7 +271,7 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
             if (result.pseudo_element != PSEUDO_ELEMENT_NONE) {
                 if (rule->data.style_rule.declaration_count > 0) {
                     dom_element_apply_pseudo_element_rule(element, rule,
-                        result.specificity, (int)result.pseudo_element);
+                        result.specificity, (int)result.pseudo_element, scope_proximity);
                 }
             } else if (!matched_selector ||
                        css_specificity_compare(result.specificity, best_specificity) > 0) {
@@ -267,7 +281,7 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
             }
         }
         if (matched_selector && rule->data.style_rule.declaration_count > 0) {
-            dom_element_apply_rule(element, rule, best_specificity);
+            dom_element_apply_rule(element, rule, best_specificity, scope_proximity);
         }
         return;
     }
@@ -285,22 +299,22 @@ static void apply_rule_to_element(DomElement* element, CssRule* rule,
     if (result.pseudo_element != PSEUDO_ELEMENT_NONE) {
         dom_element_apply_pseudo_element_rule(element, rule,
                                               result.specificity,
-                                              (int)result.pseudo_element);
+                                              (int)result.pseudo_element, scope_proximity);
     } else {
-        dom_element_apply_rule(element, rule, result.specificity);
+        dom_element_apply_rule(element, rule, result.specificity, scope_proximity);
     }
 }
 
 static void apply_rule_to_element_with_nested(DomElement* element, CssRule* rule,
                                               SelectorMatcher* matcher, Pool* pool,
-                                              CssEngine* engine, int depth) {
+                                              CssEngine* engine, int depth, uint32_t scope_proximity) {
     if (!rule || depth > 128) return;
-    apply_rule_to_element(element, rule, matcher, pool, engine);
+    apply_rule_to_element(element, rule, matcher, pool, engine, scope_proximity);
     if (rule->type == CSS_RULE_STYLE) {
         for (size_t i = 0; i < rule->data.style_rule.nested_rule_count; i++) {
             apply_rule_to_element_with_nested(element,
                 rule->data.style_rule.nested_rules[i], matcher, pool, engine,
-                depth + 1);
+                depth + 1, scope_proximity);
         }
     }
 }
@@ -326,6 +340,8 @@ static bool conditional_rule_is_active(CssRule* rule, CssEngine* engine) {
 
 static size_t active_rule_count(CssRule* rule, CssEngine* engine) {
     if (!rule) return 0;
+    // scoped groups retain target-dependent root matching in the rule program.
+    if (rule->type == CSS_RULE_SCOPE) return !rule->data.conditional_rule.invalid_scope;
     if (rule->type == CSS_RULE_NESTED_DECLARATIONS) return 1;
     if (rule->type == CSS_RULE_STYLE) {
         size_t count = 1;
@@ -355,6 +371,11 @@ static size_t active_rule_count(CssRule* rule, CssEngine* engine) {
 static void active_rule_collect(CssRule* rule, CssEngine* engine,
                                 CssRule** rules, size_t capacity, size_t* count) {
     if (!rule || !rules || !count) return;
+    if (rule->type == CSS_RULE_SCOPE) {
+        if (!rule->data.conditional_rule.invalid_scope && *count < capacity)
+            rules[(*count)++] = rule;
+        return;
+    }
     if (rule->type == CSS_RULE_STYLE ||
         rule->type == CSS_RULE_NESTED_DECLARATIONS) {
         if (*count < capacity) rules[(*count)++] = rule;

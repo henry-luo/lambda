@@ -1,0 +1,72 @@
+<!doctype html>
+<style id="registrations">
+@property --size { syntax: "<length>"; inherits: false; initial-value: 20px; }
+@property --ink { syntax: "<color>"; inherits: true; initial-value: green; }
+@property --basis { syntax: "<length>"; inherits: true; initial-value: 10px; }
+@property --invalid { syntax: "<length>"; inherits: false; initial-value: 1em; }
+@property --tokens { syntax: "*"; inherits: false; }
+@property --conditional {syntax:"<length>";inherits:false;initial-value:12px}
+@media (min-width:500px) {@property --conditional {syntax:"<length>";inherits:false;initial-value:90px}}
+@scope (.absent) {@property --scoped {syntax:"<length>";inherits:false;initial-value:14px}}
+@property --angle {syntax:"<angle>";inherits:false;initial-value:90deg}
+@property --time {syntax:"<time>";inherits:false;initial-value:1s}
+@property --density {syntax:"<resolution>";inherits:false;initial-value:1dppx}
+@property --cycle {syntax:"<length>";inherits:false;initial-value:5px}
+</style>
+<style>
+html,body{margin:0}button{height:20px}
+#parent{font-size:10px;--size:60px;--ink:blue;--basis:2em;--invalid:40px;--tokens:purple}
+.child{height:20px;width:var(--size);color:var(--ink);background:green}
+#invalid{--size:30px;--size:red}
+#inherit{--size:inherit}#unset{--size:unset}#initial{--ink:initial}
+#basis{font-size:20px;width:var(--basis)}
+#bad-registration{width:var(--invalid)}
+#tokens{color:var(--tokens,red)}
+#conditional{width:var(--conditional)}#scoped{width:var(--scoped)}
+#cycle{--cycle:2em;font-size:var(--cycle);width:var(--cycle)}
+#self{--self:var(--self,red);background:var(--self,blue)}
+#default{--angle:.5turn;--time:150ms;--density:192dpi}
+</style>
+<button id="change">change inherited values</button>
+<button id="inspect">inspect rules</button><button id="insert">insert registration</button>
+<button id="delete">delete registration</button>
+<div id="parent">
+  <div id="default" class="child"></div><div id="invalid" class="child"></div>
+  <div id="inherit" class="child"></div><div id="unset" class="child"></div>
+  <div id="initial" class="child"></div><div id="basis" class="child"></div>
+  <div id="bad-registration" class="child"></div><div id="tokens" class="child"></div>
+  <div id="conditional" class="child"></div><div id="scoped" class="child"></div>
+  <div id="cycle" class="child"></div><div id="self" class="child"></div>
+</div>
+<script>
+document.getElementById('change').addEventListener('click',function(){
+    var parent=document.getElementById('parent');
+    parent.style.setProperty('--size','80px');
+    parent.style.setProperty('--ink','purple');
+});
+document.getElementById('inspect').addEventListener('click',function(){
+    var rule=document.styleSheets[0].cssRules[0];
+    var button=document.getElementById('inspect');
+    button.setAttribute('data-name',rule.name);
+    button.setAttribute('data-syntax',rule.syntax);
+    button.setAttribute('data-inherits',String(rule.inherits));
+    button.setAttribute('data-initial',rule.initialValue);
+    button.setAttribute('data-text',rule.cssText);
+    button.setAttribute('data-universal-initial',String(document.styleSheets[0].cssRules[3].initialValue));
+    button.setAttribute('data-size',getComputedStyle(document.getElementById('default')).getPropertyValue('--size'));
+    button.setAttribute('data-basis',getComputedStyle(document.getElementById('basis')).getPropertyValue('--basis'));
+    var computed=getComputedStyle(document.getElementById('default'));
+    button.setAttribute('data-angle',computed.getPropertyValue('--angle'));
+    button.setAttribute('data-time',computed.getPropertyValue('--time'));
+    button.setAttribute('data-density',computed.getPropertyValue('--density'));
+});
+document.getElementById('insert').addEventListener('click',function(){
+    var sheet=document.styleSheets[0];
+    sheet.insertRule('@property --size {syntax:"<length>";inherits:false;initial-value:35px}',sheet.cssRules.length);
+    document.getElementById('insert').setAttribute('data-size',getComputedStyle(document.getElementById('default')).getPropertyValue('--size'));
+});
+document.getElementById('delete').addEventListener('click',function(){
+    var sheet=document.styleSheets[0];sheet.deleteRule(sheet.cssRules.length-1);
+    document.getElementById('delete').setAttribute('data-size',getComputedStyle(document.getElementById('default')).getPropertyValue('--size'));
+});
+</script>

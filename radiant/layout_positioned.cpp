@@ -545,11 +545,10 @@ static ViewBlock* containment_positioning_block(ViewElement* ancestor) {
 }
 
 static ViewBlock* transform_positioning_block(ViewElement* ancestor) {
-    if (!ancestor || !ancestor->is_block() || !radiant::has_transform(ancestor)) {
+    if (!ancestor || !ancestor->is_block() || !radiant::transform_establishes_containing_block(ancestor)) {
         return nullptr;
     }
-    // css transforms: any non-none transform establishes a containing block,
-    // even when its matrix happens to be the identity.
+    // CSS transform scene properties establish this block even without a transform list.
     return lam::view_require_block(ancestor);
 }
 

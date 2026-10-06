@@ -36,6 +36,7 @@ enum PropGroupKind : uint8_t {
     PROP_GROUP_FLEX_ITEM,
     PROP_GROUP_GRID_ITEM,
     PROP_GROUP_OUTLINE,
+    PROP_GROUP_TRANSFORM,
 };
 
 enum CssPropValueKind : uint8_t {
@@ -84,6 +85,8 @@ const CssPropAccessor* css_prop_accessor(CssPropertyCode id);
 const CssPropAccessor* css_prop_accessors(size_t* count);
 bool css_prop_serialize_computed(DomElement* element, CssPropertyCode id,
                                  int pseudo_type, char* out, size_t out_size);
+String* css_prop_serialize_registered_custom_property(Pool* pool, DomElement* element,
+    const char* name, size_t name_length);
 
 // Refresh one dynamic element's stylesheet declarations without constructing a
 // view tree; CSSOM and transition capture need the cascade, not committed layout.
@@ -175,14 +178,14 @@ typedef struct TimingFunction {
             float samples[11];
         } bezier;
         struct {
-            int count;
+            double count;
             StepPosition position;
         } steps;
     };
 } TimingFunction;
 
 void timing_cubic_bezier_init(TimingFunction* tf, float x1, float y1, float x2, float y2);
-float timing_function_eval(const TimingFunction* tf, float t);
+float timing_function_eval(const TimingFunction* tf, float t, bool before = false);
 
 extern TimingFunction TIMING_EASE;
 extern TimingFunction TIMING_EASE_IN;
@@ -196,7 +199,7 @@ typedef void (*AnimTickFn)(AnimationInstance* anim, float t);
 typedef void (*AnimFinishFn)(AnimationInstance* anim);
 typedef void (*AnimCancelFn)(AnimationInstance* anim);
 
-// tier-2: view-pool, rebuilt each relayout
+// document-owned scheduler state survives retained relayout (D4.5.1v4).
 struct AnimationInstance {
     AnimationInstance* next;
     AnimationInstance* prev;
@@ -206,10 +209,11 @@ struct AnimationInstance {
     void* state;
 
     double start_time;
+    double sample_time;
     double duration;
     double delay;
-    int iteration_count;
-    int current_iteration;
+    double iteration_count;
+    double current_iteration;
 
     AnimationDirection direction;
     AnimationFillMode fill_mode;
@@ -221,6 +225,7 @@ struct AnimationInstance {
     AnimFinishFn on_finish;
     AnimCancelFn on_cancel;
     bool suppress_cancel_event;
+    bool retain_after_finish;   // CSS name reconciliation keeps an inactive timeline until removal
 
     float bounds[4];
     double pause_time;
@@ -245,6 +250,8 @@ bool animation_scheduler_tick(AnimationScheduler* scheduler, double now,
                               DirtyTracker* dirty_tracker);
 void animation_scheduler_anchor_host_time(AnimationScheduler* scheduler, double now);
 void animation_scheduler_add(AnimationScheduler* scheduler, AnimationInstance* anim);
+void animation_scheduler_move_before(AnimationScheduler* scheduler,
+    AnimationInstance* anim, AnimationInstance* before);
 void animation_scheduler_remove(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_cancel(AnimationScheduler* scheduler, AnimationInstance* anim);
 void animation_scheduler_remove_by_target(AnimationScheduler* scheduler, void* target);
@@ -253,6 +260,7 @@ void animation_scheduler_prune_disconnected_css_views(AnimationScheduler* schedu
                                                        DomDocument* document);
 AnimationInstance* animation_instance_create(AnimationScheduler* scheduler);
 void animation_instance_pause(AnimationInstance* anim, double now);
+void animation_instance_sample(AnimationInstance* anim, double now);
 void animation_instance_resume(AnimationInstance* anim, double now);
 
 // 3x3 affine transform matrix shared by view transforms and render backends.
@@ -315,6 +323,9 @@ static inline void rdt_matrix4_transform_point(const RdtMatrix4* matrix,
 
 // Per-view CSS transform matrix, for painted bounds and for hit-testing.
 bool view_get_transform_matrix(View* view, RdtMatrix* out_matrix);
+enum BackfaceCheck { BACKFACE_SELF, BACKFACE_SUBTREE, BACKFACE_HIT_TEST };
+bool view_backface_is_hidden(View* view, BackfaceCheck check = BACKFACE_SELF);
+bool rdt_matrix4_backface_visible(const RdtMatrix4* matrix);
 bool view_get_foreign_object_matrix(View* view, RdtMatrix* out_matrix, bool include_self_transform = true);
 
 static inline RdtMatrix rdt_matrix_identity(void) {
@@ -2116,6 +2127,7 @@ typedef struct BlockProp {
     bool contain_size;
     bool contain_inline_size;
     bool contain_positioning;
+    bool contain_paint;
     bool content_visibility_hidden;
     float given_min_width_percent;   // Raw percentage if min-width: X% (NaN if not percentage)
     float given_max_width_percent;   // Raw percentage if max-width: X% (NaN if not percentage)
@@ -3617,7 +3629,7 @@ typedef struct CssAnimProp {
     lam::Up<const char> name;           // animation-name (keyframes reference)
     float duration;             // animation-duration in seconds
     float delay;                // animation-delay in seconds
-    int iteration_count;        // -1 = infinite
+    double iteration_count;     // -1 = infinite; fractional counts end within a cycle
     AnimationDirection direction;
     AnimationFillMode fill_mode;
     AnimationPlayState play_state;
@@ -3630,25 +3642,18 @@ typedef struct CssAnimProp {
 
 // tier-2: view-pool, rebuilt each relayout
 typedef struct CssTransitionProp {
-    lam::Up<CssPropertyCode> properties;  // transitioned property IDs (NULL = all)
-    int property_count;         // -1 = "all"
     float duration;             // transition-duration in seconds
     float delay;                // transition-delay in seconds
     TimingFunction timing;      // transition-timing-function
 } CssTransitionProp;
 
-bool css_transition_resolve_config(StyleTree* style_tree, Pool* pool,
-                                   CssTransitionProp* transition,
-                                   CssPropertyCode* property_buffer,
-                                   int property_capacity);
-bool css_transition_resolve_values(const CssValue* shorthand_value,
-                                   const CssValue* duration_value,
-                                   const CssValue* delay_value,
-                                   const CssValue* property_value,
-                                   const CssValue* timing_value,
-                                   CssTransitionProp* transition,
-                                   CssPropertyCode* property_buffer,
-                                   int property_capacity);
+typedef struct CssTransitionList {
+    const CssValue* values[4];   // scratch computed lists, cycled against transition-property
+} CssTransitionList;
+
+void css_transition_resolve_config(DomElement* element, Pool* pool, CssTransitionList* list);
+bool css_transition_select_config(const CssTransitionList* list, CssPropertyCode property,
+    CssTransitionProp* transition);
 
 // Shared parser entry points used by CSS animations and Web Animations so both
 // paths apply the same property-value grammar and timing-function semantics.
@@ -3670,7 +3675,8 @@ typedef struct CssAnimState {
     UiContext* ui_context;
     bool event_started;
     bool suppress_events;
-    int event_iteration;
+    double event_iteration;
+    bool css_matched;            // retained instances are matched once during list reconciliation
     CssAnimatedProp underlying[32];
     int underlying_count;
 } CssAnimState;
@@ -3783,6 +3789,8 @@ void css_animation_finish(AnimationInstance* anim);
 // Process animation properties during style resolution and start animations
 // if animation-name references valid @keyframes. Called after resolve_css_styles.
 void css_animation_resolve(DomElement* element, LayoutContext* lycon);
+const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
+    CssPropertyCode property);
 
 
 // ============================================================================
@@ -3852,6 +3860,11 @@ char* resolve_css_resource_url(LayoutContext* lycon, const CssDeclaration* decl,
 typedef const CssValue* (*CssVariableLookupFn)(void* context, const char* name);
 const CssValue* css_resolve_var_value(Pool* pool, const CssValue* value,
                                       CssVariableLookupFn lookup, void* context);
+const CssValue* css_resolve_element_var_value(Pool* pool, DomElement* element,
+    const CssValue* value, CssPropertyCode property = CSS_PROPERTY_UNKNOWN);
+const CssValue* css_compute_element_custom_property(Pool* pool, DomElement* element,
+    const char* name, size_t name_length = (size_t)-1);
+bool css_compute_cascaded_font_size(DomElement* element, float* font_size);
 const CssValue* resolve_var_function(LayoutContext* lycon, const CssValue* value);
 const char* css_font_family_name_from_value(const CssValue* value);
 const char* css_select_font_family(LayoutContext* lycon, const CssValue* value);
@@ -4001,6 +4014,8 @@ inline float transform_perspective_origin_offset(const TransformProp* transform,
     return is_percent ? extent * origin / 100.0f : origin;
 }
 extern bool has_transform(DomElement* elem);
+extern bool transform_establishes_containing_block(DomElement* elem);
+extern bool transform_preserves_3d(DomElement* elem);
 extern void transform_point(float& x, float& y, const RdtMatrix& m);
 
 } // namespace radiant
