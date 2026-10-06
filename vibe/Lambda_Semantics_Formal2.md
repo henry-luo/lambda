@@ -2533,3 +2533,43 @@ genuinely dynamic, such as `fn apply_twice(f, x) => f(f(x))` with an untyped `f`
 
 Recorded in spec §11 (S11.1.5), §12 (S12.1.1v2, S12.1.4v3), Appendix B (SO28 closed, SO44
 opened), v26.0.0.
+
+### C21. One name space for keys: namespace plus normalized spelling (2026-10-06) — RESOLVED
+
+**Spec linkage:** S8.2.2v4 (supersedes S8.2.2v3), S2.4.3v3 (names are statically
+namespace-qualified), S2.4.4 (the resolver maps namespaces to roots), S5.4.3 (element
+equality is tag + namespace), S2.2.2v2 (`symbol.empty`), S16.8.7 (`'a` is a symbol).
+Design: D3.4.4v3, NI17.
+
+**The problem.** Lambda spells a key three ways — a bare name (`a`, `ns.a`), a symbol
+literal (`'a'`) and a string (`"a"`, as a subscript or a key carried by data; a map
+literal admits only a name or a symbol as a key). S8.2.2v3 said string and symbol subscripts with the
+same contents normalize to one name, but said nothing about bare names or namespaces, and
+the design layer (D3.4.4v2) had meanwhile taken the interned `NameId` as the identity of
+a string-kind name: "a non-zero `name_id` is compared exactly". NameIds are per name pool
+(`pool_number << 16 | ordinal`), so `name` had one id in the compiler's pool, another in
+each parse `Input`'s pool, a third in the runtime pool, and none for a CSV header or a
+computed key. Reads were unaffected — every map and element access confirms a string
+key by its bytes — but the transition trees keyed their edges by id, so maps with
+identical fields built through different pools, or with pooled versus unpooled keys,
+never shared a shape (the case-2 finding of the 2026-10-06 shape survey).
+
+**The ruling (USER).** Keys form one name space. A key's identity is its resolved
+namespace plus its normalized characters — the literal's characters once quotes are
+removed and escapes decoded. A string key and an unqualified name or symbol live in the
+global namespace and are one key; `ns.a` is a key in namespace `ns`; a namespace is itself
+a name, qualified recursively, and two prefixes name one namespace iff the resolver takes
+them to the same root. An implementation identity may prove two keys equal; it never
+proves them different.
+
+**Consequences.**
+- `{a: 1}` and `{'a': 1}` declare one key; `m.a`, `m['a']` and `m["a"]` read it.
+  This was already the runtime's behaviour and is now the rule.
+- The design layer's `name_id` becomes a fast path: equal ids prove one spelling, differing
+  or absent ids fall back to kind, namespace, length and bytes (D3.4.4v3). JavaScript
+  `Symbol()` and private names are outside this space and keep identity by record (NI15).
+- Transition-tree edges must be keyed by spelling (Impl_Map_Transition_Coverage P0).
+- A namespaced symbol written to or read from a *map* is still matched by its local
+  characters alone (`fn_map_set`, `map_get`), so `ns.a` and `a` collide there — a
+  conformance gap, LR03-40; element attribute access and equality already compare the
+  namespace.

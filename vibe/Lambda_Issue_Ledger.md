@@ -604,6 +604,9 @@ S8.2.4v3 gives `doc[<title>]` as the lone-match idiom of the type-key subscript.
 
 ## 3. Value & type model (LR_03)
 
+<a id="lr03-40"></a>**LR03-40 · Map key writes and reads ignore a symbol's namespace (S8.2.2v4) · OPEN (found 2026-10-06, while ruling key identity)**
+S8.2.2v4 makes a key's identity its resolved namespace plus its normalized characters, so `ns.a` and the global `a` are different keys. Element attribute reads honour it (the attribute getter in `lambda-eval.cpp` compares `field->ns` with `symbol_lambda_namespace(key)` through `target_equal`) and so does map and element equality (`map_find_matching_field`). The map face does not: `fn_map_set` takes a `Symbol` key's `chars`/`len` only, `map_get` goes through `key.get_chars()` into `_map_get` by bytes, and `shape_field_name_equals` and the hash lookups have no namespace argument, so a namespaced symbol written to a map lands on, or reads, the unqualified field of the same spelling. Observed in the code paths. Namespaced keys arise today only from parsed documents (XML namespace targets on `ShapeEntry::ns` and `TypeElmt::ns`): in source, `<a xlink.href: "x", href: "y">` is desugared by `build_ns_attr_map_from_parts` into `<a xlink: {href: "x"}, href: "y">`, a nested map under the key `xlink`, so an element literal never produces a qualified attribute key, and `m['a']`, `m["a"]` and `{'a': 1}` already agree on the global `a`. Whether that desugaring is the intended representation of a qualified key under S8.2.2v4, or a second gap, needs a ruling. Related: the transition trees' edges split one spelling by name pool, D3.4.4v3's gap, planned in [Impl_Map_Transition_Coverage](impl/Lambda_Impl_Map_Transition_Coverage.md) P0.
+
 <a id="lr03-2"></a>**LR03-2 · Hard-coded capacity caps · OPEN**
 `TYPEMAP_HASH_CAPACITY` 32 and `TYPEMAP_HASH_DYNAMIC_MAX_CAPACITY` 32768
 (`lambda/lambda-data.hpp:346`–`347`) bound the per-map hash table; on saturation
