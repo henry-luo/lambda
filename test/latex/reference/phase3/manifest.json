@@ -1,0 +1,25 @@
+{
+  "distribution": "TeX Live 2025/basic",
+  "engine": "pdfTeX 3.141592653-2.6-1.40.27",
+  "captured": "2026-10-06",
+  "references": [
+    {
+      "source": "test/latex/samples/booktabs.tex",
+      "source_sha256": "d69444de556c6b9da15a325d441b78b237fb586f4be5f0f39d9c52feb37a9781",
+      "pdf": "booktabs.pdf",
+      "pdf_sha256": "52040f03ce4084f05e3ba4a5c40f2f6c66f00714c7a1143168909063c5893d6a"
+    },
+    {
+      "source": "test/latex/samples/spacetime_diagrams.tex",
+      "source_sha256": "2f687df773d4bf59d5f6d5b9f40ff0445fc34baeeec0fec3b1cafc284e5676e8",
+      "pdf": "spacetime_diagrams.pdf",
+      "pdf_sha256": "5e182503df2c9cec009261e900f5503a5e59e9759bb0763f3d1eaa8e48dc12f1"
+    },
+    {
+      "source": "test/lambda/latex/fixtures/caption_profile.tex",
+      "source_sha256": "b3f2bb10b1cf1610b22557574a35251cbad8ffbf7190d298a5b0e663a5b5da99",
+      "pdf": "caption_profile.pdf",
+      "pdf_sha256": "184133ac93cc4250032dd72d7a263afe373f39479095b77760466c0ddc2074e3"
+    }
+  ]
+}

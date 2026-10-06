@@ -1583,6 +1583,7 @@ typedef struct PaintGlyphRun {
 
 // caller owns the outline; all targets share the selected glyph IDs and offsets.
 RdtPath* render_path_create_glyph_run(const PaintGlyphRun* run);
+RdtPath* render_path_create_text_run(const PaintGlyphRun* run, FontContext* font_context);
 
 void paint_svg_append_cjk_dx(StrBuf* out, const char* text, int text_len,
                              float cjk_spacing);

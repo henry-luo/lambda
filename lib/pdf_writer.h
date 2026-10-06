@@ -158,6 +158,9 @@ HPDF_STATUS HPDF_Page_AddLink(HPDF_Page page, float left, float bottom,
                              float right, float top, const char* target);
 HPDF_STATUS HPDF_Doc_AddNamedDestination(HPDF_Doc doc, const char* name,
                                         HPDF_Page page, float x, float y);
+/* Source-ordered outline levels form a hierarchy; targets name registered destinations. */
+HPDF_STATUS HPDF_Doc_AddOutline(HPDF_Doc doc, const char* title,
+                                const char* destination, unsigned int level);
 
 /*---------------------------------------------------------------------------*/
 /*  Font Functions                                                           */

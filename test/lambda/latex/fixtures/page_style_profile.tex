@@ -1,0 +1,30 @@
+\documentclass{article}
+\usepackage[paperwidth=105mm,paperheight=148mm,margin=12mm]{geometry}
+\usepackage{fancyhdr,lastpage,hyperref}
+\newcommand\course{Functional documents}
+\pagestyle{fancy}
+\lhead{\textbf{\course}}
+\rhead{\thepage}
+\cfoot{Page \thepage{} of \pageref{LastPage}}
+\begin{document}
+\section{First}
+\label{first}
+First paragraph with a reference to page~\pageref{first}.
+
+A second paragraph demonstrates flowing text and a running header.
+
+More text is laid out in the shared page model. The page size is deliberately small.
+
+A fourth paragraph repeats the ordinary document content so the page composer can break it.
+
+Another paragraph follows the previous paragraph and keeps the same header and footer.
+
+The source stays independent of the output page count, which is calculated during layout.
+
+\section{Second}
+A second section begins with more content and its own destination.
+
+This paragraph continues the document after the heading.
+
+The final paragraph should remain visible with the final page number in the footer.
+\end{document}

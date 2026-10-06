@@ -1,0 +1,12 @@
+"codes:"
+[]
+"caption:"
+true
+"line numbers:"
+true
+"source escaped:"
+true
+"label linked:"
+true
+"inline escaped:"
+true

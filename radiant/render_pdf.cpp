@@ -145,6 +145,28 @@ static void pdf_apply_document_info(PdfRenderContext* ctx, DomDocument* doc) {
     if (keywords && *keywords) HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_KEYWORDS, keywords);
 }
 
+static bool pdf_collect_outlines(PdfRenderContext* ctx, DomElement* element) {
+    if (!element) return true;
+    const char* title = element->get_attribute("data-pdf-outline-title");
+    if (title && *title) {
+        const char* level_source = element->get_attribute("data-pdf-outline-level");
+        char* ending = nullptr;
+        long level = level_source ? strtol(level_source, &ending, 10) : 0;
+        if (!element->id || level < 0 || level > 32 ||
+            (level_source && (!ending || *ending || ending == level_source)) ||
+            HPDF_Doc_AddOutline(ctx->pdf_doc, title, element->id,
+                static_cast<unsigned int>(level)) != HPDF_OK) {
+            log_error("[PDF_OUTLINE] invalid outline attributes");
+            return false;
+        }
+    }
+    for (DomNode* child = element->first_child; child; child = child->next_sibling) {
+        DomElement* next = child->as_element();
+        if (next && !pdf_collect_outlines(ctx, next)) return false;
+    }
+    return true;
+}
+
 static void pdf_paint_lowering_state_init(PdfPaintLoweringState* state) {
     if (!state) return;
     memset(state, 0, sizeof(PdfPaintLoweringState));
@@ -648,116 +670,26 @@ static bool pdf_push_clip_path(PdfRenderContext* ctx, RdtPath* path,
     return true;
 }
 
-static void pdf_text_matrix_from_transform(PdfRenderContext* ctx,
-                                           const RdtMatrix* transform,
-                                           float x, float baseline_y,
-                                           float* a, float* b, float* c,
-                                           float* d, float* e, float* f) {
-    float tx = x;
-    float ty = baseline_y;
-    pdf_transform_point(transform, x, baseline_y, &tx, &ty);
-    *a = transform->e11;
-    *b = -transform->e21;
-    *c = -transform->e12;
-    *d = transform->e22;
-    *e = tx;
-    *f = ctx->page_height - ty;
-}
-
-static void pdf_show_text_word(PdfRenderContext* ctx, const char* word,
-                               float x, float baseline_y,
-                               const RdtMatrix* transform) {
-    HPDF_Page_BeginText(ctx->current_page);
-    if (transform) {
-        float a = 1.0f, b = 0.0f, c = 0.0f, d = 1.0f, e = x;
-        float f = ctx->page_height - baseline_y;
-        pdf_text_matrix_from_transform(ctx, transform, x, baseline_y,
-                                       &a, &b, &c, &d, &e, &f);
-        HPDF_Page_SetTextMatrix(ctx->current_page, a, b, c, d, e, f);
-        HPDF_Page_ShowText(ctx->current_page, word);
-    } else {
-        HPDF_Page_TextOut(ctx->current_page, x, ctx->page_height - baseline_y, word);
-    }
-    HPDF_Page_EndText(ctx->current_page);
-}
-
 static void pdf_render_glyph_run(PdfRenderContext* ctx, const PaintGlyphRun* run,
                                  const RdtMatrix* stack_transform) {
     if (!ctx || !run) return;
-    if (run->count > 0 && run->glyph_ids) {
-        RdtPath* path = render_path_create_glyph_run(run);
-        RdtMatrix composed;
-        const RdtMatrix* transform = pdf_compose_transform(stack_transform,
-            pdf_optional_transform(run->has_transform, &run->transform), &composed);
-        float left, top, right, bottom;
-        if (path && !rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
-            // Successfully resolved empty outlines (spaces) contribute no PDF ink.
-            rdt_path_free(path);
-            return;
-        }
-        pdf_set_color(ctx, run->color);
-        if (!path || !pdf_render_path(ctx, path, transform) || HPDF_Page_Fill(ctx->current_page) != HPDF_OK) {
-            ctx->paint_state.unsupported_count++;
-            log_error("[PDF_GLYPH_RUN] selected glyph outline could not be painted");
-        }
-        if (path) rdt_path_free(path);
+    RdtPath* path = run->count > 0 && run->glyph_ids
+        ? render_path_create_glyph_run(run)
+        : render_path_create_text_run(run, ctx->ui_context ? ctx->ui_context->font_ctx.get() : nullptr);
+    RdtMatrix composed;
+    const RdtMatrix* transform = pdf_compose_transform(stack_transform,
+        pdf_optional_transform(run->has_transform, &run->transform), &composed);
+    float left, top, right, bottom;
+    if (path && !rdt_path_get_bounds(path, &left, &top, &right, &bottom)) {
+        rdt_path_free(path);
         return;
     }
-    if (!run->text) return;
-    if (!ctx->current_font) return;
-
-    float font_size = run->font_size > 0.0f ? run->font_size : 16.0f;
-    HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, font_size);
     pdf_set_color(ctx, run->color);
-
-    RdtMatrix composed_transform;
-    const RdtMatrix* effective_transform =
-        pdf_compose_transform(stack_transform,
-                              pdf_optional_transform(run->has_transform, &run->transform),
-                              &composed_transform);
-
-    FontBox* font = (FontBox*)run->font;
-    FontHandle* font_handle = font ? font_box_handle(font) : nullptr;
-    float space_width = font && font->style ? font->style->space_width : 4.0f;
-    float adjusted_space_width = space_width + run->word_spacing;
-    if (adjusted_space_width < 0.0f) adjusted_space_width = space_width;
-
-    int text_len = run->text_len;
-    if (text_len < 0) {
-        text_len = (int)strlen(run->text); // INT_CAST_OK: text run byte length is bounded by source TextRect.
+    if (!path || !pdf_render_path(ctx, path, transform) || HPDF_Page_Fill(ctx->current_page) != HPDF_OK) {
+        ctx->paint_state.unsupported_count++;
+        log_error("[PDF_GLYPH_RUN] selected glyph outline could not be painted");
     }
-    if (text_len <= 0) return;
-
-    float x = run->x;
-    int word_start = 0;
-    for (int i = 0; i <= text_len; i++) {
-        bool at_end = i == text_len;
-        bool at_space = !at_end && run->text[i] == ' ';
-        if (!at_end && !at_space) continue;
-
-        if (i > word_start) {
-            char word[256];
-            int word_len = i - word_start;
-            if (word_len < (int)sizeof(word)) { // INT_CAST_OK: fixed local buffer size check.
-                memcpy(word, run->text + word_start, (size_t)word_len);
-                word[word_len] = '\0';
-
-                pdf_show_text_word(ctx, word, x, run->baseline_y,
-                                   effective_transform);
-
-                if (font_handle) {
-                    for (int j = 0; j < word_len; j++) {
-                        x += font_measure_char(font_handle, (uint32_t)word[j]);
-                    }
-                }
-            }
-        }
-
-        if (!at_end) {
-            x += adjusted_space_width;
-        }
-        word_start = i + 1;
-    }
+    if (path) rdt_path_free(path);
 }
 
 static Color pdf_gradient_composite_opaque(Color src) {
@@ -1431,14 +1363,21 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         content_len--;
     }
 
-    if (font_box_handle(&ctx->font)) {
-        for (size_t i = 0; i < content_len; i++) {  // Only count up to content_len
-            if (text_content.get()[i] == ' ') {
+    if (font_box_handle(&ctx->font) && ctx->font.style) {
+        FontStyleDesc descriptor = font_style_desc_from_prop(ctx->font.style);
+        const char* cursor = text_content.get();
+        const char* end = cursor + content_len;
+        while (cursor < end) {
+            uint32_t codepoint = 0;
+            if (!layout_utf8_next_codepoint(&cursor, end, &codepoint)) continue;
+            if (codepoint == ' ') {
                 natural_width += space_width;
                 space_count++;
-            } else {
-                natural_width += font_measure_char(font_box_handle(&ctx->font), (uint32_t)text_content.get()[i]);
+            } else if (codepoint != 0xFE0F) {
+                LoadedGlyph* glyph = font_load_glyph(font_box_handle(&ctx->font), &descriptor, codepoint, false);
+                if (glyph) natural_width += glyph->advance_x;
             }
+            natural_width += ctx->font.style->letter_spacing;
         }
     }
 
@@ -1450,7 +1389,8 @@ static void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
         adjusted_space_width = space_width + (extra_space / space_count);
     }
 
-    float baseline_offset = font_size * 0.8f;
+    float baseline_offset = ctx->font.style && ctx->font.style->ascender > 0.0f
+        ? ctx->font.style->ascender : font_size * 0.8f;
     float baseline_y = y + baseline_offset;
     PaintGlyphRun run = {};
     run.font = lam::up(&ctx->font);
@@ -1896,6 +1836,11 @@ static bool pdf_context_begin(PdfRenderContext* ctx, UiContext* ui) {
     HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_CREATOR, "Lambda Script Renderer");
     HPDF_SetInfoAttr(ctx->pdf_doc, HPDF_INFO_PRODUCER, "Lambda PDF Renderer");
     if (ui && ui->document) pdf_apply_document_info(ctx, ui->document);
+    if (ui && ui->document && !pdf_collect_outlines(ctx, ui->document->root)) {
+        HPDF_Free(ctx->pdf_doc);
+        ctx->pdf_doc = nullptr;
+        return false;
+    }
     ctx->ui_context = lam::up(ui);
     ctx->color = {.r = 0, .g = 0, .b = 0, .a = 255};
     if (ui) ctx->font.style = lam::up(&ui->default_font);

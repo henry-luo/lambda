@@ -25,6 +25,15 @@ pub let STYLESHEET = ".latex-document {
 .latex-document h4 + p {
   text-indent: 0;
 }
+.latex-running-header, .latex-running-footer {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  align-items: center; font-size: 0.85em; line-height: 1.2;
+}
+.latex-running-header { margin-bottom: 1.5em; }
+.latex-running-footer { margin-top: 1.5em; }
+.latex-running-left { text-align: left; }
+.latex-running-center { text-align: center; }
+.latex-running-right { text-align: right; }
 .latex-title { text-align: center; margin-bottom: 2em; }
 .latex-title .title { font-size: 1.7em; font-weight: bold; margin-bottom: 0.3em; }
 .latex-title .author { font-size: 1.1em; margin: 0.3em 0; }
@@ -62,6 +71,15 @@ pre.latex-verbatim {
   font-size: 0.9em;
   line-height: 1.4;
 }
+.latex-listing { margin: 0.8em 0; }
+.latex-listing-caption { margin-bottom: 0.35em; font-weight: 600; }
+.latex-listing-plain { margin: 0; white-space: pre; overflow-x: auto; line-height: 1.4; }
+.latex-listing-numbered { margin: 0; white-space: pre; overflow-x: auto; line-height: 1.4; }
+.latex-listing-line { display: flex; gap: 1em; }
+.latex-listing-number { min-width: 2em; text-align: right; color: #666; user-select: none; }
+.latex-listing-right .latex-listing-line { flex-direction: row-reverse; justify-content: flex-end; }
+.latex-tcolorbox { margin: 0.6em 0; border-radius: 2px; }
+.latex-boldmath { font-weight: 700; }
 code.latex-code {
   font-family: 'Computer Modern Typewriter', 'Latin Modern Mono', monospace;
   background: #f5f5f5;
@@ -92,6 +110,19 @@ table.latex-tabular td,
 table.latex-tabular th {
   padding: 0.3em 0.8em;
 }
+.latex-makecell { display: inline-block; text-align: center; white-space: nowrap; }
+.latex-diagonal-cell {
+  display: inline-grid;
+  grid-template-areas: 'cell';
+  min-height: 3em;
+  padding: 0.15em 0.3em;
+  background: linear-gradient(to bottom right, transparent calc(50% - 0.5px), currentColor 50%, transparent calc(50% + 0.5px));
+}
+.latex-diagonal-cell.slash {
+  background: linear-gradient(to top right, transparent calc(50% - 0.5px), currentColor 50%, transparent calc(50% + 0.5px));
+}
+.latex-diagonal-upper { grid-area: cell; justify-self: end; align-self: start; }
+.latex-diagonal-lower { grid-area: cell; justify-self: start; align-self: end; }
 table.latex-tabular .hline-top { border-top: 1px solid black; }
 table.latex-tabular .hline-bottom { border-bottom: 1px solid black; }
 table.latex-tabular tr.latex-hline + tr > td { border-top: 1px solid black; }
@@ -202,6 +233,9 @@ table.latex-tabular td[rowspan] {
 .latex-definition, .latex-example, .latex-remark {
   font-style: normal;
 }
+.latex-theorem-style-definition { font-style: normal; }
+.latex-theorem-style-remark { font-style: normal; }
+.latex-theorem-style-remark .latex-theorem-head { font-weight: normal; font-style: italic; }
 .latex-proof {
   margin: 1em 0;
 }
@@ -209,6 +243,30 @@ table.latex-tabular td[rowspan] {
   font-style: italic;
   margin-right: 0.5em;
 }
+.latex-prooftree { display: table; margin: 1.2em auto; text-align: center; }
+.latex-proof-branch { display: inline-flex; flex-direction: column; align-items: center; }
+.latex-proof-premises { display: flex; align-items: flex-end; gap: 1.5em; }
+.latex-proof-conclusion { display: inline-block; position: relative; min-width: 100%;
+  box-sizing: border-box; border-top: 1px solid currentColor; padding: 0.3em 0.5em 0; }
+.latex-proof-axiom { border-top: 0; padding-top: 0; }
+.latex-proof-label { position: absolute; left: calc(100% + 0.3em); top: -0.75em;
+  white-space: nowrap; }
+.latex-semantic-display { overflow-x: auto; text-align: center; }
+.latex-semantic-rule { display: inline-flex; flex-direction: column; align-items: center;
+  position: relative; vertical-align: middle; margin: 0 0.2em; white-space: nowrap; }
+.latex-semantic-premises { display: flex; align-items: flex-end; gap: 1em;
+  padding: 0 0.35em 0.25em; }
+.latex-semantic-premise { display: inline-block; }
+.latex-semantic-conclusion { box-sizing: border-box; min-width: 100%;
+  border-top: 1px solid currentColor; padding: 0.25em 0.35em 0; }
+.latex-semantic-rule-narrow .latex-semantic-conclusion { min-width: 0; }
+.latex-semantic-rule-name { position: absolute; left: calc(100% + 0.25em);
+  top: 50%; font-size: 0.8em; }
+.latex-semantic-predicate { display: inline-flex; align-items: baseline; gap: 0.15em; }
+.latex-semantic-expression { font-family: 'Computer Modern Typewriter', monospace; }
+.latex-semantic-arrow { display: inline-flex; position: relative; margin: 0 0.2em; }
+.latex-semantic-arrow sup { position: absolute; bottom: 0.9em; left: 0; font-size: 0.7em; }
+.latex-semantic-arrow sub { position: absolute; top: 0.75em; right: -0.4em; font-size: 0.7em; }
 .latex-textcolor, .latex-color { }
 .latex-colorbox { padding: 0.1em 0.2em; }
 .latex-fcolorbox { padding: 0.1em 0.2em; }
@@ -230,6 +288,7 @@ table.latex-tabular td[rowspan] {
 .latex-enumerate .latex-enumerate { list-style-type: lower-alpha; }
 .latex-enumerate .latex-enumerate .latex-enumerate { list-style-type: lower-roman; }
 .latex-enumerate .latex-enumerate .latex-enumerate .latex-enumerate { list-style-type: upper-alpha; }
+.latex-enumerate-alpha-paren > li::marker { content: counter(list-item, lower-alpha) ') '; }
 .latex-item-label { font-weight: normal; margin-right: 0.3em; }
 .latex-logo { font-family: 'Computer Modern Serif', 'Latin Modern Roman', Georgia, serif; }
 .latex-logo sup { font-size: 0.85em; vertical-align: 0.15em; margin-left: -0.36em; margin-right: -0.15em; }

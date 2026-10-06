@@ -72,8 +72,9 @@ fn walk(node, cursor, section, segment) {
             let next = {*:cursor, requests: cursor.requests ++ [parsed.request],
                 diagnostics: cursor.diagnostics ++ parsed.diagnostics}
             walk_children(node, 0, next, section, segment)
-        } else if (tag == "printbibliography") {
-            let opts = util.parse_kv_options(util.optional_raw(node))
+        } else if (tag == "printbibliography" or tag == "bibliography") {
+            let opts = if (tag == "bibliography") {}
+                else util.parse_kv_options(util.optional_raw(node))
             let record = {offset: node.source_offset, node: node, options: opts,
                 section: section, segment: segment, index: len(cursor.prints) + 1}
             walk_children(node, 0, {*:cursor, prints: cursor.prints ++ [record]},
@@ -225,10 +226,16 @@ fn request_issues(requests, entries, settings) {
 }
 
 pub fn prepare(ast, entries, settings) {
-    let found = walk(ast,
+    let walked = walk(ast,
         {requests: [], prints: [], diagnostics: [], next_section: 0,
             segment_counts: []},
         0, 0)
+    let found = {*:walked, requests: [for (request in walked.requests)
+        if (settings.bibtex == true and request.original_tag == "cite")
+            {*:request, tag: if (settings.citestyle == "authoryear" and
+                all([for (item in request.items) item.prenote == "" and
+                    item.postnote == ""])) "textcite" else "parencite"}
+        else request]}
     let sections = all_sections(entries, found.requests, found.next_section, settings)
     let prints = prepare_prints(found.prints, sections, found.requests)
     {requests: found.requests, prints: prints, sections: sections, settings: settings,

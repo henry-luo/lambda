@@ -4650,6 +4650,29 @@ TEST(RenderOutputParity, SvgExportCssFilterUsesRasterFallbackImage) {
         << "SVG raster fallback should embed the captured filtered paint";
 }
 
+TEST(RenderOutputParity, PdfUnicodeTextUsesFontOutlines) {
+    if (!file_exists(LAMBDA_EXE) || access(LAMBDA_EXE, X_OK) != 0)
+        GTEST_SKIP() << "lambda.exe is unavailable";
+    ASSERT_TRUE(ensure_dir("temp/render_output_parity"));
+    const char* html_path = "temp/render_output_parity/pdf_unicode.html";
+    const char* pdf_path = "temp/render_output_parity/pdf_unicode.pdf";
+    const char* html = "<!doctype html><meta charset='utf-8'>"
+        "<style>body{font:24px serif}</style><p>Café αβγ Привет</p>";
+    ASSERT_TRUE(write_file_all(html_path, html, strlen(html)));
+    char qhtml[PATH_MAX + 8], qpdf[PATH_MAX + 8], cmd[PATH_MAX * 3 + 256];
+    shell_quote(html_path, qhtml, sizeof(qhtml));
+    shell_quote(pdf_path, qpdf, sizeof(qpdf));
+    snprintf(cmd, sizeof(cmd), "%s render %s%s -o %s > temp/render_output_parity/pdf_unicode.log 2>&1",
+        LAMBDA_EXE, lambda_no_log_arg(), qhtml, qpdf);
+    int status = system(cmd);
+    ASSERT_TRUE(WIFEXITED(status));
+    ASSERT_EQ(WEXITSTATUS(status), 0);
+    EXPECT_TRUE(file_contains_text(pdf_path, " c\n"));
+    EXPECT_TRUE(file_contains_text(pdf_path, "f\n"));
+    EXPECT_FALSE(file_contains_text(pdf_path, " Tj\n"));
+    EXPECT_FALSE(file_contains_text(pdf_path, "Café"));
+}
+
 TEST(RenderOutputParity, PdfExportCssFilterUsesRasterFallbackImage) {
     if (!file_exists(LAMBDA_EXE)) {
         GTEST_SKIP() << "lambda.exe not found; run make build first";

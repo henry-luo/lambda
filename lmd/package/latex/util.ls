@@ -1,5 +1,26 @@
 // latex/util.ls — Shared utility functions for the LaTeX package
 
+// Replace one TeX control word without changing longer control words that share a prefix.
+pub fn replace_command_token(source, command, value, offset = 0, acc = "") {
+    if (offset >= len(source)) acc
+    else {
+        let remainder = slice(source, offset, len(source))
+        let found = index_of(remainder, command)
+        if (found == null) acc ++ remainder
+        else {
+            let start = offset + found
+            let after = start + len(command)
+            let next_char = if (after >= len(source)) "" else slice(source, after, after + 1)
+            let word = next_char != "" and
+                index_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_",
+                    next_char) != null
+            replace_command_token(source, command, value, after,
+                acc ++ slice(source, offset, start) ++
+                    if (word) command else value)
+        }
+    }
+}
+
 // ============================================================
 // Text extraction
 // ============================================================
@@ -111,12 +132,17 @@ pub fn str_join(arr, sep) {
     let n = len(arr)
     if (n == 0) ""
     else if (n == 1) string(arr[0])
-    else join_rec(arr, sep, 1, n, string(arr[0]))
+    else join_rec(arr, sep, 0, n)
 }
 
-fn join_rec(arr, sep, i, n, acc) {
-    if (i >= n) acc
-    else join_rec(arr, sep, i + 1, n, acc ++ sep ++ (arr[i]))
+// A balanced join keeps large generated source strings off the call stack.
+fn join_rec(arr, sep, first, ending) {
+    if (ending - first == 1) string(arr[first])
+    else {
+        let middle = first + int(floor(float(ending - first) / 2.0))
+        join_rec(arr, sep, first, middle) ++ sep ++
+            join_rec(arr, sep, middle, ending)
+    }
 }
 
 // check if a value is a parbreak symbol
@@ -124,9 +150,10 @@ pub fn is_parbreak(node) {
     node is symbol and string(node) == "parbreak"
 }
 
-// check if a node is whitespace-only string
+// nested render fragments can contain only whitespace without forming a paragraph.
 pub fn is_whitespace(node) {
-    if (not (node is string)) false
+    if (node is array or node is list) all([for (child in node) is_whitespace(child)])
+    else if (not (node is string)) false
     else trim(node) == ""
 }
 
@@ -296,6 +323,32 @@ pub fn top_level_separator(source, separator) {
     if (len(parts) < 2) null else len(parts[0])
 }
 
+// Return one balanced argument without interpreting package-specific contents.
+pub fn read_balanced(source, at, opening, closing) map^ {
+    if (at >= len(source) or slice(source, at, at + 1) != opening)
+        raise error("expected balanced argument opening")
+    else read_balanced_inner(source, at + 1, at + 1, opening, closing, 1, false)^
+}
+
+fn read_balanced_inner(source, at, body_start, opening, closing, depth, escaped) map^ {
+    if (at >= len(source)) raise error("unclosed balanced argument")
+    else {
+        let char = slice(source, at, at + 1)
+        if (escaped) read_balanced_inner(source, at + 1, body_start,
+            opening, closing, depth, false)^
+        else if (char == "\\") read_balanced_inner(source, at + 1, body_start,
+            opening, closing, depth, true)^
+        else if (char == opening) read_balanced_inner(source, at + 1, body_start,
+            opening, closing, depth + 1, false)^
+        else if (char == closing and depth == 1)
+            {raw: slice(source, body_start, at), next: at + 1}
+        else if (char == closing) read_balanced_inner(source, at + 1, body_start,
+            opening, closing, depth - 1, false)^
+        else read_balanced_inner(source, at + 1, body_start,
+            opening, closing, depth, false)^
+    }
+}
+
 pub fn unwrap_braces(source) {
     if (len(source) >= 2 and starts_with(source, "{") and ends_with(source, "}"))
         slice(source, 1, len(source) - 1)
@@ -327,6 +380,26 @@ pub fn unsupported_element(package, message, offset) {
 
 pub fn diagnostic(code, package, item, message, offset) map =>
     {code: code, package: package, item: item, message: message, offset: offset}
+
+// TeX comments end at a line break; escaped percent signs remain source text.
+fn strip_tex_comments_at(source, at, output, commented) {
+    if (at >= len(source)) output
+    else {
+        let ch = slice(source, at, at + 1)
+        if (ch == "\n" or ch == "\r")
+            strip_tex_comments_at(source, at + 1, output ++ ch, false)
+        else if (commented)
+            strip_tex_comments_at(source, at + 1, output, true)
+        else if (ch == "\\" and slice(source, at + 1, at + 2) == "%")
+            strip_tex_comments_at(source, at + 2, output ++ "\\%", false)
+        else if (ch == "%")
+            strip_tex_comments_at(source, at + 1, output, true)
+        else strip_tex_comments_at(source, at + 1, output ++ ch, false)
+    }
+}
+
+pub fn strip_tex_comments(source) =>
+    strip_tex_comments_at(source, 0, "", false)
 
 // TeX pt is 1/72.27 inch; CSS pt is 1/72 inch.
 let DIMENSION_UNITS = [

@@ -1,0 +1,10 @@
+{
+  unsupported: 0,
+  vector: true,
+  clipped: true,
+  grid: true,
+  valid_strokes: true,
+  colored_curve: true,
+  arrows: true,
+  path_count: 103
+}
