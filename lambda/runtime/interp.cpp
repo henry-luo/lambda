@@ -268,7 +268,7 @@ static bool interp_satellite_enqueue(Runtime* runtime, Script* script,
         mem_free(job);
         return false;
     }
-    log_notice("interp-tier: queued satellite function='%s'%s image=%u pool_workers=%d",
+    log_debug("interp-tier: queued satellite function='%s'%s image=%u pool_workers=%d",
         def->name ? def->name->chars : "<anonymous>",
         continuation ? " loop-continuation" : "", (unsigned)job->sequence,
         tp_thread_count(g_interp_satellite_pool));
@@ -328,7 +328,7 @@ static void interp_loop_continuation_publish(Script* script, InterpSatelliteJob*
     cell->loop_entry = job->image->target_entry;
     cell->loop_state = FN_LOOP_HANDOFF_READY;
     job->image = NULL;
-    log_notice("interp-tier: published loop continuation function='%s' loop=%u image=%u",
+    log_debug("interp-tier: published loop continuation function='%s' loop=%u image=%u",
         job->def->name ? job->def->name->chars : "<anonymous>",
         (unsigned)cell->loop_ordinal, (unsigned)job->sequence);
 }
@@ -354,7 +354,7 @@ static void interp_satellite_publish_ready(Script* script) {
             interp_satellite_publish_image(script, job->image);
         if (published) {
             job->image = NULL;  // Script now owns the private MIR context.
-            log_notice("interp-tier: published queued satellite function='%s' image=%u",
+            log_debug("interp-tier: published queued satellite function='%s' image=%u",
                 job->def->name ? job->def->name->chars : "<anonymous>",
                 (unsigned)job->sequence);
         } else if (cell && cell->state == FN_PROMOTION_QUEUED) {
@@ -5093,7 +5093,7 @@ public:
             // logged per loop exit; the census keeps each site's maximum
             const FnPromotionCell* cell = frame_->promotion_cell;
             const AstLoopControlNode* loop = frame_->handoff_loop;
-            log_notice("loop-census fn=%s loop=%u at=%u backedges=%u state=%d",
+            log_debug("loop-census fn=%s loop=%u at=%u backedges=%u state=%d",
                 frame_->fn->name ? frame_->fn->name->chars : "<anonymous>",
                 (unsigned)loop->interp_handoff_ordinal,
                 (unsigned)((AstNode*)loop)->source_span.start_byte,
@@ -6451,7 +6451,7 @@ static void interp_queue_loop_handoff(InterpFrame* frame, AstLoopControlNode* lo
         }
     }
     if (why) {
-        log_notice("interp-tier: loop handoff pinned function='%s' loop=%u reason=%s",
+        log_debug("interp-tier: loop handoff pinned function='%s' loop=%u reason=%s",
             def->name ? def->name->chars : "<anonymous>",
             (unsigned)loop->interp_handoff_ordinal, why);
         cell->loop_live_ins = NULL;
@@ -6552,7 +6552,7 @@ static bool interp_try_loop_handoff(InterpFrame* f, FnPromotionCell* cell, Item*
     if (!cell->loop_entered) {
         // once per definition: later activations enter silently
         cell->loop_entered = true;
-        log_notice("interp-tier: loop handoff function='%s' loop=%u live_ins=%d",
+        log_debug("interp-tier: loop handoff function='%s' loop=%u live_ins=%d",
             continuation->name->chars, (unsigned)cell->loop_ordinal, argc);
     }
     List args = {};
@@ -7900,7 +7900,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
         // The whole image still publishes functions through the satellite
         // boxed ABI. Reject an unsupported first trigger before paying for a
         // module compile that cannot safely become active (D8.1.1v4/D5.2).
-        log_notice("interp-tier: whole-script POC skipped file=%s reason=trigger-boundary",
+        log_debug("interp-tier: whole-script POC skipped file=%s reason=trigger-boundary",
             script->reference ? script->reference : "<unknown>");
         return false;
     }
@@ -7908,7 +7908,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
         // An async closure may have installed a satellite before the first
         // synchronous trigger; replacing that live MIR context would orphan
         // its entry, so this POC deliberately stays on the normal path.
-        log_notice("interp-tier: whole-script POC skipped file=%s reason=existing-mir-context",
+        log_debug("interp-tier: whole-script POC skipped file=%s reason=existing-mir-context",
             script->reference ? script->reference : "<unknown>");
         return false;
     }
@@ -7916,7 +7916,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
         // Full-module MIR linking requires compiled import symbols. Keep the
         // POC on the import-free cone until dependency images can be promoted
         // as one transaction (D7.2.2).
-        log_notice("interp-tier: whole-script POC skipped file=%s reason=imports",
+        log_debug("interp-tier: whole-script POC skipped file=%s reason=imports",
             script->reference ? script->reference : "<unknown>");
         return false;
     }
@@ -7925,7 +7925,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
         script->direct_imports = NULL;
     }
 
-    log_notice("interp-tier: whole-script POC trigger file=%s function='%s'",
+    log_debug("interp-tier: whole-script POC trigger file=%s function='%s'",
         script->reference ? script->reference : "<unknown>",
         trigger && trigger->name ? trigger->name : "<anonymous>");
 
@@ -7976,7 +7976,7 @@ static bool interp_whole_script_compile(InterpState* st, Script* script,
             script->reference ? script->reference : "<unknown>");
         return false;
     }
-    log_notice("interp-tier: whole-script POC compiled file=%s functions=%d",
+    log_debug("interp-tier: whole-script POC compiled file=%s functions=%d",
         script->reference ? script->reference : "<unknown>", published);
     return true;
 }
@@ -7998,7 +7998,7 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
         // keep their ownership on T0 rather than handing it to a satellite.
         if (cell->state != FN_PROMOTION_PINNED_INTERP) {
             cell->state = FN_PROMOTION_PINNED_INTERP;
-            log_notice("interp-tier: pinned UI function='%s' reason=arena-output",
+            log_debug("interp-tier: pinned UI function='%s' reason=arena-output",
                 def->name ? def->name->chars : "<anonymous>");
         }
         return false;
@@ -8038,11 +8038,12 @@ static bool interp_promote_function(Function* fn, bool count_entry) {
     }
     if (const char* refusal = interp_satellite_refusal(def)) {
         // A pinned definition is a declared interpreter policy, never a
-        // fallback to a different module compilation path. Notice level: a
-        // hot function left in T0 is otherwise visible only as a missing
-        // promotion line (T27-6).
+        // fallback to a different module compilation path (T27-6).
         cell->state = FN_PROMOTION_PINNED_INTERP;
-        log_notice("interp-tier: pinned function='%s' reason=%s",
+#ifdef NDEBUG
+        (void)refusal;
+#endif
+        log_debug("interp-tier: pinned function='%s' reason=%s",
             def->name ? def->name->chars : "<anonymous>", refusal);
         return false;
     }
@@ -8645,7 +8646,7 @@ static Item interp_run_nodes(Runner* runner, bool run_main, AstNode* repl_fragme
     }
     g_interp_stats.scripts_executed++;
     g_interp_stats.nodes_evaluated += st.node_count;
-    log_notice("interp: executed script='%s' nodes=%llu depth_used=%u",
+    log_debug("interp: executed script='%s' nodes=%llu depth_used=%u",
         script->reference ? script->reference : "<none>",
         (unsigned long long)st.node_count, st.depth_limit - st.depth);
     return result;

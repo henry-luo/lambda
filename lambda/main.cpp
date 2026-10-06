@@ -2424,10 +2424,10 @@ static int lambda_main_impl(int argc, char *argv[]) {
         }
     }
     if (!is_bash_mode) {
-        log_notice("############################################");
-        log_notice("!!! Running DEBUG build of lambda.exe  !!!");
-        log_notice("!!! Do NOT use it for performance test !!!");
-        log_notice("############################################");
+        log_debug("############################################");
+        log_debug("!!! Running DEBUG build of lambda.exe  !!!");
+        log_debug("!!! Do NOT use it for performance test !!!");
+        log_debug("############################################");
     }
 #endif
 

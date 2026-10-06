@@ -608,7 +608,7 @@ void input_script_cache_destroy(InputScriptCache* cache) {
     pthread_mutex_lock(&cache->mutex);
     cache->shutting_down = true;
     InputScriptCacheStats stats = cache->stats;
-    log_notice("script-cache: shutdown entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu mir_hits=%llu invalidations=%llu waits=%llu poisoned=%llu evictions=%llu retention_limit=%llu retention_pressure=%llu retained=%llu peak=%llu",
+    log_debug("script-cache: shutdown entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu mir_hits=%llu invalidations=%llu waits=%llu poisoned=%llu evictions=%llu retention_limit=%llu retention_pressure=%llu retained=%llu peak=%llu",
         (unsigned long long)stats.retained_entries,
         (unsigned long long)stats.source_lookups,
         (unsigned long long)stats.source_hits,
@@ -1591,7 +1591,7 @@ void input_script_cache_log_summary(InputScriptCache* cache) {
     if (!cache) return;
     InputScriptCacheStats stats;
     input_script_cache_get_stats(cache, &stats);
-    log_notice("script-cache: summary entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu ast_misses=%llu mir_hits=%llu mir_misses=%llu invalidations=%llu waits=%llu poisoned=%llu evictions=%llu retention_limit=%llu retention_pressure=%llu retained_source=%llu retained_ast=%llu retained_mir=%llu peak=%llu",
+    log_debug("script-cache: summary entries=%llu source_lookups=%llu source_hits=%llu source_misses=%llu ast_hits=%llu ast_misses=%llu mir_hits=%llu mir_misses=%llu invalidations=%llu waits=%llu poisoned=%llu evictions=%llu retention_limit=%llu retention_pressure=%llu retained_source=%llu retained_ast=%llu retained_mir=%llu peak=%llu",
         (unsigned long long)stats.retained_entries,
         (unsigned long long)stats.source_lookups,
         (unsigned long long)stats.source_hits,
