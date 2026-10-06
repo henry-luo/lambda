@@ -224,15 +224,51 @@ TEST_F(AvlTreeTest, RemoveNodeWithTwoChildren) {
     // Remove root (likely has two children)
     AvlNode* root = tree->root;
     uintptr_t root_key = root->property_id;
+    void* expected = root->declaration;
     
     void* removed = avl_tree_remove(tree, root_key);
     EXPECT_NE(removed, nullptr);
+    EXPECT_EQ(removed, expected);
     EXPECT_EQ(avl_tree_size(tree), 6);
     
     // Verify node is gone
     EXPECT_EQ(avl_tree_search(tree, root_key), nullptr);
     
     verify_tree_structure();
+}
+
+TEST_F(AvlTreeTest, RepeatedRemovalReturnsWrapperStorage) {
+    int values[3] = {10, 20, 30};
+    PoolStats warm = {};
+    pool_get_detailed_stats(pool, &warm);
+    for (size_t i = 0; i < 128; i++) {
+        ASSERT_NE(avl_tree_insert(tree, 2, &values[1]), nullptr);
+        ASSERT_NE(avl_tree_insert(tree, 1, &values[0]), nullptr);
+        ASSERT_NE(avl_tree_insert(tree, 3, &values[2]), nullptr);
+        ASSERT_EQ(avl_tree_remove(tree, 2), &values[1]);
+        avl_tree_clear(tree);
+    }
+    PoolStats stable = {};
+    pool_get_detailed_stats(pool, &stable);
+    EXPECT_EQ(stable.live_bytes, warm.live_bytes);
+}
+
+TEST_F(AvlTreeTest, TraversalCanRemoveCurrentAndSuccessor) {
+    int value = 1;
+    for (uintptr_t key = 0; key < 64; key++)
+        ASSERT_NE(avl_tree_insert(tree, key, &value), nullptr);
+    struct RemovalContext { AvlTree* tree; uintptr_t next_key; } removal = {tree, 0};
+    auto remove_pair = [](AvlNode* node, void* data) -> bool {
+        auto* ctx = static_cast<RemovalContext*>(data);
+        uintptr_t key = node->property_id;
+        EXPECT_EQ(key, ctx->next_key);
+        avl_tree_remove(ctx->tree, key);
+        avl_tree_remove(ctx->tree, key + 1);
+        ctx->next_key += 2;
+        return true;
+    };
+    EXPECT_EQ(avl_tree_foreach_inorder(tree, remove_pair, &removal), 32);
+    EXPECT_EQ(avl_tree_size(tree), 0);
 }
 
 TEST_F(AvlTreeTest, RemoveAllNodes) {

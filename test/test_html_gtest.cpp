@@ -5,7 +5,11 @@
 #include <stdbool.h>
 
 #include "../lambda/input/input.hpp"
+#include "../lambda/io/mark_builder.hpp"
+#include "../lambda/core/mark_reader.hpp"
 #include "../lambda/input/html5/html5_parser.h"
+#include "../lib/arena.h"
+#include "../lib/strbuf.h"
 
 extern "C" {
     #include "../lib/mempool.h"
@@ -827,6 +831,91 @@ TEST_F(HtmlParserTest, TreeConstructionSequentialParsing) {
     EXPECT_TRUE(get_type_id(result1) == LMD_TYPE_ELEMENT);
     EXPECT_TRUE(get_type_id(result2) == LMD_TYPE_ELEMENT);
     EXPECT_TRUE(get_type_id(result3) == LMD_TYPE_ELEMENT);
+}
+
+TEST_F(HtmlParserTest, FragmentTokenScratchPreservesPublishedDataAndContinuation) {
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    Html5Parser* parser = html5_fragment_parser_create(input->pool, input->arena, input);
+    ASSERT_NE(parser, nullptr);
+    StrBuf* markup = strbuf_new();
+    ASSERT_NE(markup, nullptr);
+    for (size_t i = 0; i < 1000; i++)
+        strbuf_append_str(markup, "<span data-key=\"kept\">text</span>");
+    size_t before = arena_total_used(input->arena);
+    ASSERT_TRUE(html5_fragment_parse(parser, markup->str));
+    strbuf_free(markup);
+    // token records and attribute buffers must not accumulate with published nodes.
+    EXPECT_LT(arena_total_used(input->arena) - before, 384000u);
+    EXPECT_EQ(parser->token_arena, parser->arena);
+    Element* body = html5_fragment_get_body(parser);
+    ASSERT_NE(body, nullptr);
+    EXPECT_EQ(body->length, 1000);
+    Element* first = body->items[0].element;
+    EXPECT_EQ(getAttr(first, "data-key"), "kept");
+    ASSERT_TRUE(html5_fragment_parse(parser, "<p id=\"later\">continued</p>"));
+    EXPECT_EQ(body->length, 1001);
+    EXPECT_EQ(getAttr(first, "data-key"), "kept");
+    EXPECT_EQ(getAttr(body->items[1000].element, "id"), "later");
+    html5_parser_destroy(parser);
+    EXPECT_EQ(body->length, 1001);
+    EXPECT_EQ(getAttr(first, "data-key"), "kept");
+    EXPECT_EQ(getAttr(body->items[1000].element, "id"), "later");
+}
+
+TEST_F(HtmlParserTest, ParserWorkDoesNotAccumulateInPublishedOwner) {
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    MarkBuilder builder(input);
+    Element* published = builder.element("span").attr("data-key", "kept").final().element;
+    ASSERT_NE(published, nullptr);
+    size_t arena_before = arena_total_used(input->arena);
+    PoolStats before = {};
+    pool_get_detailed_stats(pool, &before);
+    for (size_t i = 0; i < 64; i++) {
+        Html5Parser* parser = html5_parser_create(pool, input->arena, input);
+        ASSERT_NE(parser, nullptr);
+        for (size_t depth = 0; depth < 128; depth++) {
+            html5_push_element(parser, published);
+            html5_push_active_formatting_element(parser, published, nullptr);
+        }
+        html5_parser_destroy(parser);
+    }
+    PoolStats after = {};
+    pool_get_detailed_stats(pool, &after);
+    EXPECT_EQ(arena_total_used(input->arena), arena_before);
+    EXPECT_EQ(after.live_bytes, before.live_bytes);
+    EXPECT_STREQ(ElementReader(published).get_attr_string("data-key"), "kept");
+}
+
+TEST_F(HtmlParserTest, FragmentWorkGrowthPreservesRawTextAndAttributesAfterDestroy) {
+    Input* input = Input::create(pool);
+    ASSERT_NE(input, nullptr);
+    Html5Parser* parser = html5_fragment_parser_create(pool, input->arena, input);
+    ASSERT_NE(parser, nullptr);
+    StrBuf* markup = strbuf_new();
+    ASSERT_NE(markup, nullptr);
+    strbuf_append_str(markup, "<textarea data-long=\"");
+    for (size_t i = 0; i < 9000; i++) strbuf_append_char(markup, 'x');
+    strbuf_append_str(markup, "\">");
+    for (size_t i = 0; i < 9000; i++) strbuf_append_char(markup, 'y');
+    strbuf_append_str(markup, "</wrong></textarea>");
+    ASSERT_TRUE(html5_fragment_parse(parser, markup->str));
+    strbuf_free(markup);
+    Element* body = html5_fragment_get_body(parser);
+    ASSERT_NE(body, nullptr);
+    ASSERT_EQ(body->length, 1);
+    Element* text = body->items[0].element;
+    html5_parser_destroy(parser);
+    ElementReader reader(text);
+    String* attribute = reader.get_string_attr("data-long");
+    ASSERT_NE(attribute, nullptr);
+    EXPECT_EQ(attribute->len, 9000u);
+    ASSERT_EQ(reader.childCount(), 1);
+    String* content = reader.childAt(0).asString();
+    ASSERT_NE(content, nullptr);
+    EXPECT_EQ(content->len, 9008u);
+    EXPECT_STREQ(content->chars + 9000, "</wrong>");
 }
 
 TEST_F(HtmlParserTest, WhitespacePreservation) {

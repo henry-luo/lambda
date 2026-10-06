@@ -102,7 +102,7 @@ typedef enum DomJsMutationAttribute {
     DOM_JS_MUTATION_ATTRIBUTE_CLASS,
 } DomJsMutationAttribute;
 
-// tier-1: doc-pool, survives relayout
+// tier-1: document-owned journal, survives relayout
 typedef struct DomJsMutationRecord {
     uint32_t sequence;
     DomJsMutationKind kind;
@@ -141,9 +141,11 @@ struct DomJsRuntime {
     uint32_t mutation_kind_mask;
     int mutation_record_count;
     int mutation_record_overflow;
-    DomJsMutationRecord mutation_records[DOM_JS_MUTATION_RECORD_CAP];
+    DomJsMutationRecord* mutation_records;
+    int mutation_record_capacity;
+    DomJsMutationRecord inline_mutation_records[DOM_JS_MUTATION_RECORD_CAP];
     // DOM text-tree edits to <style> need exact owners even when the generic
-    // layout-mutation ledger reaches its bounded record capacity.
+    // layout-mutation ledger cannot grow after an allocation failure.
     DomElement** inline_stylesheet_mutations;
     int inline_stylesheet_mutation_count;
     int inline_stylesheet_mutation_capacity;
@@ -164,7 +166,9 @@ struct DomJsRuntime {
 
     DomJsRuntime() : mir_ctx(nullptr), preamble_state(nullptr), runtime(nullptr),
         doc_node(nullptr), implicit_doctype(true), mutation_count(0), mutation_sequence(0), mutation_kind_mask(0),
-        mutation_record_count(0), mutation_record_overflow(0), mutation_records{},
+        mutation_record_count(0), mutation_record_overflow(0),
+        mutation_records(inline_mutation_records), mutation_record_capacity(DOM_JS_MUTATION_RECORD_CAP),
+        inline_mutation_records{},
         inline_stylesheet_mutations(nullptr), inline_stylesheet_mutation_count(0),
         inline_stylesheet_mutation_capacity(0),
         ready_state("complete"), host_ui_context(nullptr), host_driven_loop(false),
@@ -1292,8 +1296,15 @@ void dom_option_text_normalized(DomElement* option, StrBuf* out);
 #pragma GCC diagnostic ignored "-Winvalid-offsetof"
 
 // DomElement* → Element*: returns pointer to the embedded Element within DomElement
-inline Element* dom_element_to_element(DomElement* de) { return &de->elmt; }
-inline const Element* dom_element_to_element(const DomElement* de) { return &de->elmt; }
+inline Element* dom_element_to_element(DomElement* de) {
+    if (de->node_flags & DOM_NODE_FLAG_GC_BACKING) {
+        dom_node_registry_refresh_backing(de->doc, de);
+    }
+    return &de->elmt;
+}
+inline const Element* dom_element_to_element(const DomElement* de) {
+    return dom_element_to_element(const_cast<DomElement*>(de));
+}
 
 // Synthetic layout-only nodes deliberately have no Lambda-tree identity even
 // though they carry the same embedded storage for a uniform object layout.
@@ -1479,6 +1490,10 @@ void dom_element_borrow_specified_style(DomElement* element, StyleTree* style);
  * @return Number of declarations applied
  */
 int dom_element_apply_inline_style(DomElement* element, const char* style_text);
+// Node-owned transient CSS values, independent of the authored Mark attributes.
+bool dom_element_set_presentation_style(DomElement* element, const char* property,
+                                        const char* value, bool* changed);
+bool dom_element_clear_presentation_style(DomElement* element);
 const char* dom_inline_style_declaration_end(const char* text);
 
 /**

@@ -1,0 +1,230 @@
+{
+  "name": "Independent Lambda players, motion, highlight, Morph and reduced motion",
+  "html": "test/ui/slide_features.ls",
+  "viewport": {
+    "width": 800,
+    "height": 650
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=play]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 4
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#first-player-s0-o1"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#second-player-s0-o1"
+      },
+      "property": "opacity",
+      "equals": "0"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=pause]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 500,
+      "steps": 5
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "cue"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=resume]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 250,
+      "steps": 5
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#first-player-s0-o0"
+      },
+      "min_r": 247,
+      "max_g": 8,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "advance_time",
+      "ms": 400,
+      "steps": 8
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#first-player-place-s1-o0"
+      },
+      "property": "left",
+      "equals": "200px"
+    },
+    {
+      "type": "assert_text",
+      "target": {
+        "selector": "#first-player .slide-status"
+      },
+      "equals": "2 / 2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=previous]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#first-player"
+      },
+      "attribute": "data-slide-index",
+      "equals": "0"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#first-player-s0-o0"
+      },
+      "min_r": 247,
+      "max_g": 8,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=restart]"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#first-player-s0-o0"
+      },
+      "max_r": 8,
+      "max_g": 8,
+      "min_b": 247
+    },
+    {
+      "type": "advance_time",
+      "ms": 200,
+      "steps": 4
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#first-player-s0-o1"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#first-player [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#first-player-s0-o0"
+      },
+      "min_r": 247,
+      "max_g": 8,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#second-player [data-slide-command=play]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#second-player"
+      },
+      "attribute": "data-slide-phase",
+      "equals": "waiting"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#second-player-s0-o1"
+      },
+      "property": "opacity",
+      "equals": "1"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#second-player [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#second-player [data-slide-command=next]"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#second-player"
+      },
+      "attribute": "data-slide-index",
+      "equals": "1"
+    }
+  ]
+}

@@ -998,6 +998,7 @@ typedef struct CssDeclaration {
     // Memory management and validation
     bool owns_payload;        // declaration owns a deep CssValue/string snapshot
     bool tree_owned_record;   // containing StyleTree may reclaim this declaration record
+    bool presentation_value; // transient host layer; survives authored-style recascade
     bool valid;               // Validation flag
     int ref_count;            // Reference counting for memory management
     void* payload_owner;      // immutable epoch payload shared by cascade records

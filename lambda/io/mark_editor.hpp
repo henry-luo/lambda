@@ -49,6 +49,7 @@ private:
     Input* input_;              // Input context
     Pool* pool_;                // Memory pool
     Arena* arena_;              // Arena allocator
+    Arena* draft_arena_;        // unpublished shape drafts; released with editor
     NamePool* name_pool_;       // String interning
     ArrayList* type_list_;      // Type registry
     MarkBuilder* builder_;      // For creating new structures
@@ -65,6 +66,7 @@ private:
     // Room for `dense_length` children beside the list's owned scalar tail,
     // grown into this editor's arena (inline mode; LR11-3)
     bool reserve_children(List* list, int64_t dense_length);
+    Arena* shape_draft_arena();
 
 public:
     /**

@@ -1,5 +1,9 @@
 #pragma once
 
+// document-owned named frame events, shared by scripted presentation packages
+bool radiant_document_has_pending_frames(struct DomDocument* document);
+bool radiant_bind_document_script_host(struct UiContext* uicon, struct DomDocument* document);
+
 #ifndef RADIANT_EVENT_CORE_ONLY
 #include "view.hpp"
 #include "../lambda/input/css/dom_lifecycle.hpp"

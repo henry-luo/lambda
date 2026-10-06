@@ -3006,6 +3006,7 @@ extern "C" void script_runner_cleanup_js_state(DomDocument* dom_doc) {
     Runtime* runtime = dom_doc->js.runtime;
     if (!runtime) return;
 
+    dom_lifecycle_release_backing_roots(dom_doc);
     // The document remains caller-owned; detach it before the centralized
     // Runtime teardown releases every heap pool, name pool, script, and capsule.
     dom_doc->js.runtime = nullptr;

@@ -2892,6 +2892,8 @@ void view_tree_commit_inline_prop(ViewTree* tree, DomElement* element,
                                   DomElement* parent);
 
 void view_tree_release_retired_subtree(ViewTree* tree, DomNode* root);
+// Release a private transform chain before retained restyle replaces its head.
+void view_release_transform_functions(DomElement* element, ViewTree* tree);
 // Release iframe documents before lifecycle retirement checks their host nodes.
 // The embedded document otherwise keeps an external pin on a detached iframe.
 void view_tree_release_detached_embedded_documents(ViewTree* tree, DomNode* root);
@@ -3125,6 +3127,8 @@ enum ClipShapeType {
 // tier-2: view-pool, rebuilt each relayout
 struct ClipShape {
     ClipShapeType type;
+    bool transformed;
+    RdtMatrix inverse_transform; // maps raster pixels back to the clip's author coordinates
     union {
         struct { lam::OwnArr<float> vx; lam::OwnArr<float> vy; int count; } polygon;  // view-pool copies
         struct { float cx, cy, r; } circle;
@@ -3135,6 +3139,7 @@ struct ClipShape {
 };
 
 #define RDT_MAX_CLIP_SHAPES 8
+#define RDT_CLIP_PARAM_COUNT 18 // geometry (8), transform flag (1), inverse matrix (9)
 
 bool clip_point_in_shape(ClipShape* cs, float px, float py);
 bool clip_shapes_rect_inside(ClipShape** shapes, int depth,
@@ -3143,6 +3148,7 @@ void clip_shapes_scanline_bounds(ClipShape** shapes, int depth,
     float y, int base_left, int base_right, int* out_left, int* out_right);
 ClipShape clip_shape_from_params(int type, const float* params);
 void clip_shape_to_params(const ClipShape* cs, int* out_type, float* out_params);
+void clip_shape_offset(ClipShape* shape, float offset_x, float offset_y);
 
 
 // ===== form controls =====
@@ -3725,7 +3731,7 @@ typedef struct CssTransitionValue {
 
 // One tracked transitionable property: its last-applied used value (the
 // snapshot) plus the currently running transition instance (if any).
-// tier-2: view-pool, rebuilt each relayout
+// embedded in the document-owned per-element snapshot
 typedef struct CssTransitionTrack {
     CssPropertyCode property_code;
     CssAnimValueType value_type;
@@ -3736,7 +3742,7 @@ typedef struct CssTransitionTrack {
 } CssTransitionTrack;
 
 // Persistent per-element transition state (stored in DomElement's extension).
-// tier-2: view-pool, rebuilt each relayout
+// tier-1: doc-pool, survives relayout and is released at element retirement
 typedef struct CssTransitionElemState {
     CssTransitionTrack tracks[CSS_TRANSITION_MAX_TRACKED];
     int track_count;

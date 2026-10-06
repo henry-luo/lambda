@@ -546,7 +546,7 @@ static inline void dom_record_mutation_detail(DomJsMutationKind kind,
     }
     doc->js.mutation_kind_mask |= dom_mutation_bit(kind);
 
-    if (doc->js.mutation_record_count < DOM_JS_MUTATION_RECORD_CAP) {
+    if (dom_js_mutation_records_reserve(doc, doc->js.mutation_record_count + 1)) {
         DomNodeRef target_ref = dom_node_ref(target);
         DomNodeRef parent_ref = dom_node_ref(parent);
         if (target && !dom_node_pin(doc, target_ref, DOM_NODE_PIN_RECONCILE)) return;
@@ -895,9 +895,12 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
     dom_commit_headless_layout();
     DomDocument* doc = _js_current_ui_context && _js_current_ui_context->document
         ? _js_current_ui_context->document : _js_current_document;
+    double timestamp_ms = js_event_loop_virtual_clock_enabled()
+        ? js_event_loop_virtual_clock_now_ms() : js_performance_monotonic_now_ms();
+    bool frame_delivered = dom_engine_frame_tick(doc, timestamp_ms);
     DocState* state = doc && doc->state ? (DocState*)doc->state : nullptr;
     AnimationScheduler* scheduler = state ? state->animation_scheduler : nullptr;
-    if (!state) return false;
+    if (!state) return frame_delivered;
     // Batch documents have no native frame clock; advance the same scheduler
     // deterministically so transition events cannot remain queued forever.
     bool active = false;
@@ -912,7 +915,7 @@ static bool dom_tick_headless_animation_frame_by(double delta_seconds) {
             : js_performance_monotonic_now_ms() / 1000.0;
         active = scroll_smooth_tick_document(doc, now) || active;
     }
-    return active;
+    return active || frame_delivered;
 }
 
 extern "C" bool dom_tick_headless_animation_frame(void) {
@@ -3688,6 +3691,7 @@ static void append_iframe_srcdoc_to_document(DomElement* iframe,
     if (!body || !doc->node_arena) return;
 
     Html5Parser* parser = dom_create_fragment_parser(doc);
+    Html5ParserScope parser_scope(parser);
     if (!parser) return;
     html5_fragment_parse(parser, srcdoc);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -6228,6 +6232,7 @@ static bool dom_parse_markup_into(DomElement* target, const char* html_str,
     DomDocument* doc = target ? target->doc : nullptr;
     if (!doc || !doc->input) return false;
     Html5Parser* parser = dom_create_fragment_parser(doc, context ? context : target);
+    Html5ParserScope parser_scope(parser);
     if (!parser) return false;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -6336,6 +6341,7 @@ static DomElement* dom_parse_html_fragment(DomDocument* doc,
     if (!doc || !doc->input || !html_str) return nullptr;
 
     Html5Parser* parser = dom_create_fragment_parser(doc);
+    Html5ParserScope parser_scope(parser);
     if (!parser) return nullptr;
     html5_fragment_parse(parser, html_str);
     Element* body_elem = html5_fragment_get_body(parser);
@@ -12166,6 +12172,12 @@ extern "C" Item dom_set_property_impl(Item elem_item, Item prop_name, Item value
 }
 
 extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item value) {
+    // coercion can allocate; the Lambda-only caller owns these through precise roots.
+    RootFrame style_roots(4);
+    Rooted<Item> element_root(style_roots, elem_item);
+    Rooted<Item> property_root(style_roots, prop_name);
+    Rooted<Item> value_root(style_roots, value);
+    Rooted<Item> string_root(style_roots, ItemNull);
     if (dom_is_rule_style_decl(elem_item)) {
         // CSSOM style declarations are VMaps, not DOM elements; handle them
         // before DOM unwrapping so nested rule.style.x lowering stays native.
@@ -12181,6 +12193,7 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
 
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
+        if (!dom_realm_active()) return ItemNull;
         // not a DOM element — fall back to normal property set on obj.style
         Item style_obj = dom_realm_get_name(elem_item, "style");
         TypeId style_type = get_type_id(style_obj);
@@ -12191,10 +12204,11 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
         return ItemNull;
     }
 
-    const char* js_prop = fn_to_cstr(prop_name);
     // CSSStyleDeclaration assignment performs Web IDL DOMString coercion;
     // reading raw Item storage made numeric animation values look empty.
-    const char* val_str = dom_to_dom_string_cstr(value);
+    string_root.set(js_to_string(value_root.get()));
+    const char* js_prop = fn_to_cstr(property_root.get());
+    const char* val_str = fn_to_cstr(string_root.get());
     if (!js_prop || !val_str) return ItemNull;
 
     // convert camelCase JS property to CSS property
@@ -12260,7 +12274,33 @@ extern "C" Item dom_set_style_property(Item elem_item, Item prop_name, Item valu
 // Style Property Read (elem.style.X)
 // ============================================================================
 
+extern "C" Item dom_presentation_style_set_property(Item node_item, Item property, Item value) {
+    RootFrame roots(3);
+    Rooted<Item> node_root(roots, node_item);
+    Rooted<Item> property_root(roots, property);
+    Rooted<Item> value_root(roots, value);
+    DomElement* element = (DomElement*)dom_unwrap_element(node_root.get());
+    const char* name = fn_to_cstr(property_root.get());
+    const char* text = fn_to_cstr(value_root.get());
+    bool changed = false;
+    bool accepted = element && dom_element_set_presentation_style(element, name, text, &changed);
+    if (changed) dom_notify_mutation(dom_style_mutation_kind(css_property_code_from_name(name)),
+                                     element, element->parent);
+    return (Item){.item = b2it(accepted)};
+}
+
+extern "C" Item dom_presentation_style_clear(Item node_item) {
+    DomElement* element = (DomElement*)dom_unwrap_element(node_item);
+    if (!element) return (Item){.item = b2it(false)};
+    if (dom_element_clear_presentation_style(element))
+        dom_notify_mutation(DOM_JS_MUTATION_INLINE_STYLE, element, element->parent);
+    return (Item){.item = b2it(true)};
+}
+
 extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
+    RootFrame roots(2);
+    Rooted<Item> element_root(roots, elem_item);
+    Rooted<Item> property_root(roots, prop_name);
     if (dom_is_rule_style_decl(elem_item)) {
         // CSSOM style declarations are VMaps, not DOM elements; handle them
         // before DOM unwrapping so nested rule.style.x lowering stays native.
@@ -12276,6 +12316,8 @@ extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
 
     DomElement* elem = (DomElement*)dom_unwrap_element(elem_item);
     if (!elem) {
+        // Lambda node reads share CSSOM; ordinary object fallback needs a JS realm.
+        if (!dom_realm_active()) return js_name_item("");
         // not a DOM element — fall back to normal property access on obj.style
         Item style_obj = dom_realm_get_name(elem_item, "style");
         TypeId style_type = get_type_id(style_obj);
@@ -12310,7 +12352,8 @@ extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
     }
 
     // get the specified value for this property
-    CssDeclaration* decl = dom_element_get_specified_value(elem, prop_id);
+    // CSSOM reads the inline declaration even when a stylesheet wins the cascade.
+    CssDeclaration* decl = style_tree_get_inline_declaration(elem->specified_style, prop_id);
     if (!decl || (!decl->value && (!decl->value_text || decl->value_text_len == 0))) {
         // shorthand fallback: if the property is a shorthand (e.g. padding, margin),
         // try the first longhand (e.g. padding-top) since shorthands are expanded
@@ -12319,7 +12362,7 @@ extern "C" Item dom_get_style_property(Item elem_item, Item prop_name) {
             snprintf(longhand, sizeof(longhand), "%s-top", css_prop);
             CssPropertyCode lh_id = css_property_code_from_name(longhand);
             if (lh_id != CSS_PROPERTY_UNKNOWN) {
-                decl = dom_element_get_specified_value(elem, lh_id);
+                decl = style_tree_get_inline_declaration(elem->specified_style, lh_id);
             }
         }
         if (!decl || (!decl->value && (!decl->value_text || decl->value_text_len == 0))) {
@@ -14977,6 +15020,8 @@ static bool dom_insert_backed_text(DomElement* parent, DomText* text,
         text->length = inserted_string->len;
         text->set_owns_native_string(false);
     }
+    dom_node_registry_set_backing_value(parent->doc, text,
+        Item{.item = s2it(inserted_string)});
     if (relinked && relinked != text) {
         if (!((DomNode*)parent)->insert_before(text, relinked) ||
             !((DomNode*)parent)->remove_child(relinked)) {

@@ -701,7 +701,7 @@ typedef struct {
 typedef struct {
     int depth;
     int type[RDT_MAX_CLIP_SHAPES];
-    float params[RDT_MAX_CLIP_SHAPES][8];
+    float params[RDT_MAX_CLIP_SHAPES][RDT_CLIP_PARAM_COUNT];
     int polygon_count[RDT_MAX_CLIP_SHAPES];
     lam::OwnArr<float> polygon_vx[RDT_MAX_CLIP_SHAPES];  // display-list arena copies
     lam::OwnArr<float> polygon_vy[RDT_MAX_CLIP_SHAPES];
@@ -762,9 +762,9 @@ typedef struct {
     bool tint_source;         // recolor isolated source from alpha before blur
     Color tint_color;
     int clip_type;            // ClipShapeType (0 = none, clips blur to CSS clip-path)
-    float clip_params[8];    // serialized clip shape parameters
+    float clip_params[RDT_CLIP_PARAM_COUNT];    // serialized clip shape parameters
     int exclude_type;         // ClipShapeType for element border-box exclusion (outer box-shadow)
-    float exclude_params[8]; // serialized exclude shape: restore pixels INSIDE this shape after blur
+    float exclude_params[RDT_CLIP_PARAM_COUNT]; // serialized exclude shape: restore pixels INSIDE this shape after blur
 } DlBoxBlurRegion;
 
 // Inset box-shadow blur: blur expanded region, restore pixels outside inner rect
@@ -787,7 +787,7 @@ typedef struct {
 // For inset shadows (restore_inside=0): restores pixels OUTSIDE the shape (rounded corners).
 typedef struct {
     int exclude_type;         // ClipShapeType for element border-box
-    float exclude_params[8]; // serialized shape parameters
+    float exclude_params[RDT_CLIP_PARAM_COUNT]; // serialized shape parameters
     int save_rx, save_ry, save_rw, save_rh;  // must match the save region
     int restore_inside;       // 1 = restore inside shape (outer shadow), 0 = restore outside (inset)
 } DlShadowClipRestore;
@@ -803,9 +803,9 @@ typedef struct {
     Color color;                                    // shadow colour (with alpha)
     float blur_radius;                              // CSS blur radius (physical px)
     int exclude_type;          // element border-box shape (skip composite inside)
-    float exclude_params[8];
+    float exclude_params[RDT_CLIP_PARAM_COUNT];
     int clip_type;             // optional CSS clip-path
-    float clip_params[8];
+    float clip_params[RDT_CLIP_PARAM_COUNT];
 } DlOuterShadow;
 
 // Video frame placeholder: records the layout rect and clip for post-composite blit.
@@ -1444,9 +1444,9 @@ typedef struct {
     int rx, ry, rw, rh;
     float blur_radius;
     int clip_type;
-    float clip_params[8];
+    float clip_params[RDT_CLIP_PARAM_COUNT];
     int exclude_type;
-    float exclude_params[8];
+    float exclude_params[RDT_CLIP_PARAM_COUNT];
     bool premultiply_source;
     bool tint_source;
     Color tint_color;
@@ -1465,7 +1465,7 @@ typedef struct {
 
 typedef struct {
     int exclude_type;
-    float exclude_params[8];
+    float exclude_params[RDT_CLIP_PARAM_COUNT];
     int save_rx, save_ry, save_rw, save_rh;
     int restore_inside;
 } PaintShadowClipRestore;
@@ -1476,9 +1476,9 @@ typedef struct {
     Color color;
     float blur_radius;
     int exclude_type;
-    float exclude_params[8];
+    float exclude_params[RDT_CLIP_PARAM_COUNT];
     int clip_type;
-    float clip_params[8];
+    float clip_params[RDT_CLIP_PARAM_COUNT];
 } PaintOuterShadow;
 
 typedef struct {

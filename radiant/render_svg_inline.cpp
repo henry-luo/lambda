@@ -478,6 +478,7 @@ struct SvgStyleEntry {
     DomElement* node;
     CssDeclaration** inline_declarations;
     size_t inline_count;
+    bool inline_parsed;
     SvgStyleProperty* properties;
 };
 
@@ -525,9 +526,6 @@ static void svg_style_index_tree(SvgStyleContext* style, DomElement* node) {
     SvgStyleEntry entry = {};
     entry.element = dom_element_to_element(node);
     entry.node = node;
-    const char* inline_text = node->get_attribute("style");
-    if (inline_text) entry.inline_declarations = css_parse_declaration_list_text(
-        inline_text, strlen(inline_text), style->pool, &entry.inline_count);
     SvgStyleMap::set(style->entries, entry);
     // parsed images retain source Elements; inline UI inputs may use the embedded one.
     Element* source = dom_element_render_source(node);
@@ -674,7 +672,15 @@ static FontContext* svg_style_font_context(SvgStyleContext* style, const char* s
 static SvgStyleEntry* svg_style_entry(SvgStyleContext* style, Element* element) {
     SvgStyleEntry query = {};
     query.element = element;
-    return style && style->entries ? SvgStyleMap::get(style->entries, query) : nullptr;
+    SvgStyleEntry* entry = style && style->entries ? SvgStyleMap::get(style->entries, query) : nullptr;
+    if (entry && !entry->inline_parsed) {
+        // each SVG indexes the host for references; unrelated inline CSS is never queried.
+        const char* text = entry->node->get_attribute("style");
+        if (text) entry->inline_declarations = css_parse_declaration_list_text(
+            text, strlen(text), style->pool, &entry->inline_count);
+        entry->inline_parsed = true;
+    }
+    return entry;
 }
 
 static CssValue* svg_parse_property_value(Pool* pool, const char* text, const char* name) {
@@ -785,9 +791,18 @@ static const char* svg_style_property_value(SvgInlineRenderContext* ctx, Element
     prop->animation_generation = generation;
     CssDeclaration declaration = {};
     DomDocument* doc = style->document;
-    if (css_select_element_declaration(style->engine, style->matcher, entry->node,
+    bool selected = css_select_element_declaration(style->engine, style->matcher, entry->node,
         doc->stylesheets, (size_t)doc->stylesheet_count, entry->inline_declarations,
-        entry->inline_count, name, &declaration)) {
+        entry->inline_count, name, &declaration);
+    CssDeclaration* presentation = style_tree_get_presentation_declaration(
+        entry->node->specified_style, css_property_code_from_name(name));
+    // The paint walk has its own CSS query, but consumes the same host layer.
+    if (presentation && (!selected ||
+        css_declaration_cascade_compare(presentation, &declaration) > 0)) {
+        declaration = *presentation;
+        selected = true;
+    }
+    if (selected) {
         prop->value = svg_resolve_property_declaration(style, entry->node, name, &declaration);
         prop->from_css = true;
     } else {
@@ -7820,7 +7835,8 @@ void render_inline_svg(RasterRenderContext* rdcon, ViewBlock* view) {
         RdtPath* clip_path = rdt_path_new();
         rdt_path_add_rect(clip_path, content_rect.x, content_rect.y,
                           content_rect.width, content_rect.height, 0, 0);
-        rc_push_clip(rdcon, clip_path, nullptr);
+        // the SVG viewport moves with its CSS ancestors, like its painted content
+        rc_push_clip(rdcon, clip_path, render_state_current_transform(rdcon));
         rdt_path_free(clip_path);
     }
 

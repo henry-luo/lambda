@@ -1103,8 +1103,8 @@ TEST_F(PaintIrParityTest, RasterEffectFragmentsMatchDirect) {
 }
 
 TEST_F(PaintIrParityTest, RasterShadowOpsMatchDirect) {
-    float clip_params[8] = {1.0f, 2.0f, 30.0f, 40.0f, 4.0f, 5.0f, 6.0f, 7.0f};
-    float exclude_params[8] = {8.0f, 9.0f, 50.0f, 60.0f, 10.0f, 11.0f, 12.0f, 13.0f};
+    float clip_params[RDT_CLIP_PARAM_COUNT] = {1.0f, 2.0f, 30.0f, 40.0f, 4.0f, 5.0f, 6.0f, 7.0f};
+    float exclude_params[RDT_CLIP_PARAM_COUNT] = {8.0f, 9.0f, 50.0f, 60.0f, 10.0f, 11.0f, 12.0f, 13.0f};
     Color tint = test_color(0x80203040);
 
     paint_box_blur_region(&pl, 1, 2, 30, 40, 3.5f,
@@ -1130,6 +1130,30 @@ TEST_F(PaintIrParityTest, RasterShadowOpsMatchDirect) {
                     test_color(0x70445566), 6.5f,
                     3, exclude_params, 2, clip_params);
     expect_lists_equal(lowered, direct);
+}
+
+TEST(ClipTransformTest, SerializedClipKeepsTransformAndReplayOffset) {
+    ClipShape shape = {};
+    shape.type = CLIP_SHAPE_INSET;
+    shape.inset = {20.0f, 10.0f, 40.0f, 30.0f, 0.0f, 0.0f};
+    shape.transformed = true;
+    RdtMatrix forward = {2, 0, 100, 0, 2, 0, 0, 0, 1};
+    ASSERT_TRUE(rdt_matrix_inverse(&forward, &shape.inverse_transform));
+    float params[RDT_CLIP_PARAM_COUNT] = {};
+    int type = 0;
+    clip_shape_to_params(&shape, &type, params);
+    ClipShape restored = clip_shape_from_params(type, params);
+    EXPECT_TRUE(clip_point_in_shape(&restored, 150.0f, 30.0f));
+    EXPECT_FALSE(clip_point_in_shape(&restored, 130.0f, 30.0f));
+    EXPECT_FALSE(clip_point_in_shape(&restored, 150.0f, 90.0f));
+    clip_shape_offset(&restored, 100.0f, 10.0f);
+    EXPECT_TRUE(clip_point_in_shape(&restored, 50.0f, 20.0f));
+    EXPECT_FALSE(clip_point_in_shape(&restored, 30.0f, 20.0f));
+    ClipShape* clips[] = {&restored};
+    int left = 0, right = 200;
+    clip_shapes_scanline_bounds(clips, 1, 20.5f, left, right, &left, &right);
+    EXPECT_EQ(left, 40);
+    EXPECT_EQ(right, 120);
 }
 
 TEST_F(PaintIrParityTest, RasterSurfaceOpsMatchDirect) {

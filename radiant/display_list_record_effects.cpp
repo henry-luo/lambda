@@ -3,9 +3,9 @@
 
 static void dl_copy_effect_params(float* dst, int type, const float* params) {
     if (type && params) {
-        memcpy(dst, params, 8 * sizeof(float));
+        memcpy(dst, params, RDT_CLIP_PARAM_COUNT * sizeof(float));
     } else {
-        memset(dst, 0, 8 * sizeof(float));
+        memset(dst, 0, RDT_CLIP_PARAM_COUNT * sizeof(float));
     }
 }
 

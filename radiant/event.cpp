@@ -11,6 +11,7 @@
 #include "../lib/font/font.h"
 
 #include "../lib/log.h"
+#include "../lib/shell.h"
 #include "../lambda/runtime/side_stack.h"
 #include "../lambda/runtime/radiant_event_hook.h"
 #include "../lib/utf.h"
@@ -38,8 +39,10 @@
 #include "../lambda/dom/dom_events.h" // dom_dispatch_event + native event factories
 #include "../lambda/js/js_runtime.h"   // js_new_object / js_set_key_default / js_array_new / js_array_push
 #include "../lambda/js/js_runtime_state.hpp"
+#include "../lambda/js/js_event_loop.h"
 #include "../lambda/dom/dom_platform.h"
 #include "../lambda/dom/dom_observers.h"
+#include "../lambda/dom/dom_engine.h"
 
 // CE-3 follow-up: DataTransfer factory from js_clipboard.cpp (no public
 // header — js_clipboard installs globals through dom_set_document). We
@@ -692,6 +695,10 @@ static void tick_document_animation_tree(DomDocument* document,
         tick->active = scroll_smooth_tick_document(document, tick->now) ||
             tick->active;
         tick->ticked = true;
+    }
+    if (tick->depth > 0 || tick->tick_root) {
+        tick->ticked = dom_engine_frame_tick(document, tick->now * 1000.0) || tick->ticked;
+        tick->active = radiant_document_has_pending_frames(document) || tick->active;
     }
     if (document->view_tree && document->view_tree->root) {
         view_geometry_walk_elements(document->view_tree->root,
@@ -2029,6 +2036,68 @@ static const char* dom_selection_kind_name(const DocState* state) {
         : "range";
 }
 
+struct EventSourcePayloadSeeds : DomDocumentResourceData {
+    Map* position;
+    Map* selection;
+};
+
+static void event_source_payload_seeds_destroy(DomDocumentResourceData* data) {
+    mem_free(static_cast<EventSourcePayloadSeeds*>(data));
+}
+
+static EventSourcePayloadSeeds* event_source_payload_seeds(DomDocument* doc) {
+    for (DomDocumentResource* resource = doc->resources; resource; resource = resource->next) {
+        if (resource->destroy == event_source_payload_seeds_destroy)
+            return static_cast<EventSourcePayloadSeeds*>(resource->data);
+    }
+    EventSourcePayloadSeeds* seeds = static_cast<EventSourcePayloadSeeds*>(
+        mem_calloc(1, sizeof(EventSourcePayloadSeeds), MEM_CAT_LAYOUT));
+    if (!seeds || !dom_document_add_resource(doc, seeds, event_source_payload_seeds_destroy)) {
+        if (seeds) mem_free(seeds);
+        return nullptr;
+    }
+    // Reuse the published schema builders once; these private immutable seeds
+    // belong to Input, while every event snapshot below belongs to GC (D4.1.1v2).
+    MarkBuilder builder(doc->input);
+    SourcePosC empty = {};
+    seeds->position = source_pos_to_item(builder, &empty).map;
+    seeds->selection = source_text_selection_to_item(builder, &empty, &empty).map;
+    return seeds;
+}
+
+static Item event_source_position(DomDocument* doc, const SourcePosC* position) {
+    EventSourcePayloadSeeds* seeds = event_source_payload_seeds(doc);
+    if (!seeds) return ItemError;
+    RootFrame roots(2);
+    Rooted<Item> result(roots, fn_mutable_value({.map = seeds->position}));
+    Rooted<Array*> path(roots, array_plain());
+    if (get_type_id(result.get()) != LMD_TYPE_MAP || !path.get()) return ItemError;
+    if (position && position->path.indices) {
+        for (int index = 0; index < position->path.depth; index++)
+            array_push(path.get(), {.item = i2it(position->path.indices[index])});
+    }
+    MarkBuilder builder(doc->input);
+    map_put_heap(result.get().map, builder.createName("path"), {.array = path.get()}, doc->input);
+    map_put_heap(result.get().map, builder.createName("offset"),
+        {.item = i2it(position ? position->offset : 0)}, doc->input);
+    return result.get();
+}
+
+static Item event_source_selection(DomDocument* doc, const SourcePosC* anchor,
+                                    const SourcePosC* head) {
+    EventSourcePayloadSeeds* seeds = event_source_payload_seeds(doc);
+    if (!seeds) return ItemError;
+    RootFrame roots(3);
+    Rooted<Item> result(roots, fn_mutable_value({.map = seeds->selection}));
+    Rooted<Item> anchor_value(roots, event_source_position(doc, anchor));
+    Rooted<Item> head_value(roots, event_source_position(doc, head));
+    if (get_type_id(result.get()) != LMD_TYPE_MAP) return ItemError;
+    MarkBuilder builder(doc->input);
+    map_put_heap(result.get().map, builder.createName("anchor"), anchor_value.get(), doc->input);
+    map_put_heap(result.get().map, builder.createName("head"), head_value.get(), doc->input);
+    return result.get();
+}
+
 static Item build_dom_event_record(DomDocument* doc, View* target,
                                    const char* event_name, EventContext* evcon,
                                    const InputIntent* intent = nullptr,
@@ -2370,21 +2439,19 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             if (source_pos_from_dom_boundary(&anchor_boundary, &anchor_pos)) {
                 if (!event_uses_hit_source_pos) {
                     mb.put("source_pos",
-                           source_pos_to_item(builder, &anchor_pos));
+                           event_source_position(doc, &anchor_pos));
                 }
                 DomBoundary focus_boundary = dom_selection_focus_boundary(ds);
                 if (!dom_selection_is_collapsed(ds) && focus_boundary.node) {
                     SourcePosC head_pos;
                     if (source_pos_from_dom_boundary(&focus_boundary, &head_pos)) {
                         mb.put("source_selection",
-                               source_text_selection_to_item(
-                                   builder, &anchor_pos, &head_pos));
+                               event_source_selection(doc, &anchor_pos, &head_pos));
                         source_pos_free(&head_pos);
                     }
                 } else {
                     mb.put("source_selection",
-                           source_text_selection_to_item(
-                               builder, &anchor_pos, &anchor_pos));
+                           event_source_selection(doc, &anchor_pos, &anchor_pos));
                 }
                 source_pos_free(&anchor_pos);
             }
@@ -2396,7 +2463,8 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
     // is live; schema code never reconstructs a target from post-notification
     // selection state (D7.2.5, D7.5.3).
     if (evcon && evcon->editing_target_ranges_active) {
-        ArrayBuilder projected_ranges = builder.array();
+        RootFrame range_roots(1);
+        Rooted<Array*> projected_ranges(range_roots, array_plain());
         bool projection_complete = true;
         for (uint32_t i = 0; i < evcon->editing_target_range_count; i++) {
             SourcePosC start_pos = {};
@@ -2405,15 +2473,15 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             bool have_start = source_pos_from_dom_boundary(&range.start, &start_pos);
             bool have_end = source_pos_from_dom_boundary(&range.end, &end_pos);
             if (have_start && have_end) {
-                projected_ranges.append(source_text_selection_to_item(
-                    builder, &start_pos, &end_pos));
+                array_push(projected_ranges.get(),
+                    event_source_selection(doc, &start_pos, &end_pos));
             } else {
                 projection_complete = false;
             }
             source_pos_free(&start_pos);
             source_pos_free(&end_pos);
         }
-        mb.put("source_target_ranges", projected_ranges.final());
+        mb.put("source_target_ranges", {.array = projected_ranges.get()});
         mb.put("source_projection_status",
                projection_complete ? "complete" : "partial");
     }
@@ -2448,7 +2516,7 @@ static Item build_dom_event_record(DomDocument* doc, View* target,
             }
             SourcePosC hit_pos;
             if (hit.node && source_pos_from_dom_boundary(&hit, &hit_pos)) {
-                mb.put("source_pos", source_pos_to_item(builder, &hit_pos));
+                mb.put("source_pos", event_source_position(doc, &hit_pos));
                 source_pos_free(&hit_pos);
             }
         }
@@ -2978,11 +3046,43 @@ static AuthorTemplateCascade* author_template_cascade_current(EventContext* evco
     return cascade->evcon == evcon ? cascade : nullptr;
 }
 
+struct TemplateUiAllocationScope {
+    EvalContext* owner;
+    bool previous_ui_mode;
+    Arena* previous_arena;
+    Context* previous_input;
+
+    TemplateUiAllocationScope(EvalContext* target, bool ui_mode, Arena* arena = nullptr)
+        : owner(target), previous_ui_mode(target && target->ui_mode),
+          previous_arena(target ? target->arena : nullptr), previous_input(input_context) {
+        if (owner) {
+            owner->ui_mode = ui_mode;
+            if (ui_mode) owner->arena = arena;
+        }
+        input_context = ui_mode ? (Context*)owner : nullptr;
+    }
+    ~TemplateUiAllocationScope() {
+        if (owner) {
+            owner->ui_mode = previous_ui_mode;
+            owner->arena = previous_arena;
+        }
+        input_context = previous_input;
+    }
+};
+
 static bool settle_template_retransform(EventContext* evcon,
                                         bool* out_model_reconciled) {
     if (!render_map_has_dirty()) return false;
     RetransformResult results[16];
-    int count = render_map_retransform_with_results(results, 16);
+    int count = 0;
+    {
+        Runtime* runtime = context ? context->runtime : nullptr;
+        // only published render results need fat nodes in the retained output arena.
+        TemplateUiAllocationScope render_scope(context,
+            runtime && runtime->ui_mode && runtime->result_arena,
+            runtime ? runtime->result_arena : nullptr);
+        count = render_map_retransform_with_results(results, 16);
+    }
     bool any_changed = false;
     int reported = count <= 16 ? count : 16;
     for (int i = 0; i < reported; i++) {
@@ -3107,7 +3207,6 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
         // load; the document must not borrow that stack-owned host pointer.
         rt = context->runtime;
     }
-    Context* saved_input_context = input_context;
     if (rt && runtime_heap(rt)) {
         handler_ctx = runtime_get_eval_context(rt);
         if (!handler_ctx) return true;
@@ -3128,22 +3227,15 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
             return true;
         }
     }
-    // Phase 5: Set ui_mode + arena so retransformed body functions
-    // allocate fat DomElements/DomTexts on the result arena.
-    if (handler_ctx && rt && rt->ui_mode && rt->result_arena) {
-        handler_ctx->ui_mode = true;
-        handler_ctx->arena = rt->result_arena;
-        input_context = (Context*)handler_ctx;
-    } else {
-        // Clear input_context to prevent stale arena access
-        // during list expansion in retransformed body functions.
-        input_context = nullptr;
-    }
+    // handler temporaries are runtime values; rendering opts into arena ownership separately.
+    TemplateUiAllocationScope handler_scope(handler_ctx, false);
 
     // F17: author/UA handlers receive the in-flight host record. When no JS
     // stage created it (a Lambda-only document), create the same record shape
     // here instead of rebuilding a separate Mark map.
-    RootFrame event_roots(3);
+    RootFrame event_roots(4);
+    // behavior models are GC wrappers; event construction can collect before handler entry.
+    Rooted<Item> model_root(event_roots, model_item);
     Rooted<Item> event_root(event_roots,
         build_dom_event_record(doc, target, event_name, evcon, intent,
             event_context_dom_event(evcon, event_name)));
@@ -3156,7 +3248,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     EmitHandlerContext emit_ctx;
     emit_ctx.doc = doc;
     emit_ctx.target = target;
-    emit_ctx.model_item = model_item;
+    emit_ctx.model_item = model_root.get();
     emit_ctx.template_ref = template_ref;
     emit_ctx.evcon = evcon;
     emit_ctx.has_nested_model_selection = false;
@@ -3168,7 +3260,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     uint64_t mutation_epoch = edit_bridge_mutation_epoch();
 
     // invoke handler: Item handler(Item model, Item event)
-    result_root.set(template_call_event_handler(h, model_item, event_item));
+    result_root.set(template_call_event_handler(h, model_root.get(), event_item));
     Item verdict = result_root.get();
     bool declined = handler_verdict_is(verdict, "pass");
     if (evcon && handler_verdict_is(verdict, "prevent-default")) {
@@ -3185,7 +3277,7 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
     // writes advance this epoch and need this explicit invalidation.
     if (tmpl->is_edit &&
         edit_bridge_mutation_epoch() != mutation_epoch) {
-        render_map_mark_dirty(model_item, template_ref);
+        render_map_mark_dirty(model_root.get(), template_ref);
     }
 
     AuthorTemplateCascade* cascade = author_template_cascade_current(evcon);
@@ -3223,9 +3315,6 @@ static bool invoke_template_handler(EventContext* evcon, View* target,
             log_debug("dispatch_lambda_handler: nested model selection did not resolve");
         }
     }
-
-    // input construction is call-scoped; the eval owner is thread-scoped.
-    input_context = saved_input_context;
 
     // a declining handler leaves the event unclaimed so dispatch keeps looking
     if (out_result) *out_result = result_root.get();
@@ -6200,6 +6289,38 @@ static void dom_js_mutation_reset_records(DomDocument* doc) {
 static bool dom_js_document_has_structural_css_dependency(DomDocument* doc);
 static bool dom_js_document_has_broad_structural_css_dependency(DomDocument* doc);
 
+struct FrameCommitProfile {
+    double cascade_ms, layout_ms, repaint_ms;
+    uint32_t mutations, commits;
+    DomDocument* document;
+    size_t dom_before_commit;
+    int64_t commit_dom_growth;
+    int64_t cascade_dom_growth;
+};
+static thread_local FrameCommitProfile* active_frame_profile;
+
+static void frame_profile_cascade_finished(DomDocument* doc) {
+    if (!active_frame_profile) return;
+    size_t live = 0;
+    pool_get_mem_stats(doc->document_pool, nullptr, &live, nullptr);
+    active_frame_profile->cascade_dom_growth += (int64_t)live -
+        (int64_t)active_frame_profile->dom_before_commit;
+}
+
+static void frame_profile_record_commit(uint64_t t0, uint64_t t1,
+                                         uint64_t t2, uint64_t t3, int mutations) {
+    if (!active_frame_profile) return;
+    active_frame_profile->cascade_ms += time_elapsed_ms_f(t0, t1);
+    active_frame_profile->layout_ms += time_elapsed_ms_f(t1, t2);
+    active_frame_profile->repaint_ms += time_elapsed_ms_f(t2, t3);
+    active_frame_profile->mutations += mutations;
+    active_frame_profile->commits++;
+    size_t live = 0;
+    pool_get_mem_stats(active_frame_profile->document->document_pool, nullptr, &live, nullptr);
+    active_frame_profile->commit_dom_growth += (int64_t)live -
+        (int64_t)active_frame_profile->dom_before_commit;
+}
+
 static void dom_js_mutation_log_records(DomDocument* doc) {
 #ifndef NDEBUG
     if (!doc) return;
@@ -6955,11 +7076,9 @@ bool radiant_apply_load_mutation_cascade(DomDocument* doc,
     }
 
     Pool* pool = doc->document_pool;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
-    if (!matcher) {
-        if (fallback_reason) *fallback_reason = "matcher-allocation";
-        return false;
-    }
+    SelectorMatcher matcher_storage;
+    selector_matcher_init(&matcher_storage, pool);
+    SelectorMatcher* matcher = &matcher_storage;
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
@@ -7022,11 +7141,13 @@ static DomElement* dom_js_table_layout_root(DomNode* node) {
     return fixup_parent ? fixup_parent : flow_parent;
 }
 
-static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
+static bool dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
                                                  SelectorMatcher* matcher) {
-    if (!doc || !doc->view_tree) return;
+    if (!doc || !doc->view_tree) return false;
 
-    DomElement* roots[DOM_JS_MUTATION_RECORD_CAP] = {};
+    DomElement** roots = static_cast<DomElement**>(mem_alloc(
+        sizeof(DomElement*) * doc->js.mutation_record_count, MEM_CAT_LAYOUT));
+    if (!roots) return false;
     int root_count = 0;
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
@@ -7065,9 +7186,7 @@ static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
             // target would measure descendants against the reset parent font.
             dom_js_recascade_subtree(doc, table_root,
                                      DOM_JS_MUTATION_ATTRIBUTE, matcher);
-            if (root_count < DOM_JS_MUTATION_RECORD_CAP) {
-                roots[root_count++] = table_root;
-            }
+            roots[root_count++] = table_root;
             continue;
         }
 
@@ -7098,6 +7217,8 @@ static void dom_js_reset_mutated_layout_subtrees(DomDocument* doc,
         view_pool_reset_retained_subtree(
             doc->view_tree, static_cast<DomNode*>(roots[i]));
     }
+    mem_free(roots);
+    return true;
 }
 
 typedef struct DomJsDirtyBound {
@@ -7241,7 +7362,9 @@ static bool post_html_handler_incremental_rebuild(
     if (fallback_reason_out) *fallback_reason_out = "eligible";
 
     Pool* pool = doc->document_pool;
-    SelectorMatcher* matcher = selector_matcher_create(pool);
+    SelectorMatcher matcher_storage;
+    selector_matcher_init(&matcher_storage, pool);
+    SelectorMatcher* matcher = &matcher_storage;
     state_configure_selector_matcher((DocState*)doc->state, matcher);
 
     DomNode* repaint_roots[DOM_JS_MUTATION_RECORD_CAP] = {};
@@ -7257,7 +7380,10 @@ static bool post_html_handler_incremental_rebuild(
         }
     }
 
-    dom_js_reset_mutated_layout_subtrees(doc, matcher);
+    if (!dom_js_reset_mutated_layout_subtrees(doc, matcher)) {
+        if (fallback_reason_out) *fallback_reason_out = "reset-root-allocation";
+        return false;
+    }
 
     for (int i = 0; i < doc->js.mutation_record_count; i++) {
         DomJsMutationRecord* record = &doc->js.mutation_records[i];
@@ -7271,6 +7397,7 @@ static bool post_html_handler_incremental_rebuild(
     }
 
     uint64_t t1 = time_now_ns();
+    frame_profile_cascade_finished(doc);
 
     DocState* state = (DocState*)doc->state;
     if (state) doc_state_close_context_menu(state);
@@ -7326,6 +7453,7 @@ static bool post_html_handler_incremental_rebuild(
     to_repaint();
 
     uint64_t t3 = time_now_ns();
+    frame_profile_record_commit(t0, t1, t2, t3, mutations);
     log_info("[TIMING] html handler rebuild: mode=incremental cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
              "total=%.2fms (mutations=%d records=%d repaint=%s dirty_rects=%d repaint_reason=%s)",
              time_elapsed_ms_f(t0, t1),
@@ -7360,6 +7488,8 @@ static void post_html_handler_rebuild(EventContext* evcon,
     }
 
     uint64_t t0 = time_now_ns();
+    if (active_frame_profile) pool_get_mem_stats(doc->document_pool, nullptr,
+        &active_frame_profile->dom_before_commit, nullptr);
     dom_js_mutation_log_records(doc);
     // CSSOM needs a connected <style>'s sheet during this same script turn;
     // deferring text-tree changes until load completion loses dynamic keyframes.
@@ -7386,7 +7516,9 @@ static void post_html_handler_rebuild(EventContext* evcon,
     // keep stale winning CSS declarations in specified_style.
     view_geometry_walk_dom_tree(static_cast<DomNode*>(doc->root),
                                 clear_cascaded_styles_visitor, nullptr);
-    SelectorMatcher* matcher = selector_matcher_create(pool);
+    SelectorMatcher matcher_storage;
+    selector_matcher_init(&matcher_storage, pool);
+    SelectorMatcher* matcher = &matcher_storage;
     if (matcher) {
         state_configure_selector_matcher((DocState*)doc->state, matcher);
         radiant_apply_css_stylesheets_to_tree(
@@ -7394,6 +7526,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
     }
 
     uint64_t t1 = time_now_ns();
+    frame_profile_cascade_finished(doc);
 
     DocState* state = (DocState*)doc->state;
 
@@ -7430,6 +7563,7 @@ static void post_html_handler_rebuild(EventContext* evcon,
 
     uint64_t t3 = time_now_ns();
 
+    frame_profile_record_commit(t0, t1, t2, t3, mutations);
     log_info("[TIMING] html handler rebuild: mode=retained_full_layout cascade=%.2fms layout=%.2fms repaint_req=%.2fms "
              "total=%.2fms (mutations=%d)",
              time_elapsed_ms_f(t0, t1),
@@ -7471,6 +7605,18 @@ typedef struct {
     bool         active;
 } JsCtxScope;
 
+bool radiant_bind_document_script_host(UiContext* uicon, DomDocument* doc) {
+    if (!doc || !context || !js_runtime_state_init(context)) return false;
+    // Lambda-only handlers share the same timing support, without claiming a JS realm.
+    if (doc->js.virtual_clock_enabled && !js_event_loop_virtual_clock_enabled()) {
+        js_event_loop_set_virtual_clock(true, doc->js.virtual_clock_ms);
+    }
+    dom_set_host_driven_loop(doc->js.host_driven_loop);
+    dom_set_ui_context(uicon);
+    dom_set_document(doc);
+    return true;
+}
+
 // Retained JS handlers enter the document's runtime context before allocating
 // event values or invoking a generated context-ABI function.
 static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
@@ -7492,9 +7638,10 @@ static bool radiant_js_ctx_enter(JsCtxScope* s, EventContext* evcon) {
     }
     input_context = nullptr;
     // timing support must use the viewer clock, not the static headless drain.
-    dom_set_host_driven_loop(s->doc->js.host_driven_loop);
-    dom_set_ui_context(evcon->ui_context);
-    dom_set_document(s->doc);
+    if (!radiant_bind_document_script_host(evcon->ui_context, s->doc)) {
+        input_context = s->saved_input_ctx;
+        return false;
+    }
     // A queued callback may change the DOM immediately before dispatching a
     // custom event. Its records belong to that callback turn and must survive
     // until the nested dispatch scope reconciles them.
@@ -7964,6 +8111,16 @@ void radiant_dispatch_window_event(UiContext* uicon, DomDocument* doc, const cha
     EventContext evcon = {};
     evcon.ui_context = uicon;
     evcon.target_document = doc;
+    // Lambda documents receive window notifications through their body template.
+    if (!dom_document_has_js_realm(doc)) {
+        evcon.target = radiant_document_body_element(doc);
+        JsCtxScope scope = {};
+        if (!evcon.target || !radiant_js_ctx_enter(&scope, &evcon)) return;
+        uint64_t started = time_now_ns();
+        dispatch_lambda_handler(&evcon, evcon.target, type, nullptr, nullptr, false);
+        radiant_js_ctx_exit(&scope, &evcon, started);
+        return;
+    }
     JsDispatchScope dispatch_scope(&evcon);
     if (!dispatch_scope.active) return;
     // Native window notifications use the canonical global EventTarget, which
@@ -9968,6 +10125,182 @@ extern "C" Item radiant_dispatch_synthetic_dom_event(Item target_item,
     return result;
 }
 
+struct RadiantFrameRequest {
+    DomNodeRef owner;
+    uint64_t token;
+    StrBuf* name;
+    bool pending;
+    bool delivering;
+    RadiantFrameRequest* next;
+};
+
+struct RadiantFrameQueue : DomDocumentResourceData {
+    RadiantFrameRequest* requests;
+    RadiantFrameRequest* tail;
+    uint64_t next_token;
+    uint32_t slot_count;
+    bool profile;
+};
+
+static void frame_queue_destroy(DomDocumentResourceData* data) {
+    RadiantFrameQueue* queue = static_cast<RadiantFrameQueue*>(data);
+    RadiantFrameRequest* request = queue->requests;
+    while (request) {
+        RadiantFrameRequest* next = request->next;
+        strbuf_free(request->name);
+        mem_free(request);
+        request = next;
+    }
+    mem_free(queue);
+}
+
+static RadiantFrameQueue* frame_queue_for_document(DomDocument* doc, bool create) {
+    if (!doc) return nullptr;
+    for (DomDocumentResource* resource = doc->resources; resource; resource = resource->next) {
+        if (resource->destroy == frame_queue_destroy) {
+            return static_cast<RadiantFrameQueue*>(resource->data);
+        }
+    }
+    if (!create) return nullptr;
+    RadiantFrameQueue* queue = static_cast<RadiantFrameQueue*>(
+        mem_calloc(1, sizeof(RadiantFrameQueue), MEM_CAT_LAYOUT));
+    if (!queue || !dom_document_add_resource(doc, queue, frame_queue_destroy)) {
+        if (queue) mem_free(queue);
+        return nullptr;
+    }
+    const char* profile = shell_getenv("RADIANT_FRAME_PROFILE");
+    queue->profile = profile && strcmp(profile, "1") == 0;
+    return queue;
+}
+
+extern "C" uint64_t dom_engine_frame_request(void* owner, const char* event_name) {
+    DomElement* elem = static_cast<DomElement*>(owner);
+    if (!elem || !elem->doc || !event_name || !*event_name || !dom_is_connected(elem)) return 0;
+    RadiantFrameQueue* queue = frame_queue_for_document(elem->doc, true);
+    // tokens fit the packed Lambda int; zero always denotes a refused request
+    if (!queue || queue->next_token >= 0x7FFFFFFFFFFFULL) return 0;
+    RadiantFrameRequest** slot = &queue->requests;
+    RadiantFrameRequest* previous = nullptr;
+    while (*slot && ((*slot)->pending || (*slot)->delivering)) {
+        previous = *slot;
+        slot = &(*slot)->next;
+    }
+    RadiantFrameRequest* request = *slot;
+    if (!request) {
+        request = static_cast<RadiantFrameRequest*>(
+            mem_calloc(1, sizeof(RadiantFrameRequest), MEM_CAT_LAYOUT));
+        if (!request) return 0;
+        request->name = strbuf_new();
+        if (!request->name) { mem_free(request); return 0; }
+        queue->slot_count++;
+    } else {
+        *slot = request->next;
+        if (queue->tail == request) queue->tail = previous;
+    }
+    // Reused slots join the tail, preserving registration order and cross-cancellation.
+    request->next = nullptr;
+    if (queue->tail) queue->tail->next = request;
+    else queue->requests = request;
+    queue->tail = request;
+    strbuf_reset(request->name);
+    strbuf_append_str(request->name, event_name);
+    request->owner = dom_node_ref(elem);
+    request->token = ++queue->next_token;
+    request->pending = true;
+    return request->token;
+}
+
+extern "C" bool dom_engine_frame_cancel(void* owner, uint64_t token) {
+    DomElement* elem = static_cast<DomElement*>(owner);
+    RadiantFrameQueue* queue = elem ? frame_queue_for_document(elem->doc, false) : nullptr;
+    if (!queue || !token) return false;
+    DomNodeRef ref = dom_node_ref(elem);
+    for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
+        if (request->pending && request->token == token && request->owner.address == ref.address &&
+            request->owner.expected_id == ref.expected_id) {
+            request->pending = false;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool radiant_document_has_pending_frames(DomDocument* doc) {
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    if (!queue) return false;
+    for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
+        if (!request->pending) continue;
+        if (!dom_node_ref_validate(doc, request->owner) || !dom_is_connected(request->owner.address)) {
+            request->pending = false;
+        } else return true;
+    }
+    return false;
+}
+
+extern "C" bool dom_engine_frame_tick(DomDocument* doc, double timestamp_ms) {
+    RadiantFrameQueue* queue = frame_queue_for_document(doc, false);
+    if (!queue || !radiant_document_has_pending_frames(doc)) return false;
+    // requests made by a callback belong to the next frame, including reused slots
+    uint64_t watermark = queue->next_token;
+    EventContext evcon = {};
+    evcon.target_document = doc;
+    evcon.ui_context = static_cast<UiContext*>(doc->js.host_ui_context);
+    JsCtxScope scope = {};
+    if (!radiant_js_ctx_enter(&scope, &evcon)) return false;
+    uint64_t started = time_now_ns();
+    FrameCommitProfile profile = {};
+    profile.document = doc;
+    FrameCommitProfile* previous_profile = active_frame_profile;
+    if (queue->profile) active_frame_profile = &profile;
+    RootFrame roots(2);
+    Rooted<Item> target_root(roots, ItemNull);
+    Rooted<Item> event_root(roots, ItemNull);
+    bool delivered = false;
+    uint32_t delivered_count = 0;
+    uint32_t layout_before = doc->view_tree ? doc->view_tree->layout_generation : 0;
+    for (RadiantFrameRequest* request = queue->requests; request; request = request->next) {
+        if (!request->pending || request->token > watermark) continue;
+        request->pending = false;
+        if (!dom_node_ref_validate(doc, request->owner) || !dom_is_connected(request->owner.address)) continue;
+        request->delivering = true;
+        target_root.set(dom_wrap_element(request->owner.address));
+        event_root.set(js_create_custom_event_init(request->name->str, false, false, false,
+            (Item){.item = i2it((int64_t)request->token)}));
+        js_event_set_timestamp(event_root.get(), js_performance_monotonic_to_relative(timestamp_ms));
+        radiant_dispatch_synthetic_dom_event(target_root.get(), event_root.get());
+        request->delivering = false;
+        delivered = true;
+        delivered_count++;
+    }
+    radiant_js_ctx_exit(&scope, &evcon, started);
+    active_frame_profile = previous_profile;
+    if (queue->profile) {
+        size_t dom_live = 0, view_live = 0;
+        pool_get_mem_stats(doc->document_pool, nullptr, &dom_live, nullptr);
+        if (doc->view_tree) pool_get_mem_stats(doc->view_tree->prop_pool, nullptr, &view_live, nullptr);
+        double total_ms = time_elapsed_ms_f(started, time_now_ns());
+        StyleEpochStats style_stats = {};
+        style_epoch_get_stats(doc, &style_stats);
+        // Synthetic dispatch reconciles inside its own scope; profile that nested commit too.
+        log_notice("[FRAME_PROFILE] timestamp_ms=%.3f total_ms=%.3f script_host_ms=%.3f "
+            "cascade_ms=%.3f layout_ms=%.3f repaint_request_ms=%.3f events=%u "
+            "mutations=%u commits=%u slots=%u layout_before=%u layout_after=%u dom_bytes=%zu view_bytes=%zu "
+            "input_arena_bytes=%zu node_arena_bytes=%zu commit_dom_growth=%lld cascade_dom_growth=%lld "
+            "journal_capacity=%d style_entries=%llu style_cold_bytes=%zu style_live_bytes=%zu style_evictions=%llu",
+            timestamp_ms, total_ms, total_ms - profile.cascade_ms - profile.layout_ms - profile.repaint_ms,
+            profile.cascade_ms, profile.layout_ms, profile.repaint_ms,
+            delivered_count, profile.mutations, profile.commits, queue->slot_count,
+            layout_before, doc->view_tree ? doc->view_tree->layout_generation : 0, dom_live, view_live,
+            doc->input && doc->input->arena ? arena_total_used(doc->input->arena) : 0,
+            doc->node_arena ? arena_total_used(doc->node_arena) : 0,
+            (long long)profile.commit_dom_growth, (long long)profile.cascade_dom_growth,
+            doc->js.mutation_record_capacity, (unsigned long long)style_stats.canonical_entry_count,
+            style_stats.current_unbound_bytes, style_stats.current_live_bytes,
+            (unsigned long long)style_stats.cache_eviction_count);
+    }
+    return delivered;
+}
+
 static bool click_target_is_disabled_control(DocState* state, View* target) {
     for (View* current = target; current; current = current->parent) {
         if (!current->is_element()) continue;
@@ -11670,17 +12003,7 @@ struct EventDocumentScope {
         } else if (!eval_context_init(owner)) {
             return;
         }
-        // Lambda templates initialize a JS support capsule for Jube helpers,
-        // but it is not a DOM script realm. Publish the retained JavaScript
-        // runtime only when the script runner actually established a realm; the
-        // shared runtime must still be the one JS bound to.
-        bool has_document_js_runtime = dom_document_has_js_realm(doc) &&
-            runtime == doc->js.runtime;
-        if (has_document_js_runtime) {
-            if (!js_runtime_state_init(owner)) return;
-            dom_set_ui_context(uicon);
-            dom_set_document(doc);
-        }
+        if (!radiant_bind_document_script_host(uicon, doc)) return;
         s_event_scope_depth++;
         active = true;
     }
@@ -11698,12 +12021,7 @@ struct EventDocumentScope {
         if (context != owner && !radiant_eval_context_switch(owner)) return;
         // D5.4.1: iframe hit testing is the quiescent ownership boundary;
         // following handlers use the evaluator that owns the target document.
-        if (dom_document_has_js_realm(target_doc) &&
-                !js_runtime_state_init(owner)) return;
-        if (dom_document_has_js_realm(target_doc)) {
-            dom_set_ui_context(evcon->ui_context);
-            dom_set_document(target_doc);
-        }
+        if (!radiant_bind_document_script_host(evcon->ui_context, target_doc)) return;
     }
 
     ~EventDocumentScope() {

@@ -1786,6 +1786,13 @@ bool css_property_validate_value_mode(CssPropertyCode id,
         return true;
     }
     switch (id) {
+        case CSS_PROPERTY_OPACITY: {
+            // Reject identifiers before a used-value reader interprets the
+            // numeric union; opacity accepts number/percentage syntax.
+            if (css_value_is_global_keyword(value) || css_value_contains_var_reference(value)) return true;
+            CssMathType type = css_math_value_type(value);
+            return type == CSS_MATH_NUMBER || type == CSS_MATH_PERCENT || type == CSS_MATH_DEFERRED;
+        }
         case CSS_PROPERTY_BREAK_BEFORE:
         case CSS_PROPERTY_BREAK_AFTER:
         case CSS_PROPERTY_BREAK_INSIDE:

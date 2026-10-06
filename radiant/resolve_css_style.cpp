@@ -5462,7 +5462,6 @@ static void resolve_scroll_snap(DomElement* element, LayoutContext* lycon) {
     }
 }
 
-static CssEnum logical_inline_direction(DomElement* element);
 
 static void resolve_scroll_spacing(DomElement* element, LayoutContext* lycon,
                                    bool padding) {
@@ -8338,7 +8337,7 @@ static CssEnum css_parse_webkit_text_align(const CssValue* value) {
     return CSS_VALUE__UNDEF;
 }
 
-static CssEnum logical_inline_direction(DomElement* element) {
+CssEnum logical_inline_direction(DomElement* element) {
     for (DomElement* parent = dom_parent_element(element); parent;
          parent = dom_parent_element(parent)) {
         CssEnum specified = layout_specified_keyword(
@@ -9046,6 +9045,9 @@ void resolve_css_property(CssPropertyCode prop_id, const CssDeclaration* decl, L
             break;
         }
         case CSS_PROPERTY_TRANSFORM: {
+            // retained resolution replaces the previous private chain without resetting its prop block
+            view_release_transform_functions(current_element, lycon->selected_view_tree
+                ? lycon->selected_view_tree : (lycon->doc ? lycon->doc->view_tree : nullptr));
             if (value->type == CSS_VALUE_TYPE_KEYWORD && value->data.keyword == CSS_VALUE_NONE) {
                 // transform:none clears only its list; independent transforms and origin still apply.
                 if (span->transform) span->transform->functions = nullptr;

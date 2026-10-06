@@ -1,0 +1,133 @@
+{
+  "name": "Transient CSS preserves authored attributes, SVG paint and cascade precedence",
+  "html": "test/ui/presentation_style.ls",
+  "viewport": {
+    "width": 400,
+    "height": 300
+  },
+  "events": [
+    {
+      "type": "click",
+      "target": {
+        "selector": "#apply"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#channel"
+      },
+      "attribute": "data-accepted",
+      "equals": "true"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#channel"
+      },
+      "attribute": "data-authored-opacity",
+      "equals": "0.2"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#box"
+      },
+      "attribute": "style",
+      "equals": "width:100px;height:60px;background:red;opacity:0.2;"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#paint"
+      },
+      "attribute": "fill",
+      "equals": "#0000ff"
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "0.8"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#paint-region"
+      },
+      "min_r": 247,
+      "max_g": 8,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#recascade"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "0.6"
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#channel"
+      },
+      "attribute": "data-authored-opacity",
+      "equals": "0.2"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#paint-region"
+      },
+      "min_r": 247,
+      "max_g": 8,
+      "max_b": 8
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#recascade"
+      }
+    },
+    {
+      "type": "assert_attribute",
+      "target": {
+        "selector": "#channel"
+      },
+      "attribute": "data-authored-opacity",
+      "equals": "0.2"
+    },
+    {
+      "type": "click",
+      "target": {
+        "selector": "#clear"
+      }
+    },
+    {
+      "type": "assert_style",
+      "target": {
+        "selector": "#box"
+      },
+      "property": "opacity",
+      "equals": "0.2"
+    },
+    {
+      "type": "assert_pixel",
+      "target": {
+        "selector": "#paint-region"
+      },
+      "max_r": 8,
+      "max_g": 8,
+      "min_b": 247
+    }
+  ]
+}

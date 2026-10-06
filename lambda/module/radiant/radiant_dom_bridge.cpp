@@ -16,6 +16,7 @@
 #include "../../dom/dom_core.h"
 #include "../../js/js_runtime.h"
 #include "../../runtime/heap_api.h"
+#include "../../runtime/gc/gc_heap.h"
 #include "../../runtime/render_map.h"
 #include "../../runtime/transpiler.hpp"
 #include "../../../radiant/view.hpp"
@@ -41,6 +42,30 @@ extern "C" bool vmap_backing_has(VMap* vm, Item key);
 extern "C" bool vmap_backing_set(VMap* vm, Item key, Item value);
 extern Item js_make_number(double value);
 extern __thread EvalContext* context;
+
+extern "C" void* dom_retain_backing_root(DomDocument* doc, Item* root, void* owner) {
+    gc_heap_t* gc = static_cast<gc_heap_t*>(owner);
+    if (!gc) {
+        Runtime* runtime = dom_document_script_runtime(doc);
+        Heap* heap = runtime ? runtime_heap(runtime) : (::context ? ::context->heap : nullptr);
+        gc = heap ? heap->gc : nullptr;
+    }
+    if (!gc || !root) return nullptr;
+    void* source = nullptr;
+    if (get_type_id(*root) == LMD_TYPE_ELEMENT) source = root->element;
+    else if (get_type_id(*root) == LMD_TYPE_STRING) source = root->get_string();
+    if (!source || !gc_is_managed(gc, source)) return nullptr;
+    // registry slots are stable until retirement or document/runtime teardown.
+    if (!gc_try_register_root(gc, &root->item)) {
+        log_error("DOM_BACKING_ROOT: failed to retain runtime value");
+        abort();
+    }
+    return gc;
+}
+
+extern "C" void dom_release_backing_root(void* owner, Item* root) {
+    gc_unregister_root(static_cast<gc_heap_t*>(owner), &root->item);
+}
 
 RADIANT_C_API const void* radiant_dom_node_host_type(void);
 RADIANT_C_API const void* radiant_dom_html_element_host_type(void);

@@ -1,0 +1,10 @@
+{
+  "name": "Inline SVG viewport clips share translated and scaled CSS ancestor geometry",
+  "html": "test/ui/svg_transformed_viewport_clip.html",
+  "viewport": {"width": 260, "height": 230},
+  "events": [
+    {"type": "assert_pixel", "x": 140, "y": 40, "max_r": 8, "max_g": 8, "min_b": 247},
+    {"type": "assert_pixel", "x": 90, "y": 170, "min_r": 247, "max_g": 8, "max_b": 8},
+    {"type": "assert_pixel", "x": 40, "y": 40, "min_r": 247, "min_g": 247, "min_b": 247}
+  ]
+}

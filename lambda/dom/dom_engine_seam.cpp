@@ -75,3 +75,12 @@ DOM_ENGINE_WEAK bool dom_engine_image_natural_size(DomElement* e, int* w, int* h
     if (h) *h = 0;
     return false;
 }
+DOM_ENGINE_WEAK uint64_t dom_engine_frame_request(void* n, const char* e) {
+    (void)n; (void)e; return 0;
+}
+DOM_ENGINE_WEAK bool dom_engine_frame_cancel(void* n, uint64_t t) {
+    (void)n; (void)t; return false;
+}
+DOM_ENGINE_WEAK bool dom_engine_frame_tick(DomDocument* d, double t) {
+    (void)d; (void)t; return false;
+}

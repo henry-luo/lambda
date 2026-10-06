@@ -322,7 +322,7 @@ static void free_boundary_payload(DomElement* elem, ViewTree* tree) {
     view_pool_free(tree, boundary->outline);
 }
 
-static void free_transform_payload(DomElement* elem, ViewTree* tree) {
+void view_release_transform_functions(DomElement* elem, ViewTree* tree) {
     if (!elem || !elem->transform) return;
     if (elem->transform->functions_owner == TRANSFORM_FUNCTIONS_DOCUMENT_POOL) return;
     // a view-pool chain is this element's private copy (functions_owner)
@@ -332,6 +332,7 @@ static void free_transform_payload(DomElement* elem, ViewTree* tree) {
         view_pool_free_private(tree, function);
         function = next;
     }
+    elem->transform->functions = nullptr;
 }
 
 static void free_filter_chain(ViewTree* tree, FilterProp* filter) {
@@ -590,7 +591,7 @@ static const ViewPropTeardownEntry VIEW_PROP_TEARDOWN[] = {
     { "scroll", nullptr, free_scroll_payload, view_prop_get_scroller, view_prop_clear_scroller, view_prop_free_scroller, nullptr, nullptr, &SCROLL_PROP_DEFAULT, sizeof(ScrollProp), nullptr },
     { "embed", release_embed_prop_entry, free_embed_payload, view_prop_get_embed, view_prop_clear_embed, view_prop_free_embed, nullptr, nullptr, &EMBED_PROP_DEFAULT, sizeof(EmbedProp), reset_embed_prop, release_embed_prop_for_reset },
     { "position", nullptr, nullptr, view_prop_get_position, view_prop_clear_position, view_prop_free_position, nullptr, nullptr, &POSITION_PROP_DEFAULT, sizeof(PositionProp), nullptr },
-    { "transform", nullptr, free_transform_payload, view_prop_get_transform, view_prop_clear_transform, view_prop_free_transform, nullptr, nullptr, &TRANSFORM_PROP_DEFAULT, sizeof(TransformProp), nullptr },
+    { "transform", nullptr, view_release_transform_functions, view_prop_get_transform, view_prop_clear_transform, view_prop_free_transform, nullptr, nullptr, &TRANSFORM_PROP_DEFAULT, sizeof(TransformProp), nullptr },
     { "filter", nullptr, free_filter_payload, view_prop_get_filter, view_prop_clear_filter, view_prop_free_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
     { "backdrop-filter", nullptr, free_backdrop_filter_payload, view_prop_get_backdrop_filter, view_prop_clear_backdrop_filter, view_prop_free_backdrop_filter, nullptr, nullptr, &FILTER_PROP_DEFAULT, sizeof(FilterProp), nullptr },
     { "multicol", nullptr, nullptr, view_prop_get_multicol, view_prop_clear_multicol, view_prop_free_multicol, nullptr, nullptr, &MULTICOL_PROP_DEFAULT, sizeof(MultiColumnProp), nullptr },

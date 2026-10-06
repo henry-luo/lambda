@@ -14,6 +14,7 @@ extern "C" {
 #include "../lambda/input/css/css_formatter.hpp"
 #include "../lib/tagged.hpp"
 #include "../lib/mem_grow.hpp"
+#include "../lib/mem_factory.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -1525,10 +1526,44 @@ static const CssValue* css_motion_normalize_value(Pool* pool, const CssValue* va
     return output ? output : value;
 }
 
+static constexpr size_t MOTION_ANIMATION_INITIAL_COUNT =
+    CSS_PROPERTY_ANIMATION_PLAY_STATE - CSS_PROPERTY_ANIMATION_NAME + 1;
+static constexpr size_t MOTION_INITIAL_COUNT = MOTION_ANIMATION_INITIAL_COUNT +
+    CSS_PROPERTY_TRANSITION_DELAY - CSS_PROPERTY_TRANSITION_PROPERTY + 1;
+
+struct CssMotionInitialCache : DomDocumentResourceData {
+    Pool* pool;
+    const CssValue* values[MOTION_INITIAL_COUNT];
+};
+
+static void css_motion_initial_cache_destroy(DomDocumentResourceData* resource) {
+    auto* cache = static_cast<CssMotionInitialCache*>(resource);
+    if (cache->pool) mem_pool_destroy(cache->pool);
+    mem_free(cache);
+}
+
+static CssMotionInitialCache* css_motion_initial_cache(DomDocument* doc) {
+    if (!doc) return nullptr;
+    for (DomDocumentResource* resource = doc->resources; resource; resource = resource->next)
+        if (resource->destroy == css_motion_initial_cache_destroy)
+            return static_cast<CssMotionInitialCache*>(resource->data);
+    auto* cache = static_cast<CssMotionInitialCache*>(
+        mem_calloc(1, sizeof(CssMotionInitialCache), MEM_CAT_LAYOUT));
+    if (!cache) return nullptr;
+    cache->pool = mem_pool_create((MemContext*)doc->services.mem_ctx,
+        MEM_ROLE_CSS, "css.motion.initial_values");
+    if (!cache->pool || !dom_document_add_resource(doc, cache, css_motion_initial_cache_destroy)) {
+        css_motion_initial_cache_destroy(cache);
+        return nullptr;
+    }
+    return cache;
+}
+
 const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     CssPropertyCode property) {
     if (!pool || (css_animation_longhand_index(property) < 0 &&
         css_transition_longhand_index(property) < 0)) return nullptr;
+    DomDocument* doc = element ? element->doc : nullptr;
     while (element) {
         CssDeclaration* declaration = style_tree_get_declaration(element->specified_style, property);
         const CssValue* value = declaration
@@ -1552,9 +1587,19 @@ const CssValue* css_motion_computed_value(Pool* pool, DomElement* element,
     }
     const CssProperty* metadata = css_property_get_by_code(property);
     if (!metadata) return nullptr;
+    // Initial metadata is immutable. Re-parsing it into retained view storage on
+    // every restyle otherwise accumulates four default transition graphs per element.
+    CssMotionInitialCache* cache = css_motion_initial_cache(doc);
+    size_t index = css_animation_longhand_index(property) >= 0
+        ? (size_t)css_animation_longhand_index(property)
+        : MOTION_ANIMATION_INITIAL_COUNT + (size_t)css_transition_longhand_index(property);
+    if (cache && cache->values[index]) return cache->values[index];
+    Pool* initial_pool = cache ? cache->pool : pool;
     CssDeclaration* initial = css_parse_property_declaration(metadata->name, strlen(metadata->name),
-        metadata->initial_value, strlen(metadata->initial_value), pool);
-    return initial ? initial->value : nullptr;
+        metadata->initial_value, strlen(metadata->initial_value), initial_pool);
+    const CssValue* value = initial ? initial->value : nullptr;
+    if (cache) cache->values[index] = value;
+    return value;
 }
 
 static bool css_animation_apply_keyword(const CssValue* value,

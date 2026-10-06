@@ -455,14 +455,13 @@ DOM_OP(DERIVED, click,           event, 1, "pn(n: any) -> bool", DOM_NO_BODY, DO
 // Each of these was a `->dom` slot with no row. The row's body is literally the
 // slot's function, so the module crossing here is a spelling change, not a
 // second implementation; the bridges answer `undefined` and the publication
-// boundary renders that as null for Lambda. None carries DOM_F_NEUTRAL: they
-// need a realm (CSSOM objects, the document wrapper), so they are catalog
-// operations the module reaches, not `dom.*` functions a script calls.
+// boundary renders that as null for Lambda. Neutral rows below use native
+// document ownership; the remaining bridges still require a JS realm.
 // ---------------------------------------------------------------------------
 DOM_OP(CORE, adopt_node, node, 1, "pn(n: any) -> any", dom_adopt_node_bridge, DOM_F_MUTATES, "", none, "", "")
 DOM_OP(CORE, style_has_property, style, 2, "fn(n: any, prop: string) -> any", dom_style_css_has, 0, "", none, "", "")
-DOM_OP(CORE, style_get_property, style, 2, "fn(n: any, prop: string) -> any", dom_get_style_property, 0, "", none, "", "")
-DOM_OP(CORE, style_set_property, style, 3, "pn(n: any, prop: string, value: any) -> any", dom_set_style_property, DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, style_get_property, style, 2, "fn(n: any, prop: string) -> any", dom_get_style_property, DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, style_set_property, style, 3, "pn(n: any, prop: string, value: any) -> any", dom_set_style_property, DOM_F_MUTATES | DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_has_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_decl_css_has, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_get_property, style, 2, "fn(d: any, prop: string) -> any", dom_cssom_rule_decl_get_property, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_style_set_property, style, 3, "pn(d: any, prop: string, value: any) -> any", dom_cssom_rule_decl_set_property, DOM_F_MUTATES | DOM_F_NEUTRAL, "", none, "", "")
@@ -699,6 +698,15 @@ DOM_OP(CORE, rule_get_property_syntax, style, 1, "fn(rule: any) -> any", dom_css
 DOM_OP(CORE, rule_get_property_inherits, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_inherits, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, rule_get_property_initial_value, style, 1, "fn(rule: any) -> any", dom_cssom_rule_get_property_initial_value, DOM_F_NEUTRAL, "", none, "", "")
 DOM_OP(CORE, css_register_property, style, 1, "pn(definition: map) -> null", dom_core_css_register_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+
+// named frame delivery is shared host mechanism; animation policy stays in packages
+DOM_OP(CORE, request_frame, timing, 2, "pn(n: any, event_name: string) -> int", dom_engine_request_frame, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, cancel_frame, timing, 2, "pn(n: any, token: int) -> bool", dom_engine_cancel_frame, DOM_F_ENGINE | DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_RAW(frame_request_native, timing, uint64_t, (void* owner, const char* event_name), dom_engine_frame_request, DOM_F_NATIVE)
+DOM_RAW(frame_cancel_native, timing, bool, (void* owner, uint64_t token), dom_engine_frame_cancel, DOM_F_NATIVE)
+DOM_OP(CORE, viewport_size, geometry, 1, "fn(n: any) -> map|null", dom_engine_viewport_size, DOM_F_ENGINE | DOM_F_NEUTRAL, "", none, "", "")
+DOM_OP(CORE, presentation_style_set_property, style, 3, "pn(n: any, prop: string, value: string) -> bool", dom_presentation_style_set_property, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
+DOM_OP(CORE, presentation_style_clear, style, 1, "pn(n: any) -> bool", dom_presentation_style_clear, DOM_F_NEUTRAL | DOM_F_MUTATES, "", none, "", "")
 
 #ifdef DOM_API_DEF_CLEAR_OP
 #undef DOM_OP

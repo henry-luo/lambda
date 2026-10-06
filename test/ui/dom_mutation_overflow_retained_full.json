@@ -1,5 +1,5 @@
 {
-  "name": "DOM mutation record overflow uses retained full layout",
+  "name": "Large DOM mutation batch preserves focus and retained state",
   "html": "test/ui/dom_mutation_overflow_retained_full.html",
   "viewport": {"width": 640, "height": 420},
   "events": [
@@ -9,8 +9,8 @@
     {"type": "snapshot_state_store", "name": "focused-input", "target": {"selector": "#name"}},
     {"type": "key_press", "key": "b"},
     {"type": "assert_count", "target": {"selector": "#items .row"}, "equals": 70},
-    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "overflow mutation complete"},
-    {"type": "assert_reconcile_mode", "mode": "retained_full_layout", "reason": "record-overflow"},
+    {"type": "assert_text", "target": {"selector": "#status"}, "contains": "large mutation complete"},
+    {"type": "assert_reconcile_mode", "mode": "incremental", "reason": "eligible"},
     {"type": "assert_state_store_snapshot", "name": "focused-input", "target": {"selector": "#name"}},
     {"type": "assert_focus", "target": {"selector": "#name"}},
     {"type": "assert_state_store", "target": {"selector": "#name"}, "view_state": true, "kind": "form", "weak_ref": true}

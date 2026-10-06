@@ -1490,9 +1490,13 @@ static Item build_ui_event(const char* type, Item init, const char* class_name) 
 JS_DOM_UI_EVENT_CTOR(js_ctor_ui_event_fn, "UIEvent")
 
 extern "C" Item js_ctor_focus_event_fn(Item type_arg, Item init_arg) {
-    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_arg), init_arg, "FocusEvent"));
-    event_set_item(ev, "relatedTarget", init_item(init_arg, "relatedTarget"));
-    return ev;
+    RootFrame roots(3);
+    Rooted<Item> type_root(roots, type_arg);
+    Rooted<Item> init_root(roots, init_arg);
+    JS_ASSIGN_OR_RETURN(ev, build_ui_event(fn_to_cstr(type_root.get()), init_root.get(), "FocusEvent"));
+    Rooted<Item> event_root(roots, ev);
+    event_set_item(event_root.get(), "relatedTarget", init_item(init_root.get(), "relatedTarget"));
+    return event_root.get();
 }
 
 static Item js_ctor_mouse_event_with_class(Item type_arg, Item init_arg,
@@ -1792,9 +1796,13 @@ static Item js_create_native_event_init(bool bubbles, bool cancelable,
 
 static Item js_create_trusted_native_event(const char* type, Item init,
                                            Item (*ctor)(Item, Item)) {
-    Item event = ctor(js_name_item(type ? type : ""), init);
-    event_set_bool(event, "isTrusted", true);
-    return event;
+    // name allocation and constructor calls can collect either event carrier.
+    RootFrame roots(3);
+    Rooted<Item> init_root(roots, init);
+    Rooted<Item> type_root(roots, js_name_item(type ? type : ""));
+    Rooted<Item> event_root(roots, ctor(type_root.get(), init_root.get()));
+    event_set_bool(event_root.get(), "isTrusted", true);
+    return event_root.get();
 }
 
 extern "C" Item js_create_native_event(const char* type, bool bubbles,
@@ -1965,11 +1973,14 @@ extern "C" Item js_create_native_keyboard_event(const char* type,
 extern "C" Item js_create_native_focus_event(const char* type, Item related_target) {
     // focus/blur do NOT bubble; focusin/focusout DO. Caller decides via type.
     bool bubbles = (type && (strcmp(type, "focusin") == 0 || strcmp(type, "focusout") == 0));
-    Item init = js_create_native_event_init(bubbles, false, true);
-    if (related_target.item != 0) {
-        event_set_item(init, "relatedTarget", related_target);
+    // relatedTarget wrappers have only a weak cache until the init owns them.
+    RootFrame roots(2);
+    Rooted<Item> related_root(roots, related_target);
+    Rooted<Item> init_root(roots, js_create_native_event_init(bubbles, false, true));
+    if (related_root.get().item != 0) {
+        event_set_item(init_root.get(), "relatedTarget", related_root.get());
     }
-    return js_create_trusted_native_event(type, init, js_ctor_focus_event_fn);
+    return js_create_trusted_native_event(type, init_root.get(), js_ctor_focus_event_fn);
 }
 
 // Radiant_Design_Editable.md §13: Range-backed

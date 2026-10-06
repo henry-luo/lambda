@@ -52,6 +52,9 @@ Item dom_core_equal_node(Item a, Item b);
 Item dom_core_same_node_op(Item a, Item b);
 Item dom_core_dispatch(Item n, Item event);
 Item dom_core_dispatch_op(Item n, Item event);
+Item dom_engine_request_frame(Item n, Item event_name);
+Item dom_engine_viewport_size(Item n);
+Item dom_engine_cancel_frame(Item n, Item token);
 
 // CharacterData rows (bodies in dom.cpp, beside the dom_text_*_method calls).
 Item dom_core_replace_data(Item n, Item offset, Item count, Item data);
@@ -370,6 +373,8 @@ Item dom_adopt_node_bridge(Item);
 Item dom_style_css_has(Item, Item);
 Item dom_get_style_property(Item, Item);
 Item dom_set_style_property(Item, Item, Item);
+Item dom_presentation_style_set_property(Item, Item, Item);
+Item dom_presentation_style_clear(Item);
 Item dom_cssom_decl_css_has(Item, Item);
 Item dom_cssom_rule_decl_get_property(Item, Item);
 Item dom_cssom_rule_decl_set_property(Item, Item, Item);

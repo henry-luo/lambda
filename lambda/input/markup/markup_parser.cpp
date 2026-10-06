@@ -61,7 +61,7 @@ MarkupParser::~MarkupParser() {
     freeLines();
     // Definition strings live in the Input arena; only the index is ours.
     LinkDefinitionMap::destroy(link_defs_);
-    // html5_parser_ is pool-managed, no explicit cleanup needed
+    html5_parser_destroy(html5_parser_);
 }
 
 //------------------------------------------------------------------------------
@@ -85,6 +85,7 @@ void markup_parser_destroy(MarkupParser* parser) {
 void MarkupParser::resetState() {
     state.reset();
     current_line = 0;
+    html5_parser_destroy(html5_parser_);
     html5_parser_ = nullptr;
 }
 
