@@ -45,6 +45,7 @@ MarkupParser::MarkupParser(Input* input, const ParseConfig& cfg)
     , link_defs_(nullptr)
     , link_def_count_(0)
     , html5_parser_(nullptr)
+    , span_sink(nullptr)
 {
     // Get format adapter
     if (config.format == Format::AUTO_DETECT) {

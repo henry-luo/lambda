@@ -23,6 +23,7 @@
 #include "../../lib/str.h"
 #include "../core/utf_string.h"
 #include "re2_wrapper.hpp"
+#include "../input/markup/markup_highlight.hpp"
 #include <utf8proc.h>
 #include <mpdecimal.h>  // needed for inline decimal operations
 
@@ -5817,27 +5818,205 @@ Item fn_force(Item ref) {
 extern "C" Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
 extern "C" Input* input_from_source_with_positions(const char* source, Url* url, String* type, String* flavor);
 
+// ---------------------------------------------------------------------------
+// parse(src, {type: 'markdown', sourcepos: 'spans', window: [first, last],
+// prescan: {states, valid}}) — the source editor's highlight parse
+// (vibe/radiant/Radiant_Design_Source_Editor.md CED16v2). `src` is a string,
+// an array of lines, or the editor buffer's array of line chunks, read in
+// place. The result is [kinds, spans, states, restart]: span kinds as symbols,
+// spans as flat ints (kind index, block flag, line, col, end line, end col; 0-based
+// lines, code-point columns), and the restart state per chunk boundary as
+// flat ints (3 per boundary) for the next call's `prescan`.
+// ---------------------------------------------------------------------------
+
+struct HighlightLineSource {
+    Array* chunks = nullptr;          // array of arrays of strings
+    Array* flat = nullptr;            // array of strings
+    char* owned = nullptr;            // a string source, split in place
+    lam::ArrayList<char*> owned_lines;
+    lam::ArrayList<int64_t> starts;   // first line of each chunk
+    int64_t count = 0;
+};
+
+// Lines of a flat source are grouped as the editor buffer groups them, so the
+// restart cache has the same grain either way.
+static const int64_t HIGHLIGHT_FLAT_CHUNK = 256;
+
+static const char* highlight_string_chars(Item item, size_t* len) {
+    if (get_type_id(item) != LMD_TYPE_STRING) { *len = 0; return ""; }
+    String* str = item.get_safe_string();
+    if (!str) { *len = 0; return ""; }
+    *len = str->len;
+    return str->chars;
+}
+
+static const char* highlight_line_at(void* ctx, int64_t index, size_t* len) {
+    HighlightLineSource* src = (HighlightLineSource*)ctx;
+    *len = 0;
+    if (index < 0 || index >= src->count) return "";
+    if (src->owned) {
+        char* line = src->owned_lines[(size_t)index];
+        *len = strlen(line);
+        return line;
+    }
+    if (src->flat) return highlight_string_chars(array_get(src->flat, index), len);
+    int64_t lo = 0, hi = (int64_t)src->starts.length();
+    while (lo < hi) {
+        int64_t mid = (lo + hi) / 2;
+        if (src->starts[(size_t)mid] <= index) lo = mid + 1; else hi = mid;
+    }
+    int64_t k = lo - 1;
+    Item chunk = array_get(src->chunks, k);
+    if (get_type_id(chunk) != LMD_TYPE_ARRAY) return "";
+    return highlight_string_chars(array_get(chunk.array, index - src->starts[(size_t)k]), len);
+}
+
+static bool highlight_source_init(HighlightLineSource* src, Item item) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_STRING) {
+        size_t len = 0;
+        const char* chars = highlight_string_chars(item, &len);
+        src->owned = mem_dup_n(chars, len, MEM_CAT_INPUT_MARKUP);
+        if (!src->owned) return false;
+        char* line = src->owned;
+        for (char* p = src->owned; ; p++) {
+            if (*p == '\n' || *p == '\0') {
+                bool at_end = *p == '\0';
+                if (p > line && p[-1] == '\r') p[-1] = '\0';
+                *p = '\0';
+                src->owned_lines.push_back(line);
+                if (at_end) break;
+                line = p + 1;
+            }
+        }
+        src->count = (int64_t)src->owned_lines.length();
+    } else if (type == LMD_TYPE_ARRAY) {
+        Array* arr = item.array;
+        bool chunked = arr->length > 0 && get_type_id(array_get(arr, 0)) == LMD_TYPE_ARRAY;
+        if (chunked) {
+            src->chunks = arr;
+            for (int64_t k = 0; k < arr->length; k++) {
+                Item chunk = array_get(arr, k);
+                if (get_type_id(chunk) != LMD_TYPE_ARRAY) return false;
+                src->starts.push_back(src->count);
+                src->count += chunk.array->length;
+            }
+            return src->count > 0;
+        }
+        src->flat = arr;
+        src->count = arr->length;
+    } else {
+        return false;
+    }
+    for (int64_t start = 0; start < src->count; start += HIGHLIGHT_FLAT_CHUNK) src->starts.push_back(start);
+    return src->count > 0;
+}
+
+static int64_t highlight_int(Item item, int64_t fallback) {
+    TypeId type = get_type_id(item);
+    if (type == LMD_TYPE_INT || type == LMD_TYPE_INT64) return it2l(item);
+    return fallback;
+}
+
+// An int list may be a plain array or a numeric one (`[lo, hi]` literals and
+// arithmetic results are ARRAY_NUM); read both through the generic accessors.
+static bool highlight_is_list(Item item) {
+    TypeId type = get_type_id(item);
+    return type == LMD_TYPE_ARRAY || type == LMD_TYPE_ARRAY_NUM;
+}
+
+static int64_t highlight_list_int(Item list, int64_t index) {
+    return highlight_int(fn_index(list, {.item = i2it(index)}), 0);
+}
+
+static Item highlight_map_field(Item map_item, const char* key) {
+    if (get_type_id(map_item) != LMD_TYPE_MAP) return ItemNull;
+    bool found = false;
+    Item value = _map_get((TypeMap*)map_item.map->type, map_item.map->data, key, &found);
+    return found ? value : ItemNull;
+}
+
+static Item fn_parse_highlight_spans(Item src_item, Item window_item, Item prescan_item) {
+    using namespace lambda::markup;
+    HighlightLineSource source;
+    if (!highlight_source_init(&source, src_item)) {
+        if (source.owned) mem_free(source.owned);
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "parse: sourcepos 'spans' needs a non-empty string, line array or chunk array");
+        return ItemError;
+    }
+    int64_t first = 0, last = source.count - 1;
+    if (highlight_is_list(window_item) && fn_len(window_item) == 2) {
+        first = highlight_list_int(window_item, 0);
+        last = highlight_list_int(window_item, 1);
+    }
+    lam::ArrayList<RestartState> cache;
+    int64_t valid = 0;
+    Item states_item = highlight_map_field(prescan_item, "states");
+    if (highlight_is_list(states_item)) {
+        int64_t n = fn_len(states_item);
+        for (int64_t i = 0; i + 2 < n; i += 3) {
+            cache.push_back(RestartState{(int32_t)highlight_list_int(states_item, i),      // INT_CAST_OK: state codes
+                                         (int32_t)highlight_list_int(states_item, i + 1),  // INT_CAST_OK: fence char
+                                         (int32_t)highlight_list_int(states_item, i + 2)}); // INT_CAST_OK: fence length
+        }
+        valid = highlight_int(highlight_map_field(prescan_item, "valid"), (int64_t)cache.length());
+    }
+
+    HighlightLines lines = {&source, highlight_line_at, source.count,
+                            source.starts.data(), (int64_t)source.starts.length()};
+    HighlightResult hl;
+    bool ok = markdown_highlight_window(&lines, first, last, cache.data(),
+                                        (int64_t)cache.length(), valid, &hl);
+    if (source.owned) mem_free(source.owned);
+    if (!ok) {
+        set_runtime_error(ERR_OUT_OF_MEMORY, "parse: the highlight parse could not allocate");
+        return ItemError;
+    }
+
+    // Every allocation below may collect: each array is rooted, and slots are
+    // reserved before a fresh symbol is pushed so the push cannot allocate.
+    RootFrame roots(4);
+    Rooted<Array*> result(roots, array_plain());
+    Rooted<Array*> kinds(roots, array_plain());
+    Rooted<Array*> spans(roots, array_plain());
+    Rooted<Array*> states(roots, array_plain());
+    for (size_t i = 0; i < hl.kinds.length(); i++) {
+        if (!array_reserve_append_slots(kinds.get(), 1)) return ItemError;
+        Symbol* sym = heap_create_symbol(hl.kinds[i].name, strlen(hl.kinds[i].name));
+        array_push(kinds.get(), {.item = y2it(sym)});
+    }
+    for (size_t i = 0; i < hl.spans.length(); i++) {
+        const MarkupSpan& span = hl.spans[i];
+        array_push(spans.get(), {.item = i2it(span.kind)});
+        array_push(spans.get(), {.item = i2it(span.block)});
+        array_push(spans.get(), {.item = i2it(span.line)});
+        array_push(spans.get(), {.item = i2it(span.col)});
+        array_push(spans.get(), {.item = i2it(span.end_line)});
+        array_push(spans.get(), {.item = i2it(span.end_col)});
+    }
+    for (size_t i = 0; i < hl.states.length(); i++) {
+        array_push(states.get(), {.item = i2it(hl.states[i].kind)});
+        array_push(states.get(), {.item = i2it(hl.states[i].a)});
+        array_push(states.get(), {.item = i2it(hl.states[i].b)});
+    }
+    array_push(result.get(), {.array = kinds.get()});
+    array_push(result.get(), {.array = spans.get()});
+    array_push(result.get(), {.array = states.get()});
+    array_push(result.get(), {.item = i2it(hl.restart_line)});
+    return {.array = result.get()};
+}
+
 Item fn_parse2(Item str_item, Item type) {
     GUARD_ERROR2(str_item, type);
-
-    // first arg must be a string
-    TypeId str_type = get_type_id(str_item);
-    if (str_type != LMD_TYPE_STRING) {
-        set_runtime_error(ERR_TYPE_MISMATCH,
-            "parse: 1st argument must be a string, got type: %s",
-            get_type_name(str_type));
-        return ItemError;
-    }
-    String* str = str_item.get_safe_string();
-    if (!str) {
-        set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
-        return ItemError;
-    }
 
     // parse the 2nd argument (format symbol or options map) - same logic as fn_input2
     String* type_str = NULL;
     String* flavor_str = NULL;
     bool source_positions = false;
+    bool highlight_spans = false;   // sourcepos: 'spans'
+    Item window_item = ItemNull;
+    Item prescan_item = ItemNull;
 
     TypeId type_id = get_type_id(type);
     if (type_id == LMD_TYPE_NULL) {
@@ -5882,19 +6061,48 @@ Item fn_parse2(Item str_item, Item type) {
         Item input_sourcepos = _map_get((TypeMap*)options_map->type, options_map->data, "sourcepos", &is_found);
         if (is_found && input_sourcepos.item && input_sourcepos._type_id != LMD_TYPE_NULL) {
             TypeId sourcepos_type = get_type_id(input_sourcepos);
-            if (sourcepos_type != LMD_TYPE_BOOL) {
+            if (is_text_type_id(sourcepos_type) && strcmp(fn_string(input_sourcepos)->chars, "spans") == 0) {
+                highlight_spans = true;
+                window_item = _map_get((TypeMap*)options_map->type, options_map->data, "window", &is_found);
+                if (!is_found) window_item = ItemNull;
+                prescan_item = _map_get((TypeMap*)options_map->type, options_map->data, "prescan", &is_found);
+                if (!is_found) prescan_item = ItemNull;
+            } else if (sourcepos_type != LMD_TYPE_BOOL) {
                 set_runtime_error(ERR_TYPE_MISMATCH,
-                    "parse: sourcepos option must be a bool, got type: %s",
+                    "parse: sourcepos option must be a bool or 'spans', got type: %s",
                     get_type_name(sourcepos_type));
                 return ItemError;
+            } else {
+                source_positions = it2b(input_sourcepos);
             }
-            source_positions = it2b(input_sourcepos);
         }
     }
     else {
         set_runtime_error(ERR_TYPE_MISMATCH,
             "parse: 2nd argument must be a format symbol or options map, got type: %s",
             get_type_name(type_id));
+        return ItemError;
+    }
+
+    if (highlight_spans) {
+        if (!type_str || strcmp(type_str->chars, "markdown") != 0) {
+            set_runtime_error(ERR_TYPE_MISMATCH, "parse: sourcepos 'spans' supports type 'markdown'");
+            return ItemError;
+        }
+        return fn_parse_highlight_spans(str_item, window_item, prescan_item);
+    }
+
+    // first arg must be a string
+    TypeId str_type = get_type_id(str_item);
+    if (str_type != LMD_TYPE_STRING) {
+        set_runtime_error(ERR_TYPE_MISMATCH,
+            "parse: 1st argument must be a string, got type: %s",
+            get_type_name(str_type));
+        return ItemError;
+    }
+    String* str = str_item.get_safe_string();
+    if (!str) {
+        set_runtime_error(ERR_INVALID_STATE, "parse: string value is unavailable");
         return ItemError;
     }
 

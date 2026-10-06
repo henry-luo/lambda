@@ -5,6 +5,7 @@
  * coordinate the overall document structure parsing.
  */
 #include "block_common.hpp"
+#include "../markup_highlight.hpp"
 #include "../../../../lib/mem.h"
 
 namespace lambda {
@@ -60,7 +61,9 @@ Item parse_block_element(MarkupParser* parser) {
     // may already exist. parse_link_definition returns true if the syntax is valid,
     // regardless of whether it was a duplicate.
     if (parser->config.format == Format::MARKDOWN && is_link_definition_start(line)) {
+        int def_line = parser->current_line;
         if (parse_link_definition(parser, line)) {
+            highlight_note_block(parser, "link_def", def_line, parser->current_line + 1);
             parser->current_line++;
             return Item{.item = ITEM_UNDEFINED};
         }
@@ -199,6 +202,7 @@ Item parse_document(MarkupParser* parser) {
 
     // Parse all blocks into body
     bool source_positions = parser->input() && parser->input()->source_positions;
+    if (parser->span_sink) parser->span_sink->root_lines = parser->lines;
     while (parser->current_line < parser->line_count) {
         int line_before = parser->current_line;
 
@@ -208,6 +212,8 @@ Item parse_document(MarkupParser* parser) {
             if (source_positions) {
                 record_source_position(parser, block, line_before, parser->current_line);
             }
+            highlight_note_block(parser, highlight_item_kind(block.item), line_before,
+                                 parser->current_line);
             list_push((List*)body, block);
         }
 

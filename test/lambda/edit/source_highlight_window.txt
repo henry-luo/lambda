@@ -1,0 +1,8 @@
+"lines, highlighted lines:"
+[1284, 763]
+"windows without a cache, mismatched lines:"
+0
+"windows with the cache, mismatched lines:"
+0
+"after opening a fence above the window:"
+[0, "0-10tok-code"]

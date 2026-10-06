@@ -12,6 +12,7 @@
  * Extracted from input-markup.cpp parse_link() (lines 2142-2224)
  */
 #include "inline_common.hpp"
+#include "../markup_highlight.hpp"
 #include "../../../../lib/html_entities.h"
 #include "../../../../lib/strbuf.h"
 #include <cstring>
@@ -56,6 +57,7 @@ static Item create_link_from_definition(MarkupParser* parser,
     // Parse link text content
     if (text_len > 0) {
         char* text_copy = mem_strndup(link_text, text_len, MEM_CAT_INPUT_MARKUP);
+        highlight_set_child_origin(parser, link_text);
         if (text_copy) {
             Item inner_content = parse_inline_spans(parser, text_copy);
             if (inner_content.item != ITEM_ERROR && inner_content.item != ITEM_UNDEFINED) {
@@ -593,6 +595,7 @@ Item parse_link(MarkupParser* parser, const char** text) {
             if (text_end > text_start) {
                 size_t text_len = text_end - text_start;
                 char* link_text = mem_strndup(text_start, text_len, MEM_CAT_INPUT_MARKUP);
+                highlight_set_child_origin(parser, text_start);
                 if (link_text) {
                     // Recursively parse inline content
                     Item inner_content = parse_inline_spans(parser, link_text);

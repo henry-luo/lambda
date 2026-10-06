@@ -15,6 +15,7 @@ import sess: lambda.edit.session
 import tools: lambda.edit.toolbar
 import files: lambda.edit.files
 import buf: lambda.edit.source_buffer
+import syn: lambda.edit.source_highlight
 import lambda.editor.mod_doc
 import lambda.editor.mod_source_pos
 // rich_text owns the package's `view map` template, which projects
@@ -95,8 +96,36 @@ fn col_at_byte(text, offset) {
 // Window projection
 // ---------------------------------------------------------------------------
 
-fn window_doc(b, top, rows) =>
-  node('doc', [for (l in buf.lines(b, top, rows)) node('src_line', [text(l)])])
+// A row's text leaves: highlighted runs and the plain text between them. The
+// render and the selection mapping both read rows through this, so a
+// leaf index in a source path always means the same column range.
+fn leaf(t, c, s) => {text: t, cls: c, start: s}
+
+fn leaves_from(t, runs, i, at, acc) {
+  if (i >= len(runs)) {
+    if (at < len(t) or len(acc) == 0) [*acc, leaf(slice(t, at, len(t)), null, at)] else acc
+  } else {
+    let r = runs[i]
+    let s = max(r.s, at)
+    let e = min(r.e, len(t))
+    if (e <= s) leaves_from(t, runs, i + 1, at, acc)
+    else {
+      let gap = if (s > at) [leaf(slice(t, at, s), null, at)] else [];
+      leaves_from(t, runs, i + 1, e, [*acc, *gap, leaf(slice(t, s, e), r.c, s)])
+    }
+  }
+}
+
+fn row_leaves(b, hl, line) {
+  let t = buf.line(b, line)
+  let runs = syn.runs_for(hl, b, line)
+  if (runs == null or len(runs) == 0) [leaf(t, null, 0)] else leaves_from(t, runs, 0, 0, [])
+}
+
+// rich_text's `view map` renders a text leaf with a `cls` as a classed span
+fn window_doc(b, top, rows, hl) =>
+  node('doc', [for (l in top to top + window_count(b, top, rows) - 1)
+                 node('src_line', [for (lf in row_leaves(b, hl, l)) {*: text(lf.text), cls: lf.cls}])])
 
 fn gutter(b, top, rows) =>
   <div class: "src-gutter", ["aria-hidden"]: "true",
@@ -114,39 +143,47 @@ fn scrollbar(b, top, rows) {
   >
 }
 
-// A model position as a source position in the rendered window, clamped to it.
-fn to_source(b, top, rows, p) {
-  let n = window_count(b, top, rows)
-  if (n == 0) pos([0, 0], 0)
-  else if (p.line < top) pos([0, 0], 0)
-  else if (p.line >= top + n) {
-    let l = top + n - 1
-    pos([n - 1, 0], bytes_before(buf.line(b, l), buf.line_len(b, l)))
-  }
-  else pos([p.line - top, 0], bytes_before(buf.line(b, p.line), p.col))
+// The leaf holding column `col`: the last one starting at or before it.
+fn leaf_index(leaves, col) => max(0, len([for (lf in leaves where lf.start <= col) lf]) - 1)
+
+// A position on a rendered row as a source position: [row, leaf] and a UTF-8
+// byte offset into that leaf (CED21).
+fn row_pos(b, hl, row, line, col) {
+  let leaves = row_leaves(b, hl, line)
+  let j = leaf_index(leaves, col)
+  pos([row, j], bytes_before(leaves[j].text, col - leaves[j].start))
 }
 
-fn source_selection_of(b, top, rows, sel) {
-  let anchor = to_source(b, top, rows, sel.anchor)
-  let head = to_source(b, top, rows, sel.head)
+// A model position as a source position in the rendered window, clamped to it.
+fn to_source(b, top, rows, hl, p) {
+  let n = window_count(b, top, rows)
+  if (n == 0 or p.line < top) pos([0, 0], 0)
+  else if (p.line >= top + n) row_pos(b, hl, n - 1, top + n - 1, buf.line_len(b, top + n - 1))
+  else row_pos(b, hl, p.line - top, p.line, p.col)
+}
+
+fn source_selection_of(b, top, rows, hl, sel) {
+  let anchor = to_source(b, top, rows, hl, sel.anchor)
+  let head = to_source(b, top, rows, hl, sel.head)
   text_selection(anchor, head)
 }
 
 // A source position from the rendered window as a model position.
-fn from_source(b, top, sp) {
+fn from_source(b, top, hl, sp) {
   let path = sp.path
   if (len(path) == 0) buf.clamp(b, buf.loc(top + sp.offset, 0))
   else {
     let l = min(top + path[0], b.count - 1)
-    let text = buf.line(b, l)
-    if (len(path) == 1) buf.loc(l, if (sp.offset > 0) len(text) else 0)
-    else buf.loc(l, col_at_byte(text, sp.offset))
+    let leaves = row_leaves(b, hl, l)
+    if (len(path) == 1) buf.loc(l, if (sp.offset < len(leaves)) leaves[sp.offset].start else buf.line_len(b, l))
+    else if (path[1] >= len(leaves)) buf.loc(l, buf.line_len(b, l))
+    else buf.loc(l, leaves[path[1]].start + col_at_byte(leaves[path[1]].text, sp.offset))
   }
 }
 
-fn model_selection(b, top, ssel) =>
+fn model_selection(b, top, hl, ssel) =>
   if (ssel == null or ssel.kind != 'text') null
-  else {anchor: from_source(b, top, ssel.anchor), head: from_source(b, top, ssel.head), goal: null}
+  else {anchor: from_source(b, top, hl, ssel.anchor), head: from_source(b, top, hl, ssel.head), goal: null}
 
 // ---------------------------------------------------------------------------
 // Selection helpers
@@ -159,10 +196,10 @@ fn sel_to(sel) => buf.pos_max(sel.anchor, sel.head)
 
 // The selection an action applies to: the model's own when the DOM still
 // shows its projection (it may reach past the window), else the DOM's.
-fn action_selection(b, top, rows, sel, evt) {
-  let dom_sel = model_selection(b, top, evt.source_selection)
+fn action_selection(b, top, rows, hl, sel, evt) {
+  let dom_sel = model_selection(b, top, hl, evt.source_selection)
   if (dom_sel == null) sel
-  else if (source_selection_of(b, top, rows, sel) == evt.source_selection) sel
+  else if (source_selection_of(b, top, rows, hl, sel) == evt.source_selection) sel
   else dom_sel
 }
 
@@ -333,16 +370,16 @@ fn edit_step(st, d) {
                 {*: prev, inverses: [*prev.inverses, r.inverse], after: after}]
              }
              else [*st.hist.undo, entry]
-  {b: r.buf, sel: after, hist: {undo: undo, redo: []}}
+  {b: r.buf, sel: after, hist: {undo: undo, redo: []}, steps: [{delta: d, applied: r}]}
 }
 
 // Undo pops from one stack and pushes its inverse on the other; redo is the
 // same move in the other direction.
-fn replay(b, inverses, i, acc) {
-  if (i < 0) {b: b, inverses: acc}
+fn replay(b, inverses, i, acc, steps) {
+  if (i < 0) {b: b, inverses: acc, steps: steps}
   else {
     let r = buf.apply_delta(b, inverses[i])
-    replay(r.buf, inverses, i - 1, [*acc, r.inverse])
+    replay(r.buf, inverses, i - 1, [*acc, r.inverse], [*steps, {delta: inverses[i], applied: r}])
   }
 }
 
@@ -352,10 +389,10 @@ fn history_step(st, undoing) {
   else {
     let e = from_stack[len(from_stack) - 1]
     let rest = take(from_stack, len(from_stack) - 1)
-    let r = replay(st.b, e.inverses, len(e.inverses) - 1, [])
+    let r = replay(st.b, e.inverses, len(e.inverses) - 1, [], [])
     let back = {inverses: r.inverses, before: e.after, after: e.before, typing: false}
     let to_stack = [*(if (undoing) st.hist.redo else st.hist.undo), back]
-    {b: r.b, sel: e.before,
+    {b: r.b, sel: e.before, steps: r.steps,
      hist: if (undoing) {undo: rest, redo: to_stack} else {undo: to_stack, redo: rest}}
   }
 }
@@ -371,25 +408,52 @@ fn rebased(base_b, b) => {*: base_b, version: b.version + 1}
 
 fn composition_step(st, comp, input_type, data) {
   if (input_type == "compositionStart")
-    {b: st.b, sel: st.sel, hist: st.hist,
+    {b: st.b, sel: st.sel, hist: st.hist, steps: [],
      comp: {base: st.b, base_sel: st.sel, base_hist: st.hist, from: sel_from(st.sel), to: sel_to(st.sel)}}
   else if (input_type == "insertFromComposition") {
     let base = if (comp == null) st else {b: rebased(comp.base, st.b), sel: comp.base_sel, hist: comp.base_hist}
-    edit_step(base, buf.delta(sel_from(base.sel), sel_to(base.sel), buf.text_lines(string(data or ""))))
+    let committed = edit_step(base, buf.delta(sel_from(base.sel), sel_to(base.sel), buf.text_lines(string(data or ""))));
+    // the commit applies to the pre-composition buffer: drop the mapped runs
+    {*: committed, steps: null}
   }
   else if (comp == null) null
   else if (input_type == "insertCompositionText") {
     let d = buf.delta(comp.from, comp.to, buf.text_lines(string(data or "")))
     let stop = buf.insert_end(d.from, d.insert)
-    {b: buf.apply_delta(st.b, d).buf, sel: caret(stop), hist: st.hist, comp: {*: comp, to: stop}}
+    let r = buf.apply_delta(st.b, d);
+    {b: r.buf, sel: caret(stop), hist: st.hist, comp: {*: comp, to: stop}, steps: [{delta: d, applied: r}]}
   }
-  else {b: rebased(comp.base, st.b), sel: comp.base_sel, hist: comp.base_hist, comp: null}
+  else {b: rebased(comp.base, st.b), sel: comp.base_sel, hist: comp.base_hist, comp: null, steps: null}
 }
 
 // Tab indents with the file's own unit: a tab if a line starts with one,
 // else two spaces.
 fn indent_unit(b) =>
   if (any([for (l in buf.lines(b, 0, 200)) starts_with(l, "\t")]) or false) "\t" else "  "
+
+// ---------------------------------------------------------------------------
+// Highlighting (CED14v2): pass 1 maps the runs through an edit, pass 2 makes
+// the window exact. Pass 2 belongs on the next frame; until the DOM layer
+// offers a frame request, `settle` runs it before the handler returns.
+// ---------------------------------------------------------------------------
+
+// Rows parsed beyond the visible window, so ordinary scrolling stays inside it.
+fn highlight_pad(rows) => 2 * rows
+
+fn new_highlight(path) => {lang: syn.language_of(path), hl: null, scan: syn.empty_scan()}
+
+// `steps` are the edits applied since the last settle ([] for none, null when
+// the runs no longer describe the buffer).
+fn settle(hs, steps, b, top, rows) {
+  let mapped = if (steps != null and len(steps) == 0) hs
+               else {*: hs, *: syn.after_steps(hs.hl, hs.scan, steps, b.version)}
+  if (mapped.lang == null or syn.covers(mapped.hl, b, top, top + rows - 1)) mapped
+  else {
+    let pad = highlight_pad(rows)
+    let r = syn.highlight(b, top - pad, top + rows + pad, mapped.scan)
+    if (r == null) mapped else {*: mapped, hl: r.hl, scan: r.scan}
+  }
+}
 
 // ---------------------------------------------------------------------------
 // The application template
@@ -431,9 +495,10 @@ pub fn page(session, b, status) =>
     <head
       <meta charset: "UTF-8">
       <title sess.window_title(session, false)>
-      <style files.css ++ tools.css ++ source_css>
+      <style files.css ++ tools.css ++ source_css ++ syn.css>
     >
-    apply(<source_app session: session, buf: b, status: status>, {mode: "edit"})
+    apply(<source_app session: session, buf: b, status: status,
+                      hs: settle(new_highlight(session.path), [], b, 0, DEFAULT_ROWS)>, {mode: "edit"})
   >
 
 // Bind the surface once and size the window to it: {handle, rows}.
@@ -448,11 +513,11 @@ pn mounted(surf, node, rev) {
 
 // Put the native selection where the model has it once this render lands;
 // returns the model revision the request carries.
-pn project(surf, b, top, sel, rev) {
+pn project(surf, b, top, hl, sel, rev) {
   let next = rev + 1
   if (surf.handle != null) {
     dom.finish_model_edit(surf.handle,
-      edit_result.model_applied(false, true, false, "", source_selection_of(b, top, surf.rows, sel), next))
+      edit_result.model_applied(false, true, false, "", source_selection_of(b, top, surf.rows, hl, sel), next))
   }
   next
 }
@@ -462,7 +527,7 @@ fn typed_step(st, text) => edit_step(st, buf.delta(sel_from(st.sel), sel_to(st.s
 
 edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: caret(buf.loc(0, 0)),
                          top: 0, surf: {handle: null, rows: DEFAULT_ROWS}, hist: {undo: [], redo: []},
-                         rev: 0, comp: null, wheel_px: 0.0, drag: null, dialog: null, after_save: null {
+                         rev: 0, comp: null, hs: ~.hs, wheel_px: 0.0, drag: null, dialog: null, after_save: null {
   let dirty = sess.is_dirty(session, b);
   <body class: "edit-app edit-format-source",
     <div class: "edit-toolbar", role: "toolbar", ["aria-label"]: "Document",
@@ -472,7 +537,7 @@ edit <source_app> state session: ~.session, b: ~.buf, status: ~.status, sel: car
     <div class: "src-main",
       gutter(b, top, surf.rows);
       <div id: "edit-surface", class: "src-text", contenteditable: "true", spellcheck: "false",
-           tabindex: "0", apply(window_doc(b, top, surf.rows))>
+           tabindex: "0", apply(window_doc(b, top, surf.rows, hs.hl))>
       scrollbar(b, top, surf.rows)
     >
     <div class: "edit-status", role: "status", status_line(sel, status)>
@@ -487,9 +552,9 @@ on editaction(evt) {
   let input_type = evt.input_type
   // Native cut copies the DOM selection, which is clamped to the window; it
   // must delete exactly what it copied, never a longer model selection.
-  let dom_sel = model_selection(b, top, evt.source_selection)
+  let dom_sel = model_selection(b, top, hs.hl, evt.source_selection)
   let target = if (input_type == "deleteByCut" and dom_sel != null) dom_sel
-               else action_selection(b, top, surf.rows, sel, evt)
+               else action_selection(b, top, surf.rows, hs.hl, sel, evt)
   let history = input_type == "historyUndo" or input_type == "historyRedo"
   let composing = contains(composition_types, input_type)
   let st = {b: b, sel: target, hist: hist}
@@ -501,7 +566,7 @@ on editaction(evt) {
              }
   if (next == null) {
     let known = history or composing or contains(insert_types, input_type) or contains(delete_types, input_type)
-    return if (known) edit_result.model_applied(false, false, false, "", source_selection_of(b, top, surf.rows, sel), rev)
+    return if (known) edit_result.model_applied(false, false, false, "", source_selection_of(b, top, surf.rows, hs.hl, sel), rev)
            else edit_result.decline(true, false, "unsupported", 0)
   }
   b = next.b
@@ -509,15 +574,16 @@ on editaction(evt) {
   hist = next.hist
   comp = next.comp
   top = follow(b, top, surf.rows, sel.head.line)
+  hs = settle(hs, next.steps, b, top, surf.rows)
   rev = rev + 1
   status = ""
   files.sync_window(evt.target, session, b)
-  edit_result.model_applied(true, true, true, "", source_selection_of(b, top, surf.rows, sel), rev)
+  edit_result.model_applied(true, true, true, "", source_selection_of(b, top, surf.rows, hs.hl, sel), rev)
 }
 on selectionchange(evt) {
-  let picked = model_selection(b, top, evt.source_selection)
+  let picked = model_selection(b, top, hs.hl, evt.source_selection)
   // the selection the surface itself projected keeps the model's own
-  if (picked != null and evt.source_selection != source_selection_of(b, top, surf.rows, sel)) { sel = picked }
+  if (picked != null and evt.source_selection != source_selection_of(b, top, surf.rows, hs.hl, sel)) { sel = picked }
 }
 on edit_cmd(req) {
   surf = mounted(surf, req.node, rev)
@@ -536,10 +602,11 @@ on edit_cmd(req) {
       sel = next.sel
       hist = next.hist
       top = follow(b, top, surf.rows, sel.head.line)
+      hs = settle(hs, next.steps, b, top, surf.rows)
       files.sync_window(req.node, session, b)
     }
     files.focus_surface(req.node)
-    rev = project(surf, b, top, sel, rev)
+    rev = project(surf, b, top, hs.hl, sel, rev)
   }
 }
 on edit_dialog(req) {
@@ -554,10 +621,11 @@ on edit_dialog(req) {
     sel = caret(buf.loc(0, 0))
     top = 0
     hist = {undo: [], redo: []}
+    hs = settle(new_highlight(session.path), [], b, top, surf.rows)
   }
   if (dialog == null) {
     files.focus_surface(req.node)
-    rev = project(surf, b, top, sel, rev)
+    rev = project(surf, b, top, hs.hl, sel, rev)
   }
 }
 on keydown(evt) {
@@ -580,7 +648,7 @@ on keydown(evt) {
     return 'prevent-default'
   }
   // a click places the caret without a selectionchange; adopt it first
-  sel = action_selection(b, top, surf.rows, sel, evt)
+  sel = action_selection(b, top, surf.rows, hs.hl, sel, evt)
   let st = {b: b, sel: sel, hist: hist}
   let next = if (primary and lower(string(evt.key)) == "z") history_step(st, evt.shiftKey != true)
              else if (evt.key == "Tab" and evt.shiftKey != true) typed_step(st, indent_unit(b))
@@ -598,7 +666,8 @@ on keydown(evt) {
   }
   else { sel = moved_sel }
   top = follow(b, top, surf.rows, sel.head.line)
-  rev = project(surf, b, top, sel, rev)
+  hs = settle(hs, if (next == null) [] else next.steps, b, top, surf.rows)
+  rev = project(surf, b, top, hs.hl, sel, rev)
   'prevent-default'
 }
 // The editor owns its scroll position (CED13): the wheel moves the window by
@@ -611,7 +680,8 @@ on wheel(evt) {
   let next_top = scrolled_top(b, surf.rows, top + step.lines)
   if (next_top != top) {
     top = next_top
-    rev = project(surf, b, top, sel, rev)
+    hs = settle(hs, [], b, top, surf.rows)
+    rev = project(surf, b, top, hs.hl, sel, rev)
   }
   'prevent-default'
 }
@@ -627,6 +697,7 @@ on mousedown(evt) {
     let thumb_y = r.top + r.height * float(top) / float(max(1, b.count))
     let page = max(1, surf.rows - OVERSCAN - 1)
     top = scrolled_top(b, surf.rows, if (evt.y < thumb_y) top - page else top + page)
+    hs = settle(hs, [], b, top, surf.rows)
   }
   'prevent-default'
 }
@@ -635,13 +706,16 @@ on mousemove(evt) {
   if (drag == null) { return 'pass' }
   let lines = int((evt.y - drag.y) * float(b.count) / max(1.0, drag.height))
   let next_top = scrolled_top(b, surf.rows, drag.top + lines)
-  if (next_top != top) { top = next_top }
+  if (next_top != top) {
+    top = next_top
+    hs = settle(hs, [], b, top, surf.rows)
+  }
   'prevent-default'
 }
 on mouseup(evt) {
   if (drag == null) { return 'pass' }
   drag = null
-  rev = project(surf, b, top, sel, rev)
+  rev = project(surf, b, top, hs.hl, sel, rev)
   'prevent-default'
 }
 on closerequest(evt) {

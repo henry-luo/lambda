@@ -124,6 +124,25 @@ inline bool is_empty_line(const char* line) {
  * Check if a line is a code fence (``` or ~~~)
  */
 bool is_code_fence(const char* line);
+// The opening fence's character and length, and whether `line` closes it.
+void get_fence_info(const char* line, char* fence_char, int* fence_len);
+bool is_code_fence_close(const char* line, char fence_char, int fence_len);
+
+/**
+ * HtmlBlockType - The 7 types of HTML blocks defined by CommonMark
+ */
+enum class HtmlBlockType {
+    NONE = 0,
+    TYPE_1,  // pre, script, style, textarea
+    TYPE_2,  // <!-- comment -->
+    TYPE_3,  // <? processing instruction ?>
+    TYPE_4,  // <!DOCTYPE or similar
+    TYPE_5,  // <![CDATA[
+    TYPE_6,  // Block-level tags
+    TYPE_7   // Complete tag on single line
+};
+HtmlBlockType detect_html_block_type(const char* line);
+bool check_html_block_end(const char* line, HtmlBlockType type, bool next_is_blank);
 
 /**
  * Check if a line is a thematic break (---, ***, ___)

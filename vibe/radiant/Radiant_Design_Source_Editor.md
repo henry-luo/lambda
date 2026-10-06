@@ -1,7 +1,7 @@
 # Radiant Source Editor — Virtualized Source Editing with Parser-Driven Highlighting
 
 **Date:** 2026-10-06
-**Status:** Proposed; P0 implementation in progress (record: [Radiant_Impl_Source_Editor](../impl/Radiant_Impl_Source_Editor.md)). OQ6–OQ13 were decided by the user on 2026-10-06 (§14); CED14 and CED16 were revised to v2 the same day (user; old text in Appendix C). OQ14, raised during P0, was decided by the user the same day (§14.1).
+**Status:** Proposed; P0 implementation in progress (record: [Radiant_Impl_Source_Editor](../impl/Radiant_Impl_Source_Editor.md)). OQ6–OQ13 were decided by the user on 2026-10-06 (§14); CED14 and CED16 were revised to v2 the same day (user; old text in Appendix C). OQ14, raised during P0, was decided by the user the same day (§14.1). OQ15 and OQ16, raised during P1, are open (§14.2).
 **Scope:** a source-code editing surface for Lambda/Radiant that (1) edits large text files, a few MB and beyond, through a virtualized viewport that only materializes the visible lines; (2) highlights syntax for the formats Lambda already parses, by having the Lambda parser emit a trimmed node tree that spans the viewport; (3) renders plain text first and highlighted second, and keeps edited text highlighted by mapping the color spans through each edit until the exact highlighting is swapped in. Phase-1 POC highlights Markdown and HTML only. Out of scope: LSP/diagnostics, multi-cursor, folding, minimap, extensions, rich-preview sync (kept as the later plan in [Radiant_Code_Editor.md](Radiant_Code_Editor.md) §7).
 **Builds on:**
 
@@ -400,6 +400,11 @@ OQ6–OQ13 left no decision blocking P0 (§12). Items to verify during P0 rather
 ### 14.1 Raised during P0 — resolved (user, 2026-10-06)
 
 - **OQ14 — wheel and thumb-drag scrolling for an editor-owned viewport (CED13).** The DOM layer's hot-path guard kept `wheel`, `scroll` and `mousemove` away from every Lambda author template, so the surface could scroll only by keyboard and track clicks. **Decision:** Radiant delivers continuous events to author templates that declare them, ruled as ES23v2 in `vibe/Lambda_Design_DOM_Dispatch.md` (an exact per-event registry flag keeps documents that declare none at zero cost; package loading and behavior dispatch stay guarded). The surface now handles `on wheel` (pixels accumulated into whole lines) and drags the thumb with `on mousemove`.
+
+### 14.2 Open — raised during P1
+
+- **OQ15 — flat spans instead of a trimmed tree (CED15, CED16v2).** Every `parse()` keeps its `Input` until the runtime resets, so a trimmed tree per frame would accumulate memory (4,000 parses of a 3 KB document reached 1 GB). The P1 build parses the window on a private pool and returns flat span records — kinds as symbols, positions as ints — which the Lambda walker maps to classes. The policy split is unchanged; the return shape differs from the rulings' wording. Details in the implementation record §5.5.
+- **OQ16 — frame request for pass 2 (CED14v2).** No frame-request primitive exists on master, so pass 2 runs before the handler returns (about 4 ms per change). Either adopt `dom.request_frame` when the in-progress DOM work lands, or add a minimal one for the editor.
 
 ---
 
