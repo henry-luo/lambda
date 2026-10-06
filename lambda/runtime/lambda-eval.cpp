@@ -15,6 +15,7 @@
 #include <limits.h>
 #include "../../lib/log.h"
 #include "../../lib/hashmap_helpers.h"
+#include "../../lib/mem_factory.h"
 #include "../../lib/memtrack.h"
 #include "../../lib/url.h"
 #include "../../lib/math_checked.hpp"
@@ -11081,8 +11082,10 @@ static Item runtime_map_path_write_proven(Item owner, Item path, int64_t fixed_c
 static const int RUNTIME_SHAPE_GRAPH_BUDGET = 65536;
 
 static void runtime_shape_tree_destroy(void* capsule) {
-    // D4.2.6: the Input's arena holds every tree node, so it goes as a whole
-    input_release_document_resources((Input*)capsule);
+    // D4.2.6: the Input's arena holds every tree node, so it goes as a whole.
+    // Destroying the tree's own pool runs the Input's registered cleanup
+    // (input_pool_cleanup), which releases the document resources once.
+    mem_pool_destroy(((Input*)capsule)->pool);
 }
 
 static const ContextCapsuleOps runtime_shape_tree_ops = {
@@ -11091,17 +11094,24 @@ static const ContextCapsuleOps runtime_shape_tree_ops = {
 };
 
 static Input* runtime_shape_tree(void) {
-    if (!context || !context->pool) return NULL;
+    if (!context) return NULL;
     Input* tree = (Input*)context_capsule_extension(context, RUNTIME_SHAPE_TREE_OWNER, 0);
     if (tree) return tree;
-    tree = Input::create(context->pool, nullptr, nullptr);
-    if (!tree || !tree->arena || !tree->type_list) return NULL;
-    tree->shape_graph_budget = RUNTIME_SHAPE_GRAPH_BUDGET;
-    if (!context_capsule_extension_install(context, RUNTIME_SHAPE_TREE_OWNER, 0, tree,
-            &runtime_shape_tree_ops)) {
-        input_release_document_resources(tree);
+    // The capsule outlives heap replacement (CONTEXT lifetime), so the Input
+    // cannot live in context->pool: that is the heap's pool, and a heap reset
+    // between evaluations (runtime_reset_heap, test-batch) ran the Input's pool
+    // cleanup and freed its struct while the capsule still pointed at it. The
+    // tree owns a pool of its own, as InputManager's global_pool does.
+    Pool* tree_pool = mem_pool_create(NULL, MEM_ROLE_INPUT, "runtime.shape_tree.pool");
+    if (!tree_pool) return NULL;
+    tree = Input::create(tree_pool, nullptr, nullptr);
+    if (!tree || !tree->arena || !tree->type_list ||
+            !context_capsule_extension_install(context, RUNTIME_SHAPE_TREE_OWNER, 0, tree,
+                &runtime_shape_tree_ops)) {
+        mem_pool_destroy(tree_pool);
         return NULL;
     }
+    tree->shape_graph_budget = RUNTIME_SHAPE_GRAPH_BUDGET;
     return tree;
 }
 
