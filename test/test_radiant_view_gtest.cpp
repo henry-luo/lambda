@@ -1951,6 +1951,106 @@ TEST(RadiantViewTest, AstDocumentExecutionKeepsFreshDocumentRealms) {
         timing_path, "\"document_context_live_bytes\":"));
 }
 
+TEST(RadiantViewTest, UiScriptContentSurvivesForcedGc) {
+    // D4.5.2: a UI-mode script result lives in the document's untraced arena.
+    // A runtime symbol, a non-spreadable array or a group element left there
+    // as a GC pointer is collected, and its memory reused, before the DOM build
+    // reads it; forced, poisoning collection makes that deterministic.
+    test_radiant_view_ensure_temp_dir();
+    const char* view_path = "./temp/ui_script_content_gc_view.json";
+    const ShellEnvEntry env[] = {
+        {"LAMBDA_GC_FORCE_EVERY", "1"},
+        {"LAMBDA_GC_POISON_FREED", "1"},
+        {NULL, NULL},
+    };
+    const char* args[] = {
+        "./lambda.exe", "layout", "test/html/ui_script_content_gc.ls",
+        "--view-output", view_path, "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.env = env;
+    options.merge_stderr = true;
+    ShellResult shell_result = shell_exec("./lambda.exe", args, &options);
+    ASSERT_EQ(0, shell_result.exit_code)
+        << (shell_result.stdout_buf ? shell_result.stdout_buf : "");
+    shell_result_free(&shell_result);
+
+    const char* expected[] = {"r1s1e10", "k2", "n1n2n3", "w1w1", "v1", "r4s4e40", "r5s5e50"};
+    for (const char* text : expected) {
+        EXPECT_TRUE(test_radiant_view_file_contains(view_path, text))
+            << "missing content '" << text << "' after forced GC";
+    }
+}
+
+// Two view-tree dumps match apart from their capture timestamp line.
+static bool test_radiant_view_same_view_tree(const char* left_path, const char* right_path) {
+    char* left = test_radiant_view_read_file(left_path);
+    char* right = test_radiant_view_read_file(right_path);
+    bool same = false;
+    if (left && right) {
+        const char* left_stamp = strstr(left, "\"timestamp\"");
+        const char* right_stamp = strstr(right, "\"timestamp\"");
+        if (left_stamp && right_stamp && left_stamp - left == right_stamp - right) {
+            const char* left_rest = strchr(left_stamp, '\n');
+            const char* right_rest = strchr(right_stamp, '\n');
+            same = left_rest && right_rest &&
+                strncmp(left, right, (size_t)(left_stamp - left)) == 0 &&
+                strcmp(left_rest, right_rest) == 0;
+        }
+    }
+    free(left);
+    free(right);
+    return same;
+}
+
+TEST(RadiantViewTest, BatchLoaderRuntimeMatchesFreshRuntimes) {
+    // ES12v2: a batch's stateless loaders (LaTeX, markdown math, graph and
+    // TikZ custom layouts) share one loader runtime across documents; each
+    // document must lay out exactly as it does on a fresh runtime of its own.
+    struct LoaderCase { const char* path; const char* batch_name; const char* single_name; };
+    const LoaderCase cases[] = {
+        {"test/input/math_test.tex", "input__math_test.json", "math_test.json"},
+        {"test/input/simple_math_test.md", "input__simple_math_test.json", "simple_math_test.json"},
+        {"test/input/test_graph.dot", "input__test_graph.json", "test_graph.json"},
+        {"test/input/tikz/plot_parametric.pgf", "tikz__plot_parametric.json", "plot_parametric.json"},
+    };
+    test_radiant_view_ensure_temp_dir();
+    const char* output_dir = "./temp/test_loader_runtime_batch";
+#ifdef _WIN32
+    _mkdir(output_dir);
+#else
+    mkdir(output_dir, 0755);
+#endif
+    const char* batch_args[] = {
+        "./lambda.exe", "layout", cases[0].path, cases[1].path, cases[2].path, cases[3].path,
+        "--output-dir", output_dir, "--no-log", NULL,
+    };
+    ShellOptions options = {0};
+    options.merge_stderr = true;
+    ShellResult batch_result = shell_exec("./lambda.exe", batch_args, &options);
+    ASSERT_EQ(0, batch_result.exit_code)
+        << (batch_result.stdout_buf ? batch_result.stdout_buf : "");
+    shell_result_free(&batch_result);
+
+    for (const LoaderCase& loader_case : cases) {
+        char batch_path[256];
+        char single_path[256];
+        snprintf(batch_path, sizeof(batch_path), "%s/%s", output_dir, loader_case.batch_name);
+        snprintf(single_path, sizeof(single_path), "%s/single_%s", output_dir,
+                 loader_case.single_name);
+        const char* single_args[] = {
+            "./lambda.exe", "layout", loader_case.path, "--view-output", single_path,
+            "--no-log", NULL,
+        };
+        ShellResult single_result = shell_exec("./lambda.exe", single_args, &options);
+        ASSERT_EQ(0, single_result.exit_code)
+            << (single_result.stdout_buf ? single_result.stdout_buf : "");
+        shell_result_free(&single_result);
+        EXPECT_TRUE(test_radiant_view_same_view_tree(batch_path, single_path))
+            << loader_case.path << " lays out differently on the shared loader runtime";
+    }
+}
+
 TEST(RadiantViewTest, BatchDocumentFontFaceOverridesSystemCache) {
     const char* system_font_page =
         "test/layout/data/baseline/fixed-table-layout-001.htm";

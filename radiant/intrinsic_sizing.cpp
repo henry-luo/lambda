@@ -607,7 +607,7 @@ static bool intrinsic_apply_ua_font_defaults(DomElement* element, FontProp* font
     } else if ((tag == MARKUP_NAME_CODE || tag == MARKUP_NAME_KBD || tag == MARKUP_NAME_SAMP ||
                 tag == MARKUP_NAME_TT || tag == MARKUP_NAME_PRE || tag == MARKUP_NAME_LISTING ||
                 tag == MARKUP_NAME_XMP) && !specified_family) {
-        radiant_retain_font_family(font, lam::GcPtr<char>((char*)"monospace"));
+        radiant_retain_font_family(font, lam::static_borrow("monospace"));
         changed = true;
     }
     return changed;

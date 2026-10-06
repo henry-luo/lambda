@@ -956,8 +956,9 @@ static Item radiant_layout_context_item(const CustomLayoutContext* context) {
 }
 
 static Heap* radiant_custom_layout_heap(const CustomLayoutContext* layout_context) {
-    Runtime* runtime = (layout_context && layout_context->parent && layout_context->parent->doc)
-        ? layout_context->parent->doc->lambda_runtime : nullptr;
+    // layouts register on the runtime whose packages built the document
+    Runtime* runtime = (layout_context && layout_context->parent)
+        ? dom_document_loader_runtime(layout_context->parent->doc) : nullptr;
     if (runtime && runtime_heap(runtime)) return runtime_heap(runtime);
     return ::context ? ::context->heap : nullptr;
 }
@@ -1076,13 +1077,38 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
 
     EvalContext* callback_context = nullptr;
     Context* saved_input_context = input_context;
-    Runtime* runtime = (context->parent && context->parent->doc)
-        ? context->parent->doc->lambda_runtime : nullptr;
+    DomDocument* layout_doc = context->parent ? context->parent->doc : nullptr;
+    Runtime* runtime = dom_document_loader_runtime(layout_doc);
+    // A window's loader runtime serves every document built on it, so it works
+    // on this document's Input only for the duration of the callback; every
+    // exit then hands the document the values the callback rooted.
+    Runtime* loader_runtime = layout_doc ? layout_doc->loader_runtime.get() : nullptr;
+    struct LoaderLayoutBinding {
+        DomDocument* doc;
+        Runtime* loader;
+        ~LoaderLayoutBinding() { loader_runtime_finish_document(doc, loader); }
+    } loader_binding = {layout_doc, nullptr};
     if (runtime && runtime_heap(runtime)) {
         callback_context = runtime_get_eval_context(runtime);
         if (!callback_context) {
             g_radiant_velmt_active_pass_id = previous_pass_id;
             return false;
+        }
+        if (loader_runtime && ::context && ::context != callback_context) {
+            // The document's own evaluator may hold the thread. Take it only
+            // at a quiescent layout boundary (EO5v2), never under another
+            // evaluator's live frames.
+            if (::context->execution_depth != 0 ||
+                    !radiant_eval_context_switch(callback_context)) {
+                g_radiant_velmt_active_pass_id = previous_pass_id;
+                log_error("CUSTOM_LAYOUT_LAMBDA_BUSY: layout='%s' needs the loader runtime",
+                          context->layout_name);
+                return false;
+            }
+        }
+        if (loader_runtime) {
+            runtime_bind_ui_result_input(loader_runtime, layout_doc->input);
+            loader_binding.loader = loader_runtime;
         }
         callback_context->heap = runtime_heap(runtime);
         callback_context->name_pool = runtime_name_pool(runtime);
@@ -1095,13 +1121,8 @@ static bool radiant_lambda_custom_layout_callback(const CustomLayoutContext* con
             log_error("CUSTOM_LAYOUT_LAMBDA_SIDE_STACK: layout='%s'", context->layout_name);
             return false;
         }
-        if (runtime->ui_mode && runtime->result_arena) {
-            callback_context->ui_mode = true;
-            callback_context->arena = runtime->result_arena;
-            input_context = (Context*)callback_context;
-        } else {
-            input_context = nullptr;
-        }
+        input_context = runtime_context_follow_ui_result(runtime, callback_context)
+            ? (Context*)callback_context : nullptr;
         if (!eval_context_init(callback_context)) {
             input_context = saved_input_context;
             g_radiant_velmt_active_pass_id = previous_pass_id;

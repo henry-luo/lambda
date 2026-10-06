@@ -4833,6 +4833,8 @@ DomDocument* layout_load_iframe_src_doc(LayoutContext* lycon,
     size_t src_len = strlen(src);
     StrBuf* src_buf = strbuf_new_cap(src_len);
     strbuf_append_str_n(src_buf, src, src_len);
+    // an iframe's stateless loaders keep a runtime per document (EO5v2)
+    LayoutLoaderHostScope no_loader_host(nullptr);
     DomDocument* doc = load_html_doc(lycon->ui_context->document->url,
         src_buf->str, viewport_width, viewport_height, &host_config);
     strbuf_free(src_buf);

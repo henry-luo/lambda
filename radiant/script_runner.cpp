@@ -2432,8 +2432,7 @@ extern "C" void execute_document_scripts_profiled(Element* html_root, DomDocumen
     // runtime_init memsets, so it must run before the fields set below.
     runtime_init(runtime);
     // D8.1.1v13: the shared DOM package uses this document's result arena.
-    runtime_set_ui_result_arena(runtime,
-        dom_doc->input ? dom_doc->input->arena : nullptr);
+    runtime_set_ui_result_input(runtime, dom_doc->input);
     runtime->dom_doc = (void*)dom_doc;
     runtime->resource_policy = dom_doc->resource_policy;
     runtime->dom_ui_context = dom_doc->js.host_ui_context;

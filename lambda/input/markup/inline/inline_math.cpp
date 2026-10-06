@@ -75,13 +75,13 @@ Item parse_inline_math(MarkupParser* parser, const char** text) {
         return Item{.item = ITEM_ERROR};
     }
 
-    // Add math content as string
-    // Note: Full math parsing is done later by the math parser
+    // Add math content as string; a display parse also attaches the math AST
     String* math_str = create_string(parser, content);
     if (math_str) {
         Item math_item = {.item = s2it(math_str)};
         list_push((List*)math_elem, math_item);
     }
+    finish_math_element(parser, math_elem, content_start, content_len, "latex");
 
     mem_free(content);
     *text = pos + 1; // Skip closing $

@@ -1,6 +1,6 @@
 # Lambda Formal Design — Specification
 
-**Spec version:** 25.0.0 (2026-10-06)
+**Spec version:** 25.1.0 (2026-10-06)
 
 **Status:** normative — the single source of truth for the design and
 implementation decisions that realize the semantics in
@@ -1001,6 +1001,17 @@ that carries them.
   not accommodated. Each layout, render and display-list scratch stack owns
   its own arena. Seam contracts: **pin, gen-check, copy-as-value**.
   [Memory_Model §7; Mem_Heap §4, MP-15]
+- **D4.5.2*** **Radiant never retains a GC pointer.** Storage that outlives
+  the current call — the document arena, the view tree and their pools —
+  never points into the GC heap; a GC value Radiant must keep is **copied
+  into the document arena**, which outlives it. Passing a GC value from
+  Lambda into Radiant **for reading** is a transient borrow for the duration
+  of the work that reads it, admitted provisionally until a breaking case is
+  found. Exempt: a reference held under a registered GC root that lasts at
+  least as long as the document — the root, not the storage, keeps the value
+  alive (script-identity values such as a `FileList` or a Selection wrapper).
+  *Radiant storage is invisible to the collector (D4.1.1v2): borrow to read,
+  copy or root to keep.* [Memory_Safety_Template §2.3]
 
 ### D4.6 Name identity
 
@@ -2393,6 +2404,7 @@ slice; no formal semantic ruling or document semver changes.
 | D4.3.2v2 | GC size classes and data-zone policy are retained; backing storage is owned by MemVmRegion and released by the owning GC heap. |
 | D4.3.4 | Decided 2026-09-07: `gc_trace_shape_field` marks a `null`-typed lane's word conservatively (`gc_mark_possible_item`). Found through DO30: the auto tier's fast splay figure came from collections that freed the linked right subtrees (17k of 420k objects traced); reproduced deterministically on every tier with `LAMBDA_GC_FORCE_EVERY=1 LAMBDA_GC_POISON_FREED=1`; pin `test/mir/lambda/gc_splay_null_lane` under the forced-collection stress sweep. The companion robustness fix keeps `fn_map_set`'s same-width retag from typing a shared literal shape's field as `error`. |
 | D4.5.1v4 | Radiant and Lambda keep distinct policies over memtrack/VM ownership; legacy Pool/Arena backend wording is superseded; v3 recorded batch-only arena lifetime (two variants, D4.1.4); v4 (2026-10-02) admits retention for reuse for DOM node retirement and gives each scratch stack its own arena: `view_tree.scratch_arena` (layout), `view_tree.render_scratch_arena`, `view_tree.display_list_arena`, `view_tree.layout_pass_arena` (counter state and generated content), one arena per retained display-list fragment, and `OffscreenRenderArenas` for offscreen SVG and effect renders. |
+| D4.5.2 | Ruled 2026-10-06 (user). **Partially implemented 2026-10-06:** the ownership lattice has no GC→Pool edge (a pool-domain field rejects `GcPtr`, probed in `test_own_tagged`), and built-in literals carry a static label. Audit: the JS DOM and `lambda/dom` setters copy into the document's Input arena or pool. Rooted document-side references (history state, `FileList`, Range/Selection wrappers, editing session root, custom-paint content, non-string UI attribute values) fall under the exemption (user, 2026-10-06). UI-mode script results comply since 2026-10-06: `list_push` deep-copies every non-string content value not already in the result arena into the result `Input` (pinned by `RadiantViewTest.UiScriptContentSurvivesForcedGc` under forced, poisoning GC). The Input-owned append (`list_push_with_owner`) and `MarkEditor` imports apply the same rule through one shared helper set. Live residue: values that reach the arena tree outside any append (a GC top-level script result, the math package splice in `cmd_layout.cpp`). Detail: `vibe/Memory_Safety_Template.md` §12.5 item 18. |
 | D4.4.3 | COW Stage 1 landed 2026-07-23; Stage 2 (exclusivity faces, view confinement, module-`var` rule, snapshot iteration) deferred, designed. |
 | D4.4.5 | Decided 2026-09-14 (CW35, `vibe/Lambda_Design_Runtime_COW.md` §11.12): move-out binds (`var left = node.left; …; node.left = branch; left.right = node`) borrow their place; static rule in `build_ast` (`rmw_moves_out`), runtime spine test shared with CW34. Fixture `test/lambda/proc/cow_move_out_bind.ls`. JetStream splay does not benefit yet: its `splay_node` binds store back inside `if` branches, so the rotations receive already-shared roots and keep the snapshot bind. |
 | D4.4.4v4 | Ruled 2026-09-17 (user). **Implemented (partial scope) 2026-09-17 (Tune29 T29-1, `vibe/impl/Lambda_Impl_Tune29.md` §12):** synthesized handles for record places spelled repeatedly on declared `var` roots, planned once in `build_ast` and ignored by T0; writing binds un-share through `cow_place_leaf_fixed`. Deltablue2 hot functions −35% instructions, −5% time; roots with a CW34 named borrow and `for` statements are excluded. Originally recorded as not implemented (CW37, `vibe/Lambda_Design_Runtime_COW.md` §11.14 + Appendix D). Motivation: the typed lane re-navigates `w.cons[cid]` on every access — ~38 MIR instructions per field read and ~42 per field write against one in the c2m port, the whole deltablue/havlak/richards/splay/cd family (`vibe/impl/Lambda_Impl_Tune29.md`; evidence `temp/r46/`). The star stays: named borrows, `for` loops and non-record places are still outside the implemented scope. **2026-09-17 (Tune29 §20):** a named handle may also be passed as a plain argument to a procedure that keeps no root; MIR joins its may-be-shared binding facts at control-flow merges (LR12-17). |
@@ -2696,7 +2708,7 @@ Numbered `DO#` (design-open); each links to its record.
 | D4.2 | Memory_Context stages; Mem_Heap §1.3–§1.4, §2, §9 (MP-13, MP-14, MP-16–MP-18) | `vibe/Memory_Context.md`, `Lambda_Design_Mem_Heap.md` |
 | D4.3 | GC2 §4–§12 | `Lambda_Garbage_Collector2.md` |
 | D4.4 | CW1–CW21, CW34–CW37 | `Lambda_Design_Runtime_COW.md` |
-| D4.5 | Memory_Model §5–§7 | `Lambda_Design_Memory_Model.md` |
+| D4.5 | Memory_Model §5–§7; Memory_Safety_Template §2.3 (D4.5.2) | `Lambda_Design_Memory_Model.md`, `vibe/Memory_Safety_Template.md` |
 | D4.6 | NI1–NI16, W1–W6 | `Lambda_Design_Name_Identity.md` |
 | D4.7 | CP1–CP26 | `Lambda_Design_Const_Pool.md` |
 | D5.1–D5.3 | SF1–SF20 (+ SF20 addendum 2026-09-07), OS1–OS11; Stack_API phases + invariants; CR1–CR8, RH1–RH8; Merges A/B/C; JSCU9–JSCU14, JSCU25–JSCU26 | `Lambda_Design_Stack_Frame.md`, `Lambda_Design_Stack_API.md`, `Lambda_Design_Stack_Rooting.md`, `Lambda_Design_Structs_JS.md` |

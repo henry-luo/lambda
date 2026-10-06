@@ -439,6 +439,12 @@ struct DomDocument : DomDocumentResourceData {
     DomScrollAlign pending_scroll_into_view_inline;
     DomScrollBehavior pending_scroll_into_view_behavior;
 
+    // The window's shared loader runtime when a stateless loader built this
+    // document on it. The UiContext owns that runtime and releases it after
+    // its documents; the document borrows it for its package types and its
+    // custom layouts. Its UA behavior still gets its own evaluator.
+    lam::Up<Runtime> loader_runtime;
+
     // Constructor
     DomDocument() : input(nullptr), document_pool(nullptr), node_arena(nullptr),
                     url(nullptr), html_root(nullptr), root(nullptr), html_version(0),
@@ -469,7 +475,8 @@ struct DomDocument : DomDocumentResourceData {
                     pending_scroll_into_view_if_needed(false),
                     pending_scroll_into_view_block(DOM_SCROLL_ALIGN_START),
                     pending_scroll_into_view_inline(DOM_SCROLL_ALIGN_NEAREST),
-                    pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO) {}
+                    pending_scroll_into_view_behavior(DOM_SCROLL_BEHAVIOR_AUTO),
+                    loader_runtime(nullptr) {}
 
     bool init(Input* input);
     void destroy();
@@ -482,6 +489,14 @@ struct DomDocument : DomDocumentResourceData {
 static inline Runtime* dom_document_script_runtime(const DomDocument* doc) {
     if (!doc) return nullptr;
     return doc->lambda_runtime ? doc->lambda_runtime : doc->js.runtime;
+}
+
+// The runtime whose packages built this document and serve its custom
+// layouts: the window's shared loader runtime when one built it, else the
+// document's own runtime.
+static inline Runtime* dom_document_loader_runtime(const DomDocument* doc) {
+    if (!doc) return nullptr;
+    return doc->loader_runtime ? doc->loader_runtime.get() : doc->lambda_runtime;
 }
 
 // Does this document own a live JS DOM script realm? Capability, not provenance:

@@ -1410,7 +1410,7 @@ static const char* mime_to_parser_type(const char* mime_type) {
 
 static Input* input_from_source_n_with_name_parent(const char* source,
         size_t source_len, Url* abs_url, String* type, String* flavor,
-        NamePool* name_parent, bool source_positions = false) {
+        NamePool* name_parent, const InputParseOptions* options = NULL) {
     log_debug("input_from_source_n: ENTRY type='%s', flavor='%s', len=%zu",
               type ? type->chars : "null",
               flavor ? flavor->chars : "null",
@@ -1468,10 +1468,12 @@ static Input* input_from_source_n_with_name_parent(const char* source,
             log_error("input_from_source: Failed to create input for type '%s'", effective_type);
             return NULL;
         }
-        input->source_positions = source_positions;
+        input->source_positions = options && options->source_positions;
+        input->parse_embedded_math = options && options->embedded_math;
         allocation_context.pool = input->pool;
         allocation_context.arena = input->arena;
         allocation_context.ui_mode = input->ui_mode;
+        allocation_context.input = input;
         input_allocation_context = &allocation_context;
 
         if (strcmp(effective_type, "markup") == 0) {
@@ -1551,8 +1553,15 @@ extern "C" Input* input_from_source_with_name_parent(const char* source,
 
 extern "C" Input* input_from_source_with_positions(const char* source,
         Url* abs_url, String* type, String* flavor) {
+    InputParseOptions options = {};
+    options.source_positions = true;
+    return input_from_source_with_options(source, abs_url, type, flavor, &options);
+}
+
+extern "C" Input* input_from_source_with_options(const char* source,
+        Url* abs_url, String* type, String* flavor, const InputParseOptions* options) {
     return input_from_source_n_with_name_parent(source,
-        source ? strlen(source) : 0, abs_url, type, flavor, NULL, true);
+        source ? strlen(source) : 0, abs_url, type, flavor, NULL, options);
 }
 
 // Read a local file and parse it via input_from_source_n. Detects binary
@@ -1899,6 +1908,8 @@ Input* Input::create_with_name_parent(Pool* pool, Url* abs_url, Input* parent,
     input->source_positions = false;
     input->parse_failed = false;
     input->parse_error_message = nullptr;
+    input->parse_embedded_math = false;
+    input->embedded_math = nullptr;
     input->xml_stylesheet_href = nullptr;
     // D4.2.6: the Input lives in `pool`, so the pool releases it at the latest.
     // Without this, a URL-less Input's arena outlived every owner.

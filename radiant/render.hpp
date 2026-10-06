@@ -2587,8 +2587,11 @@ inline void radiant_retain_font_family(FontProp* font, lam::PoolPtr<char> family
     font->family = lam::up(family.get());
 }
 
-inline void radiant_retain_font_family(FontProp* font, lam::GcPtr<char> family) {
-    font->family = lam::up(family.get());
+// A built-in family name (a string literal). No GcPtr overload: retained props never
+// point into the GC heap (D4.5.2). family is never written through, so dropping the
+// literal's const here is safe.
+inline void radiant_retain_font_family(FontProp* font, lam::StaticPtr<const char> family) {
+    font->family = lam::up(const_cast<char*>(family.get()));
 }
 
 inline void radiant_clear_font_family(FontProp* font) {

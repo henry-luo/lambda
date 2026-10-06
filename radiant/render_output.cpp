@@ -362,7 +362,11 @@ static bool render_export_session_begin_internal(
         return false;
     }
 
-    session->document = lam::up(loader(session, layout_width, layout_height, request));
+    {
+        // the session's UI context hosts the loader runtime for its document
+        LayoutLoaderHostScope loader_host(session->ui_context);
+        session->document = lam::up(loader(session, layout_width, layout_height, request));
+    }
     if (!session->document) {
         log_error("[EXPORT_SESSION] Could not load export document");
         render_export_session_end(session);
